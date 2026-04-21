@@ -85,7 +85,7 @@ class TestBuildRows:
     hierarchy = [
       _HierarchyNode(
         element_id="root",
-        qname="sfac6:Revenues",
+        qname="fac:Revenues",
         name="Revenues",
         classification="revenue",
         balance_type="credit",
@@ -134,7 +134,7 @@ class TestBuildRows:
     hierarchy = [
       _HierarchyNode(
         element_id="expenses_root",
-        qname="sfac6:Expenses",
+        qname="fac:Expenses",
         name="Expenses",
         classification="expense",
         balance_type="debit",
@@ -204,7 +204,7 @@ class TestBuildRows:
     hierarchy = [
       _HierarchyNode(
         element_id="root",
-        qname="sfac6:Revenues",
+        qname="fac:Revenues",
         name="Revenues",
         classification="revenue",
         balance_type="credit",
@@ -275,7 +275,7 @@ class TestBuildRows:
     hierarchy = [
       _HierarchyNode(
         element_id="root",
-        qname="sfac6:Revenues",
+        qname="fac:Revenues",
         name="Revenues",
         classification="revenue",
         balance_type="credit",
@@ -337,7 +337,7 @@ class TestBuildRows:
     hierarchy = [
       _HierarchyNode(
         element_id="root",
-        qname="sfac6:Root",
+        qname="report:Root",
         name="Root",
         classification="revenue",
         balance_type="credit",
@@ -415,7 +415,7 @@ class TestBuildRows:
     hierarchy = [
       _HierarchyNode(
         element_id="root",
-        qname="sfac6:Root",
+        qname="report:Root",
         name="Root",
         classification="revenue",
         balance_type="credit",

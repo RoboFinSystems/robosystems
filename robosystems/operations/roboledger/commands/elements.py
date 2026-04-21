@@ -16,7 +16,10 @@ relative hierarchy beneath the moved element.
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.taxonomies import (
@@ -25,7 +28,17 @@ from robosystems.models.api.extensions.taxonomies import (
   ElementResponse,
   UpdateElementRequest,
 )
-from robosystems.models.extensions import Element, Taxonomy
+from robosystems.models.extensions import (
+  Classification,
+  Element,
+  ElementClassification,
+  Taxonomy,
+)
+from robosystems.operations.library.reads import efs_classification_by_element
+from robosystems.operations.roboledger.commands._guards import (
+  LibraryImmutableError,
+  assert_not_library_origin,
+)
 from robosystems.operations.roboledger.commands.taxonomies import (
   TaxonomyNotFoundError,
 )
@@ -34,6 +47,8 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 __all__ = [
   "ElementCycleError",
   "ElementNotFoundError",
+  "ElementQNameConflictError",
+  "LibraryImmutableError",
   "TaxonomyNotFoundError",
   "create_element",
   "delete_element",
@@ -57,7 +72,23 @@ class ElementCycleError(ValueError):
   """Raised when an update would create a cycle in the element hierarchy."""
 
 
-def _element_to_response(row: Element) -> ElementResponse:
+class ElementQNameConflictError(ValueError):
+  """Raised when a new element's qname collides with an existing element.
+
+  Happens when two human-readable names CamelCase-collapse to the same
+  qname (e.g., "Owner's Equity" and "Owners Equity" both derive
+  `native:OwnersEquity`). The caller should retry with an explicit
+  `qname` on the create request.
+  """
+
+  def __init__(self, qname: str) -> None:
+    super().__init__(f"Element qname already in use: {qname}")
+    self.qname = qname
+
+
+def _element_to_response(
+  row: Element, classification: str | None = None
+) -> ElementResponse:
   return ElementResponse(
     id=row.id,
     code=row.code,
@@ -65,8 +96,7 @@ def _element_to_response(row: Element) -> ElementResponse:
     description=row.description,
     qname=row.qname,
     namespace=row.namespace,
-    classification=row.classification,
-    sub_classification=row.sub_classification,
+    classification=classification,
     balance_type=row.balance_type,
     period_type=row.period_type,
     is_abstract=row.is_abstract,
@@ -110,6 +140,57 @@ def _self_path_prefix(element: Element) -> str:
   return f"{element.path}/{element.id}" if element.path else element.id
 
 
+# Balance-sheet classifications are stock concepts (point-in-time → instant).
+# Everything else (revenue, expense, gain, loss, investmentByOwners, etc.) is
+# a flow / duration concept.
+_INSTANT_CLASSIFICATIONS = frozenset(
+  {
+    "asset",
+    "contraAsset",
+    "liability",
+    "contraLiability",
+    "equity",
+    "contraEquity",
+    "temporaryEquity",
+  }
+)
+
+
+def _derive_period_type(classification: str | None, explicit: str) -> str:
+  """Return 'instant' for balance-sheet stock concepts, `explicit` otherwise.
+
+  Stock classifications (asset/liability/equity and their contras, plus
+  temporaryEquity) are always forced to 'instant' — the caller-supplied
+  `explicit` value is ignored for these. Every other classification passes
+  `explicit` through unchanged. The request model defaults `explicit` to
+  'duration', so non-stock concepts get 'duration' when the caller omits
+  `period_type`.
+
+  There is no caller override for stock classifications; the accounting
+  rule is enforced unconditionally. If a balance-sheet element genuinely
+  needs `period_type='duration'`, it must be written directly rather than
+  through this helper.
+  """
+  if classification in _INSTANT_CLASSIFICATIONS:
+    return "instant"
+  return explicit
+
+
+def _derive_qname(name: str, source: str, namespace: str | None) -> str:
+  """Derive a namespace-prefixed qname from a human-readable account name.
+
+  Converts 'Accounts Receivable' → 'native:AccountsReceivable'.
+  Strips non-alphanumeric characters (apostrophes, ampersands, slashes,
+  hyphens) before converting to CamelCase so names like "Owner's Equity"
+  and "Salaries & Wages" produce valid XML NCNames.
+  """
+  prefix = namespace or source
+  # Strip non-word chars, title-case each word, join
+  local = re.sub(r"[^\w\s]", "", name)
+  local = "".join(word.capitalize() for word in local.split())
+  return f"{prefix}:{local}"
+
+
 def _would_create_cycle(element: Element, new_parent: Element) -> bool:
   """True if reparenting `element` under `new_parent` would create a cycle.
 
@@ -140,18 +221,24 @@ def create_element(
   ).scalar_one_or_none()
   if taxonomy is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
+  # Tenants can only author inside tenant-origin taxonomies. The taxonomy
+  # row is already in hand from the existence check above, so reuse it
+  # instead of issuing a second query (also keeps the unit tests' mock
+  # execute side_effect chain intact).
+  assert_not_library_origin(taxonomy)
 
   depth, path = _hierarchy_for_parent(session, body.parent_id)
+
+  resolved_period_type = _derive_period_type(body.classification, body.period_type)
+  resolved_qname = body.qname or _derive_qname(body.name, body.source, body.namespace)
 
   element = Element(
     id=generate_prefixed_ulid("elem"),
     code=body.code,
     name=body.name,
     description=body.description,
-    classification=body.classification,
-    sub_classification=body.sub_classification,
     balance_type=body.balance_type,
-    period_type=body.period_type,
+    period_type=resolved_period_type,
     element_type=body.element_type,
     is_abstract=body.is_abstract,
     is_monetary=body.is_monetary,
@@ -161,7 +248,7 @@ def create_element(
     taxonomy_id=body.taxonomy_id,
     source=body.source,
     currency=body.currency,
-    qname=body.qname,
+    qname=resolved_qname,
     namespace=body.namespace,
     external_id=body.external_id,
     external_source=body.external_source,
@@ -169,8 +256,49 @@ def create_element(
     created_by=created_by,
   )
   session.add(element)
+  try:
+    session.flush()
+  except IntegrityError as exc:
+    # Partial unique index `idx_elements_qname` fires when two CamelCased
+    # account names collapse to the same qname. Translate to a domain
+    # exception so the API layer can return 409 instead of 500.
+    session.rollback()
+    if "idx_elements_qname" in str(exc.orig):
+      raise ElementQNameConflictError(resolved_qname) from exc
+    raise
+
+  # Assign the primary FASB elementsOfFinancialStatements trait so that
+  # downstream report renderers (which JOIN through element_classifications)
+  # see the native account's economic nature.
+  _assign_efs_classification(session, element.id, body.classification)
+
+  return _element_to_response(element, body.classification)
+
+
+def _assign_efs_classification(
+  session: Session, element_id: str, efs_identifier: str
+) -> None:
+  """Link a native element to the matching FASB EFS classification.
+
+  No-op if the EFS Classification row is missing (e.g., in tests that
+  don't seed the library).
+  """
+  classification_row = session.execute(
+    select(Classification).where(
+      Classification.category == "elementsOfFinancialStatements",
+      Classification.identifier == efs_identifier,
+    )
+  ).scalar_one_or_none()
+  if classification_row is None:
+    return
+  session.add(
+    ElementClassification(
+      element_id=element_id,
+      classification_id=classification_row.id,
+      is_primary=True,
+    )
+  )
   session.flush()
-  return _element_to_response(element)
 
 
 def update_element(session: Session, body: UpdateElementRequest) -> ElementResponse:
@@ -192,9 +320,13 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
   ).scalar_one_or_none()
   if element is None:
     raise ElementNotFoundError(body.element_id)
+  assert_not_library_origin(element)
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("element_id", None)
+  # classification isn't a column on elements — it's an element_classifications
+  # row. Pop it here and reconcile the junction after the scalar updates land.
+  new_classification: str | None = updates.pop("classification", None)
 
   # Handle reparent separately so we can cascade path/depth changes.
   reparent = "parent_id" in updates
@@ -250,7 +382,64 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
     setattr(element, key, value)
 
   session.flush()
-  return _element_to_response(element)
+  if new_classification is not None:
+    _reassign_efs_classification(session, element.id, new_classification)
+  efs = efs_classification_by_element(session, [element.id]).get(element.id)
+  return _element_to_response(element, efs)
+
+
+def _reassign_efs_classification(
+  session: Session, element_id: str, efs_identifier: str
+) -> None:
+  """Replace the primary EFS assignment for an element.
+
+  Correction path for misclassified native accounts. Demotes any existing
+  primary EFS row (same junction kept as an audit trail but flipped to
+  is_primary=False) and inserts — or re-promotes — the chosen identifier.
+  No-op if the target Classification row isn't in the library (shouldn't
+  happen in prod; guarded so tests that skip the library seed still pass).
+  """
+  target = session.execute(
+    select(Classification).where(
+      Classification.category == "elementsOfFinancialStatements",
+      Classification.identifier == efs_identifier,
+    )
+  ).scalar_one_or_none()
+  if target is None:
+    return
+
+  existing = (
+    session.execute(
+      select(ElementClassification)
+      .join(
+        Classification,
+        Classification.id == ElementClassification.classification_id,
+      )
+      .where(
+        ElementClassification.element_id == element_id,
+        Classification.category == "elementsOfFinancialStatements",
+      )
+    )
+    .scalars()
+    .all()
+  )
+  found_target = False
+  for row in existing:
+    if row.classification_id == target.id:
+      row.is_primary = True
+      found_target = True
+    else:
+      row.is_primary = False
+
+  if not found_target:
+    session.add(
+      ElementClassification(
+        element_id=element_id,
+        classification_id=target.id,
+        is_primary=True,
+      )
+    )
+  session.flush()
 
 
 def delete_element(session: Session, body: DeleteElementRequest) -> ElementResponse:
@@ -267,7 +456,9 @@ def delete_element(session: Session, body: DeleteElementRequest) -> ElementRespo
   ).scalar_one_or_none()
   if element is None:
     raise ElementNotFoundError(body.element_id)
+  assert_not_library_origin(element)
 
   element.is_active = False
   session.flush()
-  return _element_to_response(element)
+  efs = efs_classification_by_element(session, [element.id]).get(element.id)
+  return _element_to_response(element, efs)

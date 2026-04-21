@@ -3119,6 +3119,18 @@ wheels = [
 ]
 
 [[package]]
+name = "rdflib"
+version = "7.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyparsing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/98/f5/18bb77b7af9526add0c727a3b2048959847dc5fb030913e2918bf384fec3/rdflib-7.6.0.tar.gz", hash = "sha256:6c831288d5e4a5a7ece85d0ccde9877d512a3d0f02d7c06455d00d6d0ea379df", size = 4943826, upload-time = "2026-02-13T07:15:55.938Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/c2/6604a71269e0c1bd75656d5a001432d16f2cc5b8c057140ec797155c295e/rdflib-7.6.0-py3-none-any.whl", hash = "sha256:30c0a3ebf4c0e09215f066be7246794b6492e054e782d7ac2a34c9f70a15e0dd", size = 615416, upload-time = "2026-02-13T07:15:46.487Z" },
+]
+
+[[package]]
 name = "real-ladybug"
 version = "0.13.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3351,6 +3363,7 @@ dependencies = [
     { name = "python-quickbooks" },
     { name = "python-ulid" },
     { name = "pyyaml" },
+    { name = "rdflib" },
     { name = "real-ladybug" },
     { name = "redis" },
     { name = "requests" },
@@ -3444,12 +3457,13 @@ requires-dist = [
     { name = "python-quickbooks", specifier = ">=0.9.0,<1.0" },
     { name = "python-ulid", specifier = ">=3.0.0" },
     { name = "pyyaml", specifier = ">=6.0.0,<7.0" },
+    { name = "rdflib", specifier = ">=7.0.0,<8.0" },
     { name = "real-ladybug", specifier = "==0.13.1" },
     { name = "redis", specifier = ">=7.0.0,<8.0" },
     { name = "requests", specifier = ">=2.32.0,<3.0" },
     { name = "retrying", specifier = ">=1.4.0,<2.0" },
     { name = "rich", marker = "extra == 'dev'", specifier = ">=14.0.0,<15.0" },
-    { name = "robosystems-client", marker = "extra == 'dev'", specifier = "==0.3.8" },
+    { name = "robosystems-client", marker = "extra == 'dev'", specifier = "==0.3.9" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.0,<1.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0,<3.0" },
     { name = "sse-starlette", specifier = ">=3.3.0,<4.0" },
@@ -3472,7 +3486,7 @@ lambda = [
 
 [[package]]
 name = "robosystems-client"
-version = "0.3.8"
+version = "0.3.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -3481,9 +3495,9 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/90/0e/8a977984252c4326bffc687c0c61cac310118cf10a74355c3bf7b412cf96/robosystems_client-0.3.8.tar.gz", hash = "sha256:86dafd7df1b076ee5b897919cb2252e97050ab3fa2fa12d65719a57f31510da6", size = 275004, upload-time = "2026-04-16T22:49:58.659Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/ca/ce6cae5589608411bd6435f2fd0000db3d3091a95a6241b0b9992723b77f/robosystems_client-0.3.9.tar.gz", hash = "sha256:1f9b70e870cfa85931f41b76f8635aa403bbe3155f3f4b78c81551641b522421", size = 281096, upload-time = "2026-04-21T04:41:35.713Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/b3/d8c17d5dad2bfdd06b931d0ab5819da251391573588137b21eca0e9afa4c/robosystems_client-0.3.8-py3-none-any.whl", hash = "sha256:99b87a380ee21ac71f7f48a86190fc4fd2759cb16ad6abb00b6d025fc66bb221", size = 655399, upload-time = "2026-04-16T22:49:56.973Z" },
+    { url = "https://files.pythonhosted.org/packages/26/ba/9c213a67d33b46166be0b5d77bf66572df6bcc390831f1b310709efb18ea/robosystems_client-0.3.9-py3-none-any.whl", hash = "sha256:65d547186f053d5d0150562ca7ed5297b8bba91ff91492926c9f7ce5b1694eb9", size = 664764, upload-time = "2026-04-21T04:41:33.692Z" },
 ]
 
 [[package]]

@@ -257,24 +257,6 @@ class SearchService:
       section_ids=section_ids,
     )
 
-  def upload_documents_bulk(
-    self,
-    graph_id: str,
-    requests: list[DocumentUploadRequest],
-  ) -> tuple[list[DocumentUploadResponse], list[dict]]:
-    """Upload multiple documents. Returns (results, errors)."""
-    results: list[DocumentUploadResponse] = []
-    errors: list[dict] = []
-
-    for i, request in enumerate(requests):
-      try:
-        result = self.upload_document(graph_id, request)
-        results.append(result)
-      except Exception as e:
-        errors.append({"index": i, "title": request.title, "error": str(e)})
-
-    return results, errors
-
   def delete_document(self, graph_id: str, document_id: str) -> bool:
     """Delete a document and all its sections."""
     # Try exact match first

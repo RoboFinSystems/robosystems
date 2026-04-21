@@ -15,8 +15,13 @@ from robosystems.models.api.extensions.accounts import (
   AccountTreeNode,
   AccountTreeResponse,
 )
-from robosystems.models.extensions import Element
+from robosystems.models.extensions import (
+  Classification,
+  Element,
+  ElementClassification,
+)
 from robosystems.models.extensions.roboledger import COA_SOURCES
+from robosystems.operations.library.reads import efs_classification_by_element
 
 
 def _parse_meta(raw: Any) -> dict[str, Any]:
@@ -30,16 +35,26 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
   return {}
 
 
-def account_to_response(row: Element) -> AccountResponse:
-  """Map an Element row to the wire-facing AccountResponse."""
+# Local alias for the shared library helper.
+_efs_by_element = efs_classification_by_element
+
+
+def account_to_response(
+  row: Element, classification: str | None = None
+) -> AccountResponse:
+  """Map an Element row to the wire-facing AccountResponse.
+
+  Callers that batch-load elements should also batch-load the FASB EFS
+  classification via :func:`_efs_by_element` and pass it through, so
+  list endpoints avoid N+1 lookups.
+  """
   meta = _parse_meta(row.metadata_)
   return AccountResponse(
     id=row.id,
     code=row.code,
     name=row.name,
     description=row.description,
-    classification=row.classification,
-    sub_classification=row.sub_classification,
+    classification=classification,
     balance_type=row.balance_type,
     parent_id=row.parent_id,
     depth=row.depth,
@@ -60,15 +75,29 @@ def list_accounts(
   limit: int = 100,
   offset: int = 0,
 ) -> AccountListResponse:
-  """List Chart of Accounts elements filtered by classification + is_active."""
+  """List Chart of Accounts elements filtered by classification + is_active.
+
+  ``classification`` filters on the FASB elementsOfFinancialStatements
+  trait via the element_classifications junction table.
+  """
   query = select(Element).where(Element.source.in_(COA_SOURCES))
   count_query = (
     select(func.count()).select_from(Element).where(Element.source.in_(COA_SOURCES))
   )
 
   if classification is not None:
-    query = query.where(Element.classification == classification)
-    count_query = count_query.where(Element.classification == classification)
+    subquery = (
+      select(ElementClassification.element_id)
+      .join(
+        Classification, Classification.id == ElementClassification.classification_id
+      )
+      .where(
+        Classification.category == "elementsOfFinancialStatements",
+        Classification.identifier == classification,
+      )
+    )
+    query = query.where(Element.id.in_(subquery))
+    count_query = count_query.where(Element.id.in_(subquery))
   if is_active is not None:
     query = query.where(Element.is_active == is_active)
     count_query = count_query.where(Element.is_active == is_active)
@@ -80,8 +109,9 @@ def list_accounts(
     .all()
   )
 
+  efs_map = _efs_by_element(session, [r.id for r in rows])
   return AccountListResponse(
-    accounts=[account_to_response(r) for r in rows],
+    accounts=[account_to_response(r, efs_map.get(r.id)) for r in rows],
     pagination=create_pagination_info(total, limit, offset),
   )
 
@@ -96,6 +126,7 @@ def get_account_tree(session: Session) -> AccountTreeResponse:
     .all()
   )
 
+  efs_map = _efs_by_element(session, [r.id for r in rows])
   nodes: dict[str, AccountTreeNode] = {}
   roots: list[AccountTreeNode] = []
 
@@ -105,7 +136,7 @@ def get_account_tree(session: Session) -> AccountTreeResponse:
       id=r.id,
       code=r.code,
       name=r.name,
-      classification=r.classification,
+      classification=efs_map.get(r.id),
       account_type=meta.get("account_type"),
       balance_type=r.balance_type,
       depth=r.depth,

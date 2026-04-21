@@ -5,7 +5,7 @@ These are pure data tests — they verify counts, hierarchy integrity,
 constraint compliance, and uniqueness before any SQL is executed.
 """
 
-from robosystems.config.taxonomy.seed import (
+from robosystems.taxonomy.seed import (
   ALL_GAAP_ELEMENTS,
   BALANCE_SHEET_ELEMENTS,
   INCOME_STATEMENT_ELEMENTS,

@@ -293,12 +293,20 @@ def get_statement(
       structure_type=structure_type,
     )
 
+  # Classification (FASB elementsOfFinancialStatements trait) is resolved via
+  # the element_classifications junction table.
   fact_rows = session.execute(
     text("""
       SELECT rf.element_id, rf.value, rf.period_start, rf.period_end,
-             rf.period_type, e.qname, e.name, e.classification, e.balance_type
+             rf.period_type, e.qname, e.name,
+             cls.identifier AS classification, e.balance_type
       FROM facts rf
       JOIN elements e ON e.id = rf.element_id
+      LEFT JOIN element_classifications ec
+        ON ec.element_id = e.id AND ec.is_primary = TRUE
+      LEFT JOIN classifications cls
+        ON cls.id = ec.classification_id
+        AND cls.category = 'elementsOfFinancialStatements'
       WHERE rf.report_id = :report_id
     """),
     {"report_id": report_id},

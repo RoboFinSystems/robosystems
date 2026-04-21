@@ -1,0 +1,1772 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "xbrl": "http://www.xbrl.org/2003/linkbase#",
+    "xbrldt": "http://xbrl.org/2005/xbrldt#",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "us-gaap": "http://fasb.org/us-gaap/2026#",
+    "metamodel": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/",
+    "rs": "https://robosystems.ai/vocab/",
+    "balance": {
+      "@id": "https://robosystems.ai/vocab/balance"
+    },
+    "periodType": {
+      "@id": "https://robosystems.ai/vocab/periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "substitutionGroup": {
+      "@id": "https://robosystems.ai/vocab/substitutionGroup",
+      "@type": "@id"
+    },
+    "source": {
+      "@id": "https://robosystems.ai/vocab/source"
+    },
+    "category": {
+      "@id": "https://robosystems.ai/vocab/category"
+    },
+    "identifier": {
+      "@id": "https://robosystems.ai/vocab/identifier"
+    },
+    "classifiedAs": {
+      "@id": "https://robosystems.ai/vocab/classifiedAs",
+      "@type": "@id"
+    },
+    "generalOf": {
+      "@id": "https://robosystems.ai/vocab/generalOf",
+      "@type": "@id"
+    },
+    "deprecated": {
+      "@id": "https://robosystems.ai/vocab/deprecated",
+      "@type": "xsd:boolean"
+    },
+    "replacedBy": {
+      "@id": "https://robosystems.ai/vocab/replacedBy",
+      "@type": "@id"
+    },
+    "orphan2026": {
+      "@id": "https://robosystems.ai/vocab/orphan2026",
+      "@type": "xsd:boolean"
+    },
+    "label": "rdfs:label",
+    "altLabel": "skos:altLabel",
+    "documentation": "rdfs:comment"
+  },
+  "standard": "rs-gaap-hierarchy",
+  "version": "v1",
+  "taxonomy_type": "mapping",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap-hierarchy/v1/",
+  "origin": "native",
+  "created_at": "2026-04-20",
+  "description": "Class-subclass hierarchy for rs-gaap concepts, sourced from FASB's classSubclass metamodel linkbase. Uses the XBRL general-special arcrole (generalOf → is-general-of-the-specialization). 155 anchor concepts with descendants; 1,573 total arcs in FASB; filtered to arcs where both endpoints are in rs-gaap.",
+  "@graph": [
+    {
+      "@id": "rs-gaap:AccountsPayableCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AccountsPayableInterestBearingCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableOtherCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableTradeCurrent"
+        },
+        {
+          "@id": "rs-gaap:ConstructionPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasSalesPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:GasPurchasePayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:GasImbalancePayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableUnderwritersPromotersAndEmployeesOtherThanSalariesAndWagesCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AccountsReceivableGrossCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:ContractReceivableDueOneYearOrLess"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AccountsReceivableGrossNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:ContractReceivableDueAfterOneYear"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AccruedLiabilitiesCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AccruedAdvertisingCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedBonusesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedEnvironmentalLossContingenciesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedExchangeFeeRebateCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedInsuranceCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedMarketingCostsCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedProfessionalFeesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedReclamationCostsCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedRentCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedRoyaltiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedSalesCommissionCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedUtilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:ProductWarrantyAccrualClassifiedCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherAccruedLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:EmployeeRelatedLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:TaxesPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:DividendsPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:InterestPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:InterestAndDividendsPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:SettlementLiabilitiesCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AgriculturalRelatedInventory",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AgriculturalRelatedInventoryPlantMaterial"
+        },
+        {
+          "@id": "rs-gaap:AgriculturalRelatedInventoryGrowingCrops"
+        },
+        {
+          "@id": "rs-gaap:AgriculturalRelatedInventoryFeedAndSupplies"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AirlineRelatedInventory",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AirlineRelatedInventoryAircraftFuel"
+        },
+        {
+          "@id": "rs-gaap:AirlineRelatedInventoryAircraftParts"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AssetRetirementObligationsNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:MineReclamationAndClosingLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasReclamationLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedCappingClosurePostClosureAndEnvironmentalCostsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DecommissioningLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:SpentNuclearFuelObligationNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:Assets",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:AssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LeveragedLeasesNetInvestmentInLeveragedLeasesDisclosureInvestmentInLeveragedLeasesNet"
+        },
+        {
+          "@id": "rs-gaap:AccruedInvestmentIncomeReceivable"
+        },
+        {
+          "@id": "rs-gaap:CapitalizedComputerSoftwareGross"
+        },
+        {
+          "@id": "rs-gaap:DerivativeAssets"
+        },
+        {
+          "@id": "rs-gaap:OtherAssets"
+        },
+        {
+          "@id": "rs-gaap:PrepaidExpenseAndOtherAssets"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AssetsCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:Cash"
+        },
+        {
+          "@id": "rs-gaap:CashEquivalentsAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:DueFromBanks"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashAndCashEquivalentsAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashCurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashEquivalentsCurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedInvestmentsCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherRestrictedAssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:ShortTermInvestments"
+        },
+        {
+          "@id": "rs-gaap:ReceivablesNetCurrent"
+        },
+        {
+          "@id": "rs-gaap:NotesAndLoansReceivableGrossCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsReceivableGrossCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherReceivablesGrossCurrent"
+        },
+        {
+          "@id": "rs-gaap:InventoryNet"
+        },
+        {
+          "@id": "rs-gaap:InventoryGross"
+        },
+        {
+          "@id": "rs-gaap:PrepaidExpenseCurrent"
+        },
+        {
+          "@id": "rs-gaap:ContractWithCustomerAssetNetCurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredCostsCurrent"
+        },
+        {
+          "@id": "rs-gaap:DerivativeAssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:HedgingAssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:DerivativeInstrumentsAndHedges"
+        },
+        {
+          "@id": "rs-gaap:RegulatoryAssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:FundsHeldForClients"
+        },
+        {
+          "@id": "rs-gaap:DeferredRentAssetNetCurrent"
+        },
+        {
+          "@id": "rs-gaap:AssetsHeldInTrustCurrent"
+        },
+        {
+          "@id": "rs-gaap:AdvancesOnInventoryPurchases"
+        },
+        {
+          "@id": "rs-gaap:AdvanceRoyaltiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AssetsOfDisposalGroupIncludingDiscontinuedOperationCurrent"
+        },
+        {
+          "@id": "rs-gaap:AssetsHeldForSaleNotPartOfDisposalGroupCurrent"
+        },
+        {
+          "@id": "rs-gaap:DepositsAssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:IntangibleAssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:BusinessCombinationContingentConsiderationAssetCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherAssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:CashAndDueFromBanks"
+        },
+        {
+          "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
+        },
+        {
+          "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"
+        },
+        {
+          "@id": "rs-gaap:PrepaidExpenseAndOtherAssetsCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AssetsHeldForSaleNotPartOfDisposalGroupCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:TradeAndLoansReceivablesHeldForSaleNetNotPartOfDisposalGroup"
+        },
+        {
+          "@id": "rs-gaap:AssetsHeldForSaleNotPartOfDisposalGroupCurrentOther"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AssetsNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InventoryNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:FinanceLeaseRightOfUseAsset"
+        },
+        {
+          "@id": "rs-gaap:OperatingLeaseRightOfUseAsset"
+        },
+        {
+          "@id": "rs-gaap:NetInvestmentInLeaseNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LeveragedLeasesNetInvestmentInLeveragedLeasesDisclosureInvestmentInLeveragedLeasesNet"
+        },
+        {
+          "@id": "rs-gaap:NontradeReceivablesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:PropertyPlantAndEquipmentNet"
+        },
+        {
+          "@id": "rs-gaap:PropertyPlantAndEquipmentGross"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasPropertySuccessfulEffortMethodNet"
+        },
+        {
+          "@id": "rs-gaap:OtherOilAndGasPropertySuccessfulEffortMethod"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasPropertySuccessfulEffortMethodGross"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasPropertyFullCostMethodNet"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasPropertyFullCostMethodGross"
+        },
+        {
+          "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
+        },
+        {
+          "@id": "rs-gaap:LongTermAccountsNotesAndLoansReceivableNetNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsReceivableNetNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsReceivableGrossNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:NotesAndLoansReceivableNetNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:NotesAndLoansReceivableGrossNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermInvestments"
+        },
+        {
+          "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
+        },
+        {
+          "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
+        },
+        {
+          "@id": "rs-gaap:GoodwillGross"
+        },
+        {
+          "@id": "rs-gaap:Goodwill"
+        },
+        {
+          "@id": "rs-gaap:PrepaidExpenseNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:ContractWithCustomerAssetNetNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DerivativeInstrumentsAndHedgesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DerivativeAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:HedgingAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RegulatedEntityOtherAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DepositsAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredRentReceivablesNetNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AssetsHeldInTrustNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashAndInvestmentsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashAndCashEquivalentsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashEquivalentsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedInvestmentsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherRestrictedAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AdvanceRoyaltiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:EstimatedInsuranceRecoveries"
+        },
+        {
+          "@id": "rs-gaap:CustomerFunds"
+        },
+        {
+          "@id": "rs-gaap:DeferredCosts"
+        },
+        {
+          "@id": "rs-gaap:DeferredIncomeTaxAssetsNet"
+        },
+        {
+          "@id": "rs-gaap:BusinessCombinationContingentConsiderationAssetNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AmortizationMethodQualifiedAffordableHousingProjectInvestments"
+        },
+        {
+          "@id": "rs-gaap:PrepaidExpenseAndOtherAssetsNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:AssetsOfDisposalGroupIncludingDiscontinuedOperationCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationCashAndCashEquivalents"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationInventoryCurrent"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationOtherCurrentAssets"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationAccountsNotesAndLoansReceivableNet"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationGoodwillCurrent"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationPropertyPlantAndEquipmentCurrent"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationIntangibleAssetsCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:Cash",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:CashFDICInsuredAmount"
+        },
+        {
+          "@id": "rs-gaap:CashUninsuredAmount"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InterestBearingDepositsInBanks"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:CashEquivalentsAtCarryingValue",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AssetBackedSecuritiesAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:CertificatesOfDepositAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:CommercialPaperAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:CreditAndDebitCardReceivablesAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:MoneyMarketFundsAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:MunicipalDebtSecuritiesAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:TimeDepositsAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:USGovernmentSecuritiesAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:USGovernmentAgenciesSecuritiesAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:OtherCashEquivalentsAtCarryingValue"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:ContractReceivableDueAfterOneYear",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:ContractReceivableDueFiveYearsOrMore"
+        },
+        {
+          "@id": "rs-gaap:ContractReceivableDueFourToFiveYears"
+        },
+        {
+          "@id": "rs-gaap:ContractReceivableDueOneToTwoYears"
+        },
+        {
+          "@id": "rs-gaap:ContractReceivableDueThreeToFourYears"
+        },
+        {
+          "@id": "rs-gaap:ContractReceivableDueTwoToThreeYears"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DebtCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:LongTermDebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:ShortTermBorrowings"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DeferredCompensationLiabilityClassifiedNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DeferredCompensationSharebasedArrangementsLiabilityClassifiedNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredCompensationCashbasedArrangementsLiabilityClassifiedNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherDeferredCompensationArrangementsLiabilityClassifiedNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DeferredCompensationLiabilityCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DeferredCompensationShareBasedArrangementsLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredCompensationCashBasedArrangementsLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherDeferredCompensationArrangementsLiabilityCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DeferredCosts",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DeferredCostsLeasingNetNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredCompensationPlanAssets"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DeferredCostsCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DeferredCostsLeasingNetCurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredFuelCost"
+        },
+        {
+          "@id": "rs-gaap:DeferredStormAndPropertyReserveDeficiencyCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherDeferredCostsNet"
+        },
+        {
+          "@id": "rs-gaap:OtherDeferredCostsGross"
+        },
+        {
+          "@id": "rs-gaap:DeferredOfferingCosts"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DeferredFuelCost",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DeferredGasCost"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DerivativeAssetsCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:CommodityContractAssetCurrent"
+        },
+        {
+          "@id": "rs-gaap:EnergyMarketingContractsAssetsCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DerivativeAssetsNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:CommodityContractAssetNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:EnergyMarketingContractsAssetsNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationAssetsNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationOtherNoncurrentAssets"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationInventoryNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationDeferredTaxAssets"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationIntangibleAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationGoodwillNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DisposalGroupIncludingDiscontinuedOperationPropertyPlantAndEquipmentNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:EmployeeRelatedLiabilitiesCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AccruedEmployeeBenefitsCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedPayrollTaxesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedSalariesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedVacationCurrent"
+        },
+        {
+          "@id": "rs-gaap:WorkersCompensationLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:DefinedBenefitPensionPlanLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:PensionAndOtherPostretirementDefinedBenefitPlansCurrentLiabilities"
+        },
+        {
+          "@id": "rs-gaap:PensionAndOtherPostretirementAndPostemploymentBenefitPlansLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherEmployeeRelatedLiabilitiesCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:EnergyRelatedInventory",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:EnergyRelatedInventoryPetroleum"
+        },
+        {
+          "@id": "rs-gaap:EnergyRelatedInventoryNaturalGasLiquids"
+        },
+        {
+          "@id": "rs-gaap:EnergyRelatedInventoryNaturalGasInStorage"
+        },
+        {
+          "@id": "rs-gaap:EnergyRelatedInventoryGasStoredUnderground"
+        },
+        {
+          "@id": "rs-gaap:EnergyRelatedInventoryPropaneGas"
+        },
+        {
+          "@id": "rs-gaap:EnergyRelatedInventoryCoal"
+        },
+        {
+          "@id": "rs-gaap:EnergyRelatedInventoryChemicals"
+        },
+        {
+          "@id": "rs-gaap:EnergyRelatedInventoryOtherFossilFuel"
+        },
+        {
+          "@id": "rs-gaap:CrudeOilAndNaturalGasLiquids"
+        },
+        {
+          "@id": "rs-gaap:InventoryCrudeOilProductsAndMerchandise"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:FiniteLivedIntangibleAssetsGross",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:FiniteLivedContractualRightsGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedCustomerListsGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedCustomerRelationshipsGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedLicenseAgreementsGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedNoncompeteAgreementsGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedIntangibleAssetOffMarketLeaseFavorableGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedPatentsGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedTrademarksGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedTradeNamesGross"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedIntangibleAssetAcquiredInPlaceLeases"
+        },
+        {
+          "@id": "rs-gaap:FiniteLivedCoreDepositsGross"
+        },
+        {
+          "@id": "rs-gaap:OtherFiniteLivedIntangibleAssetsGross"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:IndefiniteLivedIntangibleAssetsExcludingGoodwill",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:IndefiniteLivedContractualRights"
+        },
+        {
+          "@id": "rs-gaap:IndefiniteLivedFranchiseRights"
+        },
+        {
+          "@id": "rs-gaap:IndefiniteLivedLicenseAgreements"
+        },
+        {
+          "@id": "rs-gaap:IndefiniteLivedTrademarks"
+        },
+        {
+          "@id": "rs-gaap:IndefiniteLivedTradeNames"
+        },
+        {
+          "@id": "rs-gaap:OtherIndefiniteLivedIntangibleAssets"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:FiniteLivedIntangibleAssetsNet"
+        },
+        {
+          "@id": "rs-gaap:IndefiniteLivedIntangibleAssetsExcludingGoodwill"
+        },
+        {
+          "@id": "rs-gaap:OtherIntangibleAssetsNet"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:InventoryAdjustments",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InventoryValuationReserves"
+        },
+        {
+          "@id": "rs-gaap:InventoryLIFOReserve"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:InventoryGross",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AirlineRelatedInventory"
+        },
+        {
+          "@id": "rs-gaap:RetailRelatedInventory"
+        },
+        {
+          "@id": "rs-gaap:EnergyRelatedInventory"
+        },
+        {
+          "@id": "rs-gaap:AgriculturalRelatedInventory"
+        },
+        {
+          "@id": "rs-gaap:PublicUtilitiesInventory"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:InventoryNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InventoryRealEstate"
+        },
+        {
+          "@id": "rs-gaap:InventoryDrillingNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:InventoryGasInStorageUndergroundNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherInventoryNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:InventoryOperativeBuilders",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InventoryHomesUnderConstruction"
+        },
+        {
+          "@id": "rs-gaap:InventoryFinishedHomes"
+        },
+        {
+          "@id": "rs-gaap:InventoryLandHeldForDevelopmentAndSale"
+        },
+        {
+          "@id": "rs-gaap:InventoryBuildingsAndImprovements"
+        },
+        {
+          "@id": "rs-gaap:RealEstateInventoryCapitalizedInterestCosts"
+        },
+        {
+          "@id": "rs-gaap:LandUnderPurchaseOptionsRecorded"
+        },
+        {
+          "@id": "rs-gaap:RealEstateInventoryConstructionMaterials"
+        },
+        {
+          "@id": "rs-gaap:InventoryLandHeldForSale"
+        },
+        {
+          "@id": "rs-gaap:InventoryOperativeBuildersOther"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:InventoryRealEstate",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InventoryRealEstateImprovements"
+        },
+        {
+          "@id": "rs-gaap:InventoryRealEstateHeldForSale"
+        },
+        {
+          "@id": "rs-gaap:InventoryRealEstateLandAndLandDevelopmentCosts"
+        },
+        {
+          "@id": "rs-gaap:InventoryRealEstateConstructionInProcess"
+        },
+        {
+          "@id": "rs-gaap:InventoryRealEstateMortgageLoansHeldInInventory"
+        },
+        {
+          "@id": "rs-gaap:InventoryOperativeBuilders"
+        },
+        {
+          "@id": "rs-gaap:InventoryRealEstateTimeshareAvailableForSale"
+        },
+        {
+          "@id": "rs-gaap:InventoryRealEstateOther"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:Liabilities",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:LiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrentAndNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermDebt"
+        },
+        {
+          "@id": "rs-gaap:AccumulatedDeferredInvestmentTaxCredit"
+        },
+        {
+          "@id": "rs-gaap:DeferredGainOnSaleOfProperty"
+        },
+        {
+          "@id": "rs-gaap:DeferredIncomeTaxLiabilitiesNet"
+        },
+        {
+          "@id": "rs-gaap:DerivativeInstrumentsAndHedgesLiabilities"
+        },
+        {
+          "@id": "rs-gaap:EnergyMarketingAccountsPayable"
+        },
+        {
+          "@id": "rs-gaap:LeaseDepositLiability"
+        },
+        {
+          "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+        },
+        {
+          "@id": "rs-gaap:OffMarketLeaseUnfavorable"
+        },
+        {
+          "@id": "rs-gaap:OtherLiabilities"
+        },
+        {
+          "@id": "rs-gaap:QualifiedAffordableHousingProjectInvestmentsCommitment"
+        },
+        {
+          "@id": "rs-gaap:ProvisionForLossOnContracts"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:LiabilitiesCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DerivativeLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AssetRetirementObligationCurrent"
+        },
+        {
+          "@id": "rs-gaap:DebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:BusinessCombinationContingentConsiderationLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:ContractWithCustomerLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:CustomerRefundLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredCompensationLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredGasPurchasesCurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredRentCreditCurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredRevenueCurrent"
+        },
+        {
+          "@id": "rs-gaap:EnergyMarketingContractLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:ExtendedProductWarrantyAccrualCurrent"
+        },
+        {
+          "@id": "rs-gaap:FinanceLeaseLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:HedgingLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilitiesOfBusinessTransferredUnderContractualArrangementCurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilitiesOfDisposalGroupIncludingDiscontinuedOperationCurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilityForUncertainTaxPositionsCurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligationsCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:PostemploymentBenefitsLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:ProgramRightsObligationsCurrent"
+        },
+        {
+          "@id": "rs-gaap:RegulatoryLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:RestructuringReserveCurrent"
+        },
+        {
+          "@id": "rs-gaap:SelfInsuranceReserveCurrent"
+        },
+        {
+          "@id": "rs-gaap:SharesSubjectToMandatoryRedemptionSettlementTermsAmountCurrent"
+        },
+        {
+          "@id": "rs-gaap:StandardProductWarrantyAccrualCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:LiabilitiesNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:DerivativeLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:EnergyMarketingContractLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableInterestBearingNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedEnvironmentalLossContingenciesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedIncomeTaxesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedInsuranceNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:AssetRetirementObligationsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermDebtNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:ContractWithCustomerLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:CustomerRefundLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DecommissioningLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredCompensationLiabilityClassifiedNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredRentCreditNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredRevenueNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DefinedBenefitPensionPlanLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DerivativeInstrumentsAndHedgesLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:ExtendedProductWarrantyAccrualNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:FinanceLeaseLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:HedgingLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:BusinessCombinationContingentConsiderationLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilitiesOfBusinessTransferredUnderContractualArrangementNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilitiesOfDisposalGroupIncludingDiscontinuedOperationNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilitiesOtherThanLongtermDebtNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilityForUncertainTaxPositionsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OperatingLeaseLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherAccruedLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherPostretirementBenefitsPayableNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherPostretirementDefinedBenefitPlanLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:PensionAndOtherPostretirementAndPostemploymentBenefitPlansLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:PensionAndOtherPostretirementDefinedBenefitPlansLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:PostemploymentBenefitsLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:ProductWarrantyAccrualNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:ProgramRightsObligationsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RegulatoryLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:RestructuringReserveNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:SelfInsuranceReserveNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:SharesSubjectToMandatoryRedemptionSettlementTermsAmountNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:StandardProductWarrantyAccrualNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:WorkersCompensationLiabilityNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:LongTermDebtCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:ConvertibleDebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:ConvertibleNotesPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:SecuredDebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:UnsecuredDebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:SubordinatedDebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:ConvertibleSubordinatedDebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermCommercialPaperCurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermConstructionLoanCurrent"
+        },
+        {
+          "@id": "rs-gaap:LongtermTransitionBondCurrent"
+        },
+        {
+          "@id": "rs-gaap:LongtermPollutionControlBondCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherLongTermDebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:LinesOfCreditCurrent"
+        },
+        {
+          "@id": "rs-gaap:MediumtermNotesCurrent"
+        },
+        {
+          "@id": "rs-gaap:NotesPayableToBankCurrent"
+        },
+        {
+          "@id": "rs-gaap:SeniorNotesCurrent"
+        },
+        {
+          "@id": "rs-gaap:JuniorSubordinatedNotesCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherNotesPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:LoansPayableToBankCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherLoansPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:LoansPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:NotesAndLoansPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:SpecialAssessmentBondCurrent"
+        },
+        {
+          "@id": "rs-gaap:FederalHomeLoanBankAdvancesCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:LongTermDebtNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:ConstructionLoanNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:ConvertibleDebtNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermNotesPayable"
+        },
+        {
+          "@id": "rs-gaap:LongTermLoansPayable"
+        },
+        {
+          "@id": "rs-gaap:LongTermLineOfCredit"
+        },
+        {
+          "@id": "rs-gaap:CommercialPaperNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:SecuredLongTermDebt"
+        },
+        {
+          "@id": "rs-gaap:SubordinatedLongTermDebt"
+        },
+        {
+          "@id": "rs-gaap:UnsecuredLongTermDebt"
+        },
+        {
+          "@id": "rs-gaap:ConvertibleSubordinatedDebtNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermTransitionBond"
+        },
+        {
+          "@id": "rs-gaap:LongTermPollutionControlBond"
+        },
+        {
+          "@id": "rs-gaap:JuniorSubordinatedDebentureOwedToUnconsolidatedSubsidiaryTrustNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermNotesAndLoans"
+        },
+        {
+          "@id": "rs-gaap:SpecialAssessmentBondNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LongtermFederalHomeLoanBankAdvancesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherLongTermDebtNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:LongTermInvestments",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InvestmentsInAffiliatesSubsidiariesAssociatesAndJointVentures"
+        },
+        {
+          "@id": "rs-gaap:AdvancesToAffiliate"
+        },
+        {
+          "@id": "rs-gaap:EquityMethodInvestments"
+        },
+        {
+          "@id": "rs-gaap:MarketableSecuritiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:InvestmentInPhysicalCommodities"
+        },
+        {
+          "@id": "rs-gaap:OtherLongTermInvestments"
+        },
+        {
+          "@id": "rs-gaap:AuctionRateSecuritiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LeveragedLeaseInvestment"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:LongTermLoansPayable",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:LongTermLoansFromBank"
+        },
+        {
+          "@id": "rs-gaap:OtherLoansPayableLongTerm"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:LongTermNotesPayable",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:ConvertibleLongTermNotesPayable"
+        },
+        {
+          "@id": "rs-gaap:MediumtermNotesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:JuniorSubordinatedLongTermNotes"
+        },
+        {
+          "@id": "rs-gaap:SeniorLongTermNotes"
+        },
+        {
+          "@id": "rs-gaap:NotesPayableToBankNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherLongTermNotesPayable"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:NontradeReceivablesCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InterestReceivableCurrent"
+        },
+        {
+          "@id": "rs-gaap:IncomeTaxesReceivable"
+        },
+        {
+          "@id": "rs-gaap:ValueAddedTaxReceivableCurrent"
+        },
+        {
+          "@id": "rs-gaap:InsuranceSettlementsReceivableCurrent"
+        },
+        {
+          "@id": "rs-gaap:GrantsReceivableCurrent"
+        },
+        {
+          "@id": "rs-gaap:InsuranceReceivableForMalpracticeCurrent"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasJointInterestBillingReceivablesCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:NontradeReceivablesNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:InterestReceivableNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:IncomeTaxesReceivableNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:ValueAddedTaxReceivableNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:InsuranceSettlementsReceivableNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:GrantsReceivableNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:InsuranceReceivableForMalpracticeNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OilAndGasJointInterestBillingReceivablesNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:OilAndGasPropertySuccessfulEffortMethodGross",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:UnprovedOilAndGasPropertySuccessfulEffortMethod"
+        },
+        {
+          "@id": "rs-gaap:ProvedOilAndGasPropertySuccessfulEffortMethod"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:PrepaidExpenseCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:PrepaidInsurance"
+        },
+        {
+          "@id": "rs-gaap:PrepaidRent"
+        },
+        {
+          "@id": "rs-gaap:PrepaidAdvertising"
+        },
+        {
+          "@id": "rs-gaap:PrepaidRoyalties"
+        },
+        {
+          "@id": "rs-gaap:Supplies"
+        },
+        {
+          "@id": "rs-gaap:PrepaidInterest"
+        },
+        {
+          "@id": "rs-gaap:PrepaidTaxes"
+        },
+        {
+          "@id": "rs-gaap:OtherPrepaidExpenseCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:PrepaidExpenseNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:PrepaidExpenseOtherNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:PrepaidMineralRoyaltiesNoncurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:PropertyPlantAndEquipmentGross",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:LandAndLandImprovements"
+        },
+        {
+          "@id": "rs-gaap:LandImprovements"
+        },
+        {
+          "@id": "rs-gaap:Land"
+        },
+        {
+          "@id": "rs-gaap:BuildingsAndImprovementsGross"
+        },
+        {
+          "@id": "rs-gaap:MachineryAndEquipmentGross"
+        },
+        {
+          "@id": "rs-gaap:FurnitureAndFixturesGross"
+        },
+        {
+          "@id": "rs-gaap:FixturesAndEquipmentGross"
+        },
+        {
+          "@id": "rs-gaap:ConstructionInProgressGross"
+        },
+        {
+          "@id": "rs-gaap:LeaseholdImprovementsGross"
+        },
+        {
+          "@id": "rs-gaap:TimberAndTimberlands"
+        },
+        {
+          "@id": "rs-gaap:PropertyPlantAndEquipmentOther"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:PropertyPlantAndEquipmentNet",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:PublicUtilitiesPropertyPlantAndEquipmentNet"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:ReceivablesNetCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AccountsReceivableNetCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsNotesAndLoansReceivableNetCurrent"
+        },
+        {
+          "@id": "rs-gaap:NotesAndLoansReceivableNetCurrent"
+        },
+        {
+          "@id": "rs-gaap:NontradeReceivablesCurrent"
+        },
+        {
+          "@id": "rs-gaap:UnbilledReceivablesCurrent"
+        },
+        {
+          "@id": "rs-gaap:ReceivablesLongTermContractsOrPrograms"
+        },
+        {
+          "@id": "rs-gaap:AccountsReceivableFromSecuritization"
+        },
+        {
+          "@id": "rs-gaap:OtherReceivablesNetCurrent"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:RegulatedEntityOtherAssetsNoncurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:RegulatoryAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:SecuritizedRegulatoryTransitionAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DemandSideManagementProgramCostsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:UnamortizedLossReacquiredDebtNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DecommissioningFundInvestments"
+        },
+        {
+          "@id": "rs-gaap:AssetRecoveryDamagedPropertyCostsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredStormAndPropertyReserveDeficiencyNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:InvestmentsInPowerAndDistributionProjects"
+        },
+        {
+          "@id": "rs-gaap:UnamortizedDebtIssuanceExpense"
+        },
+        {
+          "@id": "rs-gaap:PhaseInPlanAmountOfCostsDeferredForRateMakingPurposes"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:RetailRelatedInventory",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:RetailRelatedInventoryMerchandise"
+        },
+        {
+          "@id": "rs-gaap:RetailRelatedInventoryPackagingAndOtherSupplies"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:ShortTermBorrowings",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:ConstructionLoan"
+        },
+        {
+          "@id": "rs-gaap:BankOverdrafts"
+        },
+        {
+          "@id": "rs-gaap:CommercialPaper"
+        },
+        {
+          "@id": "rs-gaap:BridgeLoan"
+        },
+        {
+          "@id": "rs-gaap:ShortTermBankLoansAndNotesPayable"
+        },
+        {
+          "@id": "rs-gaap:ShortTermNonBankLoansAndNotesPayable"
+        },
+        {
+          "@id": "rs-gaap:OtherShortTermBorrowings"
+        },
+        {
+          "@id": "rs-gaap:WarehouseAgreementBorrowings"
+        },
+        {
+          "@id": "rs-gaap:FederalHomeLoanBankAdvancesMaturitiesSummaryDueWithinOneYearOfBalanceSheetDate"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:ShortTermInvestments",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:MarketableSecuritiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherShortTermInvestments"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:TaxesPayableCurrent",
+      "https://robosystems.ai/vocab/generalOf": [
+        {
+          "@id": "rs-gaap:AccrualForTaxesOtherThanIncomeTaxesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedIncomeTaxesCurrent"
+        },
+        {
+          "@id": "rs-gaap:SalesAndExciseTaxPayableCurrent"
+        }
+      ]
+    }
+  ]
+}

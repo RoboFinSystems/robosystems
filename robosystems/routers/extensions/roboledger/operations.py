@@ -132,9 +132,11 @@ from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
+  LibraryImmutableError,
 )
 from robosystems.operations.roboledger.commands.elements import (
   ElementCycleError,
+  ElementQNameConflictError,
 )
 from robosystems.operations.roboledger.commands.elements import (
   ElementNotFoundError as ElementMissingError,
@@ -874,6 +876,8 @@ async def create_structure_op(
     try:
       with extensions_session(graph_id) as session:
         return cmd_create_structure(session, body, created_by=str(user.id))
+    except LibraryImmutableError as exc:
+      raise HTTPException(status_code=403, detail=str(exc)) from exc
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 
@@ -952,7 +956,7 @@ update_taxonomy_op = _registrar.register(
     description="Update mutable fields on a taxonomy. `taxonomy_type` is immutable.",
     command=cmd_update_taxonomy,
     request_model=UpdateTaxonomyRequest,
-    error_map={TaxonomyMissingError: 404},
+    error_map={TaxonomyMissingError: 404, LibraryImmutableError: 403},
     requires_created_by=False,
   )
 )
@@ -967,7 +971,7 @@ delete_taxonomy_op = _registrar.register(
     ),
     command=cmd_delete_taxonomy,
     request_model=DeleteTaxonomyRequest,
-    error_map={TaxonomyMissingError: 404},
+    error_map={TaxonomyMissingError: 404, LibraryImmutableError: 403},
     requires_created_by=False,
   )
 )
@@ -1005,7 +1009,7 @@ update_structure_op = _registrar.register(
     ),
     command=cmd_update_structure,
     request_model=UpdateStructureRequest,
-    error_map={StructureNotFoundError: 404},
+    error_map={StructureNotFoundError: 404, LibraryImmutableError: 403},
     requires_created_by=False,
   )
 )
@@ -1020,7 +1024,7 @@ delete_structure_op = _registrar.register(
     ),
     command=cmd_delete_structure,
     request_model=DeleteStructureRequest,
-    error_map={StructureNotFoundError: 404},
+    error_map={StructureNotFoundError: 404, LibraryImmutableError: 403},
     requires_created_by=False,
   )
 )
@@ -1039,6 +1043,8 @@ create_element_op = _registrar.register(
     request_model=CreateElementRequest,
     error_map={
       TaxonomyMissingError: 404,
+      LibraryImmutableError: 403,
+      ElementQNameConflictError: 409,
       ElementMissingError: (
         400,
         lambda e: f"Parent element not found: {e.element_id}",  # type: ignore[attr-defined]
@@ -1060,6 +1066,7 @@ update_element_op = _registrar.register(
     error_map={
       ElementMissingError: 404,
       ElementCycleError: 422,
+      LibraryImmutableError: 403,
     },
     requires_created_by=False,
   )
@@ -1075,7 +1082,7 @@ delete_element_op = _registrar.register(
     ),
     command=cmd_delete_element,
     request_model=DeleteElementRequest,
-    error_map={ElementMissingError: 404},
+    error_map={ElementMissingError: 404, LibraryImmutableError: 403},
     requires_created_by=False,
   )
 )
@@ -1116,7 +1123,7 @@ update_association_op = _registrar.register(
     ),
     command=cmd_update_association,
     request_model=UpdateAssociationRequest,
-    error_map={AssociationNotFoundError: 404},
+    error_map={AssociationNotFoundError: 404, LibraryImmutableError: 403},
     requires_created_by=False,
   )
 )
@@ -1131,7 +1138,7 @@ delete_association_op = _registrar.register(
     ),
     command=cmd_delete_association,
     request_model=DeleteAssociationRequest,
-    error_map={AssociationNotFoundError: 404},
+    error_map={AssociationNotFoundError: 404, LibraryImmutableError: 403},
     requires_created_by=False,
   )
 )
@@ -1361,6 +1368,7 @@ create_mapping_association_op = _registrar.register(
     request_model=CreateMappingAssociationOperation,
     error_map={
       MappingStructureNotFoundError: (404, lambda _e: "Mapping not found"),
+      LibraryImmutableError: 403,
       ElementNotFoundError: (
         400,
         lambda e: f"{e.side.capitalize()} element not found",  # type: ignore[attr-defined]

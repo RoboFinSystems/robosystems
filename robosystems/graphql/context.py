@@ -70,6 +70,7 @@ from sqlalchemy.orm import Session
 from strawberry.types import Info
 
 from robosystems.database import get_db_session
+from robosystems.db.extensions import LIBRARY_GRAPH_ID
 from robosystems.graphql.auth import check_graph_access
 from robosystems.middleware.auth.dependencies import (
   API_KEY_HEADER,
@@ -148,12 +149,18 @@ async def get_context(
   graph_type: str = ""
   if user is not None:
     check_graph_access(user, graph_id)
-    # Load once per request; resolvers read from context, never re-hit the DB.
-    # Same 403 semantics as check_graph_access: missing graph rows
-    # surface as "access denied" to avoid enumeration.
-    meta = load_graph_metadata(graph_id, db)
-    schema_extensions = meta.schema_extensions
-    graph_type = meta.graph_type
+    # Library sentinel — no graph row to load, no per-graph metadata.
+    # The `library` extension is always "enabled" for this sentinel.
+    if graph_id == LIBRARY_GRAPH_ID:
+      schema_extensions = (LIBRARY_GRAPH_ID,)
+      graph_type = LIBRARY_GRAPH_ID
+    else:
+      # Load once per request; resolvers read from context, never re-hit the DB.
+      # Same 403 semantics as check_graph_access: missing graph rows
+      # surface as "access denied" to avoid enumeration.
+      meta = load_graph_metadata(graph_id, db)
+      schema_extensions = meta.schema_extensions
+      graph_type = meta.graph_type
 
   return {
     "request": request,

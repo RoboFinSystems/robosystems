@@ -1,85 +1,102 @@
 """Demo-only reset logic for close_demo.
 
 This is NOT a production operation. It selectively wipes demo-generated
-state while preserving graph infrastructure (entity, shared taxonomies,
-US GAAP reporting elements).
+state while preserving graph infrastructure (entity, library-seeded
+taxonomies + elements + structures + associations).
 
 For production use cases:
 - Entries are corrected via reverse-journal-entry, not deleted
 - Schedules are truncated or individually deleted
 - Fiscal calendar state is managed via reopen-period
+
+Library-origin rows (``created_by = 'library-seeder'``) are protected by
+per-tenant PL/pgSQL triggers installed at provision time. This reset
+script uses the same audit literal to determine what it can delete:
+everything that is NOT library-seeded belongs to the demo run and is
+fair game.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 
-from robosystems.models.extensions import Element, EntityTaxonomy
-from robosystems.models.extensions.roboledger import (
-  Association,
-  Fact,
-  Structure,
-  Taxonomy,
-)
+from robosystems.models.extensions import EntityTaxonomy
 from robosystems.models.extensions.roboledger.fiscal_calendar import (
   FiscalCalendar,
   FiscalCalendarEvent,
 )
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 
-# The shared reporting taxonomy ID — must survive reset
-_REPORTING_TAX_ID = "tax_usgaap_reporting"
+_LIBRARY_SEEDER = "library-seeder"
 
 
 def reset_demo_state(graph_id: str) -> None:
-  """Wipe demo-generated state, preserving entity + shared taxonomy data.
+  """Wipe demo-generated state, preserving entity + library data.
 
   After this, the graph is clean with only:
   - The entity row (graph identity)
-  - The shared US GAAP reporting taxonomy + elements + structures
+  - The full library (taxonomies, elements, labels, references,
+    structures, associations — everything with
+    ``created_by='library-seeder'``)
 
-  All demo-created data (CoA taxonomy, elements, entries, transactions,
-  associations, facts, schedules, fiscal calendar) is removed.
+  All demo-created data (CoA taxonomy, CoA elements, entries,
+  transactions, tenant associations, facts, schedules, fiscal calendar)
+  is removed.
   """
   from robosystems.db.extensions import extensions_session
 
   with extensions_session(graph_id) as session:
-    # 1-3. All entries + line items + transactions
+    # 1-3. All entries + line items + transactions (tenant-generated;
+    # the library itself never authors these).
     session.execute(text("DELETE FROM line_items"))
     session.execute(text("DELETE FROM entries"))
     session.execute(text("DELETE FROM transactions"))
 
-    # 4. Associations (only those referencing demo-source elements)
-    demo_elem_ids = select(Element.id).where(
-      Element.source.notin_(["us-gaap", "sfac6", "system"])
+    # 4. Tenant-origin associations. The library's immutability triggers
+    # raise on any UPDATE/DELETE of rows with created_by='library-seeder',
+    # so we filter those out explicitly. CoA mapping arcs created by the
+    # demo (created_by='coa-classifier' or the demo user) are fair game.
+    session.execute(
+      text("DELETE FROM associations WHERE created_by != :seeder"),
+      {"seeder": _LIBRARY_SEEDER},
     )
-    session.query(Association).filter(
-      Association.from_element_id.in_(demo_elem_ids)
-    ).delete(synchronize_session=False)
 
     # 5. Facts
-    session.query(Fact).delete(synchronize_session=False)
+    session.execute(text("DELETE FROM facts"))
 
-    # 6. Elements (preserve shared GAAP/SFAC/system elements)
-    session.query(Element).filter(
-      Element.source.notin_(["us-gaap", "sfac6", "system"])
-    ).delete(synchronize_session=False)
-
-    # 7. Structures in non-shared taxonomies
-    non_shared_tax_ids = select(Taxonomy.id).where(
-      Taxonomy.id != _REPORTING_TAX_ID
+    # 6. Tenant-origin element classifications (child of elements; must
+    # be deleted before elements due to FK constraint).
+    session.execute(
+      text(
+        "DELETE FROM element_classifications WHERE element_id IN "
+        "(SELECT id FROM elements WHERE created_by != :seeder)"
+      ),
+      {"seeder": _LIBRARY_SEEDER},
     )
-    session.query(Structure).filter(
-      Structure.taxonomy_id.in_(non_shared_tax_ids)
-    ).delete(synchronize_session=False)
 
-    # 8. Entity taxonomy linkages (will be re-created by demo setup)
+    # 6b. Tenant-origin elements. Library elements (fac, rs-gaap,
+    # type-subtype, plus the native mapping/presentation overlays all
+    # carrying 'library-seeder') stay put.
+    session.execute(
+      text("DELETE FROM elements WHERE created_by != :seeder"),
+      {"seeder": _LIBRARY_SEEDER},
+    )
+
+    # 7. Tenant-origin structures (any the demo created — anchor
+    # structure, schedules, report layouts).
+    session.execute(
+      text("DELETE FROM structures WHERE created_by != :seeder"),
+      {"seeder": _LIBRARY_SEEDER},
+    )
+
+    # 8. Entity taxonomy linkages (will be re-created by demo setup).
     session.query(EntityTaxonomy).delete(synchronize_session=False)
 
-    # 9. Non-reporting taxonomies
-    session.query(Taxonomy).filter(
-      Taxonomy.id != _REPORTING_TAX_ID,
-    ).delete(synchronize_session=False)
+    # 9. Tenant-origin taxonomies (the demo's CoA taxonomy).
+    session.execute(
+      text("DELETE FROM taxonomies WHERE created_by != :seeder"),
+      {"seeder": _LIBRARY_SEEDER},
+    )
 
     # 10. Fiscal calendar state
     session.query(FiscalCalendarEvent).delete(synchronize_session=False)
@@ -87,46 +104,3 @@ def reset_demo_state(graph_id: str) -> None:
     session.query(FiscalPeriod).delete(synchronize_session=False)
 
     session.flush()
-
-  # Force re-seed the shared reporting taxonomy elements if they're
-  # missing (may have been wiped by a prior broader reset).
-  _ensure_reporting_taxonomy_seeded(graph_id)
-
-
-def _ensure_reporting_taxonomy_seeded(graph_id: str) -> None:
-  """Re-seed US GAAP reporting elements if they were wiped."""
-  from robosystems.db.extensions import _get_engine, _sanitize_schema
-
-  schema = _sanitize_schema(graph_id)
-  engine = _get_engine()
-
-  with engine.connect() as conn:
-    # Check if reporting elements exist in the tenant schema
-    result = conn.execute(
-      text(f"SELECT COUNT(*) FROM {schema}.elements WHERE source = 'sfac6'"),
-    )
-    count = result.scalar()
-    if count and count > 0:
-      conn.commit()
-      return
-
-    # Re-seed from public schema
-    from robosystems.config.taxonomy.seed import seed_tenant_reporting_taxonomy
-
-    # First ensure the reporting taxonomy row exists
-    result = conn.execute(
-      text(f"SELECT id FROM {schema}.taxonomies WHERE id = :id"),
-      {"id": _REPORTING_TAX_ID},
-    )
-    if not result.fetchone():
-      # Copy from public
-      conn.execute(
-        text(f"""
-          INSERT INTO {schema}.taxonomies
-            SELECT * FROM public.taxonomies WHERE id = :id
-        """),
-        {"id": _REPORTING_TAX_ID},
-      )
-
-    seed_tenant_reporting_taxonomy(conn, schema)
-    conn.commit()

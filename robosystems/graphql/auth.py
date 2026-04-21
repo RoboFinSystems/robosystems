@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
+from robosystems.db.extensions import LIBRARY_GRAPH_ID
 from robosystems.models.core import User
 
 
@@ -28,7 +29,15 @@ def check_graph_access(user: User, graph_id: str) -> None:
 
   Handles both shared repositories (SEC, etc.) and personal user graphs,
   mirroring the logic in `get_current_user_with_graph`.
+
+  The `library` sentinel routes to the taxonomy library (shared reference
+  material). Any authenticated user has read access — no per-graph ACL
+  applies to library content.
   """
+  # Library sentinel: accessible to any authenticated user. No ACL check.
+  if graph_id == LIBRARY_GRAPH_ID:
+    return
+
   from robosystems.config.shared_repositories import (
     is_shared_repository_or_subgraph,
   )

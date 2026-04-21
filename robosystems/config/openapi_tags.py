@@ -19,20 +19,20 @@ MAIN_API_TAGS = [
     "description": "🕸️ Graph queries - Execute Cypher queries on the knowledge graph",
   },
   {
-    "name": "Search",
-    "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
-  },
-  {
-    "name": "Documents",
-    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
-  },
-  {
     "name": "Tables",
     "description": "🗃️ Staging tables - Table metadata and SQL queries on the staging layer",
   },
   {
     "name": "Files",
     "description": "📄 File management - Upload, track, and manage data files for generic graphs",
+  },
+  {
+    "name": "Documents",
+    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
+  },
+  {
+    "name": "Search",
+    "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
   },
   {
     "name": "Extensions: GraphQL",

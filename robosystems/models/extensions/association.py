@@ -43,7 +43,10 @@ class Association(ExtensionsBase):
       postgresql_where="approved_by IS NULL AND suggested_by = 'ai'",
     ),
     CheckConstraint(
-      "association_type IN ('presentation', 'calculation', 'mapping')",
+      "association_type IN ("
+      "'presentation', 'calculation', 'mapping', "
+      "'equivalence', 'general-special', 'essence-alias'"
+      ")",
       name="check_association_type",
     ),
   )

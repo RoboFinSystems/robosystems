@@ -56,7 +56,7 @@ class FactRowResponse(BaseModel):
   element_id: str
   element_qname: str
   element_name: str
-  classification: str
+  classification: str | None = None
   values: list[float | None] = Field(default_factory=list)
   is_subtotal: bool = False
   depth: int = 0
@@ -160,7 +160,7 @@ class LiveStatementFactRow(BaseModel):
 
   qname: str
   name: str
-  classification: str
+  classification: str | None = None
   values: list[float | None]
   depth: int = 0
   is_subtotal: bool = False

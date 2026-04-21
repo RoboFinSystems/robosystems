@@ -231,7 +231,7 @@ class AccountTreeNode:
   id: strawberry.ID
   code: str | None
   name: str
-  classification: str
+  classification: str | None
   account_type: str | None
   balance_type: str
   depth: int

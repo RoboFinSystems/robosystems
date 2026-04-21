@@ -23,6 +23,15 @@ from robosystems.config import env
 _VALID_SCHEMA_PATTERN = re.compile(r"^kg[0-9a-f]{16,}$")
 
 
+# Sentinel used in place of a real graph_id when the caller is routing to
+# the taxonomy library. `extensions_session(LIBRARY_GRAPH_ID)` binds the
+# session's search_path to `public`; the GraphQL context stamps it as the
+# graph_type + schema_extension name; `check_graph_access` short-circuits
+# on it (any authenticated user can read the library). Defined here so
+# all sentinel call sites share one string and renames don't drift.
+LIBRARY_GRAPH_ID = "library"
+
+
 def get_extensions_database_url() -> str:
   """Get extensions database URL with SSL for staging/prod."""
   database_url = env.EXTENSIONS_DATABASE_URL
@@ -109,20 +118,32 @@ def extensions_session(graph_id: str):
   in the graph_id schema and shared tables (fiscal_periods) resolve
   from public.
 
+  Special case: `graph_id="library"` routes to the taxonomy library
+  (read-only; library content currently lives in the `public` schema,
+  but the sentinel name is the stable API identity). No tenant schema
+  binding.
+
   Usage:
       with extensions_session("kg0123456789abcdef") as session:
           accounts = session.execute(select(Account)).scalars().all()
 
+      with extensions_session("library") as session:
+          taxonomies = session.execute(select(Taxonomy)).scalars().all()
+
   Args:
-      graph_id: The graph ID that maps to a PostgreSQL schema.
+      graph_id: The graph ID that maps to a PostgreSQL schema, or the
+          `"library"` sentinel for the taxonomy library.
 
   Yields:
-      A SQLAlchemy Session scoped to the tenant schema.
+      A SQLAlchemy Session scoped to the tenant schema (or library).
   """
-  schema = _sanitize_schema(graph_id)
   session: Session = _get_session_factory()()
   try:
-    session.execute(text(f"SET search_path TO {schema}, public"))
+    if graph_id == LIBRARY_GRAPH_ID:
+      session.execute(text("SET search_path TO public"))
+    else:
+      schema = _sanitize_schema(graph_id)
+      session.execute(text(f"SET search_path TO {schema}, public"))
     yield session
     session.commit()
   except Exception:
@@ -132,15 +153,132 @@ def extensions_session(graph_id: str):
     session.close()
 
 
+_LIBRARY_IMMUTABLE_TABLES = (
+  "taxonomies",
+  "elements",
+  "element_labels",
+  "element_references",
+  "structures",
+  "associations",
+  # Mirror 0002's _IMMUTABLE_TABLES so fresh tenant provisioning applies
+  # triggers to the full library surface. Omitting these two left new
+  # graphs with weaker guarantees than migration-backfilled ones.
+  "classifications",
+  "element_classifications",
+)
+
+
+def _install_library_immutability_triggers(conn, schema: str) -> None:
+  """Attach BEFORE UPDATE/DELETE triggers keyed on created_by='library-seeder'.
+
+  Mirrors the migration at ``0003_library_immutability_and_tenant_backfill``
+  so newly provisioned tenant schemas receive the same protection existing
+  ones got during backfill. The PL/pgSQL function itself lives in the
+  public schema and is created by that migration; provisioning only
+  attaches triggers (no function DDL here).
+
+  Also installs the BEFORE-INSERT guard on ``associations`` that blocks
+  tenant arc inserts into library-seeded structures.
+  """
+  for table in _LIBRARY_IMMUTABLE_TABLES:
+    trigger = f"{table}_library_immutable"
+    conn.execute(text(f'DROP TRIGGER IF EXISTS {trigger} ON "{schema}".{table}'))
+    conn.execute(
+      text(
+        f"CREATE TRIGGER {trigger} "
+        f'BEFORE UPDATE OR DELETE ON "{schema}".{table} '
+        f"FOR EACH ROW EXECUTE FUNCTION public.raise_library_immutable()"
+      )
+    )
+  conn.execute(
+    text(
+      f'DROP TRIGGER IF EXISTS raise_insert_into_library_structure ON "{schema}".associations'
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE TRIGGER raise_insert_into_library_structure "
+      f'BEFORE INSERT ON "{schema}".associations '
+      f"FOR EACH ROW EXECUTE FUNCTION public.raise_insert_into_library_structure()"
+    )
+  )
+
+
+def _widen_library_checks(conn, schema: str) -> None:
+  """Align tenant-template CHECKs with the library's widened vocabulary.
+
+  Matches the widening applied in the 0003 migration so a fresh provision
+  lands in the same state as a backfilled tenant (admits ``equivalence``,
+  ``general-special``, ``essence-alias`` association types and the
+  ``fac``/``rs-gaap`` element sources that the library uses).
+  """
+  widened_assoc = (
+    "association_type IN ("
+    "'presentation', 'calculation', 'mapping', "
+    "'equivalence', 'general-special', 'essence-alias'"
+    ")"
+  )
+  widened_source = (
+    "source IN ("
+    "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
+    "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
+    ")"
+  )
+  widened_taxonomy_type = (
+    "taxonomy_type IN ("
+    "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
+    "'classification-vocabulary', 'classification-assignment'"
+    ")"
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".associations '
+      f"DROP CONSTRAINT IF EXISTS check_association_type"
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".associations '
+      f"ADD CONSTRAINT check_association_type CHECK ({widened_assoc})"
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".elements DROP CONSTRAINT IF EXISTS check_element_source'
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".elements '
+      f"ADD CONSTRAINT check_element_source CHECK ({widened_source})"
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".taxonomies DROP CONSTRAINT IF EXISTS check_taxonomy_type'
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".taxonomies '
+      f"ADD CONSTRAINT check_taxonomy_type CHECK ({widened_taxonomy_type})"
+    )
+  )
+
+
 def provision_tenant_schema(graph_id: str) -> None:
   """Create all tenant tables in a new PostgreSQL schema for this graph_id.
 
   Called lazily on first extension access for a graph. Creates the schema
   and all tenant-scoped tables (elements, transactions, entries, etc.)
-  using ExtensionsBase metadata.
+  using ExtensionsBase metadata, then copies the canonical taxonomy
+  library from ``public.*`` into the tenant schema per the graph's pin
+  (or the default pin when none is set). Finally installs immutability
+  triggers so library-seeded rows cannot be mutated from tenant scope.
 
-  The public schema tables (fiscal_periods, generate_prefixed_id function)
-  are managed by Alembic migrations, not this function.
+  The public schema tables (fiscal_periods, generate_prefixed_id function,
+  raise_library_immutable function) are managed by Alembic migrations,
+  not this function.
 
   Args:
       graph_id: The graph ID to create a schema for.
@@ -156,6 +294,18 @@ def provision_tenant_schema(graph_id: str) -> None:
     table for table in ExtensionsBase.metadata.sorted_tables if table.schema is None
   ]
 
+  # Look up the graph's taxonomy_pin (or default) from the platform DB
+  # before opening the extensions transaction, since they're separate
+  # databases.
+  from robosystems.database import platform_session
+  from robosystems.models.core.graph.graph import Graph
+  from robosystems.taxonomy.pins import resolve_pin
+  from robosystems.taxonomy.writers.tenant_writer import copy_library_into_tenant
+
+  with platform_session() as pdb:
+    graph = pdb.get(Graph, graph_id)
+    pin = resolve_pin(graph)
+
   with engine.connect() as conn:
     conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
 
@@ -164,10 +314,12 @@ def provision_tenant_schema(graph_id: str) -> None:
     tenant_conn = conn.execution_options(schema_translate_map={None: schema})
     ExtensionsBase.metadata.create_all(bind=tenant_conn, tables=tenant_tables)
 
-    # Seed the shared reporting taxonomy into the tenant schema so that
-    # search_path queries see it (tenant tables shadow public tables).
-    from robosystems.config.taxonomy.seed import seed_tenant_reporting_taxonomy
-
-    seed_tenant_reporting_taxonomy(conn, schema)
+    # Align CHECKs, copy library rows, then lock them. Order matters: the
+    # copy runs before trigger install so library rows can land freely;
+    # after the triggers are attached, subsequent UPDATE/DELETE on those
+    # rows raises from tenant scope.
+    _widen_library_checks(conn, schema)
+    copy_library_into_tenant(conn, schema, pin)
+    _install_library_immutability_triggers(conn, schema)
 
     conn.commit()

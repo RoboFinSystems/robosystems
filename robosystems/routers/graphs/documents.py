@@ -12,8 +12,6 @@ from robosystems.database import SessionFactory
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.search import (
-  BulkDocumentUploadRequest,
-  BulkDocumentUploadResponse,
   DocumentDetailResponse,
   DocumentListItem,
   DocumentListResponse,
@@ -186,49 +184,6 @@ async def upload_document(
     raise HTTPException(
       status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
       detail=str(e),
-    )
-  finally:
-    session.close()
-
-
-@router.post(
-  "/bulk",
-  summary="Bulk Upload Documents",
-  description="Upload up to 50 documents at once. Partial success is supported — check the errors array in the response.",
-  operation_id="upload_documents_bulk",
-  responses={**RESOURCE_ERROR_RESPONSES},
-)
-async def upload_documents_bulk(
-  graph_id: str,
-  request: BulkDocumentUploadRequest,
-  current_user: User = Depends(get_current_user_with_graph),
-) -> BulkDocumentUploadResponse:
-  _block_shared_repository(graph_id)
-  _enforce_graph_access(graph_id, require_write=True)
-  session = SessionFactory()
-  try:
-    tier = _resolve_tier(graph_id, session)
-    service = DocumentService(session)
-    results: list[DocumentUploadResponse] = []
-    errors: list[dict] = []
-
-    for i, doc_request in enumerate(request.documents):
-      try:
-        _doc, response = service.create_document(
-          graph_id=graph_id,
-          user_id=current_user.id,
-          request=doc_request,
-          tier=tier,
-        )
-        results.append(response)
-      except Exception as e:
-        errors.append({"index": i, "title": doc_request.title, "error": str(e)})
-
-    return BulkDocumentUploadResponse(
-      total_documents=len(results),
-      total_sections_indexed=sum(r.sections_indexed for r in results),
-      results=results,
-      errors=errors if errors else None,
     )
   finally:
     session.close()

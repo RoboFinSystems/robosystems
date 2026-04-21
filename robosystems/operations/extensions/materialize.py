@@ -373,22 +373,25 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'entities')
   """
 
+  # Classification is resolved via element_classifications → classifications
+  # (FASB elementsOfFinancialStatements trait axis). Multiple classifications
+  # per element are possible; we pick the first (via MIN) for the graph node.
   tables["Element"] = f"""
     CREATE OR REPLACE TABLE Element AS
     SELECT
-      id                              AS identifier,
+      e.id                            AS identifier,
       CASE
-        WHEN external_source = 'quickbooks' THEN 'qb:'
-        WHEN external_source = 'xero' THEN 'xero:'
-        WHEN external_source = 'plaid' THEN 'plaid:'
+        WHEN e.external_source = 'quickbooks' THEN 'qb:'
+        WHEN e.external_source = 'xero' THEN 'xero:'
+        WHEN e.external_source = 'plaid' THEN 'plaid:'
         ELSE 'rl:'
-      END || code                     AS qname,
-      name,
-      description,
-      classification,
-      sub_classification              AS item_type,
-      balance_type                    AS balance,
-      CASE WHEN is_placeholder THEN true ELSE false END AS is_abstract,
+      END || e.code                   AS qname,
+      e.name,
+      e.description,
+      cls.identifier                  AS classification,
+      NULL::VARCHAR                   AS item_type,
+      e.balance_type                  AS balance,
+      CASE WHEN e.is_placeholder THEN true ELSE false END AS is_abstract,
       false                           AS is_dimension_item,
       false                           AS is_domain_member,
       false                           AS is_hypercube_item,
@@ -398,14 +401,19 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       false                           AS is_fraction,
       false                           AS is_textblock,
       NULL::VARCHAR                   AS uri,
-      NULL::VARCHAR                   AS substitution_group,
-      NULL::VARCHAR                   AS period_type,
+      e.substitution_group            AS substitution_group,
+      e.period_type                   AS period_type,
       NULL::VARCHAR                   AS type,
       NULL::VARCHAR                   AS canonical_concept,
       NULL::DOUBLE                    AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
-    FROM postgres_scan('{c}', '{s}', 'elements')
-    WHERE is_active = true
+    FROM postgres_scan('{c}', '{s}', 'elements') e
+    LEFT JOIN postgres_scan('{c}', '{s}', 'element_classifications') ec
+      ON ec.element_id = e.id AND ec.is_primary = TRUE
+    LEFT JOIN postgres_scan('{c}', '{s}', 'classifications') cls
+      ON cls.id = ec.classification_id
+      AND cls.category = 'elementsOfFinancialStatements'
+    WHERE e.is_active = true
   """
 
   tables["Transaction"] = f"""

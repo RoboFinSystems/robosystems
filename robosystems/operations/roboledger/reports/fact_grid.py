@@ -272,14 +272,22 @@ def _read_mapped_balances(
   period_start: date,
   period_end: date,
 ) -> dict[str, _Balance]:
-  """Read mapped trial balance — same join as the /trial-balance/mapped endpoint."""
+  """Read mapped trial balance — same join as the /trial-balance/mapped endpoint.
+
+  ``classification`` is resolved via ``element_classifications`` →
+  ``classifications`` with ``category='elementsOfFinancialStatements'``
+  (the FASB SFAC 6 trait axis). Balance-sheet classifications (asset /
+  liability / equity) are stock concepts and must be loaded
+  cumulatively; IS / SCF items are flows and constrain by
+  ``posting_date >= :start_date``.
+  """
   result = session.execute(
     text("""
       SELECT
         target.id AS reporting_element_id,
         target.qname,
         target.name AS reporting_name,
-        target.classification,
+        tcls.identifier AS classification,
         target.balance_type,
         COALESCE(SUM(li.debit_amount), 0) AS total_debits,
         COALESCE(SUM(li.credit_amount), 0) AS total_credits
@@ -291,15 +299,20 @@ def _read_mapped_balances(
         AND mapping.association_type = 'mapping'
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
+      LEFT JOIN element_classifications tec
+        ON tec.element_id = target.id AND tec.is_primary = TRUE
+      LEFT JOIN classifications tcls
+        ON tcls.id = tec.classification_id
+        AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
         AND (
-          target.classification IN ('asset', 'liability', 'equity')
+          tcls.identifier IN ('asset', 'liability', 'equity')
           OR e.posting_date >= :start_date
           OR :start_date IS NULL
         )
       GROUP BY target.id, target.qname, target.name,
-               target.classification, target.balance_type
+               tcls.identifier, target.balance_type
       ORDER BY target.qname
     """),
     {
@@ -373,7 +386,7 @@ def _close_to_retained_earnings(
 
   Mutates the facts list in place.
   """
-  # Deterministic ID from config/taxonomy/seed.py: _elem("retained_earnings", ...)
+  # Deterministic ID from robosystems/taxonomy/seed.py: _elem("retained_earnings", ...)
   RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
 
   total_revenue = 0.0
@@ -445,10 +458,12 @@ def _close_prior_periods_to_retained_earnings(
   RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
 
   # Cumulative net income from inception through period_end.
+  # Classification is resolved via element_classifications → classifications
+  # (FASB elementsOfFinancialStatements trait axis).
   result = session.execute(
     text("""
       SELECT
-        target.classification,
+        tcls.identifier AS classification,
         target.balance_type,
         COALESCE(SUM(li.debit_amount), 0) AS total_debits,
         COALESCE(SUM(li.credit_amount), 0) AS total_credits
@@ -460,10 +475,15 @@ def _close_prior_periods_to_retained_earnings(
         AND mapping.association_type = 'mapping'
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
+      LEFT JOIN element_classifications tec
+        ON tec.element_id = target.id AND tec.is_primary = TRUE
+      LEFT JOIN classifications tcls
+        ON tcls.id = tec.classification_id
+        AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
         AND e.posting_date <= :end_date
-        AND target.classification IN ('revenue', 'expense')
-      GROUP BY target.classification, target.balance_type
+        AND tcls.identifier IN ('revenue', 'expense')
+      GROUP BY tcls.identifier, target.balance_type
     """),
     {
       "mapping_id": mapping_id,
@@ -556,7 +576,9 @@ def _load_reporting_structure(
   structure_id = struct_row.id
   structure_name = struct_row.name
 
-  # Load all elements and associations for this structure
+  # Load all elements and associations for this structure.
+  # Classification is resolved via element_classifications → classifications
+  # (FASB elementsOfFinancialStatements trait axis).
   assoc_result = session.execute(
     text("""
       SELECT
@@ -565,13 +587,18 @@ def _load_reporting_structure(
         e.id AS element_id,
         e.qname,
         e.name,
-        e.classification,
+        cls.identifier AS classification,
         e.balance_type,
         e.is_abstract,
         e.depth,
         ea.order_value
       FROM associations ea
       JOIN elements e ON e.id = ea.to_element_id
+      LEFT JOIN element_classifications ec
+        ON ec.element_id = e.id AND ec.is_primary = TRUE
+      LEFT JOIN classifications cls
+        ON cls.id = ec.classification_id
+        AND cls.category = 'elementsOfFinancialStatements'
       WHERE ea.structure_id = :structure_id
         AND ea.association_type = 'presentation'
         AND ea.from_element_id != :structure_id
@@ -604,14 +631,21 @@ def _load_reporting_structure(
   # but not as to_element_id — these are the tree roots
   root_parent_ids: set[str] = set(children_map.keys()) - all_child_ids
 
-  # Load root element info
+  # Load root element info (classification via element_classifications JOIN)
   if root_parent_ids:
     placeholders = ", ".join(f":p{i}" for i in range(len(root_parent_ids)))
     params = {f"p{i}": pid for i, pid in enumerate(root_parent_ids)}
     root_result = session.execute(
       text(f"""
-        SELECT id, qname, name, classification, balance_type, is_abstract, depth
-        FROM elements WHERE id IN ({placeholders})
+        SELECT e.id, e.qname, e.name, cls.identifier AS classification,
+               e.balance_type, e.is_abstract, e.depth
+        FROM elements e
+        LEFT JOIN element_classifications ec
+          ON ec.element_id = e.id AND ec.is_primary = TRUE
+        LEFT JOIN classifications cls
+          ON cls.id = ec.classification_id
+          AND cls.category = 'elementsOfFinancialStatements'
+        WHERE e.id IN ({placeholders})
       """),
       params,
     )

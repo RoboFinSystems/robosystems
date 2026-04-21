@@ -1,9 +1,17 @@
 """Element model — unified taxonomy element.
 
 Holds Chart of Accounts entries (from QuickBooks, Xero, native), US GAAP
-reporting concepts (SFAC 6, us-gaap), and any future taxonomy elements.
+reporting concepts (SFAC 6, rs-gaap), and any future taxonomy elements.
 All materialize to Element nodes in the graph via the postgres_scanner →
 DuckDB → LadybugDB pipeline.
+
+Only XBRL-intrinsic attributes live on this table (name, qname,
+namespace, balance_type, period_type, abstract, monetary, element_type,
+substitution_group). Classifications — including SFAC 6 primitive type
+(elementsOfFinancialStatements), liquidity, activityType,
+operatingNonoperating, flowClassification, and the other 20 FASB
+metamodel trait axes — live in ``classifications`` +
+``element_classifications``, mirroring XBRL's linkbase model.
 """
 
 from datetime import UTC, datetime
@@ -27,7 +35,6 @@ from robosystems.utils.ulid import generate_prefixed_ulid
 class Element(ExtensionsBase):
   __tablename__ = "elements"
   __table_args__ = (
-    Index("idx_elements_classification", "classification"),
     Index("idx_elements_parent", "parent_id"),
     Index("idx_elements_external", "external_id", "external_source"),
     Index(
@@ -48,9 +55,10 @@ class Element(ExtensionsBase):
       "namespace",
       postgresql_where="namespace IS NOT NULL",
     ),
-    CheckConstraint(
-      "classification IN ('asset', 'liability', 'equity', 'revenue', 'expense')",
-      name="check_element_classification",
+    Index(
+      "idx_elements_substitution_group",
+      "substitution_group",
+      postgresql_where="substitution_group IS NOT NULL",
     ),
     CheckConstraint(
       "balance_type IN ('debit', 'credit')",
@@ -68,8 +76,8 @@ class Element(ExtensionsBase):
       # 'system' is reserved for internal FK-anchor elements created by the
       # taxonomy seed (e.g., struct_balance_sheet) and is intentionally NOT
       # in COA_SOURCES so those rows never appear in the Chart of Accounts.
-      "source IN ('sfac6', 'us-gaap', 'ifrs', 'quickbooks', 'xero', "
-      "'plaid', 'native', 'import', 'system')",
+      "source IN ('fac', 'rs-gaap', 'us-gaap', 'ifrs', "
+      "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system')",
       name="check_element_source",
     ),
   )
@@ -80,23 +88,21 @@ class Element(ExtensionsBase):
   name = Column(String, nullable=False)
   description = Column(String, nullable=True)
 
-  # XBRL Alignment
+  # XBRL Alignment — intrinsic concept declaration attributes only.
   qname = Column(String, nullable=True)
   namespace = Column(String, nullable=True)
   uri = Column(String, nullable=True)
-
-  # Classification
-  classification = Column(String, nullable=False)
-  sub_classification = Column(String, nullable=True)
   balance_type = Column(String, nullable=False, default="debit")
   period_type = Column(String, nullable=False, default="duration")
+  substitution_group = Column(String, nullable=True)
 
-  # Element Type
+  # Element Type (XBRL substitution-group derived)
   is_abstract = Column(Boolean, nullable=False, default=False)
   is_monetary = Column(Boolean, nullable=False, default=True)
   element_type = Column(String, nullable=False, default="concept")
 
-  # Hierarchy
+  # Hierarchy (parent element — separate from class-subclass classification
+  # hierarchy, which lives in associations)
   parent_id = Column(String, ForeignKey("elements.id"), nullable=True)
   depth = Column(Integer, nullable=False, default=0)
   path = Column(String, nullable=False, default="")

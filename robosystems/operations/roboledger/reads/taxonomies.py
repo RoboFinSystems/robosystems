@@ -24,10 +24,13 @@ from robosystems.models.api.extensions.taxonomies import (
 )
 from robosystems.models.extensions import (
   Association,
+  Classification,
   Element,
+  ElementClassification,
   Structure,
   Taxonomy,
 )
+from robosystems.operations.library.reads import efs_classification_by_element
 
 _COA_SOURCES = ("quickbooks", "xero", "plaid", "native", "import")
 
@@ -84,8 +87,19 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
 # ── Elements ──────────────────────────────────────────────────────────────
 
 
-def element_to_response(row: Element) -> ElementResponse:
-  """Map an Element row to the wire-facing ElementResponse."""
+# Local alias for the shared library helper — keeps call sites terse and
+# makes the import site searchable (grep for ``_efs_by_element``).
+_efs_by_element = efs_classification_by_element
+
+
+def element_to_response(
+  row: Element, classification: str | None = None
+) -> ElementResponse:
+  """Map an Element row to the wire-facing ElementResponse.
+
+  Callers that batch-load should use :func:`_efs_by_element` once and
+  pass the lookup in to avoid N+1 on the EFS classification.
+  """
   return ElementResponse(
     id=row.id,
     code=row.code,
@@ -93,8 +107,7 @@ def element_to_response(row: Element) -> ElementResponse:
     description=row.description,
     qname=row.qname,
     namespace=row.namespace,
-    classification=row.classification,
-    sub_classification=row.sub_classification,
+    classification=classification,
     balance_type=row.balance_type,
     period_type=row.period_type,
     is_abstract=row.is_abstract,
@@ -119,7 +132,11 @@ def list_elements(
   limit: int = 100,
   offset: int = 0,
 ) -> ElementListResponse:
-  """List elements filtered by taxonomy / source / classification / abstract."""
+  """List elements filtered by taxonomy / source / classification / abstract.
+
+  ``classification`` filters on the FASB elementsOfFinancialStatements
+  trait via the element_classifications junction table.
+  """
   query = select(Element).where(Element.is_active.is_(True))
   count_query = (
     select(func.count()).select_from(Element).where(Element.is_active.is_(True))
@@ -132,8 +149,18 @@ def list_elements(
     query = query.where(Element.source == source)
     count_query = count_query.where(Element.source == source)
   if classification:
-    query = query.where(Element.classification == classification)
-    count_query = count_query.where(Element.classification == classification)
+    subquery = (
+      select(ElementClassification.element_id)
+      .join(
+        Classification, Classification.id == ElementClassification.classification_id
+      )
+      .where(
+        Classification.category == "elementsOfFinancialStatements",
+        Classification.identifier == classification,
+      )
+    )
+    query = query.where(Element.id.in_(subquery))
+    count_query = count_query.where(Element.id.in_(subquery))
   if is_abstract is not None:
     query = query.where(Element.is_abstract == is_abstract)
     count_query = count_query.where(Element.is_abstract == is_abstract)
@@ -149,8 +176,9 @@ def list_elements(
     .all()
   )
 
+  efs_map = _efs_by_element(session, [r.id for r in rows])
   return ElementListResponse(
-    elements=[element_to_response(r) for r in rows],
+    elements=[element_to_response(r, efs_map.get(r.id)) for r in rows],
     pagination=create_pagination_info(total, limit, offset),
   )
 
@@ -178,31 +206,51 @@ def get_element(session: Session, element_id: str) -> ElementResponse | None:
   ).scalar_one_or_none()
   if row is None:
     return None
-  return element_to_response(row)
+  efs = _efs_by_element(session, [row.id]).get(row.id)
+  return element_to_response(row, efs)
 
 
 def suggest_mapping_candidates(
-  session: Session, classification: str
+  session: Session,
+  classification: str | None = None,
+  element_id: str | None = None,
 ) -> list[ElementResponse]:
-  """Return reporting-taxonomy elements (us-gaap / sfac6) matching a classification.
+  """Return FAC candidates for a CoA element, narrowed by classification.
 
-  Used by the MCP `suggest-mapping` tool to narrow CoA → reporting concept
-  candidates by the source element's classification.
+  Filters active ``fac`` elements by the FASB
+  elementsOfFinancialStatements trait (via element_classifications).
+  ``element_id`` is reserved for future per-element overrides but is
+  currently unused — classification alone drives the filter.
   """
+  del element_id  # reserved for future per-element narrowing
+  if classification is None:
+    return []
+
   rows = (
     session.execute(
       select(Element)
       .where(
-        Element.source.in_(("us-gaap", "sfac6")),
-        Element.classification == classification,
+        Element.source == "fac",
         Element.is_active.is_(True),
+        Element.id.in_(
+          select(ElementClassification.element_id)
+          .join(
+            Classification,
+            Classification.id == ElementClassification.classification_id,
+          )
+          .where(
+            Classification.category == "elementsOfFinancialStatements",
+            Classification.identifier == classification,
+          )
+        ),
       )
       .order_by(Element.depth, Element.name)
     )
     .scalars()
     .all()
   )
-  return [element_to_response(r) for r in rows]
+  efs_map = _efs_by_element(session, [r.id for r in rows])
+  return [element_to_response(r, efs_map.get(r.id)) for r in rows]
 
 
 def list_unmapped_elements(
@@ -230,18 +278,136 @@ def list_unmapped_elements(
   mapped_ids = set(session.execute(mapped_query).scalars().all())
 
   unmapped = [e for e in coa_elements if e.id not in mapped_ids]
+  efs_map = _efs_by_element(session, [e.id for e in unmapped])
 
   return [
     UnmappedElementResponse(
       id=e.id,
       code=e.code,
       name=e.name,
-      classification=e.classification,
+      classification=efs_map.get(e.id),
       balance_type=e.balance_type,
       external_source=e.external_source,
     )
     for e in unmapped
   ]
+
+
+def expand_to_rs_gaap_candidates(
+  session: Session,
+  fac_element_id: str,
+) -> dict | None:
+  """Follow FAC → rs-gaap equivalence arcs, then surface specific filing candidates.
+
+  Two shapes exist in the fac-to-rs-gaap taxonomy:
+
+  **Narrow** (1-3 equivalents): the rs-gaap peer is a broad grouping concept
+  (e.g. ``fac:CurrentAssets`` → ``rs-gaap:AssetsCurrent``). In this case the
+  type-subtype children of that peer are the filing-specific candidates.
+
+  **Wide** (4+ equivalents): the rs-gaap peers are already the filing-specific
+  variants (e.g. ``fac:Revenues`` → 80 industry-specific revenue tags). Here the
+  equivalents themselves are the candidates; recursing into their type-subtype
+  children would produce an unmanageably large set.
+
+  Returns::
+
+      {
+        "rs_gaap_parent": {"id": ..., "qname": ..., "name": ...} | None,
+        "candidates": [{"id": ..., "qname": ..., "name": ...}, ...]
+      }
+
+  ``rs_gaap_parent`` is ``None`` in the wide-equivalence case (no single parent).
+  Returns ``None`` if no fac-to-rs-gaap equivalence exists for this FAC element.
+  """
+  # Also fetch the FAC element's own qname for prompt context.
+  fac_row = session.execute(
+    text("SELECT qname FROM elements WHERE id = :fac_id"),
+    {"fac_id": fac_element_id},
+  ).fetchone()
+  fac_qname = fac_row.qname if fac_row else fac_element_id
+
+  equiv_rows = session.execute(
+    text("""
+      SELECT e.id, e.qname, e.name
+      FROM associations a
+      JOIN structures s ON a.structure_id = s.id
+      JOIN taxonomies t ON s.taxonomy_id = t.id
+      JOIN elements e ON a.to_element_id = e.id
+      WHERE a.from_element_id = :fac_id
+        AND t.standard = 'fac-to-rs-gaap'
+        AND a.association_type = 'equivalence'
+      ORDER BY e.qname
+    """),
+    {"fac_id": fac_element_id},
+  ).fetchall()
+
+  if not equiv_rows:
+    return None
+
+  _NARROW_THRESHOLD = 3
+
+  if len(equiv_rows) > _NARROW_THRESHOLD:
+    # Wide case: equivalents are already the filing-specific candidates.
+    return {
+      "fac_qname": fac_qname,
+      "rs_gaap_parent": None,
+      "candidates": [
+        {"id": r.id, "qname": r.qname, "name": r.name} for r in equiv_rows
+      ],
+    }
+
+  # Narrow case (≤ 3 equivalents): walk type-subtype children under EACH
+  # equivalent and union them — previously we blindly picked equiv_rows[0]
+  # after alpha-sort, which discarded siblings. `fac:Assets` is the
+  # canonical example: it maps to both `rs-gaap:Assets` and
+  # `rs-gaap:AssetsCurrent`, and the useful type-subtype children live
+  # under the Current branch. The equivalents themselves are included in
+  # the candidate set so the AI can pick a parent-level target when no
+  # sub-type fits.
+  child_rows = session.execute(
+    text("""
+      SELECT e.id, e.qname, e.name, a.from_element_id AS parent_id
+      FROM associations a
+      JOIN structures s ON a.structure_id = s.id
+      JOIN taxonomies t ON s.taxonomy_id = t.id
+      JOIN elements e ON a.to_element_id = e.id
+      WHERE a.from_element_id = ANY(:rs_ids)
+        AND t.standard = 'type-subtype'
+        AND a.association_type = 'general-special'
+      ORDER BY e.qname
+    """),
+    {"rs_ids": [r.id for r in equiv_rows]},
+  ).fetchall()
+
+  # Pick the equivalent with the most type-subtype children as the
+  # "primary parent" so the fallback path in the refinement agent lands
+  # on the most-expanded branch. Ties break by the pre-existing alpha
+  # sort from the equivalence query.
+  children_by_parent: dict[str, int] = {}
+  for r in child_rows:
+    children_by_parent[r.parent_id] = children_by_parent.get(r.parent_id, 0) + 1
+  parent = max(
+    equiv_rows,
+    key=lambda e: (children_by_parent.get(e.id, 0), e.qname),
+  )
+
+  candidate_ids: set[str] = set()
+  candidates: list[dict] = []
+  for r in equiv_rows:
+    if r.id not in candidate_ids:
+      candidate_ids.add(r.id)
+      candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
+  for r in child_rows:
+    if r.id not in candidate_ids:
+      candidate_ids.add(r.id)
+      candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
+
+  return {
+    "fac_qname": fac_qname,
+    "rs_gaap_parent": {"id": parent.id, "qname": parent.qname, "name": parent.name},
+    "candidates": candidates,
+  }
 
 
 # ── Structures ────────────────────────────────────────────────────────────
@@ -413,7 +579,7 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       target.id AS reporting_element_id,
       target.qname,
       target.name AS reporting_name,
-      target.classification,
+      tcls.identifier AS classification,
       target.balance_type,
       COALESCE(SUM(li.debit_amount), 0) AS total_debits,
       COALESCE(SUM(li.credit_amount), 0) AS total_credits
@@ -425,11 +591,15 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       AND mapping.association_type = 'mapping'
       AND mapping.structure_id = :mapping_id
   JOIN elements target ON target.id = mapping.to_element_id
+  LEFT JOIN element_classifications tec
+      ON tec.element_id = target.id AND tec.is_primary = TRUE
+  LEFT JOIN classifications tcls
+      ON tcls.id = tec.classification_id
+      AND tcls.category = 'elementsOfFinancialStatements'
   WHERE e.status = 'posted'
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)
-  GROUP BY target.id, target.qname, target.name,
-           target.classification, target.balance_type
+  GROUP BY target.id, target.qname, target.name, tcls.identifier, target.balance_type
   ORDER BY target.qname
 """)
 

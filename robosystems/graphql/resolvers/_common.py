@@ -108,3 +108,28 @@ def open_extensions_session(info: Info[GraphQLContext, None], extension: str):
   from robosystems.db.extensions import extensions_session
 
   return extensions_session(graph_id)
+
+
+def open_library_session(info: Info[GraphQLContext, None]):
+  """Open an extensions session for library reads on any graph_id.
+
+  Unlike `open_extensions_session`, this does NOT gate on a per-graph
+  extension flag. Library reads are safe on any authenticated graph
+  because the returned rows are driven by the session's `search_path`:
+
+  - `graph_id == "library"` → `search_path = public` → canonical library.
+  - `graph_id == "kg…"`     → `search_path = {schema}, public` →
+    tenant's library copy + any tenant extensions of library tables
+    (e.g. the tenant's own CoA elements and anchor associations).
+
+  Access control is already enforced by `check_graph_access` in
+  `get_context`. The extension gate was defensive but blocked the
+  roboledger-app `/library` page (entity-graph scope) from resolving
+  library fields without adding security.
+  """
+  require_user(info)
+  graph_id = require_graph_id(info)
+  # Local import keeps this module importable without a running extensions DB.
+  from robosystems.db.extensions import extensions_session
+
+  return extensions_session(graph_id)

@@ -164,9 +164,9 @@ class TestSuggestMappingTool:
     candidates = [
       _element(
         id="gaap_1",
-        qname="sfac6:Revenues",
+        qname="fac:Revenues",
         name="Revenues",
-        source="sfac6",
+        source="fac",
         classification="revenue",
         is_abstract=True,
       ),
@@ -189,7 +189,7 @@ class TestSuggestMappingTool:
 
     assert result["source_element"]["name"] == "Product Revenue"
     assert len(result["candidates"]) == 2
-    assert result["candidates"][0]["qname"] == "sfac6:Revenues"
+    assert result["candidates"][0]["qname"] == "fac:Revenues"
 
   @pytest.mark.asyncio
   async def test_returns_error_for_missing_element(self, mock_graph_client):

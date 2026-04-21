@@ -41,7 +41,33 @@ from robosystems.models.extensions import (
   Taxonomy,
 )
 from robosystems.models.extensions.entity import Entity
+from robosystems.operations.roboledger.commands._guards import (
+  LibraryImmutableError,
+  assert_not_library_origin,
+  assert_tenant_taxonomy,
+)
 from robosystems.utils.ulid import generate_prefixed_ulid
+
+__all__ = [
+  "AssociationNotFoundError",
+  "ElementNotFoundError",
+  "LibraryImmutableError",
+  "MappingStructureNotFoundError",
+  "StructureNotFoundError",
+  "TaxonomyNotFoundError",
+  "bulk_create_associations",
+  "create_mapping_association",
+  "create_structure",
+  "create_taxonomy",
+  "delete_association",
+  "delete_mapping_association",
+  "delete_structure",
+  "delete_taxonomy",
+  "link_entity_taxonomy",
+  "update_association",
+  "update_structure",
+  "update_taxonomy",
+]
 
 
 class MappingStructureNotFoundError(LookupError):
@@ -132,6 +158,8 @@ def create_structure(
   session: Session, body: CreateStructureRequest, created_by: str
 ) -> StructureResponse:
   """Insert a new structure row and return its response representation."""
+  # Tenants can only add structures to tenant-origin taxonomies.
+  assert_tenant_taxonomy(session, body.taxonomy_id)
   structure = Structure(
     id=generate_prefixed_ulid("struct"),
     name=body.name,
@@ -162,12 +190,20 @@ def create_mapping_association(
   ).scalar_one_or_none()
   if structure is None:
     raise MappingStructureNotFoundError(body.mapping_id)
+  # Block arc insertion into library-seeded structures (fac-presentation,
+  # fac-to-rs-gaap, rs-gaap-hierarchy, etc). The DB-level trigger
+  # catches the same case as defense-in-depth; this path gives a clean
+  # 403 instead of a ProgrammingError.
+  assert_not_library_origin(structure)
 
   from_elem = session.execute(
     select(Element).where(Element.id == body.from_element_id)
   ).scalar_one_or_none()
   if from_elem is None:
     raise ElementNotFoundError("source", body.from_element_id)
+  # The from-element must be tenant-authored (CoA side); the target is
+  # allowed to be a library row — that's the whole point of mapping.
+  assert_not_library_origin(from_elem)
 
   to_elem = session.execute(
     select(Element).where(Element.id == body.to_element_id)
@@ -212,6 +248,18 @@ def delete_mapping_association(
   session: Session, mapping_id: str, association_id: str
 ) -> bool:
   """Delete a mapping association. Returns True if a row was deleted."""
+  assoc = session.execute(
+    select(Association).where(
+      Association.id == association_id,
+      Association.structure_id == mapping_id,
+    )
+  ).scalar_one_or_none()
+  if assoc is None:
+    return False
+  # Match update_association / delete_association — reject library-seeded
+  # rows at the service layer so the caller sees LibraryImmutableError
+  # (→ 403) instead of a bare DB trigger ProgrammingError (→ 500).
+  assert_not_library_origin(assoc)
   deleted = (
     session.query(Association)
     .filter(
@@ -240,6 +288,7 @@ def update_taxonomy(session: Session, body: UpdateTaxonomyRequest) -> TaxonomyRe
   ).scalar_one_or_none()
   if taxonomy is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
+  assert_not_library_origin(taxonomy)
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("taxonomy_id", None)
@@ -262,6 +311,7 @@ def delete_taxonomy(session: Session, body: DeleteTaxonomyRequest) -> TaxonomyRe
   ).scalar_one_or_none()
   if taxonomy is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
+  assert_not_library_origin(taxonomy)
   taxonomy.is_active = False
   session.flush()
   return _taxonomy_to_response(taxonomy)
@@ -283,6 +333,7 @@ def update_structure(
   ).scalar_one_or_none()
   if structure is None:
     raise StructureNotFoundError(body.structure_id)
+  assert_not_library_origin(structure)
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("structure_id", None)
@@ -309,6 +360,7 @@ def delete_structure(
   ).scalar_one_or_none()
   if structure is None:
     raise StructureNotFoundError(body.structure_id)
+  assert_not_library_origin(structure)
   structure.is_active = False
   session.flush()
   return _structure_to_response(structure)
@@ -359,6 +411,8 @@ def bulk_create_associations(
   ).scalar_one_or_none()
   if structure is None:
     raise StructureNotFoundError(body.structure_id)
+  # Same library-structure guard as single-association insert.
+  assert_not_library_origin(structure)
 
   # Collect all distinct element IDs across the batch and verify in
   # one query so 500 associations ≠ 1000 lookups.
@@ -425,6 +479,7 @@ def update_association(
   ).scalar_one_or_none()
   if assoc is None:
     raise AssociationNotFoundError(body.association_id)
+  assert_not_library_origin(assoc)
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("association_id", None)
@@ -449,6 +504,13 @@ def delete_association(session: Session, body: DeleteAssociationRequest) -> dict
   Returns `{"deleted": True}` on success so the route layer has a
   consistent response shape with other delete ops.
   """
+  assoc = session.execute(
+    select(Association).where(Association.id == body.association_id)
+  ).scalar_one_or_none()
+  if assoc is None:
+    raise AssociationNotFoundError(body.association_id)
+  assert_not_library_origin(assoc)
+
   deleted = (
     session.query(Association)
     .filter(Association.id == body.association_id)

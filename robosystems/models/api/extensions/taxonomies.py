@@ -103,7 +103,9 @@ class AssociationResponse(BaseModel):
 class CreateAssociationRequest(BaseModel):
   from_element_id: str
   to_element_id: str
-  association_type: Literal["presentation", "calculation", "mapping"] = "mapping"
+  association_type: Literal["presentation", "calculation", "mapping", "equivalence"] = (
+    "mapping"
+  )
   order_value: float | None = None
   weight: float | None = None
   confidence: float | None = None
@@ -159,7 +161,7 @@ class ElementResponse(BaseModel):
   description: str | None = None
   qname: str | None = None
   namespace: str | None = None
-  classification: str
+  classification: str | None = None
   sub_classification: str | None = None
   balance_type: str
   period_type: str
@@ -194,7 +196,7 @@ class UnmappedElementResponse(BaseModel):
   id: str
   code: str | None = None
   name: str
-  classification: str
+  classification: str | None = None
   balance_type: str
   external_source: str | None = None
   suggested_targets: list[SuggestedTarget] = Field(default_factory=list)
@@ -301,8 +303,23 @@ class CreateElementRequest(BaseModel):
   code: str | None = None
   name: str
   description: str | None = None
-  classification: Literal["asset", "liability", "equity", "revenue", "expense"]
-  sub_classification: str | None = None
+  classification: Literal[
+    "asset",
+    "contraAsset",
+    "liability",
+    "contraLiability",
+    "equity",
+    "contraEquity",
+    "temporaryEquity",
+    "revenue",
+    "expense",
+    "expenseReversal",
+    "gain",
+    "loss",
+    "comprehensiveIncome",
+    "investmentByOwners",
+    "distributionToOwners",
+  ]
   balance_type: Literal["debit", "credit"] = "debit"
   period_type: Literal["duration", "instant"] = "duration"
   element_type: Literal["concept", "abstract", "axis", "member", "hypercube"] = (
@@ -312,7 +329,15 @@ class CreateElementRequest(BaseModel):
   is_monetary: bool = True
   parent_id: str | None = None
   source: Literal[
-    "native", "sfac6", "us-gaap", "ifrs", "quickbooks", "xero", "plaid", "import"
+    "native",
+    "fac",
+    "rs-gaap",
+    "us-gaap",
+    "ifrs",
+    "quickbooks",
+    "xero",
+    "plaid",
+    "import",
   ] = "native"
   currency: str = "USD"
   qname: str | None = None
@@ -325,20 +350,43 @@ class UpdateElementRequest(BaseModel):
   """Update mutable fields on an element. `taxonomy_id` and `source` are
   immutable. `parent_id` honors `model_dump(exclude_unset=True)` semantics:
   omit the field to leave unchanged, pass `null` to clear the parent
-  (make root)."""
+  (make root).
+
+  ``classification`` updates the element's primary FASB
+  elementsOfFinancialStatements assignment (in ``element_classifications``,
+  not a direct column on ``elements``). Omit to leave unchanged. Passing a
+  value replaces the current primary EFS assignment; there is no
+  set-to-null semantics (use the UI/admin path for full classification
+  teardown — here we only support correction of a misclassified account)."""
 
   element_id: str
   code: str | None = None
   name: str | None = None
   description: str | None = None
-  classification: (
-    Literal["asset", "liability", "equity", "revenue", "expense"] | None
-  ) = None
-  sub_classification: str | None = None
   balance_type: Literal["debit", "credit"] | None = None
   period_type: Literal["duration", "instant"] | None = None
   parent_id: str | None = None
   currency: str | None = None
+  classification: (
+    Literal[
+      "asset",
+      "contraAsset",
+      "liability",
+      "contraLiability",
+      "equity",
+      "contraEquity",
+      "temporaryEquity",
+      "revenue",
+      "expense",
+      "expenseReversal",
+      "gain",
+      "loss",
+      "comprehensiveIncome",
+      "investmentByOwners",
+      "distributionToOwners",
+    ]
+    | None
+  ) = None
 
 
 class DeleteElementRequest(BaseModel):

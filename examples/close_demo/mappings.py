@@ -1,41 +1,46 @@
-"""CoA to US GAAP mapping definitions for Cascade Advisory Group LLC.
+"""CoA to FAC mapping definitions for Cascade Advisory Group LLC.
 
-Maps each Chart of Accounts code to a deterministic GAAP element ID
-from the US GAAP reporting taxonomy seed (robosystems/config/taxonomy/seed.py).
+Per Phase 3b, CoA elements map to FAC (Fundamental Accounting Concepts)
+as the primary reporting target. FAC is a small, stable set of
+high-level statement concepts. Deterministic expansion to rs-gaap /
+us-gaap happens via equivalence arcs on the FAC side.
+
+The demo resolves FAC qnames → element IDs at runtime against the
+library in the entity graph.
 """
 
-# (coa_code, gaap_element_id)
+# (coa_code, fac_qname)
 MAPPINGS: list[tuple[str, str]] = [
   # Assets
-  ("1000", "elem_gaap_cash"),
-  ("1100", "elem_gaap_accounts_receivable"),
-  ("1200", "elem_gaap_prepaid_expenses"),
-  ("1210", "elem_gaap_prepaid_expenses"),
-  ("1220", "elem_gaap_prepaid_expenses"),
-  ("1300", "elem_gaap_ppe"),
-  ("1310", "elem_gaap_ppe"),
-  ("1350", "elem_gaap_ppe"),  # Accumulated Depreciation (contra) → PP&E net
+  ("1000", "fac:CurrentAssets"),  # Cash
+  ("1100", "fac:CurrentAssets"),  # Accounts Receivable
+  ("1200", "fac:CurrentAssets"),  # Prepaid Expenses
+  ("1210", "fac:CurrentAssets"),
+  ("1220", "fac:CurrentAssets"),
+  ("1300", "fac:FixedAssets"),  # PP&E
+  ("1310", "fac:FixedAssets"),
+  ("1350", "fac:FixedAssets"),  # Accumulated Depreciation (contra)
   # Liabilities
-  ("2000", "elem_gaap_accounts_payable"),
-  ("2100", "elem_gaap_accrued_liabilities"),
-  ("2200", "elem_gaap_accrued_liabilities"),
+  ("2000", "fac:CurrentLiabilities"),  # Accounts Payable
+  ("2100", "fac:CurrentLiabilities"),  # Accrued Liabilities
+  ("2200", "fac:CurrentLiabilities"),
   # Equity
-  ("3000", "elem_gaap_additional_paid_in_capital"),
-  ("3100", "elem_gaap_retained_earnings"),
+  ("3000", "fac:Equity"),  # Additional Paid-In Capital
+  ("3100", "fac:Equity"),  # Retained Earnings
   # Revenue
-  ("4000", "elem_gaap_revenues"),
-  ("4100", "elem_gaap_revenues"),
-  ("4200", "elem_gaap_revenues"),
-  # Expenses
-  ("5000", "elem_gaap_sga"),
-  ("5100", "elem_gaap_sga"),
-  ("5200", "elem_gaap_sga"),
-  ("6000", "elem_gaap_sga"),
-  ("6100", "elem_gaap_sga"),
-  ("6200", "elem_gaap_sga"),
-  ("6300", "elem_gaap_sga"),
-  ("6400", "elem_gaap_sga"),
-  ("6500", "elem_gaap_sga"),
-  ("6600", "elem_gaap_sga"),
-  ("7000", "elem_gaap_depreciation_amortization"),
+  ("4000", "fac:Revenues"),
+  ("4100", "fac:Revenues"),
+  ("4200", "fac:Revenues"),
+  # Expenses (SG&A rolls into CostsAndExpenses at the FAC level)
+  ("5000", "fac:CostsAndExpenses"),
+  ("5100", "fac:CostsAndExpenses"),
+  ("5200", "fac:CostsAndExpenses"),
+  ("6000", "fac:CostsAndExpenses"),
+  ("6100", "fac:CostsAndExpenses"),
+  ("6200", "fac:CostsAndExpenses"),
+  ("6300", "fac:CostsAndExpenses"),
+  ("6400", "fac:CostsAndExpenses"),
+  ("6500", "fac:CostsAndExpenses"),
+  ("6600", "fac:CostsAndExpenses"),
+  ("7000", "fac:CostsAndExpenses"),  # Depreciation & Amortization
 ]

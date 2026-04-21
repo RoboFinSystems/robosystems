@@ -149,15 +149,15 @@ test-code:
 
 # Run linting
 lint fix="":
-    uv run ruff check . {{ if fix != "" { "--fix --unsafe-fixes" } else { "" } }}
+    @uv run ruff check . {{ if fix != "" { "--fix --unsafe-fixes" } else { "" } }}
 
 # Format code
 format:
-    uv run ruff format .
+    @uv run ruff format .
 
 # Run type checking
 typecheck module="":
-    uv run basedpyright {{ if module != "" { "robosystems/" + module } else { "" } }}
+    @uv run basedpyright {{ if module != "" { "robosystems/" + module } else { "" } }}
 
 # CloudFormation linting and validation
 cf-lint template:

@@ -32,6 +32,7 @@ from robosystems.config import env
 from robosystems.graphql.context import GraphQLContext, require_user
 from robosystems.graphql.resolvers.investor import InvestorQuery
 from robosystems.graphql.resolvers.ledger import LedgerQuery
+from robosystems.graphql.resolvers.library import LibraryQuery
 
 
 @strawberry.type
@@ -78,8 +79,15 @@ def _build_query_type() -> type:
   that would fail with `*_NOT_INITIALIZED` at runtime) keeps the
   introspection result honest and lets clients branch on the actual
   schema shape instead of trial-and-error against runtime errors.
+
+  The library mixin (`LibraryQuery`) is always composed — it's the
+  read surface for both the `graph_id="library"` sentinel (canonical
+  browse of the public schema) and any tenant graph_id (tenant schema
+  + public fallback via search_path). Library fields are not gated
+  by a per-graph extension flag; data visibility is driven by the
+  session's search_path, which is implicit in the URL's graph_id.
   """
-  bases: tuple[type, ...] = (_BaseQuery,)
+  bases: tuple[type, ...] = (LibraryQuery, _BaseQuery)
   if env.ROBOLEDGER_ENABLED:
     bases = (LedgerQuery, *bases)
   if env.ROBOINVESTOR_ENABLED:

@@ -58,7 +58,8 @@ class Taxonomy(ExtensionsBase):
       postgresql_where="parent_taxonomy_id IS NOT NULL",
     ),
     CheckConstraint(
-      "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping', 'schedule')",
+      "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping', 'schedule', "
+      "'classification-vocabulary', 'classification-assignment')",
       name="check_taxonomy_type",
     ),
     CheckConstraint(
