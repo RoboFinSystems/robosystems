@@ -80,6 +80,16 @@ class BlockTypeRegistryEntry:
   handler. Raising ``pydantic.ValidationError`` here surfaces as a
   422 at the API boundary."""
 
+  update_request_model: type[BaseModel]
+  """Pydantic model for ``update-information-block`` payload validation.
+  For block types whose ``dispatch_update`` always raises (e.g. the
+  statement family), this can be a placeholder like
+  ``_EmptyUpdateRequest``."""
+
+  delete_request_model: type[BaseModel]
+  """Pydantic model for ``delete-information-block`` payload validation.
+  Typically carries just the structure_id."""
+
   construction_mode: ConstructionMode
   """Declarative (user declares shape + seed params; atoms generated) /
   compositional (atoms exist from ingest; block is a view materialized
@@ -91,6 +101,19 @@ class BlockTypeRegistryEntry:
   ``(session, typed_payload, created_by) -> structure_id``.
   Typically delegates to an existing domain command (for Schedule,
   this delegates to ``cmd_create_schedule``)."""
+
+  dispatch_update: Callable[[Session, BaseModel, str], str]
+  """Handler that updates the block in place. Signature:
+  ``(session, typed_payload, updated_by) -> structure_id``.
+  Block types that don't support updates (library-seeded statement
+  structures, e.g.) raise :class:`NotImplementedError` — the registrar
+  translates this to HTTP 501."""
+
+  dispatch_delete: Callable[[Session, BaseModel, str], str]
+  """Handler that deletes the block. Signature:
+  ``(session, typed_payload, deleted_by) -> structure_id``.
+  Returns the deleted structure_id for the response envelope. Block
+  types that don't support deletion raise :class:`NotImplementedError`."""
 
   dispatch_build_envelope: Callable[[Session, str], InformationBlockEnvelope | None]
   """Handler that reads the block and packs its envelope. Signature:

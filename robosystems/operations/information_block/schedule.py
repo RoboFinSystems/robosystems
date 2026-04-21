@@ -20,7 +20,11 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from robosystems.models.api.extensions.schedules import CreateScheduleRequest
+from robosystems.models.api.extensions.schedules import (
+  CreateScheduleRequest,
+  DeleteScheduleRequest,
+  UpdateScheduleRequest,
+)
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   InformationBlockEnvelope,
@@ -36,6 +40,12 @@ from robosystems.operations.information_block.envelope import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   create_schedule as cmd_create_schedule,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  delete_schedule as cmd_delete_schedule,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  update_schedule as cmd_update_schedule,
 )
 
 # Shared display identity — values mirrored in the registry entry. Kept
@@ -61,6 +71,37 @@ def create(
   """
   response = cmd_create_schedule(session, payload, created_by=created_by)
   return response.structure_id
+
+
+def update(
+  session: Session,
+  payload: UpdateScheduleRequest,
+  updated_by: str,
+) -> str:
+  """Update a schedule via the existing command, return its structure_id.
+
+  The underlying ``cmd_update_schedule`` does not take an
+  ``updated_by`` parameter today; the dispatch signature accepts it for
+  consistency with :func:`create` and will wire through once audit
+  tracking on schedule updates is added.
+  """
+  response = cmd_update_schedule(session, payload)
+  return response.structure_id
+
+
+def delete(
+  session: Session,
+  payload: DeleteScheduleRequest,
+  deleted_by: str,
+) -> str:
+  """Delete a schedule via the existing command, return the deleted id.
+
+  The underlying ``cmd_delete_schedule`` returns ``{"deleted": True}``;
+  we surface the structure_id from the input payload for the unified
+  response envelope.
+  """
+  cmd_delete_schedule(session, payload)
+  return payload.structure_id
 
 
 def build_envelope(
@@ -146,4 +187,6 @@ __all__ = [
   "SCHEDULE_DISPLAY_NAME",
   "build_envelope",
   "create",
+  "delete",
+  "update",
 ]

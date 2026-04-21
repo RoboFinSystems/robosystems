@@ -21,9 +21,7 @@ import pytest
 
 from robosystems.middleware.mcp.tools.schedule_tools import (
   GetPeriodCloseStatusTool,
-  GetScheduleFactsTool,
   ListPeriodDraftsTool,
-  ListScheduleStructuresTool,
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
   DraftEntryResponse,
@@ -33,10 +31,6 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 from robosystems.models.api.extensions.schedules import (
   PeriodCloseItemResponse,
   PeriodCloseStatusResponse,
-  ScheduleFactResponse,
-  ScheduleFactsResponse,
-  ScheduleListResponse,
-  ScheduleSummaryResponse,
 )
 
 MODULE = "robosystems.middleware.mcp.tools.schedule_tools"
@@ -60,106 +54,12 @@ def _patch_session():
     yield session
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# list-schedule-structures
-# ────────────────────────────────────────────────────────────────────────────
-
-
-class TestListScheduleStructuresTool:
-  def test_tool_definition(self, mock_graph_client):
-    tool = ListScheduleStructuresTool(mock_graph_client)
-    defn = tool.get_tool_definition()
-    assert defn["name"] == "list-schedule-structures"
-    assert "inputSchema" in defn
-
-  @pytest.mark.asyncio
-  async def test_returns_schedules(self, mock_graph_client):
-    response = ScheduleListResponse(
-      schedules=[
-        ScheduleSummaryResponse(
-          structure_id="struct_01",
-          name="Depreciation",
-          taxonomy_name="Schedules",
-          entry_template={"debit_element_id": "elem_a"},
-          schedule_metadata=None,
-          total_periods=84,
-          periods_with_entries=3,
-        ),
-      ]
-    )
-    tool = ListScheduleStructuresTool(mock_graph_client)
-    with _patch_session(), patch(f"{MODULE}.ops_list_schedules", return_value=response):
-      result = await tool.execute({})
-
-    assert result["schedule_count"] == 1
-    assert result["schedules"][0]["name"] == "Depreciation"
-
-  @pytest.mark.asyncio
-  async def test_handles_error(self, mock_graph_client):
-    tool = ListScheduleStructuresTool(mock_graph_client)
-    with patch(f"{MODULE}.extensions_session", side_effect=Exception("bad graph")):
-      result = await tool.execute({})
-
-    assert "error" in result
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# get-schedule-facts
-# ────────────────────────────────────────────────────────────────────────────
-
-
-class TestGetScheduleFactsTool:
-  def test_tool_definition(self, mock_graph_client):
-    tool = GetScheduleFactsTool(mock_graph_client)
-    defn = tool.get_tool_definition()
-    assert defn["name"] == "get-schedule-facts"
-    assert "structure_id" in defn["inputSchema"]["properties"]
-
-  @pytest.mark.asyncio
-  async def test_returns_facts(self, mock_graph_client):
-    response = ScheduleFactsResponse(
-      structure_id="struct_01",
-      facts=[
-        ScheduleFactResponse(
-          element_id="elem_depr",
-          element_name="Depreciation Expense",
-          value=416.67,
-          period_start=date(2026, 1, 1),
-          period_end=date(2026, 1, 31),
-        ),
-      ],
-    )
-    tool = GetScheduleFactsTool(mock_graph_client)
-    with (
-      _patch_session(),
-      patch(f"{MODULE}.ops_get_schedule_facts", return_value=response),
-    ):
-      result = await tool.execute({"structure_id": "struct_01"})
-
-    assert result["fact_count"] == 1
-    assert result["facts"][0]["value"] == 416.67
-
-  @pytest.mark.asyncio
-  async def test_parses_date_strings(self, mock_graph_client):
-    response = ScheduleFactsResponse(structure_id="struct_01", facts=[])
-    tool = GetScheduleFactsTool(mock_graph_client)
-    with (
-      _patch_session(),
-      patch(f"{MODULE}.ops_get_schedule_facts", return_value=response) as ops,
-    ):
-      await tool.execute(
-        {
-          "structure_id": "struct_01",
-          "period_start": "2026-01-01",
-          "period_end": "2026-01-31",
-        }
-      )
-
-    call = ops.call_args
-    # ops_get_schedule_facts(session, service, structure_id, ps, pe)
-    assert call.args[2] == "struct_01"
-    assert call.args[3] == date(2026, 1, 1)
-    assert call.args[4] == date(2026, 1, 31)
+# list-schedule-structures and get-schedule-facts tools were retired —
+# schedule envelopes surface through the generic information-block reads
+# (``list-information-blocks``, ``get-information-block``). Their tests
+# live in ``tests/operations/information_block/`` and
+# ``tests/middleware/mcp/tools/test_information_block_tools.py`` (if added
+# — the MCP wiring is exercised via the router integration suite).
 
 
 # ────────────────────────────────────────────────────────────────────────────

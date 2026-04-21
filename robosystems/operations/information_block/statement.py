@@ -73,6 +73,39 @@ def _create_not_implemented(
   )
 
 
+def _update_not_implemented(
+  session: Session, payload: BaseModel, updated_by: str
+) -> str:
+  """``dispatch_update`` for every statement block type.
+
+  Statement Structures are library-seeded and immutable from a tenant
+  perspective. There is nothing to update — the envelope reflects the
+  library shape plus the tenant's report facts. Changes to what
+  surfaces come from creating a new Report, not from mutating the
+  block.
+  """
+  raise NotImplementedError(
+    "Statement blocks are library-seeded and immutable. Use "
+    "create-report to produce new facts; the envelope surfaces the "
+    "most recent report's facts automatically."
+  )
+
+
+def _delete_not_implemented(
+  session: Session, payload: BaseModel, deleted_by: str
+) -> str:
+  """``dispatch_delete`` for every statement block type.
+
+  Statement Structures are library-seeded and shared across tenants —
+  they cannot be deleted per-tenant. To stop receiving facts on a
+  statement block, archive the underlying Reports instead.
+  """
+  raise NotImplementedError(
+    "Statement blocks are library-seeded and cannot be deleted per "
+    "tenant. Archive the underlying Report via the report APIs instead."
+  )
+
+
 def _build_statement_envelope(
   session: Session,
   structure_id: str,
@@ -85,12 +118,15 @@ def _build_statement_envelope(
   expected block_type — lets :func:`get_information_block` cleanly
   return nothing to the caller.
 
-  Phase b surfaces facts from the **most recent** Report for the tenant
-  in the current session context. On the library sentinel the
-  search_path is ``public`` and the Report table is empty, so
-  ``facts`` comes back empty — which is the correct behaviour for the
-  sentinel. Phase z replaces the "most recent report" heuristic with
-  explicit ``fact_set_id`` selection.
+  Phase b surfaces facts from the **most recent** Report that has at
+  least one fact for this structure's elements. Scoping by element
+  membership — rather than taking the latest Report of any type —
+  avoids an empty envelope when a tenant's most recent report is for a
+  different statement (e.g. asking for the BS envelope when the newest
+  report is an IS). On the library sentinel the search_path is
+  ``public`` and the Report table is empty, so ``facts`` comes back
+  empty, which is the correct behaviour for the sentinel. Phase z
+  replaces this heuristic with explicit ``fact_set_id`` selection.
   """
   structure = session.get(Structure, structure_id)
   if structure is None or structure.structure_type != block_type:
@@ -111,22 +147,27 @@ def _build_statement_envelope(
     else []
   )
 
-  latest_report_id = session.execute(
-    select(Report.id).order_by(Report.created_at.desc()).limit(1)
-  ).scalar()
-
   facts: list[Fact] = []
-  if latest_report_id is not None and element_ids:
-    facts = list(
-      session.execute(
-        select(Fact).where(
-          Fact.report_id == latest_report_id,
-          Fact.element_id.in_(element_ids),
+  if element_ids:
+    latest_report_id = session.execute(
+      select(Report.id)
+      .join(Fact, Fact.report_id == Report.id)
+      .where(Fact.element_id.in_(element_ids))
+      .order_by(Report.created_at.desc())
+      .limit(1)
+    ).scalar()
+
+    if latest_report_id is not None:
+      facts = list(
+        session.execute(
+          select(Fact).where(
+            Fact.report_id == latest_report_id,
+            Fact.element_id.in_(element_ids),
+          )
         )
+        .scalars()
+        .all()
       )
-      .scalars()
-      .all()
-    )
 
   display_name, _display_plural = STATEMENT_DISPLAY[block_type]
   return InformationBlockEnvelope(
@@ -152,15 +193,21 @@ def _build_statement_envelope(
 
 
 def make_statement_handlers(block_type: str) -> dict[str, Callable[..., Any]]:
-  """Build the ``(create, build_envelope)`` pair for one statement type.
+  """Build the dispatch handlers for one statement type.
 
   ``functools.partial`` binds the ``block_type`` keyword on the
   envelope builder so the registry entry holds a two-argument callable
   matching :class:`BlockTypeRegistryEntry.dispatch_build_envelope`'s
   signature ``(session, structure_id) -> envelope | None``.
+
+  Create / update / delete all raise :class:`NotImplementedError` for
+  the statement family — statement Structures are library-seeded and
+  their per-tenant content comes from Reports, not block mutations.
   """
   return {
     "create": _create_not_implemented,
+    "update": _update_not_implemented,
+    "delete": _delete_not_implemented,
     "build_envelope": partial(_build_statement_envelope, block_type=block_type),
   }
 

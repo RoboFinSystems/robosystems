@@ -15,8 +15,6 @@ union in :class:`InformationBlock.artifact_mechanics`'s return type.
 
 from __future__ import annotations
 
-from typing import Any
-
 import strawberry
 
 from robosystems.models.api.information_block import (
@@ -66,10 +64,13 @@ class InformationModel:
 
 
 # The `mechanics` field is exposed as ``scalars.JSON`` with a `kind`
-# discriminator in the payload. Phase b will add the second mechanics
-# shape (StatementMechanics) and promote this to a typed
-# ``strawberry.union(...)``; Pydantic's discriminated union on `kind`
-# already shape-validates the payload on the server side.
+# discriminator in the payload. Phases a + b ship ScheduleMechanics +
+# StatementMechanics as Pydantic union arms (shape-validated on the
+# server side); promoting this to a typed ``strawberry.union(...)``
+# on the GraphQL side is deferred until Phase d, when
+# ``artifact_mechanics`` becomes a real column and both arms gain typed
+# fields worth exposing as a union. Until then, clients branch on the
+# embedded ``kind`` tag.
 MechanicsPayload = strawberry.scalars.JSON
 
 
@@ -144,22 +145,16 @@ class InformationBlock:
         InformationBlockConnection.from_pydantic(c) for c in envelope.connections
       ],
       facts=[InformationBlockFact.from_pydantic(f) for f in envelope.facts],
-      rules=[_as_jsonable(r) for r in envelope.rules],
-      dimensions=[_as_jsonable(d) for d in envelope.dimensions],
-      fact_set=(_as_jsonable(envelope.fact_set) if envelope.fact_set else None),
-      verification_results=[_as_jsonable(v) for v in envelope.verification_results],
+      # rules/dimensions/fact_set/verification_results are typed as
+      # ``list[dict[str, Any]]`` / ``dict[str, Any] | None`` on the
+      # Pydantic side and pass through as JSON — a Phase d follow-up
+      # turns these into typed Strawberry wrappers once the phases that
+      # populate them land.
+      rules=list(envelope.rules),
+      dimensions=list(envelope.dimensions),
+      fact_set=envelope.fact_set,
+      verification_results=list(envelope.verification_results),
     )
-
-
-def _as_jsonable(value: Any) -> Any:
-  """Coerce envelope-reserved fields (rules, dimensions, …) to JSON.
-
-  The reserved fields are typed as ``list[dict[str, Any]]`` on the
-  Pydantic side so they're already dict-shaped; this helper exists so
-  the call site is consistent should a future phase store typed rows
-  there.
-  """
-  return value
 
 
 __all__ = [

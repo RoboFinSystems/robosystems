@@ -215,10 +215,10 @@ class GraphMCPTools:
       self.get_graph_sync_status_tool = GetGraphSyncStatusTool(graph_client)
       self.materialize_tool = MaterializeTool(graph_client)
 
-    # Layer 2: Schedule read tools (gated by roboledger extension +
-    # ROBOLEDGER_ENABLED). Writes are registrar-generated.
-    self.list_schedule_structures_tool = None
-    self.get_schedule_facts_tool = None
+    # Layer 2: Period-workflow read tools (gated by roboledger extension
+    # + ROBOLEDGER_ENABLED). Schedule-specific reads were retired in
+    # favour of the generic information_block tools (see below). Writes
+    # are registrar-generated.
     self.get_period_close_status_tool = None
     self.list_period_drafts_tool = None
     # Fiscal calendar tools (same gate as schedule tools)
@@ -236,28 +236,36 @@ class GraphMCPTools:
         GetFiscalCalendarTool,
         ReopenPeriodTool,
       )
-      from .information_block_tools import (
-        GetInformationBlockTool,
-        ListInformationBlocksTool,
-      )
       from .schedule_tools import (
         GetPeriodCloseStatusTool,
-        GetScheduleFactsTool,
         ListPeriodDraftsTool,
-        ListScheduleStructuresTool,
       )
 
-      # Read-side schedule tools only — writes (create-schedule,
+      # Period-workflow read tools (span multiple blocks; not
+      # Information Block tools). Writes (create-schedule,
       # create-closing-entry, create-manual-closing-entry, truncate-schedule,
       # update-schedule, delete-schedule) are registrar-generated from the
       # roboledger OperationSpec declarations.
-      self.list_schedule_structures_tool = ListScheduleStructuresTool(graph_client)
-      self.get_schedule_facts_tool = GetScheduleFactsTool(graph_client)
+      #
+      # Schedule-specific read tools (list-schedule-structures,
+      # get-schedule-facts) were retired in favour of the generic
+      # information_block_tools: `list-information-blocks` with
+      # ``blockType="schedule"`` and `get-information-block`.
       self.get_period_close_status_tool = GetPeriodCloseStatusTool(graph_client)
       self.list_period_drafts_tool = ListPeriodDraftsTool(graph_client)
       self.get_fiscal_calendar_tool = GetFiscalCalendarTool(graph_client)
       self.close_period_tool = ClosePeriodTool(graph_client)
       self.reopen_period_tool = ReopenPeriodTool(graph_client)
+
+    # Information Block reads are pure reads and must stay available on
+    # read-only graphs. Same gate pattern as document_tools below:
+    # extension + flag only, no read_only guard.
+    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+      from .information_block_tools import (
+        GetInformationBlockTool,
+        ListInformationBlocksTool,
+      )
+
       self.get_information_block_tool = GetInformationBlockTool(graph_client)
       self.list_information_blocks_tool = ListInformationBlocksTool(graph_client)
 
@@ -482,12 +490,12 @@ class GraphMCPTools:
     return tools
 
   def _get_schedule_tool_definitions(self) -> list[dict[str, Any]]:
-    """Get schedule read tool definitions + fiscal calendar tools."""
+    """Get period-workflow tool definitions + fiscal calendar tools.
+
+    Schedule-specific read tools were retired; schedule envelopes now
+    surface through the generic information-block read tools.
+    """
     tools = []
-    if self.list_schedule_structures_tool is not None:
-      tools.append(self.list_schedule_structures_tool.get_tool_definition())
-    if self.get_schedule_facts_tool is not None:
-      tools.append(self.get_schedule_facts_tool.get_tool_definition())
     if self.get_period_close_status_tool is not None:
       tools.append(self.get_period_close_status_tool.get_tool_definition())
     if self.list_period_drafts_tool is not None:
@@ -809,25 +817,9 @@ class GraphMCPTools:
         result = await self.materialize_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
-      # Schedule read tools (writes are registrar-generated, handled at Layer 0)
-      elif name == "list-schedule-structures":
-        if self.list_schedule_structures_tool is None:
-          raise ValueError(
-            "list-schedule-structures tool is not available. "
-            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
-          )
-        result = await self.list_schedule_structures_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "get-schedule-facts":
-        if self.get_schedule_facts_tool is None:
-          raise ValueError(
-            "get-schedule-facts tool is not available. "
-            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
-          )
-        result = await self.get_schedule_facts_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
+      # Period-workflow read tools (writes are registrar-generated, Layer 0).
+      # Schedule-specific reads retired — use list-information-blocks
+      # with block_type="schedule" or get-information-block.
       elif name == "get-period-close-status":
         if self.get_period_close_status_tool is None:
           raise ValueError(

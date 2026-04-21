@@ -245,15 +245,77 @@ class CreateInformationBlockRequest(BaseModel):
   )
 
 
+class UpdateInformationBlockRequest(BaseModel):
+  """Generic update request — mirrors :class:`CreateInformationBlockRequest`.
+
+  Validated against the registry entry's ``update_request_model``.
+  Block types that don't support updates (e.g. the statement family,
+  whose Structures are library-seeded) surface ``NotImplementedError``
+  from their dispatch handler, which the registrar maps to HTTP 501.
+  """
+
+  block_type: str = Field(
+    ...,
+    description="Block type discriminator. Must match a registered entry.",
+  )
+  payload: dict[str, Any] = Field(
+    default_factory=dict,
+    description=(
+      "Block-type-specific update payload. Typically carries the "
+      "structure_id plus whichever fields are editable for this block "
+      "type. Shape-validated against the registry entry's "
+      "`update_request_model` at dispatch time."
+    ),
+  )
+
+
+class DeleteInformationBlockRequest(BaseModel):
+  """Generic delete request — mirrors :class:`CreateInformationBlockRequest`.
+
+  Validated against the registry entry's ``delete_request_model``.
+  Block types that don't support deletion raise ``NotImplementedError``.
+  """
+
+  block_type: str = Field(
+    ...,
+    description="Block type discriminator. Must match a registered entry.",
+  )
+  payload: dict[str, Any] = Field(
+    default_factory=dict,
+    description=(
+      "Block-type-specific delete payload. Typically carries just the "
+      "structure_id. Shape-validated against the registry entry's "
+      "`delete_request_model` at dispatch time."
+    ),
+  )
+
+
+class DeleteInformationBlockResponse(BaseModel):
+  """Response for ``delete-information-block``.
+
+  The envelope is gone once the block is deleted, so the response is a
+  thin confirmation instead — structure_id + block_type + name for
+  caller bookkeeping.
+  """
+
+  deleted: Literal[True] = True
+  structure_id: str
+  block_type: str
+  name: str
+
+
 __all__ = [
   "ArtifactMechanics",
   "ArtifactResponse",
   "ConnectionLite",
   "CreateInformationBlockRequest",
+  "DeleteInformationBlockRequest",
+  "DeleteInformationBlockResponse",
   "ElementLite",
   "FactLite",
   "InformationBlockEnvelope",
   "InformationModelResponse",
   "ScheduleMechanics",
   "StatementMechanics",
+  "UpdateInformationBlockRequest",
 ]

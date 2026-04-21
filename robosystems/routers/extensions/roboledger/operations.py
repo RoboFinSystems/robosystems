@@ -10,7 +10,7 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (41):**
+**Registered (44):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
@@ -35,6 +35,9 @@ Every route follows the pattern:
 - Publish lists: `create-publish-list`, `update-publish-list`,
   `delete-publish-list`, `add-publish-list-members`,
   `remove-publish-list-member`
+- Information Blocks (generic construction — see
+  `information-block.md`): `create-information-block`,
+  `update-information-block`, `delete-information-block`
 
 `build-fact-grid` is registered separately in the sibling `views.py`
 file so it can be mounted independently of `ROBOLEDGER_ENABLED` (it
@@ -130,11 +133,19 @@ from robosystems.models.api.extensions.taxonomies import (
 from robosystems.models.api.extensions.transactions import CreateTransactionRequest
 from robosystems.models.api.information_block import (
   CreateInformationBlockRequest,
+  DeleteInformationBlockRequest,
+  UpdateInformationBlockRequest,
 )
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.information_block.commands import (
   create_information_block as cmd_create_information_block,
+)
+from robosystems.operations.information_block.commands import (
+  delete_information_block as cmd_delete_information_block,
+)
+from robosystems.operations.information_block.commands import (
+  update_information_block as cmd_update_information_block,
 )
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
@@ -1378,8 +1389,9 @@ create_information_block_op = _registrar.register(
     description=(
       "Generic Information Block construction entry. `block_type` selects "
       "the registered block type; `payload` is validated against that "
-      "type's creation schema at dispatch. Phase a supports "
-      "`block_type='schedule'` (delegates to create-schedule)."
+      "type's creation schema at dispatch. Schedule dispatches to the "
+      "existing Schedule machinery; statement block types raise 501 "
+      "(use create-report instead)."
     ),
     command=cmd_create_information_block,
     request_model=CreateInformationBlockRequest,
@@ -1389,6 +1401,47 @@ create_information_block_op = _registrar.register(
       ScheduleNotFoundError: 404,
     },
     mark_stale_reason="information_block_created",
+  )
+)
+
+update_information_block_op = _registrar.register(
+  OperationSpec(
+    name="update-information-block",
+    summary="Update Information Block",
+    description=(
+      "Generic Information Block update entry. Dispatches by `block_type` "
+      "to the registered mutation handler. Block types whose Structures "
+      "are library-seeded and immutable (statement family) surface 501."
+    ),
+    command=cmd_update_information_block,
+    request_model=UpdateInformationBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+      ScheduleNotFoundError: 404,
+    },
+    mark_stale_reason="information_block_updated",
+  )
+)
+
+delete_information_block_op = _registrar.register(
+  OperationSpec(
+    name="delete-information-block",
+    summary="Delete Information Block",
+    description=(
+      "Generic Information Block deletion entry. Returns a thin "
+      "confirmation (deleted / structure_id / block_type / name). "
+      "Block types whose Structures are library-seeded cannot be "
+      "deleted per tenant and surface 501."
+    ),
+    command=cmd_delete_information_block,
+    request_model=DeleteInformationBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+      ScheduleNotFoundError: 404,
+    },
+    mark_stale_reason="information_block_deleted",
   )
 )
 

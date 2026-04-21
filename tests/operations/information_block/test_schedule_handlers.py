@@ -12,8 +12,10 @@ from unittest.mock import MagicMock, patch
 
 from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
+  DeleteScheduleRequest,
   EntryTemplateRequest,
   ScheduleCreatedResponse,
+  UpdateScheduleRequest,
 )
 from robosystems.operations.information_block import schedule as schedule_handlers
 
@@ -56,6 +58,37 @@ class TestCreate:
     assert args[0] is session
     assert args[1] is not None
     assert kwargs.get("created_by") == "usr_test"
+
+
+class TestUpdate:
+  def test_delegates_to_cmd_update_schedule_and_returns_structure_id(self) -> None:
+    session = MagicMock()
+    body = UpdateScheduleRequest(structure_id="struct_existing", name="Renamed")
+    expected = ScheduleCreatedResponse(
+      structure_id="struct_existing",
+      name="Renamed",
+      taxonomy_id="tax_01",
+      total_periods=3,
+      total_facts=6,
+    )
+    with patch(f"{MODULE}.cmd_update_schedule", return_value=expected) as mock_cmd:
+      result = schedule_handlers.update(session, body, "usr_test")
+
+    assert result == "struct_existing"
+    mock_cmd.assert_called_once_with(session, body)
+
+
+class TestDelete:
+  def test_delegates_to_cmd_delete_schedule_and_returns_structure_id(self) -> None:
+    session = MagicMock()
+    body = DeleteScheduleRequest(structure_id="struct_gone")
+    with patch(
+      f"{MODULE}.cmd_delete_schedule", return_value={"deleted": True}
+    ) as mock_cmd:
+      result = schedule_handlers.delete(session, body, "usr_test")
+
+    assert result == "struct_gone"
+    mock_cmd.assert_called_once_with(session, body)
 
 
 class TestBuildEnvelope:

@@ -17,16 +17,27 @@ from robosystems.middleware.operations import OperationEnvelope
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   CreateInformationBlockRequest,
+  DeleteInformationBlockRequest,
+  DeleteInformationBlockResponse,
   InformationBlockEnvelope,
   InformationModelResponse,
   ScheduleMechanics,
+  UpdateInformationBlockRequest,
 )
 from robosystems.routers.extensions.roboledger.operations import (
   create_information_block_op,
+  delete_information_block_op,
+  update_information_block_op,
 )
 
 GRAPH_ID = "kg01234567890abcdef"
 CMD_PATH = "robosystems.operations.information_block.commands.create_information_block"
+UPDATE_CMD_PATH = (
+  "robosystems.operations.information_block.commands.update_information_block"
+)
+DELETE_CMD_PATH = (
+  "robosystems.operations.information_block.commands.delete_information_block"
+)
 
 
 def _make_user() -> MagicMock:
@@ -220,3 +231,126 @@ class TestCreateInformationBlockOp:
     assert mock_cmd.call_count == 1
     assert first.operation_id == second.operation_id
     assert second.idempotent_replay is True
+
+
+class TestUpdateInformationBlockOp:
+  @pytest.mark.asyncio
+  async def test_happy_path_returns_envelope(self) -> None:
+    body = UpdateInformationBlockRequest(
+      block_type="schedule",
+      payload={"structure_id": "struct_ib_abc", "name": "Renamed"},
+    )
+    expected = _envelope("struct_ib_abc")
+
+    with (
+      patch(UPDATE_CMD_PATH, return_value=expected),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await update_information_block_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert isinstance(envelope, OperationEnvelope)
+    assert envelope.operation == "update-information-block"
+    assert envelope.status == "completed"
+    assert envelope.result is not None
+    assert envelope.result["id"] == "struct_ib_abc"
+
+  @pytest.mark.asyncio
+  async def test_statement_block_type_returns_501(self) -> None:
+    from fastapi import HTTPException
+
+    body = UpdateInformationBlockRequest(block_type="balance_sheet", payload={})
+    with (
+      patch(
+        UPDATE_CMD_PATH,
+        side_effect=NotImplementedError(
+          "Statement blocks are library-seeded and immutable."
+        ),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await update_information_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc.value.status_code == 501
+
+
+class TestDeleteInformationBlockOp:
+  @pytest.mark.asyncio
+  async def test_happy_path_returns_deleted_confirmation(self) -> None:
+    body = DeleteInformationBlockRequest(
+      block_type="schedule", payload={"structure_id": "struct_ib_abc"}
+    )
+    expected = DeleteInformationBlockResponse(
+      deleted=True,
+      structure_id="struct_ib_abc",
+      block_type="schedule",
+      name="Equipment Depreciation",
+    )
+
+    with (
+      patch(DELETE_CMD_PATH, return_value=expected),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await delete_information_block_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert isinstance(envelope, OperationEnvelope)
+    assert envelope.operation == "delete-information-block"
+    assert envelope.status == "completed"
+    assert envelope.result is not None
+    assert envelope.result["deleted"] is True
+    assert envelope.result["structure_id"] == "struct_ib_abc"
+
+  @pytest.mark.asyncio
+  async def test_statement_block_type_returns_501(self) -> None:
+    from fastapi import HTTPException
+
+    body = DeleteInformationBlockRequest(block_type="income_statement", payload={})
+    with (
+      patch(
+        DELETE_CMD_PATH,
+        side_effect=NotImplementedError(
+          "Statement blocks are library-seeded and cannot be deleted."
+        ),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await delete_information_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc.value.status_code == 501

@@ -51,6 +51,42 @@ class TestCreate:
     assert handlers["create"] is statement_handlers._create_not_implemented
 
 
+class TestUpdate:
+  def test_update_raises_not_implemented(self) -> None:
+    session = MagicMock()
+    with pytest.raises(NotImplementedError) as exc:
+      statement_handlers._update_not_implemented(session, MagicMock(), "usr_test")
+    assert "library-seeded" in str(exc.value)
+
+  @pytest.mark.parametrize(
+    "block_type",
+    ["balance_sheet", "income_statement", "cash_flow_statement", "equity_statement"],
+  )
+  def test_every_statement_handler_binds_not_implemented_update(
+    self, block_type: str
+  ) -> None:
+    handlers = statement_handlers.make_statement_handlers(block_type)
+    assert handlers["update"] is statement_handlers._update_not_implemented
+
+
+class TestDelete:
+  def test_delete_raises_not_implemented(self) -> None:
+    session = MagicMock()
+    with pytest.raises(NotImplementedError) as exc:
+      statement_handlers._delete_not_implemented(session, MagicMock(), "usr_test")
+    assert "library-seeded" in str(exc.value)
+
+  @pytest.mark.parametrize(
+    "block_type",
+    ["balance_sheet", "income_statement", "cash_flow_statement", "equity_statement"],
+  )
+  def test_every_statement_handler_binds_not_implemented_delete(
+    self, block_type: str
+  ) -> None:
+    handlers = statement_handlers.make_statement_handlers(block_type)
+    assert handlers["delete"] is statement_handlers._delete_not_implemented
+
+
 class TestBuildEnvelope:
   def test_returns_none_when_structure_missing(self) -> None:
     session = MagicMock()
@@ -81,10 +117,9 @@ class TestBuildEnvelope:
     structure.description = "Assets + Liabilities + Equity"
     session.get.return_value = structure
     # No associations → no elements → element_ids short-circuits the
-    # element query. latest_report_id=None short-circuits the fact query.
+    # element + latest-report queries. Only associations runs.
     session.execute.side_effect = [
       _exec_result(scalars_all=[]),  # associations
-      _exec_result(scalar=None),  # latest_report_id
     ]
 
     build = statement_handlers.make_statement_handlers("balance_sheet")[
@@ -241,9 +276,9 @@ class TestBuildEnvelope:
     structure.name = statement_handlers.STATEMENT_DISPLAY[block_type][0]
     structure.description = None
     session.get.return_value = structure
+    # No associations → no elements → no report lookup.
     session.execute.side_effect = [
       _exec_result(scalars_all=[]),
-      _exec_result(scalar=None),
     ]
 
     build = statement_handlers.make_statement_handlers(block_type)["build_envelope"]

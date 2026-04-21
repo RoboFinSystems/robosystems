@@ -14,7 +14,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from robosystems.models.api.extensions.schedules import CreateScheduleRequest
+from robosystems.models.api.extensions.schedules import (
+  CreateScheduleRequest,
+  DeleteScheduleRequest,
+  UpdateScheduleRequest,
+)
 from robosystems.models.api.information_block import (
   ScheduleMechanics,
   StatementMechanics,
@@ -28,17 +32,20 @@ from robosystems.operations.information_block.statement import (
 from robosystems.operations.information_block.types import BlockTypeRegistryEntry
 
 
-class _EmptyCreateRequest(BaseModel):
-  """Placeholder ``create_request_model`` for compositional block types.
+class _EmptyPayload(BaseModel):
+  """Placeholder request model for block types whose dispatch raises.
 
-  Statement block types raise ``NotImplementedError`` in
-  ``dispatch_create`` — their envelopes materialise from library atoms
-  and tenant report facts, not from a create payload. This empty model
-  keeps the OpenAPI shape honest ("no payload expected, and the call
-  will 501 anyway").
+  Statement block types raise ``NotImplementedError`` in their
+  ``dispatch_{create,update,delete}`` handlers — the OpenAPI schema
+  stays honest with an empty-but-forbidden-extra-fields shape so
+  callers learn "no payload expected, the call will 501 anyway".
   """
 
   model_config = ConfigDict(extra="forbid")
+
+
+# Backward-compatible alias — Phase β used _EmptyCreateRequest.
+_EmptyCreateRequest = _EmptyPayload
 
 
 # ── Schedule ────────────────────────────────────────────────────────────────
@@ -59,8 +66,12 @@ SCHEDULE_BLOCK = BlockTypeRegistryEntry(
   member_arrangement_default=None,
   mechanics_schema=ScheduleMechanics,
   create_request_model=CreateScheduleRequest,
+  update_request_model=UpdateScheduleRequest,
+  delete_request_model=DeleteScheduleRequest,
   construction_mode="declarative",
   dispatch_create=schedule_handlers.create,
+  dispatch_update=schedule_handlers.update,
+  dispatch_delete=schedule_handlers.delete,
   dispatch_build_envelope=schedule_handlers.build_envelope,
   # Schedules are tenant-only — they exist against live ledger data.
   # Don't surface them on the library sentinel.
@@ -95,9 +106,13 @@ def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
     concept_arrangement_default="roll_up",
     member_arrangement_default="aggregation",
     mechanics_schema=StatementMechanics,
-    create_request_model=_EmptyCreateRequest,
+    create_request_model=_EmptyPayload,
+    update_request_model=_EmptyPayload,
+    delete_request_model=_EmptyPayload,
     construction_mode="compositional",
     dispatch_create=handlers["create"],
+    dispatch_update=handlers["update"],
+    dispatch_delete=handlers["delete"],
     dispatch_build_envelope=handlers["build_envelope"],
     # Statement Structures live in public.structures (library-immutable)
     # and should surface on the library sentinel, with facts=[] because

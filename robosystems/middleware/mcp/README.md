@@ -44,9 +44,11 @@ mcp/
     │
     │ # Layer 2b: Roboledger OLTP tools (delegate to operations/roboledger/*)
     ├── fiscal_calendar_tools.py    # get-fiscal-calendar, close-period, reopen-period
-    ├── schedule_tools.py           # create-schedule, list-schedule-structures, get-schedule-facts,
-    │                               # get-period-close-status, create-closing-entry,
-    │                               # list-period-drafts, truncate-schedule, create-manual-closing-entry
+    ├── schedule_tools.py           # get-period-close-status, list-period-drafts
+    │                               # (create-schedule + siblings are registrar-
+    │                               # generated; schedule envelopes now surface via
+    │                               # information_block_tools)
+    ├── information_block_tools.py  # get-information-block, list-information-blocks
     ├── taxonomy_tools.py           # get-unmapped-elements, suggest-mapping,
     │                               # create-mapping-association, get-mapping-summary
     ├── materialization_tools.py    # get-graph-sync-status, materialize-graph
@@ -100,15 +102,31 @@ Require `roboledger` in `schema_extensions`, `ROBOLEDGER_ENABLED=true`, the grap
 
 **Schedules (depreciation, amortization, accruals):**
 
+Schedule reads (list, get facts) moved to the generic Information Block
+surface — use `list-information-blocks` with `block_type="schedule"`
+and `get-information-block` instead. Schedule-specific writes stay
+registered for wire compatibility and operate through the unified
+envelope machine under the hood.
+
 | Tool | Description | Delegates to |
 |------|-------------|--------------|
 | `create-schedule` | Create a schedule structure with pre-generated facts | `commands/schedules.create_schedule` |
-| `list-schedule-structures` | List schedule structures for a graph | `reads/schedules.list_schedule_structures` |
-| `get-schedule-facts` | Get the fact rows for a specific schedule | `reads/schedules.get_schedule_facts` |
+| `update-schedule` | Rename or edit schedule mechanics | `commands/schedules.update_schedule` |
+| `delete-schedule` | Remove a schedule | `commands/schedules.delete_schedule` |
 | `truncate-schedule` | Cut a schedule short at a given period | `commands/schedules.truncate_schedule` |
 | `list-period-drafts` | List pending draft entries for a period | `reads/period_drafts.list_period_drafts` |
-| `create-closing-entry` | Create a schedule-derived closing entry | `commands/schedules.create_closing_entry` |
-| `create-manual-closing-entry` | Create a manually-authored closing entry | `commands/schedules.create_manual_closing_entry` |
+| `create-closing-entry` | Create a schedule-derived closing entry (ledger operation) | `commands/schedules.create_closing_entry` |
+| `create-manual-closing-entry` | Create a manually-authored closing entry (ledger operation) | `commands/schedules.create_manual_closing_entry` |
+
+**Information Block (cross-type molecular reads + writes):**
+
+| Tool | Description | Delegates to |
+|------|-------------|--------------|
+| `get-information-block` | Fetch one block envelope by id | `operations/information_block/reads.get_information_block` |
+| `list-information-blocks` | List envelopes, filter by block_type + category | `operations/information_block/reads.list_information_blocks` |
+| `create-information-block` | Generic create (registrar-generated) | `operations/information_block/commands.create_information_block` |
+| `update-information-block` | Generic update (registrar-generated) | `operations/information_block/commands.update_information_block` |
+| `delete-information-block` | Generic delete (registrar-generated) | `operations/information_block/commands.delete_information_block` |
 
 **Taxonomy and CoA→GAAP mapping:**
 
