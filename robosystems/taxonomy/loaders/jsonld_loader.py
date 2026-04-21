@@ -268,8 +268,11 @@ def _extract_classification_assignments(
   """Walk ``classifiedAs`` arcs and emit assignment specs.
 
   Each arc connects an element (subject) to a Classification IRI of the
-  shape ``metamodel:{category}/{identifier}``. We decode the tail into
-  (category, identifier) and emit one assignment per arc.
+  shape ``{namespace_uri}/{standard}/{version}/{category}/{identifier}``
+  — e.g. ``https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/
+  elementsOfFinancialStatements/asset``. We decode the last 4 IRI
+  segments into (standard-as-source, version, category, identifier) so
+  the assignment carries its vocabulary's provenance.
   """
   assignments: list[ClassificationAssignmentSpec] = []
   predicate = URIRef(f"{RS_NS}classifiedAs")
@@ -279,17 +282,25 @@ def _extract_classification_assignments(
     element_qname = _iri_to_qname(str(subject), CANONICAL_CONTEXT)
     if not element_qname:
       continue
-    # Classification IRIs look like "…/us-gaap-metamodel/v1/{category}/{identifier}"
     iri = str(obj)
-    tail = iri.rsplit("/", 2)
-    if len(tail) < 2:
+    parts = iri.rsplit("/", 4)
+    # Need at least 4 trailing segments — anything shorter cannot carry
+    # the {standard}/{version}/{category}/{identifier} structure and
+    # would silently round-trip with a bogus category.
+    if len(parts) < 5:
       continue
-    category, identifier = tail[-2], tail[-1]
+    source, _version, category, identifier = (
+      parts[-4],
+      parts[-3],
+      parts[-2],
+      parts[-1],
+    )
     assignments.append(
       ClassificationAssignmentSpec(
         element_qname=element_qname,
         category=category,
         identifier=identifier,
+        source=source,
       )
     )
   return assignments

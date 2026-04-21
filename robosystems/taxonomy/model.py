@@ -111,6 +111,17 @@ class ClassificationAssignmentSpec(BaseModel):
   element_qname: str = Field(..., description="Element qname being classified")
   category: str = Field(..., description="Classification category")
   identifier: str = Field(..., description="Member identifier within the category")
+  source: str = Field(
+    "us-gaap-metamodel",
+    description=(
+      "Provenance of the assignment — which seed/taxonomy declared the "
+      "(element → classification) arc. Defaults to us-gaap-metamodel "
+      "since that's where nearly all EFS assignments originate; future "
+      "seeds from other metamodels (e.g. ifrs-metamodel) should set "
+      "this explicitly so row provenance is preserved in "
+      "element_classifications.source."
+    ),
+  )
   is_primary: bool = Field(
     True,
     description=(

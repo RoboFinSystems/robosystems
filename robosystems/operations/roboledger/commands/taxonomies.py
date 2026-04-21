@@ -190,6 +190,11 @@ def create_mapping_association(
   ).scalar_one_or_none()
   if structure is None:
     raise MappingStructureNotFoundError(body.mapping_id)
+  # Block arc insertion into library-seeded structures (fac-presentation,
+  # fac-to-rs-gaap, rs-gaap-hierarchy, etc). The DB-level trigger
+  # catches the same case as defense-in-depth; this path gives a clean
+  # 403 instead of a ProgrammingError.
+  assert_not_library_origin(structure)
 
   from_elem = session.execute(
     select(Element).where(Element.id == body.from_element_id)
@@ -243,6 +248,18 @@ def delete_mapping_association(
   session: Session, mapping_id: str, association_id: str
 ) -> bool:
   """Delete a mapping association. Returns True if a row was deleted."""
+  assoc = session.execute(
+    select(Association).where(
+      Association.id == association_id,
+      Association.structure_id == mapping_id,
+    )
+  ).scalar_one_or_none()
+  if assoc is None:
+    return False
+  # Match update_association / delete_association — reject library-seeded
+  # rows at the service layer so the caller sees LibraryImmutableError
+  # (→ 403) instead of a bare DB trigger ProgrammingError (→ 500).
+  assert_not_library_origin(assoc)
   deleted = (
     session.query(Association)
     .filter(
@@ -394,6 +411,8 @@ def bulk_create_associations(
   ).scalar_one_or_none()
   if structure is None:
     raise StructureNotFoundError(body.structure_id)
+  # Same library-structure guard as single-association insert.
+  assert_not_library_origin(structure)
 
   # Collect all distinct element IDs across the batch and verify in
   # one query so 500 associations ≠ 1000 lookups.

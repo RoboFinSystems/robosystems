@@ -8,6 +8,7 @@ Callers own the session lifetime.
 from __future__ import annotations
 
 from robosystems.operations.library.reads.elements import (
+  efs_classification_by_element,
   get_element,
   get_element_arcs,
   get_element_by_qname,
@@ -30,6 +31,7 @@ from robosystems.operations.library.reads.taxonomies import (
 
 __all__ = [
   "count_taxonomy_arcs",
+  "efs_classification_by_element",
   "get_element",
   "get_element_arcs",
   "get_element_by_qname",

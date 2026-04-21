@@ -91,7 +91,7 @@ def _labels_by_element(
   return grouped
 
 
-def _efs_classification_by_element(
+def efs_classification_by_element(
   session: Session, element_ids: list[str]
 ) -> dict[str, str]:
   """Batch-load FASB elementsOfFinancialStatements classification identifier.
@@ -99,13 +99,16 @@ def _efs_classification_by_element(
   Returns ``{element_id: identifier}`` — e.g., ``{"elem_xyz": "asset"}``.
   Elements without an EFS classification assignment are absent from the
   map (callers should default to ``None``).
+
+  ``ORDER BY is_primary DESC`` ensures the primary EFS assignment wins
+  when multiple rows exist for one element (the junction supports a
+  single primary plus alternates). This is the single source of truth
+  for EFS lookups — any read path that needs the primary EFS tag should
+  import this instead of re-implementing the query.
   """
   result: dict[str, str] = {}
   if not element_ids:
     return result
-  # ORDER BY is_primary DESC ensures the primary EFS assignment wins
-  # when multiple rows exist for one element (the migration allows the
-  # junction to carry alternates alongside a single primary).
   rows = session.execute(
     select(ElementClassification.element_id, Classification.identifier)
     .join(Classification, Classification.id == ElementClassification.classification_id)
@@ -118,6 +121,11 @@ def _efs_classification_by_element(
   for element_id, identifier in rows:
     result.setdefault(element_id, identifier)
   return result
+
+
+# Backward-compat internal alias — callers within this module still use
+# the underscore-prefixed name.
+_efs_classification_by_element = efs_classification_by_element
 
 
 def _references_by_element(
@@ -335,10 +343,19 @@ def get_element_tree(
   session: Session,
   element_id: str,
   max_depth: int = 5,
+  structure_id: str | None = None,
 ) -> LibraryElementTreeNode | None:
   """Walk parent→children descendants using `parent-child` associations.
 
   Returns the element plus a nested tree of descendants up to `max_depth`.
+
+  When ``structure_id`` is provided, arc traversal is scoped to that one
+  structure — critical for presentation seeds like ``fac-presentation``
+  which define multiple variants (classified BS vs unclassified BS,
+  multi-step vs single-step IS). Without the scope, a concept reused
+  across variants returns a blended child set that corresponds to no
+  real statement layout. Omitting the argument keeps the legacy blended
+  walk behavior for callers that haven't adopted structure-scoped trees.
   """
   root = session.execute(
     select(Element).where(Element.id == element_id)
@@ -358,18 +375,14 @@ def get_element_tree(
     parent_id, depth = frontier.pop(0)
     if depth >= max_depth:
       continue
-    assoc_rows = (
-      session.execute(
-        select(Association.to_element_id)
-        .where(
-          Association.from_element_id == parent_id,
-          Association.association_type == "presentation",
-        )
-        .order_by(Association.order_value.asc().nulls_last())
-      )
-      .scalars()
-      .all()
+    q = select(Association.to_element_id).where(
+      Association.from_element_id == parent_id,
+      Association.association_type == "presentation",
     )
+    if structure_id is not None:
+      q = q.where(Association.structure_id == structure_id)
+    q = q.order_by(Association.order_value.asc().nulls_last())
+    assoc_rows = session.execute(q).scalars().all()
     ordered_children = list(assoc_rows)
     children_by_parent[parent_id] = ordered_children
     for child_id in ordered_children:

@@ -28,7 +28,6 @@ from robosystems.utils.uuid import generate_deterministic_uuid
 # not meaningful reporting concepts and would fail the CHECK anyway.
 _ALLOWED_SOURCES = frozenset(
   {
-    "sfac6",
     "fac",
     "rs-gaap",
     "us-gaap",
@@ -117,6 +116,7 @@ def _write_classification_assignment(
   classification_id: str,
   is_primary: bool,
   confidence: float | None,
+  source: str,
 ) -> None:
   """Insert an element_classifications junction row."""
   conn.execute(
@@ -127,11 +127,12 @@ def _write_classification_assignment(
         created_at, updated_at, created_by
       ) VALUES (
         :element_id, :classification_id, :is_primary, :confidence,
-        'us-gaap-metamodel', now(), now(), 'library-seeder'
+        :source, now(), now(), 'library-seeder'
       )
       ON CONFLICT (element_id, classification_id) DO UPDATE SET
         is_primary = EXCLUDED.is_primary,
         confidence = EXCLUDED.confidence,
+        source = EXCLUDED.source,
         updated_at = now()
       """
     ),
@@ -140,6 +141,7 @@ def _write_classification_assignment(
       "classification_id": classification_id,
       "is_primary": is_primary,
       "confidence": confidence,
+      "source": source,
     },
   )
 
@@ -537,6 +539,7 @@ def write_taxonomy_arcs(conn: Connection, package: TaxonomyPackage) -> dict[str,
       classification_id=cls_id,
       is_primary=asn.is_primary,
       confidence=asn.confidence,
+      source=asn.source,
     )
     counts["classification_assignments"] += 1
 

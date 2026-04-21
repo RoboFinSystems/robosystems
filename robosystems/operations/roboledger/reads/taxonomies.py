@@ -30,6 +30,7 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.library.reads import efs_classification_by_element
 
 _COA_SOURCES = ("quickbooks", "xero", "plaid", "native", "import")
 
@@ -86,28 +87,9 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
 # ── Elements ──────────────────────────────────────────────────────────────
 
 
-def _efs_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
-  """Batch-load FASB elementsOfFinancialStatements identifier per element.
-
-  ``ORDER BY is_primary DESC`` ensures the primary EFS assignment wins
-  when multiple rows exist for one element (the junction supports a
-  single primary plus alternates).
-  """
-  if not element_ids:
-    return {}
-  rows = session.execute(
-    select(ElementClassification.element_id, Classification.identifier)
-    .join(Classification, Classification.id == ElementClassification.classification_id)
-    .where(
-      ElementClassification.element_id.in_(element_ids),
-      Classification.category == "elementsOfFinancialStatements",
-    )
-    .order_by(ElementClassification.is_primary.desc())
-  ).all()
-  result: dict[str, str] = {}
-  for element_id, identifier in rows:
-    result.setdefault(element_id, identifier)
-  return result
+# Local alias for the shared library helper — keeps call sites terse and
+# makes the import site searchable (grep for ``_efs_by_element``).
+_efs_by_element = efs_classification_by_element
 
 
 def element_to_response(
@@ -375,27 +357,56 @@ def expand_to_rs_gaap_candidates(
       ],
     }
 
-  # Narrow case: one rs-gaap parent + its type-subtype children as candidates.
-  parent = equiv_rows[0]
+  # Narrow case (≤ 3 equivalents): walk type-subtype children under EACH
+  # equivalent and union them — previously we blindly picked equiv_rows[0]
+  # after alpha-sort, which discarded siblings. `fac:Assets` is the
+  # canonical example: it maps to both `rs-gaap:Assets` and
+  # `rs-gaap:AssetsCurrent`, and the useful type-subtype children live
+  # under the Current branch. The equivalents themselves are included in
+  # the candidate set so the AI can pick a parent-level target when no
+  # sub-type fits.
   child_rows = session.execute(
     text("""
-      SELECT e.id, e.qname, e.name
+      SELECT e.id, e.qname, e.name, a.from_element_id AS parent_id
       FROM associations a
       JOIN structures s ON a.structure_id = s.id
       JOIN taxonomies t ON s.taxonomy_id = t.id
       JOIN elements e ON a.to_element_id = e.id
-      WHERE a.from_element_id = :rs_id
+      WHERE a.from_element_id = ANY(:rs_ids)
         AND t.standard = 'type-subtype'
         AND a.association_type = 'general-special'
       ORDER BY e.qname
     """),
-    {"rs_id": parent.id},
+    {"rs_ids": [r.id for r in equiv_rows]},
   ).fetchall()
+
+  # Pick the equivalent with the most type-subtype children as the
+  # "primary parent" so the fallback path in the refinement agent lands
+  # on the most-expanded branch. Ties break by the pre-existing alpha
+  # sort from the equivalence query.
+  children_by_parent: dict[str, int] = {}
+  for r in child_rows:
+    children_by_parent[r.parent_id] = children_by_parent.get(r.parent_id, 0) + 1
+  parent = max(
+    equiv_rows,
+    key=lambda e: (children_by_parent.get(e.id, 0), e.qname),
+  )
+
+  candidate_ids: set[str] = set()
+  candidates: list[dict] = []
+  for r in equiv_rows:
+    if r.id not in candidate_ids:
+      candidate_ids.add(r.id)
+      candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
+  for r in child_rows:
+    if r.id not in candidate_ids:
+      candidate_ids.add(r.id)
+      candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
 
   return {
     "fac_qname": fac_qname,
     "rs_gaap_parent": {"id": parent.id, "qname": parent.qname, "name": parent.name},
-    "candidates": [{"id": r.id, "qname": r.qname, "name": r.name} for r in child_rows],
+    "candidates": candidates,
   }
 
 

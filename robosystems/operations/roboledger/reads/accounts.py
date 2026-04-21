@@ -21,6 +21,7 @@ from robosystems.models.extensions import (
   ElementClassification,
 )
 from robosystems.models.extensions.roboledger import COA_SOURCES
+from robosystems.operations.library.reads import efs_classification_by_element
 
 
 def _parse_meta(raw: Any) -> dict[str, Any]:
@@ -34,28 +35,8 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
   return {}
 
 
-def _efs_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
-  """Batch-load FASB elementsOfFinancialStatements identifier per element.
-
-  ``ORDER BY is_primary DESC`` ensures the primary EFS assignment wins
-  when multiple rows exist for one element (the junction supports a
-  single primary plus alternates).
-  """
-  if not element_ids:
-    return {}
-  rows = session.execute(
-    select(ElementClassification.element_id, Classification.identifier)
-    .join(Classification, Classification.id == ElementClassification.classification_id)
-    .where(
-      ElementClassification.element_id.in_(element_ids),
-      Classification.category == "elementsOfFinancialStatements",
-    )
-    .order_by(ElementClassification.is_primary.desc())
-  ).all()
-  result: dict[str, str] = {}
-  for element_id, identifier in rows:
-    result.setdefault(element_id, identifier)
-  return result
+# Local alias for the shared library helper.
+_efs_by_element = efs_classification_by_element
 
 
 def account_to_response(

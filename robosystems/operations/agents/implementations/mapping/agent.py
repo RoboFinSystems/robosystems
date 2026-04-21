@@ -154,9 +154,7 @@ class MappingAgent(Agent):
         batch = cls_elements[batch_start : batch_start + BATCH_SIZE]
 
         try:
-          mappings = await self._map_batch(
-            ctx, batch, candidates, mapping_id, create_tool
-          )
+          mappings = await self._map_batch(ctx, batch, candidates)
 
           for m in mappings:
             if m.get("target_id") and m["confidence"] >= CONFIDENCE_AUTO_APPROVE:
@@ -208,10 +206,17 @@ class MappingAgent(Agent):
     ctx: AgentContext,
     elements: list[dict],
     candidates: list[dict],
-    mapping_id: str,
-    create_tool: Any,
   ) -> list[dict]:
-    """Map a batch of elements via Bedrock and write results."""
+    """Classify a batch of CoA elements against FAC candidates.
+
+    FAC is the intermediate semantic anchor — we use it to reason about
+    the account's nature and to narrow rs-gaap candidates in the refine
+    pass. Only the rs-gaap arc is persisted as a reporting target; the
+    FAC decision flows through the returned ``mappings`` list to
+    ``_refine_to_rs_gaap`` via the orchestrator's ``confirmed_fac``
+    buffer. Writing both fac and rs-gaap arcs into the same coa_mapping
+    structure would double-count line items in every rollup reader.
+    """
     prompt = build_mapping_prompt(elements, candidates)
 
     response = await ctx.ai.create_message(
@@ -223,26 +228,7 @@ class MappingAgent(Agent):
       operation_description="CoA to FAC mapping",
     )
 
-    mappings = self._parse_response(response.content, elements)
-
-    # Write confirmed mappings via MCP tool
-    for m in mappings:
-      if m.get("target_id") and m["confidence"] >= CONFIDENCE_MIN_MAP:
-        try:
-          await create_tool.execute(
-            {
-              "mapping_id": mapping_id,
-              "from_element_id": m["element_id"],
-              "to_element_id": m["target_id"],
-              "confidence": m["confidence"],
-            }
-          )
-        except Exception as e:
-          logger.warning(f"Failed to create association for {m['element_id']}: {e}")
-          m["target_id"] = None
-          m["confidence"] = 0
-
-    return mappings
+    return self._parse_response(response.content, elements)
 
   async def _refine_to_rs_gaap(
     self,

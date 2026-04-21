@@ -74,6 +74,17 @@ def _scalars_exec(values):
   return r
 
 
+def _all_exec(rows):
+  """Mock for a ``session.execute(...).all()`` call returning tuple rows.
+
+  Used for the EFS-classification lookup inside update_element/delete_element
+  which iterates (element_id, identifier) tuples directly rather than going
+  through .scalars()."""
+  r = MagicMock()
+  r.all.return_value = rows
+  return r
+
+
 # ── _would_create_cycle ──────────────────────────────────────────────────
 
 
@@ -274,6 +285,7 @@ class TestUpdateElement:
       _scalar_exec(elem_X),  # load new parent for cycle check
       _scalar_exec(elem_X),  # load new parent inside _hierarchy_for_parent
       _scalars_exec([elem_C]),  # load descendants
+      _all_exec([]),  # post-flush EFS classification lookup
     ]
 
     update_element(
@@ -303,6 +315,7 @@ class TestUpdateElement:
       _scalar_exec(elem_B),  # load element
       # No cycle-check execute for None parent
       _scalars_exec([elem_C]),  # load descendants
+      _all_exec([]),  # post-flush EFS classification lookup
     ]
 
     update_element(session, UpdateElementRequest(element_id="elem_B", parent_id=None))
@@ -328,6 +341,7 @@ class TestUpdateElement:
       _scalar_exec(elem_Z),  # load new parent Z for cycle check
       _scalar_exec(elem_Z),  # load Z in _hierarchy_for_parent
       _scalars_exec([]),  # no descendants of X
+      _all_exec([]),  # post-flush EFS classification lookup
     ]
 
     update_element(

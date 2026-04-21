@@ -129,7 +129,21 @@ _CLASSIFICATION_CATEGORY_CHECK = (
 
 
 def _install_raise_library_immutable_fn(conn) -> None:
-  """Create the PL/pgSQL function that raises on library-origin mutations."""
+  """Create the PL/pgSQL functions that raise on library-origin mutations.
+
+  Two functions:
+
+  * ``raise_library_immutable`` — guards UPDATE/DELETE on all library
+    tables by checking ``OLD.created_by = 'library-seeder'``.
+
+  * ``raise_insert_into_library_structure`` — guards INSERT on
+    ``associations`` by looking up the target ``structures.created_by``.
+    Without this, a tenant caller can INSERT user-authored arcs into a
+    library-seeded structure (fac-presentation, fac-to-rs-gaap, etc)
+    and silently change library behavior for that tenant only. The
+    service-layer ``assert_not_library_origin(structure)`` guard is the
+    fast path; this is defense-in-depth.
+  """
   conn.execute(
     text(
       """
@@ -152,6 +166,32 @@ def _install_raise_library_immutable_fn(conn) -> None:
       """
     )
   )
+  conn.execute(
+    text(
+      """
+      CREATE OR REPLACE FUNCTION public.raise_insert_into_library_structure()
+      RETURNS trigger AS $$
+      DECLARE
+        structure_created_by text;
+      BEGIN
+        EXECUTE format(
+          'SELECT created_by FROM %I.structures WHERE id = $1 LIMIT 1',
+          TG_TABLE_SCHEMA
+        )
+        INTO structure_created_by
+        USING NEW.structure_id;
+        IF structure_created_by = 'library-seeder' THEN
+          RAISE EXCEPTION
+            'Cannot insert association into library-seeded structure: '
+            '%.%.structure_id=% is owned by the library',
+            TG_TABLE_SCHEMA, TG_TABLE_NAME, NEW.structure_id;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      """
+    )
+  )
 
 
 def _install_triggers_for_tenant(conn, schema: str) -> None:
@@ -167,6 +207,23 @@ def _install_triggers_for_tenant(conn, schema: str) -> None:
         """
       )
     )
+  # INSERT guard on associations — catches tenant writes that target a
+  # library-seeded structure (the cross-row check the per-row immutability
+  # trigger can't do).
+  conn.execute(
+    text(
+      f"DROP TRIGGER IF EXISTS raise_insert_into_library_structure ON {schema}.associations"
+    )
+  )
+  conn.execute(
+    text(
+      f"""
+      CREATE TRIGGER raise_insert_into_library_structure
+      BEFORE INSERT ON {schema}.associations
+      FOR EACH ROW EXECUTE FUNCTION public.raise_insert_into_library_structure()
+      """
+    )
+  )
 
 
 def _drop_triggers_for_tenant(conn, schema: str) -> None:
@@ -176,6 +233,11 @@ def _drop_triggers_for_tenant(conn, schema: str) -> None:
         f"DROP TRIGGER IF EXISTS raise_library_immutable_{table} ON {schema}.{table}"
       )
     )
+  conn.execute(
+    text(
+      f"DROP TRIGGER IF EXISTS raise_insert_into_library_structure ON {schema}.associations"
+    )
+  )
 
 
 def _widen_tenant_checks(conn, schema: str) -> None:
@@ -354,6 +416,7 @@ SEED_FILES = [
   # Classification assignments + hierarchy (reference rs-gaap concepts)
   SEEDS_DIR / "rs-gaap-to-metamodel" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "rs-gaap-hierarchy" / "v1" / "taxonomy.jsonld",
+  SEEDS_DIR / "rs-gaap-presentation" / "v1" / "taxonomy.jsonld",
   # Cross-taxonomy mapping + calculation + presentation arc packs
   SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-calculations" / "v1" / "taxonomy.jsonld",

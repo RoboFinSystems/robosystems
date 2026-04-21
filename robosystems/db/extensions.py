@@ -160,6 +160,11 @@ _LIBRARY_IMMUTABLE_TABLES = (
   "element_references",
   "structures",
   "associations",
+  # Mirror 0002's _IMMUTABLE_TABLES so fresh tenant provisioning applies
+  # triggers to the full library surface. Omitting these two left new
+  # graphs with weaker guarantees than migration-backfilled ones.
+  "classifications",
+  "element_classifications",
 )
 
 
@@ -171,6 +176,9 @@ def _install_library_immutability_triggers(conn, schema: str) -> None:
   ones got during backfill. The PL/pgSQL function itself lives in the
   public schema and is created by that migration; provisioning only
   attaches triggers (no function DDL here).
+
+  Also installs the BEFORE-INSERT guard on ``associations`` that blocks
+  tenant arc inserts into library-seeded structures.
   """
   for table in _LIBRARY_IMMUTABLE_TABLES:
     trigger = f"{table}_library_immutable"
@@ -182,6 +190,18 @@ def _install_library_immutability_triggers(conn, schema: str) -> None:
         f"FOR EACH ROW EXECUTE FUNCTION public.raise_library_immutable()"
       )
     )
+  conn.execute(
+    text(
+      f'DROP TRIGGER IF EXISTS raise_insert_into_library_structure ON "{schema}".associations'
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE TRIGGER raise_insert_into_library_structure "
+      f'BEFORE INSERT ON "{schema}".associations '
+      f"FOR EACH ROW EXECUTE FUNCTION public.raise_insert_into_library_structure()"
+    )
+  )
 
 
 def _widen_library_checks(conn, schema: str) -> None:

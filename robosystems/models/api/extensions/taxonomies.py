@@ -348,7 +348,14 @@ class UpdateElementRequest(BaseModel):
   """Update mutable fields on an element. `taxonomy_id` and `source` are
   immutable. `parent_id` honors `model_dump(exclude_unset=True)` semantics:
   omit the field to leave unchanged, pass `null` to clear the parent
-  (make root)."""
+  (make root).
+
+  ``classification`` updates the element's primary FASB
+  elementsOfFinancialStatements assignment (in ``element_classifications``,
+  not a direct column on ``elements``). Omit to leave unchanged. Passing a
+  value replaces the current primary EFS assignment; there is no
+  set-to-null semantics (use the UI/admin path for full classification
+  teardown — here we only support correction of a misclassified account)."""
 
   element_id: str
   code: str | None = None
@@ -358,6 +365,26 @@ class UpdateElementRequest(BaseModel):
   period_type: Literal["duration", "instant"] | None = None
   parent_id: str | None = None
   currency: str | None = None
+  classification: (
+    Literal[
+      "asset",
+      "contraAsset",
+      "liability",
+      "contraLiability",
+      "equity",
+      "contraEquity",
+      "temporaryEquity",
+      "revenue",
+      "expense",
+      "expenseReversal",
+      "gain",
+      "loss",
+      "comprehensiveIncome",
+      "investmentByOwners",
+      "distributionToOwners",
+    ]
+    | None
+  ) = None
 
 
 class DeleteElementRequest(BaseModel):

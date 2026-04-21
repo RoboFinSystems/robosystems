@@ -235,15 +235,27 @@ class LibraryQuery:
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
     max_depth: int = 5,
+    structure_id: strawberry.ID | None = None,
   ) -> LibraryElementTreeNode | None:
-    """Walk presentation arcs down from an element."""
+    """Walk presentation arcs down from an element.
+
+    Pass ``structureId`` to scope the walk to one presentation
+    structure — required when the element participates in multiple
+    statement variants (e.g. classified vs unclassified balance sheet)
+    and a blended tree would misrepresent any single layout.
+    """
     if max_depth < 1 or max_depth > 10:
       raise strawberry.exceptions.StrawberryGraphQLError(
         message="max_depth must be between 1 and 10",
         extensions={"code": "INVALID_ARGUMENT"},
       )
     with _open_session(info) as session:
-      node = get_element_tree(session, element_id=str(id), max_depth=max_depth)
+      node = get_element_tree(
+        session,
+        element_id=str(id),
+        max_depth=max_depth,
+        structure_id=str(structure_id) if structure_id else None,
+      )
       return LibraryElementTreeNode.from_pydantic(node) if node else None
 
   @strawberry.field

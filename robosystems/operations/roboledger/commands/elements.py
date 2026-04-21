@@ -33,6 +33,7 @@ from robosystems.models.extensions import (
   ElementClassification,
   Taxonomy,
 )
+from robosystems.operations.library.reads import efs_classification_by_element
 from robosystems.operations.roboledger.commands._guards import (
   LibraryImmutableError,
   assert_not_library_origin,
@@ -294,6 +295,9 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("element_id", None)
+  # classification isn't a column on elements — it's an element_classifications
+  # row. Pop it here and reconcile the junction after the scalar updates land.
+  new_classification: str | None = updates.pop("classification", None)
 
   # Handle reparent separately so we can cascade path/depth changes.
   reparent = "parent_id" in updates
@@ -349,7 +353,64 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
     setattr(element, key, value)
 
   session.flush()
-  return _element_to_response(element)
+  if new_classification is not None:
+    _reassign_efs_classification(session, element.id, new_classification)
+  efs = efs_classification_by_element(session, [element.id]).get(element.id)
+  return _element_to_response(element, efs)
+
+
+def _reassign_efs_classification(
+  session: Session, element_id: str, efs_identifier: str
+) -> None:
+  """Replace the primary EFS assignment for an element.
+
+  Correction path for misclassified native accounts. Demotes any existing
+  primary EFS row (same junction kept as an audit trail but flipped to
+  is_primary=False) and inserts — or re-promotes — the chosen identifier.
+  No-op if the target Classification row isn't in the library (shouldn't
+  happen in prod; guarded so tests that skip the library seed still pass).
+  """
+  target = session.execute(
+    select(Classification).where(
+      Classification.category == "elementsOfFinancialStatements",
+      Classification.identifier == efs_identifier,
+    )
+  ).scalar_one_or_none()
+  if target is None:
+    return
+
+  existing = (
+    session.execute(
+      select(ElementClassification)
+      .join(
+        Classification,
+        Classification.id == ElementClassification.classification_id,
+      )
+      .where(
+        ElementClassification.element_id == element_id,
+        Classification.category == "elementsOfFinancialStatements",
+      )
+    )
+    .scalars()
+    .all()
+  )
+  found_target = False
+  for row in existing:
+    if row.classification_id == target.id:
+      row.is_primary = True
+      found_target = True
+    else:
+      row.is_primary = False
+
+  if not found_target:
+    session.add(
+      ElementClassification(
+        element_id=element_id,
+        classification_id=target.id,
+        is_primary=True,
+      )
+    )
+  session.flush()
 
 
 def delete_element(session: Session, body: DeleteElementRequest) -> ElementResponse:
@@ -370,4 +431,5 @@ def delete_element(session: Session, body: DeleteElementRequest) -> ElementRespo
 
   element.is_active = False
   session.flush()
-  return _element_to_response(element)
+  efs = efs_classification_by_element(session, [element.id]).get(element.id)
+  return _element_to_response(element, efs)
