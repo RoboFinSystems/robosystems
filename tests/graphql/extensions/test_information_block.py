@@ -17,6 +17,7 @@ from robosystems.models.api.information_block import (
   InformationBlockEnvelope,
   InformationModelResponse,
   ScheduleMechanics,
+  StatementMechanics,
 )
 
 GRAPH_ID = "kg01234567890abcdef"
@@ -183,3 +184,82 @@ class TestInformationBlocksQuery:
     _, kwargs = mock_list.call_args
     assert kwargs.get("block_type") == "schedule"
     assert kwargs.get("library_sentinel") is False
+
+
+def _statement_envelope(
+  structure_id: str = "struct_balance_sheet",
+  block_type: str = "balance_sheet",
+  display_name: str = "Balance Sheet",
+) -> InformationBlockEnvelope:
+  return InformationBlockEnvelope(
+    id=structure_id,
+    block_type=block_type,
+    name=display_name,
+    display_name=display_name,
+    category="Reporting",
+    information_model=InformationModelResponse(
+      concept_arrangement="roll_up", member_arrangement="aggregation"
+    ),
+    artifact=ArtifactResponse(mechanics=StatementMechanics()),
+  )
+
+
+class TestStatementInformationBlocks:
+  """Phase β: statement block types surface on both sentinel and tenant."""
+
+  def test_balance_sheet_envelope_on_tenant_graph(self) -> None:
+    expected = _statement_envelope()
+    with (
+      _patch_session(),
+      patch(GET_PATH, return_value=expected),
+    ):
+      result = schema.execute_sync(
+        'query { informationBlock(id: "struct_balance_sheet")'
+        " { id blockType category informationModel"
+        " { conceptArrangement memberArrangement } artifact { mechanics } } }",
+        context_value=_ctx(),
+      )
+    assert result.errors is None
+    data = result.data["informationBlock"]
+    assert data["id"] == "struct_balance_sheet"
+    assert data["blockType"] == "balance_sheet"
+    assert data["category"] == "Reporting"
+    assert data["informationModel"]["conceptArrangement"] == "roll_up"
+    assert data["informationModel"]["memberArrangement"] == "aggregation"
+    assert data["artifact"]["mechanics"]["kind"] == "statement_renderer"
+
+  def test_balance_sheet_filter_surfaces_on_library_sentinel(self) -> None:
+    """Statement block types have ``surfaces_in_library=True``; the
+    sentinel returns their envelopes (with empty facts) when queried."""
+    expected = _statement_envelope()
+    with (
+      _patch_session(),
+      patch(LIST_PATH, return_value=[expected]) as mock_list,
+    ):
+      result = schema.execute_sync(
+        'query { informationBlocks(blockType: "balance_sheet")'
+        " { id blockType displayName } }",
+        context_value=_ctx(graph_id=LIBRARY_GRAPH_ID),
+      )
+    assert result.errors is None
+    items = result.data["informationBlocks"]
+    assert len(items) == 1
+    assert items[0]["blockType"] == "balance_sheet"
+    # Resolver forwards library_sentinel=True on the sentinel endpoint.
+    _, kwargs = mock_list.call_args
+    assert kwargs.get("block_type") == "balance_sheet"
+    assert kwargs.get("library_sentinel") is True
+
+  def test_cash_flow_returns_empty_when_not_seeded(self) -> None:
+    """`cash_flow_statement` is registered but its library Structure
+    isn't seeded yet — the query returns []."""
+    with (
+      _patch_session(),
+      patch(LIST_PATH, return_value=[]),
+    ):
+      result = schema.execute_sync(
+        'query { informationBlocks(blockType: "cash_flow_statement") { id } }',
+        context_value=_ctx(),
+      )
+    assert result.errors is None
+    assert result.data["informationBlocks"] == []

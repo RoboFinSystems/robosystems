@@ -1,17 +1,31 @@
-"""Registry tests — SCHEDULE_BLOCK wired, get/list_registered work."""
+"""Registry tests — Schedule + statement family wired, get/list work."""
 
 from __future__ import annotations
 
 import pytest
 
 from robosystems.models.api.extensions.schedules import CreateScheduleRequest
-from robosystems.models.api.information_block import ScheduleMechanics
+from robosystems.models.api.information_block import (
+  ScheduleMechanics,
+  StatementMechanics,
+)
 from robosystems.operations.information_block.registry import (
+  BALANCE_SHEET_BLOCK,
+  CASH_FLOW_STATEMENT_BLOCK,
+  EQUITY_STATEMENT_BLOCK,
+  INCOME_STATEMENT_BLOCK,
   REGISTRY,
   SCHEDULE_BLOCK,
   get,
   list_registered,
 )
+
+STATEMENT_BLOCK_IDS = [
+  "balance_sheet",
+  "income_statement",
+  "cash_flow_statement",
+  "equity_statement",
+]
 
 
 class TestRegistry:
@@ -39,17 +53,48 @@ class TestRegistry:
 
   def test_get_unknown_raises_keyerror(self) -> None:
     with pytest.raises(KeyError) as exc:
-      get("balance_sheet")
-    assert "balance_sheet" in str(exc.value)
+      get("nonexistent_block_type")
+    assert "nonexistent_block_type" in str(exc.value)
 
   def test_list_registered_returns_all_entries(self) -> None:
     entries = list_registered()
-    # Phase a: only Schedule is registered
-    assert SCHEDULE_BLOCK in entries
-    assert [e.id for e in entries] == ["schedule"]
+    # Phase b: Schedule + 4 statement block types
+    assert [e.id for e in entries] == [
+      "schedule",
+      *STATEMENT_BLOCK_IDS,
+    ]
 
   def test_entry_is_frozen(self) -> None:
     """Registry entries are immutable — a typo in handler wiring can't be
     patched out by a caller at runtime."""
     with pytest.raises(Exception):  # FrozenInstanceError (subclass of AttributeError)
       SCHEDULE_BLOCK.category = "Mutated"  # type: ignore[misc]
+
+
+class TestStatementRegistration:
+  @pytest.mark.parametrize(
+    "block_type,entry",
+    [
+      ("balance_sheet", BALANCE_SHEET_BLOCK),
+      ("income_statement", INCOME_STATEMENT_BLOCK),
+      ("cash_flow_statement", CASH_FLOW_STATEMENT_BLOCK),
+      ("equity_statement", EQUITY_STATEMENT_BLOCK),
+    ],
+  )
+  def test_statement_block_registered(self, block_type: str, entry) -> None:
+    assert block_type in REGISTRY
+    assert REGISTRY[block_type] is entry
+    assert get(block_type) is entry
+
+  @pytest.mark.parametrize("block_type", STATEMENT_BLOCK_IDS)
+  def test_statement_block_shape(self, block_type: str) -> None:
+    entry = get(block_type)
+    assert entry.id == block_type
+    assert entry.category == "Reporting"
+    assert entry.construction_mode == "compositional"
+    assert entry.concept_arrangement_default == "roll_up"
+    assert entry.member_arrangement_default == "aggregation"
+    assert entry.mechanics_schema is StatementMechanics
+    # All four statement block types surface on the library sentinel
+    # because their Structures live in public.structures.
+    assert entry.surfaces_in_library is True

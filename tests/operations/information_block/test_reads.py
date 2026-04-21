@@ -12,6 +12,7 @@ from robosystems.models.api.information_block import (
   InformationBlockEnvelope,
   InformationModelResponse,
   ScheduleMechanics,
+  StatementMechanics,
 )
 from robosystems.operations.information_block.reads import (
   get_information_block,
@@ -48,13 +49,14 @@ class TestGetInformationBlock:
     assert get_information_block(session, "struct_missing") is None
 
   def test_unknown_block_type_returns_none(self) -> None:
-    """Structures with a structure_type not yet modeled (e.g., 'balance_sheet'
-    pre-Phase-β) return None rather than raising — can't build the envelope."""
+    """Structures with a structure_type not yet modeled in the registry
+    (e.g., legacy ``custom`` or ``chart_of_accounts`` rows) return None
+    rather than raising — can't build the envelope."""
     session = MagicMock()
     structure = MagicMock()
-    structure.structure_type = "balance_sheet"
+    structure.structure_type = "chart_of_accounts"
     session.get.return_value = structure
-    assert get_information_block(session, "struct_bs") is None
+    assert get_information_block(session, "struct_coa") is None
 
   def test_dispatches_to_schedule_handler(self) -> None:
     session = MagicMock()
@@ -92,15 +94,17 @@ class TestListInformationBlocks:
     # No query attempted — we short-circuited on the library gate.
     session.execute.assert_not_called()
 
-  def test_library_sentinel_without_block_type_returns_empty_when_none_opt_in(
-    self,
-  ) -> None:
-    """Phase a: no block type has surfaces_in_library=True, so the sentinel
-    returns [] even without a block_type filter."""
+  def test_library_sentinel_surfaces_only_opt_in_block_types(self) -> None:
+    """Phase b: statement block types have surfaces_in_library=True;
+    schedule does not. On the sentinel we run one query scoped to the
+    opt-in types and skip the rest."""
     session = MagicMock()
+    # No library structures seeded in this unit test → empty result.
+    session.execute.return_value.scalars.return_value.all.return_value = []
     result = list_information_blocks(session, library_sentinel=True)
     assert result == []
-    session.execute.assert_not_called()
+    # One query attempted — against the 4 statement block types only.
+    session.execute.assert_called_once()
 
   def test_tenant_query_includes_registered_block_types(self) -> None:
     """On a tenant graph, the query runs against Structure rows for all
@@ -121,10 +125,12 @@ class TestListInformationBlocks:
     assert result[0] is expected
 
   def test_category_filter_narrows_to_matching_block_types(self) -> None:
+    """Category 'Nonexistent' matches no registered block type — empty
+    result without a DB query. Phase b categories in use are 'Close'
+    (schedule) and 'Reporting' (4 statement types)."""
     session = MagicMock()
-    # Category 'Close' matches SCHEDULE_BLOCK; 'Reporting' matches nothing
     result = list_information_blocks(
-      session, category="Reporting", library_sentinel=False
+      session, category="Nonexistent", library_sentinel=False
     )
     assert result == []
     session.execute.assert_not_called()
@@ -146,12 +152,12 @@ class TestListInformationBlocks:
     schedule_row = MagicMock()
     schedule_row.id = "struct_s"
     schedule_row.structure_type = "schedule"
-    bs_row = MagicMock()
-    bs_row.id = "struct_bs"
-    bs_row.structure_type = "balance_sheet"  # not in registry yet
+    coa_row = MagicMock()
+    coa_row.id = "struct_coa"
+    coa_row.structure_type = "chart_of_accounts"  # not in registry yet
     session.execute.return_value.scalars.return_value.all.return_value = [
       schedule_row,
-      bs_row,
+      coa_row,
     ]
     expected = _envelope("struct_s")
     mock_build = MagicMock(return_value=expected)
@@ -160,3 +166,51 @@ class TestListInformationBlocks:
       result = list_information_blocks(session, library_sentinel=False)
     assert len(result) == 1
     assert result[0].id == "struct_s"
+
+  def test_library_sentinel_balance_sheet_filter_queries_statement_types(
+    self,
+  ) -> None:
+    """When ``block_type='balance_sheet'`` is supplied on the sentinel,
+    ``surfaces_in_library=True`` → query runs, scoped to the one type."""
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    result = list_information_blocks(
+      session, block_type="balance_sheet", library_sentinel=True
+    )
+    assert result == []
+    session.execute.assert_called_once()
+
+  def test_list_surfaces_statement_blocks_on_tenant_graph(self) -> None:
+    """A tenant Structure with ``structure_type='balance_sheet'`` flows
+    through the statement handler and surfaces its envelope."""
+    from robosystems.operations.information_block.registry import (
+      BALANCE_SHEET_BLOCK,
+    )
+
+    session = MagicMock()
+    bs_row = MagicMock()
+    bs_row.id = "struct_balance_sheet"
+    bs_row.structure_type = "balance_sheet"
+    session.execute.return_value.scalars.return_value.all.return_value = [bs_row]
+
+    expected = InformationBlockEnvelope(
+      id="struct_balance_sheet",
+      block_type="balance_sheet",
+      name="Balance Sheet",
+      display_name="Balance Sheet",
+      category="Reporting",
+      information_model=InformationModelResponse(
+        concept_arrangement="roll_up", member_arrangement="aggregation"
+      ),
+      artifact=ArtifactResponse(mechanics=StatementMechanics()),
+    )
+    mock_build = MagicMock(return_value=expected)
+    patched = dataclasses.replace(
+      BALANCE_SHEET_BLOCK, dispatch_build_envelope=mock_build
+    )
+    with patch.dict(REGISTRY_PATH, {"balance_sheet": patched}):
+      result = list_information_blocks(
+        session, block_type="balance_sheet", library_sentinel=False
+      )
+    assert len(result) == 1
+    assert result[0].block_type == "balance_sheet"

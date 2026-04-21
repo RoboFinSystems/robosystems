@@ -121,3 +121,16 @@ class TestCreateInformationBlock:
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
       with pytest.raises(RuntimeError, match="dispatch_build_envelope returned None"):
         create_information_block(session, body, created_by="usr_1")
+
+  @pytest.mark.parametrize(
+    "block_type",
+    ["balance_sheet", "income_statement", "cash_flow_statement", "equity_statement"],
+  )
+  def test_statement_block_type_raises_not_implemented(self, block_type: str) -> None:
+    """Statement block types raise NotImplementedError in dispatch_create —
+    the registrar's error_map translates this to HTTP 501. Statements are
+    generated via ``create-report``, not ``create-information-block``."""
+    session = MagicMock()
+    body = CreateInformationBlockRequest(block_type=block_type, payload={})
+    with pytest.raises(NotImplementedError, match="create-report"):
+      create_information_block(session, body, created_by="usr_1")

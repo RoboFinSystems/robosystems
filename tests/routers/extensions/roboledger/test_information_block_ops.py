@@ -154,6 +154,38 @@ class TestCreateInformationBlockOp:
     assert exc.value.status_code == 422
 
   @pytest.mark.asyncio
+  async def test_statement_block_type_returns_501(self) -> None:
+    """Statement block types raise NotImplementedError in dispatch_create
+    (pointing callers to create-report). The registrar's error_map routes
+    NotImplementedError → 501."""
+    from fastapi import HTTPException
+
+    body = CreateInformationBlockRequest(block_type="balance_sheet", payload={})
+    with (
+      patch(
+        CMD_PATH,
+        side_effect=NotImplementedError(
+          "Statements are generated via create-report, not create-information-block."
+        ),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await create_information_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+
+    assert exc.value.status_code == 501
+    assert "create-report" in str(exc.value.detail)
+
+  @pytest.mark.asyncio
   async def test_idempotency_replay_returns_cached_envelope(self) -> None:
     """Same Idempotency-Key + same body → second call returns cached
     result without re-running the command."""

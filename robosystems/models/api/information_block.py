@@ -116,9 +116,27 @@ class ScheduleMechanics(BaseModel):
   )
 
 
+class StatementMechanics(BaseModel):
+  """Renderer mechanics for the statement family of block types.
+
+  Covers ``balance_sheet``, ``income_statement``, ``cash_flow_statement``,
+  and ``equity_statement``. Phase b ships a minimal tagged body — the
+  concept_arrangement + member_arrangement on the envelope's
+  InformationModelResponse carry the shape, and the existing
+  ``statement(...)`` GraphQL field continues to serve rendered output.
+  Phase d fleshes out typed fields (``template_id``,
+  ``rollup_root_element_ids``, ``period_comparisons``) once
+  ``artifact_mechanics`` becomes a real column.
+  """
+
+  kind: Literal["statement_renderer"] = "statement_renderer"
+
+
 # New block-type mechanics models add a `kind` literal and extend this
 # union. Pydantic dispatches on `kind` via the discriminator tag.
-ArtifactMechanics = Annotated[ScheduleMechanics, Field(discriminator="kind")]
+ArtifactMechanics = Annotated[
+  ScheduleMechanics | StatementMechanics, Field(discriminator="kind")
+]
 
 
 # ── Information Model + Artifact envelope components ──────────────────────
@@ -237,4 +255,5 @@ __all__ = [
   "InformationBlockEnvelope",
   "InformationModelResponse",
   "ScheduleMechanics",
+  "StatementMechanics",
 ]

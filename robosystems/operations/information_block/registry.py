@@ -12,10 +12,34 @@ per block type — ``schedule.py``, ``statement.py``, ...).
 
 from __future__ import annotations
 
+from pydantic import BaseModel, ConfigDict
+
 from robosystems.models.api.extensions.schedules import CreateScheduleRequest
-from robosystems.models.api.information_block import ScheduleMechanics
+from robosystems.models.api.information_block import (
+  ScheduleMechanics,
+  StatementMechanics,
+)
 from robosystems.operations.information_block import schedule as schedule_handlers
+from robosystems.operations.information_block.statement import (
+  STATEMENT_CATEGORY,
+  STATEMENT_DISPLAY,
+  make_statement_handlers,
+)
 from robosystems.operations.information_block.types import BlockTypeRegistryEntry
+
+
+class _EmptyCreateRequest(BaseModel):
+  """Placeholder ``create_request_model`` for compositional block types.
+
+  Statement block types raise ``NotImplementedError`` in
+  ``dispatch_create`` — their envelopes materialise from library atoms
+  and tenant report facts, not from a create payload. This empty model
+  keeps the OpenAPI shape honest ("no payload expected, and the call
+  will 501 anyway").
+  """
+
+  model_config = ConfigDict(extra="forbid")
+
 
 # ── Schedule ────────────────────────────────────────────────────────────────
 
@@ -43,10 +67,59 @@ SCHEDULE_BLOCK = BlockTypeRegistryEntry(
   surfaces_in_library=False,
 )
 
+
+# ── Statements (compositional) ─────────────────────────────────────────────
+
+
+def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
+  """Build a registry entry for a statement-family block type.
+
+  All four statement block types share the same construction mode,
+  category, Information Model defaults, and dispatch handlers — they
+  differ only in their ``block_type`` discriminator and display
+  strings. This helper factors the common shape.
+  """
+  display_name, display_plural = STATEMENT_DISPLAY[block_type]
+  handlers = make_statement_handlers(block_type)
+  return BlockTypeRegistryEntry(
+    id=block_type,
+    display_name=display_name,
+    display_plural=display_plural,
+    category=STATEMENT_CATEGORY,
+    icon=icon,
+    description=(
+      f"{display_name} — library-seeded reporting structure. Facts are "
+      f"surfaced from the tenant's most recent Report; created via "
+      f"create-report, not create-information-block."
+    ),
+    concept_arrangement_default="roll_up",
+    member_arrangement_default="aggregation",
+    mechanics_schema=StatementMechanics,
+    create_request_model=_EmptyCreateRequest,
+    construction_mode="compositional",
+    dispatch_create=handlers["create"],
+    dispatch_build_envelope=handlers["build_envelope"],
+    # Statement Structures live in public.structures (library-immutable)
+    # and should surface on the library sentinel, with facts=[] because
+    # reports live in tenant schemas.
+    surfaces_in_library=True,
+  )
+
+
+BALANCE_SHEET_BLOCK = _make_statement_entry("balance_sheet", "scale-3d")
+INCOME_STATEMENT_BLOCK = _make_statement_entry("income_statement", "trending-up")
+CASH_FLOW_STATEMENT_BLOCK = _make_statement_entry("cash_flow_statement", "waves")
+EQUITY_STATEMENT_BLOCK = _make_statement_entry("equity_statement", "pie-chart")
+
+
 # ── Registry ────────────────────────────────────────────────────────────────
 
 REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   SCHEDULE_BLOCK.id: SCHEDULE_BLOCK,
+  BALANCE_SHEET_BLOCK.id: BALANCE_SHEET_BLOCK,
+  INCOME_STATEMENT_BLOCK.id: INCOME_STATEMENT_BLOCK,
+  CASH_FLOW_STATEMENT_BLOCK.id: CASH_FLOW_STATEMENT_BLOCK,
+  EQUITY_STATEMENT_BLOCK.id: EQUITY_STATEMENT_BLOCK,
 }
 
 
@@ -69,6 +142,10 @@ def list_registered() -> list[BlockTypeRegistryEntry]:
 
 
 __all__ = [
+  "BALANCE_SHEET_BLOCK",
+  "CASH_FLOW_STATEMENT_BLOCK",
+  "EQUITY_STATEMENT_BLOCK",
+  "INCOME_STATEMENT_BLOCK",
   "REGISTRY",
   "SCHEDULE_BLOCK",
   "get",
