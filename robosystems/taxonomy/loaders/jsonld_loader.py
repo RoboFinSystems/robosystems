@@ -43,6 +43,7 @@ RS_NS = RS_VOCAB  # alias for readability
 RULE_CATEGORY_VALUES: frozenset[str] = frozenset(
   {
     "AutomatedAccountingAndReportingChecks",
+    "DisclosureMechanicsRule",
     "FundamentalAccountingConceptRelation",
     "PeerConsistencyRule",
     "PriorPeriodConsistencyRule",

@@ -138,6 +138,7 @@ _NARROW_STRUCTURE_TYPE_CHECK = (
 _RULE_CATEGORY_CHECK = (
   "rule_category IN ("
   "'AutomatedAccountingAndReportingChecks', "
+  "'DisclosureMechanicsRule', "
   "'FundamentalAccountingConceptRelation', "
   "'PeerConsistencyRule', "
   "'PriorPeriodConsistencyRule', "

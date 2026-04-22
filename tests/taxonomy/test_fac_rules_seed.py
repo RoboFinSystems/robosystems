@@ -1,8 +1,8 @@
-"""Tests for the hand-curated fac-rules/v1 JSON-LD seed.
+"""Tests for the fac-rules/v1 JSON-LD seed.
 
 Pure data tests — parses the seed via
 :func:`robosystems.taxonomy.loaders.jsonld_loader.load_taxonomy_package`
-and asserts the shape Phase δ.2 ships: 7 forked rules drawn from two
+and asserts the shape Phase δ.3 ships: 14 forked rules drawn from three
 rule categories and five rule patterns, every `$Variable` bound via
 `rule_variables`, every rule scoped to a known fac-calculations /
 fac-presentation Structure role URI.
@@ -66,11 +66,11 @@ class TestPackageMetadata:
 
 
 class TestRuleCount:
-  def test_has_seven_rules(self, rules: list[RuleSpec]) -> None:
-    """Phase δ.2 freezes the seed at 7 hand-curated rules — every new
-    rule broadens the surface for downstream copy / coverage tests and
-    should be added deliberately."""
-    assert len(rules) == 7
+  def test_has_fourteen_rules(self, rules: list[RuleSpec]) -> None:
+    """Phase δ.3 expands the seed to 14 rules: 7 from Phase δ.2 plus
+    2 harvested from XBRL formula linkbases (IS / CNA identities) and
+    5 from disclosure-mechanics definition linkbases."""
+    assert len(rules) == 14
 
 
 class TestRuleEnums:
@@ -82,14 +82,15 @@ class TestRuleEnums:
     for rule in rules:
       assert rule.rule_pattern in RULE_PATTERN_VALUES
 
-  def test_seed_covers_two_categories(self, rules: list[RuleSpec]) -> None:
-    """Two of eight cm:VerificationRule categories seeded in Phase δ.2
-    — the remaining six are backfilled by Phase δ.3's XBRL parser when
-    Charlie Hoffman's source artifacts for them are harvested."""
+  def test_seed_covers_three_categories(self, rules: list[RuleSpec]) -> None:
+    """Three of eight cm:VerificationRule categories seeded in Phase δ.3:
+    the two from δ.2 plus DisclosureMechanicsRule harvested from the
+    Seattle Method dm definition linkbases."""
     categories = {rule.rule_category for rule in rules}
     assert categories == {
       "FundamentalAccountingConceptRelation",
       "ReportLevelModelStructureRule",
+      "DisclosureMechanicsRule",
     }
 
   def test_seed_covers_five_patterns(self, rules: list[RuleSpec]) -> None:
@@ -167,13 +168,13 @@ class TestRuleExpressionsBindVariables:
 
 
 class TestRuleIdShape:
-  def test_ids_are_fac_rule_prefixed(self, rules: list[RuleSpec]) -> None:
-    """Blank-node local ids prefix with `fac-rule-` — mirrors
-    fac-calculations' `fac-calc-*` convention. The writer rewrites to
-    a deterministic UUID5 at seed time."""
+  def test_ids_have_known_prefix(self, rules: list[RuleSpec]) -> None:
+    """Blank-node local ids prefix with `fac-rule-` (Phase δ.2 rules) or
+    `sfac6-rule-` (Phase δ.3 formula/dm harvested rules). The writer
+    rewrites to a deterministic UUID5 at seed time."""
     for rule in rules:
-      assert "fac-rule-" in rule.id, (
-        f"rule id {rule.id!r} should contain 'fac-rule-' local part"
+      assert "fac-rule-" in rule.id or "sfac6-rule-" in rule.id, (
+        f"rule id {rule.id!r} should contain 'fac-rule-' or 'sfac6-rule-'"
       )
 
   def test_ids_are_unique(self, rules: list[RuleSpec]) -> None:
