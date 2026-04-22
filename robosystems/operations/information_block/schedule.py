@@ -23,6 +23,8 @@ from sqlalchemy.orm import Session
 from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
   DeleteScheduleRequest,
+  EntryTemplateRequest,
+  ScheduleMetadataRequest,
   UpdateScheduleRequest,
 )
 from robosystems.models.api.information_block import (
@@ -104,6 +106,36 @@ def delete(
   return payload.structure_id
 
 
+def _load_schedule_mechanics(
+  structure: Structure, periods_with_entries: int
+) -> ScheduleMechanics:
+  """Build the typed Schedule mechanics from a Structure row.
+
+  Prefers the Phase δ typed column (``artifact_mechanics``). Falls back
+  to the legacy ``metadata_`` JSONB shape for Schedule rows that
+  pre-date the Phase δ backfill — both paths produce the same
+  :class:`ScheduleMechanics` envelope arm.
+  """
+  mechanics_blob = structure.artifact_mechanics
+  if mechanics_blob:
+    return ScheduleMechanics.model_validate(
+      {**mechanics_blob, "periods_with_entries": periods_with_entries}
+    )
+
+  meta = structure.metadata_ or {}
+  raw_schedule_meta = meta.get("schedule_metadata")
+  return ScheduleMechanics(
+    kind="closing_entry_generator",
+    entry_template=EntryTemplateRequest.model_validate(meta.get("entry_template", {})),
+    schedule_metadata=(
+      ScheduleMetadataRequest.model_validate(raw_schedule_meta)
+      if raw_schedule_meta
+      else None
+    ),
+    periods_with_entries=periods_with_entries,
+  )
+
+
 def build_envelope(
   session: Session, structure_id: str
 ) -> InformationBlockEnvelope | None:
@@ -112,9 +144,9 @@ def build_envelope(
   Returns ``None`` when the structure doesn't exist or isn't a schedule,
   so the generic reader can cleanly distinguish misses from errors.
 
-  Phase a reads mechanics from the existing ``metadata_`` JSONB; Phase d
-  migrates the fields onto typed columns and this code path switches to
-  reading those columns without changing the envelope shape.
+  Phase δ reads mechanics from the typed ``artifact_mechanics`` column,
+  falling back to legacy ``metadata_`` JSONB for rows that pre-date the
+  backfill.
   """
   structure = session.get(Structure, structure_id)
   if structure is None or structure.structure_type != SCHEDULE_BLOCK_TYPE:
@@ -133,13 +165,7 @@ def build_envelope(
     or 0
   )
 
-  meta = structure.metadata_ or {}
-  mechanics = ScheduleMechanics(
-    kind="closing_entry_generator",
-    entry_template=meta.get("entry_template", {}) or {},
-    schedule_metadata=meta.get("schedule_metadata", {}) or {},
-    periods_with_entries=periods_with_entries,
-  )
+  mechanics = _load_schedule_mechanics(structure, periods_with_entries)
 
   taxonomy_name = session.execute(
     select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
@@ -186,12 +212,12 @@ def build_envelope(
     taxonomy_id=structure.taxonomy_id,
     taxonomy_name=taxonomy_name,
     information_model=InformationModelResponse(
-      concept_arrangement="roll_forward",
-      member_arrangement=None,
+      concept_arrangement=structure.concept_arrangement or "roll_forward",
+      member_arrangement=structure.member_arrangement,
     ),
     artifact=ArtifactResponse(
       topic=structure.description,
-      parenthetical_note=None,
+      parenthetical_note=structure.parenthetical_note,
       template=None,
       mechanics=mechanics,
     ),

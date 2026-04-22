@@ -173,6 +173,13 @@ def _build_statement_envelope(
         .all()
       )
 
+  # Prefer the typed Phase δ column; fall back to the Phase β empty
+  # tagged body for library-seeded rows that pre-date the backfill.
+  if structure.artifact_mechanics:
+    mechanics = StatementMechanics.model_validate(structure.artifact_mechanics)
+  else:
+    mechanics = StatementMechanics(kind="statement_renderer")
+
   display_name, _display_plural = STATEMENT_DISPLAY[block_type]
   return InformationBlockEnvelope(
     id=structure.id,
@@ -183,14 +190,14 @@ def _build_statement_envelope(
     taxonomy_id=structure.taxonomy_id,
     taxonomy_name=taxonomy_name,
     information_model=InformationModelResponse(
-      concept_arrangement="roll_up",
-      member_arrangement="aggregation",
+      concept_arrangement=structure.concept_arrangement or "roll_up",
+      member_arrangement=structure.member_arrangement or "aggregation",
     ),
     artifact=ArtifactResponse(
       topic=structure.description,
-      parenthetical_note=None,
+      parenthetical_note=structure.parenthetical_note,
       template=None,
-      mechanics=StatementMechanics(kind="statement_renderer"),
+      mechanics=mechanics,
     ),
     elements=[element_to_lite(e) for e in elements],
     connections=[association_to_connection(a) for a in associations],

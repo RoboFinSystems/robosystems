@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from robosystems.models.api.extensions.schedules import EntryTemplateRequest
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   InformationBlockEnvelope,
@@ -22,6 +23,10 @@ from robosystems.operations.information_block.registry import SCHEDULE_BLOCK
 
 REGISTRY_PATH = "robosystems.operations.information_block.registry.REGISTRY"
 
+_TEST_ENTRY_TEMPLATE = EntryTemplateRequest(
+  debit_element_id="elem_dr", credit_element_id="elem_cr"
+)
+
 
 def _envelope(structure_id: str = "struct_1") -> InformationBlockEnvelope:
   return InformationBlockEnvelope(
@@ -31,7 +36,9 @@ def _envelope(structure_id: str = "struct_1") -> InformationBlockEnvelope:
     display_name="Schedule",
     category="Close",
     information_model=InformationModelResponse(concept_arrangement="roll_forward"),
-    artifact=ArtifactResponse(mechanics=ScheduleMechanics()),
+    artifact=ArtifactResponse(
+      mechanics=ScheduleMechanics(entry_template=_TEST_ENTRY_TEMPLATE)
+    ),
   )
 
 

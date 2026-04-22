@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
+from robosystems.models.api.extensions.schedules import EntryTemplateRequest
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   CreateInformationBlockRequest,
@@ -33,6 +34,10 @@ from robosystems.operations.information_block.commands import (
   update_information_block,
 )
 from robosystems.operations.information_block.registry import SCHEDULE_BLOCK
+
+_TEST_ENTRY_TEMPLATE = EntryTemplateRequest(
+  debit_element_id="elem_dr", credit_element_id="elem_cr"
+)
 
 REGISTRY_PATH = "robosystems.operations.information_block.registry.REGISTRY"
 
@@ -60,7 +65,9 @@ def _minimal_envelope(structure_id: str = "struct_new") -> InformationBlockEnvel
     display_name="Schedule",
     category="Close",
     information_model=InformationModelResponse(concept_arrangement="roll_forward"),
-    artifact=ArtifactResponse(mechanics=ScheduleMechanics()),
+    artifact=ArtifactResponse(
+      mechanics=ScheduleMechanics(entry_template=_TEST_ENTRY_TEMPLATE)
+    ),
   )
 
 

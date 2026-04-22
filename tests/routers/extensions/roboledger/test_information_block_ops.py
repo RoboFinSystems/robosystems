@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.middleware.operations import OperationEnvelope
+from robosystems.models.api.extensions.schedules import EntryTemplateRequest
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   CreateInformationBlockRequest,
@@ -28,6 +29,10 @@ from robosystems.routers.extensions.roboledger.operations import (
   create_information_block_op,
   delete_information_block_op,
   update_information_block_op,
+)
+
+_TEST_ENTRY_TEMPLATE = EntryTemplateRequest(
+  debit_element_id="elem_dr", credit_element_id="elem_cr"
 )
 
 GRAPH_ID = "kg01234567890abcdef"
@@ -54,7 +59,9 @@ def _envelope(structure_id: str = "struct_ib_abc") -> InformationBlockEnvelope:
     display_name="Schedule",
     category="Close",
     information_model=InformationModelResponse(concept_arrangement="roll_forward"),
-    artifact=ArtifactResponse(mechanics=ScheduleMechanics()),
+    artifact=ArtifactResponse(
+      mechanics=ScheduleMechanics(entry_template=_TEST_ENTRY_TEMPLATE)
+    ),
   )
 
 

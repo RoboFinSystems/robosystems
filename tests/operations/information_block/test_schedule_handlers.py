@@ -116,8 +116,13 @@ class TestBuildEnvelope:
     session.get.return_value = structure
     assert schedule_handlers.build_envelope(session, "struct_other") is None
 
-  def test_packs_mechanics_from_metadata_jsonb(self) -> None:
-    """Phase a reads mechanics from structures.metadata_ JSONB."""
+  def test_packs_mechanics_from_typed_artifact_mechanics_column(self) -> None:
+    """Phase δ reads mechanics from structures.artifact_mechanics column.
+
+    This is the post-backfill path every Schedule row takes: the typed
+    JSONB column is the authoritative source; metadata_ carries the
+    same content during the transition window but is not consulted.
+    """
     session = MagicMock()
     structure = MagicMock()
     structure.id = "struct_abc"
@@ -125,7 +130,11 @@ class TestBuildEnvelope:
     structure.name = "Equipment Depreciation"
     structure.description = "Depreciation schedule — equipment"
     structure.taxonomy_id = "tax_01"
-    structure.metadata_ = {
+    structure.concept_arrangement = "roll_forward"
+    structure.member_arrangement = None
+    structure.parenthetical_note = None
+    structure.artifact_mechanics = {
+      "kind": "closing_entry_generator",
       "entry_template": {
         "debit_element_id": "elem_dep",
         "credit_element_id": "elem_accum",
@@ -141,9 +150,8 @@ class TestBuildEnvelope:
         "asset_element_id": "elem_ppe",
       },
     }
+    structure.metadata_ = {"should_be_ignored": True}
     session.get.return_value = structure
-    # Query order: entry count, taxonomy name, associations, facts.
-    # No elements query when element_ids set is empty.
     session.execute.side_effect = [
       _exec_result(scalar=5),  # periods_with_entries count
       _exec_result(scalar="US GAAP"),  # taxonomy name
@@ -163,27 +171,42 @@ class TestBuildEnvelope:
 
     mechanics = envelope.artifact.mechanics
     assert mechanics.kind == "closing_entry_generator"
-    assert mechanics.entry_template["debit_element_id"] == "elem_dep"
-    assert mechanics.schedule_metadata["method"] == "straight_line"
-    # Phase a: reserved fields are empty
+    assert mechanics.entry_template.debit_element_id == "elem_dep"
+    assert mechanics.schedule_metadata is not None
+    assert mechanics.schedule_metadata.method == "straight_line"
     assert envelope.rules == []
     assert envelope.dimensions == []
     assert envelope.fact_set is None
     assert envelope.verification_results == []
-    # Runtime + lineage fields populated from the new queries.
     assert envelope.taxonomy_id == "tax_01"
     assert envelope.taxonomy_name == "US GAAP"
     assert mechanics.periods_with_entries == 5
 
-  def test_empty_metadata_defaults_to_empty_mechanics(self) -> None:
+  def test_falls_back_to_metadata_jsonb_when_artifact_mechanics_null(self) -> None:
+    """Pre-δ Schedule rows lacking artifact_mechanics still surface.
+
+    The migration backfills every existing Schedule row, so this path is
+    only exercised by rows inserted between DDL and backfill — or rows
+    from a future adapter that bypasses the typed column write. Keeping
+    the fallback avoids silent envelope failures during any such gap.
+    """
     session = MagicMock()
     structure = MagicMock()
-    structure.id = "struct_empty"
+    structure.id = "struct_legacy"
     structure.structure_type = "schedule"
-    structure.name = "Empty"
+    structure.name = "Legacy Schedule"
     structure.description = None
     structure.taxonomy_id = "tax_01"
-    structure.metadata_ = None
+    structure.concept_arrangement = None  # pre-backfill, read default
+    structure.member_arrangement = None
+    structure.parenthetical_note = None
+    structure.artifact_mechanics = None
+    structure.metadata_ = {
+      "entry_template": {
+        "debit_element_id": "elem_dep",
+        "credit_element_id": "elem_accum",
+      },
+    }
     session.get.return_value = structure
     session.execute.side_effect = [
       _exec_result(scalar=0),  # periods_with_entries
@@ -192,8 +215,10 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[]),  # facts
     ]
 
-    envelope = schedule_handlers.build_envelope(session, "struct_empty")
+    envelope = schedule_handlers.build_envelope(session, "struct_legacy")
     assert envelope is not None
-    assert envelope.artifact.mechanics.entry_template == {}
-    assert envelope.artifact.mechanics.schedule_metadata == {}
-    assert envelope.artifact.mechanics.periods_with_entries == 0
+    mechanics = envelope.artifact.mechanics
+    assert mechanics.entry_template.debit_element_id == "elem_dep"
+    assert mechanics.schedule_metadata is None
+    assert mechanics.periods_with_entries == 0
+    assert envelope.information_model.concept_arrangement == "roll_forward"

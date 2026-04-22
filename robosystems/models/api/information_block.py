@@ -18,6 +18,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from robosystems.models.api.extensions.schedules import (
+  EntryTemplateRequest,
+  ScheduleMetadataRequest,
+)
+
 # ── Atom "Lite" projections ────────────────────────────────────────────────
 
 
@@ -92,22 +97,24 @@ class FactLite(BaseModel):
 class ScheduleMechanics(BaseModel):
   """Closing-entry generator mechanics for ``block_type='schedule'``.
 
-  Mirrors the shape already stored in ``structures.metadata_`` (fields
-  ``entry_template`` + ``schedule_metadata``) for Schedule POC rows.
-  Phase d migrates this onto a typed ``artifact_mechanics`` column; in
-  Phase a it's read-through validation over the existing JSONB.
+  Phase δ: reads directly from the typed ``structures.artifact_mechanics``
+  JSONB column. ``entry_template`` and ``schedule_metadata`` are typed
+  sub-models (reusing the wire-level request shapes so OpenAPI emits one
+  canonical type per concept); the envelope builder falls back to
+  ``structures.metadata_`` for pre-δ Schedule rows that the tenant
+  backfill hasn't yet migrated.
   """
 
   kind: Literal["closing_entry_generator"] = "closing_entry_generator"
-  entry_template: dict[str, Any] = Field(
-    default_factory=dict,
+  entry_template: EntryTemplateRequest = Field(
+    ...,
     description=(
       "Debit/credit elements + memo template + auto_reverse flag that "
       "drive fact→entry generation for each in-scope period."
     ),
   )
-  schedule_metadata: dict[str, Any] = Field(
-    default_factory=dict,
+  schedule_metadata: ScheduleMetadataRequest | None = Field(
+    None,
     description=(
       "Method (straight_line / declining_balance / units_of_production), "
       "original_amount, residual_value, useful_life_months, optional "
@@ -128,16 +135,43 @@ class StatementMechanics(BaseModel):
   """Renderer mechanics for the statement family of block types.
 
   Covers ``balance_sheet``, ``income_statement``, ``cash_flow_statement``,
-  and ``equity_statement``. Phase b ships a minimal tagged body — the
-  concept_arrangement + member_arrangement on the envelope's
-  InformationModelResponse carry the shape, and the existing
-  ``statement(...)`` GraphQL field continues to serve rendered output.
-  Phase d fleshes out typed fields (``template_id``,
-  ``rollup_root_element_ids``, ``period_comparisons``) once
-  ``artifact_mechanics`` becomes a real column.
+  and ``equity_statement``. Phase δ adds typed mechanics fields alongside
+  the existing Phase β tagged body; the fields are all optional so
+  library-seeded rows that haven't been enriched yet still validate.
+  The existing ``statement(...)`` GraphQL field continues to serve
+  rendered output; this mechanics model is the source of truth for
+  future renderer configuration.
   """
 
   kind: Literal["statement_renderer"] = "statement_renderer"
+  template_id: str | None = Field(
+    None,
+    description=(
+      "Pinned template id — when set, the renderer uses that template's "
+      "layout instead of the block's default. The templates table lands "
+      "in a later phase; the column lands now so tenant writes can stamp "
+      "it without another migration round-trip."
+    ),
+  )
+  rollup_root_element_ids: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Element ids that anchor the statement's roll-up roots (e.g. the "
+      "Assets and LiabilitiesAndEquity totals on a Balance Sheet). "
+      "Empty on library-seeded rows until tenant adoption."
+    ),
+  )
+  period_comparisons: int = Field(
+    default=1,
+    ge=1,
+    le=4,
+    description=(
+      "Number of period columns to render in comparative mode: 1 = "
+      "single-period, 2 = prior-period comparison, 3-4 = multi-year "
+      "trailing view. Defaults to single-period; overridden by the "
+      "template when one is attached."
+    ),
+  )
 
 
 # New block-type mechanics models add a `kind` literal and extend this

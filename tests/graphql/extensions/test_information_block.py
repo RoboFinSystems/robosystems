@@ -12,12 +12,17 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from robosystems.graphql.schema import schema
+from robosystems.models.api.extensions.schedules import EntryTemplateRequest
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   InformationBlockEnvelope,
   InformationModelResponse,
   ScheduleMechanics,
   StatementMechanics,
+)
+
+_TEST_ENTRY_TEMPLATE = EntryTemplateRequest(
+  debit_element_id="elem_dr", credit_element_id="elem_cr"
 )
 
 GRAPH_ID = "kg01234567890abcdef"
@@ -68,7 +73,9 @@ def _envelope(structure_id: str = "struct_ib_01") -> InformationBlockEnvelope:
     display_name="Schedule",
     category="Close",
     information_model=InformationModelResponse(concept_arrangement="roll_forward"),
-    artifact=ArtifactResponse(mechanics=ScheduleMechanics()),
+    artifact=ArtifactResponse(
+      mechanics=ScheduleMechanics(entry_template=_TEST_ENTRY_TEMPLATE)
+    ),
   )
 
 

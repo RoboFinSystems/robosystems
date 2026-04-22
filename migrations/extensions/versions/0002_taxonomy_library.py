@@ -305,6 +305,67 @@ def _add_substitution_group_column(conn, schema: str) -> None:
   )
 
 
+def _add_phase_d_columns_to_tenant(conn, schema: str) -> None:
+  """Add Phase d typed-mechanics columns to a tenant's structures table.
+
+  Mirror of the public-schema DDL earlier in the upgrade. Nullable so
+  existing tenant Schedule rows (which only carry ``metadata_`` today)
+  pass the ALTER; the subsequent
+  :func:`_backfill_tenant_schedule_mechanics` populates them.
+  """
+  t = TenantOps(conn, schema)
+  t.add_column("structures", "concept_arrangement", "VARCHAR")
+  t.add_column("structures", "member_arrangement", "VARCHAR")
+  t.add_column("structures", "artifact_mechanics", "JSONB")
+  t.add_column("structures", "parenthetical_note", "VARCHAR")
+  t.add_column("structures", "template_id", "VARCHAR")
+
+
+def _drop_phase_d_columns_from_tenant(conn, schema: str) -> None:
+  """Reverse of :func:`_add_phase_d_columns_to_tenant` for downgrade."""
+  t = TenantOps(conn, schema)
+  for col in (
+    "template_id",
+    "parenthetical_note",
+    "artifact_mechanics",
+    "member_arrangement",
+    "concept_arrangement",
+  ):
+    t.drop_column("structures", col)
+
+
+def _backfill_tenant_schedule_mechanics(conn, schema: str) -> None:
+  """Lift Schedule mechanics out of ``metadata_`` into typed columns.
+
+  Schedule rows in tenant schemas carry ``entry_template`` + ``schedule_metadata``
+  inside the ``metadata_`` JSONB blob today. Phase d moves them into the
+  typed ``artifact_mechanics`` column (discriminated-union-arm shape keyed
+  on ``kind='closing_entry_generator'``) and stamps
+  ``concept_arrangement='roll_forward'`` to match the registry default.
+  Runs after ``copy_library_into_tenant`` so library-seeded statement
+  rows (already populated in public before the copy) don't get clobbered.
+  """
+  conn.execute(
+    text(
+      f"""
+      UPDATE "{schema}".structures
+      SET concept_arrangement = COALESCE(concept_arrangement, 'roll_forward'),
+          artifact_mechanics = COALESCE(
+            artifact_mechanics,
+            jsonb_build_object(
+              'kind', 'closing_entry_generator',
+              'entry_template',
+                COALESCE(metadata -> 'entry_template', '{{}}'::jsonb),
+              'schedule_metadata',
+                COALESCE(metadata -> 'schedule_metadata', '{{}}'::jsonb)
+            )
+          )
+      WHERE structure_type = 'schedule'
+      """
+    )
+  )
+
+
 def _backfill_library_into_tenant(conn, schema: str) -> None:
   """Widen CHECKs, drop old columns, add substitution_group, copy library rows.
 
@@ -313,9 +374,11 @@ def _backfill_library_into_tenant(conn, schema: str) -> None:
   _widen_tenant_checks(conn, schema)
   _drop_old_element_columns(conn, schema)
   _add_substitution_group_column(conn, schema)
+  _add_phase_d_columns_to_tenant(conn, schema)
   _create_tenant_library_tables(conn, schema)
   stats = copy_library_into_tenant(conn, schema)
   print(f"  [{schema}] library backfill: {stats.total:,} rows")
+  _backfill_tenant_schedule_mechanics(conn, schema)
   _install_triggers_for_tenant(conn, schema)
 
 
@@ -531,6 +594,46 @@ def upgrade() -> None:
     "check_structure_type", "structures", _WIDENED_STRUCTURE_TYPE_CHECK
   )
 
+  # Phase d: typed artifact_mechanics + Information-Model axis columns
+  # on public.structures. Folded into 0002 because 0002 is still
+  # unreleased; shipping as a standalone migration would force a second
+  # tenant-schema round-trip. Nullable on add so library loaders and
+  # existing rows (none in public yet at this point in the upgrade, but
+  # defense in depth for tenant ALTERs below) don't fail. Post-seed
+  # UPDATEs populate concept/member_arrangement + artifact_mechanics for
+  # the library-seeded statement Structures; per-tenant UPDATEs backfill
+  # existing Schedule rows from metadata_. See
+  # ``local/docs/specs/information-block.md`` section 4.2, Phase d.
+  op.add_column(
+    "structures",
+    sa.Column("concept_arrangement", sa.String(), nullable=True),
+    schema="public",
+  )
+  op.add_column(
+    "structures",
+    sa.Column("member_arrangement", sa.String(), nullable=True),
+    schema="public",
+  )
+  op.add_column(
+    "structures",
+    sa.Column(
+      "artifact_mechanics",
+      postgresql.JSONB(astext_type=sa.Text()),
+      nullable=True,
+    ),
+    schema="public",
+  )
+  op.add_column(
+    "structures",
+    sa.Column("parenthetical_note", sa.String(), nullable=True),
+    schema="public",
+  )
+  op.add_column(
+    "structures",
+    sa.Column("template_id", sa.String(), nullable=True),
+    schema="public",
+  )
+
   # ──────────────────────────────────────────────────────────────────────
   # 5. Label + reference linkbase tables (XBRL).
   # ──────────────────────────────────────────────────────────────────────
@@ -680,6 +783,30 @@ def upgrade() -> None:
       f"(skipped={counts['classification_assignments_skipped']})"
     )
 
+  # Phase d backfill on public.structures: set concept/member_arrangement
+  # + empty statement_renderer mechanics for the four library-seeded
+  # statement block types. Has to run BEFORE copy_library_into_tenant so
+  # the tenant copy picks up populated values rather than NULL. See
+  # ``local/docs/specs/information-block.md`` section 5.9 block inventory
+  # for the arrangement defaults.
+  conn.execute(
+    text(
+      """
+      UPDATE public.structures
+      SET concept_arrangement = 'roll_up',
+          member_arrangement = 'aggregation',
+          artifact_mechanics = jsonb_build_object(
+            'kind', 'statement_renderer'
+          )
+      WHERE structure_type IN (
+        'balance_sheet', 'income_statement',
+        'cash_flow_statement', 'equity_statement'
+      )
+        AND artifact_mechanics IS NULL
+      """
+    )
+  )
+
   # ──────────────────────────────────────────────────────────────────────
   # 8. Tenant-schema rollout: schema alignment + library backfill + triggers.
   # ──────────────────────────────────────────────────────────────────────
@@ -693,12 +820,14 @@ def upgrade() -> None:
 def downgrade() -> None:
   conn = op.get_bind()
 
-  # Tenant teardown: drop triggers, restore narrow CHECKs, restore the
-  # old classification columns (best-effort — values can't be recovered
-  # losslessly once the junction has been used, so we leave them NULL).
+  # Tenant teardown: drop triggers, restore narrow CHECKs, drop Phase d
+  # columns, restore the old classification columns (best-effort —
+  # values can't be recovered losslessly once the junction has been
+  # used, so we leave them NULL).
   def _teardown_tenant(conn, schema: str) -> None:
     _drop_triggers_for_tenant(conn, schema)
     _restore_narrow_tenant_checks(conn, schema)
+    _drop_phase_d_columns_from_tenant(conn, schema)
 
   for_each_tenant_schema(conn, _teardown_tenant)
   conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))
@@ -765,6 +894,19 @@ def downgrade() -> None:
   op.create_check_constraint(
     "check_structure_type", "structures", _NARROW_STRUCTURE_TYPE_CHECK
   )
+
+  # Drop Phase d columns from public.structures (tenant-schema columns
+  # were dropped above in _teardown_tenant). IF EXISTS makes this safe
+  # when downgrading from a mid-transition state where an earlier
+  # migration run installed 0002 before the Phase δ columns existed.
+  for col in (
+    "template_id",
+    "parenthetical_note",
+    "artifact_mechanics",
+    "member_arrangement",
+    "concept_arrangement",
+  ):
+    conn.execute(text(f"ALTER TABLE public.structures DROP COLUMN IF EXISTS {col}"))
 
   # Drop substitution_group.
   op.drop_index("idx_elements_substitution_group", table_name="elements")

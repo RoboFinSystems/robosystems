@@ -16,11 +16,16 @@ from robosystems.middleware.mcp.tools.information_block_tools import (
   GetInformationBlockTool,
   ListInformationBlocksTool,
 )
+from robosystems.models.api.extensions.schedules import EntryTemplateRequest
 from robosystems.models.api.information_block import (
   ArtifactResponse,
   InformationBlockEnvelope,
   InformationModelResponse,
   ScheduleMechanics,
+)
+
+_TEST_ENTRY_TEMPLATE = EntryTemplateRequest(
+  debit_element_id="elem_dr", credit_element_id="elem_cr"
 )
 
 MODULE = "robosystems.middleware.mcp.tools.information_block_tools"
@@ -51,7 +56,9 @@ def _envelope(structure_id: str = "struct_x") -> InformationBlockEnvelope:
     display_name="Schedule",
     category="Close",
     information_model=InformationModelResponse(concept_arrangement="roll_forward"),
-    artifact=ArtifactResponse(mechanics=ScheduleMechanics()),
+    artifact=ArtifactResponse(
+      mechanics=ScheduleMechanics(entry_template=_TEST_ENTRY_TEMPLATE)
+    ),
   )
 
 

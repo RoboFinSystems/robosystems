@@ -43,7 +43,8 @@ _ELEMENT_REFERENCE_COLS = (
 
 _STRUCTURE_COLS = (
   "id, name, description, structure_type, taxonomy_id, graph_structure_id, "
-  "is_active, metadata, created_at, updated_at, created_by"
+  "is_active, concept_arrangement, member_arrangement, artifact_mechanics, "
+  "parenthetical_note, template_id, metadata, created_at, updated_at, created_by"
 )
 
 _ASSOCIATION_COLS = (

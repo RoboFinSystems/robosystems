@@ -189,10 +189,23 @@ class ScheduleService:
         "asset_element_id": schedule_metadata.asset_element_id,
       }
 
+    # Phase δ: stamp the typed artifact_mechanics column alongside the
+    # legacy metadata_ blob so the envelope builder's typed-column read
+    # path works from creation. metadata_ is kept populated during the
+    # transition window — it's retired in a later phase once the spec
+    # follow-ups remove the fallback path on the read side.
+    artifact_mechanics: dict[str, object] = {
+      "kind": "closing_entry_generator",
+      "entry_template": metadata["entry_template"],
+      "schedule_metadata": metadata.get("schedule_metadata", {}),
+    }
+
     structure = Structure(
       name=name,
       structure_type="schedule",
       taxonomy_id=taxonomy_id,
+      concept_arrangement="roll_forward",
+      artifact_mechanics=artifact_mechanics,
       metadata_=metadata,
       created_by=created_by,
     )

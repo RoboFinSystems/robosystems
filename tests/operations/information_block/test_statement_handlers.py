@@ -32,6 +32,41 @@ def _exec_result(
   return result
 
 
+def _make_statement_structure(
+  *,
+  structure_id: str,
+  block_type: str,
+  name: str,
+  description: str | None = None,
+  taxonomy_id: str = "tax_usgaap",
+  artifact_mechanics: dict[str, Any] | None = None,
+  concept_arrangement: str | None = "roll_up",
+  member_arrangement: str | None = "aggregation",
+) -> MagicMock:
+  """Shape a MagicMock like a Phase δ Structure row for a statement block.
+
+  The envelope builder now reads typed columns (artifact_mechanics,
+  concept/member_arrangement, parenthetical_note) off the row, so
+  MagicMock's auto-attribute behaviour would otherwise inject unwanted
+  truthy values — this helper pins every field the builder touches.
+  """
+  structure = MagicMock()
+  structure.id = structure_id
+  structure.structure_type = block_type
+  structure.name = name
+  structure.description = description
+  structure.taxonomy_id = taxonomy_id
+  structure.artifact_mechanics = (
+    artifact_mechanics
+    if artifact_mechanics is not None
+    else {"kind": "statement_renderer"}
+  )
+  structure.concept_arrangement = concept_arrangement
+  structure.member_arrangement = member_arrangement
+  structure.parenthetical_note = None
+  return structure
+
+
 class TestCreate:
   def test_create_raises_not_implemented_with_create_report_pointer(self) -> None:
     session = MagicMock()
@@ -110,12 +145,12 @@ class TestBuildEnvelope:
   def test_returns_envelope_with_empty_facts_when_no_reports_exist(self) -> None:
     """Library sentinel path: seeded atoms present, no tenant reports."""
     session = MagicMock()
-    structure = MagicMock()
-    structure.id = "struct_balance_sheet"
-    structure.structure_type = "balance_sheet"
-    structure.name = "Balance Sheet"
-    structure.description = "Assets + Liabilities + Equity"
-    structure.taxonomy_id = "tax_usgaap"
+    structure = _make_statement_structure(
+      structure_id="struct_balance_sheet",
+      block_type="balance_sheet",
+      name="Balance Sheet",
+      description="Assets + Liabilities + Equity",
+    )
     session.get.return_value = structure
     # Query order: taxonomy name, associations. Element/report queries
     # skip when element_ids is empty.
@@ -152,12 +187,11 @@ class TestBuildEnvelope:
 
   def test_loads_elements_and_associations_from_library_seed(self) -> None:
     session = MagicMock()
-    structure = MagicMock()
-    structure.id = "struct_income_statement"
-    structure.structure_type = "income_statement"
-    structure.name = "Income Statement"
-    structure.description = None
-    structure.taxonomy_id = "tax_usgaap"
+    structure = _make_statement_structure(
+      structure_id="struct_income_statement",
+      block_type="income_statement",
+      name="Income Statement",
+    )
     session.get.return_value = structure
 
     association = MagicMock()
@@ -213,12 +247,11 @@ class TestBuildEnvelope:
 
   def test_facts_populated_from_most_recent_report(self) -> None:
     session = MagicMock()
-    structure = MagicMock()
-    structure.id = "struct_balance_sheet"
-    structure.structure_type = "balance_sheet"
-    structure.name = "Balance Sheet"
-    structure.description = None
-    structure.taxonomy_id = "tax_usgaap"
+    structure = _make_statement_structure(
+      structure_id="struct_balance_sheet",
+      block_type="balance_sheet",
+      name="Balance Sheet",
+    )
     session.get.return_value = structure
 
     assoc = MagicMock()
@@ -278,12 +311,11 @@ class TestBuildEnvelope:
   )
   def test_display_metadata_is_block_type_specific(self, block_type: str) -> None:
     session = MagicMock()
-    structure = MagicMock()
-    structure.id = f"struct_{block_type}"
-    structure.structure_type = block_type
-    structure.name = statement_handlers.STATEMENT_DISPLAY[block_type][0]
-    structure.description = None
-    structure.taxonomy_id = "tax_usgaap"
+    structure = _make_statement_structure(
+      structure_id=f"struct_{block_type}",
+      block_type=block_type,
+      name=statement_handlers.STATEMENT_DISPLAY[block_type][0],
+    )
     session.get.return_value = structure
     # Query order: taxonomy name, associations. Elements/report queries
     # skip when there are no associations.

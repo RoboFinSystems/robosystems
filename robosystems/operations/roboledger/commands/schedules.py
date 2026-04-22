@@ -270,6 +270,14 @@ def update_schedule(
     }
 
   structure.metadata_ = metadata
+  # Phase δ: keep artifact_mechanics in sync with metadata_ while both
+  # live on the row. Envelope reads prefer artifact_mechanics; writes
+  # stamp both during the transition window.
+  structure.artifact_mechanics = {
+    "kind": "closing_entry_generator",
+    "entry_template": metadata.get("entry_template", {}),
+    "schedule_metadata": metadata.get("schedule_metadata", {}),
+  }
   session.flush()
 
   # Recount for response (same as create_schedule response shape)
