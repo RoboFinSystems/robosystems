@@ -134,6 +134,7 @@ from robosystems.models.api.extensions.transactions import CreateTransactionRequ
 from robosystems.models.api.information_block import (
   CreateInformationBlockRequest,
   DeleteInformationBlockRequest,
+  EvaluateRulesRequest,
   UpdateInformationBlockRequest,
 )
 from robosystems.models.core import User
@@ -146,6 +147,9 @@ from robosystems.operations.information_block.commands import (
 )
 from robosystems.operations.information_block.commands import (
   update_information_block as cmd_update_information_block,
+)
+from robosystems.operations.information_block.rules.commands import (
+  cmd_evaluate_rules,
 )
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
@@ -1442,6 +1446,25 @@ delete_information_block_op = _registrar.register(
       ScheduleNotFoundError: 404,
     },
     mark_stale_reason="information_block_deleted",
+  )
+)
+
+evaluate_rules_op = _registrar.register(
+  OperationSpec(
+    name="evaluate-rules",
+    summary="Evaluate Rules for an Information Block",
+    description=(
+      "Runs every rule targeting the given structure (plus element- and "
+      "association-scoped rules for the structure's atoms), binds "
+      "$Variable references to in-scope facts via qname lookup, writes "
+      "one VerificationResult row per rule, and returns the results plus "
+      "a status-keyed summary. Phase delta.3 — decoding mode, 5 patterns "
+      "(EqualTo, RollUp, RollForward, Exists, CoExists)."
+    ),
+    command=cmd_evaluate_rules,
+    request_model=EvaluateRulesRequest,
+    error_map={ValueError: 422},
+    requires_created_by=True,
   )
 )
 

@@ -633,6 +633,57 @@ class DeleteInformationBlockResponse(BaseModel):
   name: str
 
 
+class EvaluateRulesRequest(BaseModel):
+  """Request body for the ``evaluate-rules`` operation (Phase delta.3).
+
+  Runs every rule scoped to ``structure_id`` (plus element/association-
+  scoped rules for the structure's atoms), binds ``$Variable`` references
+  to facts via qname lookup, and writes one
+  :class:`VerificationResult` row per rule.
+
+  Optional ``period_start`` / ``period_end`` narrow the fact-binding
+  window; without them the engine uses the most recent ``in_scope`` fact
+  for each element regardless of period.
+  """
+
+  structure_id: str
+  fact_set_id: str | None = Field(
+    None,
+    description=(
+      "Optional FactSet id to stamp on each VerificationResult row. "
+      "Allows results to be scoped to a specific period run when the "
+      "FactSet table is populated (Phase zeta expand pass)."
+    ),
+  )
+  period_start: date | None = Field(
+    None,
+    description="Lower bound on the fact period window (inclusive).",
+  )
+  period_end: date | None = Field(
+    None,
+    description="Upper bound on the fact period window (inclusive).",
+  )
+
+
+class EvaluateRulesResponse(BaseModel):
+  """Response for the ``evaluate-rules`` operation.
+
+  ``results`` is the full list of :class:`VerificationResultLite` rows
+  written by this evaluation run. ``summary`` gives counts keyed by
+  status for quick display without iterating the list.
+  """
+
+  structure_id: str
+  results: list[VerificationResultLite]
+  summary: dict[str, int] = Field(
+    default_factory=dict,
+    description=(
+      "Status counts keyed by outcome string: "
+      "``{'pass': N, 'fail': N, 'error': N, 'skipped': N}``."
+    ),
+  )
+
+
 __all__ = [
   "ArtifactMechanics",
   "ArtifactResponse",
@@ -642,6 +693,8 @@ __all__ = [
   "DeleteInformationBlockRequest",
   "DeleteInformationBlockResponse",
   "ElementLite",
+  "EvaluateRulesRequest",
+  "EvaluateRulesResponse",
   "FactLite",
   "FactSetLite",
   "InformationBlockEnvelope",

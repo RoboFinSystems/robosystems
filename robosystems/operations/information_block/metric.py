@@ -108,8 +108,5 @@ __all__ = [
   "METRIC_BLOCK_TYPE",
   "METRIC_CATEGORY",
   "METRIC_DISPLAY_NAME",
-  "_create_not_implemented",
-  "_delete_not_implemented",
-  "_update_not_implemented",
   "build_envelope",
 ]

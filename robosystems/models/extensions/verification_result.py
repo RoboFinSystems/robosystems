@@ -6,9 +6,10 @@ against a particular FactSet / Structure context:
 - ``rule_id`` FKs the rule being evaluated.
 - ``structure_id`` (nullable) FKs the block the rule was evaluated
   against — matches the rule's polymorphic target when applicable.
-- ``fact_set_id`` (nullable) FKs the FactSet the evaluation bound
-  ``$Variable`` references against. Null for rules that run outside a
-  FactSet context (e.g. library-time structural checks).
+- ``fact_set_id`` (nullable) loosely references the FactSet the evaluation
+  bound ``$Variable`` values against (no FK constraint — the engine may
+  write results before the FactSet row is committed). Null for rules that
+  run outside a FactSet context (e.g. library-time structural checks).
 - ``status`` IN ('pass','fail','error','skipped') captures the
   outcome; ``message`` carries the human-readable explanation.
 
