@@ -21,6 +21,9 @@ from robosystems.models.api.information_block import (
   ArtifactResponse as PydanticArtifact,
 )
 from robosystems.models.api.information_block import (
+  ClassificationLite as PydanticClassification,
+)
+from robosystems.models.api.information_block import (
   ConnectionLite as PydanticConnection,
 )
 from robosystems.models.api.information_block import (
@@ -28,6 +31,9 @@ from robosystems.models.api.information_block import (
 )
 from robosystems.models.api.information_block import (
   FactLite as PydanticFact,
+)
+from robosystems.models.api.information_block import (
+  FactSetLite as PydanticFactSet,
 )
 from robosystems.models.api.information_block import (
   InformationBlockEnvelope as PydanticInformationBlock,
@@ -44,6 +50,9 @@ from robosystems.models.api.information_block import (
 from robosystems.models.api.information_block import (
   RuleVariableLite as PydanticRuleVariable,
 )
+from robosystems.models.api.information_block import (
+  VerificationResultLite as PydanticVerificationResult,
+)
 
 # ── Leaf types — auto-derived from Pydantic ────────────────────────────────
 
@@ -51,6 +60,12 @@ from robosystems.models.api.information_block import (
 @strawberry.experimental.pydantic.type(model=PydanticElement, all_fields=True)
 class InformationBlockElement:
   """An element bundled inside an Information Block envelope."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticClassification, all_fields=True)
+class InformationBlockClassification:
+  """An association-level classification bundled inside the envelope
+  (Phase epsilon)."""
 
 
 @strawberry.experimental.pydantic.type(model=PydanticConnection, all_fields=True)
@@ -65,6 +80,11 @@ class InformationBlockConnection:
 @strawberry.experimental.pydantic.type(model=PydanticFact, all_fields=True)
 class InformationBlockFact:
   """A fact bundled inside the envelope (period-scoped value)."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticFactSet, all_fields=True)
+class InformationBlockFactSet:
+  """Period-specific instantiation of the Structure (Phase ζ)."""
 
 
 @strawberry.experimental.pydantic.type(model=PydanticInformationModel, all_fields=True)
@@ -85,6 +105,13 @@ class InformationBlockRuleVariable:
 @strawberry.experimental.pydantic.type(model=PydanticRule, all_fields=True)
 class InformationBlockRule:
   """A verification rule bundled inside the envelope (Phase δ.2)."""
+
+
+@strawberry.experimental.pydantic.type(
+  model=PydanticVerificationResult, all_fields=True
+)
+class InformationBlockVerificationResult:
+  """Persisted outcome of a rule evaluation (Phase iota data model)."""
 
 
 # The `mechanics` field is exposed as ``scalars.JSON`` with a `kind`
@@ -151,11 +178,11 @@ class InformationBlock:
   facts: list[InformationBlockFact]
   rules: list[InformationBlockRule]
 
-  # Reserved for later phases — typed as JSON until the phase that
-  # populates them lands (then each gets its own typed wrapper).
+  # Dimensions still typed as JSON until Phase ζ's content side lands.
+  # fact_set + verification_results are typed as of Phase ζ + iota.
   dimensions: list[MechanicsPayload]
-  fact_set: MechanicsPayload | None
-  verification_results: list[MechanicsPayload]
+  fact_set: InformationBlockFactSet | None
+  verification_results: list[InformationBlockVerificationResult]
 
   @classmethod
   def from_pydantic(cls, envelope: PydanticInformationBlock) -> InformationBlock:
@@ -175,25 +202,32 @@ class InformationBlock:
       ],
       facts=[InformationBlockFact.from_pydantic(f) for f in envelope.facts],
       rules=[InformationBlockRule.from_pydantic(r) for r in envelope.rules],
-      # dimensions/fact_set/verification_results remain typed as
-      # ``list[dict[str, Any]]`` / ``dict[str, Any] | None`` on the
-      # Pydantic side and pass through as JSON — later phases turn
-      # these into typed Strawberry wrappers once the phases that
-      # populate them land.
+      # dimensions / verification_results still pass through as JSON
+      # until their phases land; fact_set is typed as of Phase ζ.
       dimensions=list(envelope.dimensions),
-      fact_set=envelope.fact_set,
-      verification_results=list(envelope.verification_results),
+      fact_set=(
+        InformationBlockFactSet.from_pydantic(envelope.fact_set)
+        if envelope.fact_set is not None
+        else None
+      ),
+      verification_results=[
+        InformationBlockVerificationResult.from_pydantic(vr)
+        for vr in envelope.verification_results
+      ],
     )
 
 
 __all__ = [
   "Artifact",
   "InformationBlock",
+  "InformationBlockClassification",
   "InformationBlockConnection",
   "InformationBlockElement",
   "InformationBlockFact",
+  "InformationBlockFactSet",
   "InformationBlockRule",
   "InformationBlockRuleTarget",
   "InformationBlockRuleVariable",
+  "InformationBlockVerificationResult",
   "InformationModel",
 ]

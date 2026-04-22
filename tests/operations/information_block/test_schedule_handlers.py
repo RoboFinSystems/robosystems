@@ -158,6 +158,8 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # facts
       _exec_result(scalars_all=[]),  # rules
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalars_all=[]),  # verification results
     ]
 
     envelope = schedule_handlers.build_envelope(session, "struct_abc")
@@ -245,6 +247,8 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # facts
       _exec_result(scalars_all=[]),  # rules
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalars_all=[]),  # verification results
     ]
 
     envelope = schedule_handlers.build_envelope(session, "struct_legacy")

@@ -58,10 +58,11 @@ class TestRegistry:
 
   def test_list_registered_returns_all_entries(self) -> None:
     entries = list_registered()
-    # Phase b: Schedule + 4 statement block types
+    # Schedule + 4 statement block types + Phase η metric.
     assert [e.id for e in entries] == [
       "schedule",
       *STATEMENT_BLOCK_IDS,
+      "metric",
     ]
 
   def test_entry_is_frozen(self) -> None:

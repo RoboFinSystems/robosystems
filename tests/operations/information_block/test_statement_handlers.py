@@ -18,12 +18,22 @@ from robosystems.operations.information_block import statement as statement_hand
 
 
 def _exec_result(
-  *, scalars_all: list[Any] | None = None, scalar: Any = None
+  *,
+  scalars_all: list[Any] | None = None,
+  scalar: Any = None,
+  all_rows: list[Any] | None = None,
 ) -> MagicMock:
-  """Build a MagicMock shaped like a SQLAlchemy Result object."""
+  """Build a MagicMock shaped like a SQLAlchemy Result object.
+
+  ``all_rows`` covers the ``.all()`` path (used by the Phase epsilon
+  association-classifications loader which queries tuples rather than
+  scalars).
+  """
   result = MagicMock()
   if scalars_all is not None:
     result.scalars.return_value.all.return_value = scalars_all
+  if all_rows is not None:
+    result.all.return_value = all_rows
   if scalar is not None:
     result.scalar.return_value = scalar
   else:
@@ -152,12 +162,15 @@ class TestBuildEnvelope:
       description="Assets + Liabilities + Equity",
     )
     session.get.return_value = structure
-    # Query order: taxonomy name, associations, rules. Element/report
-    # queries skip when element_ids is empty.
+    # Query order: taxonomy name, associations, rules, fact_set.
+    # Element/report queries skip when element_ids is empty; the
+    # association-classifications query skips when associations is empty.
     session.execute.side_effect = [
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalars_all=[]),  # verification results
     ]
 
     build = statement_handlers.make_statement_handlers("balance_sheet")[
@@ -232,6 +245,9 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[element_revenue, element_sales]),  # elements
       _exec_result(scalar=None),  # no reports → facts=[]
       _exec_result(scalars_all=[]),  # rules
+      _exec_result(all_rows=[]),  # association classifications
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalars_all=[]),  # verification results
     ]
 
     build = statement_handlers.make_statement_handlers("income_statement")[
@@ -294,6 +310,9 @@ class TestBuildEnvelope:
       _exec_result(scalar="rep_latest"),  # latest_report_id
       _exec_result(scalars_all=[fact]),  # facts
       _exec_result(scalars_all=[]),  # rules
+      _exec_result(all_rows=[]),  # association classifications
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalars_all=[]),  # verification results
     ]
 
     build = statement_handlers.make_statement_handlers("balance_sheet")[
@@ -320,12 +339,15 @@ class TestBuildEnvelope:
       name=statement_handlers.STATEMENT_DISPLAY[block_type][0],
     )
     session.get.return_value = structure
-    # Query order: taxonomy name, associations, rules. Elements/report
-    # queries skip when there are no associations.
+    # Query order: taxonomy name, associations, rules, fact_set.
+    # Elements/report queries skip when there are no associations; the
+    # association-classifications query skips too.
     session.execute.side_effect = [
       _exec_result(scalar="US GAAP"),
       _exec_result(scalars_all=[]),
       _exec_result(scalars_all=[]),  # rules
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalars_all=[]),  # verification results
     ]
 
     build = statement_handlers.make_statement_handlers(block_type)["build_envelope"]

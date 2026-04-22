@@ -80,6 +80,7 @@ _IMMUTABLE_TABLES = (
   "associations",
   "classifications",
   "element_classifications",
+  "association_classifications",
   "rules",
 )
 
@@ -120,7 +121,7 @@ _WIDENED_STRUCTURE_TYPE_CHECK = (
   "structure_type IN ("
   "'chart_of_accounts', 'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
-  "'schedule', 'rollforward', 'reconciliation', 'policy'"
+  "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric'"
   ")"
 )
 _NARROW_STRUCTURE_TYPE_CHECK = (
@@ -347,6 +348,33 @@ def _add_substitution_group_column(conn, schema: str) -> None:
   )
 
 
+def _add_phase_theta_columns_to_tenant(conn, schema: str) -> None:
+  """Add Phase theta canonical-concept columns to a tenant's elements table.
+
+  Three additive columns the MappingAgent + classifier use for
+  cross-tenant concept unification. Nullable (or empty-list-defaulted)
+  so existing tenant rows pass the ALTER without a backfill.
+  """
+  conn.execute(
+    text(f"ALTER TABLE {schema}.elements ADD COLUMN IF NOT EXISTS agent_id VARCHAR")
+  )
+  conn.execute(
+    text(
+      f"ALTER TABLE {schema}.elements "
+      "ADD COLUMN IF NOT EXISTS aliases TEXT[] NOT NULL DEFAULT '{}'"
+    )
+  )
+  conn.execute(
+    text(f"ALTER TABLE {schema}.elements ADD COLUMN IF NOT EXISTS embedding FLOAT[]")
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_elements_agent_id "
+      f"ON {schema}.elements (agent_id) WHERE agent_id IS NOT NULL"
+    )
+  )
+
+
 def _add_phase_d_columns_to_tenant(conn, schema: str) -> None:
   """Add Phase d typed-mechanics columns to a tenant's structures table.
 
@@ -374,6 +402,13 @@ def _drop_phase_d_columns_from_tenant(conn, schema: str) -> None:
     "concept_arrangement",
   ):
     t.drop_column("structures", col)
+
+
+def _drop_phase_theta_columns_from_tenant(conn, schema: str) -> None:
+  """Reverse of :func:`_add_phase_theta_columns_to_tenant` for downgrade."""
+  conn.execute(text(f"DROP INDEX IF EXISTS {schema}.idx_{schema}_elements_agent_id"))
+  for col in ("embedding", "aliases", "agent_id"):
+    conn.execute(text(f"ALTER TABLE {schema}.elements DROP COLUMN IF EXISTS {col}"))
 
 
 def _backfill_tenant_schedule_mechanics(conn, schema: str) -> None:
@@ -416,6 +451,7 @@ def _backfill_library_into_tenant(conn, schema: str) -> None:
   _widen_tenant_checks(conn, schema)
   _drop_old_element_columns(conn, schema)
   _add_substitution_group_column(conn, schema)
+  _add_phase_theta_columns_to_tenant(conn, schema)
   _add_phase_d_columns_to_tenant(conn, schema)
   _create_tenant_library_tables(conn, schema)
   stats = copy_library_into_tenant(conn, schema)
@@ -521,6 +557,33 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
     text(
       f"CREATE INDEX IF NOT EXISTS idx_{schema}_element_classifications_primary "
       f"ON {schema}.element_classifications (element_id, is_primary) "
+      f"WHERE is_primary = true"
+    )
+  )
+
+  # Phase epsilon — association_classifications junction. Mirrors
+  # element_classifications. FKs scoped to the tenant schema's own
+  # associations/classifications so library rows copied by
+  # copy_library_into_tenant retain their referential integrity.
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.association_classifications (
+        association_id VARCHAR NOT NULL REFERENCES {schema}.associations(id),
+        classification_id VARCHAR NOT NULL REFERENCES {schema}.classifications(id),
+        is_primary BOOLEAN NOT NULL DEFAULT true,
+        confidence FLOAT,
+        source VARCHAR,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        PRIMARY KEY (association_id, classification_id)
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_association_classifications_primary "
+      f"ON {schema}.association_classifications (association_id, is_primary) "
       f"WHERE is_primary = true"
     )
   )
@@ -644,6 +707,35 @@ def upgrade() -> None:
     "elements",
     ["substitution_group"],
     postgresql_where="substitution_group IS NOT NULL",
+  )
+
+  # ──────────────────────────────────────────────────────────────────────
+  # 2b. Phase theta — canonical-concept columns for cross-tenant unification.
+  # ──────────────────────────────────────────────────────────────────────
+  # agent_id groups elements that refer to the same cross-tenant concept;
+  # aliases collects alternate spellings / qname variants; embedding
+  # stores a sentence embedding the MappingAgent + classifier use for
+  # similarity lookups. Seeding happens in a follow-up — the blitz only
+  # lands the columns.
+  op.add_column("elements", sa.Column("agent_id", sa.String(), nullable=True))
+  op.add_column(
+    "elements",
+    sa.Column(
+      "aliases",
+      sa.ARRAY(sa.String()),
+      nullable=False,
+      server_default=sa.text("'{}'::text[]"),
+    ),
+  )
+  op.add_column(
+    "elements",
+    sa.Column("embedding", sa.ARRAY(sa.Float()), nullable=True),
+  )
+  op.create_index(
+    "idx_elements_agent_id",
+    "elements",
+    ["agent_id"],
+    postgresql_where="agent_id IS NOT NULL",
   )
 
   # ──────────────────────────────────────────────────────────────────────
@@ -854,6 +946,36 @@ def upgrade() -> None:
     postgresql_where="is_primary = true",
   )
 
+  # Phase epsilon — association_classifications junction. Mirrors
+  # element_classifications; carries association-level categories
+  # (concept_arrangement, member_arrangement, named_disclosure) that don't
+  # belong on the aggregated structures.concept_arrangement column.
+  op.create_table(
+    "association_classifications",
+    sa.Column("association_id", sa.String(), nullable=False),
+    sa.Column("classification_id", sa.String(), nullable=False),
+    sa.Column("is_primary", sa.Boolean(), nullable=False, server_default=sa.true()),
+    sa.Column("confidence", sa.Float(), nullable=True),
+    sa.Column("source", sa.String(), nullable=True),
+    sa.Column("created_at", sa.DateTime(), nullable=False),
+    sa.Column("updated_at", sa.DateTime(), nullable=False),
+    sa.Column("created_by", sa.String(), nullable=False),
+    sa.ForeignKeyConstraint(["association_id"], ["associations.id"]),
+    sa.ForeignKeyConstraint(["classification_id"], ["classifications.id"]),
+    sa.PrimaryKeyConstraint("association_id", "classification_id"),
+  )
+  op.create_index(
+    "idx_association_classifications_classification",
+    "association_classifications",
+    ["classification_id"],
+  )
+  op.create_index(
+    "idx_association_classifications_primary",
+    "association_classifications",
+    ["association_id", "is_primary"],
+    postgresql_where="is_primary = true",
+  )
+
   # ──────────────────────────────────────────────────────────────────────
   # 6b. Phase d.2 — verification rules table.
   # ──────────────────────────────────────────────────────────────────────
@@ -1025,6 +1147,7 @@ def downgrade() -> None:
     _drop_triggers_for_tenant(conn, schema)
     _restore_narrow_tenant_checks(conn, schema)
     _drop_phase_d_columns_from_tenant(conn, schema)
+    _drop_phase_theta_columns_from_tenant(conn, schema)
 
   for_each_tenant_schema(conn, _teardown_tenant)
   conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))
@@ -1032,6 +1155,7 @@ def downgrade() -> None:
   # Delete library-origin data in FK-safe order.
   # Rules first — they FK structures / elements / associations.
   conn.execute(text("DELETE FROM public.rules"))
+  conn.execute(text("DELETE FROM public.association_classifications"))
   conn.execute(text("DELETE FROM public.element_classifications"))
   conn.execute(text("DELETE FROM public.classifications"))
   conn.execute(text("DELETE FROM public.element_references"))
@@ -1065,6 +1189,18 @@ def downgrade() -> None:
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_structure"))
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_taxonomy"))
   conn.execute(text("DROP TABLE IF EXISTS public.rules"))
+
+  # Drop association_classifications junction (Phase epsilon).
+  op.drop_index(
+    "idx_association_classifications_primary",
+    table_name="association_classifications",
+    postgresql_where="is_primary = true",
+  )
+  op.drop_index(
+    "idx_association_classifications_classification",
+    table_name="association_classifications",
+  )
+  op.drop_table("association_classifications")
 
   # Drop junction + vocabulary.
   op.drop_index(
@@ -1115,6 +1251,16 @@ def downgrade() -> None:
     "concept_arrangement",
   ):
     conn.execute(text(f"ALTER TABLE public.structures DROP COLUMN IF EXISTS {col}"))
+
+  # Drop Phase theta canonical-concept columns.
+  op.drop_index(
+    "idx_elements_agent_id",
+    table_name="elements",
+    postgresql_where="agent_id IS NOT NULL",
+  )
+  op.drop_column("elements", "embedding")
+  op.drop_column("elements", "aliases")
+  op.drop_column("elements", "agent_id")
 
   # Drop substitution_group.
   op.drop_index("idx_elements_substitution_group", table_name="elements")

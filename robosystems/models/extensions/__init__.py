@@ -15,6 +15,7 @@ split and the aspects-only-on-events rule.
 
 # Base ontology concepts
 from .association import Association
+from .association_classification import AssociationClassification
 from .classification import Classification
 from .classification_rule import ClassificationRule
 from .dimension import Dimension
@@ -37,6 +38,7 @@ from .roboledger import (
   COA_SOURCES,
   Entry,
   Fact,
+  FactSet,
   FiscalCalendar,
   FiscalCalendarEvent,
   FiscalPeriod,
@@ -52,7 +54,9 @@ from .roboledger import (
 )
 from .rule import Rule
 from .structure import Structure
+from .structure_template import StructureTemplate
 from .taxonomy import Taxonomy
+from .verification_result import VerificationResult
 
 __all__ = [
   # RoboLedger
@@ -60,6 +64,7 @@ __all__ = [
   # Base ontology
   "Account",
   "Association",
+  "AssociationClassification",
   "Classification",
   "ClassificationRule",
   "Dimension",
@@ -71,6 +76,7 @@ __all__ = [
   "EntityTaxonomy",
   "Entry",
   "Fact",
+  "FactSet",
   "FiscalCalendar",
   "FiscalCalendarEvent",
   "FiscalPeriod",
@@ -85,8 +91,10 @@ __all__ = [
   "Rule",
   "Security",
   "Structure",
+  "StructureTemplate",
   "Taxonomy",
   "Transaction",
+  "VerificationResult",
   "entry_dimensions",
   "line_item_dimensions",
   "transaction_dimensions",

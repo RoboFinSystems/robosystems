@@ -13,7 +13,7 @@ adding a block type is a union-arm edit, not an envelope redesign.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,6 +50,59 @@ class ElementLite(BaseModel):
   period_type: str | None = None
 
 
+class ClassificationLite(BaseModel):
+  """Classification projection — one row per `association_classifications`
+  or `element_classifications` junction entry.
+
+  Carries enough for the envelope caller to render / filter by category +
+  identifier without a follow-up lookup. The full `public.classifications`
+  vocabulary catalog (name / description / metadata) is available via the
+  library GraphQL surface when callers need the details.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  id: str = Field(..., description="Classification vocabulary row id.")
+  category: str = Field(
+    ...,
+    description=(
+      "One of the categories in the `public.classifications` CHECK "
+      "constraint — e.g. 'concept_arrangement', 'member_arrangement', "
+      "'named_disclosure' for association-level; 'liquidity', "
+      "'activityType', etc. for element-level."
+    ),
+  )
+  identifier: str = Field(
+    ...,
+    description=(
+      "Vocabulary identifier within the category — e.g. 'RollUp', "
+      "'aggregation', 'AssetsRollUp'."
+    ),
+  )
+  is_primary: bool = Field(
+    default=True,
+    description=(
+      "Whether this is the canonical classification for the "
+      "(association|element, category) pair. Non-primary rows capture "
+      "alternates / AI suggestions alongside the chosen primary."
+    ),
+  )
+  confidence: float | None = Field(
+    None,
+    description=(
+      "AI/adapter-supplied confidence (0.0-1.0). Null for deterministic "
+      "library-seeded rows."
+    ),
+  )
+  source: str | None = Field(
+    None,
+    description=(
+      "Provenance — 'arcrole_analysis', 'disclosure_mechanics', "
+      "'us-gaap-metamodel', adapter name, etc."
+    ),
+  )
+
+
 class ConnectionLite(BaseModel):
   """Connection (= Association) projection.
 
@@ -73,6 +126,15 @@ class ConnectionLite(BaseModel):
   arcrole: str | None = None
   order_value: float | None = None
   weight: float | None = None
+  classifications: list[ClassificationLite] = Field(
+    default_factory=list,
+    description=(
+      "Association-level classifications (Phase epsilon) — "
+      "concept_arrangement, member_arrangement, named_disclosure rows "
+      "from the junction. Empty for library-seeded associations that "
+      "haven't been classified yet."
+    ),
+  )
 
 
 class FactLite(BaseModel):
@@ -89,6 +151,39 @@ class FactLite(BaseModel):
   unit: str = "USD"
   fact_scope: str = Field(..., description="historical | in_scope")
   fact_set_id: str | None = None
+
+
+class FactSetLite(BaseModel):
+  """FactSet projection — period-specific instantiation of the Structure.
+
+  Phase ζ data-model landing. The envelope carries one ``FactSetLite``
+  per block when a FactSet row exists for the requested period; older
+  writes (pre-Phase-ζ ``create_report`` / ``create_schedule`` paths) may
+  still leave ``fact_set`` null until the expand pass stamps FactSet
+  rows on every write.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  id: str
+  structure_id: str | None = None
+  period_start: date | None = None
+  period_end: date
+  factset_type: str = Field(
+    ...,
+    description=(
+      "'report' | 'schedule' | 'custom'. Enum closure enforced by the "
+      "``public.fact_sets`` CHECK constraint."
+    ),
+  )
+  entity_id: str
+  report_id: str | None = Field(
+    None,
+    description=(
+      "Back-pointer to the ``reports`` table while ``report_id`` still "
+      "lives on facts. Drops out once the retirement migration lands."
+    ),
+  )
 
 
 class RuleTargetLite(BaseModel):
@@ -124,6 +219,34 @@ class RuleVariableLite(BaseModel):
   variable_qname: str = Field(
     ..., description="Concept qname the variable resolves to, e.g. 'fac:Assets'."
   )
+
+
+class VerificationResultLite(BaseModel):
+  """Persisted outcome of one Rule evaluation (Phase iota data model).
+
+  One row per ``public.verification_results`` entry the engine (Phase
+  δ.3) writes. The envelope surfaces them so the block viewer's
+  "Verification Results" tab and MCP ``list-verification-failures``
+  tool can render + aggregate without a second round-trip.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  id: str
+  rule_id: str
+  structure_id: str | None = None
+  fact_set_id: str | None = None
+  status: str = Field(
+    ...,
+    description=(
+      "'pass' | 'fail' | 'error' | 'skipped'. Enum closure enforced by "
+      "the ``public.verification_results`` CHECK constraint."
+    ),
+  )
+  message: str | None = None
+  period_start: date | None = None
+  period_end: date | None = None
+  evaluated_at: datetime | None = None
 
 
 class RuleLite(BaseModel):
@@ -219,6 +342,59 @@ class ScheduleMechanics(BaseModel):
   )
 
 
+class MetricMechanics(BaseModel):
+  """Derivative mechanics for ``block_type='metric'`` (Phase η data model).
+
+  A metric block composes its facts from one or more source blocks at
+  read time — covenant tests, ratios, KPI trend computations. Phase η
+  ships the typed arm so the discriminated union covers all three
+  construction modes (declarative / compositional / derivative); the
+  actual derivation evaluator ships in a follow-up.
+
+  ``source_block_ids`` is the ordered list of Structure ids this metric
+  derives from; ``derivation_type`` names the kind of computation
+  (``ratio``, ``trailing_twelve_month``, ``covenant_test``, …), and
+  ``expression`` carries the agent-authored derivation string evaluated
+  at envelope build time.
+  """
+
+  kind: Literal["metric"] = "metric"
+  source_block_ids: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Ordered list of Structure ids this metric sources from. Must be "
+      "non-empty at evaluation time; the blitz landing allows empty "
+      "lists so library scaffolding can register metric templates "
+      "before source linkage is wired."
+    ),
+  )
+  derivation_type: str | None = Field(
+    None,
+    description=(
+      "Free-form label for the derivation kind — 'ratio', "
+      "'trailing_twelve_month', 'covenant_test', etc. The evaluator "
+      "dispatches on this tag; future phases may lock the set with a "
+      "CHECK constraint once the derivation catalog stabilizes."
+    ),
+  )
+  expression: str | None = Field(
+    None,
+    description=(
+      "Derivation expression in the metric DSL — evaluated at envelope "
+      "read time to produce the derivative fact value. Opaque string "
+      "during the blitz; the rule-engine work (Phase δ.3) lands the "
+      "parser / evaluator in a follow-up."
+    ),
+  )
+  unit: str = Field(
+    "ratio",
+    description=(
+      "Output unit of the derived value — 'ratio', 'percent', 'USD', "
+      "'count', etc. Used by the renderer to format the metric badge."
+    ),
+  )
+
+
 class StatementMechanics(BaseModel):
   """Renderer mechanics for the statement family of block types.
 
@@ -265,7 +441,8 @@ class StatementMechanics(BaseModel):
 # New block-type mechanics models add a `kind` literal and extend this
 # union. Pydantic dispatches on `kind` via the discriminator tag.
 ArtifactMechanics = Annotated[
-  ScheduleMechanics | StatementMechanics, Field(discriminator="kind")
+  ScheduleMechanics | StatementMechanics | MetricMechanics,
+  Field(discriminator="kind"),
 ]
 
 
@@ -353,8 +530,17 @@ class InformationBlockEnvelope(BaseModel):
 
   # Reserved for later phases — declared so the envelope shape is stable.
   dimensions: list[dict[str, Any]] = Field(default_factory=list)
-  fact_set: dict[str, Any] | None = None
-  verification_results: list[dict[str, Any]] = Field(default_factory=list)
+  fact_set: FactSetLite | None = Field(
+    None,
+    description=(
+      "The period-specific FactSet this envelope instantiates (Phase ζ). "
+      "Null when the underlying block has no FactSet row yet — typically "
+      "library-seeded statement Structures with no tenant-generated "
+      "facts, or Schedule rows written before the create-side stamping "
+      "(expand pass) lands."
+    ),
+  )
+  verification_results: list[VerificationResultLite] = Field(default_factory=list)
 
 
 # ── Request models ─────────────────────────────────────────────────────────
@@ -450,18 +636,22 @@ class DeleteInformationBlockResponse(BaseModel):
 __all__ = [
   "ArtifactMechanics",
   "ArtifactResponse",
+  "ClassificationLite",
   "ConnectionLite",
   "CreateInformationBlockRequest",
   "DeleteInformationBlockRequest",
   "DeleteInformationBlockResponse",
   "ElementLite",
   "FactLite",
+  "FactSetLite",
   "InformationBlockEnvelope",
   "InformationModelResponse",
+  "MetricMechanics",
   "RuleLite",
   "RuleTargetLite",
   "RuleVariableLite",
   "ScheduleMechanics",
   "StatementMechanics",
   "UpdateInformationBlockRequest",
+  "VerificationResultLite",
 ]

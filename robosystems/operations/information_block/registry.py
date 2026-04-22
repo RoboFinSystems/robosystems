@@ -20,9 +20,11 @@ from robosystems.models.api.extensions.schedules import (
   UpdateScheduleRequest,
 )
 from robosystems.models.api.information_block import (
+  MetricMechanics,
   ScheduleMechanics,
   StatementMechanics,
 )
+from robosystems.operations.information_block import metric as metric_handlers
 from robosystems.operations.information_block import schedule as schedule_handlers
 from robosystems.operations.information_block.statement import (
   STATEMENT_CATEGORY,
@@ -123,6 +125,35 @@ CASH_FLOW_STATEMENT_BLOCK = _make_statement_entry("cash_flow_statement", "waves"
 EQUITY_STATEMENT_BLOCK = _make_statement_entry("equity_statement", "pie-chart")
 
 
+# ── Metric (derivative) ────────────────────────────────────────────────────
+
+METRIC_BLOCK = BlockTypeRegistryEntry(
+  id=metric_handlers.METRIC_BLOCK_TYPE,
+  display_name=metric_handlers.METRIC_DISPLAY_NAME,
+  display_plural="Metrics",
+  category=metric_handlers.METRIC_CATEGORY,
+  icon="gauge",
+  description=(
+    "Derivative block — computes its facts from one or more source "
+    "blocks at read time. Covenant tests, ratios, KPI trend views. "
+    "Phase η ships the typed mechanics arm; the derivation evaluator "
+    "lands in a follow-up."
+  ),
+  concept_arrangement_default="arithmetic",
+  member_arrangement_default=None,
+  mechanics_schema=MetricMechanics,
+  create_request_model=_EmptyPayload,
+  update_request_model=_EmptyPayload,
+  delete_request_model=_EmptyPayload,
+  construction_mode="derivative",
+  dispatch_create=metric_handlers._create_not_implemented,
+  dispatch_update=metric_handlers._update_not_implemented,
+  dispatch_delete=metric_handlers._delete_not_implemented,
+  dispatch_build_envelope=metric_handlers.build_envelope,
+  surfaces_in_library=False,
+)
+
+
 # ── Registry ────────────────────────────────────────────────────────────────
 
 REGISTRY: dict[str, BlockTypeRegistryEntry] = {
@@ -131,6 +162,7 @@ REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   INCOME_STATEMENT_BLOCK.id: INCOME_STATEMENT_BLOCK,
   CASH_FLOW_STATEMENT_BLOCK.id: CASH_FLOW_STATEMENT_BLOCK,
   EQUITY_STATEMENT_BLOCK.id: EQUITY_STATEMENT_BLOCK,
+  METRIC_BLOCK.id: METRIC_BLOCK,
 }
 
 
@@ -157,6 +189,7 @@ __all__ = [
   "CASH_FLOW_STATEMENT_BLOCK",
   "EQUITY_STATEMENT_BLOCK",
   "INCOME_STATEMENT_BLOCK",
+  "METRIC_BLOCK",
   "REGISTRY",
   "SCHEDULE_BLOCK",
   "get",

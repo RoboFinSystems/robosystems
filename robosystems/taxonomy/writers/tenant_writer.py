@@ -31,8 +31,9 @@ _ELEMENT_COLS = (
   "id, code, name, description, qname, namespace, uri, "
   "balance_type, period_type, substitution_group, is_abstract, is_monetary, "
   "element_type, parent_id, depth, path, taxonomy_id, source, currency, "
-  "is_active, is_placeholder, external_id, external_source, metadata, "
-  "version, created_at, updated_at, created_by"
+  "is_active, is_placeholder, external_id, external_source, "
+  "agent_id, aliases, embedding, "
+  "metadata, version, created_at, updated_at, created_by"
 )
 
 _ELEMENT_LABEL_COLS = "id, element_id, role, language, text, created_at, created_by"
@@ -63,6 +64,11 @@ _ELEMENT_CLASSIFICATION_COLS = (
   "created_at, updated_at, created_by"
 )
 
+_ASSOC_CLASSIFICATION_COLS = (
+  "association_id, classification_id, is_primary, confidence, source, "
+  "created_at, updated_at, created_by"
+)
+
 _RULE_COLS = (
   "id, taxonomy_id, rule_category, rule_pattern, rule_expression, "
   "rule_message, rule_severity, rule_origin, target_kind, "
@@ -83,6 +89,7 @@ class CopyStats:
   associations: int
   classifications: int
   element_classifications: int
+  association_classifications: int
   rules: int
 
   @property
@@ -96,6 +103,7 @@ class CopyStats:
       + self.associations
       + self.classifications
       + self.element_classifications
+      + self.association_classifications
       + self.rules
     )
 
@@ -126,7 +134,7 @@ def copy_library_into_tenant(
   """
   resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
   if not resolved_pin:
-    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0)
+    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
   # Flatten the pin into a parameterized IN clause via VALUES.
   # E.g., ("sfac6", "v1"), ("fac", "v1"), …
@@ -257,6 +265,27 @@ def copy_library_into_tenant(
     pin_params,
   )
 
+  # Association classifications (Phase epsilon) — junction rows linking
+  # associations copied above to the classification catalog.
+  ac_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.association_classifications ({_ASSOC_CLASSIFICATION_COLS})
+      SELECT {_ASSOC_CLASSIFICATION_COLS} FROM public.association_classifications
+      WHERE association_id IN (
+        SELECT id FROM public.associations
+        WHERE structure_id IN (
+          SELECT id FROM public.structures
+          WHERE taxonomy_id IN (
+            SELECT id FROM public.taxonomies
+            WHERE (standard, version) IN (VALUES {pin_values_sql})
+          )
+        )
+      )
+      ON CONFLICT (association_id, classification_id) DO NOTHING
+    """),
+    pin_params,
+  )
+
   # Rules — by taxonomy_id. Depends on the copied structures / elements /
   # associations above since rule rows FK them polymorphically.
   rule_result = connection.execute(
@@ -281,5 +310,6 @@ def copy_library_into_tenant(
     associations=assoc_result.rowcount or 0,
     classifications=cls_result.rowcount or 0,
     element_classifications=ec_result.rowcount or 0,
+    association_classifications=ac_result.rowcount or 0,
     rules=rule_result.rowcount or 0,
   )

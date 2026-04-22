@@ -21,12 +21,13 @@ from sqlalchemy import (
   CheckConstraint,
   Column,
   DateTime,
+  Float,
   ForeignKey,
   Index,
   Integer,
   String,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -59,6 +60,11 @@ class Element(ExtensionsBase):
       "idx_elements_substitution_group",
       "substitution_group",
       postgresql_where="substitution_group IS NOT NULL",
+    ),
+    Index(
+      "idx_elements_agent_id",
+      "agent_id",
+      postgresql_where="agent_id IS NOT NULL",
     ),
     CheckConstraint(
       "balance_type IN ('debit', 'credit')",
@@ -121,6 +127,17 @@ class Element(ExtensionsBase):
   # External mapping (QB, Xero, etc.)
   external_id = Column(String, nullable=True)
   external_source = Column(String, nullable=True)
+
+  # Canonical concept linkage (Phase θ) — elements pointing at the same
+  # cross-tenant canonical concept share ``agent_id``. ``aliases`` carries
+  # alternate spellings and qname variants (e.g. us-gaap-2024 vs
+  # us-gaap-2020) that agents should treat as the same concept.
+  # ``embedding`` holds a 1024-dimensional sentence embedding the
+  # MappingAgent + classifier use for similarity lookups; nullable while
+  # the seed content lands incrementally.
+  agent_id = Column(String, nullable=True)
+  aliases = Column(ARRAY(String), nullable=False, default=list)
+  embedding = Column(ARRAY(Float), nullable=True)
 
   # Metadata
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
