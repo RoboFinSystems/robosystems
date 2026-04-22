@@ -227,7 +227,7 @@ def _widen_library_checks(conn, schema: str) -> None:
   widened_taxonomy_type = (
     "taxonomy_type IN ("
     "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
-    "'classification-vocabulary', 'classification-assignment'"
+    "'classification-vocabulary', 'classification-assignment', 'rules'"
     ")"
   )
   conn.execute(

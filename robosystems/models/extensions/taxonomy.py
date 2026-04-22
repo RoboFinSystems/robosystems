@@ -59,7 +59,7 @@ class Taxonomy(ExtensionsBase):
     ),
     CheckConstraint(
       "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping', 'schedule', "
-      "'classification-vocabulary', 'classification-assignment')",
+      "'classification-vocabulary', 'classification-assignment', 'rules')",
       name="check_taxonomy_type",
     ),
     CheckConstraint(

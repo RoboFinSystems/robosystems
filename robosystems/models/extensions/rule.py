@@ -55,6 +55,7 @@ class Rule(ExtensionsBase):
     CheckConstraint(
       "rule_category IN ("
       "'AutomatedAccountingAndReportingChecks', "
+      "'DisclosureMechanicsRule', "
       "'FundamentalAccountingConceptRelation', "
       "'PeerConsistencyRule', "
       "'PriorPeriodConsistencyRule', "
