@@ -50,6 +50,7 @@ from .roboledger import (
   line_item_dimensions,
   transaction_dimensions,
 )
+from .rule import Rule
 from .structure import Structure
 from .taxonomy import Taxonomy
 
@@ -81,6 +82,7 @@ __all__ = [
   "PublishListMember",
   "Report",
   "ReportShare",
+  "Rule",
   "Security",
   "Structure",
   "Taxonomy",

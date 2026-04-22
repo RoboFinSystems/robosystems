@@ -194,6 +194,9 @@ class ScheduleService:
     # path works from creation. metadata_ is kept populated during the
     # transition window — it's retired in a later phase once the spec
     # follow-ups remove the fallback path on the read side.
+    # periods_with_entries is a transient read-time value (queried from facts),
+    # not a stored property — intentionally excluded here rather than using
+    # ScheduleMechanics.model_dump(); it is injected by the envelope builder.
     artifact_mechanics: dict[str, object] = {
       "kind": "closing_entry_generator",
       "entry_template": metadata["entry_template"],

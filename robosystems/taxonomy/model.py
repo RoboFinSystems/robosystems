@@ -10,6 +10,8 @@ TaxonomyPackage directly; it's a DB-side DTO.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -166,6 +168,114 @@ class StructureSpec(BaseModel):
   )
 
 
+class RuleTargetSpec(BaseModel):
+  """Polymorphic pointer from a rule to the atom it scopes.
+
+  `target_ref` is the natural-key identifier for the target: a role URI
+  when `target_kind='structure'`, a qname when `target_kind='element'`,
+  or a reified-arc IRI when `target_kind='association'`. The writer
+  resolves it to the corresponding UUID at seed time. Rules with no
+  target (a global report-wide rule) omit this spec entirely.
+  """
+
+  target_kind: Literal["structure", "element", "association"] = Field(
+    ..., description="Which atom type this rule is scoped to."
+  )
+  target_ref: str = Field(
+    ...,
+    description=(
+      "Natural-key reference to the target atom. role URI for "
+      "structure, qname for element, reified-arc IRI for association."
+    ),
+  )
+
+
+class RuleVariableSpec(BaseModel):
+  """Binding from a `$Variable` in the rule expression to a concept qname.
+
+  The engine (Phase δ.3) evaluates `rule_expression` by looking each
+  variable up in the Structure's in-scope fact set and substituting the
+  value. This spec is the compile-time binding table.
+  """
+
+  variable_name: str = Field(
+    ..., description="Local variable name in `rule_expression`, e.g. 'Assets'."
+  )
+  variable_qname: str = Field(
+    ..., description="Concept qname the variable resolves to, e.g. 'fac:Assets'."
+  )
+
+
+class RuleSpec(BaseModel):
+  """A single verification rule from the Seattle Method taxonomy.
+
+  Two orthogonal axes: `rule_category` (scope/governance — 8 values from
+  `cm_VerificationRule` subclasses) and `rule_pattern` (mechanism — 10
+  values from `cm_BusinessRulePattern`). `rule_expression` carries an
+  XPath-flavored predicate with `$Variable` placeholders bound via
+  `rule_variables`; evaluation is deferred to the engine.
+  """
+
+  id: str = Field(
+    ...,
+    description=(
+      "Blank-node local id from the seed, e.g. 'fac-rule-bs-identity'. "
+      "Writer rewrites this to a deterministic UUID5 keyed on "
+      "(standard, id)."
+    ),
+  )
+  rule_category: str = Field(
+    ...,
+    description=(
+      "cm:VerificationRule subclass — AutomatedAccountingAndReportingChecks, "
+      "FundamentalAccountingConceptRelation, PeerConsistencyRule, "
+      "PriorPeriodConsistencyRule, ReportLevelModelStructureRule, "
+      "ReportingSystemSpecificRule, ToDoManualTask, XBRLTechnicalSyntaxRule."
+    ),
+  )
+  rule_pattern: str = Field(
+    ...,
+    description=(
+      "cm:BusinessRulePattern member — Adjustment, CoExists, EqualTo, "
+      "Exists, GreaterThan, GreaterThanOrEqualToZero, LessThan, "
+      "RollForward, RollUp, Variance."
+    ),
+  )
+  rule_expression: str = Field(
+    ...,
+    description=(
+      "XPath-flavored predicate (verbatim from Charlie's XBRL Formula "
+      "linkbases) or natural-language condition for structural rules. "
+      "Evaluation DSL selection is the engine's job (Phase δ.3)."
+    ),
+  )
+  rule_target: RuleTargetSpec | None = Field(
+    None,
+    description=(
+      "Atom the rule is scoped to. Null = global rule that applies report-wide."
+    ),
+  )
+  rule_variables: list[RuleVariableSpec] = Field(default_factory=list)
+  rule_message: str | None = Field(
+    None,
+    description=(
+      "Human-readable message emitted when the rule fails. Null for "
+      "engine-only rules whose failure output is constructed elsewhere."
+    ),
+  )
+  rule_severity: Literal["info", "warning", "error"] = Field(
+    "error", description="Failure severity when the rule does not evaluate true."
+  )
+  rule_origin: Literal["forked", "native"] = Field(
+    "native",
+    description=(
+      "Provenance. 'forked' = transcribed from an upstream source "
+      "(Seattle Method, etc). 'native' = authored in this seed or by a "
+      "tenant post-provision."
+    ),
+  )
+
+
 class TaxonomyPackage(BaseModel):
   """A fully-loaded taxonomy ready for library persistence."""
 
@@ -181,17 +291,19 @@ class TaxonomyPackage(BaseModel):
   classification_assignments: list[ClassificationAssignmentSpec] = Field(
     default_factory=list
   )
+  rules: list[RuleSpec] = Field(default_factory=list)
 
   taxonomy_type: str = Field(
     "reporting",
     description=(
-      "chart_of_accounts | reporting | mapping | schedule | "
+      "chart_of_accounts | reporting | mapping | schedule | rules | "
       "classification-vocabulary | classification-assignment — shapes "
       "how the library viewer renders this taxonomy. Concept taxonomies "
       "(sfac6, rs-gaap) are 'reporting'; equivalence + hierarchy arc "
       "packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB metamodel "
       "seed is 'classification-vocabulary'; rs-gaap-to-metamodel is "
-      "'classification-assignment'."
+      "'classification-assignment'; verification-rule packs (fac-rules) "
+      "are 'rules'."
     ),
   )
   is_shared: bool = Field(True, description="Shared across tenants (library-origin)")

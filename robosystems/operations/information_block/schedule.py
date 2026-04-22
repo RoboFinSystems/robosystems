@@ -39,6 +39,7 @@ from robosystems.operations.information_block.envelope import (
   association_to_connection,
   element_to_lite,
   fact_to_lite,
+  load_rules_for_structure,
 )
 from robosystems.operations.roboledger.commands.schedules import (
   create_schedule as cmd_create_schedule,
@@ -124,9 +125,16 @@ def _load_schedule_mechanics(
 
   meta = structure.metadata_ or {}
   raw_schedule_meta = meta.get("schedule_metadata")
+  raw_entry_template = meta.get("entry_template")
+  if not raw_entry_template:
+    raise ValueError(
+      f"Schedule structure {structure.id!r} has no entry_template in metadata_ "
+      "and no artifact_mechanics — the row may be corrupted or from an unsupported "
+      "pre-δ path. Check the Schedule creation path and the Phase δ backfill."
+    )
   return ScheduleMechanics(
     kind="closing_entry_generator",
-    entry_template=EntryTemplateRequest.model_validate(meta.get("entry_template", {})),
+    entry_template=EntryTemplateRequest.model_validate(raw_entry_template),
     schedule_metadata=(
       ScheduleMetadataRequest.model_validate(raw_schedule_meta)
       if raw_schedule_meta
@@ -203,6 +211,13 @@ def build_envelope(
     .all()
   )
 
+  rules = load_rules_for_structure(
+    session,
+    structure_id,
+    element_ids=list(element_ids),
+    association_ids=[a.id for a in associations],
+  )
+
   return InformationBlockEnvelope(
     id=structure.id,
     block_type=SCHEDULE_BLOCK_TYPE,
@@ -224,6 +239,7 @@ def build_envelope(
     elements=[element_to_lite(e) for e in elements],
     connections=[association_to_connection(a) for a in associations],
     facts=[fact_to_lite(f) for f in facts],
+    rules=rules,
   )
 
 

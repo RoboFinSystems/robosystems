@@ -28,6 +28,7 @@ DEFAULT_TAXONOMY_PIN: dict[str, str] = {
   "fac-to-rs-gaap": "v1",
   "fac-calculations": "v1",
   "fac-presentation": "v1",
+  "fac-rules": "v1",
 }
 
 

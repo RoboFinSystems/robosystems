@@ -63,6 +63,13 @@ _ELEMENT_CLASSIFICATION_COLS = (
   "created_at, updated_at, created_by"
 )
 
+_RULE_COLS = (
+  "id, taxonomy_id, rule_category, rule_pattern, rule_expression, "
+  "rule_message, rule_severity, rule_origin, target_kind, "
+  "target_structure_id, target_element_id, target_association_id, "
+  "rule_variables, metadata, created_at, updated_at, created_by"
+)
+
 
 @dataclass(frozen=True)
 class CopyStats:
@@ -76,6 +83,7 @@ class CopyStats:
   associations: int
   classifications: int
   element_classifications: int
+  rules: int
 
   @property
   def total(self) -> int:
@@ -88,6 +96,7 @@ class CopyStats:
       + self.associations
       + self.classifications
       + self.element_classifications
+      + self.rules
     )
 
 
@@ -117,7 +126,7 @@ def copy_library_into_tenant(
   """
   resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
   if not resolved_pin:
-    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0)
+    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0)
 
   # Flatten the pin into a parameterized IN clause via VALUES.
   # E.g., ("sfac6", "v1"), ("fac", "v1"), …
@@ -248,6 +257,21 @@ def copy_library_into_tenant(
     pin_params,
   )
 
+  # Rules — by taxonomy_id. Depends on the copied structures / elements /
+  # associations above since rule rows FK them polymorphically.
+  rule_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.rules ({_RULE_COLS})
+      SELECT {_RULE_COLS} FROM public.rules
+      WHERE taxonomy_id IN (
+        SELECT id FROM public.taxonomies
+        WHERE (standard, version) IN (VALUES {pin_values_sql})
+      )
+      ON CONFLICT (id) DO NOTHING
+    """),
+    pin_params,
+  )
+
   return CopyStats(
     taxonomies=tax_result.rowcount or 0,
     elements=elem_result.rowcount or 0,
@@ -257,4 +281,5 @@ def copy_library_into_tenant(
     associations=assoc_result.rowcount or 0,
     classifications=cls_result.rowcount or 0,
     element_classifications=ec_result.rowcount or 0,
+    rules=rule_result.rowcount or 0,
   )

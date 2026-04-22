@@ -35,6 +35,15 @@ from robosystems.models.api.information_block import (
 from robosystems.models.api.information_block import (
   InformationModelResponse as PydanticInformationModel,
 )
+from robosystems.models.api.information_block import (
+  RuleLite as PydanticRule,
+)
+from robosystems.models.api.information_block import (
+  RuleTargetLite as PydanticRuleTarget,
+)
+from robosystems.models.api.information_block import (
+  RuleVariableLite as PydanticRuleVariable,
+)
 
 # ── Leaf types — auto-derived from Pydantic ────────────────────────────────
 
@@ -61,6 +70,21 @@ class InformationBlockFact:
 @strawberry.experimental.pydantic.type(model=PydanticInformationModel, all_fields=True)
 class InformationModel:
   """Intrinsic shape of the block — concept + member arrangement patterns."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticRuleTarget, all_fields=True)
+class InformationBlockRuleTarget:
+  """Polymorphic pointer to the structure/element/association a rule targets."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticRuleVariable, all_fields=True)
+class InformationBlockRuleVariable:
+  """A `$Variable` binding inside a rule expression — name and qname."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticRule, all_fields=True)
+class InformationBlockRule:
+  """A verification rule bundled inside the envelope (Phase δ.2)."""
 
 
 # The `mechanics` field is exposed as ``scalars.JSON`` with a `kind`
@@ -125,10 +149,10 @@ class InformationBlock:
   elements: list[InformationBlockElement]
   connections: list[InformationBlockConnection]
   facts: list[InformationBlockFact]
+  rules: list[InformationBlockRule]
 
   # Reserved for later phases — typed as JSON until the phase that
   # populates them lands (then each gets its own typed wrapper).
-  rules: list[MechanicsPayload]
   dimensions: list[MechanicsPayload]
   fact_set: MechanicsPayload | None
   verification_results: list[MechanicsPayload]
@@ -150,12 +174,12 @@ class InformationBlock:
         InformationBlockConnection.from_pydantic(c) for c in envelope.connections
       ],
       facts=[InformationBlockFact.from_pydantic(f) for f in envelope.facts],
-      # rules/dimensions/fact_set/verification_results are typed as
+      rules=[InformationBlockRule.from_pydantic(r) for r in envelope.rules],
+      # dimensions/fact_set/verification_results remain typed as
       # ``list[dict[str, Any]]`` / ``dict[str, Any] | None`` on the
-      # Pydantic side and pass through as JSON — a Phase d follow-up
-      # turns these into typed Strawberry wrappers once the phases that
+      # Pydantic side and pass through as JSON — later phases turn
+      # these into typed Strawberry wrappers once the phases that
       # populate them land.
-      rules=list(envelope.rules),
       dimensions=list(envelope.dimensions),
       fact_set=envelope.fact_set,
       verification_results=list(envelope.verification_results),
@@ -168,5 +192,8 @@ __all__ = [
   "InformationBlockConnection",
   "InformationBlockElement",
   "InformationBlockFact",
+  "InformationBlockRule",
+  "InformationBlockRuleTarget",
+  "InformationBlockRuleVariable",
   "InformationModel",
 ]

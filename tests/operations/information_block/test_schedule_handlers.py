@@ -157,6 +157,7 @@ class TestBuildEnvelope:
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # facts
+      _exec_result(scalars_all=[]),  # rules
     ]
 
     envelope = schedule_handlers.build_envelope(session, "struct_abc")
@@ -181,6 +182,36 @@ class TestBuildEnvelope:
     assert envelope.taxonomy_id == "tax_01"
     assert envelope.taxonomy_name == "US GAAP"
     assert mechanics.periods_with_entries == 5
+
+  def test_legacy_fallback_raises_when_entry_template_missing(self) -> None:
+    """Corrupted/missing entry_template in metadata_ raises ValueError.
+
+    In practice every row written by create_schedule carries a valid
+    entry_template, so this path indicates data corruption. The guard
+    raises with a diagnostic message pointing at the structure id rather
+    than leaking an opaque Pydantic ValidationError.
+    """
+    import pytest
+
+    session = MagicMock()
+    structure = MagicMock()
+    structure.id = "struct_corrupted"
+    structure.structure_type = "schedule"
+    structure.name = "Corrupted"
+    structure.description = None
+    structure.taxonomy_id = "tax_01"
+    structure.concept_arrangement = None
+    structure.member_arrangement = None
+    structure.parenthetical_note = None
+    structure.artifact_mechanics = None
+    structure.metadata_ = {}  # no entry_template key
+    session.get.return_value = structure
+    session.execute.side_effect = [
+      _exec_result(scalar=0),  # periods_with_entries
+    ]
+
+    with pytest.raises(ValueError, match="struct_corrupted"):
+      schedule_handlers.build_envelope(session, "struct_corrupted")
 
   def test_falls_back_to_metadata_jsonb_when_artifact_mechanics_null(self) -> None:
     """Pre-δ Schedule rows lacking artifact_mechanics still surface.
@@ -213,6 +244,7 @@ class TestBuildEnvelope:
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # facts
+      _exec_result(scalars_all=[]),  # rules
     ]
 
     envelope = schedule_handlers.build_envelope(session, "struct_legacy")

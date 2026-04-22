@@ -38,6 +38,7 @@ from robosystems.operations.information_block.envelope import (
   association_to_connection,
   element_to_lite,
   fact_to_lite,
+  load_rules_for_structure,
 )
 
 if TYPE_CHECKING:
@@ -180,6 +181,13 @@ def _build_statement_envelope(
   else:
     mechanics = StatementMechanics(kind="statement_renderer")
 
+  rules = load_rules_for_structure(
+    session,
+    structure_id,
+    element_ids=list(element_ids),
+    association_ids=[a.id for a in associations],
+  )
+
   display_name, _display_plural = STATEMENT_DISPLAY[block_type]
   return InformationBlockEnvelope(
     id=structure.id,
@@ -202,6 +210,7 @@ def _build_statement_envelope(
     elements=[element_to_lite(e) for e in elements],
     connections=[association_to_connection(a) for a in associations],
     facts=[fact_to_lite(f) for f in facts],
+    rules=rules,
   )
 
 

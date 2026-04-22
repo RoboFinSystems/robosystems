@@ -273,6 +273,8 @@ def update_schedule(
   # Phase δ: keep artifact_mechanics in sync with metadata_ while both
   # live on the row. Envelope reads prefer artifact_mechanics; writes
   # stamp both during the transition window.
+  # periods_with_entries is transient (queried from facts at read time) —
+  # intentionally excluded rather than using ScheduleMechanics.model_dump().
   structure.artifact_mechanics = {
     "kind": "closing_entry_generator",
     "entry_template": metadata.get("entry_template", {}),

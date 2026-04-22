@@ -80,6 +80,7 @@ _IMMUTABLE_TABLES = (
   "associations",
   "classifications",
   "element_classifications",
+  "rules",
 )
 
 _WIDENED_ASSOCIATION_CHECK = (
@@ -97,7 +98,7 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
 _WIDENED_TAXONOMY_TYPE_CHECK = (
   "taxonomy_type IN ("
   "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
-  "'classification-vocabulary', 'classification-assignment'"
+  "'classification-vocabulary', 'classification-assignment', 'rules'"
   ")"
 )
 _NARROW_ASSOCIATION_CHECK = (
@@ -126,6 +127,47 @@ _NARROW_STRUCTURE_TYPE_CHECK = (
   "structure_type IN ("
   "'chart_of_accounts', 'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', 'schedule'"
+  ")"
+)
+
+# Phase d.2 — Seattle Method rule taxonomy: 8 VerificationRule categories
+# x 10 BusinessRulePattern mechanisms. These match the CHECK constraints on
+# public.rules.rule_category / rule_pattern and the RULE_CATEGORY_VALUES /
+# RULE_PATTERN_VALUES frozensets in jsonld_loader.py.
+_RULE_CATEGORY_CHECK = (
+  "rule_category IN ("
+  "'AutomatedAccountingAndReportingChecks', "
+  "'FundamentalAccountingConceptRelation', "
+  "'PeerConsistencyRule', "
+  "'PriorPeriodConsistencyRule', "
+  "'ReportLevelModelStructureRule', "
+  "'ReportingSystemSpecificRule', "
+  "'ToDoManualTask', "
+  "'XBRLTechnicalSyntaxRule'"
+  ")"
+)
+_RULE_PATTERN_CHECK = (
+  "rule_pattern IN ("
+  "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
+  "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
+  "'Variance'"
+  ")"
+)
+_RULE_SEVERITY_CHECK = "rule_severity IN ('info', 'warning', 'error')"
+_RULE_ORIGIN_CHECK = "rule_origin IN ('forked', 'native')"
+# Polymorphic target: either nothing (global rule) or exactly one of
+# target_structure_id / target_element_id / target_association_id is set,
+# and target_kind names which column carries the FK.
+_RULE_TARGET_POLYMORPHISM_CHECK = (
+  "("
+  "(target_kind IS NULL AND target_structure_id IS NULL "
+  "AND target_element_id IS NULL AND target_association_id IS NULL) "
+  "OR (target_kind = 'structure' AND target_structure_id IS NOT NULL "
+  "AND target_element_id IS NULL AND target_association_id IS NULL) "
+  "OR (target_kind = 'element' AND target_element_id IS NOT NULL "
+  "AND target_structure_id IS NULL AND target_association_id IS NULL) "
+  "OR (target_kind = 'association' AND target_association_id IS NOT NULL "
+  "AND target_structure_id IS NULL AND target_element_id IS NULL)"
   ")"
 )
 
@@ -483,6 +525,72 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
     )
   )
 
+  # Phase d.2 — verification rules. Polymorphic target (structure/element/
+  # association) enforced via CHECK; FKs point at the same-schema parent
+  # tables so tenant rows can't reference public library ids.
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.rules (
+        id VARCHAR PRIMARY KEY,
+        taxonomy_id VARCHAR NOT NULL REFERENCES {schema}.taxonomies(id),
+        rule_category VARCHAR NOT NULL,
+        rule_pattern VARCHAR NOT NULL,
+        rule_expression TEXT NOT NULL,
+        rule_message TEXT,
+        rule_severity VARCHAR NOT NULL DEFAULT 'error',
+        rule_origin VARCHAR NOT NULL DEFAULT 'native',
+        target_kind VARCHAR,
+        target_structure_id VARCHAR REFERENCES {schema}.structures(id),
+        target_element_id VARCHAR REFERENCES {schema}.elements(id),
+        target_association_id VARCHAR REFERENCES {schema}.associations(id),
+        rule_variables JSONB NOT NULL DEFAULT '[]',
+        metadata JSONB NOT NULL DEFAULT '{{}}',
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        CONSTRAINT check_{schema}_rule_category CHECK ({_RULE_CATEGORY_CHECK}),
+        CONSTRAINT check_{schema}_rule_pattern CHECK ({_RULE_PATTERN_CHECK}),
+        CONSTRAINT check_{schema}_rule_severity CHECK ({_RULE_SEVERITY_CHECK}),
+        CONSTRAINT check_{schema}_rule_origin CHECK ({_RULE_ORIGIN_CHECK}),
+        CONSTRAINT check_{schema}_rule_target_polymorphism
+          CHECK ({_RULE_TARGET_POLYMORPHISM_CHECK})
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_taxonomy "
+      f"ON {schema}.rules (taxonomy_id)"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_structure "
+      f"ON {schema}.rules (target_structure_id) "
+      f"WHERE target_structure_id IS NOT NULL"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_element "
+      f"ON {schema}.rules (target_element_id) "
+      f"WHERE target_element_id IS NOT NULL"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_association "
+      f"ON {schema}.rules (target_association_id) "
+      f"WHERE target_association_id IS NOT NULL"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_category "
+      f"ON {schema}.rules (rule_category)"
+    )
+  )
+
 
 SEEDS_DIR = (
   Path(__file__).parent.parent.parent.parent / "robosystems" / "taxonomy" / "seeds"
@@ -506,6 +614,9 @@ SEED_FILES = [
   SEEDS_DIR / "fac-calculations" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-presentation" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "type-subtype" / "v1" / "taxonomy.jsonld",
+  # Phase d.2 — verification rules (Seattle Method). Last because rules
+  # reference structures loaded by fac-calculations/fac-presentation.
+  SEEDS_DIR / "fac-rules" / "v1" / "taxonomy.jsonld",
 ]
 
 
@@ -744,6 +855,80 @@ def upgrade() -> None:
   )
 
   # ──────────────────────────────────────────────────────────────────────
+  # 6b. Phase d.2 — verification rules table.
+  # ──────────────────────────────────────────────────────────────────────
+  # Polymorphic target: nullable FKs to structures / elements /
+  # associations, with a CHECK that exactly one (or none, for global
+  # rules) is set. rule_variables JSONB carries the $Variable → qname
+  # binding table the engine consumes at evaluation time.
+  op.create_table(
+    "rules",
+    sa.Column("id", sa.String(), nullable=False),
+    sa.Column("taxonomy_id", sa.String(), nullable=False),
+    sa.Column("rule_category", sa.String(), nullable=False),
+    sa.Column("rule_pattern", sa.String(), nullable=False),
+    sa.Column("rule_expression", sa.Text(), nullable=False),
+    sa.Column("rule_message", sa.Text(), nullable=True),
+    sa.Column("rule_severity", sa.String(), nullable=False, server_default="error"),
+    sa.Column("rule_origin", sa.String(), nullable=False, server_default="native"),
+    sa.Column("target_kind", sa.String(), nullable=True),
+    sa.Column("target_structure_id", sa.String(), nullable=True),
+    sa.Column("target_element_id", sa.String(), nullable=True),
+    sa.Column("target_association_id", sa.String(), nullable=True),
+    sa.Column(
+      "rule_variables",
+      postgresql.JSONB(astext_type=sa.Text()),
+      nullable=False,
+      server_default=sa.text("'[]'::jsonb"),
+    ),
+    sa.Column(
+      "metadata",
+      postgresql.JSONB(astext_type=sa.Text()),
+      nullable=False,
+      server_default=sa.text("'{}'::jsonb"),
+    ),
+    sa.Column(
+      "created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.Column(
+      "updated_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.Column("created_by", sa.String(), nullable=False, server_default="system"),
+    sa.ForeignKeyConstraint(["taxonomy_id"], ["taxonomies.id"]),
+    sa.ForeignKeyConstraint(["target_structure_id"], ["structures.id"]),
+    sa.ForeignKeyConstraint(["target_element_id"], ["elements.id"]),
+    sa.ForeignKeyConstraint(["target_association_id"], ["associations.id"]),
+    sa.PrimaryKeyConstraint("id"),
+    sa.CheckConstraint(_RULE_CATEGORY_CHECK, name="check_rule_category"),
+    sa.CheckConstraint(_RULE_PATTERN_CHECK, name="check_rule_pattern"),
+    sa.CheckConstraint(_RULE_SEVERITY_CHECK, name="check_rule_severity"),
+    sa.CheckConstraint(_RULE_ORIGIN_CHECK, name="check_rule_origin"),
+    sa.CheckConstraint(
+      _RULE_TARGET_POLYMORPHISM_CHECK, name="check_rule_target_polymorphism"
+    ),
+  )
+  op.create_index("idx_rules_taxonomy", "rules", ["taxonomy_id"])
+  op.create_index(
+    "idx_rules_target_structure",
+    "rules",
+    ["target_structure_id"],
+    postgresql_where="target_structure_id IS NOT NULL",
+  )
+  op.create_index(
+    "idx_rules_target_element",
+    "rules",
+    ["target_element_id"],
+    postgresql_where="target_element_id IS NOT NULL",
+  )
+  op.create_index(
+    "idx_rules_target_association",
+    "rules",
+    ["target_association_id"],
+    postgresql_where="target_association_id IS NOT NULL",
+  )
+  op.create_index("idx_rules_category", "rules", ["rule_category"])
+
+  # ──────────────────────────────────────────────────────────────────────
   # 7. Load JSON-LD seeds — two-pass to let arcs cross package boundaries.
   # ──────────────────────────────────────────────────────────────────────
   # Phase 1 writes every package's elements + classification vocabulary;
@@ -756,6 +941,7 @@ def upgrade() -> None:
   from robosystems.taxonomy.writers import (
     write_taxonomy_arcs,
     write_taxonomy_elements,
+    write_taxonomy_rules,
   )
 
   loaded_packages = []
@@ -781,6 +967,17 @@ def upgrade() -> None:
       f"(skipped={counts['associations_skipped']}) "
       f"classification_assignments={counts['classification_assignments']} "
       f"(skipped={counts['classification_assignments_skipped']})"
+    )
+
+  # Phase 3 — rules. Runs after phase 2 so association-targeted rules can
+  # resolve (though none of the seeded fac-rules use that target_kind yet).
+  for package in loaded_packages:
+    if not package.rules:
+      continue
+    counts = write_taxonomy_rules(conn, package)
+    print(
+      f"  [phase 3] {package.name}: "
+      f"rules={counts['rules']} (skipped={counts['rules_skipped']})"
     )
 
   # Phase d backfill on public.structures: set concept/member_arrangement
@@ -833,6 +1030,8 @@ def downgrade() -> None:
   conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))
 
   # Delete library-origin data in FK-safe order.
+  # Rules first — they FK structures / elements / associations.
+  conn.execute(text("DELETE FROM public.rules"))
   conn.execute(text("DELETE FROM public.element_classifications"))
   conn.execute(text("DELETE FROM public.classifications"))
   conn.execute(text("DELETE FROM public.element_references"))
@@ -857,6 +1056,15 @@ def downgrade() -> None:
     )
   )
   conn.execute(text("DELETE FROM public.taxonomies WHERE is_shared = true"))
+
+  # Drop rules table (Phase d.2). IF EXISTS on the indexes because a
+  # mid-transition downgrade from a partial run might not have created them.
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_category"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_association"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_element"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_structure"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_taxonomy"))
+  conn.execute(text("DROP TABLE IF EXISTS public.rules"))
 
   # Drop junction + vocabulary.
   op.drop_index(

@@ -6,6 +6,7 @@ from robosystems.taxonomy.writers.library_writer import (
   write_taxonomy_arcs,
   write_taxonomy_elements,
   write_taxonomy_package,
+  write_taxonomy_rules,
 )
 from robosystems.taxonomy.writers.tenant_writer import (
   CopyStats,
@@ -18,4 +19,5 @@ __all__ = [
   "write_taxonomy_arcs",
   "write_taxonomy_elements",
   "write_taxonomy_package",
+  "write_taxonomy_rules",
 ]

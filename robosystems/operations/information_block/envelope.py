@@ -9,12 +9,18 @@ doesn't diverge from Phase a's Schedule handler.
 
 from __future__ import annotations
 
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+
 from robosystems.models.api.information_block import (
   ConnectionLite,
   ElementLite,
   FactLite,
+  RuleLite,
+  RuleTargetLite,
+  RuleVariableLite,
 )
-from robosystems.models.extensions import Association, Element
+from robosystems.models.extensions import Association, Element, Rule
 from robosystems.models.extensions.roboledger import Fact
 
 
@@ -61,8 +67,88 @@ def fact_to_lite(fact: Fact) -> FactLite:
   )
 
 
+def rule_to_lite(rule: Rule) -> RuleLite:
+  """Project a :class:`Rule` ORM row onto :class:`RuleLite`.
+
+  Unpacks the polymorphic target columns into a single typed
+  :class:`RuleTargetLite` and the JSONB variable blob into typed
+  :class:`RuleVariableLite` entries.
+  """
+  target: RuleTargetLite | None = None
+  if rule.target_kind == "structure" and rule.target_structure_id is not None:
+    target = RuleTargetLite(
+      target_kind="structure", target_ref_id=rule.target_structure_id
+    )
+  elif rule.target_kind == "element" and rule.target_element_id is not None:
+    target = RuleTargetLite(target_kind="element", target_ref_id=rule.target_element_id)
+  elif rule.target_kind == "association" and rule.target_association_id is not None:
+    target = RuleTargetLite(
+      target_kind="association", target_ref_id=rule.target_association_id
+    )
+
+  raw_vars = rule.rule_variables or []
+  variables = [
+    RuleVariableLite(
+      variable_name=v.get("variable_name", ""),
+      variable_qname=v.get("variable_qname", ""),
+    )
+    for v in raw_vars
+  ]
+
+  return RuleLite(
+    id=rule.id,
+    rule_category=rule.rule_category,
+    rule_pattern=rule.rule_pattern,
+    rule_expression=rule.rule_expression,
+    rule_target=target,
+    rule_variables=variables,
+    rule_message=rule.rule_message,
+    rule_severity=rule.rule_severity,
+    rule_origin=rule.rule_origin,
+  )
+
+
+def load_rules_for_structure(
+  session: Session,
+  structure_id: str,
+  element_ids: list[str] | None = None,
+  association_ids: list[str] | None = None,
+) -> list[RuleLite]:
+  """Fetch every rule scoped to a Structure (plus its inner atoms).
+
+  Pulls three buckets in one query:
+
+  * ``target_structure_id = structure_id`` — rules whose target *is* the
+    Structure (the common case for library-seeded Seattle Method rules).
+  * ``target_element_id IN element_ids`` — element-scoped rules for
+    elements belonging to the Structure.
+  * ``target_association_id IN association_ids`` — association-scoped
+    rules.
+
+  Results are ordered by ``rule_category`` then ``id`` so the envelope is
+  deterministic across calls; UIs that group by category get the order
+  for free.
+  """
+  conditions = [Rule.target_structure_id == structure_id]
+  if element_ids:
+    conditions.append(Rule.target_element_id.in_(element_ids))
+  if association_ids:
+    conditions.append(Rule.target_association_id.in_(association_ids))
+
+  rules = (
+    session.execute(
+      select(Rule).where(or_(*conditions)).order_by(Rule.rule_category, Rule.id)
+    )
+    .scalars()
+    .all()
+  )
+  return [rule_to_lite(r) for r in rules]
+
+
 __all__ = [
   "association_to_connection",
   "element_to_lite",
   "fact_to_lite",
+  "load_rules_for_structure",
+  "rule_to_lite",
 ]

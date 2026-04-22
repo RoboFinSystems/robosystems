@@ -152,11 +152,12 @@ class TestBuildEnvelope:
       description="Assets + Liabilities + Equity",
     )
     session.get.return_value = structure
-    # Query order: taxonomy name, associations. Element/report queries
-    # skip when element_ids is empty.
+    # Query order: taxonomy name, associations, rules. Element/report
+    # queries skip when element_ids is empty.
     session.execute.side_effect = [
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
+      _exec_result(scalars_all=[]),  # rules
     ]
 
     build = statement_handlers.make_statement_handlers("balance_sheet")[
@@ -230,6 +231,7 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[association]),  # associations
       _exec_result(scalars_all=[element_revenue, element_sales]),  # elements
       _exec_result(scalar=None),  # no reports → facts=[]
+      _exec_result(scalars_all=[]),  # rules
     ]
 
     build = statement_handlers.make_statement_handlers("income_statement")[
@@ -291,6 +293,7 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[element]),  # elements
       _exec_result(scalar="rep_latest"),  # latest_report_id
       _exec_result(scalars_all=[fact]),  # facts
+      _exec_result(scalars_all=[]),  # rules
     ]
 
     build = statement_handlers.make_statement_handlers("balance_sheet")[
@@ -317,11 +320,12 @@ class TestBuildEnvelope:
       name=statement_handlers.STATEMENT_DISPLAY[block_type][0],
     )
     session.get.return_value = structure
-    # Query order: taxonomy name, associations. Elements/report queries
-    # skip when there are no associations.
+    # Query order: taxonomy name, associations, rules. Elements/report
+    # queries skip when there are no associations.
     session.execute.side_effect = [
       _exec_result(scalar="US GAAP"),
       _exec_result(scalars_all=[]),
+      _exec_result(scalars_all=[]),  # rules
     ]
 
     build = statement_handlers.make_statement_handlers(block_type)["build_envelope"]

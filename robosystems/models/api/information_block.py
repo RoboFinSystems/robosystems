@@ -91,6 +91,94 @@ class FactLite(BaseModel):
   fact_set_id: str | None = None
 
 
+class RuleTargetLite(BaseModel):
+  """Polymorphic rule target — points at the atom the rule is scoped to."""
+
+  model_config = ConfigDict(from_attributes=True)
+
+  target_kind: str = Field(
+    ...,
+    description=(
+      "Which atom type the rule targets — 'structure' | 'element' | "
+      "'association'. Enum closure enforced by the ``public.rules`` "
+      "CHECK constraint."
+    ),
+  )
+  target_ref_id: str = Field(
+    ...,
+    description=(
+      "UUID of the target atom — structure_id, element_id, or "
+      "association_id depending on ``target_kind``."
+    ),
+  )
+
+
+class RuleVariableLite(BaseModel):
+  """`$Variable` → concept qname binding for a rule expression."""
+
+  model_config = ConfigDict(from_attributes=True)
+
+  variable_name: str = Field(
+    ..., description="Local name in the rule expression, e.g. 'Assets'."
+  )
+  variable_qname: str = Field(
+    ..., description="Concept qname the variable resolves to, e.g. 'fac:Assets'."
+  )
+
+
+class RuleLite(BaseModel):
+  """Rule projection for the Information Block envelope.
+
+  One row per ``public.rules`` entry scoped to this block. The engine
+  (Phase δ.3) consumes ``rule_expression`` + ``rule_variables`` to
+  evaluate against the in-scope fact set; until then the envelope just
+  surfaces the rules so the UI can render them as a checklist.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  id: str
+  rule_category: str = Field(
+    ...,
+    description=(
+      "One of 8 cm:VerificationRule subclasses — "
+      "AutomatedAccountingAndReportingChecks, "
+      "FundamentalAccountingConceptRelation, PeerConsistencyRule, "
+      "PriorPeriodConsistencyRule, ReportLevelModelStructureRule, "
+      "ReportingSystemSpecificRule, ToDoManualTask, "
+      "XBRLTechnicalSyntaxRule."
+    ),
+  )
+  rule_pattern: str = Field(
+    ...,
+    description=(
+      "One of 10 cm:BusinessRulePattern mechanisms — Adjustment, "
+      "CoExists, EqualTo, Exists, GreaterThan, "
+      "GreaterThanOrEqualToZero, LessThan, RollForward, RollUp, "
+      "Variance."
+    ),
+  )
+  rule_expression: str
+  rule_target: RuleTargetLite | None = None
+  rule_variables: list[RuleVariableLite] = Field(default_factory=list)
+  rule_message: str | None = None
+  rule_severity: str = Field(
+    "error",
+    description=(
+      "Failure severity — 'info' | 'warning' | 'error'. Enum closure "
+      "enforced by the ``public.rules`` CHECK constraint."
+    ),
+  )
+  rule_origin: str = Field(
+    "native",
+    description=(
+      "Provenance — 'forked' (from an upstream artifact, e.g. Seattle "
+      "Method) or 'native' (authored in this seed or by a tenant). Enum "
+      "closure enforced by the ``public.rules`` CHECK constraint."
+    ),
+  )
+
+
 # ── Artifact Mechanics — discriminated union on `kind` ─────────────────────
 
 
@@ -261,9 +349,9 @@ class InformationBlockEnvelope(BaseModel):
   elements: list[ElementLite] = Field(default_factory=list)
   connections: list[ConnectionLite] = Field(default_factory=list)
   facts: list[FactLite] = Field(default_factory=list)
+  rules: list[RuleLite] = Field(default_factory=list)
 
   # Reserved for later phases — declared so the envelope shape is stable.
-  rules: list[dict[str, Any]] = Field(default_factory=list)
   dimensions: list[dict[str, Any]] = Field(default_factory=list)
   fact_set: dict[str, Any] | None = None
   verification_results: list[dict[str, Any]] = Field(default_factory=list)
@@ -370,6 +458,9 @@ __all__ = [
   "FactLite",
   "InformationBlockEnvelope",
   "InformationModelResponse",
+  "RuleLite",
+  "RuleTargetLite",
+  "RuleVariableLite",
   "ScheduleMechanics",
   "StatementMechanics",
   "UpdateInformationBlockRequest",
