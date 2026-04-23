@@ -92,6 +92,7 @@ def _run_dispose(session, body: DisposeScheduleRequest, accumulated_dollars: flo
   session.execute.side_effect = [
     _exec_result(row=structure),
     _exec_result(fetchone_row=_acc_fact(accumulated_dollars)),
+    MagicMock(),  # DELETE FROM verification_results (SumEquals cleanup)
   ]
   session.query.side_effect = lambda model: _Query(model, deleted_models)
 
@@ -297,6 +298,7 @@ class TestDisposeScheduleValidation:
     session.execute.side_effect = [
       _exec_result(row=structure),
       _exec_result(fetchone_row=_acc_fact(accumulated_dollars)),
+      MagicMock(),  # DELETE FROM verification_results (SumEquals cleanup)
     ]
     return session
 

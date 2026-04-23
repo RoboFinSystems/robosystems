@@ -212,8 +212,13 @@ def evaluate_rules_for_structure(
     .scalars()
     .all()
   )
-  element_ids = {a.from_element_id for a in associations} | {
-    a.to_element_id for a in associations
+  element_ids = {
+    x
+    for x in (
+      {a.from_element_id for a in associations}
+      | {a.to_element_id for a in associations}
+    )
+    if x is not None
   }
 
   rule_lites = load_rules_for_structure(

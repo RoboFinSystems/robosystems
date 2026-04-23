@@ -592,10 +592,11 @@ def _share_to_target(
           error="Target graph does not have 'roboledger' schema extension.",
         )
   except Exception as e:
+    logger.error(f"Failed to validate target graph {target_graph_id}: {e}")
     return ShareResultItem(
       target_graph_id=target_graph_id,
       status="error",
-      error=f"Failed to validate target graph: {e!s}",
+      error="Failed to validate target graph.",
     )
 
   try:

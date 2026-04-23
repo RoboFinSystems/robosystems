@@ -218,7 +218,7 @@ class TestDeleteInformationBlock:
     mock_delete = MagicMock(return_value="struct_gone")
     patched = _schedule_entry_with(mock_build=mock_build, mock_delete=mock_delete)
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
-      result = delete_information_block(session, body, deleted_by="usr_1")
+      result = delete_information_block(session, body, created_by="usr_1")
 
     assert isinstance(result, DeleteInformationBlockResponse)
     assert result.deleted is True
@@ -247,13 +247,13 @@ class TestDeleteInformationBlock:
     patched = _schedule_entry_with(mock_build=mock_build, mock_delete=mock_delete)
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
       with pytest.raises(ScheduleNotFoundError):
-        delete_information_block(session, body, deleted_by="usr_1")
+        delete_information_block(session, body, created_by="usr_1")
 
   def test_unknown_block_type_raises_value_error(self) -> None:
     session = MagicMock()
     body = DeleteInformationBlockRequest(block_type="nonsense", payload={})
     with pytest.raises(ValueError, match="Unknown block_type"):
-      delete_information_block(session, body, deleted_by="usr_1")
+      delete_information_block(session, body, created_by="usr_1")
 
   @pytest.mark.parametrize(
     "block_type",
@@ -263,4 +263,4 @@ class TestDeleteInformationBlock:
     session = MagicMock()
     body = DeleteInformationBlockRequest(block_type=block_type, payload={})
     with pytest.raises(NotImplementedError, match="library-seeded"):
-      delete_information_block(session, body, deleted_by="usr_1")
+      delete_information_block(session, body, created_by="usr_1")

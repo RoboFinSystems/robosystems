@@ -175,6 +175,28 @@ def truncate_schedule(
     reason=body.reason,
     updated_by=created_by,
   )
+
+  # The SumEquals rule was created with expected_total = original_amount.
+  # After truncation, remaining facts sum to less than that — the rule
+  # would produce a permanent false failure. Remove it (and its VRs)
+  # so the rule engine stays clean. Same pattern as dispose_schedule.
+  session.execute(
+    text(
+      "DELETE FROM verification_results WHERE rule_id IN ("
+      "  SELECT id FROM rules"
+      "  WHERE target_structure_id = :sid"
+      "  AND rule_pattern = 'SumEquals'"
+      "  AND rule_origin = 'native'"
+      ")"
+    ),
+    {"sid": body.structure_id},
+  )
+  session.query(Rule).filter(
+    Rule.target_structure_id == body.structure_id,
+    Rule.rule_pattern == "SumEquals",
+    Rule.rule_origin == "native",
+  ).delete(synchronize_session=False)
+
   session.commit()
 
   return TruncateScheduleResponse(
@@ -305,7 +327,7 @@ def update_schedule(
     "entry_template": metadata.get("entry_template", {}),
     "schedule_metadata": metadata.get("schedule_metadata"),
   }
-  session.flush()
+  session.commit()
 
   # Recount for response (same as create_schedule response shape)
   count_row = session.execute(
@@ -399,7 +421,18 @@ def dispose_schedule(
 
   # The auto-generated SumEquals rule is no longer valid after disposal —
   # forward facts are gone so the sum will never equal original_amount again.
-  # Delete it so the rule engine doesn't surface a permanent false failure.
+  # Delete verification_results first (FK → rules), then the rule itself.
+  session.execute(
+    text(
+      "DELETE FROM verification_results WHERE rule_id IN ("
+      "  SELECT id FROM rules"
+      "  WHERE target_structure_id = :sid"
+      "  AND rule_pattern = 'SumEquals'"
+      "  AND rule_origin = 'native'"
+      ")"
+    ),
+    {"sid": body.structure_id},
+  )
   session.query(Rule).filter(
     Rule.target_structure_id == body.structure_id,
     Rule.rule_pattern == "SumEquals",
@@ -521,6 +554,6 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
     synchronize_session=False
   )
   session.delete(structure)
-  session.flush()
+  session.commit()
 
   return {"deleted": True}
