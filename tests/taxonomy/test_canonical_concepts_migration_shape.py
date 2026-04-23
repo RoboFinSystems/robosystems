@@ -10,6 +10,10 @@ from __future__ import annotations
 import importlib.util as _util
 from pathlib import Path
 
+from sqlalchemy import CheckConstraint
+
+from robosystems.db import extensions as extensions_db
+from robosystems.models.extensions import Structure
 from robosystems.taxonomy.writers.tenant_writer import _ELEMENT_COLS
 
 _MIGRATION_PATH = (
@@ -48,3 +52,26 @@ class TestMetricTypeInStructureCheck:
     """The Phase η metric block type must be admissible in the widened
     structure_type CHECK so tenant Structures can be created with it."""
     assert "'metric'" in mig_0002._WIDENED_STRUCTURE_TYPE_CHECK
+
+  def test_metric_is_allowed_by_runtime_structure_model(self) -> None:
+    """Fresh tenant schemas are created from SQLAlchemy metadata, so the
+    runtime model CHECK must match the migration vocabulary."""
+    checks = [
+      c
+      for c in Structure.__table__.constraints
+      if isinstance(c, CheckConstraint) and c.name == "check_structure_type"
+    ]
+    assert len(checks) == 1
+    assert "'metric'" in str(checks[0].sqltext)
+
+  def test_fresh_tenant_check_widener_mentions_metric(self) -> None:
+    """Provisioning widens checks after metadata create_all; it must not
+    narrow the freshly-created structure_type vocabulary."""
+    statements: list[str] = []
+
+    class FakeConn:
+      def execute(self, statement):
+        statements.append(str(statement))
+
+    extensions_db._widen_library_checks(FakeConn(), "kg0123456789abcdef")
+    assert any("structures" in stmt and "'metric'" in stmt for stmt in statements)

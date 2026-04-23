@@ -30,7 +30,7 @@ class Structure(ExtensionsBase):
       "structure_type IN ("
       "'chart_of_accounts', 'income_statement', 'balance_sheet', "
       "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
-      "'schedule', 'rollforward', 'reconciliation', 'policy'"
+      "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric'"
       ")",
       name="check_structure_type",
     ),

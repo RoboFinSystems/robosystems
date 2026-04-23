@@ -23,6 +23,7 @@ from __future__ import annotations
 import importlib.util as _util
 from pathlib import Path
 
+from robosystems.db import extensions as extensions_db
 from robosystems.taxonomy.loaders.jsonld_loader import (
   RULE_CATEGORY_VALUES,
   RULE_PATTERN_VALUES,
@@ -50,12 +51,38 @@ class TestImmutableTables:
     structures/associations/elements."""
     assert "rules" in mig_0002._IMMUTABLE_TABLES
 
+  def test_fresh_tenant_provisioning_installs_same_immutability_trigger(self) -> None:
+    """Fresh schemas use ``provision_tenant_schema`` instead of the migration
+    backfill helper, so its trigger table list must stay in sync."""
+    assert "rules" in extensions_db._LIBRARY_IMMUTABLE_TABLES
+
 
 class TestTaxonomyTypeCheck:
   def test_rules_type_is_allowed(self) -> None:
     """The widened CHECK constraint on ``public.taxonomies.taxonomy_type``
     must include ``'rules'`` so the fac-rules seed row can be written."""
     assert "'rules'" in mig_0002._WIDENED_TAXONOMY_TYPE_CHECK
+
+  def test_existing_tenant_backfill_widens_taxonomy_type(self) -> None:
+    """Existing tenant schemas copy the fac-rules taxonomy during 0002;
+    their CHECK must widen before that copy runs."""
+
+    class _Conn:
+      def __init__(self) -> None:
+        self.statements: list[str] = []
+
+      def execute(self, stmt) -> None:
+        self.statements.append(str(stmt))
+
+    conn = _Conn()
+    mig_0002._widen_tenant_checks(conn, "kgtest")
+
+    assert any(
+      '"kgtest".taxonomies' in stmt and "'rules'" in stmt for stmt in conn.statements
+    )
+
+  def test_downgrade_restores_narrow_taxonomy_type(self) -> None:
+    assert "'rules'" not in mig_0002._NARROW_TAXONOMY_TYPE_CHECK
 
 
 class TestSeedFiles:

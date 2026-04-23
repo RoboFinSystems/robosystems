@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def _make_rule_orm(
   *,
@@ -83,6 +85,75 @@ class TestBindVariables:
     bindings = _bind_variables(session, rule, "struct_bs", None, None)
     assert bindings == {"Assets": None}
 
+  def test_falls_back_to_report_fact_when_structure_fact_missing(self) -> None:
+    """Report facts are structure-agnostic until the FactSet expand pass;
+    the rule engine should still bind them after structure facts miss."""
+    from robosystems.operations.information_block.rules.engine import _bind_variables
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      variables=[{"variable_name": "Assets", "variable_qname": "fac:Assets"}]
+    )
+    session.execute.side_effect = [
+      _scalar("elem_assets"),
+      _scalar(None),
+      _scalar(1000.0),
+    ]
+    bindings = _bind_variables(
+      session,
+      rule,
+      "struct_bs",
+      None,
+      None,
+      fallback_report_id="rep_latest",
+    )
+    assert bindings == {"Assets": 1000.0}
+
+  def test_does_not_fall_back_to_unpinned_report_fact(self) -> None:
+    from robosystems.operations.information_block.rules.engine import _bind_variables
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      variables=[{"variable_name": "Assets", "variable_qname": "fac:Assets"}]
+    )
+    session.execute.side_effect = [_scalar("elem_assets"), _scalar(None)]
+    bindings = _bind_variables(session, rule, "struct_bs", None, None)
+    assert bindings == {"Assets": None}
+    assert session.execute.call_count == 2
+
+  def test_fact_set_binding_does_not_fall_back_to_report_fact(self) -> None:
+    from robosystems.operations.information_block.rules.engine import _bind_variables
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      variables=[{"variable_name": "Assets", "variable_qname": "fac:Assets"}]
+    )
+    session.execute.side_effect = [_scalar("elem_assets"), _scalar(None)]
+    bindings = _bind_variables(
+      session, rule, "struct_bs", None, None, fact_set_id="fs_1"
+    )
+    assert bindings == {"Assets": None}
+    assert session.execute.call_count == 2
+
+  def test_can_disable_report_fallback_for_schedule_rules(self) -> None:
+    from robosystems.operations.information_block.rules.engine import _bind_variables
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      variables=[{"variable_name": "Assets", "variable_qname": "fac:Assets"}]
+    )
+    session.execute.side_effect = [_scalar("elem_assets"), _scalar(None)]
+    bindings = _bind_variables(
+      session,
+      rule,
+      "struct_schedule",
+      None,
+      None,
+      allow_report_fallback=False,
+    )
+    assert bindings == {"Assets": None}
+    assert session.execute.call_count == 2
+
   def test_skips_empty_variable_name(self) -> None:
     from robosystems.operations.information_block.rules.engine import _bind_variables
 
@@ -112,14 +183,60 @@ class TestBindVariables:
     assert bindings == {"A": 100.0, "B": 50.0}
 
 
+class TestLatestReportFallback:
+  def test_returns_none_without_structure_elements(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _latest_report_id_for_fallback,
+    )
+
+    session = MagicMock()
+    assert _latest_report_id_for_fallback(session, set(), None, None) is None
+    session.execute.assert_not_called()
+
+  def test_returns_latest_matching_report_id(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _latest_report_id_for_fallback,
+    )
+
+    session = MagicMock()
+    session.execute.return_value = _scalar("rep_latest")
+
+    report_id = _latest_report_id_for_fallback(
+      session,
+      {"elem_assets", "elem_equity"},
+      date(2025, 1, 1),
+      date(2025, 12, 31),
+    )
+
+    assert report_id == "rep_latest"
+    stmt = str(session.execute.call_args.args[0])
+    assert "reports.created_at DESC" in stmt
+    assert "facts.report_id IS NOT NULL" in stmt
+    assert "facts.structure_id IS NULL" in stmt
+
+
 class TestEvaluateRulesForStructure:
+  def test_raises_when_structure_missing(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      evaluate_rules_for_structure,
+    )
+
+    session = MagicMock()
+    session.get.return_value = None
+
+    with pytest.raises(ValueError, match="Structure not found: struct_missing"):
+      evaluate_rules_for_structure(session, "struct_missing")
+
+    session.execute.assert_not_called()
+    session.flush.assert_not_called()
+
   def test_returns_empty_when_no_rules(self) -> None:
     from robosystems.operations.information_block.rules.engine import (
       evaluate_rules_for_structure,
     )
 
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs")
+    session.get.return_value = MagicMock(id="struct_bs", structure_type="schedule")
     session.execute.return_value = _scalars()
 
     with patch(
@@ -136,7 +253,7 @@ class TestEvaluateRulesForStructure:
     )
 
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs")
+    session.get.return_value = MagicMock(id="struct_bs", structure_type="schedule")
 
     rule_lite = MagicMock()
     rule_lite.id = "rule_crash"
@@ -169,7 +286,7 @@ class TestEvaluateRulesForStructure:
     )
 
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs")
+    session.get.return_value = MagicMock(id="struct_bs", structure_type="schedule")
 
     rule_lite = MagicMock()
     rule_lite.id = "rule_eq"
@@ -210,7 +327,7 @@ class TestEvaluateRulesForStructure:
     )
 
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs")
+    session.get.return_value = MagicMock(id="struct_bs", structure_type="schedule")
     session.execute.return_value = _scalars()
 
     with patch(

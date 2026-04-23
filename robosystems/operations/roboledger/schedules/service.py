@@ -200,7 +200,7 @@ class ScheduleService:
     artifact_mechanics: dict[str, object] = {
       "kind": "closing_entry_generator",
       "entry_template": metadata["entry_template"],
-      "schedule_metadata": metadata.get("schedule_metadata", {}),
+      "schedule_metadata": metadata.get("schedule_metadata"),
     }
 
     structure = Structure(
@@ -970,11 +970,17 @@ class ScheduleService:
     metadata["schedule_metadata"] = schedule_meta
     metadata["truncations"] = truncation_log
     structure.metadata_ = metadata
+    structure.artifact_mechanics = {
+      "kind": "closing_entry_generator",
+      "entry_template": metadata.get("entry_template", {}),
+      "schedule_metadata": metadata.get("schedule_metadata"),
+    }
 
     # Force SQLAlchemy to detect the JSONB change
     from sqlalchemy.orm.attributes import flag_modified
 
     flag_modified(structure, "metadata_")
+    flag_modified(structure, "artifact_mechanics")
     session.flush()
 
     logger.info(

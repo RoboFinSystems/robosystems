@@ -41,6 +41,7 @@ from robosystems.middleware.extensions import (
   OperationRegistrar,
   OperationSpec,
 )
+from robosystems.operations.extensions.staleness import mark_graph_stale
 
 from ._gate import MCPExtensionGateError, require_graph_extension_mcp
 from .base_tool import BaseTool
@@ -246,6 +247,9 @@ class _RegistrarMCPTool(BaseTool):
         "MCP tool %s failed unexpectedly: %s", self.spec.name, exc, exc_info=True
       )
       return {"error": "command_failed", "message": str(exc)}
+
+    if self.spec.mark_stale_reason is not None:
+      mark_graph_stale(graph_id, self.spec.mark_stale_reason)
 
     # ── 5. Normalize response ───────────────────────────────────────────
     return _dump_response(result)

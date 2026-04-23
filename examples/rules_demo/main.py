@@ -47,18 +47,21 @@ PERIOD_START = date(PERIOD_END.year, 1, 1)
 
 def _get_or_create_graph() -> tuple[str, str]:
   """Return (graph_id, api_key), creating a graph if needed."""
+  from robosystems_client.api.graphs.create_graph import (
+    sync_detailed as api_create_graph,
+  )
+  from robosystems_client.api.operations.get_operation_status import (
+    sync_detailed as api_get_operation_status,
+  )
+  from robosystems_client.client import AuthenticatedClient
+  from robosystems_client.models import CreateGraphRequest, GraphMetadata
+
   from examples.credentials.utils import (
     CredentialContext,
     ensure_user_credentials,
     get_graph_id,
     save_graph_id,
   )
-  from robosystems_client.api.graphs.create_graph import sync_detailed as api_create_graph
-  from robosystems_client.api.operations.get_operation_status import (
-    sync_detailed as api_get_operation_status,
-  )
-  from robosystems_client.client import AuthenticatedClient
-  from robosystems_client.models import CreateGraphRequest, GraphMetadata
 
   context = CredentialContext(
     base_url=BASE_URL,

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from robosystems.db.extensions import extensions_session
+from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
 from robosystems.logger import logger
 from robosystems.operations.information_block import (
   get_information_block as ops_get_information_block,
@@ -177,7 +177,7 @@ has many blocks.
           category=category,
           limit=limit,
           offset=offset,
-          library_sentinel=False,
+          library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
         )
         return {
           "block_count": len(envelopes),

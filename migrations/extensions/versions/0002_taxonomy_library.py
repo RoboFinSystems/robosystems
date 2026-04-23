@@ -102,6 +102,9 @@ _WIDENED_TAXONOMY_TYPE_CHECK = (
   "'classification-vocabulary', 'classification-assignment', 'rules'"
   ")"
 )
+_NARROW_TAXONOMY_TYPE_CHECK = (
+  "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping', 'schedule')"
+)
 _NARROW_ASSOCIATION_CHECK = (
   "association_type IN ('presentation', 'calculation', 'mapping')"
 )
@@ -307,6 +310,7 @@ def _widen_tenant_checks(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
   t.add_check("associations", "check_association_type", _WIDENED_ASSOCIATION_CHECK)
   t.add_check("elements", "check_element_source", _WIDENED_ELEMENT_SOURCE_CHECK)
+  t.add_check("taxonomies", "check_taxonomy_type", _WIDENED_TAXONOMY_TYPE_CHECK)
   t.add_check("structures", "check_structure_type", _WIDENED_STRUCTURE_TYPE_CHECK)
 
 
@@ -314,6 +318,7 @@ def _restore_narrow_tenant_checks(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
   t.add_check("associations", "check_association_type", _NARROW_ASSOCIATION_CHECK)
   t.add_check("elements", "check_element_source", _NARROW_ELEMENT_SOURCE_CHECK)
+  t.add_check("taxonomies", "check_taxonomy_type", _NARROW_TAXONOMY_TYPE_CHECK)
   t.add_check("structures", "check_structure_type", _NARROW_STRUCTURE_TYPE_CHECK)
 
 
@@ -435,7 +440,7 @@ def _backfill_tenant_schedule_mechanics(conn, schema: str) -> None:
               'entry_template',
                 COALESCE(metadata -> 'entry_template', '{{}}'::jsonb),
               'schedule_metadata',
-                COALESCE(metadata -> 'schedule_metadata', '{{}}'::jsonb)
+                COALESCE(metadata -> 'schedule_metadata', 'null'::jsonb)
             )
           )
       WHERE structure_type = 'schedule'
@@ -1234,6 +1239,10 @@ def downgrade() -> None:
   op.drop_constraint("check_element_source", "elements", type_="check")
   op.create_check_constraint(
     "check_element_source", "elements", _NARROW_ELEMENT_SOURCE_CHECK
+  )
+  op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")
+  op.create_check_constraint(
+    "check_taxonomy_type", "taxonomies", _NARROW_TAXONOMY_TYPE_CHECK
   )
   op.drop_constraint("check_structure_type", "structures", type_="check")
   op.create_check_constraint(

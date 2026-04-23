@@ -180,3 +180,22 @@ class TestListInformationBlocksTool:
       offset=5,
       library_sentinel=False,
     )
+
+  @pytest.mark.asyncio
+  async def test_passes_library_sentinel_for_library_graph(self, mock_graph_client):
+    mock_graph_client.graph_id = "library"
+    tool = ListInformationBlocksTool(mock_graph_client)
+    with (
+      _patch_session() as session,
+      patch(f"{MODULE}.ops_list_information_blocks", return_value=[]) as ops_mock,
+    ):
+      await tool.execute({})
+
+    ops_mock.assert_called_once_with(
+      session,
+      block_type=None,
+      category=None,
+      limit=50,
+      offset=0,
+      library_sentinel=True,
+    )

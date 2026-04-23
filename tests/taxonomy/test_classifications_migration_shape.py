@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib.util as _util
 from pathlib import Path
 
+from robosystems.db import extensions as extensions_db
 from robosystems.taxonomy.writers.tenant_writer import (
   _ASSOC_CLASSIFICATION_COLS,
   CopyStats,
@@ -42,6 +43,11 @@ class TestImmutableTables:
     against UPDATE/DELETE — same contract as element_classifications /
     rules / structures."""
     assert "association_classifications" in mig_0002._IMMUTABLE_TABLES
+
+  def test_fresh_tenant_provisioning_installs_same_immutability_trigger(self) -> None:
+    """Fresh schemas use ``provision_tenant_schema`` instead of the migration
+    backfill helper, so its trigger table list must stay in sync."""
+    assert "association_classifications" in extensions_db._LIBRARY_IMMUTABLE_TABLES
 
 
 class TestTenantWriterCols:

@@ -251,6 +251,25 @@ class TestRegistrarToolExecute:
     assert result == {"id": "x", "echoed": 3}
 
   @pytest.mark.asyncio
+  async def test_mark_stale_reason_marks_graph_after_success(self) -> None:
+    tool = _RegistrarMCPTool(
+      client=_client(graph_id="kg_stale", user_id="usr_42"),
+      spec=_spec(mark_stale_reason="demo_changed"),
+      registrar=_registrar_stub(),
+    )
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.registrar.require_graph_extension_mcp",
+        return_value=MagicMock(),
+      ),
+      patch("robosystems.middleware.mcp.tools.registrar.mark_graph_stale") as stale,
+    ):
+      result = await tool.execute({"id": "x", "value": 3})
+
+    assert result == {"id": "x", "echoed": 3}
+    stale.assert_called_once_with("kg_stale", "demo_changed")
+
+  @pytest.mark.asyncio
   async def test_gate_rejection_short_circuits_before_validation(self) -> None:
     """A gate error must return the code/message envelope and skip
     Pydantic validation (so an otherwise invalid body still produces the

@@ -146,6 +146,28 @@ class TestCreateSchedule:
     assert len(fact_objects) > 0
     assert all(f.fact_scope == "in_scope" for f in fact_objects)
 
+  def test_omitted_schedule_metadata_stays_null_in_typed_mechanics(self):
+    session = _mock_session()
+    svc = ScheduleService()
+
+    session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="No Metadata",
+        taxonomy_id="tax_01",
+        element_ids=["elem_a", "elem_b"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        monthly_amount=10000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    structure = session.add.call_args_list[0][0][0]
+    assert structure.artifact_mechanics["schedule_metadata"] is None
+
   def test_closed_through_splits_historical_and_in_scope(self):
     """Facts with period_end ≤ closed_through → historical; else → in_scope."""
     session = _mock_session()
@@ -684,6 +706,11 @@ class TestTruncateSchedule:
         "useful_life_months": 36,
       },
     }
+    struct.artifact_mechanics = {
+      "kind": "closing_entry_generator",
+      "entry_template": struct.metadata_["entry_template"],
+      "schedule_metadata": struct.metadata_.get("schedule_metadata"),
+    }
     return struct
 
   def test_happy_path_deletes_future_facts(self):
@@ -728,6 +755,8 @@ class TestTruncateSchedule:
     assert result["facts_deleted"] == 15
     assert result["new_end_date"] == date(2026, 3, 31)
     assert result["reason"] == "Sold the computer"
+    structure = session.get.return_value
+    assert structure.artifact_mechanics["schedule_metadata"]["end_date"] == "2026-03-31"
 
   def test_rejects_empty_reason(self):
     session = _mock_session()
