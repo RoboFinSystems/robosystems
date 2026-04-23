@@ -17,6 +17,16 @@ from sqlalchemy.orm import Session
 _LIBRARY_SEEDER = "library-seeder"
 
 
+def rule_summary(results: list) -> dict[str, int] | None:
+  """Tally verification results by status. Returns None when no rules exist."""
+  if not results:
+    return None
+  tally: dict[str, int] = {"pass": 0, "fail": 0, "error": 0, "skipped": 0}
+  for r in results:
+    tally[r.status] = tally.get(r.status, 0) + 1
+  return tally
+
+
 class LibraryImmutableError(PermissionError):
   """Raised when a mutation targets a library-seeded row in a tenant schema.
 

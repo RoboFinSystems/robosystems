@@ -34,6 +34,9 @@ from robosystems.models.extensions import (
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
+from robosystems.operations.roboledger.commands._guards import (
+  rule_summary as _rule_summary,
+)
 from robosystems.operations.roboledger.reads.reports import (
   build_periods,
   load_structures,
@@ -82,16 +85,6 @@ def _get_entity_id(session: Session, graph_id: str) -> str:
   if row is None:
     raise NoEntityError("No entity found. Import data before creating reports.")
   return row.id
-
-
-def _rule_summary(results: list) -> dict[str, int] | None:
-  """Tally verification results by status. Returns None when no rules exist."""
-  if not results:
-    return None
-  tally: dict[str, int] = {"pass": 0, "fail": 0, "error": 0, "skipped": 0}
-  for r in results:
-    tally[r.status] = tally.get(r.status, 0) + 1
-  return tally
 
 
 def _evaluate_report_structures(

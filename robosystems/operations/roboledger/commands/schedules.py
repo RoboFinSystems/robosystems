@@ -35,21 +35,14 @@ from robosystems.models.extensions.roboledger import Fact
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
+from robosystems.operations.roboledger.commands._guards import (
+  rule_summary as _rule_summary,
+)
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.roboledger.schedules.service import (
   EntryTemplate,
   ScheduleMetadata,
 )
-
-
-def _rule_summary(results: list) -> dict[str, int] | None:
-  """Tally verification results by status. Returns None when no rules exist."""
-  if not results:
-    return None
-  tally: dict[str, int] = {"pass": 0, "fail": 0, "error": 0, "skipped": 0}
-  for r in results:
-    tally[r.status] = tally.get(r.status, 0) + 1
-  return tally
 
 
 class ScheduleNotFoundError(LookupError):
@@ -382,7 +375,6 @@ def dispose_schedule(
   accumulated_depreciation_dollars = float(acc_row.value) if acc_row else 0.0
   accumulated_depreciation = round(accumulated_depreciation_dollars * 100)
 
-  round(original_amount / 100.0, 2)
   net_book_value = original_amount - accumulated_depreciation
   sale_proceeds = body.sale_proceeds or 0
   gain_loss = sale_proceeds - net_book_value
@@ -404,6 +396,15 @@ def dispose_schedule(
     reason=body.reason,
     updated_by=created_by,
   )
+
+  # The auto-generated SumEquals rule is no longer valid after disposal —
+  # forward facts are gone so the sum will never equal original_amount again.
+  # Delete it so the rule engine doesn't surface a permanent false failure.
+  session.query(Rule).filter(
+    Rule.target_structure_id == body.structure_id,
+    Rule.rule_pattern == "SumEquals",
+    Rule.rule_origin == "native",
+  ).delete(synchronize_session=False)
 
   # Build balanced disposal line items (all amounts in cents)
   line_items: list[dict] = [

@@ -10,13 +10,13 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (41):**
+**Registered (43):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
   `close-period`, `reopen-period`
 - Schedules: `truncate-schedule`, `create-closing-entry`,
-  `create-manual-closing-entry`
+  `create-manual-closing-entry`, `dispose-schedule`, `evaluate-rules`
 - Taxonomies: `create-taxonomy`, `update-taxonomy`, `delete-taxonomy`,
   `create-structure`, `update-structure`, `delete-structure`,
   `create-mapping-association`, `delete-mapping-association`

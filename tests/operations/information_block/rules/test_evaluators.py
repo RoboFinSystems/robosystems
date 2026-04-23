@@ -149,6 +149,73 @@ class TestCoExistsPattern:
     assert outcome.status == "skipped"
 
 
+class TestSumEqualsPattern:
+  def test_pass_when_sum_matches_expected_total(self) -> None:
+    rule = _make_rule(
+      pattern="SumEquals",
+      expression="sum($periodic_amount) = 1200.0",
+      variables=[
+        {"variable_name": "periodic_amount", "variable_qname": "fac:DeprExpense"}
+      ],
+      metadata={"expected_total": 1200.0},
+    )
+    outcome = evaluate_rule(rule, {"periodic_amount": 1200.0})
+    assert outcome.status == "pass"
+    assert outcome.message is None
+
+  def test_fail_when_sum_differs_from_expected(self) -> None:
+    rule = _make_rule(
+      pattern="SumEquals",
+      expression="sum($periodic_amount) = 1200.0",
+      variables=[
+        {"variable_name": "periodic_amount", "variable_qname": "fac:DeprExpense"}
+      ],
+      metadata={"expected_total": 1200.0},
+    )
+    outcome = evaluate_rule(rule, {"periodic_amount": 1199.98})
+    assert outcome.status == "fail"
+    assert "1199.98" in (outcome.message or "")
+    assert outcome.detail["actual_sum"] == 1199.98
+    assert outcome.detail["expected_total"] == 1200.0
+
+  def test_skipped_when_sum_not_bound(self) -> None:
+    rule = _make_rule(
+      pattern="SumEquals",
+      variables=[
+        {"variable_name": "periodic_amount", "variable_qname": "fac:DeprExpense"}
+      ],
+      metadata={"expected_total": 1200.0},
+    )
+    outcome = evaluate_rule(rule, {"periodic_amount": None})
+    assert outcome.status == "skipped"
+    assert "periodic_amount" in (outcome.message or "")
+
+  def test_skipped_when_no_variables(self) -> None:
+    rule = _make_rule(
+      pattern="SumEquals", variables=[], metadata={"expected_total": 100.0}
+    )
+    outcome = evaluate_rule(rule, {})
+    assert outcome.status == "skipped"
+
+  def test_pass_within_custom_tolerance(self) -> None:
+    rule = _make_rule(
+      pattern="SumEquals",
+      variables=[{"variable_name": "periodic_amount", "variable_qname": "fac:X"}],
+      metadata={"expected_total": 1000.0, "tolerance": 1.0},
+    )
+    outcome = evaluate_rule(rule, {"periodic_amount": 1000.5})
+    assert outcome.status == "pass"
+
+  def test_fail_outside_custom_tolerance(self) -> None:
+    rule = _make_rule(
+      pattern="SumEquals",
+      variables=[{"variable_name": "periodic_amount", "variable_qname": "fac:X"}],
+      metadata={"expected_total": 1000.0, "tolerance": 0.01},
+    )
+    outcome = evaluate_rule(rule, {"periodic_amount": 999.0})
+    assert outcome.status == "fail"
+
+
 class TestUnimplementedPattern:
   def test_adjustment_returns_skipped(self) -> None:
     rule = _make_rule(pattern="Adjustment")
