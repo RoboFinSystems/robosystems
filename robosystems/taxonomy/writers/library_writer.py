@@ -8,6 +8,8 @@ because they're keyed on qname + namespace_uri + version).
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
@@ -17,6 +19,7 @@ from robosystems.taxonomy.model import (
   ClassificationAssignmentSpec,
   ClassificationSpec,
   ElementSpec,
+  RuleSpec,
   StructureSpec,
   TaxonomyPackage,
 )
@@ -160,6 +163,16 @@ def _association_id(
     f"{structure_id}:{from_element_id}:{to_element_id}:{association_type}",
     namespace="association",
   )
+
+
+def _rule_id(standard: str, local_id: str) -> str:
+  """Deterministic UUID5 for a rule row keyed on (standard, local id).
+
+  The local id is the blank-node local name from the seed (e.g.
+  'fac-rule-bs-identity'). Including ``standard`` in the seed avoids
+  collision if two rule packs happen to pick the same local id.
+  """
+  return generate_deterministic_uuid(f"{standard}:{local_id}", namespace="rule")
 
 
 def _write_taxonomy_row(conn: Connection, package: TaxonomyPackage) -> str:
@@ -559,18 +572,155 @@ def write_taxonomy_arcs(conn: Connection, package: TaxonomyPackage) -> dict[str,
   return counts
 
 
+def _resolve_structure_id_by_role(conn: Connection, role_uri: str) -> str | None:
+  """Confirm a structure with this role_uri exists; return its id.
+
+  Structure ids are deterministic UUID5(role_uri), so we could compute
+  the id without a round-trip — but the lookup catches typos in the
+  seed where the role URI doesn't match a previously-loaded structure
+  (FK would otherwise fail at INSERT with a less obvious error).
+  """
+  expected_id = _structure_id(role_uri)
+  row = conn.execute(
+    text("SELECT id FROM public.structures WHERE id = :id LIMIT 1"),
+    {"id": expected_id},
+  ).fetchone()
+  return row[0] if row else None
+
+
+def _write_rule(
+  conn: Connection,
+  rule: RuleSpec,
+  taxonomy_id: str,
+  package: TaxonomyPackage,
+) -> bool:
+  """Insert one rule row. Returns True on write, False when skipped.
+
+  Skips (with a warning) when the polymorphic target can't be
+  resolved — the most common failure mode is a target_ref in the seed
+  pointing at a structure/element that hasn't been loaded yet. Better
+  to log the miss than raise and abort the whole taxonomy load.
+  """
+  rule_uuid = _rule_id(package.standard, rule.id)
+  target_kind: str | None = None
+  target_structure_id: str | None = None
+  target_element_id: str | None = None
+  target_association_id: str | None = None
+
+  if rule.rule_target is not None:
+    target_kind = rule.rule_target.target_kind
+    ref = rule.rule_target.target_ref
+    if target_kind == "structure":
+      target_structure_id = _resolve_structure_id_by_role(conn, ref)
+      if target_structure_id is None:
+        logger.warning(
+          "Rule %s: target structure role_uri %r not in library — skipping",
+          rule.id,
+          ref,
+        )
+        return False
+    elif target_kind == "element":
+      target_element_id = _resolve_qname_db(conn, ref)
+      if target_element_id is None:
+        logger.warning(
+          "Rule %s: target element qname %r not in library — skipping",
+          rule.id,
+          ref,
+        )
+        return False
+    elif target_kind == "association":
+      # Associations carry opaque composite ids; we don't have a
+      # natural-key resolver yet. Phase δ.3 will add one alongside the
+      # arc-level rule harvest; until then association-targeted rules
+      # are not seedable.
+      logger.warning(
+        "Rule %s: association-targeted rules not yet supported — skipping",
+        rule.id,
+      )
+      return False
+
+  variables_json = json.dumps(
+    [
+      {"variable_name": v.variable_name, "variable_qname": v.variable_qname}
+      for v in rule.rule_variables
+    ]
+  )
+
+  conn.execute(
+    text(
+      """
+      INSERT INTO public.rules (
+        id, taxonomy_id, rule_category, rule_pattern, rule_expression,
+        rule_message, rule_severity, rule_origin,
+        target_kind, target_structure_id, target_element_id,
+        target_association_id,
+        rule_variables, metadata, created_at, updated_at, created_by
+      ) VALUES (
+        :id, :taxonomy_id, :rule_category, :rule_pattern, :rule_expression,
+        :rule_message, :rule_severity, :rule_origin,
+        :target_kind, :target_structure_id, :target_element_id,
+        :target_association_id,
+        CAST(:rule_variables AS jsonb), '{}'::jsonb, now(), now(), 'library-seeder'
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        rule_expression = EXCLUDED.rule_expression,
+        rule_message = EXCLUDED.rule_message,
+        rule_severity = EXCLUDED.rule_severity,
+        rule_variables = EXCLUDED.rule_variables,
+        updated_at = now()
+      """
+    ),
+    {
+      "id": rule_uuid,
+      "taxonomy_id": taxonomy_id,
+      "rule_category": rule.rule_category,
+      "rule_pattern": rule.rule_pattern,
+      "rule_expression": rule.rule_expression,
+      "rule_message": rule.rule_message,
+      "rule_severity": rule.rule_severity,
+      "rule_origin": rule.rule_origin,
+      "target_kind": target_kind,
+      "target_structure_id": target_structure_id,
+      "target_element_id": target_element_id,
+      "target_association_id": target_association_id,
+      "rule_variables": variables_json,
+    },
+  )
+  return True
+
+
+def write_taxonomy_rules(conn: Connection, package: TaxonomyPackage) -> dict[str, int]:
+  """Phase 3 writer: rules rows.
+
+  Depends on elements + structures already persisted (phase 1) so
+  polymorphic target references resolve. Runs after
+  ``write_taxonomy_arcs`` for every package so association-targeted
+  rules (Phase δ.3) can resolve their targets too.
+  """
+  counts = {"rules": 0, "rules_skipped": 0}
+  taxonomy_id = _taxonomy_id(package.standard, package.version)
+  for rule in package.rules:
+    if _write_rule(conn, rule, taxonomy_id, package):
+      counts["rules"] += 1
+    else:
+      counts["rules_skipped"] += 1
+  return counts
+
+
 def write_taxonomy_package(
   conn: Connection, package: TaxonomyPackage
 ) -> dict[str, int]:
-  """Single-package write — phase 1 + phase 2 in one call.
+  """Single-package write — phase 1 + phase 2 + phase 3 in one call.
 
   Safe only when every qname/classification this package references is
   already in the DB (or defined in this package itself). For multi-seed
   loads where arcs span packages, call ``write_taxonomy_elements`` for
-  every package first, then ``write_taxonomy_arcs`` for every package.
+  every package first, then ``write_taxonomy_arcs`` for every package,
+  then ``write_taxonomy_rules`` last.
   """
   elem_counts = write_taxonomy_elements(conn, package)
   arc_counts = write_taxonomy_arcs(conn, package)
-  counts = {**elem_counts, **arc_counts}
+  rule_counts = write_taxonomy_rules(conn, package)
+  counts = {**elem_counts, **arc_counts, **rule_counts}
   logger.info(f"Wrote {package.name}: {counts}")
   return counts

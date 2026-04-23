@@ -29,11 +29,6 @@ from robosystems.models.api.extensions.journal_entries import (
   ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
-from robosystems.models.api.extensions.schedules import (
-  DeleteScheduleRequest,
-  ScheduleCreatedResponse,
-  UpdateScheduleRequest,
-)
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   BulkAssociationItem,
@@ -61,7 +56,6 @@ from robosystems.routers.extensions.roboledger.operations import (
   delete_association_op,
   delete_element_op,
   delete_journal_entry_op,
-  delete_schedule_op,
   delete_structure_op,
   delete_taxonomy_op,
   reverse_journal_entry_op,
@@ -69,7 +63,6 @@ from robosystems.routers.extensions.roboledger.operations import (
   update_element_op,
   update_entity_op,
   update_journal_entry_op,
-  update_schedule_op,
   update_structure_op,
   update_taxonomy_op,
 )
@@ -1305,126 +1298,3 @@ class TestReverseJournalEntryOp:
         )
     assert exc.value.status_code == 422
     assert "posted" in exc.value.detail
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Schedule update/delete route tests
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-def _make_schedule_response(
-  structure_id: str = "struct_sched_abc",
-) -> ScheduleCreatedResponse:
-  return ScheduleCreatedResponse(
-    structure_id=structure_id,
-    name="Computer Depreciation",
-    taxonomy_id="tax_schedules",
-    total_periods=36,
-    total_facts=72,
-  )
-
-
-class TestUpdateScheduleOp:
-  @pytest.mark.asyncio
-  async def test_happy_path(self) -> None:
-    body = UpdateScheduleRequest(
-      structure_id="struct_sched_abc", name="Renamed Schedule"
-    )
-    with (
-      patch(
-        "robosystems.operations.roboledger.commands.schedules.update_schedule",
-        return_value=_make_schedule_response(),
-      ),
-      _mock_session_ctx() as mock_session,
-    ):
-      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-      mock_session.return_value.__exit__ = MagicMock(return_value=False)
-
-      envelope = await update_schedule_op(
-        body=body,
-        graph_id=GRAPH_ID,
-        user=_make_user(),
-        idempotency_key=None,
-        cache=_FakeCache(),
-      )
-    assert envelope.operation == "update-schedule"
-    assert envelope.result["structure_id"] == "struct_sched_abc"
-
-  @pytest.mark.asyncio
-  async def test_404_when_schedule_missing(self) -> None:
-    from robosystems.operations.roboledger.commands.schedules import (
-      ScheduleNotFoundError,
-    )
-
-    body = UpdateScheduleRequest(structure_id="struct_missing", name="X")
-    with (
-      patch(
-        "robosystems.operations.roboledger.commands.schedules.update_schedule",
-        side_effect=ScheduleNotFoundError("struct_missing"),
-      ),
-      _mock_session_ctx() as mock_session,
-    ):
-      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-      mock_session.return_value.__exit__ = MagicMock(return_value=False)
-
-      with pytest.raises(HTTPException) as exc:
-        await update_schedule_op(
-          body=body,
-          graph_id=GRAPH_ID,
-          user=_make_user(),
-          idempotency_key=None,
-          cache=_FakeCache(),
-        )
-    assert exc.value.status_code == 404
-
-
-class TestDeleteScheduleOp:
-  @pytest.mark.asyncio
-  async def test_cascade_delete(self) -> None:
-    body = DeleteScheduleRequest(structure_id="struct_sched_abc")
-    with (
-      patch(
-        "robosystems.operations.roboledger.commands.schedules.delete_schedule",
-        return_value={"deleted": True},
-      ),
-      _mock_session_ctx() as mock_session,
-    ):
-      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-      mock_session.return_value.__exit__ = MagicMock(return_value=False)
-
-      envelope = await delete_schedule_op(
-        body=body,
-        graph_id=GRAPH_ID,
-        user=_make_user(),
-        idempotency_key=None,
-        cache=_FakeCache(),
-      )
-    assert envelope.operation == "delete-schedule"
-    assert envelope.result["deleted"] is True
-
-  @pytest.mark.asyncio
-  async def test_404_when_schedule_missing(self) -> None:
-    from robosystems.operations.roboledger.commands.schedules import (
-      ScheduleNotFoundError,
-    )
-
-    body = DeleteScheduleRequest(structure_id="struct_missing")
-    with (
-      patch(
-        "robosystems.operations.roboledger.commands.schedules.delete_schedule",
-        side_effect=ScheduleNotFoundError("struct_missing"),
-      ),
-      _mock_session_ctx() as mock_session,
-    ):
-      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-      mock_session.return_value.__exit__ = MagicMock(return_value=False)
-
-      with pytest.raises(HTTPException) as exc:
-        await delete_schedule_op(
-          body=body,
-          graph_id=GRAPH_ID,
-          user=_make_user(),
-          idempotency_key=None,
-          cache=_FakeCache(),
-        )
-    assert exc.value.status_code == 404

@@ -35,10 +35,13 @@ from robosystems.models.api.extensions.taxonomies import (
 )
 from robosystems.models.extensions import (
   Association,
+  AssociationClassification,
   Element,
   EntityTaxonomy,
+  Rule,
   Structure,
   Taxonomy,
+  VerificationResult,
 )
 from robosystems.models.extensions.entity import Entity
 from robosystems.operations.roboledger.commands._guards import (
@@ -260,6 +263,7 @@ def delete_mapping_association(
   # rows at the service layer so the caller sees LibraryImmutableError
   # (→ 403) instead of a bare DB trigger ProgrammingError (→ 500).
   assert_not_library_origin(assoc)
+  _delete_association_dependents(session, [association_id])
   deleted = (
     session.query(Association)
     .filter(
@@ -269,6 +273,31 @@ def delete_mapping_association(
     .delete(synchronize_session=False)
   )
   return bool(deleted)
+
+
+def _delete_association_dependents(
+  session: Session, association_ids: list[str]
+) -> None:
+  """Delete rows that FK association ids before hard-deleting associations."""
+  if not association_ids:
+    return
+
+  rule_ids = (
+    session.execute(
+      select(Rule.id).where(Rule.target_association_id.in_(association_ids))
+    )
+    .scalars()
+    .all()
+  )
+  if rule_ids:
+    session.query(VerificationResult).filter(
+      VerificationResult.rule_id.in_(rule_ids)
+    ).delete(synchronize_session=False)
+    session.query(Rule).filter(Rule.id.in_(rule_ids)).delete(synchronize_session=False)
+
+  session.query(AssociationClassification).filter(
+    AssociationClassification.association_id.in_(association_ids)
+  ).delete(synchronize_session=False)
 
 
 # ─── Taxonomy update / delete ─────────────────────────────────────────────
@@ -510,6 +539,7 @@ def delete_association(session: Session, body: DeleteAssociationRequest) -> dict
   if assoc is None:
     raise AssociationNotFoundError(body.association_id)
   assert_not_library_origin(assoc)
+  _delete_association_dependents(session, [body.association_id])
 
   deleted = (
     session.query(Association)

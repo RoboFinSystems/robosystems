@@ -1,19 +1,26 @@
-"""Schedule MCP read tools for AI accounting close workflows.
+"""Period-workflow MCP read tools.
 
-Four read-side tools that complement the registrar-generated schedule
-writes (`create-schedule`, `truncate-schedule`, `create-closing-entry`,
-`create-manual-closing-entry`, `update-schedule`, `delete-schedule`):
+Two read-side tools covering the period-close workflow that spans
+multiple Information Blocks:
 
-1. list-schedule-structures: List active schedules with entry templates
-2. get-schedule-facts: Get fact values for a schedule by period
-3. get-period-close-status: Overview of what's done vs pending for a period
-4. list-period-drafts: Review all draft entries for a period before close
+1. get-period-close-status: Overview of what's done vs pending for a period
+2. list-period-drafts: Review all draft entries for a period before close
 
-Reads stay hand-written because they reshape the response for the
-agent-friendly MCP wire format (e.g., folding totals into summary blocks).
-All four route through `operations/roboledger/{reads}/schedules.py` and
-`reads/period_drafts.py` so MCP, GraphQL, and REST read surfaces share
-one source of truth.
+Schedule-specific reads (``list-schedule-structures``,
+``get-schedule-facts``) were retired in favour of the generic
+Information Block reads — see ``information_block_tools.py``.
+Schedule envelopes now surface through ``list-information-blocks``
+with ``blockType="schedule"`` and ``get-information-block``. This
+module stays scoped to tools that operate across blocks rather than
+within one.
+
+Writes (``create-schedule``, ``update-schedule``, ``delete-schedule``,
+``truncate-schedule``, ``create-closing-entry``,
+``create-manual-closing-entry``) are registrar-generated from the
+roboledger ``OperationSpec`` declarations. The unified
+``create-information-block`` / ``update-information-block`` /
+``delete-information-block`` operations dispatch the same underlying
+schedule commands via the block-type registry.
 """
 
 from datetime import date
@@ -25,147 +32,7 @@ from robosystems.operations.roboledger.reads.period_drafts import list_period_dr
 from robosystems.operations.roboledger.reads.schedules import (
   get_period_close_status as ops_get_period_close_status,
 )
-from robosystems.operations.roboledger.reads.schedules import (
-  get_schedule_facts as ops_get_schedule_facts,
-)
-from robosystems.operations.roboledger.reads.schedules import (
-  list_schedules as ops_list_schedules,
-)
 from robosystems.operations.roboledger.schedules import ScheduleService
-
-# ────────────────────────────────────────────────────────────────────────────
-# list-schedule-structures
-# ────────────────────────────────────────────────────────────────────────────
-
-
-class ListScheduleStructuresTool:
-  """List all active schedule structures with summary info."""
-
-  def __init__(self, graph_client):
-    self.client = graph_client
-
-  def get_tool_definition(self) -> dict[str, Any]:
-    return {
-      "name": "list-schedule-structures",
-      "description": """List all active schedule structures for this graph.
-
-**WHEN TO USE:**
-- At the start of a month-end close to see what schedules exist
-- To check which schedules have pending closing entries
-- To understand the depreciation, amortization, and accrual schedules
-
-**RETURNS:**
-- Schedule name, taxonomy, entry template (debit/credit elements), metadata
-- Total periods and how many already have closing entries
-
-**WORKFLOW:**
-1. Call this to see all schedules
-2. Use get-period-close-status to check what's pending for a specific period
-3. Use create-closing-entry to draft entries for pending schedules""",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [],
-      },
-    }
-
-  async def execute(self, arguments: dict[str, Any]) -> Any:
-    graph_id = self.client.graph_id
-
-    try:
-      with extensions_session(graph_id) as session:
-        response = ops_list_schedules(session, ScheduleService())
-        return {
-          "schedule_count": len(response.schedules),
-          "schedules": [s.model_dump(mode="json") for s in response.schedules],
-        }
-    except Exception as exc:
-      logger.warning(f"list-schedule-structures failed: {exc}")
-      return {"error": str(exc)}
-
-
-# ────────────────────────────────────────────────────────────────────────────
-# get-schedule-facts
-# ────────────────────────────────────────────────────────────────────────────
-
-
-class GetScheduleFactsTool:
-  """Get facts for a schedule, optionally filtered by period."""
-
-  def __init__(self, graph_client):
-    self.client = graph_client
-
-  def get_tool_definition(self) -> dict[str, Any]:
-    return {
-      "name": "get-schedule-facts",
-      "description": """Get the in-scope fact values for a schedule structure.
-
-**WHEN TO USE:**
-- To see the planned amounts for a specific schedule (e.g., monthly depreciation)
-- To verify the amount before creating a closing entry
-- To view the schedule across the in-scope reporting window
-
-**NOTE:**
-Only facts flagged as ``fact_scope='in_scope'`` are returned. Historical
-facts (those that fell into an opening-balance window at schedule creation
-time via ``closed_through``) are hidden, since they've already been
-reflected in the ledger and shouldn't generate new closing entries.
-
-**PARAMETERS:**
-- structure_id (required): The schedule structure ID
-- period_start / period_end (optional): Filter to a specific period
-
-**RETURNS:**
-- List of in-scope facts with element name, value (dollars), and period dates""",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "structure_id": {
-            "type": "string",
-            "description": "Schedule structure ID",
-          },
-          "period_start": {
-            "type": "string",
-            "description": "Filter: period start date (YYYY-MM-DD)",
-          },
-          "period_end": {
-            "type": "string",
-            "description": "Filter: period end date (YYYY-MM-DD)",
-          },
-        },
-        "required": ["structure_id"],
-      },
-    }
-
-  async def execute(self, arguments: dict[str, Any]) -> Any:
-    graph_id = self.client.graph_id
-    structure_id = arguments["structure_id"]
-
-    period_start = (
-      date.fromisoformat(arguments["period_start"])
-      if arguments.get("period_start")
-      else None
-    )
-    period_end = (
-      date.fromisoformat(arguments["period_end"])
-      if arguments.get("period_end")
-      else None
-    )
-
-    try:
-      with extensions_session(graph_id) as session:
-        response = ops_get_schedule_facts(
-          session, ScheduleService(), structure_id, period_start, period_end
-        )
-        return {
-          "structure_id": response.structure_id,
-          "fact_count": len(response.facts),
-          "facts": [f.model_dump(mode="json") for f in response.facts],
-        }
-    except Exception as exc:
-      logger.warning(f"get-schedule-facts failed: {exc}")
-      return {"error": str(exc)}
-
 
 # ────────────────────────────────────────────────────────────────────────────
 # get-period-close-status

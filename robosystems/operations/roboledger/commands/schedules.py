@@ -7,7 +7,7 @@ translate request bodies to service calls and assemble responses.
 
 from __future__ import annotations
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.schedules import (
@@ -21,7 +21,14 @@ from robosystems.models.api.extensions.schedules import (
   TruncateScheduleResponse,
   UpdateScheduleRequest,
 )
-from robosystems.models.extensions import Association, Structure
+from robosystems.models.extensions import (
+  Association,
+  AssociationClassification,
+  FactSet,
+  Rule,
+  Structure,
+  VerificationResult,
+)
 from robosystems.models.extensions.roboledger import Fact
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.roboledger.schedules.service import (
@@ -270,6 +277,16 @@ def update_schedule(
     }
 
   structure.metadata_ = metadata
+  # Phase δ: keep artifact_mechanics in sync with metadata_ while both
+  # live on the row. Envelope reads prefer artifact_mechanics; writes
+  # stamp both during the transition window.
+  # periods_with_entries is transient (queried from facts at read time) —
+  # intentionally excluded rather than using ScheduleMechanics.model_dump().
+  structure.artifact_mechanics = {
+    "kind": "closing_entry_generator",
+    "entry_template": metadata.get("entry_template", {}),
+    "schedule_metadata": metadata.get("schedule_metadata"),
+  }
   session.flush()
 
   # Recount for response (same as create_schedule response shape)
@@ -298,17 +315,46 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   """Delete a schedule — cascades through facts and associations.
 
   Deletion order respects FK constraints:
-  1. Facts (referencing structure_id)
-  2. Associations (referencing structure_id)
-  3. Structure row itself
+  1. Verification results (referencing rules / structure_id)
+  2. Facts and FactSets (referencing structure_id)
+  3. Rules and association classifications (referencing associations)
+  4. Associations (referencing structure_id)
+  5. Structure row itself
 
   Raises `ScheduleNotFoundError` if the schedule does not exist.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
+  association_ids = (
+    session.execute(
+      select(Association.id).where(Association.structure_id == structure.id)
+    )
+    .scalars()
+    .all()
+  )
+  rule_filters = [Rule.target_structure_id == structure.id]
+  if association_ids:
+    rule_filters.append(Rule.target_association_id.in_(association_ids))
+  rule_ids = session.execute(select(Rule.id).where(or_(*rule_filters))).scalars().all()
+
+  verification_filters = [VerificationResult.structure_id == structure.id]
+  if rule_ids:
+    verification_filters.append(VerificationResult.rule_id.in_(rule_ids))
+  session.query(VerificationResult).filter(or_(*verification_filters)).delete(
+    synchronize_session=False
+  )
 
   session.query(Fact).filter(Fact.structure_id == structure.id).delete(
     synchronize_session=False
   )
+  session.query(FactSet).filter(FactSet.structure_id == structure.id).delete(
+    synchronize_session=False
+  )
+  if rule_ids:
+    session.query(Rule).filter(Rule.id.in_(rule_ids)).delete(synchronize_session=False)
+  if association_ids:
+    session.query(AssociationClassification).filter(
+      AssociationClassification.association_id.in_(association_ids)
+    ).delete(synchronize_session=False)
   session.query(Association).filter(Association.structure_id == structure.id).delete(
     synchronize_session=False
   )

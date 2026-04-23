@@ -145,33 +145,6 @@ class TruncateScheduleResponse(BaseModel):
 # ── Responses ──────────────────────────────────────────────────────────────
 
 
-class ScheduleSummaryResponse(BaseModel):
-  structure_id: str
-  name: str
-  taxonomy_name: str
-  entry_template: dict | None = None
-  schedule_metadata: dict | None = None
-  total_periods: int
-  periods_with_entries: int
-
-
-class ScheduleListResponse(BaseModel):
-  schedules: list[ScheduleSummaryResponse]
-
-
-class ScheduleFactResponse(BaseModel):
-  element_id: str
-  element_name: str
-  value: float
-  period_start: date
-  period_end: date
-
-
-class ScheduleFactsResponse(BaseModel):
-  structure_id: str
-  facts: list[ScheduleFactResponse]
-
-
 class PeriodCloseItemResponse(BaseModel):
   structure_id: str
   structure_name: str

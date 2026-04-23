@@ -49,8 +49,6 @@ from robosystems.graphql.types.ledger import (
   PublishListList,
   Report,
   ReportList,
-  ScheduleFacts,
-  ScheduleList,
   Statement,
   StructureList,
   Taxonomy,
@@ -504,35 +502,7 @@ class LedgerQuery:
       _raise_ledger_not_initialized()
     return MappedTrialBalance.from_pydantic(response)
 
-  # ── Schedules ───────────────────────────────────────────────────────────
-
-  @strawberry.field
-  def schedules(self, info: Info[GraphQLContext, None]) -> ScheduleList | None:
-    """List all active schedules."""
-    try:
-      with _open_session(info, "roboledger") as session:
-        response = reads_schedules.list_schedules(session, _schedule_svc)
-    except (ValueError, ProgrammingError):
-      _raise_ledger_not_initialized()
-    return ScheduleList.from_pydantic(response)
-
-  @strawberry.field
-  def schedule_facts(
-    self,
-    info: Info[GraphQLContext, None],
-    structure_id: str,
-    period_start: date | None = None,
-    period_end: date | None = None,
-  ) -> ScheduleFacts | None:
-    """Facts for a schedule, optionally filtered by period."""
-    try:
-      with _open_session(info, "roboledger") as session:
-        response = reads_schedules.get_schedule_facts(
-          session, _schedule_svc, structure_id, period_start, period_end
-        )
-    except (ValueError, ProgrammingError):
-      _raise_ledger_not_initialized()
-    return ScheduleFacts.from_pydantic(response)
+  # ── Period close ────────────────────────────────────────────────────────
 
   @strawberry.field
   def period_close_status(

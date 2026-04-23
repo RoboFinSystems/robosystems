@@ -161,10 +161,12 @@ _LIBRARY_IMMUTABLE_TABLES = (
   "structures",
   "associations",
   # Mirror 0002's _IMMUTABLE_TABLES so fresh tenant provisioning applies
-  # triggers to the full library surface. Omitting these two left new
+  # triggers to the full library surface. Omitting rows here leaves new
   # graphs with weaker guarantees than migration-backfilled ones.
   "classifications",
   "element_classifications",
+  "association_classifications",
+  "rules",
 )
 
 
@@ -207,10 +209,11 @@ def _install_library_immutability_triggers(conn, schema: str) -> None:
 def _widen_library_checks(conn, schema: str) -> None:
   """Align tenant-template CHECKs with the library's widened vocabulary.
 
-  Matches the widening applied in the 0003 migration so a fresh provision
+  Matches the widening applied in the 0002 migration so a fresh provision
   lands in the same state as a backfilled tenant (admits ``equivalence``,
   ``general-special``, ``essence-alias`` association types and the
-  ``fac``/``rs-gaap`` element sources that the library uses).
+  ``fac``/``rs-gaap`` element sources, the rules taxonomy type, and the
+  full Information Block structure-type vocabulary that the library uses).
   """
   widened_assoc = (
     "association_type IN ("
@@ -227,7 +230,14 @@ def _widen_library_checks(conn, schema: str) -> None:
   widened_taxonomy_type = (
     "taxonomy_type IN ("
     "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
-    "'classification-vocabulary', 'classification-assignment'"
+    "'classification-vocabulary', 'classification-assignment', 'rules'"
+    ")"
+  )
+  widened_structure_type = (
+    "structure_type IN ("
+    "'chart_of_accounts', 'income_statement', 'balance_sheet', "
+    "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
+    "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric'"
     ")"
   )
   conn.execute(
@@ -262,6 +272,18 @@ def _widen_library_checks(conn, schema: str) -> None:
     text(
       f'ALTER TABLE "{schema}".taxonomies '
       f"ADD CONSTRAINT check_taxonomy_type CHECK ({widened_taxonomy_type})"
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".structures '
+      f"DROP CONSTRAINT IF EXISTS check_structure_type"
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".structures '
+      f"ADD CONSTRAINT check_structure_type CHECK ({widened_structure_type})"
     )
   )
 

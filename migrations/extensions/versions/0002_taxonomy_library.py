@@ -80,6 +80,8 @@ _IMMUTABLE_TABLES = (
   "associations",
   "classifications",
   "element_classifications",
+  "association_classifications",
+  "rules",
 )
 
 _WIDENED_ASSOCIATION_CHECK = (
@@ -97,8 +99,11 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
 _WIDENED_TAXONOMY_TYPE_CHECK = (
   "taxonomy_type IN ("
   "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
-  "'classification-vocabulary', 'classification-assignment'"
+  "'classification-vocabulary', 'classification-assignment', 'rules'"
   ")"
+)
+_NARROW_TAXONOMY_TYPE_CHECK = (
+  "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping', 'schedule')"
 )
 _NARROW_ASSOCIATION_CHECK = (
   "association_type IN ('presentation', 'calculation', 'mapping')"
@@ -107,6 +112,67 @@ _NARROW_ELEMENT_SOURCE_CHECK = (
   "source IN ("
   "'sfac6', 'us-gaap', 'ifrs', "
   "'quickbooks', 'xero', 'plaid', 'native', 'import'"
+  ")"
+)
+# Structure.structure_type widens to admit the Phase g.1 block types
+# (rollforward, reconciliation, policy) required as admissible CHECK
+# values for Phase d (typed artifact_mechanics + rules) and Phase eta
+# (metric block type). Folded into 0002 rather than shipped as a
+# standalone migration since 0002 is still unreleased. See
+# ``local/docs/specs/information-block.md`` section 5.9, Phase g.1.
+_WIDENED_STRUCTURE_TYPE_CHECK = (
+  "structure_type IN ("
+  "'chart_of_accounts', 'income_statement', 'balance_sheet', "
+  "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
+  "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric'"
+  ")"
+)
+_NARROW_STRUCTURE_TYPE_CHECK = (
+  "structure_type IN ("
+  "'chart_of_accounts', 'income_statement', 'balance_sheet', "
+  "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', 'schedule'"
+  ")"
+)
+
+# Phase d.2 — Seattle Method rule taxonomy: 8 VerificationRule categories
+# x 10 BusinessRulePattern mechanisms. These match the CHECK constraints on
+# public.rules.rule_category / rule_pattern and the RULE_CATEGORY_VALUES /
+# RULE_PATTERN_VALUES frozensets in jsonld_loader.py.
+_RULE_CATEGORY_CHECK = (
+  "rule_category IN ("
+  "'AutomatedAccountingAndReportingChecks', "
+  "'DisclosureMechanicsRule', "
+  "'FundamentalAccountingConceptRelation', "
+  "'PeerConsistencyRule', "
+  "'PriorPeriodConsistencyRule', "
+  "'ReportLevelModelStructureRule', "
+  "'ReportingSystemSpecificRule', "
+  "'ToDoManualTask', "
+  "'XBRLTechnicalSyntaxRule'"
+  ")"
+)
+_RULE_PATTERN_CHECK = (
+  "rule_pattern IN ("
+  "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
+  "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
+  "'Variance'"
+  ")"
+)
+_RULE_SEVERITY_CHECK = "rule_severity IN ('info', 'warning', 'error')"
+_RULE_ORIGIN_CHECK = "rule_origin IN ('forked', 'native')"
+# Polymorphic target: either nothing (global rule) or exactly one of
+# target_structure_id / target_element_id / target_association_id is set,
+# and target_kind names which column carries the FK.
+_RULE_TARGET_POLYMORPHISM_CHECK = (
+  "("
+  "(target_kind IS NULL AND target_structure_id IS NULL "
+  "AND target_element_id IS NULL AND target_association_id IS NULL) "
+  "OR (target_kind = 'structure' AND target_structure_id IS NOT NULL "
+  "AND target_element_id IS NULL AND target_association_id IS NULL) "
+  "OR (target_kind = 'element' AND target_element_id IS NOT NULL "
+  "AND target_structure_id IS NULL AND target_association_id IS NULL) "
+  "OR (target_kind = 'association' AND target_association_id IS NOT NULL "
+  "AND target_structure_id IS NULL AND target_element_id IS NULL)"
   ")"
 )
 
@@ -244,12 +310,16 @@ def _widen_tenant_checks(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
   t.add_check("associations", "check_association_type", _WIDENED_ASSOCIATION_CHECK)
   t.add_check("elements", "check_element_source", _WIDENED_ELEMENT_SOURCE_CHECK)
+  t.add_check("taxonomies", "check_taxonomy_type", _WIDENED_TAXONOMY_TYPE_CHECK)
+  t.add_check("structures", "check_structure_type", _WIDENED_STRUCTURE_TYPE_CHECK)
 
 
 def _restore_narrow_tenant_checks(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
   t.add_check("associations", "check_association_type", _NARROW_ASSOCIATION_CHECK)
   t.add_check("elements", "check_element_source", _NARROW_ELEMENT_SOURCE_CHECK)
+  t.add_check("taxonomies", "check_taxonomy_type", _NARROW_TAXONOMY_TYPE_CHECK)
+  t.add_check("structures", "check_structure_type", _NARROW_STRUCTURE_TYPE_CHECK)
 
 
 def _drop_old_element_columns(conn, schema: str) -> None:
@@ -284,6 +354,101 @@ def _add_substitution_group_column(conn, schema: str) -> None:
   )
 
 
+def _add_phase_theta_columns_to_tenant(conn, schema: str) -> None:
+  """Add Phase theta canonical-concept columns to a tenant's elements table.
+
+  Three additive columns the MappingAgent + classifier use for
+  cross-tenant concept unification. Nullable (or empty-list-defaulted)
+  so existing tenant rows pass the ALTER without a backfill.
+  """
+  conn.execute(
+    text(f"ALTER TABLE {schema}.elements ADD COLUMN IF NOT EXISTS agent_id VARCHAR")
+  )
+  conn.execute(
+    text(
+      f"ALTER TABLE {schema}.elements "
+      "ADD COLUMN IF NOT EXISTS aliases TEXT[] NOT NULL DEFAULT '{}'"
+    )
+  )
+  conn.execute(
+    text(f"ALTER TABLE {schema}.elements ADD COLUMN IF NOT EXISTS embedding FLOAT[]")
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_elements_agent_id "
+      f"ON {schema}.elements (agent_id) WHERE agent_id IS NOT NULL"
+    )
+  )
+
+
+def _add_phase_d_columns_to_tenant(conn, schema: str) -> None:
+  """Add Phase d typed-mechanics columns to a tenant's structures table.
+
+  Mirror of the public-schema DDL earlier in the upgrade. Nullable so
+  existing tenant Schedule rows (which only carry ``metadata_`` today)
+  pass the ALTER; the subsequent
+  :func:`_backfill_tenant_schedule_mechanics` populates them.
+  """
+  t = TenantOps(conn, schema)
+  t.add_column("structures", "concept_arrangement", "VARCHAR")
+  t.add_column("structures", "member_arrangement", "VARCHAR")
+  t.add_column("structures", "artifact_mechanics", "JSONB")
+  t.add_column("structures", "parenthetical_note", "VARCHAR")
+  t.add_column("structures", "template_id", "VARCHAR")
+
+
+def _drop_phase_d_columns_from_tenant(conn, schema: str) -> None:
+  """Reverse of :func:`_add_phase_d_columns_to_tenant` for downgrade."""
+  t = TenantOps(conn, schema)
+  for col in (
+    "template_id",
+    "parenthetical_note",
+    "artifact_mechanics",
+    "member_arrangement",
+    "concept_arrangement",
+  ):
+    t.drop_column("structures", col)
+
+
+def _drop_phase_theta_columns_from_tenant(conn, schema: str) -> None:
+  """Reverse of :func:`_add_phase_theta_columns_to_tenant` for downgrade."""
+  conn.execute(text(f"DROP INDEX IF EXISTS {schema}.idx_{schema}_elements_agent_id"))
+  for col in ("embedding", "aliases", "agent_id"):
+    conn.execute(text(f"ALTER TABLE {schema}.elements DROP COLUMN IF EXISTS {col}"))
+
+
+def _backfill_tenant_schedule_mechanics(conn, schema: str) -> None:
+  """Lift Schedule mechanics out of ``metadata_`` into typed columns.
+
+  Schedule rows in tenant schemas carry ``entry_template`` + ``schedule_metadata``
+  inside the ``metadata_`` JSONB blob today. Phase d moves them into the
+  typed ``artifact_mechanics`` column (discriminated-union-arm shape keyed
+  on ``kind='closing_entry_generator'``) and stamps
+  ``concept_arrangement='roll_forward'`` to match the registry default.
+  Runs after ``copy_library_into_tenant`` so library-seeded statement
+  rows (already populated in public before the copy) don't get clobbered.
+  """
+  conn.execute(
+    text(
+      f"""
+      UPDATE "{schema}".structures
+      SET concept_arrangement = COALESCE(concept_arrangement, 'roll_forward'),
+          artifact_mechanics = COALESCE(
+            artifact_mechanics,
+            jsonb_build_object(
+              'kind', 'closing_entry_generator',
+              'entry_template',
+                COALESCE(metadata -> 'entry_template', '{{}}'::jsonb),
+              'schedule_metadata',
+                COALESCE(metadata -> 'schedule_metadata', 'null'::jsonb)
+            )
+          )
+      WHERE structure_type = 'schedule'
+      """
+    )
+  )
+
+
 def _backfill_library_into_tenant(conn, schema: str) -> None:
   """Widen CHECKs, drop old columns, add substitution_group, copy library rows.
 
@@ -292,9 +457,12 @@ def _backfill_library_into_tenant(conn, schema: str) -> None:
   _widen_tenant_checks(conn, schema)
   _drop_old_element_columns(conn, schema)
   _add_substitution_group_column(conn, schema)
+  _add_phase_theta_columns_to_tenant(conn, schema)
+  _add_phase_d_columns_to_tenant(conn, schema)
   _create_tenant_library_tables(conn, schema)
   stats = copy_library_into_tenant(conn, schema)
   print(f"  [{schema}] library backfill: {stats.total:,} rows")
+  _backfill_tenant_schedule_mechanics(conn, schema)
   _install_triggers_for_tenant(conn, schema)
 
 
@@ -399,6 +567,99 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
     )
   )
 
+  # Phase epsilon — association_classifications junction. Mirrors
+  # element_classifications. FKs scoped to the tenant schema's own
+  # associations/classifications so library rows copied by
+  # copy_library_into_tenant retain their referential integrity.
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.association_classifications (
+        association_id VARCHAR NOT NULL REFERENCES {schema}.associations(id),
+        classification_id VARCHAR NOT NULL REFERENCES {schema}.classifications(id),
+        is_primary BOOLEAN NOT NULL DEFAULT true,
+        confidence FLOAT,
+        source VARCHAR,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        PRIMARY KEY (association_id, classification_id)
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_association_classifications_primary "
+      f"ON {schema}.association_classifications (association_id, is_primary) "
+      f"WHERE is_primary = true"
+    )
+  )
+
+  # Phase d.2 — verification rules. Polymorphic target (structure/element/
+  # association) enforced via CHECK; FKs point at the same-schema parent
+  # tables so tenant rows can't reference public library ids.
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.rules (
+        id VARCHAR PRIMARY KEY,
+        taxonomy_id VARCHAR NOT NULL REFERENCES {schema}.taxonomies(id),
+        rule_category VARCHAR NOT NULL,
+        rule_pattern VARCHAR NOT NULL,
+        rule_expression TEXT NOT NULL,
+        rule_message TEXT,
+        rule_severity VARCHAR NOT NULL DEFAULT 'error',
+        rule_origin VARCHAR NOT NULL DEFAULT 'native',
+        target_kind VARCHAR,
+        target_structure_id VARCHAR REFERENCES {schema}.structures(id),
+        target_element_id VARCHAR REFERENCES {schema}.elements(id),
+        target_association_id VARCHAR REFERENCES {schema}.associations(id),
+        rule_variables JSONB NOT NULL DEFAULT '[]',
+        metadata JSONB NOT NULL DEFAULT '{{}}',
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        CONSTRAINT check_{schema}_rule_category CHECK ({_RULE_CATEGORY_CHECK}),
+        CONSTRAINT check_{schema}_rule_pattern CHECK ({_RULE_PATTERN_CHECK}),
+        CONSTRAINT check_{schema}_rule_severity CHECK ({_RULE_SEVERITY_CHECK}),
+        CONSTRAINT check_{schema}_rule_origin CHECK ({_RULE_ORIGIN_CHECK}),
+        CONSTRAINT check_{schema}_rule_target_polymorphism
+          CHECK ({_RULE_TARGET_POLYMORPHISM_CHECK})
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_taxonomy "
+      f"ON {schema}.rules (taxonomy_id)"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_structure "
+      f"ON {schema}.rules (target_structure_id) "
+      f"WHERE target_structure_id IS NOT NULL"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_element "
+      f"ON {schema}.rules (target_element_id) "
+      f"WHERE target_element_id IS NOT NULL"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_association "
+      f"ON {schema}.rules (target_association_id) "
+      f"WHERE target_association_id IS NOT NULL"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_category "
+      f"ON {schema}.rules (rule_category)"
+    )
+  )
+
 
 SEEDS_DIR = (
   Path(__file__).parent.parent.parent.parent / "robosystems" / "taxonomy" / "seeds"
@@ -422,6 +683,9 @@ SEED_FILES = [
   SEEDS_DIR / "fac-calculations" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-presentation" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "type-subtype" / "v1" / "taxonomy.jsonld",
+  # Phase d.2 — verification rules (Seattle Method). Last because rules
+  # reference structures loaded by fac-calculations/fac-presentation.
+  SEEDS_DIR / "fac-rules" / "v1" / "taxonomy.jsonld",
 ]
 
 
@@ -449,6 +713,35 @@ def upgrade() -> None:
     "elements",
     ["substitution_group"],
     postgresql_where="substitution_group IS NOT NULL",
+  )
+
+  # ──────────────────────────────────────────────────────────────────────
+  # 2b. Phase theta — canonical-concept columns for cross-tenant unification.
+  # ──────────────────────────────────────────────────────────────────────
+  # agent_id groups elements that refer to the same cross-tenant concept;
+  # aliases collects alternate spellings / qname variants; embedding
+  # stores a sentence embedding the MappingAgent + classifier use for
+  # similarity lookups. Seeding happens in a follow-up — the blitz only
+  # lands the columns.
+  op.add_column("elements", sa.Column("agent_id", sa.String(), nullable=True))
+  op.add_column(
+    "elements",
+    sa.Column(
+      "aliases",
+      sa.ARRAY(sa.String()),
+      nullable=False,
+      server_default=sa.text("'{}'::text[]"),
+    ),
+  )
+  op.add_column(
+    "elements",
+    sa.Column("embedding", sa.ARRAY(sa.Float()), nullable=True),
+  )
+  op.create_index(
+    "idx_elements_agent_id",
+    "elements",
+    ["agent_id"],
+    postgresql_where="agent_id IS NOT NULL",
   )
 
   # ──────────────────────────────────────────────────────────────────────
@@ -502,6 +795,52 @@ def upgrade() -> None:
   op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")
   op.create_check_constraint(
     "check_taxonomy_type", "taxonomies", _WIDENED_TAXONOMY_TYPE_CHECK
+  )
+  # Phase g.1: widen structures.structure_type to admit rollforward,
+  # reconciliation, policy. Pure vocabulary expansion — no data change.
+  op.drop_constraint("check_structure_type", "structures", type_="check")
+  op.create_check_constraint(
+    "check_structure_type", "structures", _WIDENED_STRUCTURE_TYPE_CHECK
+  )
+
+  # Phase d: typed artifact_mechanics + Information-Model axis columns
+  # on public.structures. Folded into 0002 because 0002 is still
+  # unreleased; shipping as a standalone migration would force a second
+  # tenant-schema round-trip. Nullable on add so library loaders and
+  # existing rows (none in public yet at this point in the upgrade, but
+  # defense in depth for tenant ALTERs below) don't fail. Post-seed
+  # UPDATEs populate concept/member_arrangement + artifact_mechanics for
+  # the library-seeded statement Structures; per-tenant UPDATEs backfill
+  # existing Schedule rows from metadata_. See
+  # ``local/docs/specs/information-block.md`` section 4.2, Phase d.
+  op.add_column(
+    "structures",
+    sa.Column("concept_arrangement", sa.String(), nullable=True),
+    schema="public",
+  )
+  op.add_column(
+    "structures",
+    sa.Column("member_arrangement", sa.String(), nullable=True),
+    schema="public",
+  )
+  op.add_column(
+    "structures",
+    sa.Column(
+      "artifact_mechanics",
+      postgresql.JSONB(astext_type=sa.Text()),
+      nullable=True,
+    ),
+    schema="public",
+  )
+  op.add_column(
+    "structures",
+    sa.Column("parenthetical_note", sa.String(), nullable=True),
+    schema="public",
+  )
+  op.add_column(
+    "structures",
+    sa.Column("template_id", sa.String(), nullable=True),
+    schema="public",
   )
 
   # ──────────────────────────────────────────────────────────────────────
@@ -613,6 +952,110 @@ def upgrade() -> None:
     postgresql_where="is_primary = true",
   )
 
+  # Phase epsilon — association_classifications junction. Mirrors
+  # element_classifications; carries association-level categories
+  # (concept_arrangement, member_arrangement, named_disclosure) that don't
+  # belong on the aggregated structures.concept_arrangement column.
+  op.create_table(
+    "association_classifications",
+    sa.Column("association_id", sa.String(), nullable=False),
+    sa.Column("classification_id", sa.String(), nullable=False),
+    sa.Column("is_primary", sa.Boolean(), nullable=False, server_default=sa.true()),
+    sa.Column("confidence", sa.Float(), nullable=True),
+    sa.Column("source", sa.String(), nullable=True),
+    sa.Column("created_at", sa.DateTime(), nullable=False),
+    sa.Column("updated_at", sa.DateTime(), nullable=False),
+    sa.Column("created_by", sa.String(), nullable=False),
+    sa.ForeignKeyConstraint(["association_id"], ["associations.id"]),
+    sa.ForeignKeyConstraint(["classification_id"], ["classifications.id"]),
+    sa.PrimaryKeyConstraint("association_id", "classification_id"),
+  )
+  op.create_index(
+    "idx_association_classifications_classification",
+    "association_classifications",
+    ["classification_id"],
+  )
+  op.create_index(
+    "idx_association_classifications_primary",
+    "association_classifications",
+    ["association_id", "is_primary"],
+    postgresql_where="is_primary = true",
+  )
+
+  # ──────────────────────────────────────────────────────────────────────
+  # 6b. Phase d.2 — verification rules table.
+  # ──────────────────────────────────────────────────────────────────────
+  # Polymorphic target: nullable FKs to structures / elements /
+  # associations, with a CHECK that exactly one (or none, for global
+  # rules) is set. rule_variables JSONB carries the $Variable → qname
+  # binding table the engine consumes at evaluation time.
+  op.create_table(
+    "rules",
+    sa.Column("id", sa.String(), nullable=False),
+    sa.Column("taxonomy_id", sa.String(), nullable=False),
+    sa.Column("rule_category", sa.String(), nullable=False),
+    sa.Column("rule_pattern", sa.String(), nullable=False),
+    sa.Column("rule_expression", sa.Text(), nullable=False),
+    sa.Column("rule_message", sa.Text(), nullable=True),
+    sa.Column("rule_severity", sa.String(), nullable=False, server_default="error"),
+    sa.Column("rule_origin", sa.String(), nullable=False, server_default="native"),
+    sa.Column("target_kind", sa.String(), nullable=True),
+    sa.Column("target_structure_id", sa.String(), nullable=True),
+    sa.Column("target_element_id", sa.String(), nullable=True),
+    sa.Column("target_association_id", sa.String(), nullable=True),
+    sa.Column(
+      "rule_variables",
+      postgresql.JSONB(astext_type=sa.Text()),
+      nullable=False,
+      server_default=sa.text("'[]'::jsonb"),
+    ),
+    sa.Column(
+      "metadata",
+      postgresql.JSONB(astext_type=sa.Text()),
+      nullable=False,
+      server_default=sa.text("'{}'::jsonb"),
+    ),
+    sa.Column(
+      "created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.Column(
+      "updated_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")
+    ),
+    sa.Column("created_by", sa.String(), nullable=False, server_default="system"),
+    sa.ForeignKeyConstraint(["taxonomy_id"], ["taxonomies.id"]),
+    sa.ForeignKeyConstraint(["target_structure_id"], ["structures.id"]),
+    sa.ForeignKeyConstraint(["target_element_id"], ["elements.id"]),
+    sa.ForeignKeyConstraint(["target_association_id"], ["associations.id"]),
+    sa.PrimaryKeyConstraint("id"),
+    sa.CheckConstraint(_RULE_CATEGORY_CHECK, name="check_rule_category"),
+    sa.CheckConstraint(_RULE_PATTERN_CHECK, name="check_rule_pattern"),
+    sa.CheckConstraint(_RULE_SEVERITY_CHECK, name="check_rule_severity"),
+    sa.CheckConstraint(_RULE_ORIGIN_CHECK, name="check_rule_origin"),
+    sa.CheckConstraint(
+      _RULE_TARGET_POLYMORPHISM_CHECK, name="check_rule_target_polymorphism"
+    ),
+  )
+  op.create_index("idx_rules_taxonomy", "rules", ["taxonomy_id"])
+  op.create_index(
+    "idx_rules_target_structure",
+    "rules",
+    ["target_structure_id"],
+    postgresql_where="target_structure_id IS NOT NULL",
+  )
+  op.create_index(
+    "idx_rules_target_element",
+    "rules",
+    ["target_element_id"],
+    postgresql_where="target_element_id IS NOT NULL",
+  )
+  op.create_index(
+    "idx_rules_target_association",
+    "rules",
+    ["target_association_id"],
+    postgresql_where="target_association_id IS NOT NULL",
+  )
+  op.create_index("idx_rules_category", "rules", ["rule_category"])
+
   # ──────────────────────────────────────────────────────────────────────
   # 7. Load JSON-LD seeds — two-pass to let arcs cross package boundaries.
   # ──────────────────────────────────────────────────────────────────────
@@ -626,6 +1069,7 @@ def upgrade() -> None:
   from robosystems.taxonomy.writers import (
     write_taxonomy_arcs,
     write_taxonomy_elements,
+    write_taxonomy_rules,
   )
 
   loaded_packages = []
@@ -653,6 +1097,41 @@ def upgrade() -> None:
       f"(skipped={counts['classification_assignments_skipped']})"
     )
 
+  # Phase 3 — rules. Runs after phase 2 so association-targeted rules can
+  # resolve (though none of the seeded fac-rules use that target_kind yet).
+  for package in loaded_packages:
+    if not package.rules:
+      continue
+    counts = write_taxonomy_rules(conn, package)
+    print(
+      f"  [phase 3] {package.name}: "
+      f"rules={counts['rules']} (skipped={counts['rules_skipped']})"
+    )
+
+  # Phase d backfill on public.structures: set concept/member_arrangement
+  # + empty statement_renderer mechanics for the four library-seeded
+  # statement block types. Has to run BEFORE copy_library_into_tenant so
+  # the tenant copy picks up populated values rather than NULL. See
+  # ``local/docs/specs/information-block.md`` section 5.9 block inventory
+  # for the arrangement defaults.
+  conn.execute(
+    text(
+      """
+      UPDATE public.structures
+      SET concept_arrangement = 'roll_up',
+          member_arrangement = 'aggregation',
+          artifact_mechanics = jsonb_build_object(
+            'kind', 'statement_renderer'
+          )
+      WHERE structure_type IN (
+        'balance_sheet', 'income_statement',
+        'cash_flow_statement', 'equity_statement'
+      )
+        AND artifact_mechanics IS NULL
+      """
+    )
+  )
+
   # ──────────────────────────────────────────────────────────────────────
   # 8. Tenant-schema rollout: schema alignment + library backfill + triggers.
   # ──────────────────────────────────────────────────────────────────────
@@ -666,17 +1145,23 @@ def upgrade() -> None:
 def downgrade() -> None:
   conn = op.get_bind()
 
-  # Tenant teardown: drop triggers, restore narrow CHECKs, restore the
-  # old classification columns (best-effort — values can't be recovered
-  # losslessly once the junction has been used, so we leave them NULL).
+  # Tenant teardown: drop triggers, restore narrow CHECKs, drop Phase d
+  # columns, restore the old classification columns (best-effort —
+  # values can't be recovered losslessly once the junction has been
+  # used, so we leave them NULL).
   def _teardown_tenant(conn, schema: str) -> None:
     _drop_triggers_for_tenant(conn, schema)
     _restore_narrow_tenant_checks(conn, schema)
+    _drop_phase_d_columns_from_tenant(conn, schema)
+    _drop_phase_theta_columns_from_tenant(conn, schema)
 
   for_each_tenant_schema(conn, _teardown_tenant)
   conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))
 
   # Delete library-origin data in FK-safe order.
+  # Rules first — they FK structures / elements / associations.
+  conn.execute(text("DELETE FROM public.rules"))
+  conn.execute(text("DELETE FROM public.association_classifications"))
   conn.execute(text("DELETE FROM public.element_classifications"))
   conn.execute(text("DELETE FROM public.classifications"))
   conn.execute(text("DELETE FROM public.element_references"))
@@ -701,6 +1186,27 @@ def downgrade() -> None:
     )
   )
   conn.execute(text("DELETE FROM public.taxonomies WHERE is_shared = true"))
+
+  # Drop rules table (Phase d.2). IF EXISTS on the indexes because a
+  # mid-transition downgrade from a partial run might not have created them.
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_category"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_association"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_element"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_structure"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_taxonomy"))
+  conn.execute(text("DROP TABLE IF EXISTS public.rules"))
+
+  # Drop association_classifications junction (Phase epsilon).
+  op.drop_index(
+    "idx_association_classifications_primary",
+    table_name="association_classifications",
+    postgresql_where="is_primary = true",
+  )
+  op.drop_index(
+    "idx_association_classifications_classification",
+    table_name="association_classifications",
+  )
+  op.drop_table("association_classifications")
 
   # Drop junction + vocabulary.
   op.drop_index(
@@ -734,6 +1240,37 @@ def downgrade() -> None:
   op.create_check_constraint(
     "check_element_source", "elements", _NARROW_ELEMENT_SOURCE_CHECK
   )
+  op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")
+  op.create_check_constraint(
+    "check_taxonomy_type", "taxonomies", _NARROW_TAXONOMY_TYPE_CHECK
+  )
+  op.drop_constraint("check_structure_type", "structures", type_="check")
+  op.create_check_constraint(
+    "check_structure_type", "structures", _NARROW_STRUCTURE_TYPE_CHECK
+  )
+
+  # Drop Phase d columns from public.structures (tenant-schema columns
+  # were dropped above in _teardown_tenant). IF EXISTS makes this safe
+  # when downgrading from a mid-transition state where an earlier
+  # migration run installed 0002 before the Phase δ columns existed.
+  for col in (
+    "template_id",
+    "parenthetical_note",
+    "artifact_mechanics",
+    "member_arrangement",
+    "concept_arrangement",
+  ):
+    conn.execute(text(f"ALTER TABLE public.structures DROP COLUMN IF EXISTS {col}"))
+
+  # Drop Phase theta canonical-concept columns.
+  op.drop_index(
+    "idx_elements_agent_id",
+    table_name="elements",
+    postgresql_where="agent_id IS NOT NULL",
+  )
+  op.drop_column("elements", "embedding")
+  op.drop_column("elements", "aliases")
+  op.drop_column("elements", "agent_id")
 
   # Drop substitution_group.
   op.drop_index("idx_elements_substitution_group", table_name="elements")

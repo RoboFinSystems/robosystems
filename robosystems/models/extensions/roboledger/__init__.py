@@ -49,6 +49,7 @@ from .dimension_junctions import (
 )
 from .entry import Entry
 from .fact import Fact
+from .fact_set import FactSet
 from .fiscal_calendar import FiscalCalendar, FiscalCalendarEvent
 from .fiscal_period import FiscalPeriod
 from .line_item import LineItem
@@ -70,6 +71,7 @@ __all__ = [
   "Element",
   "Entry",
   "Fact",
+  "FactSet",
   "FiscalCalendar",
   "FiscalCalendarEvent",
   "FiscalPeriod",

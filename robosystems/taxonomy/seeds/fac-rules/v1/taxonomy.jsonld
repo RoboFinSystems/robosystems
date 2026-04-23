@@ -1,0 +1,412 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "fac": "http://www.xbrlsite.com/fac#",
+    "sfac6": "http://xbrlsite.com/seattlemethod/sfac6#",
+    "rs": "https://robosystems.ai/vocab/",
+    "ruleCategory": {
+      "@id": "https://robosystems.ai/vocab/ruleCategory"
+    },
+    "rulePattern": {
+      "@id": "https://robosystems.ai/vocab/rulePattern"
+    },
+    "ruleExpression": {
+      "@id": "https://robosystems.ai/vocab/ruleExpression"
+    },
+    "ruleTarget": {
+      "@id": "https://robosystems.ai/vocab/ruleTarget"
+    },
+    "targetKind": {
+      "@id": "https://robosystems.ai/vocab/targetKind"
+    },
+    "targetRef": {
+      "@id": "https://robosystems.ai/vocab/targetRef",
+      "@type": "@id"
+    },
+    "ruleVariables": {
+      "@id": "https://robosystems.ai/vocab/ruleVariables",
+      "@container": "@list"
+    },
+    "variableName": {
+      "@id": "https://robosystems.ai/vocab/variableName"
+    },
+    "variableQname": {
+      "@id": "https://robosystems.ai/vocab/variableQname"
+    },
+    "ruleMessage": {
+      "@id": "https://robosystems.ai/vocab/ruleMessage"
+    },
+    "ruleSeverity": {
+      "@id": "https://robosystems.ai/vocab/ruleSeverity"
+    },
+    "ruleOrigin": {
+      "@id": "https://robosystems.ai/vocab/ruleOrigin"
+    },
+    "label": "rdfs:label",
+    "documentation": "rdfs:comment"
+  },
+  "standard": "fac-rules",
+  "version": "v1",
+  "namespace_uri": "http://www.xbrlsite.com/fac/rules/",
+  "taxonomy_type": "rules",
+  "forked_from": {
+    "author": "Charlie Hoffman",
+    "url": "http://xbrlsite.com/seattlemethod/cm/cm.xsd",
+    "format": "XBRL Formula + Disclosure Mechanics linkbases (Seattle Method conceptual model)"
+  },
+  "forked_at": "2026-04-21",
+  "upstream_tracking": "frozen",
+  "description": "Seattle Method verification rules — 14 rules harvested from Charlie Hoffman's XBRL Formula and Disclosure Mechanics linkbases at local/taxonomies/seattle_method_full/. v1 rules (7) carried forward verbatim. v2 additions (formula): sfac6-rule-is-identity (IS01 single-step income identity), sfac6-rule-cna-identity (CNA01 not-for-profit identity). v2 additions (disclosure mechanics): sfac6-rule-{bs-requires-liabilities, bs-requires-equity, ci-requires-ci-concept, ci-requires-revenues, ce-requires-equity}. Rules using sfac6: qnames (Revenues, Expenses, Gains, Losses, ComprehensiveIncome, ChangeInNetAssets) evaluate to 'skipped' until sfac6 elements are added to the element seed — the rules are correct, the binding returns None. Skipped rule families: SE01/SHE01 rollforward (period-specific variable binding, both EquityBalanceStart and EquityBalanceEnd map to the same qname at different periods — engine would bind both to the same fact giving an incorrect result); sfac6-formula-arithmetic-other (multi-period cross-statement identity, requires temporal-aware fact selection). Re-run this harvester (local/scripts/harvest_fac_rules.py) to regenerate.",
+  "@graph": [
+    {
+      "@id": "_:fac-rule-bs-identity",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "EqualTo",
+      "ruleExpression": "$Assets = ($Liabilities + $Equity)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS2"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Assets",
+          "variableQname": "fac:Assets"
+        },
+        {
+          "variableName": "Liabilities",
+          "variableQname": "fac:Liabilities"
+        },
+        {
+          "variableName": "Equity",
+          "variableQname": "fac:Equity"
+        }
+      ],
+      "ruleMessage": "Balance Sheet identity: Assets must equal Liabilities plus Equity.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:fac-rule-gross-profit",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "EqualTo",
+      "ruleExpression": "$GrossProfit = ($Revenues - $CostOfRevenue)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS1"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "GrossProfit",
+          "variableQname": "fac:GrossProfit"
+        },
+        {
+          "variableName": "Revenues",
+          "variableQname": "fac:Revenues"
+        },
+        {
+          "variableName": "CostOfRevenue",
+          "variableQname": "fac:CostOfRevenue"
+        }
+      ],
+      "ruleMessage": "Income Statement consistency: Gross Profit must equal Revenues minus Cost of Revenue.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:fac-rule-equity-rollforward",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollForward",
+      "ruleExpression": "$EquityBegin + $ComprehensiveIncome = $EquityEnd",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome-breakdown"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "EquityBegin",
+          "variableQname": "fac:Equity"
+        },
+        {
+          "variableName": "ComprehensiveIncome",
+          "variableQname": "fac:ComprehensiveIncomeLoss"
+        },
+        {
+          "variableName": "EquityEnd",
+          "variableQname": "fac:Equity"
+        }
+      ],
+      "ruleMessage": "Equity rollforward: ending Equity must equal beginning Equity plus Comprehensive Income (simplified SE01 — full rollforward with investments and distributions lands when those concepts are seeded).",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:fac-rule-assets-decomposition",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$Assets = ($CurrentAssets + $NoncurrentAssets)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS3"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Assets",
+          "variableQname": "fac:Assets"
+        },
+        {
+          "variableName": "CurrentAssets",
+          "variableQname": "fac:CurrentAssets"
+        },
+        {
+          "variableName": "NoncurrentAssets",
+          "variableQname": "fac:NoncurrentAssets"
+        }
+      ],
+      "ruleMessage": "Classified Balance Sheet: total Assets must roll up from Current Assets plus Noncurrent Assets.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:fac-rule-report-requires-bs",
+      "ruleCategory": "ReportLevelModelStructureRule",
+      "rulePattern": "Exists",
+      "ruleExpression": "exists($BalanceSheet)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BS-classified"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "BalanceSheet",
+          "variableQname": "fac:Assets"
+        }
+      ],
+      "ruleMessage": "Financial report must include a Balance Sheet disclosure.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:fac-rule-is-requires-ci",
+      "ruleCategory": "ReportLevelModelStructureRule",
+      "rulePattern": "CoExists",
+      "ruleExpression": "exists($IncomeStatement) implies exists($ComprehensiveIncome)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "IncomeStatement",
+          "variableQname": "fac:NetIncomeLoss"
+        },
+        {
+          "variableName": "ComprehensiveIncome",
+          "variableQname": "fac:ComprehensiveIncomeLoss"
+        }
+      ],
+      "ruleMessage": "If an Income Statement is reported, a Statement of Comprehensive Income is required.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:fac-rule-bs-requires-assets",
+      "ruleCategory": "ReportLevelModelStructureRule",
+      "rulePattern": "Exists",
+      "ruleExpression": "exists($Assets)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BS-classified"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Assets",
+          "variableQname": "fac:Assets"
+        }
+      ],
+      "ruleMessage": "Balance Sheet must report a top-level Assets concept.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:sfac6-rule-is-identity",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "EqualTo",
+      "ruleExpression": "$ComprehensiveIncome = ($Revenues - $Expenses + $Gains - $Losses)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "ComprehensiveIncome",
+          "variableQname": "sfac6:ComprehensiveIncome"
+        },
+        {
+          "variableName": "Expenses",
+          "variableQname": "sfac6:Expenses"
+        },
+        {
+          "variableName": "Gains",
+          "variableQname": "sfac6:Gains"
+        },
+        {
+          "variableName": "Losses",
+          "variableQname": "sfac6:Losses"
+        },
+        {
+          "variableName": "Revenues",
+          "variableQname": "sfac6:Revenues"
+        }
+      ],
+      "ruleMessage": "Income Statement single-step identity: Comprehensive Income must equal Revenues minus Expenses plus Gains minus Losses. Source: sfac6-formula-consistency-IS01.xml (Arithmetic_IS01). Uses sfac6: qnames — evaluates once sfac6 elements are seeded.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:sfac6-rule-cna-identity",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "EqualTo",
+      "ruleExpression": "$ChangeInNetAssets = ($Revenues - $Expenses + $Gains - $Losses)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "ChangeInNetAssets",
+          "variableQname": "sfac6:ChangeInNetAssets"
+        },
+        {
+          "variableName": "Expenses",
+          "variableQname": "sfac6:Expenses"
+        },
+        {
+          "variableName": "Gains",
+          "variableQname": "sfac6:Gains"
+        },
+        {
+          "variableName": "Losses",
+          "variableQname": "sfac6:Losses"
+        },
+        {
+          "variableName": "Revenues",
+          "variableQname": "sfac6:Revenues"
+        }
+      ],
+      "ruleMessage": "Not-for-profit identity: Change in Net Assets must equal Revenues minus Expenses plus Gains minus Losses. Source: sfac6-formula-consistency-CNA01.xml (Arithmetic_CNA01). Uses sfac6: qnames — evaluates once sfac6 elements are seeded.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:sfac6-rule-bs-requires-liabilities",
+      "ruleCategory": "DisclosureMechanicsRule",
+      "rulePattern": "Exists",
+      "ruleExpression": "exists($Liabilities)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BS-classified"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Liabilities",
+          "variableQname": "fac:Liabilities"
+        }
+      ],
+      "ruleMessage": "Balance Sheet must report a top-level Liabilities concept. Source: dm-BalanceSheet-rules-def.xml.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:sfac6-rule-bs-requires-equity",
+      "ruleCategory": "DisclosureMechanicsRule",
+      "rulePattern": "Exists",
+      "ruleExpression": "exists($Equity)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BS-classified"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Equity",
+          "variableQname": "fac:Equity"
+        }
+      ],
+      "ruleMessage": "Balance Sheet must report a top-level Equity concept. Source: dm-BalanceSheet-rules-def.xml.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:sfac6-rule-ci-requires-ci-concept",
+      "ruleCategory": "DisclosureMechanicsRule",
+      "rulePattern": "Exists",
+      "ruleExpression": "exists($ComprehensiveIncome)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "ComprehensiveIncome",
+          "variableQname": "sfac6:ComprehensiveIncome"
+        }
+      ],
+      "ruleMessage": "Comprehensive Income disclosure must report a ComprehensiveIncome concept. Source: dm-ComprehensiveIncome-rules-def.xml.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:sfac6-rule-ci-requires-revenues",
+      "ruleCategory": "DisclosureMechanicsRule",
+      "rulePattern": "Exists",
+      "ruleExpression": "exists($Revenues)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Revenues",
+          "variableQname": "sfac6:Revenues"
+        }
+      ],
+      "ruleMessage": "Comprehensive Income disclosure must report a Revenues concept. Source: dm-ComprehensiveIncome-rules-def.xml.",
+      "ruleOrigin": "forked"
+    },
+    {
+      "@id": "_:sfac6-rule-ce-requires-equity",
+      "ruleCategory": "DisclosureMechanicsRule",
+      "rulePattern": "Exists",
+      "ruleExpression": "exists($Equity)",
+      "ruleTarget": {
+        "targetKind": "structure",
+        "targetRef": {
+          "@id": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome-breakdown"
+        }
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Equity",
+          "variableQname": "fac:Equity"
+        }
+      ],
+      "ruleMessage": "Changes in Equity disclosure must report an Equity concept. Source: dm-ChangesInEquity-rules-def.xml.",
+      "ruleOrigin": "forked"
+    }
+  ]
+}

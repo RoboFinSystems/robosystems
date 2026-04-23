@@ -57,6 +57,7 @@ seeds/
 ├── fac-to-rs-gaap/v1/      native — FAC → rs-gaap equivalence arcs
 ├── fac-calculations/v1/    native — FAC BS/IS/CF accounting identities (summationOf arcs)
 ├── fac-presentation/v1/    native — FAC multi-variant presentation hierarchies
+├── fac-rules/v1/           forked — Seattle Method verification rules (7 hand-curated)
 └── rs-gaap-presentation/v1/ native — rs-gaap presentation hierarchies
 ```
 

@@ -293,8 +293,8 @@ pip install robosystems-client
 
 **Database Models:**
 
-- **[Platform Models](/robosystems/models/core/README.md)** - SQLAlchemy models for the platform database (users, orgs, graphs, billing, connections, documents)
-- **[Extensions OLTP Models](/robosystems/models/extensions/README.md)** - SQLAlchemy models for the extensions database (roboledger ledger, roboinvestor portfolios) with schema-per-graph tenancy
+- **[Platform Models](/robosystems/models/core/README.md)** - SQLAlchemy models for the platform database
+- **[Extensions Models](/robosystems/models/extensions/README.md)** - SQLAlchemy models for the extensions database with schema-per-graph tenancy
 - **[API Models](/robosystems/models/api/README.md)** - Pydantic request/response models for core platform and extensions surfaces
 
 **Graph Database System:**

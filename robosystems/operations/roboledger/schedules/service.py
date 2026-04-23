@@ -53,30 +53,6 @@ class ScheduleMetadata:
 
 
 @dataclass
-class ScheduleFact:
-  """A single schedule fact for display."""
-
-  element_id: str
-  element_name: str
-  value: float  # dollars
-  period_start: date
-  period_end: date
-
-
-@dataclass
-class ScheduleSummary:
-  """Summary of a schedule structure."""
-
-  structure_id: str
-  name: str
-  taxonomy_name: str
-  entry_template: dict | None
-  schedule_metadata: dict | None
-  total_periods: int
-  periods_with_entries: int
-
-
-@dataclass
 class PeriodCloseItem:
   """One schedule's status for a fiscal period."""
 
@@ -213,10 +189,26 @@ class ScheduleService:
         "asset_element_id": schedule_metadata.asset_element_id,
       }
 
+    # Phase δ: stamp the typed artifact_mechanics column alongside the
+    # legacy metadata_ blob so the envelope builder's typed-column read
+    # path works from creation. metadata_ is kept populated during the
+    # transition window — it's retired in a later phase once the spec
+    # follow-ups remove the fallback path on the read side.
+    # periods_with_entries is a transient read-time value (queried from facts),
+    # not a stored property — intentionally excluded here rather than using
+    # ScheduleMechanics.model_dump(); it is injected by the envelope builder.
+    artifact_mechanics: dict[str, object] = {
+      "kind": "closing_entry_generator",
+      "entry_template": metadata["entry_template"],
+      "schedule_metadata": metadata.get("schedule_metadata"),
+    }
+
     structure = Structure(
       name=name,
       structure_type="schedule",
       taxonomy_id=taxonomy_id,
+      concept_arrangement="roll_forward",
+      artifact_mechanics=artifact_mechanics,
       metadata_=metadata,
       created_by=created_by,
     )
@@ -307,92 +299,6 @@ class ScheduleService:
 
     session.flush()
     return structure
-
-  def list_schedules(self, session: Session) -> list[ScheduleSummary]:
-    """List all schedule structures with summary info."""
-    result = session.execute(
-      text("""
-        SELECT
-          s.id AS structure_id,
-          s.name,
-          t.name AS taxonomy_name,
-          s.metadata AS metadata,
-          (SELECT COUNT(DISTINCT (f.period_start, f.period_end))
-           FROM facts f WHERE f.structure_id = s.id) AS total_periods,
-          (SELECT COUNT(DISTINCT e.id)
-           FROM entries e
-           WHERE e.source_structure_id = s.id
-             AND e.status IN ('draft', 'posted')) AS periods_with_entries
-        FROM structures s
-        JOIN taxonomies t ON t.id = s.taxonomy_id
-        WHERE s.structure_type = 'schedule'
-          AND s.is_active = true
-        ORDER BY s.name
-      """)
-    )
-
-    return [
-      ScheduleSummary(
-        structure_id=row.structure_id,
-        name=row.name,
-        taxonomy_name=row.taxonomy_name,
-        entry_template=row.metadata.get("entry_template") if row.metadata else None,
-        schedule_metadata=row.metadata.get("schedule_metadata")
-        if row.metadata
-        else None,
-        total_periods=row.total_periods,
-        periods_with_entries=row.periods_with_entries,
-      )
-      for row in result
-    ]
-
-  def get_schedule_facts(
-    self,
-    session: Session,
-    structure_id: str,
-    period_start: date | None = None,
-    period_end: date | None = None,
-  ) -> list[ScheduleFact]:
-    """Get facts for a schedule, optionally filtered by period."""
-    # Validate schedule exists
-    struct = session.get(Structure, structure_id)
-    if not struct or struct.structure_type != "schedule":
-      raise ValueError(f"Schedule structure '{structure_id}' not found")
-
-    params: dict = {"structure_id": structure_id}
-    period_filter = ""
-
-    if period_start:
-      period_filter += " AND f.period_start >= :period_start"
-      params["period_start"] = period_start
-    if period_end:
-      period_filter += " AND f.period_end <= :period_end"
-      params["period_end"] = period_end
-
-    result = session.execute(
-      text(f"""
-        SELECT f.element_id, e.name AS element_name,
-               f.value, f.period_start, f.period_end
-        FROM facts f
-        JOIN elements e ON e.id = f.element_id
-        WHERE f.structure_id = :structure_id
-          AND f.fact_scope = 'in_scope'
-          {period_filter}
-        ORDER BY f.period_start, f.period_end, e.name
-      """),
-      params,
-    )
-
-    return [
-      ScheduleFact(
-        element_id=row.element_id,
-        element_name=row.element_name,
-        value=row.value,
-        period_start=row.period_start,
-        period_end=row.period_end,
-      )
-      for row in result
-    ]
 
   def get_period_close_status(
     self,
@@ -1064,11 +970,17 @@ class ScheduleService:
     metadata["schedule_metadata"] = schedule_meta
     metadata["truncations"] = truncation_log
     structure.metadata_ = metadata
+    structure.artifact_mechanics = {
+      "kind": "closing_entry_generator",
+      "entry_template": metadata.get("entry_template", {}),
+      "schedule_metadata": metadata.get("schedule_metadata"),
+    }
 
     # Force SQLAlchemy to detect the JSONB change
     from sqlalchemy.orm.attributes import flag_modified
 
     flag_modified(structure, "metadata_")
+    flag_modified(structure, "artifact_mechanics")
     session.flush()
 
     logger.info(

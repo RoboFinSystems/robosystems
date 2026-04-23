@@ -14,7 +14,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from rdflib import Graph, Literal, URIRef
+from rdflib import BNode, Graph, Literal, URIRef
+from rdflib.collection import Collection
 from rdflib.namespace import DCTERMS, OWL, RDFS, SKOS
 
 from robosystems.arelle.context import CANONICAL_CONTEXT, RS_VOCAB
@@ -26,11 +27,46 @@ from robosystems.taxonomy.model import (
   ElementSpec,
   LabelSpec,
   ReferenceSpec,
+  RuleSpec,
+  RuleTargetSpec,
+  RuleVariableSpec,
   StructureSpec,
   TaxonomyPackage,
 )
 
 RS_NS = RS_VOCAB  # alias for readability
+
+# Enum closures for rule axes. Kept here so both the loader (for
+# cheap sanity-checking during parse) and the migration CHECK
+# constraints can import one canonical source. Expand when Phase δ.3's
+# parser produces rules under the not-yet-seeded categories or patterns.
+RULE_CATEGORY_VALUES: frozenset[str] = frozenset(
+  {
+    "AutomatedAccountingAndReportingChecks",
+    "DisclosureMechanicsRule",
+    "FundamentalAccountingConceptRelation",
+    "PeerConsistencyRule",
+    "PriorPeriodConsistencyRule",
+    "ReportLevelModelStructureRule",
+    "ReportingSystemSpecificRule",
+    "ToDoManualTask",
+    "XBRLTechnicalSyntaxRule",
+  }
+)
+RULE_PATTERN_VALUES: frozenset[str] = frozenset(
+  {
+    "Adjustment",
+    "CoExists",
+    "EqualTo",
+    "Exists",
+    "GreaterThan",
+    "GreaterThanOrEqualToZero",
+    "LessThan",
+    "RollForward",
+    "RollUp",
+    "Variance",
+  }
+)
 
 
 # Inverse label role mapping — predicate → role name + language preserved via literal.lang
@@ -407,6 +443,108 @@ def _extract_associations(graph: Graph) -> list[AssociationSpec]:
   return associations
 
 
+def _extract_rules(graph: Graph) -> list[RuleSpec]:
+  """Walk rule subjects and emit RuleSpec entries.
+
+  A rule subject is any node carrying an ``rs:ruleCategory`` triple.
+  The blank-node local id is the subject's string form (the local name
+  after ``_:`` in the JSON-LD source); the writer rewrites it to a
+  deterministic UUID5 at seed time.
+
+  ``rule_target`` sits on a nested blank node (``rs:ruleTarget``) with
+  ``rs:targetKind`` + ``rs:targetRef`` (a URIRef because the context
+  marks ``targetRef`` as ``@type: @id``). ``rule_variables`` is an
+  rdf:List under ``rs:ruleVariables`` — walked via
+  :class:`rdflib.collection.Collection`.
+  """
+  rules: list[RuleSpec] = []
+  category_pred = URIRef(f"{RS_NS}ruleCategory")
+  pattern_pred = URIRef(f"{RS_NS}rulePattern")
+  expression_pred = URIRef(f"{RS_NS}ruleExpression")
+  target_pred = URIRef(f"{RS_NS}ruleTarget")
+  target_kind_pred = URIRef(f"{RS_NS}targetKind")
+  target_ref_pred = URIRef(f"{RS_NS}targetRef")
+  variables_pred = URIRef(f"{RS_NS}ruleVariables")
+  variable_name_pred = URIRef(f"{RS_NS}variableName")
+  variable_qname_pred = URIRef(f"{RS_NS}variableQname")
+  message_pred = URIRef(f"{RS_NS}ruleMessage")
+  severity_pred = URIRef(f"{RS_NS}ruleSeverity")
+  origin_pred = URIRef(f"{RS_NS}ruleOrigin")
+
+  for subject in set(graph.subjects(category_pred)):
+    category_vals = list(graph.objects(subject, category_pred))
+    pattern_vals = list(graph.objects(subject, pattern_pred))
+    expression_vals = list(graph.objects(subject, expression_pred))
+    if not category_vals or not pattern_vals or not expression_vals:
+      continue
+
+    # Unknown categories / patterns are not silently round-tripped — a
+    # typo in a seed would otherwise land in the DB and fail the CHECK
+    # constraint only at write time. Skip with a warning here so the
+    # failure surfaces during load.
+    category = str(category_vals[0])
+    pattern = str(pattern_vals[0])
+    if category not in RULE_CATEGORY_VALUES:
+      logger.warning("Rule %s has unknown ruleCategory=%r; skipping", subject, category)
+      continue
+    if pattern not in RULE_PATTERN_VALUES:
+      logger.warning("Rule %s has unknown rulePattern=%r; skipping", subject, pattern)
+      continue
+
+    target_spec: RuleTargetSpec | None = None
+    target_objs = list(graph.objects(subject, target_pred))
+    if target_objs:
+      target_node = target_objs[0]
+      kind_vals = list(graph.objects(target_node, target_kind_pred))
+      ref_vals = list(graph.objects(target_node, target_ref_pred))
+      if kind_vals and ref_vals:
+        target_spec = RuleTargetSpec(
+          target_kind=str(kind_vals[0]),  # type: ignore[arg-type]
+          target_ref=str(ref_vals[0]),
+        )
+
+    variable_specs: list[RuleVariableSpec] = []
+    var_list_heads = list(graph.objects(subject, variables_pred))
+    if var_list_heads:
+      head = var_list_heads[0]
+      if isinstance(head, (BNode, URIRef)):
+        for item in Collection(graph, head):
+          name_vals = list(graph.objects(item, variable_name_pred))
+          qname_vals = list(graph.objects(item, variable_qname_pred))
+          if not name_vals or not qname_vals:
+            continue
+          variable_specs.append(
+            RuleVariableSpec(
+              variable_name=str(name_vals[0]),
+              variable_qname=str(qname_vals[0]),
+            )
+          )
+
+    message_vals = list(graph.objects(subject, message_pred))
+    severity_vals = list(graph.objects(subject, severity_pred))
+    origin_vals = list(graph.objects(subject, origin_pred))
+
+    severity = str(severity_vals[0]) if severity_vals else "error"
+    origin = str(origin_vals[0]) if origin_vals else "native"
+
+    local_id = str(subject)
+    rules.append(
+      RuleSpec(
+        id=local_id,
+        rule_category=category,
+        rule_pattern=pattern,
+        rule_expression=str(expression_vals[0]),
+        rule_target=target_spec,
+        rule_variables=variable_specs,
+        rule_message=str(message_vals[0]) if message_vals else None,
+        rule_severity=severity,  # type: ignore[arg-type]
+        rule_origin=origin,  # type: ignore[arg-type]
+      )
+    )
+
+  return rules
+
+
 def _extract_structures(graph: Graph) -> list[StructureSpec]:
   """Extract extended link roles as structures."""
   structures: list[StructureSpec] = []
@@ -483,12 +621,14 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
   associations = _extract_associations(graph)
   structures = _extract_structures(graph)
   assignments = _extract_classification_assignments(graph)
+  rules = _extract_rules(graph)
 
   logger.info(
     f"Loaded {name}: {len(elements)} elements, "
     f"{len(associations)} associations, {len(structures)} structures, "
     f"{len(classifications)} classifications, "
-    f"{len(assignments)} classification assignments"
+    f"{len(assignments)} classification assignments, "
+    f"{len(rules)} rules"
   )
 
   # Derive primary namespace_uri if not in metadata
@@ -511,6 +651,7 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     structures=structures,
     classifications=classifications,
     classification_assignments=assignments,
+    rules=rules,
     taxonomy_type=taxonomy_type,
     is_shared=True,
     description=description,
