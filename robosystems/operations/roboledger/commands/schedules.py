@@ -16,6 +16,8 @@ from robosystems.models.api.extensions.schedules import (
   CreateManualClosingEntryRequest,
   CreateScheduleRequest,
   DeleteScheduleRequest,
+  DisposeScheduleRequest,
+  DisposeScheduleResponse,
   ScheduleCreatedResponse,
   TruncateScheduleOperation,
   TruncateScheduleResponse,
@@ -30,11 +32,24 @@ from robosystems.models.extensions import (
   VerificationResult,
 )
 from robosystems.models.extensions.roboledger import Fact
+from robosystems.operations.information_block.rules.engine import (
+  evaluate_rules_for_structure,
+)
 from robosystems.operations.roboledger.schedules import ScheduleService
 from robosystems.operations.roboledger.schedules.service import (
   EntryTemplate,
   ScheduleMetadata,
 )
+
+
+def _rule_summary(results: list) -> dict[str, int] | None:
+  """Tally verification results by status. Returns None when no rules exist."""
+  if not results:
+    return None
+  tally: dict[str, int] = {"pass": 0, "fail": 0, "error": 0, "skipped": 0}
+  for r in results:
+    tally[r.status] = tally.get(r.status, 0) + 1
+  return tally
 
 
 class ScheduleNotFoundError(LookupError):
@@ -114,6 +129,7 @@ def create_schedule(
     schedule_metadata=sm,
     created_by=created_by,
     closed_through=body.closed_through,
+    source_transaction_id=body.source_transaction_id,
   )
 
   # Count generated facts and distinct periods for the response.
@@ -129,6 +145,14 @@ def create_schedule(
     {"sid": structure.id},
   ).fetchone()
 
+  rule_results = evaluate_rules_for_structure(
+    session,
+    structure.id,
+    period_start=body.period_start,
+    period_end=body.period_end,
+    created_by=created_by,
+  )
+
   session.commit()
 
   return ScheduleCreatedResponse(
@@ -137,6 +161,7 @@ def create_schedule(
     taxonomy_id=structure.taxonomy_id,
     total_periods=period_row.cnt if period_row else 0,
     total_facts=count_row.cnt if count_row else 0,
+    rule_summary=_rule_summary(rule_results),
   )
 
 
@@ -308,6 +333,142 @@ def update_schedule(
     taxonomy_id=structure.taxonomy_id,
     total_periods=period_row.cnt if period_row else 0,
     total_facts=count_row.cnt if count_row else 0,
+  )
+
+
+def dispose_schedule(
+  session: Session,
+  body: DisposeScheduleRequest,
+  created_by: str,
+) -> DisposeScheduleResponse:
+  """Atomically truncate a schedule and create the disposal closing entry.
+
+  Computes accumulated depreciation from the schedule's own instant facts,
+  derives NBV and gain/loss, truncates forward facts past disposal_date,
+  then creates a balanced multi-line disposal closing entry.
+
+  Raises `ValueError` for validation failures — caller maps to 422.
+  Raises `ScheduleNotFoundError` if the schedule does not exist.
+  """
+  structure = _load_schedule_or_404(session, body.structure_id)
+  mechanics = structure.artifact_mechanics or {}
+  sm = mechanics.get("schedule_metadata") or {}
+  et = mechanics.get("entry_template") or {}
+
+  original_amount: int = int(sm.get("original_amount") or 0)
+  asset_element_id: str | None = sm.get("asset_element_id")
+  credit_element_id: str | None = et.get(
+    "credit_element_id"
+  )  # accumulated depreciation
+
+  if not asset_element_id:
+    raise ValueError(
+      "dispose-schedule requires schedule_metadata.asset_element_id "
+      "(the balance-sheet asset element). Update the schedule first."
+    )
+  if not credit_element_id:
+    raise ValueError("dispose-schedule requires entry_template.credit_element_id.")
+
+  # Accumulated depreciation = most recent cumulative instant fact up to disposal_date
+  acc_row = session.execute(
+    text(
+      "SELECT value FROM facts "
+      "WHERE structure_id = :sid AND element_id = :eid "
+      "AND period_type = 'instant' AND period_end <= :d "
+      "ORDER BY period_end DESC LIMIT 1"
+    ),
+    {"sid": structure.id, "eid": credit_element_id, "d": body.disposal_date},
+  ).fetchone()
+  accumulated_depreciation_dollars = float(acc_row.value) if acc_row else 0.0
+  accumulated_depreciation = round(accumulated_depreciation_dollars * 100)
+
+  round(original_amount / 100.0, 2)
+  net_book_value = original_amount - accumulated_depreciation
+  sale_proceeds = body.sale_proceeds or 0
+  gain_loss = sale_proceeds - net_book_value
+
+  if sale_proceeds > 0 and not body.proceeds_element_id:
+    raise ValueError("proceeds_element_id is required when sale_proceeds > 0.")
+  if net_book_value != 0 and gain_loss != 0 and not body.gain_loss_element_id:
+    raise ValueError(
+      "gain_loss_element_id is required when net book value > 0 and "
+      "the disposal produces a gain or loss."
+    )
+
+  # Truncate forward facts
+  service = ScheduleService()
+  trunc_result = service.truncate_schedule(
+    session,
+    structure_id=body.structure_id,
+    new_end_date=body.disposal_date,
+    reason=body.reason,
+    updated_by=created_by,
+  )
+
+  # Build balanced disposal line items (all amounts in cents)
+  line_items: list[dict] = [
+    # DR accumulated depreciation (remove the contra account)
+    {
+      "element_id": credit_element_id,
+      "debit_amount": accumulated_depreciation,
+      "credit_amount": 0,
+      "description": "Remove accumulated depreciation",
+    },
+    # CR asset at cost
+    {
+      "element_id": asset_element_id,
+      "debit_amount": 0,
+      "credit_amount": original_amount,
+      "description": "Remove asset at cost",
+    },
+  ]
+  if sale_proceeds > 0 and body.proceeds_element_id:
+    line_items.append(
+      {
+        "element_id": body.proceeds_element_id,
+        "debit_amount": sale_proceeds,
+        "credit_amount": 0,
+        "description": "Sale proceeds",
+      }
+    )
+  if gain_loss > 0 and body.gain_loss_element_id:
+    line_items.append(
+      {
+        "element_id": body.gain_loss_element_id,
+        "debit_amount": 0,
+        "credit_amount": gain_loss,
+        "description": "Gain on disposal",
+      }
+    )
+  elif gain_loss < 0 and body.gain_loss_element_id:
+    line_items.append(
+      {
+        "element_id": body.gain_loss_element_id,
+        "debit_amount": abs(gain_loss),
+        "credit_amount": 0,
+        "description": "Loss on disposal",
+      }
+    )
+
+  entry_result = service.create_manual_closing_entry(
+    session,
+    posting_date=body.disposal_date,
+    line_items=line_items,
+    memo=body.memo,
+    created_by=created_by,
+    entry_type="closing",
+  )
+  session.commit()
+
+  return DisposeScheduleResponse(
+    structure_id=body.structure_id,
+    disposal_date=body.disposal_date,
+    original_amount=original_amount,
+    accumulated_depreciation=accumulated_depreciation,
+    net_book_value=net_book_value,
+    gain_loss=gain_loss,
+    facts_deleted=trunc_result.get("facts_deleted", 0),
+    closing_entry=_build_closing_entry_response(entry_result),
   )
 
 

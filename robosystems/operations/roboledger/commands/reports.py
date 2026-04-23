@@ -25,10 +25,14 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.extensions import (
   Fact,
+  FactSet,
   PublishList,
   PublishListMember,
   Report,
   ReportShare,
+)
+from robosystems.operations.information_block.rules.engine import (
+  evaluate_rules_for_structure,
 )
 from robosystems.operations.roboledger.reads.reports import (
   build_periods,
@@ -38,6 +42,7 @@ from robosystems.operations.roboledger.reads.reports import (
   resolve_entity_name,
 )
 from robosystems.operations.roboledger.reports.fact_grid import generate_report_facts
+from robosystems.utils.ulid import generate_prefixed_ulid
 
 
 class ReportNotFoundError(LookupError):
@@ -79,15 +84,113 @@ def _get_entity_id(session: Session, graph_id: str) -> str:
   return row.id
 
 
+def _rule_summary(results: list) -> dict[str, int] | None:
+  """Tally verification results by status. Returns None when no rules exist."""
+  if not results:
+    return None
+  tally: dict[str, int] = {"pass": 0, "fail": 0, "error": 0, "skipped": 0}
+  for r in results:
+    tally[r.status] = tally.get(r.status, 0) + 1
+  return tally
+
+
+def _evaluate_report_structures(
+  session: Session,
+  facts,
+  element_to_structure: dict[str, str],
+  structure_to_factset: dict[str, str],
+  period_start,
+  period_end,
+  created_by: str,
+) -> dict[str, int] | None:
+  """Run rule evaluation for every structure that received report facts.
+
+  Returns an aggregated rule_summary across all structures, or None if
+  no structures have rules.
+  """
+  structures_with_facts = {
+    element_to_structure[f.element_id]
+    for f in facts.facts
+    if f.element_id in element_to_structure
+  }
+  all_results = []
+  for structure_id in structures_with_facts:
+    results = evaluate_rules_for_structure(
+      session,
+      structure_id,
+      fact_set_id=structure_to_factset[structure_id],
+      period_start=period_start,
+      period_end=period_end,
+      created_by=created_by,
+    )
+    all_results.extend(results)
+  return _rule_summary(all_results)
+
+
+def _build_structure_mapping(
+  session: Session, taxonomy_id: str
+) -> tuple[dict[str, str], dict[str, str]]:
+  """Return (element_id→structure_id, structure_id→fact_set_id) for a taxonomy.
+
+  Queries associations to find which elements belong to which
+  report-eligible structure (statements + metric + custom), then
+  pre-generates one fact_set_id ULID per structure.
+
+  Schedule/rollforward/reconciliation/policy/CoA structures are
+  excluded — facts for those come from ScheduleService, not reports.
+  """
+  rows = session.execute(
+    text(
+      """
+      SELECT DISTINCT s.id AS structure_id, a.to_element_id AS element_id
+      FROM structures s
+      JOIN associations a ON a.structure_id = s.id
+      WHERE s.taxonomy_id = :tid
+        AND s.structure_type IN (
+          'income_statement', 'balance_sheet',
+          'cash_flow_statement', 'equity_statement',
+          'custom', 'metric'
+        )
+        AND s.is_active = true
+      """
+    ),
+    {"tid": taxonomy_id},
+  ).fetchall()
+
+  element_to_structure: dict[str, str] = {
+    row.element_id: row.structure_id for row in rows
+  }
+  structure_to_factset: dict[str, str] = {
+    structure_id: generate_prefixed_ulid("fs")
+    for structure_id in {r.structure_id for r in rows}
+  }
+  return element_to_structure, structure_to_factset
+
+
 def _persist_report_facts(
-  session: Session, report_id: str, facts, entity_id: str
+  session: Session,
+  report_id: str,
+  facts,
+  entity_id: str,
+  element_to_structure: dict[str, str] | None = None,
+  structure_to_factset: dict[str, str] | None = None,
 ) -> None:
-  """Clear any existing facts for this report and persist the new set."""
+  """Clear any existing facts for this report and persist the new set.
+
+  If `element_to_structure` / `structure_to_factset` are provided, each
+  Fact is stamped with `structure_id` and `fact_set_id` so the Information
+  Block envelope can resolve its FactSet row. `report_id` is still set —
+  the CHECK constraint requires at least one of the two to be non-null.
+  """
   session.execute(
     text("DELETE FROM facts WHERE report_id = :report_id"),
     {"report_id": report_id},
   )
+  elem_map = element_to_structure or {}
+  fs_map = structure_to_factset or {}
   for fact in facts.facts:
+    structure_id = elem_map.get(fact.element_id)
+    fact_set_id = fs_map.get(structure_id) if structure_id else None
     rf = Fact(
       report_id=report_id,
       element_id=fact.element_id,
@@ -97,8 +200,55 @@ def _persist_report_facts(
       period_type=fact.period_type,
       unit="USD",
       entity_id=entity_id,
+      structure_id=structure_id,
+      fact_set_id=fact_set_id,
     )
     session.add(rf)
+
+
+def _create_report_fact_sets(
+  session: Session,
+  report_id: str,
+  entity_id: str,
+  created_by: str,
+  facts,
+  element_to_structure: dict[str, str],
+  structure_to_factset: dict[str, str],
+) -> None:
+  """Insert one FactSet row per statement structure that received facts.
+
+  Period envelope: for comparative reports with multi-period fact sets,
+  the FactSet row spans the outer range (min period_start, max period_end)
+  of the facts actually linked to this structure. This matches the
+  "Block = fragment" model — the IS block is ONE block regardless of how
+  many periods are compared, and the envelope read
+  (`ORDER BY period_end DESC LIMIT 1`) picks the latest FactSet per
+  structure cleanly.
+  """
+  per_structure: dict[str, list] = {}
+  for f in facts.facts:
+    sid = element_to_structure.get(f.element_id)
+    if sid is not None:
+      per_structure.setdefault(sid, []).append(f)
+
+  for structure_id, struct_facts in per_structure.items():
+    starts = [f.period_start for f in struct_facts if f.period_start is not None]
+    ends = [f.period_end for f in struct_facts if f.period_end is not None]
+    if not ends:
+      # period_end is NOT NULL on fact_sets — skip structures with no dated facts
+      continue
+    session.add(
+      FactSet(
+        id=structure_to_factset[structure_id],
+        structure_id=structure_id,
+        period_start=min(starts) if starts else None,
+        period_end=max(ends),
+        factset_type="report",
+        entity_id=entity_id,
+        report_id=report_id,
+        created_by=created_by,
+      )
+    )
 
 
 def create_report(
@@ -147,7 +297,35 @@ def create_report(
   )
 
   entity_id = _get_entity_id(session, graph_id)
-  _persist_report_facts(session, report_def.id, facts, entity_id)
+  element_to_structure, structure_to_factset = _build_structure_mapping(
+    session, body.taxonomy_id
+  )
+  _persist_report_facts(
+    session,
+    report_def.id,
+    facts,
+    entity_id,
+    element_to_structure,
+    structure_to_factset,
+  )
+  _create_report_fact_sets(
+    session,
+    report_def.id,
+    entity_id,
+    created_by,
+    facts,
+    element_to_structure,
+    structure_to_factset,
+  )
+  summary = _evaluate_report_structures(
+    session,
+    facts,
+    element_to_structure,
+    structure_to_factset,
+    body.period_start,
+    body.period_end,
+    created_by,
+  )
 
   report_def.generation_status = "published"
   report_def.last_generated = datetime.now(UTC)
@@ -155,7 +333,9 @@ def create_report(
 
   structures = load_structures(session, body.taxonomy_id)
   entity_name = resolve_entity_name(session, report_def)
-  return report_to_response(report_def, structures, entity_name)
+  resp = report_to_response(report_def, structures, entity_name)
+  resp.rule_summary = summary
+  return resp
 
 
 def regenerate_report(
@@ -216,7 +396,41 @@ def regenerate_report(
   )
 
   entity_id = _get_entity_id(session, graph_id)
-  _persist_report_facts(session, report_def.id, facts, entity_id)
+  element_to_structure, structure_to_factset = _build_structure_mapping(
+    session, report_def.taxonomy_id
+  )
+  # Stale FactSet rows from the prior generation must be cleared before
+  # new rows are inserted with freshly-minted ULIDs.
+  session.execute(
+    text("DELETE FROM fact_sets WHERE report_id = :report_id"),
+    {"report_id": report_def.id},
+  )
+  _persist_report_facts(
+    session,
+    report_def.id,
+    facts,
+    entity_id,
+    element_to_structure,
+    structure_to_factset,
+  )
+  _create_report_fact_sets(
+    session,
+    report_def.id,
+    entity_id,
+    acting_user_id,
+    facts,
+    element_to_structure,
+    structure_to_factset,
+  )
+  summary = _evaluate_report_structures(
+    session,
+    facts,
+    element_to_structure,
+    structure_to_factset,
+    report_def.period_start,
+    report_def.period_end,
+    acting_user_id,
+  )
 
   report_def.generation_status = "published"
   report_def.last_generated = datetime.now(UTC)
@@ -224,7 +438,9 @@ def regenerate_report(
 
   structures = load_structures(session, report_def.taxonomy_id)
   entity_name = resolve_entity_name(session, report_def)
-  return report_to_response(report_def, structures, entity_name)
+  resp = report_to_response(report_def, structures, entity_name)
+  resp.rule_summary = summary
+  return resp
 
 
 def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool:
@@ -241,6 +457,10 @@ def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool
 
   session.execute(
     text("DELETE FROM facts WHERE report_id = :report_id"),
+    {"report_id": report_id},
+  )
+  session.execute(
+    text("DELETE FROM fact_sets WHERE report_id = :report_id"),
     {"report_id": report_id},
   )
   session.delete(report_def)
@@ -408,6 +628,11 @@ def _share_to_target(
       target_session.flush()
 
       for fact_data in source_facts:
+        # Cross-graph share: source-graph structure_id/fact_set_id
+        # reference rows in the source tenant schema and are meaningless
+        # in the target. Drop both on copy — shared facts identify
+        # themselves via report_id alone. Populating target FactSet rows
+        # per-structure on share is expand-pass work.
         rf = Fact(
           report_id=shared_report.id,
           element_id=fact_data["element_id"],
@@ -417,7 +642,6 @@ def _share_to_target(
           period_type=fact_data["period_type"],
           unit=fact_data["unit"],
           entity_id=fact_data["entity_id"],
-          fact_set_id=fact_data.get("fact_set_id"),
         )
         target_session.add(rf)
 

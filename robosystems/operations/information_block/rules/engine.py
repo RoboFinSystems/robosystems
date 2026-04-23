@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.extensions import (
@@ -151,6 +151,36 @@ def _latest_report_id_for_fallback(
   return session.execute(stmt).scalar()
 
 
+def _bind_sum_variables(
+  session: Session,
+  rule: Rule,
+  structure_id: str,
+) -> dict[str, float | None]:
+  """Aggregate SUM of duration facts per variable — used exclusively by SumEquals rules."""
+  bindings: dict[str, float | None] = {}
+  for var in rule.rule_variables or []:
+    name = var.get("variable_name", "")
+    qname = var.get("variable_qname", "")
+    if not name:
+      continue
+    element_id: str | None = session.execute(
+      select(Element.id).where(Element.qname == qname).limit(1)
+    ).scalar()
+    if element_id is None:
+      bindings[name] = None
+      continue
+    row = session.execute(
+      text(
+        "SELECT ROUND(SUM(value)::numeric, 2) AS total "
+        "FROM facts "
+        "WHERE element_id = :eid AND structure_id = :sid AND period_type = 'duration'"
+      ),
+      {"eid": element_id, "sid": structure_id},
+    ).fetchone()
+    bindings[name] = float(row.total) if row and row.total is not None else None
+  return bindings
+
+
 def evaluate_rules_for_structure(
   session: Session,
   structure_id: str,
@@ -212,16 +242,19 @@ def evaluate_rules_for_structure(
     if rule is None:
       continue
     try:
-      bindings = _bind_variables(
-        session,
-        rule,
-        structure_id,
-        period_start,
-        period_end,
-        fact_set_id=fact_set_id,
-        allow_report_fallback=allow_report_fallback,
-        fallback_report_id=fallback_report_id,
-      )
+      if rule.rule_pattern == "SumEquals":
+        bindings = _bind_sum_variables(session, rule, structure_id)
+      else:
+        bindings = _bind_variables(
+          session,
+          rule,
+          structure_id,
+          period_start,
+          period_end,
+          fact_set_id=fact_set_id,
+          allow_report_fallback=allow_report_fallback,
+          fallback_report_id=fallback_report_id,
+        )
       outcome = evaluate_rule(rule, bindings)
     except Exception as exc:
       outcome = EvaluationOutcome(

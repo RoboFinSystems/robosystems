@@ -70,7 +70,7 @@ class Rule(ExtensionsBase):
       "rule_pattern IN ("
       "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
       "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
-      "'Variance'"
+      "'SumEquals', 'Variance'"
       ")",
       name="check_rule_pattern",
     ),

@@ -118,6 +118,43 @@ class TestCreateSchedule:
     # Multiple adds: 1 structure + 2 associations + 3 months * 3 facts/month = 12
     assert session.add.call_count >= 12
 
+  def test_inserts_fact_set_row_with_matching_ulid(self):
+    """create_schedule must insert one FactSet row whose id equals
+    the fact_set_id stamped on every generated fact."""
+    session = _mock_session()
+    svc = ScheduleService()
+
+    session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="FactSet Test",
+        taxonomy_id="tax_01",
+        element_ids=["elem_a", "elem_b"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=10000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    added = [call[0][0] for call in session.add.call_args_list]
+    fact_sets = [o for o in added if type(o).__name__ == "FactSet"]
+    facts = [o for o in added if type(o).__name__ == "Fact"]
+
+    assert len(fact_sets) == 1
+    fs = fact_sets[0]
+    assert fs.factset_type == "schedule"
+    assert fs.period_start == date(2026, 1, 1)
+    assert fs.period_end == date(2026, 3, 31)
+    assert fs.entity_id == "ent_01"
+    assert fs.created_by == "usr_test"
+
+    # Every generated fact shares the FactSet's id
+    assert facts, "expected facts to be generated"
+    assert all(f.fact_set_id == fs.id for f in facts)
+
   def test_facts_default_to_in_scope(self):
     """Without closed_through, all facts should be in_scope."""
     session = _mock_session()

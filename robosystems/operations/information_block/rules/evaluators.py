@@ -53,6 +53,8 @@ def evaluate_rule(rule: Any, bindings: dict[str, float | None]) -> EvaluationOut
     return _evaluate_exists(rule, bindings)
   if pattern == "CoExists":
     return _evaluate_coexists(rule, bindings)
+  if pattern == "SumEquals":
+    return _evaluate_sum_equals(rule, bindings)
   return EvaluationOutcome(
     status="skipped",
     message=f"pattern {pattern!r} not yet implemented",
@@ -116,6 +118,34 @@ def _evaluate_exists(rule: Any, bindings: dict[str, float | None]) -> Evaluation
     status="fail",
     message=f"required concept(s) not present: {', '.join(variable_names)}",
     detail={"bindings": _serializable(bound_values)},
+  )
+
+
+def _evaluate_sum_equals(
+  rule: Any, bindings: dict[str, float | None]
+) -> EvaluationOutcome:
+  """Pass when the aggregate sum bound for the first variable equals expected_total."""
+  variable_names = [v["variable_name"] for v in (rule.rule_variables or [])]
+  if not variable_names:
+    return EvaluationOutcome(
+      status="skipped",
+      message="SumEquals rule has no variables",
+      detail={},
+    )
+  actual = bindings.get(variable_names[0])
+  if actual is None:
+    return EvaluationOutcome(
+      status="skipped",
+      message=f"no sum bound for variable: {variable_names[0]}",
+      detail={},
+    )
+  expected = float((rule.metadata_ or {}).get("expected_total", 0))
+  tolerance = float((rule.metadata_ or {}).get("tolerance", EQUALITY_TOLERANCE))
+  passed = abs(actual - expected) <= tolerance
+  return EvaluationOutcome(
+    status="pass" if passed else "fail",
+    message=None if passed else f"sum {actual:.2f} != expected {expected:.2f}",
+    detail={"actual_sum": actual, "expected_total": expected, "tolerance": tolerance},
   )
 
 
