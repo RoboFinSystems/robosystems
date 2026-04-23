@@ -77,7 +77,7 @@ def test_delete_schedule_removes_information_block_dependents_before_structure()
     Association,
   ]
   session.delete.assert_called_once_with(structure)
-  session.flush.assert_called_once()
+  session.commit.assert_called_once()
 
 
 def test_update_schedule_keeps_omitted_metadata_null_in_typed_mechanics() -> None:

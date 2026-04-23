@@ -10,13 +10,13 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (41):**
+**Registered (43):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
   `close-period`, `reopen-period`
 - Schedules: `truncate-schedule`, `create-closing-entry`,
-  `create-manual-closing-entry`
+  `create-manual-closing-entry`, `dispose-schedule`, `evaluate-rules`
 - Taxonomies: `create-taxonomy`, `update-taxonomy`, `delete-taxonomy`,
   `create-structure`, `update-structure`, `delete-structure`,
   `create-mapping-association`, `delete-mapping-association`
@@ -109,6 +109,7 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.api.extensions.schedules import (
   CreateClosingEntryOperation,
   CreateManualClosingEntryRequest,
+  DisposeScheduleRequest,
   TruncateScheduleOperation,
 )
 from robosystems.models.api.extensions.taxonomies import (
@@ -261,6 +262,9 @@ from robosystems.operations.roboledger.commands.schedules import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   create_manual_closing_entry as cmd_create_manual_closing_entry,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  dispose_schedule as cmd_dispose_schedule,
 )
 from robosystems.operations.roboledger.commands.schedules import (
   truncate_schedule as cmd_truncate_schedule,
@@ -1294,6 +1298,26 @@ create_manual_closing_entry_op = _registrar.register(
     request_model=CreateManualClosingEntryRequest,
     error_map={ValueError: 422},
     mark_stale_reason="manual_entry_created",
+  )
+)
+
+dispose_schedule_op = _registrar.register(
+  OperationSpec(
+    name="dispose-schedule",
+    summary="Dispose Schedule (Sale or Abandonment)",
+    description=(
+      "Atomically truncate a schedule past the disposal date and create a "
+      "balanced disposal closing entry. Computes accumulated depreciation "
+      "from the schedule's own facts, derives net book value and gain/loss, "
+      "removes forward facts, and books the disposal entry in one call. "
+      "Use when an asset is sold or abandoned before the schedule runs to "
+      "completion. For abandonment with no proceeds, omit `sale_proceeds` "
+      "and `proceeds_element_id`."
+    ),
+    command=cmd_dispose_schedule,
+    request_model=DisposeScheduleRequest,
+    error_map={ValueError: 422, ScheduleNotFoundError: 404},
+    mark_stale_reason="schedule_disposed",
   )
 )
 

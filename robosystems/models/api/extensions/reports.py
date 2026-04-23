@@ -100,6 +100,7 @@ class ReportResponse(BaseModel):
   source_graph_id: str | None = None
   source_report_id: str | None = None
   shared_at: datetime | None = None
+  rule_summary: dict[str, int] | None = None
 
 
 class ShareResultItem(BaseModel):

@@ -82,6 +82,20 @@ def reset_demo_state(graph_id: str) -> None:
       {"seeder": _LIBRARY_SEEDER},
     )
 
+    # 6c. Verification results, rules, and fact_sets all FK structures —
+    # delete them before structures to avoid constraint violations.
+    session.execute(text("DELETE FROM verification_results"))
+    session.execute(
+      text("DELETE FROM rules WHERE target_structure_id IN "
+           "(SELECT id FROM structures WHERE created_by != :seeder)"),
+      {"seeder": _LIBRARY_SEEDER},
+    )
+    session.execute(
+      text("DELETE FROM fact_sets WHERE structure_id IN "
+           "(SELECT id FROM structures WHERE created_by != :seeder)"),
+      {"seeder": _LIBRARY_SEEDER},
+    )
+
     # 7. Tenant-origin structures (any the demo created — anchor
     # structure, schedules, report layouts).
     session.execute(

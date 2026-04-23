@@ -118,6 +118,43 @@ class TestCreateSchedule:
     # Multiple adds: 1 structure + 2 associations + 3 months * 3 facts/month = 12
     assert session.add.call_count >= 12
 
+  def test_inserts_fact_set_row_with_matching_ulid(self):
+    """create_schedule must insert one FactSet row whose id equals
+    the fact_set_id stamped on every generated fact."""
+    session = _mock_session()
+    svc = ScheduleService()
+
+    session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="FactSet Test",
+        taxonomy_id="tax_01",
+        element_ids=["elem_a", "elem_b"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=10000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    added = [call[0][0] for call in session.add.call_args_list]
+    fact_sets = [o for o in added if type(o).__name__ == "FactSet"]
+    facts = [o for o in added if type(o).__name__ == "Fact"]
+
+    assert len(fact_sets) == 1
+    fs = fact_sets[0]
+    assert fs.factset_type == "schedule"
+    assert fs.period_start == date(2026, 1, 1)
+    assert fs.period_end == date(2026, 3, 31)
+    assert fs.entity_id == "ent_01"
+    assert fs.created_by == "usr_test"
+
+    # Every generated fact shares the FactSet's id
+    assert facts, "expected facts to be generated"
+    assert all(f.fact_set_id == fs.id for f in facts)
+
   def test_facts_default_to_in_scope(self):
     """Without closed_through, all facts should be in_scope."""
     session = _mock_session()
@@ -272,6 +309,148 @@ class TestCreateSchedule:
       if hasattr(obj, "value") and obj.value is not None:
         # Value should have at most 2 decimal places
         assert round(obj.value, 2) == obj.value, f"Unrounded value: {obj.value}"
+
+
+class TestCreateScheduleSumEqualsRule:
+  """create_schedule auto-generates a SumEquals Rule when original_amount > 0."""
+
+  def _run(self, session, *, original_amount: int | None = 120_000):
+    svc = ScheduleService()
+    # taxonomy_id is provided so _ensure_schedule_taxonomy is skipped.
+    # The only execute call in create_schedule is the Element.qname lookup
+    # for the SumEquals rule (when original_dollars is not None).
+    debit_qname_row = MagicMock()
+    debit_qname_row.scalar.return_value = "fac:DeprExpense"
+
+    session.execute.side_effect = [debit_qname_row]
+
+    metadata = (
+      ScheduleMetadata(
+        method="straight_line",
+        original_amount=original_amount,
+        residual_value=0,
+        useful_life_months=3,
+        asset_element_id="elem_ppe",
+      )
+      if original_amount is not None
+      else None
+    )
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Depr Test",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr_expense", "elem_accum_depr"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=40_000,
+        entry_template=_make_entry_template(),
+        schedule_metadata=metadata,
+        created_by="usr_test",
+      )
+
+    return [call[0][0] for call in session.add.call_args_list]
+
+  def test_sum_equals_rule_is_added(self):
+    session = _mock_session()
+    added = self._run(session)
+    rules = [o for o in added if type(o).__name__ == "Rule"]
+    assert len(rules) == 1
+    rule = rules[0]
+    assert rule.rule_pattern == "SumEquals"
+    assert rule.rule_origin == "native"
+    assert rule.rule_category == "ReportingSystemSpecificRule"
+
+  def test_sum_equals_rule_expected_total_matches_original(self):
+    session = _mock_session()
+    added = self._run(session, original_amount=120_000)
+    rules = [o for o in added if type(o).__name__ == "Rule"]
+    assert rules[0].metadata_["expected_total"] == 1200.0  # cents → dollars
+
+  def test_sum_equals_rule_targets_structure(self):
+    session = _mock_session()
+    added = self._run(session)
+    structure = next(o for o in added if type(o).__name__ == "Structure")
+    rules = [o for o in added if type(o).__name__ == "Rule"]
+    assert rules[0].target_kind == "structure"
+    assert rules[0].target_structure_id == structure.id
+
+  def test_sum_equals_rule_variable_uses_debit_qname(self):
+    session = _mock_session()
+    added = self._run(session)
+    rules = [o for o in added if type(o).__name__ == "Rule"]
+    assert rules[0].rule_variables == [
+      {"variable_name": "periodic_amount", "variable_qname": "fac:DeprExpense"}
+    ]
+
+  def test_no_sum_equals_rule_when_no_original_amount(self):
+    session = _mock_session()
+    # When schedule_metadata is None, no execute call for qname lookup
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="No Metadata",
+        taxonomy_id="tax_01",
+        element_ids=["elem_a", "elem_b"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+    added = [call[0][0] for call in session.add.call_args_list]
+    rules = [o for o in added if type(o).__name__ == "Rule"]
+    assert len(rules) == 0
+
+
+class TestCreateScheduleSourceTransactionId:
+  def test_source_transaction_id_stored_in_artifact_mechanics(self):
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Linked Schedule",
+        taxonomy_id="tax_01",
+        element_ids=["elem_a", "elem_b"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+        source_transaction_id="txn_abc123",
+      )
+    structure = session.add.call_args_list[0][0][0]
+    assert structure.artifact_mechanics["source_transaction_id"] == "txn_abc123"
+
+  def test_source_transaction_id_defaults_to_none(self):
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="No Link",
+        taxonomy_id="tax_01",
+        element_ids=["elem_a", "elem_b"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+    structure = session.add.call_args_list[0][0][0]
+    assert structure.artifact_mechanics["source_transaction_id"] is None
 
 
 class TestCreateClosingEntry:

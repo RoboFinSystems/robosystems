@@ -97,7 +97,7 @@ def update_information_block(
 def delete_information_block(
   session: Session,
   body: DeleteInformationBlockRequest,
-  deleted_by: str,
+  created_by: str,
 ) -> DeleteInformationBlockResponse:
   """Delete a block and return a thin confirmation response.
 
@@ -120,7 +120,7 @@ def delete_information_block(
   if structure_id_attr is not None:
     pre_delete_envelope = entry.dispatch_build_envelope(session, structure_id_attr)
 
-  deleted_id = entry.dispatch_delete(session, typed_payload, deleted_by)
+  deleted_id = entry.dispatch_delete(session, typed_payload, created_by)
   # name="" only reaches callers when dispatch_delete succeeds without a
   # pre-delete envelope — today that can't happen (Schedule's delete
   # raises ScheduleNotFoundError on missing rows; statement types raise

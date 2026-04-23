@@ -491,6 +491,11 @@ class StructureSummary:
 class Report:
   """Report definition summary — structures + entity + sharing provenance."""
 
+  # rule_summary is dict[str, int] in Pydantic — must be declared as JSON
+  # here because Strawberry's pydantic derivation can't map dict[str, int]
+  # to a GraphQL type automatically.
+  rule_summary: strawberry.scalars.JSON | None
+
 
 @strawberry.experimental.pydantic.type(
   model=PydanticReportListResponse, all_fields=True

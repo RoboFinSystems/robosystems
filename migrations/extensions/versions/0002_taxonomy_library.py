@@ -155,7 +155,7 @@ _RULE_PATTERN_CHECK = (
   "rule_pattern IN ("
   "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
   "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
-  "'Variance'"
+  "'SumEquals', 'Variance'"
   ")"
 )
 _RULE_SEVERITY_CHECK = "rule_severity IN ('info', 'warning', 'error')"

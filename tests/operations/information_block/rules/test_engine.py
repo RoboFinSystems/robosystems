@@ -183,6 +183,90 @@ class TestBindVariables:
     assert bindings == {"A": 100.0, "B": 50.0}
 
 
+class TestBindSumVariables:
+  def test_returns_aggregate_sum_for_duration_facts(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _bind_sum_variables,
+    )
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      pattern="SumEquals",
+      variables=[
+        {"variable_name": "periodic_amount", "variable_qname": "fac:DeprExpense"}
+      ],
+    )
+    # First execute: element lookup → scalar
+    elem_result = MagicMock()
+    elem_result.scalar.return_value = "elem_depr_expense"
+    # Second execute: SUM aggregate → fetchone row
+    sum_row = MagicMock()
+    sum_row.total = 1200.0
+    agg_result = MagicMock()
+    agg_result.fetchone.return_value = sum_row
+
+    session.execute.side_effect = [elem_result, agg_result]
+
+    bindings = _bind_sum_variables(session, rule, "struct_sched")
+    assert bindings == {"periodic_amount": 1200.0}
+
+  def test_returns_none_when_element_not_found(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _bind_sum_variables,
+    )
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      pattern="SumEquals",
+      variables=[{"variable_name": "periodic_amount", "variable_qname": "fac:Unknown"}],
+    )
+    elem_result = MagicMock()
+    elem_result.scalar.return_value = None
+    session.execute.return_value = elem_result
+
+    bindings = _bind_sum_variables(session, rule, "struct_sched")
+    assert bindings == {"periodic_amount": None}
+    assert session.execute.call_count == 1  # no aggregate query attempted
+
+  def test_returns_none_when_no_matching_facts(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _bind_sum_variables,
+    )
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      pattern="SumEquals",
+      variables=[
+        {"variable_name": "periodic_amount", "variable_qname": "fac:DeprExpense"}
+      ],
+    )
+    elem_result = MagicMock()
+    elem_result.scalar.return_value = "elem_depr_expense"
+    sum_row = MagicMock()
+    sum_row.total = None
+    agg_result = MagicMock()
+    agg_result.fetchone.return_value = sum_row
+
+    session.execute.side_effect = [elem_result, agg_result]
+
+    bindings = _bind_sum_variables(session, rule, "struct_sched")
+    assert bindings == {"periodic_amount": None}
+
+  def test_skips_variable_with_empty_name(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _bind_sum_variables,
+    )
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      pattern="SumEquals",
+      variables=[{"variable_name": "", "variable_qname": "fac:X"}],
+    )
+    bindings = _bind_sum_variables(session, rule, "struct_sched")
+    assert bindings == {}
+    session.execute.assert_not_called()
+
+
 class TestLatestReportFallback:
   def test_returns_none_without_structure_elements(self) -> None:
     from robosystems.operations.information_block.rules.engine import (

@@ -67,7 +67,7 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 
 - Graph API with LadybugDB and DuckDB backends
 - Dagster for data pipeline orchestration
-- PostgreSQL for graph metadata, IAM and Dagster
+- PostgreSQL for IAM, graph metadata, extensions and Dagster
 - Valkey for caching, SSE messaging, and rate limiting
 - OpenSearch for full-text and semantic document search
 - Localstack for S3 and DynamoDB emulation
@@ -157,7 +157,7 @@ RoboSystems is built on a modern, scalable architecture with:
 **Application Layer:**
 
 - FastAPI REST API with versioned endpoints
-- Extension API routes feature-flagged per module
+- Extension GraphQL API for reads with command operations
 - MCP Server for AI-powered graph database access with schema-aware tools
 - AI Agent System for autonomous financial operations with automatic credit tracking
 - Dagster for data pipeline orchestration and background jobs

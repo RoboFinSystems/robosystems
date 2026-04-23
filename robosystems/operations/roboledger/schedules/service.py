@@ -13,18 +13,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.extensions.roboledger import (
   Association,
+  Element,
   Entry,
   Fact,
+  FactSet,
   LineItem,
   Structure,
   Taxonomy,
 )
+from robosystems.models.extensions.rule import Rule
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 # ── Data classes ─────────────────────────────────────────────────────────
@@ -136,6 +139,7 @@ class ScheduleService:
     schedule_metadata: ScheduleMetadata | None = None,
     created_by: str,
     closed_through: date | None = None,
+    source_transaction_id: str | None = None,
   ) -> Structure:
     """Create a schedule with pre-generated facts.
 
@@ -201,6 +205,7 @@ class ScheduleService:
       "kind": "closing_entry_generator",
       "entry_template": metadata["entry_template"],
       "schedule_metadata": metadata.get("schedule_metadata"),
+      "source_transaction_id": source_transaction_id,
     }
 
     structure = Structure(
@@ -236,10 +241,23 @@ class ScheduleService:
 
     periods = _generate_monthly_periods(period_start, period_end)
     amount_dollars = round(monthly_amount / 100.0, 2)
-    accumulated = 0.0
+    original_dollars = (
+      round(schedule_metadata.original_amount / 100.0, 2)
+      if schedule_metadata and schedule_metadata.original_amount > 0
+      else None
+    )
+    accumulated_debit = 0.0
 
-    for p_start, p_end in periods:
-      accumulated = round(accumulated + amount_dollars, 2)
+    for i, (p_start, p_end) in enumerate(periods):
+      is_last = i == len(periods) - 1
+
+      # Last period absorbs rounding so sum(debit facts) == original_amount exactly
+      period_amount = (
+        round(original_dollars - accumulated_debit, 2)
+        if is_last and original_dollars is not None
+        else amount_dollars
+      )
+      accumulated_debit = round(accumulated_debit + period_amount, 2)
 
       # Scope: facts in periods already closed are historical (not acted on
       # by the close workflow). Only periods > closed_through are in_scope.
@@ -251,7 +269,7 @@ class ScheduleService:
       session.add(
         Fact(
           element_id=entry_template.debit_element_id,
-          value=amount_dollars,
+          value=period_amount,
           period_start=p_start,
           period_end=p_end,
           period_type="duration",
@@ -267,7 +285,7 @@ class ScheduleService:
       session.add(
         Fact(
           element_id=entry_template.credit_element_id,
-          value=accumulated,
+          value=accumulated_debit,
           period_start=p_start,
           period_end=p_end,
           period_type="instant",
@@ -281,11 +299,10 @@ class ScheduleService:
 
       # Net book value if we have asset element info
       if schedule_metadata and schedule_metadata.asset_element_id:
-        original = round(schedule_metadata.original_amount / 100.0, 2)
         session.add(
           Fact(
             element_id=schedule_metadata.asset_element_id,
-            value=round(original - accumulated, 2),
+            value=round((original_dollars or amount_dollars) - accumulated_debit, 2),
             period_start=p_start,
             period_end=p_end,
             period_type="instant",
@@ -294,6 +311,46 @@ class ScheduleService:
             structure_id=structure.id,
             fact_set_id=fact_set_id,
             fact_scope=fact_scope,
+          )
+        )
+
+    # Block = Fact Set. One fact_sets row per Information Block creation
+    # event; reuses the ULID already stamped on every fact above.
+    session.add(
+      FactSet(
+        id=fact_set_id,
+        structure_id=structure.id,
+        period_start=period_start,
+        period_end=period_end,
+        factset_type="schedule",
+        entity_id=entity_id,
+        created_by=created_by,
+      )
+    )
+
+    # Auto-generate a SumEquals rule so the engine can verify that
+    # the sum of period debit facts equals original_amount.
+    if original_dollars is not None:
+      debit_qname: str | None = session.execute(
+        select(Element.qname)
+        .where(Element.id == entry_template.debit_element_id)
+        .limit(1)
+      ).scalar()
+      if debit_qname:
+        var_name = "periodic_amount"
+        session.add(
+          Rule(
+            taxonomy_id=structure.taxonomy_id,
+            rule_category="ReportingSystemSpecificRule",
+            rule_pattern="SumEquals",
+            rule_expression=f"sum(${var_name}) = {original_dollars}",
+            rule_severity="error",
+            rule_origin="native",
+            target_kind="structure",
+            target_structure_id=structure.id,
+            rule_variables=[{"variable_name": var_name, "variable_qname": debit_qname}],
+            metadata_={"expected_total": original_dollars},
+            created_by=created_by,
           )
         )
 

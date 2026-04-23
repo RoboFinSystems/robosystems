@@ -358,7 +358,9 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
   # Resolve FAC qnames → element IDs via the library in the entity graph.
   fac_elements = client.list_elements(graph_id, source="fac", limit=500)
   fac_by_qname: dict[str, str] = {
-    e["qname"]: e["id"] for e in (fac_elements or {}).get("elements", []) if e.get("qname")
+    e["qname"]: e["id"]
+    for e in (fac_elements or {}).get("elements", [])
+    if e.get("qname")
   }
 
   # Build the associations list, skipping any CoA codes not in the element lookup
@@ -794,6 +796,20 @@ def main() -> None:
   print("\nCreating schedules...")
   schedule_count = create_schedules(graph_id, element_lookup)
   print(f"  Schedules:    {schedule_count}")
+
+  # Validate Information Block system
+  print("\nValidating Information Blocks...")
+  api_key = (
+    json.loads(CREDENTIALS_FILE.read_text()).get("api_key", "")
+    if CREDENTIALS_FILE.exists()
+    else ""
+  )
+  if api_key:
+    from .validate import run_validation
+
+    run_validation(graph_id, api_key)
+  else:
+    print("  (skipped — no credentials)")
 
   # Upload policies
   print("\nUploading accounting policies...")
