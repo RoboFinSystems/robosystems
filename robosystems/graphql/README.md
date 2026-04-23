@@ -16,15 +16,17 @@ In dev, hitting the endpoint in a browser renders GraphiQL with introspection en
 
 ```
 robosystems/graphql/
-├── schema.py              # Query root, composed per enabled domain flags
+├── schema.py              # Query root, composed per enabled domain flags + always-on mixins
 ├── context.py             # get_context / require_user / require_graph_id / GraphQLContext
 ├── auth.py                # check_graph_access — wrapped by get_context before resolvers run
 ├── resolvers/
 │   ├── _common.py         # Shared helpers (pagination guards, session opener)
-│   ├── ledger.py          # LedgerQuery — 29 roboledger read fields
-│   └── investor.py        # InvestorQuery — 7 roboinvestor read fields
+│   ├── information_block.py  # InformationBlockQuery — always-on (not feature-gated)
+│   ├── ledger.py          # LedgerQuery — roboledger read fields (ROBOLEDGER_ENABLED)
+│   └── investor.py        # InvestorQuery — roboinvestor read fields (ROBOINVESTOR_ENABLED)
 └── types/
     ├── common.py          # PaginationInfo
+    ├── information_block.py  # Strawberry types for InformationBlockEnvelope and its atoms
     ├── ledger.py          # Strawberry types wrapping roboledger Pydantic response models
     └── investor.py        # Same for roboinvestor
 ```
@@ -76,7 +78,7 @@ Resolvers never contain business logic. The same `reads/*.py` modules are called
 ```python
 # graphql/schema.py
 def _build_query_type() -> type:
-    bases: tuple[type, ...] = (_BaseQuery,)
+    bases: tuple[type, ...] = (InformationBlockQuery, _BaseQuery)
     if env.ROBOLEDGER_ENABLED:
         bases = (LedgerQuery, *bases)
     if env.ROBOINVESTOR_ENABLED:
@@ -84,15 +86,21 @@ def _build_query_type() -> type:
     return strawberry.type(type("Query", bases, {}))
 ```
 
-The `Query` root is built at class-construction time from whichever domain mixins are enabled. A ledger-only deployment:
+The `Query` root is built at class-construction time from whichever domain mixins are enabled. There are two composition patterns:
 
-- Has `LedgerQuery` in the schema
+**Always-on mixins** (`InformationBlockQuery`) are composed into `bases` unconditionally. They use `open_library_session` so they work on both the library sentinel (`graph_id='library'`) and any tenant graph — reads are driven by the session's `search_path`. The `informationBlock` / `informationBlocks` fields are always present in the schema regardless of which product flags are on.
+
+**Domain-gated mixins** (`LedgerQuery`, `InvestorQuery`) are guarded by feature flags. A ledger-only deployment:
+
+- Has `LedgerQuery` and `InformationBlockQuery` in the schema
 - Does **not** have `InvestorQuery` in the schema
-- Introspection reports only ledger fields — there's no way for a client to discover or call `portfolios` on a deployment where investor is off
+- Introspection reports only ledger + information-block fields — there's no way for a client to discover or call `portfolios` on a deployment where investor is off
 
 This is strictly better than the alternative ("expose everything, throw `INVESTOR_NOT_INITIALIZED` at runtime") because clients can branch on the actual schema shape rather than trial-and-error against runtime errors. The tradeoff is that introspection tooling sees a different schema per deployment — fine for now since we don't publish a single SDL.
 
 Per-domain gating also short-circuits the router: if both flags are off, the FastAPI router that mounts `/extensions/{graph_id}/graphql` never mounts at all (see `main.py` line ~369).
+
+**Rule for new resolvers**: if the read is domain-specific (roboledger data, roboinvestor data), gate it behind the appropriate flag by adding the method to `LedgerQuery` or `InvestorQuery`. If the read is cross-domain or must be available regardless of which product domains are on, add it to `InformationBlockQuery` (or a new always-on mixin) and compose it into `bases` without a flag guard.
 
 ### 4. Auth and graph access are enforced before resolvers run
 
@@ -161,11 +169,13 @@ Concrete walkthrough — adding `fiscalCalendar.daysUntilClose` to the existing 
 
 If the new field is a whole new query (not a new attribute on an existing type):
 
-1. Add a new Pydantic response model in `models/api/extensions/*.py`.
-2. Add a new `reads/*.py` function in `operations/{roboledger,roboinvestor}/reads/`.
-3. Add a Strawberry wrapper in `graphql/types/{ledger,investor}.py` — usually one line with the decorator.
-4. Add a resolver method on `LedgerQuery` or `InvestorQuery` that opens a session and delegates to the reads function.
-5. Add a test under `tests/graphql/extensions/test_{ledger,investor}.py`.
+1. Add a new Pydantic response model in `models/api/extensions/*.py` (domain) or `models/api/information_block.py` (cross-domain).
+2. Add a new `reads/*.py` function in `operations/{domain}/reads/` or `operations/information_block/reads.py`.
+3. Add a Strawberry wrapper in `graphql/types/{ledger,investor,information_block}.py` — usually one line with the decorator.
+4. Add a resolver method on the appropriate query mixin:
+   - Domain reads (`LedgerQuery`, `InvestorQuery`) — gated by the existing feature-flag guards.
+   - Cross-domain reads (`InformationBlockQuery`) — added unconditionally; no flag guard.
+5. Add a test under `tests/graphql/extensions/test_{ledger,investor,information_block}.py`.
 
 ## The recursive escape hatch
 
@@ -209,15 +219,16 @@ class AccountTreeNode:
 
 The cost is that new fields on `PydanticAccountTreeNode` require a parallel edit to this class — the auto-derivation is gone for this one type. If you find yourself adding a second recursive model, follow the same pattern. Don't try to be clever with forward references or `update_forward_refs()` — the Strawberry decorator's generator doesn't honor them.
 
-`ScheduleSummary` and `ScheduleList` also hand-write `from_pydantic` for a different reason — they wrap lists of other Strawberry types and the decorator's codegen doesn't compose cleanly across the boundary.
+`InformationBlock` (in `types/information_block.py`) is hand-written for a different reason — its `artifact.mechanics` field is a discriminated union on `kind` (`ScheduleMechanics | StatementMechanics | MetricMechanics`), and Strawberry's pydantic decorator can't unwrap union types cleanly. The `from_pydantic` classmethod does the union dispatch manually. New block types add a `*MechanicsType` Strawberry wrapper and extend the union in `InformationBlock.artifact_mechanics`'s return type annotation.
 
 ## Testing
 
 Tests live under `tests/graphql/extensions/`:
 
 - `test_schema.py` — schema introspection + composition (per-flag variations)
-- `test_ledger.py` — 29 ledger resolvers, happy path + a couple of error paths each
-- `test_investor.py` — 7 investor resolvers, same shape
+- `test_ledger.py` — ledger resolvers, happy path + a couple of error paths each
+- `test_investor.py` — investor resolvers, same shape
+- `test_information_block.py` — `informationBlock` / `informationBlocks` fields, always-on
 
 Pattern: use the existing `extensions_test_db` fixture to seed an isolated extensions schema, then call through `TestClient` with `POST /extensions/{graph_id}/graphql` and a query string. Assert on `response.json()["data"]` for success, `response.json()["errors"][0]["extensions"]["code"]` for typed failures.
 

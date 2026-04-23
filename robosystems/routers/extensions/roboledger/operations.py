@@ -10,13 +10,13 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (44):**
+**Registered (41):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
   `close-period`, `reopen-period`
-- Schedules: `create-schedule`, `update-schedule`, `delete-schedule`,
-  `truncate-schedule`, `create-closing-entry`, `create-manual-closing-entry`
+- Schedules: `truncate-schedule`, `create-closing-entry`,
+  `create-manual-closing-entry`
 - Taxonomies: `create-taxonomy`, `update-taxonomy`, `delete-taxonomy`,
   `create-structure`, `update-structure`, `delete-structure`,
   `create-mapping-association`, `delete-mapping-association`
@@ -109,10 +109,7 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.api.extensions.schedules import (
   CreateClosingEntryOperation,
   CreateManualClosingEntryRequest,
-  CreateScheduleRequest,
-  DeleteScheduleRequest,
   TruncateScheduleOperation,
-  UpdateScheduleRequest,
 )
 from robosystems.models.api.extensions.taxonomies import (
   BulkCreateAssociationsRequest,
@@ -266,16 +263,7 @@ from robosystems.operations.roboledger.commands.schedules import (
   create_manual_closing_entry as cmd_create_manual_closing_entry,
 )
 from robosystems.operations.roboledger.commands.schedules import (
-  create_schedule as cmd_create_schedule,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  delete_schedule as cmd_delete_schedule,
-)
-from robosystems.operations.roboledger.commands.schedules import (
   truncate_schedule as cmd_truncate_schedule,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  update_schedule as cmd_update_schedule,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   AssociationNotFoundError,
@@ -808,16 +796,6 @@ async def reopen_period_op(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Schedule operations
-#
-# Registered on the registrar (see `update_schedule_op`/`delete_schedule_op`
-# below). `create-schedule`, `truncate-schedule`, `create-closing-entry`,
-# and `create-manual-closing-entry` are all declared there. Keeping them
-# grouped with update/delete keeps schedule-surface specs together.
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Taxonomy operations
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1265,31 +1243,8 @@ reverse_journal_entry_op = _registrar.register(
   )
 )
 
-# ── Schedule create / update / delete / truncate + closing entries ───────
+# ── Schedule truncate + closing entries ──────────────────────────────────
 
-
-def _validate_schedule_period(body: CreateScheduleRequest) -> None:
-  """Pre-DB guard for `create-schedule`."""
-  if body.period_end < body.period_start:
-    raise HTTPException(status_code=422, detail="period_end must be >= period_start")
-
-
-create_schedule_op = _registrar.register(
-  OperationSpec(
-    name="create-schedule",
-    summary="Create Schedule",
-    description=(
-      "Create a schedule and pre-generate monthly amortization facts "
-      "spanning the period range. `entry_template` defines the debit/credit "
-      "elements used by `create-closing-entry` each period."
-    ),
-    command=cmd_create_schedule,
-    request_model=CreateScheduleRequest,
-    error_map={ValueError: 422},
-    pre_validate=_validate_schedule_period,
-    mark_stale_reason="schedule_created",
-  )
-)
 
 truncate_schedule_op = _registrar.register(
   OperationSpec(
@@ -1342,49 +1297,11 @@ create_manual_closing_entry_op = _registrar.register(
   )
 )
 
-update_schedule_op = _registrar.register(
-  OperationSpec(
-    name="update-schedule",
-    summary="Update Schedule",
-    description=(
-      "Update mutable fields on a schedule: name, entry_template, "
-      "schedule_metadata. Period range and monthly_amount are NOT "
-      "editable — use truncate-schedule + create-schedule instead."
-    ),
-    command=cmd_update_schedule,
-    request_model=UpdateScheduleRequest,
-    error_map={ScheduleNotFoundError: 404},
-    requires_created_by=False,
-  )
-)
-
-delete_schedule_op = _registrar.register(
-  OperationSpec(
-    name="delete-schedule",
-    summary="Delete Schedule",
-    description=(
-      "Permanently delete a schedule, cascading through facts and "
-      "associations. For ending a schedule early without removing "
-      "history, use truncate-schedule instead."
-    ),
-    command=cmd_delete_schedule,
-    request_model=DeleteScheduleRequest,
-    error_map={ScheduleNotFoundError: 404},
-    requires_created_by=False,
-  )
-)
-
 # ── Information Block (generic construction — see information-block.md) ───
 #
-# `create-information-block` is the generic write entry for any registered
-# block_type. Phase a dispatches only block_type="schedule" (other types
-# raise NotImplementedError → 501). The hand-written `create-schedule`
-# op above stays registered and keeps working unchanged — the two entry
-# points coexist, both calling the same underlying command.
-#
-# Side effect: registering this spec automatically exposes it as an MCP
-# write tool via `build_tools_for_extension`. No hand-written MCP tool
-# is needed for the write path.
+# Side effect: registering these specs automatically exposes them as MCP
+# write tools via `build_tools_for_extension`. No hand-written MCP tools
+# are needed for the write path.
 
 create_information_block_op = _registrar.register(
   OperationSpec(
