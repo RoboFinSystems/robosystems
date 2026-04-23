@@ -72,18 +72,24 @@ def create_information_block(
 def update_information_block(
   session: Session,
   body: UpdateInformationBlockRequest,
-  updated_by: str,
+  created_by: str,
 ) -> InformationBlockEnvelope:
   """Update a block in place and return the refreshed envelope.
 
   Mirrors :func:`create_information_block` dispatch flow. Block types
   whose Structures are library-seeded and immutable (the statement
   family) surface :class:`NotImplementedError` → HTTP 501.
+
+  The ``created_by`` kwarg name matches the registrar convention (see
+  :class:`~robosystems.middleware.extensions.OperationSpec`), which
+  passes ``created_by=str(user.id)`` for every registered op. It's
+  propagated positionally to ``dispatch_update`` where the handler
+  still names its parameter ``updated_by`` for semantic clarity.
   """
   entry = _get_entry_or_422(body.block_type)
 
   typed_payload = entry.update_request_model.model_validate(body.payload)
-  structure_id = entry.dispatch_update(session, typed_payload, updated_by)
+  structure_id = entry.dispatch_update(session, typed_payload, created_by)
 
   envelope = entry.dispatch_build_envelope(session, structure_id)
   if envelope is None:

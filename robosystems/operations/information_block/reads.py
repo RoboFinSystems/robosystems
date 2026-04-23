@@ -85,11 +85,20 @@ def list_information_blocks(
   if not candidate_ids:
     return []
 
+  # Tenant-authored blocks sort before library-seeded ones so a default
+  # `list-information-blocks` call surfaces the tenant's own work first.
+  # Without this, library-seeded statements (dozens per tenant graph)
+  # swamp the default `limit=50` and a user browsing without filters
+  # never sees their schedules.
   query = (
     select(Structure)
     .where(Structure.structure_type.in_(candidate_ids))
     .where(Structure.is_active.is_(True))
-    .order_by(Structure.structure_type, Structure.name)
+    .order_by(
+      (Structure.created_by == "library-seeder").asc(),
+      Structure.structure_type,
+      Structure.name,
+    )
     .limit(limit)
     .offset(offset)
   )

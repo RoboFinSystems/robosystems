@@ -226,6 +226,12 @@ def _install_raise_library_immutable_fn(conn) -> None:
             'Library-seeded row is immutable in tenant scope: %.% id=%',
             TG_TABLE_SCHEMA, TG_TABLE_NAME, OLD.id;
         END IF;
+        -- BEFORE UPDATE/DELETE trigger contract: return NEW on UPDATE to
+        -- let the mutation through, OLD on DELETE for the same. Returning
+        -- OLD on UPDATE silently cancels the update without raising.
+        IF TG_OP = 'UPDATE' THEN
+          RETURN NEW;
+        END IF;
         RETURN OLD;
       END;
       $$ LANGUAGE plpgsql;
