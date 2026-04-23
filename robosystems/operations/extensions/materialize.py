@@ -374,8 +374,23 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """
 
   # Classification is resolved via element_classifications → classifications
-  # (FASB elementsOfFinancialStatements trait axis). Multiple classifications
-  # per element are possible; we pick the first (via MIN) for the graph node.
+  # (FASB elementsOfFinancialStatements trait axis).
+  #
+  # The element_classifications table uses `is_primary` per-category — an
+  # element can legitimately have multiple is_primary=TRUE rows, one per
+  # category (elementsOfFinancialStatements, flowClassification,
+  # realizationStatus, etc.). A naive two-stage LEFT JOIN with the
+  # category filter on the classifications join (not the EC join) fans
+  # the output out to N rows per element — N = count of is_primary=TRUE
+  # EC rows — with only one carrying the real classification and the
+  # rest showing `cls = NULL`. The COPY then rejects the batch as a
+  # duplicate-PK violation, which silently cascades to every
+  # Element-targeting edge table (LINE_ITEM_RELATES_TO_ELEMENT,
+  # ASSOCIATION_HAS_{FROM,TO}_ELEMENT, FACT_HAS_ELEMENT).
+  #
+  # Pre-filter in a subquery so exactly the single elementsOfFinancial-
+  # Statements classification (if any) reaches the outer join — no
+  # fan-out, no DISTINCT ON, no ORDER-BY-dependent pick.
   tables["Element"] = f"""
     CREATE OR REPLACE TABLE Element AS
     SELECT
@@ -388,7 +403,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       END || e.code                   AS qname,
       e.name,
       e.description,
-      cls.identifier                  AS classification,
+      efs.classification_identifier   AS classification,
       NULL::VARCHAR                   AS item_type,
       e.balance_type                  AS balance,
       CASE WHEN e.is_placeholder THEN true ELSE false END AS is_abstract,
@@ -408,11 +423,15 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::DOUBLE                    AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
     FROM postgres_scan('{c}', '{s}', 'elements') e
-    LEFT JOIN postgres_scan('{c}', '{s}', 'element_classifications') ec
-      ON ec.element_id = e.id AND ec.is_primary = TRUE
-    LEFT JOIN postgres_scan('{c}', '{s}', 'classifications') cls
-      ON cls.id = ec.classification_id
-      AND cls.category = 'elementsOfFinancialStatements'
+    LEFT JOIN (
+      SELECT ec.element_id,
+             cls.identifier AS classification_identifier
+      FROM postgres_scan('{c}', '{s}', 'element_classifications') ec
+      JOIN postgres_scan('{c}', '{s}', 'classifications') cls
+        ON cls.id = ec.classification_id
+      WHERE ec.is_primary = TRUE
+        AND cls.category = 'elementsOfFinancialStatements'
+    ) efs ON efs.element_id = e.id
     WHERE e.is_active = true
   """
 
@@ -1368,7 +1387,16 @@ class ExtensionsMaterializer:
         source_graph_id: If set, read DuckDB staging from this graph instead
             of graph_id. Used by blue-green: WIP reads from the original graph's DuckDB.
     """
-    # Materialize nodes first, then relationships
+    # Materialize nodes first, then relationships.
+    #
+    # Node failures are fatal: every edge table has a FK into some node
+    # table, so a missed node silently produces "Unable to find primary
+    # key value" errors on every edge that references it (the prior
+    # behavior would then log those ERRORs, swallow them, and report the
+    # overall op as a success with thousands of zero-row edge tables).
+    # Edge failures are logged into result.errors but don't abort the
+    # run — an isolated edge problem isn't necessarily graph-invalidating.
+    node_tables = set(NODE_TABLES)
     for table_name in result.tables_staged:
       try:
         logger.info(f"Materializing {table_name} → LadybugDB ({graph_id})")
@@ -1387,3 +1415,10 @@ class ExtensionsMaterializer:
         error_msg = f"Failed to materialize {table_name}: {e!s}"
         logger.error(error_msg)
         result.errors.append(error_msg)
+        if table_name in node_tables:
+          result.status = "failed"
+          raise RuntimeError(
+            f"Node table '{table_name}' failed to materialize — aborting "
+            f"so edge tables don't silently load with broken FK targets. "
+            f"Original error: {e!s}"
+          ) from e

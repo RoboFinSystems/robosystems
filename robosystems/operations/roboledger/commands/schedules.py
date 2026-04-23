@@ -147,6 +147,7 @@ def create_schedule(
       residual_value=body.schedule_metadata.residual_value,
       useful_life_months=body.schedule_metadata.useful_life_months,
       asset_element_id=body.schedule_metadata.asset_element_id,
+      periodic_amounts=body.schedule_metadata.periodic_amounts,
     )
 
   structure = service.create_schedule(
@@ -353,6 +354,7 @@ def update_schedule(
       "residual_value": body.schedule_metadata.residual_value,
       "useful_life_months": body.schedule_metadata.useful_life_months,
       "asset_element_id": body.schedule_metadata.asset_element_id,
+      "periodic_amounts": body.schedule_metadata.periodic_amounts,
     }
 
   structure.metadata_ = metadata
