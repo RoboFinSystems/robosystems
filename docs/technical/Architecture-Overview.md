@@ -70,8 +70,8 @@ The FastAPI backend serves two distinct API surfaces:
 
 RoboLedger and RoboInvestor are product extensions served under a unified `/extensions/*` surface that splits reads from writes by transport:
 
-- **GraphQL Reads**: `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint with 29 ledger fields and 7 investor fields. The schema is composed dynamically from enabled domains, so a ledger-only deployment exposes only ledger fields (introspection never reveals disabled domains). Types auto-derive from Pydantic response models — adding a field on the backend exposes it on the wire with zero GraphQL-layer boilerplate.
-- **Named Command Operations**: `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{op_name}` — 23 ledger commands (`close-period`, `share-report`, `create-mapping-association`, etc.) and 9 investor commands. Writes are explicit command operations rather than resource CRUD, matching the multi-step domain operations they actually perform. Every response is wrapped in an `OperationEnvelope` with a ULID `operationId` and supports `Idempotency-Key` headers for safe retries. Long-running commands return `status: "pending"` with HTTP 202 and stream progress through `/v1/operations/{operationId}/stream`.
+- **GraphQL Reads**: `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL endpoint. The schema is composed dynamically: `InformationBlockQuery` (`informationBlock` / `informationBlocks`) is always-on regardless of product flags; `LedgerQuery` and `InvestorQuery` are gated by `ROBOLEDGER_ENABLED` / `ROBOINVESTOR_ENABLED`. A ledger-only deployment exposes ledger + information-block fields but not investor fields — introspection never reveals disabled domains. Types auto-derive from Pydantic response models; adding a field on the backend exposes it on the wire with zero GraphQL-layer boilerplate.
+- **Named Command Operations**: `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{op_name}` — ledger commands (`close-period`, `share-report`, `create-mapping-association`, `create-information-block`, `evaluate-rules`, etc.) and roboinvestor commands. Writes are explicit command operations rather than resource CRUD, matching the multi-step domain operations they actually perform. Every response is wrapped in an `OperationEnvelope` with a ULID `operationId` and supports `Idempotency-Key` headers for safe retries. Long-running commands return `status: "pending"` with HTTP 202 and stream progress through `/v1/operations/{operationId}/stream`.
 - **Analytical View Operations**: `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — graph-backed analytical operations that query LadybugDB rather than the extensions OLTP database. Share the same envelope contract as command operations but are read-only and routed to the materialized graph. `build-fact-grid` (multi-dimensional pivot tables over the XBRL hypercube schema) is the first one; this is the seam for any analytical operation that needs columnar/graph query power beyond what a Postgres read can provide. Gated independently from the OLTP domains so deployments without the corresponding roboledger/roboinvestor tenants can still use them.
 
 Feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSIONS_GRAPHQL_ENABLED`, `FACT_GRID_ENABLED`) gate each surface at schema-construction time, not request time — disabled domains are simply absent from the schema rather than throwing runtime errors.
@@ -364,7 +364,7 @@ Business workflow orchestration and service layer. Two categories of code live h
 - **Search Service**: OpenSearch-backed full-text and semantic document search
 - **Connection Service**: Provider-agnostic connection management (QuickBooks, Plaid, SEC) with encrypted credential storage
 
-**Extension domain kernels** (`operations/roboledger/`, `operations/roboinvestor/`):
+**Extension domain kernels** (`operations/roboledger/`, `operations/roboinvestor/`, `operations/information_block/`):
 
 Each product extension keeps its business logic in a CQRS-style subtree with reads and commands as separate pure-function modules:
 
@@ -382,6 +382,16 @@ operations/roboledger/
 operations/roboinvestor/
 ├── reads/       # portfolios, securities, positions, holdings
 └── commands/    # portfolios, securities, positions
+
+operations/information_block/  # Cross-domain; not nested under roboledger
+├── registry.py  # BlockTypeRegistryEntry, REGISTRY dict (frozen at import)
+├── commands.py  # Generic create/update/delete dispatch by block_type
+├── reads.py     # get/list_information_blocks — envelope reads
+├── envelope.py  # Shared atom → Lite projection helpers
+├── schedule.py  # Schedule handler (declarative construction mode)
+├── statement.py # Statement handlers (compositional, stub)
+├── metric.py    # Metric handler (derivative, stub)
+└── rules/       # Rule evaluation engine (evaluate_rules_for_structure)
 ```
 
 **Single source of truth.** `reads/*.py` and `commands/*.py` are the only place domain logic lives. Three different transports call into them:
