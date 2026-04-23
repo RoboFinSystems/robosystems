@@ -69,7 +69,7 @@
   },
   "standard": "rs-gaap",
   "version": "v1",
-  "taxonomy_type": "reporting",
+  "taxonomy_type": "reporting_standard",
   "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
   "forked_from": {
     "author": "FASB us-gaap 2026 (XBRL-intrinsic attributes only); bootstrapped 2026-04-19 from Charlie Hoffman's FAC→us-gaap mapping",

@@ -202,7 +202,7 @@ def build_rs_gaap_seed() -> int:
     "@graph": rs_gaap_graph,
     "standard": "rs-gaap",
     "version": "v1",
-    "taxonomy_type": "reporting",
+    "taxonomy_type": "reporting_standard",
     "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
     "description": (
       "rs-gaap v1 — RoboSystems's year-independent canonical reporting "
@@ -232,7 +232,7 @@ def build_rs_gaap_seed() -> int:
     "@graph": fac_concept_nodes,
     "standard": "fac",
     "version": doc.get("version", "v1"),
-    "taxonomy_type": "reporting",
+    "taxonomy_type": "reporting_standard",
     "namespace_uri": doc.get("namespace_uri", ""),
     "description": (
       "FAC (Fundamental Accounting Concepts) — Charlie Hoffman's 199 "

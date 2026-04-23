@@ -33,7 +33,14 @@ class TaxonomyListResponse(BaseModel):
 class CreateTaxonomyRequest(BaseModel):
   name: str
   description: str | None = None
-  taxonomy_type: Literal["chart_of_accounts", "reporting", "mapping", "schedule"]
+  taxonomy_type: Literal[
+    "chart_of_accounts",
+    "reporting_standard",
+    "reporting_extension",
+    "custom_ontology",
+    "mapping",
+    "schedule",
+  ]
   version: str | None = None
   source_taxonomy_id: str | None = None
   target_taxonomy_id: str | None = None

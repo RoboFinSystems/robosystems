@@ -10,20 +10,16 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (43):**
+**Registered (31):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
   `close-period`, `reopen-period`
 - Schedules: `truncate-schedule`, `create-closing-entry`,
   `create-manual-closing-entry`, `dispose-schedule`, `evaluate-rules`
-- Taxonomies: `create-taxonomy`, `update-taxonomy`, `delete-taxonomy`,
-  `create-structure`, `update-structure`, `delete-structure`,
-  `create-mapping-association`, `delete-mapping-association`
-- Elements (native CoA writes): `create-element`, `update-element`,
-  `delete-element`
-- Associations (bulk, generalized): `create-associations`,
-  `update-association`, `delete-association`
+- Taxonomy mapping (craft, not curation):
+  `create-mapping-association`, `delete-mapping-association`,
+  `link-entity-taxonomy`
 - Transactions (standalone business events): `create-transaction`
 - Journal entries (native accounting writes): `create-journal-entry`,
   `update-journal-entry`, `delete-journal-entry`, `reverse-journal-entry`
@@ -38,6 +34,14 @@ Every route follows the pattern:
 - Information Blocks (generic construction — see
   `information-block.md`): `create-information-block`,
   `update-information-block`, `delete-information-block`
+
+Ontology CRUD (taxonomies, structures, elements, non-mapping associations)
+is admin-only post-Phase-1 — replaced by the Taxonomy Block envelope
+(spec: `local/docs/specs/taxonomy-block.md`). The underlying `cmd_*`
+functions in `operations/roboledger/commands/{taxonomies,elements}.py`
+remain for internal callers (library ingest, tenant provisioning, QB
+pipeline, migrations). Mapping associations stay direct (craft, not
+curation).
 
 `build-fact-grid` is registered separately in the sibling `views.py`
 file so it can be mounted independently of `ROBOLEDGER_ENABLED` (it
@@ -113,20 +117,8 @@ from robosystems.models.api.extensions.schedules import (
   TruncateScheduleOperation,
 )
 from robosystems.models.api.extensions.taxonomies import (
-  BulkCreateAssociationsRequest,
-  CreateElementRequest,
   CreateMappingAssociationOperation,
-  CreateStructureRequest,
-  CreateTaxonomyRequest,
-  DeleteAssociationRequest,
-  DeleteElementRequest,
-  DeleteStructureRequest,
-  DeleteTaxonomyRequest,
   LinkEntityTaxonomyRequest,
-  UpdateAssociationRequest,
-  UpdateElementRequest,
-  UpdateStructureRequest,
-  UpdateTaxonomyRequest,
 )
 from robosystems.models.api.extensions.transactions import CreateTransactionRequest
 from robosystems.models.api.information_block import (
@@ -152,22 +144,6 @@ from robosystems.operations.information_block.rules.commands import (
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   LibraryImmutableError,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  ElementCycleError,
-  ElementQNameConflictError,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  ElementNotFoundError as ElementMissingError,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  create_element as cmd_create_element,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  delete_element as cmd_delete_element,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  update_element as cmd_update_element,
 )
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
@@ -270,50 +246,21 @@ from robosystems.operations.roboledger.commands.schedules import (
   truncate_schedule as cmd_truncate_schedule,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
-  AssociationNotFoundError,
   ElementNotFoundError,
   EntityNotFoundError,
   MappingStructureNotFoundError,
-  StructureNotFoundError,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   TaxonomyNotFoundError as TaxonomyMissingError,  # alias: avoids collision with commands.reports.TaxonomyNotFoundError
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
-  bulk_create_associations as cmd_bulk_create_associations,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association as cmd_create_mapping_association,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  create_structure as cmd_create_structure,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  create_taxonomy as cmd_create_taxonomy,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  delete_association as cmd_delete_association,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   delete_mapping_association as cmd_delete_mapping_association,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
-  delete_structure as cmd_delete_structure,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  delete_taxonomy as cmd_delete_taxonomy,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
   link_entity_taxonomy as cmd_link_entity_taxonomy,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  update_association as cmd_update_association,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  update_structure as cmd_update_structure,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  update_taxonomy as cmd_update_taxonomy,
 )
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
@@ -800,95 +747,16 @@ async def reopen_period_op(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Taxonomy operations
+# Taxonomy mapping operations
+#
+# Ontology CRUD (create-taxonomy, create-structure, create/update/delete-element,
+# create-associations, update/delete-taxonomy, update/delete-structure,
+# update/delete-association) was retired from the public surface in Phase 1
+# of the Taxonomy Block refactor. The underlying `cmd_*` functions remain for
+# internal seeders; Phase 2 introduces the Taxonomy Block envelope as the
+# replacement public surface. Mapping associations (below) stay direct —
+# mapping is craft, not curation.
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-@router.post(
-  "/create-taxonomy",
-  response_model=OperationEnvelope,
-  operation_id="opCreateTaxonomy",
-  summary="Create Taxonomy",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-taxonomy",
-  method="POST",
-  business_event_type="ledger_create_taxonomy",
-)
-async def create_taxonomy_op(
-  body: CreateTaxonomyRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-taxonomy",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_create_taxonomy(session, body, created_by=str(user.id))
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
-
-  return await _dispatch(ctx, _runner, cache)
-
-
-@router.post(
-  "/create-structure",
-  response_model=OperationEnvelope,
-  operation_id="opCreateStructure",
-  summary="Create Structure",
-  description="Structures organize elements within a taxonomy. Types: `statement`, `mapping`, `schedule`, `presentation`, `calculation`.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-structure",
-  method="POST",
-  business_event_type="ledger_create_structure",
-)
-async def create_structure_op(
-  body: CreateStructureRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-structure",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_create_structure(session, body, created_by=str(user.id))
-    except LibraryImmutableError as exc:
-      raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
-
-  return await _dispatch(ctx, _runner, cache)
-
-
-# `create-mapping-association` is registered on the registrar — see the
-# "Taxonomy mapping write" block below.
 
 
 @router.post(
@@ -950,35 +818,6 @@ async def delete_mapping_association_op(
 # would leave at module scope.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# ── Taxonomy update + delete ──────────────────────────────────────────────
-
-update_taxonomy_op = _registrar.register(
-  OperationSpec(
-    name="update-taxonomy",
-    summary="Update Taxonomy",
-    description="Update mutable fields on a taxonomy. `taxonomy_type` is immutable.",
-    command=cmd_update_taxonomy,
-    request_model=UpdateTaxonomyRequest,
-    error_map={TaxonomyMissingError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-delete_taxonomy_op = _registrar.register(
-  OperationSpec(
-    name="delete-taxonomy",
-    summary="Delete Taxonomy",
-    description=(
-      "Soft-delete a taxonomy (sets `is_active=false`). Historical "
-      "references remain valid."
-    ),
-    command=cmd_delete_taxonomy,
-    request_model=DeleteTaxonomyRequest,
-    error_map={TaxonomyMissingError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
 link_entity_taxonomy_op = _registrar.register(
   OperationSpec(
     name="link-entity-taxonomy",
@@ -996,152 +835,6 @@ link_entity_taxonomy_op = _registrar.register(
       EntityNotFoundError: 404,
       TaxonomyMissingError: 404,
     },
-    requires_created_by=False,
-  )
-)
-
-# ── Structure update + delete ─────────────────────────────────────────────
-
-update_structure_op = _registrar.register(
-  OperationSpec(
-    name="update-structure",
-    summary="Update Structure",
-    description=(
-      "Update mutable fields on a structure. `structure_type` and "
-      "`taxonomy_id` are immutable."
-    ),
-    command=cmd_update_structure,
-    request_model=UpdateStructureRequest,
-    error_map={StructureNotFoundError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-delete_structure_op = _registrar.register(
-  OperationSpec(
-    name="delete-structure",
-    summary="Delete Structure",
-    description=(
-      "Soft-delete a structure (sets `is_active=false`). Associations "
-      "referencing it are effectively orphaned."
-    ),
-    command=cmd_delete_structure,
-    request_model=DeleteStructureRequest,
-    error_map={StructureNotFoundError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-# ── Element CRUD ──────────────────────────────────────────────────────────
-
-create_element_op = _registrar.register(
-  OperationSpec(
-    name="create-element",
-    summary="Create Element",
-    description=(
-      "Create an element within a taxonomy. For chart-of-accounts "
-      "taxonomies this is how native accounts are added."
-    ),
-    command=cmd_create_element,
-    request_model=CreateElementRequest,
-    error_map={
-      TaxonomyMissingError: 404,
-      LibraryImmutableError: 403,
-      ElementQNameConflictError: 409,
-      ElementMissingError: (
-        400,
-        lambda e: f"Parent element not found: {e.element_id}",  # type: ignore[attr-defined]
-      ),
-    },
-  )
-)
-
-update_element_op = _registrar.register(
-  OperationSpec(
-    name="update-element",
-    summary="Update Element",
-    description=(
-      "Update mutable fields on an element. `taxonomy_id` and `source` "
-      "are immutable. Reparenting cascades path/depth to descendants."
-    ),
-    command=cmd_update_element,
-    request_model=UpdateElementRequest,
-    error_map={
-      ElementMissingError: 404,
-      ElementCycleError: 422,
-      LibraryImmutableError: 403,
-    },
-    requires_created_by=False,
-  )
-)
-
-delete_element_op = _registrar.register(
-  OperationSpec(
-    name="delete-element",
-    summary="Delete Element",
-    description=(
-      "Soft-delete an element (sets `is_active=false`). Historical "
-      "line items referencing it remain valid."
-    ),
-    command=cmd_delete_element,
-    request_model=DeleteElementRequest,
-    error_map={ElementMissingError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-# ── Association bulk + update + delete ───────────────────────────────────
-
-create_associations_op = _registrar.register(
-  OperationSpec(
-    name="create-associations",
-    summary="Create Associations (Bulk)",
-    description=(
-      "Create N associations in a single structure, atomically. Handles "
-      "50+ presentation arcs, 25+ calculation arcs, or a full table "
-      "linkbase in one call. Any failed row rolls back the batch."
-    ),
-    command=cmd_bulk_create_associations,
-    request_model=BulkCreateAssociationsRequest,
-    error_map={
-      StructureNotFoundError: 404,
-      ElementNotFoundError: (
-        400,
-        lambda e: (  # type: ignore[attr-defined]
-          f"{e.side.capitalize()} element not found: {e.element_id}"
-        ),
-      ),
-    },
-  )
-)
-
-update_association_op = _registrar.register(
-  OperationSpec(
-    name="update-association",
-    summary="Update Association",
-    description=(
-      "Update mutable fields on an association. `from_element_id`, "
-      "`to_element_id`, `association_type`, and `structure_id` are "
-      "immutable — delete and recreate instead."
-    ),
-    command=cmd_update_association,
-    request_model=UpdateAssociationRequest,
-    error_map={AssociationNotFoundError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-delete_association_op = _registrar.register(
-  OperationSpec(
-    name="delete-association",
-    summary="Delete Association",
-    description=(
-      "Hard-delete an association. Generalizes delete-mapping-association "
-      "to all association types (presentation, calculation, mapping)."
-    ),
-    command=cmd_delete_association,
-    request_model=DeleteAssociationRequest,
-    error_map={AssociationNotFoundError: 404, LibraryImmutableError: 403},
     requires_created_by=False,
   )
 )
@@ -1415,11 +1108,7 @@ create_mapping_association_op = _registrar.register(
   OperationSpec(
     name="create-mapping-association",
     summary="Create Mapping Association",
-    description=(
-      "Link a chart-of-accounts element to a US GAAP reporting concept. "
-      "For bulk associations (presentation/calculation linkbases, 50+ "
-      "arcs at once) use `create-associations` instead."
-    ),
+    description=("Link a chart-of-accounts element to a US GAAP reporting concept."),
     command=cmd_create_mapping_association,
     request_model=CreateMappingAssociationOperation,
     error_map={

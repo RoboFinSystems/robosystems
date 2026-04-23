@@ -38,7 +38,7 @@ class SeedSpec:
   url: str
   namespace_uri: str = ""
   description: str = ""
-  taxonomy_type: str = "reporting"
+  taxonomy_type: str = "reporting_standard"
 
 
 SEEDS: list[SeedSpec] = [

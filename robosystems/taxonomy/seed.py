@@ -730,7 +730,7 @@ def seed_reporting_taxonomy(connection) -> None:
       "id": TAXONOMY_ID,
       "name": "US GAAP Reporting Taxonomy",
       "desc": "Standard US GAAP reporting hierarchy rooted in SFAC 6",
-      "type": "reporting",
+      "type": "reporting_standard",
       "version": "2024",
       "standard": "us-gaap",
       "ns": "http://fasb.org/us-gaap/2024",

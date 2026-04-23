@@ -294,15 +294,16 @@ class TaxonomyPackage(BaseModel):
   rules: list[RuleSpec] = Field(default_factory=list)
 
   taxonomy_type: str = Field(
-    "reporting",
+    "reporting_standard",
     description=(
-      "chart_of_accounts | reporting | mapping | schedule | rules | "
+      "chart_of_accounts | reporting_standard | reporting_extension | "
+      "custom_ontology | mapping | schedule | rules | "
       "classification-vocabulary | classification-assignment — shapes "
       "how the library viewer renders this taxonomy. Concept taxonomies "
-      "(sfac6, rs-gaap) are 'reporting'; equivalence + hierarchy arc "
-      "packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB metamodel "
-      "seed is 'classification-vocabulary'; rs-gaap-to-metamodel is "
-      "'classification-assignment'; verification-rule packs (fac-rules) "
+      "(sfac6, rs-gaap) are 'reporting_standard'; equivalence + hierarchy "
+      "arc packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB "
+      "metamodel seed is 'classification-vocabulary'; rs-gaap-to-metamodel "
+      "is 'classification-assignment'; verification-rule packs (fac-rules) "
       "are 'rules'."
     ),
   )

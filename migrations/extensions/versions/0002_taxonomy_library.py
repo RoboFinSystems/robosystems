@@ -98,8 +98,9 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
 )
 _WIDENED_TAXONOMY_TYPE_CHECK = (
   "taxonomy_type IN ("
-  "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
-  "'classification-vocabulary', 'classification-assignment', 'rules'"
+  "'chart_of_accounts', 'mapping', 'schedule', "
+  "'classification-vocabulary', 'classification-assignment', 'rules', "
+  "'reporting_standard', 'reporting_extension', 'custom_ontology'"
   ")"
 )
 _NARROW_TAXONOMY_TYPE_CHECK = (
@@ -159,20 +160,27 @@ _RULE_PATTERN_CHECK = (
   ")"
 )
 _RULE_SEVERITY_CHECK = "rule_severity IN ('info', 'warning', 'error')"
-_RULE_ORIGIN_CHECK = "rule_origin IN ('forked', 'native')"
+_RULE_ORIGIN_CHECK = "rule_origin IN ('forked', 'native', 'auto')"
 # Polymorphic target: either nothing (global rule) or exactly one of
-# target_structure_id / target_element_id / target_association_id is set,
-# and target_kind names which column carries the FK.
+# target_structure_id / target_element_id / target_association_id /
+# target_taxonomy_id is set, and target_kind names which column carries the FK.
 _RULE_TARGET_POLYMORPHISM_CHECK = (
   "("
   "(target_kind IS NULL AND target_structure_id IS NULL "
-  "AND target_element_id IS NULL AND target_association_id IS NULL) "
+  "AND target_element_id IS NULL AND target_association_id IS NULL "
+  "AND target_taxonomy_id IS NULL) "
   "OR (target_kind = 'structure' AND target_structure_id IS NOT NULL "
-  "AND target_element_id IS NULL AND target_association_id IS NULL) "
+  "AND target_element_id IS NULL AND target_association_id IS NULL "
+  "AND target_taxonomy_id IS NULL) "
   "OR (target_kind = 'element' AND target_element_id IS NOT NULL "
-  "AND target_structure_id IS NULL AND target_association_id IS NULL) "
+  "AND target_structure_id IS NULL AND target_association_id IS NULL "
+  "AND target_taxonomy_id IS NULL) "
   "OR (target_kind = 'association' AND target_association_id IS NOT NULL "
-  "AND target_structure_id IS NULL AND target_element_id IS NULL)"
+  "AND target_structure_id IS NULL AND target_element_id IS NULL "
+  "AND target_taxonomy_id IS NULL) "
+  "OR (target_kind = 'taxonomy' AND target_taxonomy_id IS NOT NULL "
+  "AND target_structure_id IS NULL AND target_element_id IS NULL "
+  "AND target_association_id IS NULL)"
   ")"
 )
 
@@ -618,6 +626,7 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
         target_structure_id VARCHAR REFERENCES {schema}.structures(id),
         target_element_id VARCHAR REFERENCES {schema}.elements(id),
         target_association_id VARCHAR REFERENCES {schema}.associations(id),
+        target_taxonomy_id VARCHAR REFERENCES {schema}.taxonomies(id) ON DELETE SET NULL,
         rule_variables JSONB NOT NULL DEFAULT '[]',
         metadata JSONB NOT NULL DEFAULT '{{}}',
         created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -657,6 +666,13 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
       f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_association "
       f"ON {schema}.rules (target_association_id) "
       f"WHERE target_association_id IS NOT NULL"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_taxonomy "
+      f"ON {schema}.rules (target_taxonomy_id) "
+      f"WHERE target_taxonomy_id IS NOT NULL"
     )
   )
   conn.execute(
@@ -1009,6 +1025,7 @@ def upgrade() -> None:
     sa.Column("target_structure_id", sa.String(), nullable=True),
     sa.Column("target_element_id", sa.String(), nullable=True),
     sa.Column("target_association_id", sa.String(), nullable=True),
+    sa.Column("target_taxonomy_id", sa.String(), nullable=True),
     sa.Column(
       "rule_variables",
       postgresql.JSONB(astext_type=sa.Text()),
@@ -1032,6 +1049,9 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(["target_structure_id"], ["structures.id"]),
     sa.ForeignKeyConstraint(["target_element_id"], ["elements.id"]),
     sa.ForeignKeyConstraint(["target_association_id"], ["associations.id"]),
+    sa.ForeignKeyConstraint(
+      ["target_taxonomy_id"], ["taxonomies.id"], ondelete="SET NULL"
+    ),
     sa.PrimaryKeyConstraint("id"),
     sa.CheckConstraint(_RULE_CATEGORY_CHECK, name="check_rule_category"),
     sa.CheckConstraint(_RULE_PATTERN_CHECK, name="check_rule_pattern"),
@@ -1059,6 +1079,12 @@ def upgrade() -> None:
     "rules",
     ["target_association_id"],
     postgresql_where="target_association_id IS NOT NULL",
+  )
+  op.create_index(
+    "idx_rules_target_taxonomy",
+    "rules",
+    ["target_taxonomy_id"],
+    postgresql_where="target_taxonomy_id IS NOT NULL",
   )
   op.create_index("idx_rules_category", "rules", ["rule_category"])
 
@@ -1196,6 +1222,7 @@ def downgrade() -> None:
   # Drop rules table (Phase d.2). IF EXISTS on the indexes because a
   # mid-transition downgrade from a partial run might not have created them.
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_category"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_taxonomy"))
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_association"))
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_element"))
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_structure"))
