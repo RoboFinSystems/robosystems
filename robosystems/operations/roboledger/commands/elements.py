@@ -212,6 +212,9 @@ def create_element(
 ) -> ElementResponse:
   """Create a new element within a taxonomy.
 
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``create-taxonomy-block``.
+
   Raises `TaxonomyNotFoundError` if `body.taxonomy_id` does not exist,
   or `ElementNotFoundError` if `body.parent_id` is set but the parent
   does not exist.
@@ -303,6 +306,9 @@ def _assign_efs_classification(
 
 def update_element(session: Session, body: UpdateElementRequest) -> ElementResponse:
   """Update mutable fields on an element.
+
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``update-taxonomy-block``.
 
   Uses `model_dump(exclude_unset=True)` semantics: omitted fields are
   left unchanged, explicit nulls are applied. For `parent_id`: omit to
@@ -444,6 +450,9 @@ def _reassign_efs_classification(
 
 def delete_element(session: Session, body: DeleteElementRequest) -> ElementResponse:
   """Soft delete — sets `is_active=false`.
+
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``delete-taxonomy-block``.
 
   Historical line items referencing the element remain valid. New line
   items cannot use an inactive element (enforced by caller / validation

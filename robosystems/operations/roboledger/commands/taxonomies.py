@@ -17,8 +17,6 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
-  BulkCreateAssociationsRequest,
-  BulkCreateAssociationsResponse,
   CreateMappingAssociationOperation,
   CreateStructureRequest,
   CreateTaxonomyRequest,
@@ -58,7 +56,6 @@ __all__ = [
   "MappingStructureNotFoundError",
   "StructureNotFoundError",
   "TaxonomyNotFoundError",
-  "bulk_create_associations",
   "create_mapping_association",
   "create_structure",
   "create_taxonomy",
@@ -141,7 +138,11 @@ def _structure_to_response(row: Structure) -> StructureResponse:
 def create_taxonomy(
   session: Session, body: CreateTaxonomyRequest, created_by: str
 ) -> TaxonomyResponse:
-  """Insert a new taxonomy row and return its response representation."""
+  """Insert a new taxonomy row and return its response representation.
+
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``create-taxonomy-block``.
+  """
   taxonomy = Taxonomy(
     id=generate_prefixed_ulid("tax"),
     name=body.name,
@@ -160,7 +161,11 @@ def create_taxonomy(
 def create_structure(
   session: Session, body: CreateStructureRequest, created_by: str
 ) -> StructureResponse:
-  """Insert a new structure row and return its response representation."""
+  """Insert a new structure row and return its response representation.
+
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``create-taxonomy-block``.
+  """
   # Tenants can only add structures to tenant-origin taxonomies.
   assert_tenant_taxonomy(session, body.taxonomy_id)
   structure = Structure(
@@ -306,6 +311,9 @@ def _delete_association_dependents(
 def update_taxonomy(session: Session, body: UpdateTaxonomyRequest) -> TaxonomyResponse:
   """Update mutable fields on a taxonomy.
 
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``update-taxonomy-block``.
+
   Uses `model_dump(exclude_unset=True)` — omitted fields are left
   unchanged, explicit nulls are applied. `taxonomy_type` is immutable
   and is not in the request model.
@@ -330,6 +338,9 @@ def update_taxonomy(session: Session, body: UpdateTaxonomyRequest) -> TaxonomyRe
 def delete_taxonomy(session: Session, body: DeleteTaxonomyRequest) -> TaxonomyResponse:
   """Soft delete — sets `is_active=false`.
 
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``delete-taxonomy-block``.
+
   Historical references (structures, elements, associations) remain
   valid. The taxonomy is simply no longer offered for new writes.
 
@@ -352,9 +363,12 @@ def delete_taxonomy(session: Session, body: DeleteTaxonomyRequest) -> TaxonomyRe
 def update_structure(
   session: Session, body: UpdateStructureRequest
 ) -> StructureResponse:
-  """Update mutable fields on a structure. `structure_type` and
-  `taxonomy_id` are immutable.
+  """Update mutable fields on a structure.
 
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``update-taxonomy-block``.
+
+  `structure_type` and `taxonomy_id` are immutable.
   Raises `StructureNotFoundError` if the structure does not exist.
   """
   structure = session.execute(
@@ -377,10 +391,8 @@ def delete_structure(
 ) -> StructureResponse:
   """Soft delete — sets `is_active=false`.
 
-  Associations referencing the structure stay on disk but are
-  effectively orphaned. If you need to fully wipe a structure and its
-  contents, call `delete_structure` then separately hard-delete the
-  associations.
+  Internal only — retired from the public surface in Phase 1 of the
+  Taxonomy Block refactor. Tenant writes use ``delete-taxonomy-block``.
 
   Raises `StructureNotFoundError` if the structure does not exist.
   """
@@ -421,79 +433,6 @@ def _association_to_response(
   )
 
 
-def bulk_create_associations(
-  session: Session,
-  body: BulkCreateAssociationsRequest,
-  created_by: str,
-) -> BulkCreateAssociationsResponse:
-  """Create N associations within a single structure, atomically.
-
-  Validates once: structure exists, all referenced elements exist.
-  Then bulk-inserts via a single `session.add_all` + `flush`. Any
-  unique-constraint violation rolls back the whole batch.
-
-  Raises `StructureNotFoundError` if the structure is missing, or
-  `ElementNotFoundError` if any referenced element does not exist.
-  """
-  structure = session.execute(
-    select(Structure).where(Structure.id == body.structure_id)
-  ).scalar_one_or_none()
-  if structure is None:
-    raise StructureNotFoundError(body.structure_id)
-  # Same library-structure guard as single-association insert.
-  assert_not_library_origin(structure)
-
-  # Collect all distinct element IDs across the batch and verify in
-  # one query so 500 associations ≠ 1000 lookups.
-  referenced_ids: set[str] = set()
-  for item in body.associations:
-    referenced_ids.add(item.from_element_id)
-    referenced_ids.add(item.to_element_id)
-
-  existing_ids = {
-    row[0]
-    for row in session.execute(
-      select(Element.id).where(Element.id.in_(referenced_ids))
-    ).all()
-  }
-  missing = referenced_ids - existing_ids
-  if missing:
-    # Find which side the first missing element is on so the error is
-    # specific. Iterate in input order to make the error deterministic.
-    for item in body.associations:
-      if item.from_element_id in missing:
-        raise ElementNotFoundError("source", item.from_element_id)
-      if item.to_element_id in missing:
-        raise ElementNotFoundError("target", item.to_element_id)
-
-  association_rows: list[Association] = []
-  for item in body.associations:
-    association_rows.append(
-      Association(
-        id=generate_prefixed_ulid("assoc"),
-        structure_id=body.structure_id,
-        from_element_id=item.from_element_id,
-        to_element_id=item.to_element_id,
-        association_type=item.association_type,
-        arcrole=item.arcrole,
-        order_value=item.order_value,
-        weight=item.weight,
-        confidence=item.confidence,
-        suggested_by=item.suggested_by,
-        created_by=created_by,
-      )
-    )
-
-  session.add_all(association_rows)
-  session.flush()
-
-  return BulkCreateAssociationsResponse(
-    structure_id=body.structure_id,
-    created=len(association_rows),
-    association_ids=[row.id for row in association_rows],
-  )
-
-
 def update_association(
   session: Session, body: UpdateAssociationRequest
 ) -> AssociationResponse:
@@ -525,9 +464,8 @@ def delete_association(session: Session, body: DeleteAssociationRequest) -> dict
   """Hard delete an association.
 
   Associations are cheap edges; we don't soft-delete them. If you need
-  to remove many at once (e.g., wipe a whole linkbase), call
-  `delete_structure` (soft) and add fresh ones via
-  `bulk_create_associations`.
+  to remove many at once, use `update-taxonomy-block` with
+  `associations_to_remove`.
 
   Raises `AssociationNotFoundError` if the association does not exist.
   Returns `{"deleted": True}` on success so the route layer has a
