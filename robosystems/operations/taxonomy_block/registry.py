@@ -87,8 +87,8 @@ REPORTING_STANDARD_BLOCK = TaxonomyBlockRegistryEntry(
   icon="library",
   description=(
     "Library reporting taxonomy (FAC, us-gaap, rs-gaap). Read-only on "
-    "the public surface — seeded via the admin-only library writer. "
-    "Phase 2.7 will route library seeding through the envelope."
+    "the public surface — seeded via the admin-only library_creator "
+    "(operations/taxonomy_block/library_creator.py)."
   ),
   construction_mode="read_only",
   requires_parent_taxonomy=False,

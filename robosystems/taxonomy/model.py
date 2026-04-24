@@ -1,8 +1,9 @@
 """Pydantic model for taxonomy packages.
 
 `TaxonomyPackage` is the in-memory intermediate between JSON-LD (canonical
-on-disk format) and the database library_writer. The loader reads JSON-LD →
-TaxonomyPackage; the writer takes TaxonomyPackage → SQL INSERTs. The
+on-disk format) and the database. The loader reads JSON-LD → TaxonomyPackage;
+``operations/taxonomy_block/library_creator.py`` takes TaxonomyPackage → ORM
+session inserts. The
 extractor (in `robosystems/arelle/`) produces rdflib.Graph which is
 serialized to JSON-LD via the serializer — these never construct
 TaxonomyPackage directly; it's a DB-side DTO.

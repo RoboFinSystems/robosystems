@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-from robosystems.taxonomy.writers.library_writer import (
-  write_taxonomy_arcs,
-  write_taxonomy_elements,
-  write_taxonomy_package,
-  write_taxonomy_rules,
-)
 from robosystems.taxonomy.writers.tenant_writer import (
   CopyStats,
   copy_library_into_tenant,
@@ -16,8 +10,4 @@ from robosystems.taxonomy.writers.tenant_writer import (
 __all__ = [
   "CopyStats",
   "copy_library_into_tenant",
-  "write_taxonomy_arcs",
-  "write_taxonomy_elements",
-  "write_taxonomy_package",
-  "write_taxonomy_rules",
 ]

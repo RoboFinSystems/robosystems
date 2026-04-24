@@ -730,8 +730,8 @@ SEEDS_DIR = (
 # seeds); then the classification vocabulary; then assignments/mappings.
 SEED_FILES = [
   # Classification vocabulary FIRST — FAC + rs-gaap seeds reference these
-  # via classifiedAs arcs; the DB lookup in write_taxonomy_package fails if
-  # the classification rows don't exist yet.
+  # via classifiedAs arcs; create_library_arcs resolves classifications via
+  # DB lookup so they must be persisted in phase 1 before phase 2 runs.
   SEEDS_DIR / "us-gaap-metamodel" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "rs-gaap" / "v1" / "taxonomy.jsonld",
@@ -1142,48 +1142,57 @@ def upgrade() -> None:
   # reference an element defined in ANY other seed regardless of the
   # SEED_FILES order — without the split, arcs targeting elements that
   # only a later seed defines are silently dropped.
-  from robosystems.taxonomy.loaders import load_taxonomy_package
-  from robosystems.taxonomy.writers import (
-    write_taxonomy_arcs,
-    write_taxonomy_elements,
-    write_taxonomy_rules,
+  from sqlalchemy.orm import Session as _Session
+
+  from robosystems.operations.taxonomy_block.library_creator import (
+    create_library_arcs,
+    create_library_rules,
+    create_library_taxonomy_elements,
   )
+  from robosystems.taxonomy.loaders import load_taxonomy_package
 
-  loaded_packages = []
-  for seed_path in SEED_FILES:
-    if not seed_path.exists():
-      print(f"  [WARN] Seed file missing, skipping: {seed_path}")
-      continue
-    print(f"  Loading seed: {seed_path.relative_to(SEEDS_DIR)}")
-    package = load_taxonomy_package(seed_path)
-    loaded_packages.append(package)
-    counts = write_taxonomy_elements(conn, package)
-    print(
-      f"    [phase 1] elements={counts['elements']} labels={counts['labels']} "
-      f"references={counts['references']} structures={counts['structures']} "
-      f"classifications={counts['classifications']}"
-    )
+  session = _Session(bind=conn)
+  try:
+    loaded_packages = []
+    for seed_path in SEED_FILES:
+      if not seed_path.exists():
+        print(f"  [WARN] Seed file missing, skipping: {seed_path}")
+        continue
+      print(f"  Loading seed: {seed_path.relative_to(SEEDS_DIR)}")
+      package = load_taxonomy_package(seed_path)
+      loaded_packages.append(package)
+      _, counts = create_library_taxonomy_elements(session, package)
+      session.flush()
+      print(
+        f"    [phase 1] elements={counts['elements']} labels={counts['labels']} "
+        f"references={counts['references']} structures={counts['structures']} "
+        f"classifications={counts['classifications']}"
+      )
 
-  for package in loaded_packages:
-    counts = write_taxonomy_arcs(conn, package)
-    print(
-      f"  [phase 2] {package.name}: "
-      f"associations={counts['associations']} "
-      f"(skipped={counts['associations_skipped']}) "
-      f"classification_assignments={counts['classification_assignments']} "
-      f"(skipped={counts['classification_assignments_skipped']})"
-    )
+    for package in loaded_packages:
+      counts = create_library_arcs(session, package)
+      session.flush()
+      print(
+        f"  [phase 2] {package.name}: "
+        f"associations={counts['associations']} "
+        f"(skipped={counts['associations_skipped']}) "
+        f"classification_assignments={counts['classification_assignments']} "
+        f"(skipped={counts['classification_assignments_skipped']})"
+      )
 
-  # Phase 3 — rules. Runs after phase 2 so association-targeted rules can
-  # resolve (though none of the seeded fac-rules use that target_kind yet).
-  for package in loaded_packages:
-    if not package.rules:
-      continue
-    counts = write_taxonomy_rules(conn, package)
-    print(
-      f"  [phase 3] {package.name}: "
-      f"rules={counts['rules']} (skipped={counts['rules_skipped']})"
-    )
+    # Phase 3 — rules. Runs after phase 2 so association-targeted rules can
+    # resolve (though none of the seeded fac-rules use that target_kind yet).
+    for package in loaded_packages:
+      if not package.rules:
+        continue
+      counts = create_library_rules(session, package)
+      session.flush()
+      print(
+        f"  [phase 3] {package.name}: "
+        f"rules={counts['rules']} (skipped={counts['rules_skipped']})"
+      )
+  finally:
+    session.close()
 
   # Phase d backfill on public.structures: set concept/member_arrangement
   # + empty statement_renderer mechanics for the four library-seeded

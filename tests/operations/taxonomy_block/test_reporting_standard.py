@@ -32,7 +32,7 @@ def test_create_raises_admin_only() -> None:
   session = MagicMock()
   with pytest.raises(NotImplementedError) as exc:
     reporting_standard.create(session, _make_create_request(), "usr_admin")
-  assert "library writer" in str(exc.value)
+  assert "library_creator" in str(exc.value)
 
 
 def test_update_raises_admin_only() -> None:
@@ -40,7 +40,7 @@ def test_update_raises_admin_only() -> None:
   payload = UpdateTaxonomyBlockRequest(taxonomy_id="tx_1")
   with pytest.raises(NotImplementedError) as exc:
     reporting_standard.update(session, payload, "usr_admin")
-  assert "library writer" in str(exc.value)
+  assert "library_creator" in str(exc.value)
 
 
 def test_delete_raises_admin_only() -> None:
@@ -48,7 +48,7 @@ def test_delete_raises_admin_only() -> None:
   payload = DeleteTaxonomyBlockRequest(taxonomy_id="tx_1", reason="cleanup")
   with pytest.raises(NotImplementedError) as exc:
     reporting_standard.delete(session, payload, "usr_admin")
-  assert "library writer" in str(exc.value)
+  assert "library_creator" in str(exc.value)
 
 
 def test_build_envelope_returns_none_when_missing() -> None:

@@ -1,11 +1,11 @@
 """Handlers for ``taxonomy_type='reporting_standard'`` — library taxonomies.
 
 Library reporting taxonomies (FAC, us-gaap, rs-gaap) are seeded through
-the admin-only ``library_writer.py`` path (Arelle → JSON-LD → bulk
-insert into the ``public`` schema). The public Taxonomy Block surface
-does NOT author library rows — ``create``/``update``/``delete`` raise
-:class:`NotImplementedError` until Phase 2.7 routes library seeding
-through the envelope.
+the admin-only ``library_creator.py`` operations path
+(JSON-LD → ``create_library_taxonomy_elements`` / ``create_library_arcs`` /
+``create_library_rules`` → ORM session inserts into the ``public`` schema).
+The public Taxonomy Block surface does NOT author library rows —
+``create``/``update``/``delete`` raise :class:`NotImplementedError`.
 
 ``build_envelope`` mirrors the ``chart_of_accounts`` projection; the
 only observable difference is ``origin='library'`` (derived from
@@ -44,9 +44,10 @@ CATEGORY = "Library"
 
 _ADMIN_ONLY_MESSAGE = (
   "reporting_standard taxonomies are library-origin and cannot be authored "
-  "through the public envelope. Use the admin-only library writer "
-  "(robosystems/taxonomy/writers/library_writer.py) via Arelle ingest. "
-  "Phase 2.7 will route library seeding through the envelope."
+  "through the public envelope. Library seeding uses the admin-only "
+  "robosystems/operations/taxonomy_block/library_creator.py path "
+  "(JSON-LD → create_library_taxonomy_elements / create_library_arcs / "
+  "create_library_rules)."
 )
 
 

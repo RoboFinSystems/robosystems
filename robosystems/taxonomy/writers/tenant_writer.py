@@ -6,9 +6,9 @@ schemas. The pattern is bulk ``INSERT ... SELECT`` in FK order, preserving
 the library rows' deterministic UUID5 ids so re-running is idempotent.
 
 Library-origin rows are distinguished by ``created_by = 'library-seeder'``
-(applied in ``library_writer.py``). After the copy, tenant-schema
-immutability triggers (installed separately) key on that same audit field
-to raise on any UPDATE/DELETE against a library-seeded row.
+(applied by ``operations/taxonomy_block/library_creator.py``). After the copy,
+tenant-schema immutability triggers (installed separately) key on that same
+audit field to raise on any UPDATE/DELETE against a library-seeded row.
 """
 
 from __future__ import annotations
