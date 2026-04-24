@@ -14,13 +14,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.taxonomy_block import UpdateTaxonomyBlockRequest
 from robosystems.models.extensions import (
   Association,
   Element,
+  ElementClassification,
+  ElementLabel,
+  ElementReference,
   Rule,
   Structure,
   Taxonomy,
@@ -229,6 +232,222 @@ def apply_associations_to_add(
     session.add(assoc)
 
 
+def apply_elements_to_update(
+  session: Session,
+  taxonomy: Taxonomy,
+  payload: UpdateTaxonomyBlockRequest,
+  updated_by: str,
+  *,
+  update_classification: Callable[[Session, str, str], None] | None = None,
+  library_parent_lookup: Callable[[set[str]], dict[str, str]] | None = None,
+) -> None:
+  """Mutate existing elements in place per each ``ElementUpdatePatch``.
+
+  Non-None patch fields overwrite; ``metadata`` when provided replaces
+  ``metadata_`` wholesale. ``parent_ref`` is re-resolved against the
+  current in-taxonomy qname→id map, with optional library fallback.
+  ``update_classification`` (handler-supplied) is invoked per element
+  when ``classification`` is non-None — CoA uses this to re-assign
+  the FASB elementsOfFinancialStatements junction row.
+  """
+  if not payload.elements_to_update:
+    return
+
+  qnames = [p.qname for p in payload.elements_to_update]
+  existing_rows = (
+    session.execute(
+      select(Element).where(
+        Element.taxonomy_id == taxonomy.id, Element.qname.in_(qnames)
+      )
+    )
+    .scalars()
+    .all()
+  )
+  element_by_qname = {str(e.qname): e for e in existing_rows if e.qname}
+
+  all_elements_by_qname = {
+    str(e.qname): e
+    for e in session.execute(select(Element).where(Element.taxonomy_id == taxonomy.id))
+    .scalars()
+    .all()
+    if e.qname
+  }
+
+  library_qnames_needed: set[str] = set()
+  if library_parent_lookup is not None:
+    for patch in payload.elements_to_update:
+      if (
+        patch.parent_ref is not None
+        and patch.parent_ref
+        and patch.parent_ref not in all_elements_by_qname
+      ):
+        library_qnames_needed.add(patch.parent_ref)
+  library_qname_to_id = (
+    library_parent_lookup(library_qnames_needed)
+    if library_qnames_needed and library_parent_lookup is not None
+    else {}
+  )
+
+  for patch in payload.elements_to_update:
+    element = element_by_qname.get(patch.qname)
+    if element is None:
+      continue
+    if patch.name is not None:
+      element.name = patch.name
+    if patch.description is not None:
+      element.description = patch.description
+    if patch.balance_type is not None:
+      element.balance_type = patch.balance_type
+    if patch.period_type is not None:
+      element.period_type = patch.period_type
+    if patch.is_monetary is not None:
+      element.is_monetary = patch.is_monetary
+    if patch.code is not None:
+      element.code = patch.code
+    if patch.sub_classification is not None:
+      element.sub_classification = patch.sub_classification
+    if patch.metadata is not None:
+      element.metadata_ = dict(patch.metadata)
+    if patch.parent_ref is not None:
+      if patch.parent_ref == "":
+        element.parent_id = None
+      else:
+        local = all_elements_by_qname.get(patch.parent_ref)
+        if local is not None:
+          element.parent_id = local.id
+        else:
+          library_id = library_qname_to_id.get(patch.parent_ref)
+          if library_id is None:
+            raise ValueError(
+              f"element {patch.qname!r} parent_ref {patch.parent_ref!r} did "
+              f"not resolve in this taxonomy or the parent library."
+            )
+          element.parent_id = library_id
+    if patch.classification is not None and update_classification is not None:
+      update_classification(session, str(element.id), patch.classification)
+
+  session.flush()
+
+
+def apply_elements_to_remove(
+  session: Session,
+  taxonomy: Taxonomy,
+  payload: UpdateTaxonomyBlockRequest,
+  element_id_by_qname: dict[str, str],
+) -> None:
+  """Delete elements + their side-tables + any in-taxonomy associations.
+
+  The self-referential ``parent_id`` FK is RESTRICT-ON-DELETE, so
+  inter-sibling parents within the removal set must be NULL-cleared
+  before the batch DELETE. The validator already rejected any element
+  whose non-removed children would become orphans.
+  """
+  if not payload.elements_to_remove:
+    return
+
+  element_ids = [
+    element_id_by_qname[q]
+    for q in payload.elements_to_remove
+    if q in element_id_by_qname
+  ]
+  if not element_ids:
+    return
+
+  session.execute(
+    Element.__table__.update()
+    .where(Element.id.in_(element_ids), Element.parent_id.in_(element_ids))
+    .values(parent_id=None)
+  )
+
+  session.execute(
+    delete(Association).where(
+      or_(
+        Association.from_element_id.in_(element_ids),
+        Association.to_element_id.in_(element_ids),
+      )
+    )
+  )
+
+  session.execute(
+    delete(ElementClassification).where(
+      ElementClassification.element_id.in_(element_ids)
+    )
+  )
+  session.execute(delete(ElementLabel).where(ElementLabel.element_id.in_(element_ids)))
+  session.execute(
+    delete(ElementReference).where(ElementReference.element_id.in_(element_ids))
+  )
+
+  session.execute(delete(Element).where(Element.id.in_(element_ids)))
+  session.flush()
+
+
+def apply_structures_to_update(
+  session: Session,
+  taxonomy: Taxonomy,
+  payload: UpdateTaxonomyBlockRequest,
+  updated_by: str,
+) -> None:
+  """Mutate existing structures — name / description / role_uri / metadata."""
+  if not payload.structures_to_update:
+    return
+
+  ids = [p.structure_id for p in payload.structures_to_update]
+  rows = session.execute(select(Structure).where(Structure.id.in_(ids))).scalars().all()
+  by_id = {str(s.id): s for s in rows}
+
+  for patch in payload.structures_to_update:
+    structure = by_id.get(patch.structure_id)
+    if structure is None:
+      continue
+    if patch.name is not None:
+      structure.name = patch.name
+    if patch.description is not None:
+      structure.description = patch.description
+    if patch.role_uri is not None:
+      metadata = dict(structure.metadata_ or {})
+      metadata["role_uri"] = patch.role_uri
+      structure.metadata_ = metadata
+    if patch.metadata is not None:
+      structure.metadata_ = dict(patch.metadata)
+
+  session.flush()
+
+
+def apply_structures_to_remove(
+  session: Session,
+  taxonomy: Taxonomy,
+  payload: UpdateTaxonomyBlockRequest,
+) -> None:
+  """Delete structures + their rules + cascading associations."""
+  if not payload.structures_to_remove:
+    return
+
+  ids = list(payload.structures_to_remove)
+  session.execute(
+    delete(Rule).where(
+      Rule.target_kind == "structure", Rule.target_structure_id.in_(ids)
+    )
+  )
+  session.execute(delete(Association).where(Association.structure_id.in_(ids)))
+  session.execute(delete(Structure).where(Structure.id.in_(ids)))
+  session.flush()
+
+
+def apply_associations_to_remove(
+  session: Session,
+  taxonomy: Taxonomy,
+  payload: UpdateTaxonomyBlockRequest,
+) -> None:
+  """Delete individual associations by id — validator scope-checked already."""
+  if not payload.associations_to_remove:
+    return
+  session.execute(
+    delete(Association).where(Association.id.in_(payload.associations_to_remove))
+  )
+  session.flush()
+
+
 def apply_rules_to_remove(
   session: Session,
   taxonomy: Taxonomy,
@@ -282,9 +501,14 @@ def apply_rules_to_add(
 
 __all__ = [
   "apply_associations_to_add",
+  "apply_associations_to_remove",
   "apply_elements_to_add",
+  "apply_elements_to_remove",
+  "apply_elements_to_update",
   "apply_rules_to_add",
   "apply_rules_to_remove",
   "apply_structures_to_add",
+  "apply_structures_to_remove",
+  "apply_structures_to_update",
   "apply_top_level_fields",
 ]

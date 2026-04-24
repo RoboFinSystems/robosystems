@@ -53,10 +53,15 @@ from robosystems.operations.taxonomy_block.rule_persistence import (
 from robosystems.operations.taxonomy_block.rule_reads import project_rules
 from robosystems.operations.taxonomy_block.update_apply import (
   apply_associations_to_add,
+  apply_associations_to_remove,
   apply_elements_to_add,
+  apply_elements_to_remove,
+  apply_elements_to_update,
   apply_rules_to_add,
   apply_rules_to_remove,
   apply_structures_to_add,
+  apply_structures_to_remove,
+  apply_structures_to_update,
   apply_top_level_fields,
 )
 from robosystems.operations.taxonomy_block.update_validator import (
@@ -321,7 +326,22 @@ def update(
   def _library_lookup(qnames: set[str]) -> dict[str, str]:
     return _library_qname_lookup(session, parent_taxonomy_id, qnames)
 
+  element_id_by_qname: dict[str, str] = {
+    str(qname): str(eid)
+    for eid, qname in session.execute(
+      select(Element.id, Element.qname).where(Element.taxonomy_id == taxonomy.id)
+    ).all()
+    if qname
+  }
+
   apply_top_level_fields(taxonomy, payload)
+  apply_elements_to_update(
+    session,
+    taxonomy,
+    payload,
+    updated_by,
+    library_parent_lookup=_library_lookup,
+  )
   new_elements = apply_elements_to_add(
     session,
     taxonomy,
@@ -330,6 +350,7 @@ def update(
     element_factory=_element_factory,
     library_parent_lookup=_library_lookup,
   )
+  apply_structures_to_update(session, taxonomy, payload, updated_by)
   new_structures = apply_structures_to_add(session, taxonomy, payload, updated_by)
   session.flush()
   apply_associations_to_add(
@@ -341,6 +362,9 @@ def update(
     updated_by,
     library_ref_lookup=_library_lookup,
   )
+  apply_associations_to_remove(session, taxonomy, payload)
+  apply_structures_to_remove(session, taxonomy, payload)
+  apply_elements_to_remove(session, taxonomy, payload, element_id_by_qname)
   apply_rules_to_remove(session, taxonomy, payload)
   apply_rules_to_add(
     session, taxonomy, payload, new_elements, new_structures, updated_by

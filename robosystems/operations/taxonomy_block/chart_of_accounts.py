@@ -42,10 +42,15 @@ from robosystems.operations.taxonomy_block.rule_persistence import (
 from robosystems.operations.taxonomy_block.rule_reads import project_rules
 from robosystems.operations.taxonomy_block.update_apply import (
   apply_associations_to_add,
+  apply_associations_to_remove,
   apply_elements_to_add,
+  apply_elements_to_remove,
+  apply_elements_to_update,
   apply_rules_to_add,
   apply_rules_to_remove,
   apply_structures_to_add,
+  apply_structures_to_remove,
+  apply_structures_to_update,
   apply_top_level_fields,
 )
 from robosystems.operations.taxonomy_block.update_validator import (
@@ -106,6 +111,18 @@ def _assign_efs_classification(
       is_primary=True,
     )
   )
+
+
+def _update_efs_classification(
+  session: Session, element_id: str, identifier: str
+) -> None:
+  """Re-assign an element's EFS classification — clears existing, then adds."""
+  session.execute(
+    ElementClassification.__table__.delete().where(
+      ElementClassification.element_id == element_id
+    )
+  )
+  _assign_efs_classification(session, element_id, identifier)
 
 
 def _qname_for_coa(standard: str | None, code: str | None, name: str) -> str:
@@ -308,7 +325,22 @@ def update(
   if issues:
     raise TaxonomyBlockValidationError(issues)
 
+  element_id_by_qname: dict[str, str] = {
+    str(qname): str(eid)
+    for eid, qname in session.execute(
+      select(Element.id, Element.qname).where(Element.taxonomy_id == taxonomy.id)
+    ).all()
+    if qname
+  }
+
   apply_top_level_fields(taxonomy, payload)
+  apply_elements_to_update(
+    session,
+    taxonomy,
+    payload,
+    updated_by,
+    update_classification=_update_efs_classification,
+  )
   new_elements = apply_elements_to_add(
     session, taxonomy, payload, updated_by, element_factory=_element_factory
   )
@@ -319,11 +351,15 @@ def update(
       if element is not None:
         _assign_efs_classification(session, str(element.id), req.classification)
 
+  apply_structures_to_update(session, taxonomy, payload, updated_by)
   new_structures = apply_structures_to_add(session, taxonomy, payload, updated_by)
   session.flush()
   apply_associations_to_add(
     session, taxonomy, new_elements, new_structures, payload, updated_by
   )
+  apply_associations_to_remove(session, taxonomy, payload)
+  apply_structures_to_remove(session, taxonomy, payload)
+  apply_elements_to_remove(session, taxonomy, payload, element_id_by_qname)
   apply_rules_to_remove(session, taxonomy, payload)
   apply_rules_to_add(
     session, taxonomy, payload, new_elements, new_structures, updated_by
