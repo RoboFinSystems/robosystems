@@ -139,12 +139,13 @@ def _qname_for_coa(standard: str | None, code: str | None, name: str) -> str:
   return f"{ns}:{token}"
 
 
-def _auto_link_entity(session: Session, taxonomy_id: str, created_by: str) -> None:
+def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
   """Link the graph entity to this CoA as primary chart_of_accounts.
 
   No-op when no entity exists in the graph (e.g. during tests or
   seeding). Clears any existing primary CoA link before setting the new
-  one — only one primary CoA per entity at a time.
+  one — only one primary CoA per entity at a time. If the link already
+  exists but is non-primary, promotes it rather than returning early.
   """
   entity = session.execute(select(Entity).limit(1)).scalar_one_or_none()
   if entity is None:
@@ -157,7 +158,18 @@ def _auto_link_entity(session: Session, taxonomy_id: str, created_by: str) -> No
       EntityTaxonomy.basis == "chart_of_accounts",
     )
   ).scalar_one_or_none()
+
   if existing:
+    if existing.is_primary:
+      return
+    existing.is_primary = True
+    session.query(EntityTaxonomy).filter(
+      EntityTaxonomy.entity_id == entity.id,
+      EntityTaxonomy.basis == "chart_of_accounts",
+      EntityTaxonomy.is_primary.is_(True),
+      EntityTaxonomy.taxonomy_id != taxonomy_id,
+    ).update({"is_primary": False}, synchronize_session=False)
+    session.flush()
     return
 
   session.query(EntityTaxonomy).filter(
@@ -326,7 +338,7 @@ def create(
     )
     session.flush()
 
-  _auto_link_entity(session, taxonomy.id, created_by)
+  _auto_link_entity(session, taxonomy.id)
 
   return taxonomy.id
 

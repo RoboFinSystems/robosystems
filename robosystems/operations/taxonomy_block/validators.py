@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -45,9 +45,6 @@ from robosystems.operations.information_block.rules.expressions import (
   InvalidRuleExpression,
   parse_arithmetic_expression,
 )
-
-if TYPE_CHECKING:
-  pass
 
 
 @dataclass(frozen=True)

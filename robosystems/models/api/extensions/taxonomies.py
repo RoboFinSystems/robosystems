@@ -404,42 +404,6 @@ class DeleteElementRequest(BaseModel):
   element_id: str
 
 
-# ── Association bulk create / update / delete ────────────────────────────
-
-
-class BulkAssociationItem(BaseModel):
-  """A single association within a bulk-create payload. The parent
-  `structure_id` is set once on the request envelope, not repeated
-  per item."""
-
-  from_element_id: str
-  to_element_id: str
-  association_type: Literal["presentation", "calculation", "mapping"] = "presentation"
-  arcrole: str | None = None
-  order_value: float | None = 0.0
-  weight: float | None = None
-  confidence: float | None = None
-  suggested_by: str | None = None
-
-
-class BulkCreateAssociationsRequest(BaseModel):
-  """Bulk create associations within a single structure. Atomic — any
-  failed row rolls back the whole batch. Handles 50+ presentation arcs,
-  25+ calculation arcs, or a full table linkbase in one call."""
-
-  structure_id: str
-  associations: list[BulkAssociationItem] = Field(..., min_length=1, max_length=5000)
-
-
-class BulkCreateAssociationsResponse(BaseModel):
-  """Result of a bulk association create. `association_ids` is in the
-  same order as the input `associations` list."""
-
-  structure_id: str
-  created: int
-  association_ids: list[str]
-
-
 class UpdateAssociationRequest(BaseModel):
   """Update mutable fields on an association. `from_element_id`,
   `to_element_id`, and `association_type` are immutable — delete and
