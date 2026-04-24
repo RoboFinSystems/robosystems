@@ -28,7 +28,7 @@ Every route follows the pattern:
   `reverse-journal-entry`
 - Close Workflow: `set-close-target`, `create-closing-entry`,
   `create-manual-closing-entry`, `truncate-schedule`,
-  `dispose-schedule`, `close-period`, `reopen-period`
+  `close-period`, `reopen-period` (asset disposal moved to `create-event-block(event_type='asset_disposed')`)
 - Reports: `create-report`, `regenerate-report`, `delete-report`,
   `share-report`
 - Publish Lists: `create-publish-list`, `update-publish-list`,
@@ -122,7 +122,6 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.api.extensions.schedules import (
   CreateClosingEntryOperation,
   CreateManualClosingEntryRequest,
-  DisposeScheduleRequest,
   TruncateScheduleOperation,
 )
 from robosystems.models.api.extensions.taxonomies import (
@@ -185,6 +184,12 @@ from robosystems.operations.roboledger.commands.event_block import (
 )
 from robosystems.operations.roboledger.commands.event_block.engine import (
   EngineValidationError,
+)
+from robosystems.operations.roboledger.commands.event_block.python_handlers._disposal_plan import (
+  ScheduleNotFoundError as DisposalScheduleNotFoundError,
+)
+from robosystems.operations.roboledger.commands.event_block.python_handlers.types import (
+  HandlerMetadataValidationError,
 )
 from robosystems.operations.roboledger.commands.event_block.registry import (
   HandlerAmbiguousError,
@@ -295,9 +300,6 @@ from robosystems.operations.roboledger.commands.schedules import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   create_manual_closing_entry as cmd_create_manual_closing_entry,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  dispose_schedule as cmd_dispose_schedule,
 )
 from robosystems.operations.roboledger.commands.schedules import (
   truncate_schedule as cmd_truncate_schedule,
@@ -998,6 +1000,8 @@ create_event_block_op = _registrar.register(
       HandlerAmbiguousError: 409,
       TemplateInterpolationError: 422,
       EngineValidationError: 422,
+      HandlerMetadataValidationError: 422,
+      DisposalScheduleNotFoundError: 404,
       ValueError: 422,
     },
   )
@@ -1305,25 +1309,11 @@ truncate_schedule_op = _registrar.register(
   )
 )
 
-dispose_schedule_op = _registrar.register(
-  OperationSpec(
-    name="dispose-schedule",
-    summary="Dispose Schedule (Sale or Abandonment)",
-    description=(
-      "Atomically truncate a schedule past the disposal date and create a "
-      "balanced disposal closing entry. Computes accumulated depreciation "
-      "from the schedule's own facts, derives net book value and gain/loss, "
-      "removes forward facts, and books the disposal entry in one call. "
-      "Use when an asset is sold or abandoned before the schedule runs to "
-      "completion. For abandonment with no proceeds, omit `sale_proceeds` "
-      "and `proceeds_element_id`."
-    ),
-    command=cmd_dispose_schedule,
-    request_model=DisposeScheduleRequest,
-    error_map={ValueError: 422, ScheduleNotFoundError: 404},
-    mark_stale_reason="schedule_disposed",
-  )
-)
+# Asset disposal is now handled via create-event-block with
+# event_type='asset_disposed' (Phase 4b of the event-driven ledger). The
+# standalone dispose-schedule operation was retired — its logic moved into
+# the Python handler registry at operations/roboledger/commands/event_block/
+# python_handlers/asset_disposed.py.
 
 
 @router.post(

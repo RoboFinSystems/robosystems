@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -29,6 +30,8 @@ from robosystems.models.extensions.roboledger.dimension_junctions import (
 from robosystems.models.extensions.roboledger.event import Event
 
 from .engine import EngineValidationError, apply_handler
+from .python_handlers import get_python_handler
+from .python_handlers.types import HandlerMetadataValidationError
 from .registry import (
   HandlerAmbiguousError,
   HandlerNotFoundError,
@@ -101,6 +104,32 @@ def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
   )
 
 
+def _build_event_row(
+  body: CreateEventBlockRequest,
+  created_by: str,
+  status: str,
+) -> Event:
+  return Event(
+    event_type=body.event_type,
+    event_category=body.event_category,
+    agent_id=body.agent_id,
+    resource_type=body.resource_type,
+    resource_element_id=body.resource_element_id,
+    occurred_at=body.occurred_at,
+    effective_at=body.effective_at,
+    source=body.source,
+    external_id=body.external_id,
+    external_url=body.external_url,
+    amount=body.amount,
+    currency=body.currency,
+    description=body.description,
+    metadata_=body.metadata,
+    status=status,
+    created_at=datetime.now(UTC),
+    created_by=created_by,
+  )
+
+
 def create_event_block(
   session: Session,
   body: CreateEventBlockRequest,
@@ -109,13 +138,44 @@ def create_event_block(
   """Persist an event block, optionally firing the handler engine.
 
   apply_handlers=False: capture-only (Phase 1 behaviour, status='captured').
-  apply_handlers=True:  resolves handler, fires template, status='classified'.
+  apply_handlers=True: resolves handler and fires it atomically.
+
+  Handler resolution:
+    1. Python registry (hub-defined complex workflows, e.g., asset_disposed)
+    2. DSL registry (event_handlers table, tenant-configurable simple templates)
 
   On validation failure (no handler, ambiguous, template error, engine error)
   nothing is persisted — the exception propagates and the caller's session
   rolls back.
   """
   if body.apply_handlers:
+    # 1. Python registry wins over DSL registry
+    python_handler = get_python_handler(body.event_type)
+    if python_handler is not None:
+      try:
+        typed_metadata = python_handler.metadata_schema.model_validate(body.metadata)
+      except ValidationError as e:
+        raise HandlerMetadataValidationError(
+          f"event_type='{body.event_type}' metadata validation failed: {e}"
+        )
+
+      event = _build_event_row(body, created_by, status=python_handler.target_status)
+      session.add(event)
+      session.flush()
+
+      if body.dimension_ids:
+        session.execute(
+          event_dimensions.insert(),
+          [{"event_id": event.id, "dimension_id": d} for d in body.dimension_ids],
+        )
+
+      # Handler executes; errors roll back the whole unit of work.
+      python_handler.dispatch(session, event, typed_metadata, created_by)
+
+      session.commit()
+      return _to_envelope(event, body.dimension_ids)
+
+    # 2. Fall through to the DSL registry (Phase 3 path)
     handler = resolve_handler(
       session,
       event_type=body.event_type,
@@ -126,26 +186,7 @@ def create_event_block(
       metadata=body.metadata,
     )
 
-    # Insert event first (flush gives it an id)
-    event = Event(
-      event_type=body.event_type,
-      event_category=body.event_category,
-      agent_id=body.agent_id,
-      resource_type=body.resource_type,
-      resource_element_id=body.resource_element_id,
-      occurred_at=body.occurred_at,
-      effective_at=body.effective_at,
-      source=body.source,
-      external_id=body.external_id,
-      external_url=body.external_url,
-      amount=body.amount,
-      currency=body.currency,
-      description=body.description,
-      metadata_=body.metadata,
-      status="classified",
-      created_at=datetime.now(UTC),
-      created_by=created_by,
-    )
+    event = _build_event_row(body, created_by, status="classified")
     session.add(event)
     session.flush()
 
@@ -231,6 +272,42 @@ def update_event_block(
   return _to_envelope(event, _load_dimension_ids(session, event.id))
 
 
+def _python_preview_to_response(preview) -> PreviewEventBlockResponse:
+  """Map a Python HandlerPreview to the public PreviewEventBlockResponse shape."""
+  planned: list[TransactionPreview] = []
+  for entry_idx, entry in enumerate(preview.planned_entries):
+    line_items = entry.get("line_items", [])
+    # Python handlers emit multi-leg entries; expose them as a simple list
+    # with (entry_index, debit_element_id, credit_element_id) where possible.
+    # For entries with >2 legs (disposal), pick the first debit + first credit
+    # pair as a summary — full detail is available in handler_metadata /
+    # the echoed planned_entries via the underlying preview data.
+    first_debit = next((li for li in line_items if li.get("debit_amount", 0) > 0), None)
+    first_credit = next(
+      (li for li in line_items if li.get("credit_amount", 0) > 0), None
+    )
+    if first_debit and first_credit:
+      debit_amount = first_debit.get("debit_amount", 0)
+      credit_amount = first_credit.get("credit_amount", 0)
+      planned.append(
+        TransactionPreview(
+          entry_index=entry_idx,
+          debit_element_id=first_debit.get("element_id", ""),
+          credit_element_id=first_credit.get("element_id", ""),
+          amount_cents=debit_amount,
+          interpolated_debit_amount=str(debit_amount),
+          interpolated_credit_amount=str(credit_amount),
+        )
+      )
+  return PreviewEventBlockResponse(
+    matched_handler=None,  # Python handlers aren't rows in event_handlers
+    planned_transactions=planned,
+    validation_errors=preview.validation_errors,
+    would_succeed=preview.would_succeed,
+    handler_metadata=preview.computed_values,
+  )
+
+
 def preview_event_block(
   session: Session,
   body: CreateEventBlockRequest,
@@ -238,12 +315,27 @@ def preview_event_block(
 ) -> PreviewEventBlockResponse:
   """Dry-run: resolve handler + evaluate template, return plan without persisting.
 
-  Uses a savepoint so the session is rolled back after inspection.
-  Returns PreviewEventBlockResponse with matched_handler, planned_transactions,
-  and any validation_errors — no rows written.
+  Python registry wins over DSL registry, same as create_event_block.
+  No rows are written.
   """
   from robosystems.operations.roboledger.reads.event_handler import handler_to_response
 
+  # 1. Python registry
+  python_handler = get_python_handler(body.event_type)
+  if python_handler is not None:
+    try:
+      typed_metadata = python_handler.metadata_schema.model_validate(body.metadata)
+    except ValidationError as e:
+      return PreviewEventBlockResponse(
+        matched_handler=None,
+        planned_transactions=[],
+        validation_errors=[f"metadata validation: {e}"],
+        would_succeed=False,
+      )
+    preview = python_handler.dispatch_preview(session, body, typed_metadata)
+    return _python_preview_to_response(preview)
+
+  # 2. DSL registry fallback
   errors: list[str] = []
   matched_handler_response = None
   planned: list[TransactionPreview] = []

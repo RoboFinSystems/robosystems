@@ -16,8 +16,6 @@ from robosystems.models.api.extensions.schedules import (
   CreateManualClosingEntryRequest,
   CreateScheduleRequest,
   DeleteScheduleRequest,
-  DisposeScheduleRequest,
-  DisposeScheduleResponse,
   ScheduleCreatedResponse,
   TruncateScheduleOperation,
   TruncateScheduleResponse,
@@ -219,7 +217,7 @@ def truncate_schedule(
   # The SumEquals rule was created with expected_total = original_amount.
   # After truncation, remaining facts sum to less than that — the rule
   # would produce a permanent false failure. Remove it (and its VRs)
-  # so the rule engine stays clean. Same pattern as dispose_schedule.
+  # so the rule engine stays clean. Same pattern the asset_disposed handler uses.
   session.execute(
     text(
       "DELETE FROM verification_results WHERE rule_id IN ("
@@ -392,159 +390,11 @@ def update_schedule(
   )
 
 
-def dispose_schedule(
-  session: Session,
-  body: DisposeScheduleRequest,
-  created_by: str,
-) -> DisposeScheduleResponse:
-  """Atomically truncate a schedule and create the disposal closing entry.
-
-  Computes accumulated depreciation from the schedule's own instant facts,
-  derives NBV and gain/loss, truncates forward facts past disposal_date,
-  then creates a balanced multi-line disposal closing entry.
-
-  Raises `ValueError` for validation failures — caller maps to 422.
-  Raises `ScheduleNotFoundError` if the schedule does not exist.
-  """
-  structure = _load_schedule_or_404(session, body.structure_id)
-  mechanics = structure.artifact_mechanics or {}
-  sm = mechanics.get("schedule_metadata") or {}
-  et = mechanics.get("entry_template") or {}
-
-  original_amount: int = int(sm.get("original_amount") or 0)
-  asset_element_id: str | None = sm.get("asset_element_id")
-  credit_element_id: str | None = et.get(
-    "credit_element_id"
-  )  # accumulated depreciation
-
-  if not asset_element_id:
-    raise ValueError(
-      "dispose-schedule requires schedule_metadata.asset_element_id "
-      "(the balance-sheet asset element). Update the schedule first."
-    )
-  if not credit_element_id:
-    raise ValueError("dispose-schedule requires entry_template.credit_element_id.")
-
-  # Accumulated depreciation = most recent cumulative instant fact up to disposal_date
-  acc_row = session.execute(
-    text(
-      "SELECT value FROM facts "
-      "WHERE structure_id = :sid AND element_id = :eid "
-      "AND period_type = 'instant' AND period_end <= :d "
-      "ORDER BY period_end DESC LIMIT 1"
-    ),
-    {"sid": structure.id, "eid": credit_element_id, "d": body.disposal_date},
-  ).fetchone()
-  accumulated_depreciation_dollars = float(acc_row.value) if acc_row else 0.0
-  accumulated_depreciation = round(accumulated_depreciation_dollars * 100)
-
-  net_book_value = original_amount - accumulated_depreciation
-  sale_proceeds = body.sale_proceeds or 0
-  gain_loss = sale_proceeds - net_book_value
-
-  if sale_proceeds > 0 and not body.proceeds_element_id:
-    raise ValueError("proceeds_element_id is required when sale_proceeds > 0.")
-  if net_book_value != 0 and gain_loss != 0 and not body.gain_loss_element_id:
-    raise ValueError(
-      "gain_loss_element_id is required when net book value > 0 and "
-      "the disposal produces a gain or loss."
-    )
-
-  # Truncate forward facts
-  service = ScheduleService()
-  trunc_result = service.truncate_schedule(
-    session,
-    structure_id=body.structure_id,
-    new_end_date=body.disposal_date,
-    reason=body.reason,
-    updated_by=created_by,
-  )
-
-  # The auto-generated SumEquals rule is no longer valid after disposal —
-  # forward facts are gone so the sum will never equal original_amount again.
-  # Delete verification_results first (FK → rules), then the rule itself.
-  session.execute(
-    text(
-      "DELETE FROM verification_results WHERE rule_id IN ("
-      "  SELECT id FROM rules"
-      "  WHERE target_structure_id = :sid"
-      "  AND rule_pattern = 'SumEquals'"
-      "  AND rule_origin = 'native'"
-      ")"
-    ),
-    {"sid": body.structure_id},
-  )
-  session.query(Rule).filter(
-    Rule.target_structure_id == body.structure_id,
-    Rule.rule_pattern == "SumEquals",
-    Rule.rule_origin == "native",
-  ).delete(synchronize_session=False)
-
-  # Build balanced disposal line items (all amounts in cents)
-  line_items: list[dict] = [
-    # DR accumulated depreciation (remove the contra account)
-    {
-      "element_id": credit_element_id,
-      "debit_amount": accumulated_depreciation,
-      "credit_amount": 0,
-      "description": "Remove accumulated depreciation",
-    },
-    # CR asset at cost
-    {
-      "element_id": asset_element_id,
-      "debit_amount": 0,
-      "credit_amount": original_amount,
-      "description": "Remove asset at cost",
-    },
-  ]
-  if sale_proceeds > 0 and body.proceeds_element_id:
-    line_items.append(
-      {
-        "element_id": body.proceeds_element_id,
-        "debit_amount": sale_proceeds,
-        "credit_amount": 0,
-        "description": "Sale proceeds",
-      }
-    )
-  if gain_loss > 0 and body.gain_loss_element_id:
-    line_items.append(
-      {
-        "element_id": body.gain_loss_element_id,
-        "debit_amount": 0,
-        "credit_amount": gain_loss,
-        "description": "Gain on disposal",
-      }
-    )
-  elif gain_loss < 0 and body.gain_loss_element_id:
-    line_items.append(
-      {
-        "element_id": body.gain_loss_element_id,
-        "debit_amount": abs(gain_loss),
-        "credit_amount": 0,
-        "description": "Loss on disposal",
-      }
-    )
-
-  entry_result = service.create_manual_closing_entry(
-    session,
-    posting_date=body.disposal_date,
-    line_items=line_items,
-    memo=body.memo,
-    created_by=created_by,
-    entry_type="closing",
-  )
-  session.commit()
-
-  return DisposeScheduleResponse(
-    structure_id=body.structure_id,
-    disposal_date=body.disposal_date,
-    original_amount=original_amount,
-    accumulated_depreciation=accumulated_depreciation,
-    net_book_value=net_book_value,
-    gain_loss=gain_loss,
-    facts_deleted=trunc_result.get("facts_deleted", 0),
-    closing_entry=_build_closing_entry_response(entry_result),
-  )
+# Asset disposal was retired as a standalone operation in Phase 4b of the
+# event-driven ledger. The atomic truncate + SumEquals cleanup + balanced
+# disposal entry logic now lives in the Python handler registry at
+# operations/roboledger/commands/event_block/python_handlers/asset_disposed.py
+# and is invoked via create-event-block(event_type='asset_disposed').
 
 
 def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:

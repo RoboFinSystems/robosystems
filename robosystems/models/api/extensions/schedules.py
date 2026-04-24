@@ -273,62 +273,7 @@ class DeleteScheduleRequest(BaseModel):
   structure_id: str
 
 
-class DisposeScheduleRequest(BaseModel):
-  """Dispose a schedule early — combines truncation with a disposal closing entry.
-
-  Computes net book value from the schedule's own facts, truncates forward
-  periods, and creates a balanced disposal entry in one atomic operation.
-  Use when an asset is sold or abandoned before the schedule runs to completion.
-  """
-
-  structure_id: str = Field(..., description="Target schedule structure ID.")
-  disposal_date: date = Field(
-    ...,
-    description=(
-      "Last day of the final period (month-end). Forward facts past this "
-      "date are deleted; the disposal entry is posted on this date."
-    ),
-  )
-  sale_proceeds: int | None = Field(
-    None,
-    ge=0,
-    description=(
-      "Cash received from the sale in cents. None or 0 for abandonment "
-      "(no cash received). If provided, `proceeds_element_id` is required."
-    ),
-  )
-  proceeds_element_id: str | None = Field(
-    None,
-    description="Element to debit for sale proceeds (e.g., Cash or AR). Required when sale_proceeds > 0.",
-  )
-  gain_loss_element_id: str | None = Field(
-    None,
-    description=(
-      "Element for gain or loss on disposal. Required when net book value > 0 "
-      "after applying sale proceeds. Optional when asset is fully depreciated "
-      "(NBV = 0, no gain/loss line needed)."
-    ),
-  )
-  memo: str = Field(
-    ..., min_length=1, description="Memo for the disposal closing entry."
-  )
-  reason: str = Field(
-    ..., min_length=1, description="Reason for disposal (audit trail)."
-  )
-
-
-class DisposeScheduleResponse(BaseModel):
-  structure_id: str
-  disposal_date: date
-  original_amount: int = Field(..., description="Original cost basis in cents.")
-  accumulated_depreciation: int = Field(
-    ..., description="Total depreciation posted through disposal_date in cents."
-  )
-  net_book_value: int = Field(
-    ..., description="Remaining book value at disposal in cents."
-  )
-  gain_loss: int = Field(
-    ..., description="Gain (positive) or loss (negative) on disposal in cents."
-  )
-  facts_deleted: int
-  closing_entry: ClosingEntryResponse
+# DisposeScheduleRequest / DisposeScheduleResponse retired in Phase 4b.
+# Asset disposal is now an event block: `create-event-block(event_type='asset_disposed')`.
+# See operations/roboledger/commands/event_block/python_handlers/asset_disposed.py
+# for the metadata schema (AssetDisposedMetadata).

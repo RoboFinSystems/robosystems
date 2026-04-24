@@ -168,3 +168,11 @@ class PreviewEventBlockResponse(BaseModel):
   planned_transactions: list[TransactionPreview] = Field(default_factory=list)
   validation_errors: list[str] = Field(default_factory=list)
   would_succeed: bool
+  handler_metadata: dict = Field(
+    default_factory=dict,
+    description=(
+      "Handler-specific compute output. For Python handlers like "
+      "'asset_disposed', includes NBV, gain/loss, accumulated depreciation. "
+      "Empty for DSL-handler previews."
+    ),
+  )

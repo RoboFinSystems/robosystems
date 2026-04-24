@@ -36,6 +36,11 @@ class Entry(ExtensionsBase):
       "source_structure_id",
       postgresql_where="source_structure_id IS NOT NULL",
     ),
+    Index(
+      "idx_entries_triggered_by_event",
+      "triggered_by_event_id",
+      postgresql_where="triggered_by_event_id IS NOT NULL",
+    ),
     CheckConstraint(
       "status IN ('draft', 'posted', 'reversed')",
       name="check_entry_status",
@@ -60,6 +65,13 @@ class Entry(ExtensionsBase):
 
   # Provenance — links closing entries back to the schedule structure they came from
   source_structure_id = Column(String, nullable=True)
+
+  # Event audit chain — links this entry to the business event that caused it.
+  # Null for legacy entries; set by event handlers (e.g., asset_disposed).
+  # Parallel to transactions.triggered_by_event_id but covers the Entry-only
+  # case (closing entries created via create_manual_closing_entry have no
+  # parent Transaction row).
+  triggered_by_event_id = Column(String, nullable=True)
 
   # Origin tracking — where this entry came from
   provenance = Column(

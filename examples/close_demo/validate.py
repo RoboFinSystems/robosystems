@@ -186,7 +186,7 @@ class _Validator:
   # ── Dispose smoke test ───────────────────────────────────────────────────
 
   def dispose_smoke_test(self, dr_id: str, cr_id: str) -> None:
-    self._sub("dispose-schedule smoke test")
+    self._sub("asset_disposed event block smoke test")
     if not dr_id or not cr_id:
       self._skip("dispose test", "element IDs unavailable")
       return
@@ -220,36 +220,72 @@ class _Validator:
       self._check("throwaway schedule created", False, str(exc))
       return
 
+    # Preview the disposal first — confirm NBV/gain-loss computation
+    # before firing the handler for real.
+    try:
+      preview = self._op(
+        "preview-event-block",
+        {
+          "event_type": "asset_disposed",
+          "event_category": "adjustment",
+          "source": "native",
+          "occurred_at": "2026-03-31T00:00:00Z",
+          "metadata": {
+            "schedule_id": sid,
+            "proceeds": 0,
+            "gain_loss_element_id": dr_id,
+            "memo": "Validation disposal",
+            "reason": "e2e test",
+          },
+          "apply_handlers": True,
+        },
+      ).get("result", {})
+      self._check(
+        "preview would_succeed",
+        preview.get("would_succeed") is True,
+        f"errors={preview.get('validation_errors')}",
+      )
+      computed = preview.get("handler_metadata") or {}
+      nbv_preview = computed.get("nbv_cents", -1)
+      gain_loss_preview = computed.get("gain_loss_cents")
+      self._check("preview NBV > 0", nbv_preview > 0, f"{nbv_preview} cents")
+      self._check(
+        "preview gain_loss < 0 (loss)",
+        gain_loss_preview is not None and gain_loss_preview < 0,
+        f"{gain_loss_preview} cents",
+      )
+    except Exception as exc:
+      self._check("preview-event-block call", False, str(exc))
+      return
+
+    # Execute the disposal via create-event-block
     try:
       payload = self._op(
-        "dispose-schedule",
+        "create-event-block",
         {
-          "structure_id": sid,
-          "disposal_date": "2026-03-31",
-          "sale_proceeds": None,
-          "proceeds_element_id": None,
-          "gain_loss_element_id": dr_id,
-          "memo": "Validation disposal",
-          "reason": "e2e test",
+          "event_type": "asset_disposed",
+          "event_category": "adjustment",
+          "source": "native",
+          "occurred_at": "2026-03-31T00:00:00Z",
+          "metadata": {
+            "schedule_id": sid,
+            "proceeds": 0,
+            "gain_loss_element_id": dr_id,
+            "memo": "Validation disposal",
+            "reason": "e2e test",
+          },
+          "apply_handlers": True,
         },
       ).get("result", {})
 
-      nbv = payload.get("net_book_value", -1)
-      gain_loss = payload.get("gain_loss")
-      entry = payload.get("closing_entry", {})
-      self._check("NBV > 0", nbv > 0, f"{nbv} cents")
       self._check(
-        "gain_loss < 0 (loss)",
-        gain_loss is not None and gain_loss < 0,
-        f"{gain_loss} cents",
+        "event status = fulfilled",
+        payload.get("status") == "fulfilled",
+        f"status={payload.get('status')}",
       )
-      self._check(
-        "closing_entry created",
-        entry.get("outcome") in ("created", "unchanged"),
-        f"outcome={entry.get('outcome')}",
-      )
+      self._check("event id returned", bool(payload.get("id")), payload.get("id", ""))
     except Exception as exc:
-      self._check("dispose-schedule call", False, str(exc))
+      self._check("create-event-block(asset_disposed) call", False, str(exc))
       return
 
     try:
