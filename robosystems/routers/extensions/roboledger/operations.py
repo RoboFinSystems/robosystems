@@ -615,11 +615,10 @@ link_entity_taxonomy_op = _registrar.register(
     name="link-entity-taxonomy",
     summary="Link Entity to Taxonomy",
     description=(
-      "Link the graph's entity to a taxonomy (creates the "
-      "ENTITY_HAS_TAXONOMY edge). Idempotent — returns existing "
-      "linkage if it already exists. Required after creating a CoA "
-      "taxonomy so the platform knows which chart of accounts the "
-      "entity reports under."
+      "Link the graph's entity to a taxonomy. Idempotent — returns "
+      "existing linkage if it already exists. CoA blocks auto-link "
+      "at create time; use this only to switch the primary CoA or "
+      "link a reporting extension / custom ontology explicitly."
     ),
     command=cmd_link_entity_taxonomy,
     request_model=LinkEntityTaxonomyRequest,

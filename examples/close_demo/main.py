@@ -260,10 +260,6 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
   )
   coa_taxonomy_id = envelope["id"]
 
-  client.link_entity_taxonomy(
-    graph_id, coa_taxonomy_id, basis="chart_of_accounts", is_primary=True
-  )
-
   element_lookup: dict[str, str] = {
     (e.get("qname") or "").split(":", 1)[-1]: e["id"]
     for e in envelope.get("elements", [])

@@ -28,6 +28,8 @@ from robosystems.models.extensions import (
   Classification,
   Element,
   ElementClassification,
+  Entity,
+  EntityTaxonomy,
   Structure,
   Taxonomy,
 )
@@ -135,6 +137,45 @@ def _qname_for_coa(standard: str | None, code: str | None, name: str) -> str:
   ns = standard or "coa"
   token = code or name.replace(" ", "")
   return f"{ns}:{token}"
+
+
+def _auto_link_entity(session: Session, taxonomy_id: str, created_by: str) -> None:
+  """Link the graph entity to this CoA as primary chart_of_accounts.
+
+  No-op when no entity exists in the graph (e.g. during tests or
+  seeding). Clears any existing primary CoA link before setting the new
+  one — only one primary CoA per entity at a time.
+  """
+  entity = session.execute(select(Entity).limit(1)).scalar_one_or_none()
+  if entity is None:
+    return
+
+  existing = session.execute(
+    select(EntityTaxonomy).where(
+      EntityTaxonomy.entity_id == entity.id,
+      EntityTaxonomy.taxonomy_id == taxonomy_id,
+      EntityTaxonomy.basis == "chart_of_accounts",
+    )
+  ).scalar_one_or_none()
+  if existing:
+    return
+
+  session.query(EntityTaxonomy).filter(
+    EntityTaxonomy.entity_id == entity.id,
+    EntityTaxonomy.basis == "chart_of_accounts",
+    EntityTaxonomy.is_primary.is_(True),
+  ).update({"is_primary": False}, synchronize_session=False)
+  session.flush()
+
+  session.add(
+    EntityTaxonomy(
+      entity_id=entity.id,
+      taxonomy_id=taxonomy_id,
+      basis="chart_of_accounts",
+      is_primary=True,
+    )
+  )
+  session.flush()
 
 
 def create(
@@ -284,6 +325,8 @@ def create(
       created_by,
     )
     session.flush()
+
+  _auto_link_entity(session, taxonomy.id, created_by)
 
   return taxonomy.id
 
