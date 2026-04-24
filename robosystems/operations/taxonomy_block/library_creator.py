@@ -326,6 +326,16 @@ def _resolve_element_id(session: Session, qname: str) -> str | None:
   return row
 
 
+def _bulk_resolve_element_ids(session: Session, qnames: set[str]) -> dict[str, str]:
+  """Single query resolving all qnames at once. Returns {qname: element_id}."""
+  if not qnames:
+    return {}
+  rows = session.execute(
+    select(Element.qname, Element.id).where(Element.qname.in_(qnames))
+  ).all()
+  return {row[0]: row[1] for row in rows}
+
+
 def _resolve_classification_id(
   session: Session, category: str, identifier: str
 ) -> str | None:
@@ -356,10 +366,16 @@ def create_library_arcs(
 
   default_struct_id = _structure_id(_default_role_uri(package))
 
+  # Bulk-resolve all qnames needed by associations and classification
+  # assignments in one query to avoid O(N) round trips for large packages.
+  all_qnames = {q for a in package.associations for q in (a.from_qname, a.to_qname)}
+  all_qnames |= {asn.element_qname for asn in package.classification_assignments}
+  element_id_map = _bulk_resolve_element_ids(session, all_qnames)
+
   unresolved: list[tuple[str, str, str]] = []
   for assoc in package.associations:
-    from_id = _resolve_element_id(session, assoc.from_qname)
-    to_id = _resolve_element_id(session, assoc.to_qname)
+    from_id = element_id_map.get(assoc.from_qname)
+    to_id = element_id_map.get(assoc.to_qname)
     if from_id is None or to_id is None:
       unresolved.append((assoc.from_qname, assoc.to_qname, assoc.association_type))
       continue
@@ -399,7 +415,7 @@ def create_library_arcs(
 
   skipped_assignments: list[ClassificationAssignmentSpec] = []
   for asn in package.classification_assignments:
-    elem_id = _resolve_element_id(session, asn.element_qname)
+    elem_id = element_id_map.get(asn.element_qname)
     if elem_id is None:
       skipped_assignments.append(asn)
       continue

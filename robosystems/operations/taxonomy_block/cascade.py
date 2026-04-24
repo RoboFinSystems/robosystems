@@ -67,21 +67,7 @@ def preflight_delete(session: Session, taxonomy_id: str) -> DeletePreflight:
     .all()
   )
 
-  cross_mapping_rows = session.execute(
-    select(Association.id)
-    .join(Structure, Association.structure_id == Structure.id)
-    .where(
-      Structure.taxonomy_id != taxonomy_id,
-      (
-        Association.from_element_id.in_(element_ids)
-        | Association.to_element_id.in_(element_ids)
-      ),
-    )
-    .limit(10)
-  ).all()
-  cross_mapping_ids = [row[0] for row in cross_mapping_rows]
-
-  cross_mapping_total = (
+  all_cross_mapping_ids = (
     session.execute(
       select(Association.id)
       .join(Structure, Association.structure_id == Structure.id)
@@ -100,8 +86,8 @@ def preflight_delete(session: Session, taxonomy_id: str) -> DeletePreflight:
   return DeletePreflight(
     fact_count=len(fact_count),
     line_item_count=len(line_item_count),
-    cross_taxonomy_mapping_count=len(cross_mapping_total),
-    cross_taxonomy_mapping_ids=cross_mapping_ids,
+    cross_taxonomy_mapping_count=len(all_cross_mapping_ids),
+    cross_taxonomy_mapping_ids=list(all_cross_mapping_ids[:10]),
   )
 
 

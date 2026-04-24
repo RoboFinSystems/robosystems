@@ -202,24 +202,20 @@ class TestCreateLibraryTaxonomyElements:
 
 
 class TestCreateLibraryArcs:
-  def _session_resolves(self, qname_to_id: dict[str, str | None]) -> MagicMock:
-    """Return a session mock whose execute().scalar_one_or_none() resolves qnames."""
+  def _session_with_element_map(self, qname_to_id: dict[str, str]) -> MagicMock:
+    """Mock session where _bulk_resolve_element_ids returns the given map.
+
+    _bulk_resolve_element_ids calls session.execute(...).all() and expects a
+    sequence of (qname, id) tuples.  _resolve_classification_id still calls
+    session.execute(...).scalar_one_or_none(), so both can be configured
+    independently on the same return_value mock.
+    """
     session = MagicMock()
-
-    def _scalar(*args, **kwargs):
-      mock = MagicMock()
-      # Capture qname from the WHERE clause binding when possible; fall back
-      # to returning a stable id for any qname that has an entry.
-      mock.scalar_one_or_none.return_value = None
-      return mock
-
-    session.execute.side_effect = _scalar
+    session.execute.return_value.all.return_value = list(qname_to_id.items())
     return session
 
   def test_skips_unresolved_qnames(self) -> None:
-    session = MagicMock()
-    # scalar_one_or_none returns None → unresolved
-    session.execute.return_value.scalar_one_or_none.return_value = None
+    session = self._session_with_element_map({})
     assoc = AssociationSpec(
       from_qname="fac:Assets",
       to_qname="fac:CashAndCashEquivalents",
@@ -232,9 +228,9 @@ class TestCreateLibraryArcs:
     assert counts["associations_skipped"] == 1
 
   def test_writes_association_when_resolved(self) -> None:
-    session = MagicMock()
-    # First two execute calls resolve from/to qnames; rest are inserts.
-    session.execute.return_value.scalar_one_or_none.return_value = "elem_resolved_id"
+    session = self._session_with_element_map(
+      {"fac:Assets": "elem_from_id", "fac:Cash": "elem_to_id"}
+    )
     assoc = AssociationSpec(
       from_qname="fac:Assets",
       to_qname="fac:Cash",
@@ -247,8 +243,7 @@ class TestCreateLibraryArcs:
     assert counts["associations_skipped"] == 0
 
   def test_skips_unresolved_classification_assignment(self) -> None:
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = None
+    session = self._session_with_element_map({})
     asn = ClassificationAssignmentSpec(
       element_qname="fac:Assets",
       category="elementsOfFinancialStatements",
@@ -260,8 +255,8 @@ class TestCreateLibraryArcs:
     assert counts["classification_assignments_skipped"] == 1
 
   def test_writes_classification_assignment_when_resolved(self) -> None:
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = "some_id"
+    session = self._session_with_element_map({"fac:Assets": "elem_id"})
+    session.execute.return_value.scalar_one_or_none.return_value = "cls_id"
     asn = ClassificationAssignmentSpec(
       element_qname="fac:Assets",
       category="elementsOfFinancialStatements",

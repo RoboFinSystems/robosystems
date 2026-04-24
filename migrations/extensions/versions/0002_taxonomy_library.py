@@ -1246,6 +1246,9 @@ def downgrade() -> None:
 
   for_each_tenant_schema(conn, _teardown_tenant)
   conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))
+  conn.execute(
+    text("DROP FUNCTION IF EXISTS public.raise_insert_into_library_structure()")
+  )
 
   # Delete library-origin data in FK-safe order.
   # Rules first — they FK structures / elements / associations.

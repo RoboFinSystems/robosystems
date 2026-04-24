@@ -329,7 +329,6 @@ class ElementUpdatePatch(BaseModel):
   period_type: str | None = None
   is_monetary: bool | None = None
   code: str | None = None
-  sub_classification: str | None = None
   parent_ref: str | None = None
   metadata: dict[str, Any] | None = None
 

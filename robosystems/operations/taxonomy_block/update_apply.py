@@ -304,8 +304,6 @@ def apply_elements_to_update(
       element.is_monetary = patch.is_monetary
     if patch.code is not None:
       element.code = patch.code
-    if patch.sub_classification is not None:
-      element.sub_classification = patch.sub_classification
     if patch.metadata is not None:
       element.metadata_ = dict(patch.metadata)
     if patch.parent_ref is not None:
@@ -404,12 +402,12 @@ def apply_structures_to_update(
       structure.name = patch.name
     if patch.description is not None:
       structure.description = patch.description
+    if patch.metadata is not None:
+      structure.metadata_ = dict(patch.metadata)
     if patch.role_uri is not None:
       metadata = dict(structure.metadata_ or {})
       metadata["role_uri"] = patch.role_uri
       structure.metadata_ = metadata
-    if patch.metadata is not None:
-      structure.metadata_ = dict(patch.metadata)
 
   session.flush()
 

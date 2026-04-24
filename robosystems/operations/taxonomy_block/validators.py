@@ -31,22 +31,23 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.taxonomy_block import (
   CreateTaxonomyBlockRequest,
-  TaxonomyBlockAssociationRequest,
   TaxonomyBlockElementRequest,
-  TaxonomyBlockRuleRequest,
 )
 from robosystems.models.extensions import Element
 from robosystems.operations.information_block.rules.expressions import (
   InvalidRuleExpression,
   parse_arithmetic_expression,
 )
+
+if TYPE_CHECKING:
+  pass
 
 
 @dataclass(frozen=True)
@@ -537,10 +538,3 @@ __all__ = [
   "ValidationIssue",
   "validate_create_envelope",
 ]
-
-
-# Silence import warnings for TaxonomyBlockAssociationRequest /
-# TaxonomyBlockRuleRequest — they're used only for type hints inside
-# phase helpers but imported for documentation + IDE help.
-_ = TaxonomyBlockAssociationRequest
-_ = TaxonomyBlockRuleRequest
