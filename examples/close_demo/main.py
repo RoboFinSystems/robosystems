@@ -219,55 +219,52 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
 
   Returns (element_lookup, coa_taxonomy_id, count).
   element_lookup maps account code → element ID for downstream use.
+
+  Uses the Taxonomy Block envelope — one POST creates the taxonomy, the
+  mapping structure, and every CoA element atomically.
   """
   from .data import ACCOUNTS
 
   client = _get_ledger_client()
 
-  # 1. Create CoA taxonomy
-  tax_result = client.create_taxonomy(
+  elements_payload = [
+    {
+      "qname": f"coa:{code}",
+      "name": name,
+      "classification": classification,
+      "balance_type": balance_type,
+      "description": description,
+      "code": code,
+      "sub_classification": sub_class,
+    }
+    for code, name, classification, sub_class, balance_type, description in ACCOUNTS
+  ]
+
+  envelope = client.create_taxonomy_block(
     graph_id,
     {
       "name": "Native Chart of Accounts",
       "taxonomy_type": "chart_of_accounts",
+      "description": "Tenant chart of accounts for Cascade Advisory Group LLC.",
+      "elements": elements_payload,
+      "structures": [
+        {
+          "name": "CoA to US GAAP Mapping",
+          "description": "Maps Chart of Accounts to US GAAP reporting concepts",
+          "structure_type": "coa_mapping",
+        },
+      ],
+      "associations": [],
+      "rules": [],
     },
   )
-  coa_taxonomy_id = tax_result["id"]
+  coa_taxonomy_id = envelope["id"]
 
-  # 2. Link entity → CoA taxonomy (ENTITY_HAS_TAXONOMY edge)
-  client.link_entity_taxonomy(
-    graph_id, coa_taxonomy_id, basis="chart_of_accounts", is_primary=True
-  )
-
-  # 3. Create mapping structure (coa_mapping) in the CoA taxonomy
-  client.create_structure(
-    graph_id,
-    {
-      "name": "CoA to US GAAP Mapping",
-      "description": "Maps Chart of Accounts to US GAAP reporting concepts",
-      "structure_type": "coa_mapping",
-      "taxonomy_id": coa_taxonomy_id,
-    },
-  )
-
-  # 4. Create elements (flat CoA — no parent hierarchy)
-  element_lookup: dict[str, str] = {}
-  for code, name, classification, _sub_class, balance_type, description in ACCOUNTS:
-    result = client.create_element(
-      graph_id,
-      {
-        "taxonomy_id": coa_taxonomy_id,
-        "code": code,
-        "name": name,
-        "classification": classification,
-        "balance_type": balance_type,
-        "description": description,
-        "source": SOURCE,
-        "external_id": code,
-        "external_source": SOURCE,
-      },
-    )
-    element_lookup[code] = result["id"]
+  element_lookup: dict[str, str] = {
+    (e.get("qname") or "").split(":", 1)[-1]: e["id"]
+    for e in envelope.get("elements", [])
+    if e.get("qname")
+  }
 
   return element_lookup, coa_taxonomy_id, len(ACCOUNTS)
 
@@ -363,8 +360,11 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
     if e.get("qname")
   }
 
-  # Build the associations list, skipping any CoA codes not in the element lookup
-  associations = []
+  # Walk MAPPINGS and post each association one-by-one. The bulk
+  # create-associations op was retired in Phase 1; mappings now go
+  # through create-mapping-association which takes a single pair. The
+  # demo's mapping set is ~20 rows so per-call latency is fine.
+  created = 0
   for coa_code, fac_qname in MAPPINGS:
     coa_id = element_lookup.get(coa_code)
     if not coa_id:
@@ -374,20 +374,15 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
     if not fac_id:
       print(f"  WARNING: FAC qname {fac_qname} not found in library")
       continue
-    associations.append(
-      {
-        "from_element_id": coa_id,
-        "to_element_id": fac_id,
-        "association_type": "mapping",
-        "order_value": 0.0,
-      }
+    client.create_mapping_association(
+      graph_id,
+      mapping_id=mapping_id,
+      from_element_id=coa_id,
+      to_element_id=fac_id,
     )
+    created += 1
 
-  if not associations:
-    return 0
-
-  result = client.create_associations(graph_id, mapping_id, associations)
-  return result.get("created", 0)
+  return created
 
 
 # ---------------------------------------------------------------------------
@@ -558,11 +553,12 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
       if block.get("taxonomy_name") == "Cascade Schedules":
         client.delete_schedule(graph_id, block["id"])
   else:
-    result = client.create_taxonomy(
+    result = client.create_taxonomy_block(
       graph_id,
       {
         "name": "Cascade Schedules",
         "taxonomy_type": "schedule",
+        "description": "Container for the demo's recurring closing schedules.",
       },
     )
     taxonomy_id = result["id"]

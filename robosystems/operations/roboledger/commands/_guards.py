@@ -31,8 +31,8 @@ class LibraryImmutableError(PermissionError):
   """Raised when a mutation targets a library-seeded row in a tenant schema.
 
   Library-origin rows are distinguished by ``created_by='library-seeder'``
-  (applied by ``robosystems/taxonomy/writers/library_writer.py`` during
-  the canonical JSON-LD load). Tenant schemas carry a copy of those rows
+  (applied by ``robosystems/operations/taxonomy_block/library_creator.py``
+  during the canonical JSON-LD load). Tenant schemas carry a copy of those rows
   for search-path shadowing; they are read-only from tenant-scoped command
   paths. Tenant authoring happens via tenant-origin rows that coexist with
   the library copy, distinguished by their own ``created_by`` audit value.

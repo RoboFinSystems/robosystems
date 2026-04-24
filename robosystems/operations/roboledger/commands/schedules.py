@@ -26,6 +26,7 @@ from robosystems.models.api.extensions.schedules import (
 from robosystems.models.extensions import (
   Association,
   AssociationClassification,
+  Element,
   FactSet,
   Rule,
   Structure,
@@ -82,6 +83,43 @@ def _build_closing_entry_response(result) -> ClosingEntryResponse:
   )
 
 
+def _validate_element_references(session: Session, body: CreateScheduleRequest) -> None:
+  """Check that every element id on the request actually exists.
+
+  Without this, a typo in ``entry_template.debit_element_id`` silently
+  succeeds and writes facts pointing at a phantom Element row — the
+  auto-rule generator then skips (qname lookup fails) leaving a
+  corrupted schedule with no rules and no error surfaced. Validate
+  up-front and fail with a clear 422 instead.
+  """
+  referenced: set[str] = set(body.element_ids)
+  referenced.add(body.entry_template.debit_element_id)
+  referenced.add(body.entry_template.credit_element_id)
+  if body.schedule_metadata and body.schedule_metadata.asset_element_id:
+    referenced.add(body.schedule_metadata.asset_element_id)
+
+  existing = set(
+    session.execute(select(Element.id).where(Element.id.in_(referenced))).scalars()
+  )
+  missing = referenced - existing
+  if missing:
+    raise ValueError(
+      f"Element(s) not found: {sorted(missing)}. "
+      f"Check that the element ids exist in this graph's taxonomy."
+    )
+
+  template_refs = {
+    body.entry_template.debit_element_id,
+    body.entry_template.credit_element_id,
+  }
+  undeclared = template_refs - set(body.element_ids)
+  if undeclared:
+    raise ValueError(
+      f"entry_template element(s) not declared in element_ids: "
+      f"{sorted(undeclared)}. Add them to element_ids."
+    )
+
+
 def create_schedule(
   session: Session,
   body: CreateScheduleRequest,
@@ -91,6 +129,7 @@ def create_schedule(
 
   Raises `ValueError` for validation failures — caller maps to 422.
   """
+  _validate_element_references(session, body)
   service = ScheduleService()
   et = EntryTemplate(
     debit_element_id=body.entry_template.debit_element_id,
@@ -108,6 +147,7 @@ def create_schedule(
       residual_value=body.schedule_metadata.residual_value,
       useful_life_months=body.schedule_metadata.useful_life_months,
       asset_element_id=body.schedule_metadata.asset_element_id,
+      periodic_amounts=body.schedule_metadata.periodic_amounts,
     )
 
   structure = service.create_schedule(
@@ -314,6 +354,7 @@ def update_schedule(
       "residual_value": body.schedule_metadata.residual_value,
       "useful_life_months": body.schedule_metadata.useful_life_months,
       "asset_element_id": body.schedule_metadata.asset_element_id,
+      "periodic_amounts": body.schedule_metadata.periodic_amounts,
     }
 
   structure.metadata_ = metadata

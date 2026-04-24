@@ -6,9 +6,9 @@ schemas. The pattern is bulk ``INSERT ... SELECT`` in FK order, preserving
 the library rows' deterministic UUID5 ids so re-running is idempotent.
 
 Library-origin rows are distinguished by ``created_by = 'library-seeder'``
-(applied in ``library_writer.py``). After the copy, tenant-schema
-immutability triggers (installed separately) key on that same audit field
-to raise on any UPDATE/DELETE against a library-seeded row.
+(applied by ``operations/taxonomy_block/library_creator.py``). After the copy,
+tenant-schema immutability triggers (installed separately) key on that same
+audit field to raise on any UPDATE/DELETE against a library-seeded row.
 """
 
 from __future__ import annotations
@@ -137,7 +137,7 @@ def copy_library_into_tenant(
     return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
   # Flatten the pin into a parameterized IN clause via VALUES.
-  # E.g., ("sfac6", "v1"), ("fac", "v1"), …
+  # E.g., ("fac", "v1"), ("rs-gaap", "v1"), …
   pin_values_sql = ", ".join(f"(:s{i}, :v{i})" for i in range(len(resolved_pin)))
   pin_params: dict[str, str] = {}
   for i, (std, ver) in enumerate(resolved_pin.items()):

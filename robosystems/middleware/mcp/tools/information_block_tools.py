@@ -169,6 +169,22 @@ has many blocks.
     limit = int(arguments.get("limit", 50))
     offset = int(arguments.get("offset", 0))
 
+    # MCP inputSchema declares minimum/maximum bounds for limit + offset,
+    # but the stdio server doesn't enforce them — some clients (and
+    # direct HTTP callers) pass out-of-range values. Reassert the bounds
+    # here so we match the declared contract instead of silently
+    # clamping.
+    if not 1 <= limit <= 1000:
+      return {
+        "error": "invalid_arguments",
+        "message": "limit must be between 1 and 1000",
+      }
+    if offset < 0:
+      return {
+        "error": "invalid_arguments",
+        "message": "offset must be >= 0",
+      }
+
     try:
       with extensions_session(graph_id) as session:
         envelopes = ops_list_information_blocks(

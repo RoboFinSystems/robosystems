@@ -589,7 +589,7 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
   version = doc.get("version", "v1")
   namespace_uri = doc.get("namespace_uri", "")
   description = doc.get("description")
-  taxonomy_type = doc.get("taxonomy_type", "reporting")
+  taxonomy_type = doc.get("taxonomy_type", "reporting_standard")
   name = f"{standard} {version}"
 
   # Parse with rdflib — it handles the @context expansion

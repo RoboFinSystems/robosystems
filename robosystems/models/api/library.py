@@ -33,7 +33,7 @@ class LibraryElementResponse(BaseModel):
   """A library element (concept, abstract, axis, member, or hypercube)."""
 
   id: str
-  qname: str = Field(..., description="Qualified name, e.g. 'sfac6:Assets'")
+  qname: str = Field(..., description="Qualified name, e.g. 'fac:Assets'")
   namespace: str | None = Field(None)
   name: str
   classification: str | None = Field(
@@ -54,7 +54,7 @@ class LibraryElementResponse(BaseModel):
   element_type: str = Field(
     ..., description="concept | abstract | axis | member | hypercube"
   )
-  source: str = Field(..., description="sfac6 | fac | us-gaap | rs-gaap | …")
+  source: str = Field(..., description="fac | us-gaap | rs-gaap | …")
   taxonomy_id: str | None = Field(None)
   parent_id: str | None = Field(None)
   labels: list[LibraryLabelResponse] = Field(default_factory=list)
@@ -62,14 +62,12 @@ class LibraryElementResponse(BaseModel):
 
 
 class LibraryTaxonomyResponse(BaseModel):
-  """A library taxonomy (sfac6, fac, us-gaap, rs-gaap, …)."""
+  """A library taxonomy (fac, us-gaap, rs-gaap, …)."""
 
   id: str
   name: str
   description: str | None = None
-  standard: str | None = Field(
-    None, description="sfac6 | fac | us-gaap | rs-gaap | ifrs"
-  )
+  standard: str | None = Field(None, description="fac | us-gaap | rs-gaap | ifrs")
   version: str | None = None
   namespace_uri: str | None = None
   taxonomy_type: str = Field(

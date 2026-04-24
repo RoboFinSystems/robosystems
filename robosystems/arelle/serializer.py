@@ -45,7 +45,7 @@ def serialize_jsonld(
   *,
   namespace_uri: str | None = None,
   description: str | None = None,
-  taxonomy_type: str = "reporting",
+  taxonomy_type: str = "reporting_standard",
 ) -> str:
   """Serialize an rdflib.Graph to canonical JSON-LD string.
 
@@ -55,7 +55,8 @@ def serialize_jsonld(
       version: Version identifier (v1, 2020, …).
       namespace_uri: Primary namespace URI (for metadata).
       description: Optional human-readable description.
-      taxonomy_type: chart_of_accounts | reporting | mapping | schedule.
+      taxonomy_type: chart_of_accounts | reporting_standard | reporting_extension
+        | custom_ontology | mapping | schedule.
 
   Returns:
       JSON-LD string ready to write to a seed file.

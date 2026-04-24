@@ -2,8 +2,8 @@
 
 These tests avoid live XBRL fetches by relying on the committed seed
 artifacts at `robosystems/taxonomy/seeds/`. They exercise the
-serializer/loader round-trip and the TaxonomyPackage + library_writer
-shape, but not the extractor (which needs a live ModelXbrl).
+serializer/loader round-trip and the TaxonomyPackage shape,
+but not the extractor (which needs a live ModelXbrl).
 
 Extractor unit tests are Phase 1 work — they require either a mocked
 Arelle model or a lightweight fixture package.

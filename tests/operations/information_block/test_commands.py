@@ -180,7 +180,7 @@ class TestUpdateInformationBlock:
     mock_build = MagicMock(return_value=expected)
     patched = _schedule_entry_with(mock_update=mock_update, mock_build=mock_build)
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
-      result = update_information_block(session, body, updated_by="usr_1")
+      result = update_information_block(session, body, created_by="usr_1")
 
     assert result is expected
     mock_update.assert_called_once()
@@ -193,7 +193,7 @@ class TestUpdateInformationBlock:
     session = MagicMock()
     body = UpdateInformationBlockRequest(block_type="nonsense", payload={})
     with pytest.raises(ValueError, match="Unknown block_type"):
-      update_information_block(session, body, updated_by="usr_1")
+      update_information_block(session, body, created_by="usr_1")
 
   @pytest.mark.parametrize(
     "block_type",
@@ -203,7 +203,7 @@ class TestUpdateInformationBlock:
     session = MagicMock()
     body = UpdateInformationBlockRequest(block_type=block_type, payload={})
     with pytest.raises(NotImplementedError, match="library-seeded"):
-      update_information_block(session, body, updated_by="usr_1")
+      update_information_block(session, body, created_by="usr_1")
 
 
 class TestDeleteInformationBlock:

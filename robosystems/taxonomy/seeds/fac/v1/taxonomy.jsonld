@@ -125,7 +125,7 @@
   },
   "standard": "fac",
   "version": "v1",
-  "taxonomy_type": "reporting",
+  "taxonomy_type": "reporting_standard",
   "namespace_uri": "http://xbrlsite.com/fac/",
   "forked_from": {
     "author": "Charlie Hoffman",

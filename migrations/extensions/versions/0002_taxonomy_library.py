@@ -98,8 +98,11 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
 )
 _WIDENED_TAXONOMY_TYPE_CHECK = (
   "taxonomy_type IN ("
+  # 'reporting' retained transitionally so 0001-era rows survive the widen;
+  # they're immediately backfilled to 'reporting_standard' right after.
   "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
-  "'classification-vocabulary', 'classification-assignment', 'rules'"
+  "'classification-vocabulary', 'classification-assignment', 'rules', "
+  "'reporting_standard', 'reporting_extension', 'custom_ontology'"
   ")"
 )
 _NARROW_TAXONOMY_TYPE_CHECK = (
@@ -155,24 +158,34 @@ _RULE_PATTERN_CHECK = (
   "rule_pattern IN ("
   "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
   "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
-  "'SumEquals', 'Variance'"
+  "'SumEquals', 'Variance', "
+  "'LeafHasClassification', 'LibraryOriginImmutability', "
+  "'NoCycles', 'NoOrphanArcs', 'ParentBeforeChild', "
+  "'UniqueQNameInTaxonomy'"
   ")"
 )
 _RULE_SEVERITY_CHECK = "rule_severity IN ('info', 'warning', 'error')"
-_RULE_ORIGIN_CHECK = "rule_origin IN ('forked', 'native')"
+_RULE_ORIGIN_CHECK = "rule_origin IN ('forked', 'native', 'auto')"
 # Polymorphic target: either nothing (global rule) or exactly one of
-# target_structure_id / target_element_id / target_association_id is set,
-# and target_kind names which column carries the FK.
+# target_structure_id / target_element_id / target_association_id /
+# target_taxonomy_id is set, and target_kind names which column carries the FK.
 _RULE_TARGET_POLYMORPHISM_CHECK = (
   "("
   "(target_kind IS NULL AND target_structure_id IS NULL "
-  "AND target_element_id IS NULL AND target_association_id IS NULL) "
+  "AND target_element_id IS NULL AND target_association_id IS NULL "
+  "AND target_taxonomy_id IS NULL) "
   "OR (target_kind = 'structure' AND target_structure_id IS NOT NULL "
-  "AND target_element_id IS NULL AND target_association_id IS NULL) "
+  "AND target_element_id IS NULL AND target_association_id IS NULL "
+  "AND target_taxonomy_id IS NULL) "
   "OR (target_kind = 'element' AND target_element_id IS NOT NULL "
-  "AND target_structure_id IS NULL AND target_association_id IS NULL) "
+  "AND target_structure_id IS NULL AND target_association_id IS NULL "
+  "AND target_taxonomy_id IS NULL) "
   "OR (target_kind = 'association' AND target_association_id IS NOT NULL "
-  "AND target_structure_id IS NULL AND target_element_id IS NULL)"
+  "AND target_structure_id IS NULL AND target_element_id IS NULL "
+  "AND target_taxonomy_id IS NULL) "
+  "OR (target_kind = 'taxonomy' AND target_taxonomy_id IS NOT NULL "
+  "AND target_structure_id IS NULL AND target_element_id IS NULL "
+  "AND target_association_id IS NULL)"
   ")"
 )
 
@@ -225,6 +238,12 @@ def _install_raise_library_immutable_fn(conn) -> None:
           RAISE EXCEPTION
             'Library-seeded row is immutable in tenant scope: %.% id=%',
             TG_TABLE_SCHEMA, TG_TABLE_NAME, OLD.id;
+        END IF;
+        -- BEFORE UPDATE/DELETE trigger contract: return NEW on UPDATE to
+        -- let the mutation through, OLD on DELETE for the same. Returning
+        -- OLD on UPDATE silently cancels the update without raising.
+        IF TG_OP = 'UPDATE' THEN
+          RETURN NEW;
         END IF;
         RETURN OLD;
       END;
@@ -312,6 +331,36 @@ def _widen_tenant_checks(conn, schema: str) -> None:
   t.add_check("elements", "check_element_source", _WIDENED_ELEMENT_SOURCE_CHECK)
   t.add_check("taxonomies", "check_taxonomy_type", _WIDENED_TAXONOMY_TYPE_CHECK)
   t.add_check("structures", "check_structure_type", _WIDENED_STRUCTURE_TYPE_CHECK)
+
+
+def _backfill_reporting_standard(conn, schema: str) -> None:
+  """Rename library-locked ``reporting`` rows to ``reporting_standard``.
+
+  Part of the Phase 2 Taxonomy Block rename. Library-origin reporting
+  taxonomies (``is_locked=true``) carry the new ``reporting_standard``
+  type; tenant rows created under the old ``reporting`` name (none exist
+  today but the filter is defensive) stay as-is until the narrowing step
+  in a future phase."""
+  conn.execute(
+    text(
+      f"UPDATE {schema}.taxonomies "
+      f"SET taxonomy_type = 'reporting_standard' "
+      f"WHERE taxonomy_type = 'reporting' AND is_locked = true"
+    )
+  )
+
+
+def _reverse_backfill_reporting(conn, schema: str) -> None:
+  """Reverse of :func:`_backfill_reporting_standard`. Only touches library-
+  locked rows — tenant rows with the new 0002 types would violate the
+  narrow CHECK and cause the downgrade to fail loudly (by design)."""
+  conn.execute(
+    text(
+      f"UPDATE {schema}.taxonomies "
+      f"SET taxonomy_type = 'reporting' "
+      f"WHERE taxonomy_type = 'reporting_standard' AND is_locked = true"
+    )
+  )
 
 
 def _restore_narrow_tenant_checks(conn, schema: str) -> None:
@@ -455,6 +504,10 @@ def _backfill_library_into_tenant(conn, schema: str) -> None:
   Order is load-bearing: schema changes first, then copy, then triggers.
   """
   _widen_tenant_checks(conn, schema)
+  # Phase 2 Taxonomy Block rename: flip any pre-existing locked
+  # ``reporting`` rows in the tenant schema to ``reporting_standard``
+  # before the library copy unions new rows in.
+  _backfill_reporting_standard(conn, schema)
   _drop_old_element_columns(conn, schema)
   _add_substitution_group_column(conn, schema)
   _add_phase_theta_columns_to_tenant(conn, schema)
@@ -612,6 +665,7 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
         target_structure_id VARCHAR REFERENCES {schema}.structures(id),
         target_element_id VARCHAR REFERENCES {schema}.elements(id),
         target_association_id VARCHAR REFERENCES {schema}.associations(id),
+        target_taxonomy_id VARCHAR REFERENCES {schema}.taxonomies(id) ON DELETE SET NULL,
         rule_variables JSONB NOT NULL DEFAULT '[]',
         metadata JSONB NOT NULL DEFAULT '{{}}',
         created_at TIMESTAMP NOT NULL DEFAULT now(),
@@ -655,6 +709,13 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
   )
   conn.execute(
     text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_target_taxonomy "
+      f"ON {schema}.rules (target_taxonomy_id) "
+      f"WHERE target_taxonomy_id IS NOT NULL"
+    )
+  )
+  conn.execute(
+    text(
       f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_category "
       f"ON {schema}.rules (rule_category)"
     )
@@ -669,8 +730,8 @@ SEEDS_DIR = (
 # seeds); then the classification vocabulary; then assignments/mappings.
 SEED_FILES = [
   # Classification vocabulary FIRST — FAC + rs-gaap seeds reference these
-  # via classifiedAs arcs; the DB lookup in write_taxonomy_package fails if
-  # the classification rows don't exist yet.
+  # via classifiedAs arcs; create_library_arcs resolves classifications via
+  # DB lookup so they must be persisted in phase 1 before phase 2 runs.
   SEEDS_DIR / "us-gaap-metamodel" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "rs-gaap" / "v1" / "taxonomy.jsonld",
@@ -796,6 +857,12 @@ def upgrade() -> None:
   op.create_check_constraint(
     "check_taxonomy_type", "taxonomies", _WIDENED_TAXONOMY_TYPE_CHECK
   )
+  # Phase 2 Taxonomy Block rename: 0001-seeded library reporting rows
+  # carry ``taxonomy_type='reporting'``; flip them to the new
+  # ``reporting_standard`` value so subsequent tenant code (Block writer,
+  # library browser) sees the canonical form. The widened CHECK still
+  # admits ``'reporting'`` transitionally so this UPDATE validates.
+  _backfill_reporting_standard(op.get_bind(), "public")
   # Phase g.1: widen structures.structure_type to admit rollforward,
   # reconciliation, policy. Pure vocabulary expansion — no data change.
   op.drop_constraint("check_structure_type", "structures", type_="check")
@@ -1003,6 +1070,7 @@ def upgrade() -> None:
     sa.Column("target_structure_id", sa.String(), nullable=True),
     sa.Column("target_element_id", sa.String(), nullable=True),
     sa.Column("target_association_id", sa.String(), nullable=True),
+    sa.Column("target_taxonomy_id", sa.String(), nullable=True),
     sa.Column(
       "rule_variables",
       postgresql.JSONB(astext_type=sa.Text()),
@@ -1026,6 +1094,9 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(["target_structure_id"], ["structures.id"]),
     sa.ForeignKeyConstraint(["target_element_id"], ["elements.id"]),
     sa.ForeignKeyConstraint(["target_association_id"], ["associations.id"]),
+    sa.ForeignKeyConstraint(
+      ["target_taxonomy_id"], ["taxonomies.id"], ondelete="SET NULL"
+    ),
     sa.PrimaryKeyConstraint("id"),
     sa.CheckConstraint(_RULE_CATEGORY_CHECK, name="check_rule_category"),
     sa.CheckConstraint(_RULE_PATTERN_CHECK, name="check_rule_pattern"),
@@ -1054,6 +1125,12 @@ def upgrade() -> None:
     ["target_association_id"],
     postgresql_where="target_association_id IS NOT NULL",
   )
+  op.create_index(
+    "idx_rules_target_taxonomy",
+    "rules",
+    ["target_taxonomy_id"],
+    postgresql_where="target_taxonomy_id IS NOT NULL",
+  )
   op.create_index("idx_rules_category", "rules", ["rule_category"])
 
   # ──────────────────────────────────────────────────────────────────────
@@ -1065,48 +1142,57 @@ def upgrade() -> None:
   # reference an element defined in ANY other seed regardless of the
   # SEED_FILES order — without the split, arcs targeting elements that
   # only a later seed defines are silently dropped.
-  from robosystems.taxonomy.loaders import load_taxonomy_package
-  from robosystems.taxonomy.writers import (
-    write_taxonomy_arcs,
-    write_taxonomy_elements,
-    write_taxonomy_rules,
+  from sqlalchemy.orm import Session as _Session
+
+  from robosystems.operations.taxonomy_block.library_creator import (
+    create_library_arcs,
+    create_library_rules,
+    create_library_taxonomy_elements,
   )
+  from robosystems.taxonomy.loaders import load_taxonomy_package
 
-  loaded_packages = []
-  for seed_path in SEED_FILES:
-    if not seed_path.exists():
-      print(f"  [WARN] Seed file missing, skipping: {seed_path}")
-      continue
-    print(f"  Loading seed: {seed_path.relative_to(SEEDS_DIR)}")
-    package = load_taxonomy_package(seed_path)
-    loaded_packages.append(package)
-    counts = write_taxonomy_elements(conn, package)
-    print(
-      f"    [phase 1] elements={counts['elements']} labels={counts['labels']} "
-      f"references={counts['references']} structures={counts['structures']} "
-      f"classifications={counts['classifications']}"
-    )
+  session = _Session(bind=conn)
+  try:
+    loaded_packages = []
+    for seed_path in SEED_FILES:
+      if not seed_path.exists():
+        print(f"  [WARN] Seed file missing, skipping: {seed_path}")
+        continue
+      print(f"  Loading seed: {seed_path.relative_to(SEEDS_DIR)}")
+      package = load_taxonomy_package(seed_path)
+      loaded_packages.append(package)
+      _, counts = create_library_taxonomy_elements(session, package)
+      session.flush()
+      print(
+        f"    [phase 1] elements={counts['elements']} labels={counts['labels']} "
+        f"references={counts['references']} structures={counts['structures']} "
+        f"classifications={counts['classifications']}"
+      )
 
-  for package in loaded_packages:
-    counts = write_taxonomy_arcs(conn, package)
-    print(
-      f"  [phase 2] {package.name}: "
-      f"associations={counts['associations']} "
-      f"(skipped={counts['associations_skipped']}) "
-      f"classification_assignments={counts['classification_assignments']} "
-      f"(skipped={counts['classification_assignments_skipped']})"
-    )
+    for package in loaded_packages:
+      counts = create_library_arcs(session, package)
+      session.flush()
+      print(
+        f"  [phase 2] {package.name}: "
+        f"associations={counts['associations']} "
+        f"(skipped={counts['associations_skipped']}) "
+        f"classification_assignments={counts['classification_assignments']} "
+        f"(skipped={counts['classification_assignments_skipped']})"
+      )
 
-  # Phase 3 — rules. Runs after phase 2 so association-targeted rules can
-  # resolve (though none of the seeded fac-rules use that target_kind yet).
-  for package in loaded_packages:
-    if not package.rules:
-      continue
-    counts = write_taxonomy_rules(conn, package)
-    print(
-      f"  [phase 3] {package.name}: "
-      f"rules={counts['rules']} (skipped={counts['rules_skipped']})"
-    )
+    # Phase 3 — rules. Runs after phase 2 so association-targeted rules can
+    # resolve (though none of the seeded fac-rules use that target_kind yet).
+    for package in loaded_packages:
+      if not package.rules:
+        continue
+      counts = create_library_rules(session, package)
+      session.flush()
+      print(
+        f"  [phase 3] {package.name}: "
+        f"rules={counts['rules']} (skipped={counts['rules_skipped']})"
+      )
+  finally:
+    session.close()
 
   # Phase d backfill on public.structures: set concept/member_arrangement
   # + empty statement_renderer mechanics for the four library-seeded
@@ -1151,12 +1237,18 @@ def downgrade() -> None:
   # used, so we leave them NULL).
   def _teardown_tenant(conn, schema: str) -> None:
     _drop_triggers_for_tenant(conn, schema)
+    # Reverse the Phase 2 Taxonomy Block rename before narrowing the
+    # CHECK so the locked library rows pass the 0001-era constraint.
+    _reverse_backfill_reporting(conn, schema)
     _restore_narrow_tenant_checks(conn, schema)
     _drop_phase_d_columns_from_tenant(conn, schema)
     _drop_phase_theta_columns_from_tenant(conn, schema)
 
   for_each_tenant_schema(conn, _teardown_tenant)
   conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))
+  conn.execute(
+    text("DROP FUNCTION IF EXISTS public.raise_insert_into_library_structure()")
+  )
 
   # Delete library-origin data in FK-safe order.
   # Rules first — they FK structures / elements / associations.
@@ -1190,6 +1282,7 @@ def downgrade() -> None:
   # Drop rules table (Phase d.2). IF EXISTS on the indexes because a
   # mid-transition downgrade from a partial run might not have created them.
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_category"))
+  conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_taxonomy"))
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_association"))
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_element"))
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_structure"))
@@ -1240,6 +1333,9 @@ def downgrade() -> None:
   op.create_check_constraint(
     "check_element_source", "elements", _NARROW_ELEMENT_SOURCE_CHECK
   )
+  # Reverse the Phase 2 Taxonomy Block rename on public before narrowing
+  # the CHECK so the locked library rows pass the 0001-era constraint.
+  _reverse_backfill_reporting(op.get_bind(), "public")
   op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")
   op.create_check_constraint(
     "check_taxonomy_type", "taxonomies", _NARROW_TAXONOMY_TYPE_CHECK

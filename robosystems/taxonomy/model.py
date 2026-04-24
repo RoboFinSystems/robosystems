@@ -1,8 +1,9 @@
 """Pydantic model for taxonomy packages.
 
 `TaxonomyPackage` is the in-memory intermediate between JSON-LD (canonical
-on-disk format) and the database library_writer. The loader reads JSON-LD →
-TaxonomyPackage; the writer takes TaxonomyPackage → SQL INSERTs. The
+on-disk format) and the database. The loader reads JSON-LD → TaxonomyPackage;
+``operations/taxonomy_block/library_creator.py`` takes TaxonomyPackage → ORM
+session inserts. The
 extractor (in `robosystems/arelle/`) produces rdflib.Graph which is
 serialized to JSON-LD via the serializer — these never construct
 TaxonomyPackage directly; it's a DB-side DTO.
@@ -53,8 +54,8 @@ class ElementSpec(BaseModel):
   Classifications live in ClassificationSpec + ClassificationAssignmentSpec.
   """
 
-  qname: str = Field(..., description="Qualified name, e.g. 'sfac6:Assets'")
-  namespace: str = Field(..., description="Namespace prefix, e.g. 'sfac6'")
+  qname: str = Field(..., description="Qualified name, e.g. 'fac:Assets'")
+  namespace: str = Field(..., description="Namespace prefix, e.g. 'fac'")
   namespace_uri: str = Field(..., description="Full namespace URI")
   name: str = Field(..., description="Local name within the namespace")
 
@@ -70,7 +71,7 @@ class ElementSpec(BaseModel):
   )
 
   # Source / origin
-  source: str = Field(..., description="sfac6 | fac | us-gaap | ifrs | …")
+  source: str = Field(..., description="fac | us-gaap | ifrs | …")
 
   # Hierarchy (resolved at write time) — parent_id in OLTP. Independent
   # of classification: this is the element-tree hierarchy, not the
@@ -101,7 +102,7 @@ class ClassificationSpec(BaseModel):
     ..., description="Member name within the category, e.g. 'asset', 'current'."
   )
   source: str = Field(
-    ..., description="Provenance, e.g. 'us-gaap-metamodel', 'sfac6', 'system'."
+    ..., description="Provenance, e.g. 'us-gaap-metamodel', 'fac', 'system'."
   )
   name: str | None = Field(None, description="Human-readable display name")
   description: str | None = Field(None)
@@ -279,8 +280,8 @@ class RuleSpec(BaseModel):
 class TaxonomyPackage(BaseModel):
   """A fully-loaded taxonomy ready for library persistence."""
 
-  name: str = Field(..., description="Human name, e.g. 'SFAC 6 v1'")
-  standard: str = Field(..., description="sfac6 | fac | us-gaap | ifrs")
+  name: str = Field(..., description="Human name, e.g. 'FAC v1'")
+  standard: str = Field(..., description="fac | us-gaap | ifrs")
   version: str = Field(..., description="Version identifier, e.g. 'v1' or '2020'")
   namespace_uri: str = Field(..., description="Primary namespace URI for this package")
 
@@ -294,15 +295,16 @@ class TaxonomyPackage(BaseModel):
   rules: list[RuleSpec] = Field(default_factory=list)
 
   taxonomy_type: str = Field(
-    "reporting",
+    "reporting_standard",
     description=(
-      "chart_of_accounts | reporting | mapping | schedule | rules | "
+      "chart_of_accounts | reporting_standard | reporting_extension | "
+      "custom_ontology | mapping | schedule | rules | "
       "classification-vocabulary | classification-assignment — shapes "
       "how the library viewer renders this taxonomy. Concept taxonomies "
-      "(sfac6, rs-gaap) are 'reporting'; equivalence + hierarchy arc "
-      "packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB metamodel "
-      "seed is 'classification-vocabulary'; rs-gaap-to-metamodel is "
-      "'classification-assignment'; verification-rule packs (fac-rules) "
+      "(rs-gaap) are 'reporting_standard'; equivalence + hierarchy "
+      "arc packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB "
+      "metamodel seed is 'classification-vocabulary'; rs-gaap-to-metamodel "
+      "is 'classification-assignment'; verification-rule packs (fac-rules) "
       "are 'rules'."
     ),
   )

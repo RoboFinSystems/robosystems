@@ -10,34 +10,33 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (43):**
+**Registered (34) — in logical workflow order:**
 
-- Entity: `update-entity`
-- Fiscal calendar / periods: `initialize`, `set-close-target`,
-  `close-period`, `reopen-period`
-- Schedules: `truncate-schedule`, `create-closing-entry`,
-  `create-manual-closing-entry`, `dispose-schedule`, `evaluate-rules`
-- Taxonomies: `create-taxonomy`, `update-taxonomy`, `delete-taxonomy`,
-  `create-structure`, `update-structure`, `delete-structure`,
-  `create-mapping-association`, `delete-mapping-association`
-- Elements (native CoA writes): `create-element`, `update-element`,
-  `delete-element`
-- Associations (bulk, generalized): `create-associations`,
-  `update-association`, `delete-association`
-- Transactions (standalone business events): `create-transaction`
-- Journal entries (native accounting writes): `create-journal-entry`,
-  `update-journal-entry`, `delete-journal-entry`, `reverse-journal-entry`
-- Mappings (async): `auto-map-elements` — the one
-  Dagster-dispatched op, returns `status: "pending"` and streams
-  through `/v1/operations/{operation_id}/stream`
+- Setup: `initialize`, `update-entity`
+- Ontology / Taxonomy Blocks: `create-taxonomy-block`,
+  `update-taxonomy-block`, `delete-taxonomy-block`,
+  `link-entity-taxonomy`
+- Mapping (craft, not curation): `create-mapping-association`,
+  `delete-mapping-association`, `auto-map-elements`
+- Information Blocks: `create-information-block`,
+  `update-information-block`, `delete-information-block`,
+  `evaluate-rules`
+- Journal Entries: `create-transaction`, `create-journal-entry`,
+  `update-journal-entry`, `delete-journal-entry`,
+  `reverse-journal-entry`
+- Close Workflow: `set-close-target`, `create-closing-entry`,
+  `create-manual-closing-entry`, `truncate-schedule`,
+  `dispose-schedule`, `close-period`, `reopen-period`
 - Reports: `create-report`, `regenerate-report`, `delete-report`,
   `share-report`
-- Publish lists: `create-publish-list`, `update-publish-list`,
+- Publish Lists: `create-publish-list`, `update-publish-list`,
   `delete-publish-list`, `add-publish-list-members`,
   `remove-publish-list-member`
-- Information Blocks (generic construction — see
-  `information-block.md`): `create-information-block`,
-  `update-information-block`, `delete-information-block`
+
+Raw ontology CRUD (taxonomies, structures, elements, non-mapping
+associations) was retired in Phase 1 — the Taxonomy Block envelope is
+now the only tenant-facing construction path. Mapping associations stay
+direct (craft, not curation).
 
 `build-fact-grid` is registered separately in the sibling `views.py`
 file so it can be mounted independently of `ROBOLEDGER_ENABLED` (it
@@ -113,20 +112,8 @@ from robosystems.models.api.extensions.schedules import (
   TruncateScheduleOperation,
 )
 from robosystems.models.api.extensions.taxonomies import (
-  BulkCreateAssociationsRequest,
-  CreateElementRequest,
   CreateMappingAssociationOperation,
-  CreateStructureRequest,
-  CreateTaxonomyRequest,
-  DeleteAssociationRequest,
-  DeleteElementRequest,
-  DeleteStructureRequest,
-  DeleteTaxonomyRequest,
   LinkEntityTaxonomyRequest,
-  UpdateAssociationRequest,
-  UpdateElementRequest,
-  UpdateStructureRequest,
-  UpdateTaxonomyRequest,
 )
 from robosystems.models.api.extensions.transactions import CreateTransactionRequest
 from robosystems.models.api.information_block import (
@@ -134,6 +121,11 @@ from robosystems.models.api.information_block import (
   DeleteInformationBlockRequest,
   EvaluateRulesRequest,
   UpdateInformationBlockRequest,
+)
+from robosystems.models.api.taxonomy_block import (
+  CreateTaxonomyBlockRequest,
+  DeleteTaxonomyBlockRequest,
+  UpdateTaxonomyBlockRequest,
 )
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
@@ -152,22 +144,6 @@ from robosystems.operations.information_block.rules.commands import (
 from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   LibraryImmutableError,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  ElementCycleError,
-  ElementQNameConflictError,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  ElementNotFoundError as ElementMissingError,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  create_element as cmd_create_element,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  delete_element as cmd_delete_element,
-)
-from robosystems.operations.roboledger.commands.elements import (
-  update_element as cmd_update_element,
 )
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
@@ -270,50 +246,21 @@ from robosystems.operations.roboledger.commands.schedules import (
   truncate_schedule as cmd_truncate_schedule,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
-  AssociationNotFoundError,
   ElementNotFoundError,
   EntityNotFoundError,
   MappingStructureNotFoundError,
-  StructureNotFoundError,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   TaxonomyNotFoundError as TaxonomyMissingError,  # alias: avoids collision with commands.reports.TaxonomyNotFoundError
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
-  bulk_create_associations as cmd_bulk_create_associations,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
   create_mapping_association as cmd_create_mapping_association,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  create_structure as cmd_create_structure,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  create_taxonomy as cmd_create_taxonomy,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  delete_association as cmd_delete_association,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   delete_mapping_association as cmd_delete_mapping_association,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
-  delete_structure as cmd_delete_structure,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  delete_taxonomy as cmd_delete_taxonomy,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
   link_entity_taxonomy as cmd_link_entity_taxonomy,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  update_association as cmd_update_association,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  update_structure as cmd_update_structure,
-)
-from robosystems.operations.roboledger.commands.taxonomies import (
-  update_taxonomy as cmd_update_taxonomy,
 )
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
@@ -329,6 +276,15 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   InvalidCloseTargetError,
+)
+from robosystems.operations.taxonomy_block.commands import (
+  create_taxonomy_block as cmd_create_taxonomy_block,
+)
+from robosystems.operations.taxonomy_block.commands import (
+  delete_taxonomy_block as cmd_delete_taxonomy_block,
+)
+from robosystems.operations.taxonomy_block.commands import (
+  update_taxonomy_block as cmd_update_taxonomy_block,
 )
 
 router = APIRouter()
@@ -476,61 +432,7 @@ class DeleteResult(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Entity operations
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@router.post(
-  "/update-entity",
-  response_model=OperationEnvelope,
-  operation_id="opUpdateEntity",
-  summary="Update Entity",
-  description="Only provided (non-null) fields are updated.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/update-entity",
-  method="POST",
-  business_event_type="ledger_update_entity",
-)
-async def update_entity_op(
-  body: UpdateEntityRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="update-entity",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-  updates = body.model_dump(exclude_none=True)
-
-  def _runner():
-    if not updates:
-      raise HTTPException(status_code=400, detail="No fields provided for update.")
-    try:
-      with extensions_session(graph_id) as session:
-        result = update_parent_entity(session, updates)
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
-    if result is None:
-      raise HTTPException(
-        status_code=404, detail="No entity found. Create an entity graph first."
-      )
-    return result
-
-  return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Fiscal calendar / periods operations
+# Setup
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -591,6 +493,507 @@ async def initialize_op(
 
 
 @router.post(
+  "/update-entity",
+  response_model=OperationEnvelope,
+  operation_id="opUpdateEntity",
+  summary="Update Entity",
+  description="Only provided (non-null) fields are updated.",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/update-entity",
+  method="POST",
+  business_event_type="ledger_update_entity",
+)
+async def update_entity_op(
+  body: UpdateEntityRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="update-entity",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+  updates = body.model_dump(exclude_none=True)
+
+  def _runner():
+    if not updates:
+      raise HTTPException(status_code=400, detail="No fields provided for update.")
+    try:
+      with extensions_session(graph_id) as session:
+        result = update_parent_entity(session, updates)
+    except (ValueError, ProgrammingError):
+      raise _ledger_404()
+    if result is None:
+      raise HTTPException(
+        status_code=404, detail="No entity found. Create an entity graph first."
+      )
+    return result
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Ontology / Taxonomy Blocks
+#
+# Taxonomy Block is the only tenant-facing path for ontology curation.
+# Raw CRUD (create-taxonomy, create-structure, create/update/delete-element,
+# create-associations) was retired from the public surface in Phase 1.
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_taxonomy_block_op = _registrar.register(
+  OperationSpec(
+    name="create-taxonomy-block",
+    summary="Create Taxonomy Block",
+    description=(
+      "Create a taxonomy block atomically: one envelope carrying the "
+      "taxonomy row plus its structures, elements, associations, and "
+      "rules. Dispatches by `taxonomy_type` — `chart_of_accounts` "
+      "(declarative tenant CoA) is live; `reporting_extension` / "
+      "`custom_ontology` / `reporting_standard` land in later sub-phases."
+    ),
+    command=cmd_create_taxonomy_block,
+    request_model=CreateTaxonomyBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+    },
+    mark_stale_reason="taxonomy_block_created",
+  )
+)
+
+update_taxonomy_block_op = _registrar.register(
+  OperationSpec(
+    name="update-taxonomy-block",
+    summary="Update Taxonomy Block",
+    description=(
+      "Incrementally mutate a taxonomy block via typed delta lists "
+      "(elements/structures/associations/rules to add, update, remove). "
+      "Dispatches by the target taxonomy's stored `taxonomy_type`. "
+      "Library-origin block types (`reporting_standard`) surface 501."
+    ),
+    command=cmd_update_taxonomy_block,
+    request_model=UpdateTaxonomyBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+    },
+    mark_stale_reason="taxonomy_block_updated",
+  )
+)
+
+delete_taxonomy_block_op = _registrar.register(
+  OperationSpec(
+    name="delete-taxonomy-block",
+    summary="Delete Taxonomy Block",
+    description=(
+      "Delete a taxonomy block and return a thin confirmation. "
+      "`cascade_facts=True` also deletes Fact rows that reference the "
+      "taxonomy's elements; default False fails the delete if such "
+      "facts exist. Library-origin block types surface 501."
+    ),
+    command=cmd_delete_taxonomy_block,
+    request_model=DeleteTaxonomyBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+    },
+    mark_stale_reason="taxonomy_block_deleted",
+  )
+)
+
+link_entity_taxonomy_op = _registrar.register(
+  OperationSpec(
+    name="link-entity-taxonomy",
+    summary="Link Entity to Taxonomy",
+    description=(
+      "Link the graph's entity to a taxonomy. Idempotent — returns "
+      "existing linkage if it already exists. CoA blocks auto-link "
+      "at create time; use this only to switch the primary CoA or "
+      "link a reporting extension / custom ontology explicitly."
+    ),
+    command=cmd_link_entity_taxonomy,
+    request_model=LinkEntityTaxonomyRequest,
+    error_map={
+      EntityNotFoundError: 404,
+      TaxonomyMissingError: 404,
+    },
+    requires_created_by=False,
+  )
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Mapping (craft, not curation)
+#
+# Mapping associations stay direct — mapping is iterative AI-assisted craft,
+# not a curation envelope. `auto-map-elements` dispatches to the background
+# worker and returns a `pending` envelope immediately.
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_mapping_association_op = _registrar.register(
+  OperationSpec(
+    name="create-mapping-association",
+    summary="Create Mapping Association",
+    description=("Link a chart-of-accounts element to a US GAAP reporting concept."),
+    command=cmd_create_mapping_association,
+    request_model=CreateMappingAssociationOperation,
+    error_map={
+      MappingStructureNotFoundError: (404, lambda _e: "Mapping not found"),
+      LibraryImmutableError: 403,
+      ElementNotFoundError: (
+        400,
+        lambda e: f"{e.side.capitalize()} element not found",  # type: ignore[attr-defined]
+      ),
+    },
+  )
+)
+
+
+@router.post(
+  "/delete-mapping-association",
+  response_model=OperationEnvelope,
+  operation_id="opDeleteMappingAssociation",
+  summary="Delete Mapping Association",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/delete-mapping-association",
+  method="POST",
+  business_event_type="ledger_delete_mapping_association",
+)
+async def delete_mapping_association_op(
+  body: DeleteMappingAssociationOperation,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="delete-mapping-association",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        deleted = cmd_delete_mapping_association(
+          session, body.mapping_id, body.association_id
+        )
+    except (ValueError, ProgrammingError):
+      raise _ledger_404()
+    if not deleted:
+      raise HTTPException(status_code=404, detail="Association not found")
+    return DeleteResult(deleted=True)
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+class AutoMapElementsOperation(BaseModel):
+  """Request body for the auto-map-elements async operation."""
+
+  mapping_id: str
+
+
+@router.post(
+  "/auto-map-elements",
+  response_model=OperationEnvelope,
+  status_code=202,
+  operation_id="opAutoMapElements",
+  summary="Auto-Map Elements via AI (async)",
+  description="Dispatches to the background worker — returns a `pending` envelope immediately. Monitor via SSE at `/v1/operations/{operation_id}/stream`. Confidence thresholds: ≥0.90 auto-approved, 0.70–0.89 flagged for review, <0.70 skipped.",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/auto-map-elements",
+  method="POST",
+  business_event_type="ledger_auto_map_elements",
+)
+async def auto_map_elements_op(
+  body: AutoMapElementsOperation,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  from robosystems.worker.client import enqueue_task
+
+  op_name = "auto-map-elements"
+  user_id = str(user.id)
+  body_fingerprint = fingerprint_body(body)
+
+  replay = await check_idempotency(
+    cache,
+    user_id,
+    graph_id,
+    op_name,
+    idempotency_key,
+    body_fingerprint,
+    event="extensions.operation",
+  )
+  if replay is not None:
+    return replay
+
+  task_response = await enqueue_task(
+    task_type="agent",
+    graph_id=graph_id,
+    user_id=user_id,
+    params={"agent_type": "mapping", "mapping_id": body.mapping_id},
+  )
+
+  envelope = wrap_pending(
+    op_name,
+    operation_id=task_response["operation_id"],
+    partial_result={
+      "operation_type": task_response.get("operation_type"),
+      "links": task_response.get("_links"),
+      "deduplicated": task_response.get("deduplicated", False),
+    },
+    created_by=user_id,
+  )
+
+  if idempotency_key is not None:
+    await cache.put(
+      user_id, graph_id, op_name, idempotency_key, envelope, body_fingerprint
+    )
+
+  log_operation_audit(
+    operation_name=op_name,
+    operation_id=envelope.operation_id,
+    user_id=user_id,
+    graph_id=graph_id,
+    duration_ms=0.0,
+    status="pending",
+    idempotency_key=idempotency_key,
+  )
+  return envelope
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Information Blocks
+#
+# Generic construction envelope for schedules, statement blocks, metrics,
+# and future block types. `evaluate-rules` runs the rule engine against a
+# block's materialized facts (decoding mode, 5 patterns).
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_information_block_op = _registrar.register(
+  OperationSpec(
+    name="create-information-block",
+    summary="Create Information Block",
+    description=(
+      "Generic Information Block construction entry. `block_type` selects "
+      "the registered block type; `payload` is validated against that "
+      "type's creation schema at dispatch. Schedule dispatches to the "
+      "existing Schedule machinery; statement block types raise 501 "
+      "(use create-report instead)."
+    ),
+    command=cmd_create_information_block,
+    request_model=CreateInformationBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+      ScheduleNotFoundError: 404,
+    },
+    mark_stale_reason="information_block_created",
+  )
+)
+
+update_information_block_op = _registrar.register(
+  OperationSpec(
+    name="update-information-block",
+    summary="Update Information Block",
+    description=(
+      "Generic Information Block update entry. Dispatches by `block_type` "
+      "to the registered mutation handler. Block types whose Structures "
+      "are library-seeded and immutable (statement family) surface 501."
+    ),
+    command=cmd_update_information_block,
+    request_model=UpdateInformationBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+      ScheduleNotFoundError: 404,
+    },
+    mark_stale_reason="information_block_updated",
+  )
+)
+
+delete_information_block_op = _registrar.register(
+  OperationSpec(
+    name="delete-information-block",
+    summary="Delete Information Block",
+    description=(
+      "Generic Information Block deletion entry. Returns a thin "
+      "confirmation (deleted / structure_id / block_type / name). "
+      "Block types whose Structures are library-seeded cannot be "
+      "deleted per tenant and surface 501."
+    ),
+    command=cmd_delete_information_block,
+    request_model=DeleteInformationBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+      ScheduleNotFoundError: 404,
+    },
+    mark_stale_reason="information_block_deleted",
+  )
+)
+
+evaluate_rules_op = _registrar.register(
+  OperationSpec(
+    name="evaluate-rules",
+    summary="Evaluate Rules for an Information Block",
+    description=(
+      "Runs every rule targeting the given structure (plus element- and "
+      "association-scoped rules for the structure's atoms), binds "
+      "$Variable references to in-scope facts via qname lookup, writes "
+      "one VerificationResult row per rule, and returns the results plus "
+      "a status-keyed summary. Phase delta.3 — decoding mode, 5 patterns "
+      "(EqualTo, RollUp, RollForward, Exists, CoExists)."
+    ),
+    command=cmd_evaluate_rules,
+    request_model=EvaluateRulesRequest,
+    error_map={ValueError: 422},
+    requires_created_by=True,
+  )
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Journal Entries
+#
+# Native accounting writes: transactions (standalone business events) and
+# journal entries (balanced debit/credit sets). Entries are always created
+# as drafts; posting happens via close-period.
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_transaction_op = _registrar.register(
+  OperationSpec(
+    name="create-transaction",
+    summary="Create Transaction",
+    description=(
+      "Create a standalone business-event Transaction without entries. "
+      "Returns a transaction_id that can be passed to create-journal-entry "
+      "to attach one or more journal entries to this event. Use this when "
+      "a single event (invoice, payment, deposit) produces multiple entries "
+      "over its lifecycle."
+    ),
+    command=cmd_create_transaction,
+    request_model=CreateTransactionRequest,
+    error_map={ValueError: 422},
+  )
+)
+
+create_journal_entry_op = _registrar.register(
+  OperationSpec(
+    name="create-journal-entry",
+    summary="Create Journal Entry",
+    description=(
+      "Create a new draft journal entry with balanced line items. "
+      "Enforces DR=CR at the validation layer. Entries are always "
+      "created as drafts; posting happens via close-period or a "
+      "future per-entry post op."
+    ),
+    command=cmd_create_journal_entry,
+    request_model=CreateJournalEntryRequest,
+    error_map={
+      ClosedPeriodError: 422,
+      UnbalancedJournalEntryError: 422,
+      ValueError: 422,
+    },
+  )
+)
+
+update_journal_entry_op = _registrar.register(
+  OperationSpec(
+    name="update-journal-entry",
+    summary="Update Journal Entry",
+    description=(
+      "Update a draft journal entry. Posted entries are immutable and "
+      "must be corrected via reverse-journal-entry. If line_items is "
+      "provided, existing line items are replaced atomically and the "
+      "new set must balance."
+    ),
+    command=cmd_update_journal_entry,
+    request_model=UpdateJournalEntryRequest,
+    error_map={
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotDraftError: 422,
+      ClosedPeriodError: 422,
+      UnbalancedJournalEntryError: 422,
+      ValueError: 422,
+    },
+    requires_created_by=False,
+  )
+)
+
+delete_journal_entry_op = _registrar.register(
+  OperationSpec(
+    name="delete-journal-entry",
+    summary="Delete Journal Entry",
+    description=(
+      "Hard-delete a draft journal entry. Posted entries are immutable "
+      "and must be reversed instead."
+    ),
+    command=cmd_delete_journal_entry,
+    request_model=DeleteJournalEntryRequest,
+    error_map={
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotDraftError: 422,
+    },
+    requires_created_by=False,
+  )
+)
+
+reverse_journal_entry_op = _registrar.register(
+  OperationSpec(
+    name="reverse-journal-entry",
+    summary="Reverse Journal Entry",
+    description=(
+      "Reverse a posted journal entry by creating a new offsetting "
+      "entry (debits ↔ credits) and marking the original as "
+      "status='reversed'. Both entries stay in the ledger — the audit "
+      "trail shows original + reversal side by side."
+    ),
+    command=cmd_reverse_journal_entry,
+    request_model=ReverseJournalEntryRequest,
+    error_map={
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotPostedError: 422,
+      ClosedPeriodError: 422,
+      ValueError: 422,
+    },
+  )
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Close Workflow
+#
+# Month-end processing: configure the close target, generate schedule
+# entries, handle asset disposals, then lock the period.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
   "/set-close-target",
   response_model=OperationEnvelope,
   operation_id="opSetCloseTarget",
@@ -644,6 +1047,78 @@ async def set_close_target_op(
       raise
 
   return await _dispatch(ctx, _runner, cache)
+
+
+create_closing_entry_op = _registrar.register(
+  OperationSpec(
+    name="create-closing-entry",
+    summary="Create Closing Entry",
+    description=(
+      "Create a draft closing entry pre-populated from a schedule's facts "
+      "for the given period. Idempotent — safe to call repeatedly; the "
+      "`outcome` field describes what happened "
+      "(`created`, `unchanged`, `regenerated`, `removed`, `skipped`)."
+    ),
+    command=cmd_create_closing_entry,
+    request_model=CreateClosingEntryOperation,
+    error_map={ValueError: 422},
+    mark_stale_reason="closing_entry_created",
+  )
+)
+
+create_manual_closing_entry_op = _registrar.register(
+  OperationSpec(
+    name="create-manual-closing-entry",
+    summary="Create Manual Closing Entry",
+    description=(
+      "Create a draft closing entry with manually specified line items — "
+      "not tied to a schedule. Use for one-off business events (asset "
+      "disposal, correcting entry, impairment). Total debits must equal "
+      "total credits."
+    ),
+    command=cmd_create_manual_closing_entry,
+    request_model=CreateManualClosingEntryRequest,
+    error_map={ValueError: 422},
+    mark_stale_reason="manual_entry_created",
+  )
+)
+
+truncate_schedule_op = _registrar.register(
+  OperationSpec(
+    name="truncate-schedule",
+    summary="Truncate Schedule (End Early)",
+    description=(
+      "End a schedule early by deleting forward facts and any stale draft "
+      "closing entries past the cutoff. Historical facts and posted entries "
+      "are preserved. Use this when a business event (asset disposal, "
+      "contract cancellation) shortens the schedule's lifespan."
+    ),
+    command=cmd_truncate_schedule,
+    request_model=TruncateScheduleOperation,
+    error_map={ValueError: 422, ScheduleNotFoundError: 404},
+    mark_stale_reason="schedule_truncated",
+  )
+)
+
+dispose_schedule_op = _registrar.register(
+  OperationSpec(
+    name="dispose-schedule",
+    summary="Dispose Schedule (Sale or Abandonment)",
+    description=(
+      "Atomically truncate a schedule past the disposal date and create a "
+      "balanced disposal closing entry. Computes accumulated depreciation "
+      "from the schedule's own facts, derives net book value and gain/loss, "
+      "removes forward facts, and books the disposal entry in one call. "
+      "Use when an asset is sold or abandoned before the schedule runs to "
+      "completion. For abandonment with no proceeds, omit `sale_proceeds` "
+      "and `proceeds_element_id`."
+    ),
+    command=cmd_dispose_schedule,
+    request_model=DisposeScheduleRequest,
+    error_map={ValueError: 422, ScheduleNotFoundError: 404},
+    mark_stale_reason="schedule_disposed",
+  )
+)
 
 
 @router.post(
@@ -800,725 +1275,7 @@ async def reopen_period_op(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Taxonomy operations
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@router.post(
-  "/create-taxonomy",
-  response_model=OperationEnvelope,
-  operation_id="opCreateTaxonomy",
-  summary="Create Taxonomy",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-taxonomy",
-  method="POST",
-  business_event_type="ledger_create_taxonomy",
-)
-async def create_taxonomy_op(
-  body: CreateTaxonomyRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-taxonomy",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_create_taxonomy(session, body, created_by=str(user.id))
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
-
-  return await _dispatch(ctx, _runner, cache)
-
-
-@router.post(
-  "/create-structure",
-  response_model=OperationEnvelope,
-  operation_id="opCreateStructure",
-  summary="Create Structure",
-  description="Structures organize elements within a taxonomy. Types: `statement`, `mapping`, `schedule`, `presentation`, `calculation`.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/create-structure",
-  method="POST",
-  business_event_type="ledger_create_structure",
-)
-async def create_structure_op(
-  body: CreateStructureRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="create-structure",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        return cmd_create_structure(session, body, created_by=str(user.id))
-    except LibraryImmutableError as exc:
-      raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
-
-  return await _dispatch(ctx, _runner, cache)
-
-
-# `create-mapping-association` is registered on the registrar — see the
-# "Taxonomy mapping write" block below.
-
-
-@router.post(
-  "/delete-mapping-association",
-  response_model=OperationEnvelope,
-  operation_id="opDeleteMappingAssociation",
-  summary="Delete Mapping Association",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/delete-mapping-association",
-  method="POST",
-  business_event_type="ledger_delete_mapping_association",
-)
-async def delete_mapping_association_op(
-  body: DeleteMappingAssociationOperation,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="delete-mapping-association",
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        deleted = cmd_delete_mapping_association(
-          session, body.mapping_id, body.association_id
-        )
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
-    if not deleted:
-      raise HTTPException(status_code=404, detail="Association not found")
-    return DeleteResult(deleted=True)
-
-  return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Native-accounting CRUD surface — registered via the factory.
-#
-# Each operation below is a declarative OperationSpec. The registrar
-# builds the FastAPI route, wraps it with metrics + idempotency, and
-# translates domain exceptions via the error_map. Adding a new op is
-# a single OperationSpec block — not 50 lines of route boilerplate.
-#
-# These module-level names (`update_taxonomy_op`, etc.) exist so tests
-# can import the handler functions directly; the registrar returns the
-# metrics-wrapped handler, matching what a hand-written decorator stack
-# would leave at module scope.
-# ═══════════════════════════════════════════════════════════════════════════
-
-# ── Taxonomy update + delete ──────────────────────────────────────────────
-
-update_taxonomy_op = _registrar.register(
-  OperationSpec(
-    name="update-taxonomy",
-    summary="Update Taxonomy",
-    description="Update mutable fields on a taxonomy. `taxonomy_type` is immutable.",
-    command=cmd_update_taxonomy,
-    request_model=UpdateTaxonomyRequest,
-    error_map={TaxonomyMissingError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-delete_taxonomy_op = _registrar.register(
-  OperationSpec(
-    name="delete-taxonomy",
-    summary="Delete Taxonomy",
-    description=(
-      "Soft-delete a taxonomy (sets `is_active=false`). Historical "
-      "references remain valid."
-    ),
-    command=cmd_delete_taxonomy,
-    request_model=DeleteTaxonomyRequest,
-    error_map={TaxonomyMissingError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-link_entity_taxonomy_op = _registrar.register(
-  OperationSpec(
-    name="link-entity-taxonomy",
-    summary="Link Entity to Taxonomy",
-    description=(
-      "Link the graph's entity to a taxonomy (creates the "
-      "ENTITY_HAS_TAXONOMY edge). Idempotent — returns existing "
-      "linkage if it already exists. Required after creating a CoA "
-      "taxonomy so the platform knows which chart of accounts the "
-      "entity reports under."
-    ),
-    command=cmd_link_entity_taxonomy,
-    request_model=LinkEntityTaxonomyRequest,
-    error_map={
-      EntityNotFoundError: 404,
-      TaxonomyMissingError: 404,
-    },
-    requires_created_by=False,
-  )
-)
-
-# ── Structure update + delete ─────────────────────────────────────────────
-
-update_structure_op = _registrar.register(
-  OperationSpec(
-    name="update-structure",
-    summary="Update Structure",
-    description=(
-      "Update mutable fields on a structure. `structure_type` and "
-      "`taxonomy_id` are immutable."
-    ),
-    command=cmd_update_structure,
-    request_model=UpdateStructureRequest,
-    error_map={StructureNotFoundError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-delete_structure_op = _registrar.register(
-  OperationSpec(
-    name="delete-structure",
-    summary="Delete Structure",
-    description=(
-      "Soft-delete a structure (sets `is_active=false`). Associations "
-      "referencing it are effectively orphaned."
-    ),
-    command=cmd_delete_structure,
-    request_model=DeleteStructureRequest,
-    error_map={StructureNotFoundError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-# ── Element CRUD ──────────────────────────────────────────────────────────
-
-create_element_op = _registrar.register(
-  OperationSpec(
-    name="create-element",
-    summary="Create Element",
-    description=(
-      "Create an element within a taxonomy. For chart-of-accounts "
-      "taxonomies this is how native accounts are added."
-    ),
-    command=cmd_create_element,
-    request_model=CreateElementRequest,
-    error_map={
-      TaxonomyMissingError: 404,
-      LibraryImmutableError: 403,
-      ElementQNameConflictError: 409,
-      ElementMissingError: (
-        400,
-        lambda e: f"Parent element not found: {e.element_id}",  # type: ignore[attr-defined]
-      ),
-    },
-  )
-)
-
-update_element_op = _registrar.register(
-  OperationSpec(
-    name="update-element",
-    summary="Update Element",
-    description=(
-      "Update mutable fields on an element. `taxonomy_id` and `source` "
-      "are immutable. Reparenting cascades path/depth to descendants."
-    ),
-    command=cmd_update_element,
-    request_model=UpdateElementRequest,
-    error_map={
-      ElementMissingError: 404,
-      ElementCycleError: 422,
-      LibraryImmutableError: 403,
-    },
-    requires_created_by=False,
-  )
-)
-
-delete_element_op = _registrar.register(
-  OperationSpec(
-    name="delete-element",
-    summary="Delete Element",
-    description=(
-      "Soft-delete an element (sets `is_active=false`). Historical "
-      "line items referencing it remain valid."
-    ),
-    command=cmd_delete_element,
-    request_model=DeleteElementRequest,
-    error_map={ElementMissingError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-# ── Association bulk + update + delete ───────────────────────────────────
-
-create_associations_op = _registrar.register(
-  OperationSpec(
-    name="create-associations",
-    summary="Create Associations (Bulk)",
-    description=(
-      "Create N associations in a single structure, atomically. Handles "
-      "50+ presentation arcs, 25+ calculation arcs, or a full table "
-      "linkbase in one call. Any failed row rolls back the batch."
-    ),
-    command=cmd_bulk_create_associations,
-    request_model=BulkCreateAssociationsRequest,
-    error_map={
-      StructureNotFoundError: 404,
-      ElementNotFoundError: (
-        400,
-        lambda e: (  # type: ignore[attr-defined]
-          f"{e.side.capitalize()} element not found: {e.element_id}"
-        ),
-      ),
-    },
-  )
-)
-
-update_association_op = _registrar.register(
-  OperationSpec(
-    name="update-association",
-    summary="Update Association",
-    description=(
-      "Update mutable fields on an association. `from_element_id`, "
-      "`to_element_id`, `association_type`, and `structure_id` are "
-      "immutable — delete and recreate instead."
-    ),
-    command=cmd_update_association,
-    request_model=UpdateAssociationRequest,
-    error_map={AssociationNotFoundError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-delete_association_op = _registrar.register(
-  OperationSpec(
-    name="delete-association",
-    summary="Delete Association",
-    description=(
-      "Hard-delete an association. Generalizes delete-mapping-association "
-      "to all association types (presentation, calculation, mapping)."
-    ),
-    command=cmd_delete_association,
-    request_model=DeleteAssociationRequest,
-    error_map={AssociationNotFoundError: 404, LibraryImmutableError: 403},
-    requires_created_by=False,
-  )
-)
-
-# ── Transaction + Journal entry CRUD ────────────────────────────────────
-
-create_transaction_op = _registrar.register(
-  OperationSpec(
-    name="create-transaction",
-    summary="Create Transaction",
-    description=(
-      "Create a standalone business-event Transaction without entries. "
-      "Returns a transaction_id that can be passed to create-journal-entry "
-      "to attach one or more journal entries to this event. Use this when "
-      "a single event (invoice, payment, deposit) produces multiple entries "
-      "over its lifecycle."
-    ),
-    command=cmd_create_transaction,
-    request_model=CreateTransactionRequest,
-    error_map={ValueError: 422},
-  )
-)
-
-create_journal_entry_op = _registrar.register(
-  OperationSpec(
-    name="create-journal-entry",
-    summary="Create Journal Entry",
-    description=(
-      "Create a new draft journal entry with balanced line items. "
-      "Enforces DR=CR at the validation layer. Entries are always "
-      "created as drafts; posting happens via close-period or a "
-      "future per-entry post op."
-    ),
-    command=cmd_create_journal_entry,
-    request_model=CreateJournalEntryRequest,
-    error_map={
-      ClosedPeriodError: 422,
-      UnbalancedJournalEntryError: 422,
-      ValueError: 422,
-    },
-  )
-)
-
-update_journal_entry_op = _registrar.register(
-  OperationSpec(
-    name="update-journal-entry",
-    summary="Update Journal Entry",
-    description=(
-      "Update a draft journal entry. Posted entries are immutable and "
-      "must be corrected via reverse-journal-entry. If line_items is "
-      "provided, existing line items are replaced atomically and the "
-      "new set must balance."
-    ),
-    command=cmd_update_journal_entry,
-    request_model=UpdateJournalEntryRequest,
-    error_map={
-      JournalEntryNotFoundError: 404,
-      JournalEntryNotDraftError: 422,
-      ClosedPeriodError: 422,
-      UnbalancedJournalEntryError: 422,
-      ValueError: 422,
-    },
-    requires_created_by=False,
-  )
-)
-
-delete_journal_entry_op = _registrar.register(
-  OperationSpec(
-    name="delete-journal-entry",
-    summary="Delete Journal Entry",
-    description=(
-      "Hard-delete a draft journal entry. Posted entries are immutable "
-      "and must be reversed instead."
-    ),
-    command=cmd_delete_journal_entry,
-    request_model=DeleteJournalEntryRequest,
-    error_map={
-      JournalEntryNotFoundError: 404,
-      JournalEntryNotDraftError: 422,
-    },
-    requires_created_by=False,
-  )
-)
-
-reverse_journal_entry_op = _registrar.register(
-  OperationSpec(
-    name="reverse-journal-entry",
-    summary="Reverse Journal Entry",
-    description=(
-      "Reverse a posted journal entry by creating a new offsetting "
-      "entry (debits ↔ credits) and marking the original as "
-      "status='reversed'. Both entries stay in the ledger — the audit "
-      "trail shows original + reversal side by side."
-    ),
-    command=cmd_reverse_journal_entry,
-    request_model=ReverseJournalEntryRequest,
-    error_map={
-      JournalEntryNotFoundError: 404,
-      JournalEntryNotPostedError: 422,
-      ClosedPeriodError: 422,
-      ValueError: 422,
-    },
-  )
-)
-
-# ── Schedule truncate + closing entries ──────────────────────────────────
-
-
-truncate_schedule_op = _registrar.register(
-  OperationSpec(
-    name="truncate-schedule",
-    summary="Truncate Schedule (End Early)",
-    description=(
-      "End a schedule early by deleting forward facts and any stale draft "
-      "closing entries past the cutoff. Historical facts and posted entries "
-      "are preserved. Use this when a business event (asset disposal, "
-      "contract cancellation) shortens the schedule's lifespan."
-    ),
-    command=cmd_truncate_schedule,
-    request_model=TruncateScheduleOperation,
-    error_map={ValueError: 422, ScheduleNotFoundError: 404},
-    mark_stale_reason="schedule_truncated",
-  )
-)
-
-create_closing_entry_op = _registrar.register(
-  OperationSpec(
-    name="create-closing-entry",
-    summary="Create Closing Entry",
-    description=(
-      "Create a draft closing entry pre-populated from a schedule's facts "
-      "for the given period. Idempotent — safe to call repeatedly; the "
-      "`outcome` field describes what happened "
-      "(`created`, `unchanged`, `regenerated`, `removed`, `skipped`)."
-    ),
-    command=cmd_create_closing_entry,
-    request_model=CreateClosingEntryOperation,
-    error_map={ValueError: 422},
-    mark_stale_reason="closing_entry_created",
-  )
-)
-
-create_manual_closing_entry_op = _registrar.register(
-  OperationSpec(
-    name="create-manual-closing-entry",
-    summary="Create Manual Closing Entry",
-    description=(
-      "Create a draft closing entry with manually specified line items — "
-      "not tied to a schedule. Use for one-off business events (asset "
-      "disposal, correcting entry, impairment). Total debits must equal "
-      "total credits."
-    ),
-    command=cmd_create_manual_closing_entry,
-    request_model=CreateManualClosingEntryRequest,
-    error_map={ValueError: 422},
-    mark_stale_reason="manual_entry_created",
-  )
-)
-
-dispose_schedule_op = _registrar.register(
-  OperationSpec(
-    name="dispose-schedule",
-    summary="Dispose Schedule (Sale or Abandonment)",
-    description=(
-      "Atomically truncate a schedule past the disposal date and create a "
-      "balanced disposal closing entry. Computes accumulated depreciation "
-      "from the schedule's own facts, derives net book value and gain/loss, "
-      "removes forward facts, and books the disposal entry in one call. "
-      "Use when an asset is sold or abandoned before the schedule runs to "
-      "completion. For abandonment with no proceeds, omit `sale_proceeds` "
-      "and `proceeds_element_id`."
-    ),
-    command=cmd_dispose_schedule,
-    request_model=DisposeScheduleRequest,
-    error_map={ValueError: 422, ScheduleNotFoundError: 404},
-    mark_stale_reason="schedule_disposed",
-  )
-)
-
-# ── Information Block (generic construction — see information-block.md) ───
-#
-# Side effect: registering these specs automatically exposes them as MCP
-# write tools via `build_tools_for_extension`. No hand-written MCP tools
-# are needed for the write path.
-
-create_information_block_op = _registrar.register(
-  OperationSpec(
-    name="create-information-block",
-    summary="Create Information Block",
-    description=(
-      "Generic Information Block construction entry. `block_type` selects "
-      "the registered block type; `payload` is validated against that "
-      "type's creation schema at dispatch. Schedule dispatches to the "
-      "existing Schedule machinery; statement block types raise 501 "
-      "(use create-report instead)."
-    ),
-    command=cmd_create_information_block,
-    request_model=CreateInformationBlockRequest,
-    error_map={
-      ValueError: 422,
-      NotImplementedError: 501,
-      ScheduleNotFoundError: 404,
-    },
-    mark_stale_reason="information_block_created",
-  )
-)
-
-update_information_block_op = _registrar.register(
-  OperationSpec(
-    name="update-information-block",
-    summary="Update Information Block",
-    description=(
-      "Generic Information Block update entry. Dispatches by `block_type` "
-      "to the registered mutation handler. Block types whose Structures "
-      "are library-seeded and immutable (statement family) surface 501."
-    ),
-    command=cmd_update_information_block,
-    request_model=UpdateInformationBlockRequest,
-    error_map={
-      ValueError: 422,
-      NotImplementedError: 501,
-      ScheduleNotFoundError: 404,
-    },
-    mark_stale_reason="information_block_updated",
-  )
-)
-
-delete_information_block_op = _registrar.register(
-  OperationSpec(
-    name="delete-information-block",
-    summary="Delete Information Block",
-    description=(
-      "Generic Information Block deletion entry. Returns a thin "
-      "confirmation (deleted / structure_id / block_type / name). "
-      "Block types whose Structures are library-seeded cannot be "
-      "deleted per tenant and surface 501."
-    ),
-    command=cmd_delete_information_block,
-    request_model=DeleteInformationBlockRequest,
-    error_map={
-      ValueError: 422,
-      NotImplementedError: 501,
-      ScheduleNotFoundError: 404,
-    },
-    mark_stale_reason="information_block_deleted",
-  )
-)
-
-evaluate_rules_op = _registrar.register(
-  OperationSpec(
-    name="evaluate-rules",
-    summary="Evaluate Rules for an Information Block",
-    description=(
-      "Runs every rule targeting the given structure (plus element- and "
-      "association-scoped rules for the structure's atoms), binds "
-      "$Variable references to in-scope facts via qname lookup, writes "
-      "one VerificationResult row per rule, and returns the results plus "
-      "a status-keyed summary. Phase delta.3 — decoding mode, 5 patterns "
-      "(EqualTo, RollUp, RollForward, Exists, CoExists)."
-    ),
-    command=cmd_evaluate_rules,
-    request_model=EvaluateRulesRequest,
-    error_map={ValueError: 422},
-    requires_created_by=True,
-  )
-)
-
-# ── Taxonomy mapping write ────────────────────────────────────────────────
-
-create_mapping_association_op = _registrar.register(
-  OperationSpec(
-    name="create-mapping-association",
-    summary="Create Mapping Association",
-    description=(
-      "Link a chart-of-accounts element to a US GAAP reporting concept. "
-      "For bulk associations (presentation/calculation linkbases, 50+ "
-      "arcs at once) use `create-associations` instead."
-    ),
-    command=cmd_create_mapping_association,
-    request_model=CreateMappingAssociationOperation,
-    error_map={
-      MappingStructureNotFoundError: (404, lambda _e: "Mapping not found"),
-      LibraryImmutableError: 403,
-      ElementNotFoundError: (
-        400,
-        lambda e: f"{e.side.capitalize()} element not found",  # type: ignore[attr-defined]
-      ),
-    },
-  )
-)
-
-
-class AutoMapElementsOperation(BaseModel):
-  """Request body for the auto-map-elements async operation."""
-
-  mapping_id: str
-
-
-@router.post(
-  "/auto-map-elements",
-  response_model=OperationEnvelope,
-  status_code=202,
-  operation_id="opAutoMapElements",
-  summary="Auto-Map Elements via AI (async)",
-  description="Dispatches to the background worker — returns a `pending` envelope immediately. Monitor via SSE at `/v1/operations/{operation_id}/stream`. Confidence thresholds: ≥0.90 auto-approved, 0.70–0.89 flagged for review, <0.70 skipped.",
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/auto-map-elements",
-  method="POST",
-  business_event_type="ledger_auto_map_elements",
-)
-async def auto_map_elements_op(
-  body: AutoMapElementsOperation,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  from robosystems.worker.client import enqueue_task
-
-  op_name = "auto-map-elements"
-  user_id = str(user.id)
-  body_fingerprint = fingerprint_body(body)
-
-  replay = await check_idempotency(
-    cache,
-    user_id,
-    graph_id,
-    op_name,
-    idempotency_key,
-    body_fingerprint,
-    event="extensions.operation",
-  )
-  if replay is not None:
-    return replay
-
-  task_response = await enqueue_task(
-    task_type="agent",
-    graph_id=graph_id,
-    user_id=user_id,
-    params={"agent_type": "mapping", "mapping_id": body.mapping_id},
-  )
-
-  envelope = wrap_pending(
-    op_name,
-    operation_id=task_response["operation_id"],
-    partial_result={
-      "operation_type": task_response.get("operation_type"),
-      "links": task_response.get("_links"),
-      "deduplicated": task_response.get("deduplicated", False),
-    },
-    created_by=user_id,
-  )
-
-  if idempotency_key is not None:
-    await cache.put(
-      user_id, graph_id, op_name, idempotency_key, envelope, body_fingerprint
-    )
-
-  log_operation_audit(
-    operation_name=op_name,
-    operation_id=envelope.operation_id,
-    user_id=user_id,
-    graph_id=graph_id,
-    duration_ms=0.0,
-    status="pending",
-    idempotency_key=idempotency_key,
-  )
-  return envelope
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Report operations
+# Reports
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -1746,7 +1503,7 @@ async def share_report_op(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Publish list operations
+# Publish Lists
 # ═══════════════════════════════════════════════════════════════════════════
 
 

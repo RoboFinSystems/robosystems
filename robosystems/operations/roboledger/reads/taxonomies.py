@@ -75,7 +75,7 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
   row = session.execute(
     select(Taxonomy).where(
       Taxonomy.standard == "us-gaap",
-      Taxonomy.taxonomy_type == "reporting",
+      Taxonomy.taxonomy_type == "reporting_standard",
       Taxonomy.is_locked.is_(True),
     )
   ).scalar_one_or_none()

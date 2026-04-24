@@ -34,12 +34,36 @@ class EntryTemplateRequest(BaseModel):
 
 
 class ScheduleMetadataRequest(BaseModel):
-  method: str = Field("straight_line", description="Calculation method")
+  method: str = Field(
+    "straight_line",
+    description=(
+      "Calculation method. 'straight_line' (default) distributes "
+      "`monthly_amount` evenly across periods with the final period "
+      "absorbing rounding. 'custom' requires `periodic_amounts` — the "
+      "generator uses those values verbatim instead of computing. Other "
+      "strings are labels only; fact values still come from "
+      "`monthly_amount` or `periodic_amounts`."
+    ),
+  )
   original_amount: int = Field(0, description="Cost basis in cents")
   residual_value: int = Field(0, description="Salvage value in cents")
   useful_life_months: int = Field(0, description="Useful life in months")
   asset_element_id: str | None = Field(
     None, description="BS asset element for net book value"
+  )
+  periodic_amounts: list[int] | None = Field(
+    None,
+    description=(
+      "Explicit per-period amounts in cents. When set, the generator "
+      "uses these values instead of `monthly_amount` — enabling "
+      "non-straight-line schedules (effective-interest bond discount "
+      "amortization, day-count interest accrual, variable lease "
+      "payments, pre-computed effective-yield curves, etc.). Length must "
+      "match the number of monthly periods between `period_start` and "
+      "`period_end`; sum must equal `original_amount` exactly. The "
+      "auto-generated SumEquals rule proves Σ = original regardless of "
+      "the curve shape."
+    ),
   )
 
 

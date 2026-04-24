@@ -53,6 +53,7 @@ class ScheduleMetadata:
   residual_value: int = 0  # cents
   useful_life_months: int = 0
   asset_element_id: str | None = None
+  periodic_amounts: list[int] | None = None  # cents; see Request model
 
 
 @dataclass
@@ -191,6 +192,7 @@ class ScheduleService:
         "residual_value": schedule_metadata.residual_value,
         "useful_life_months": schedule_metadata.useful_life_months,
         "asset_element_id": schedule_metadata.asset_element_id,
+        "periodic_amounts": schedule_metadata.periodic_amounts,
       }
 
     # Phase δ: stamp the typed artifact_mechanics column alongside the
@@ -246,17 +248,53 @@ class ScheduleService:
       if schedule_metadata and schedule_metadata.original_amount > 0
       else None
     )
+
+    # Custom amortization curve: caller supplies one integer (cents) per
+    # period, pre-balanced. The generator uses the explicit values
+    # instead of the straight-line formula. Use cases: day-count
+    # interest accrual, effective-interest bond discount amortization,
+    # variable lease payments, any pre-computed schedule.
+    #
+    # Invariants (enforced here so the downstream loop stays simple):
+    #   - len(periodic_amounts) == len(periods)
+    #   - sum(periodic_amounts) == original_amount (cents, exact)
+    #   - each entry >= 0 (the SumEquals rule assumes non-negative terms)
+    custom_amounts_dollars: list[float] | None = None
+    if schedule_metadata and schedule_metadata.periodic_amounts is not None:
+      if len(schedule_metadata.periodic_amounts) != len(periods):
+        raise ValueError(
+          f"periodic_amounts length ({len(schedule_metadata.periodic_amounts)}) "
+          f"does not match period count ({len(periods)}) between "
+          f"{period_start} and {period_end}."
+        )
+      if any(x < 0 for x in schedule_metadata.periodic_amounts):
+        raise ValueError("periodic_amounts entries must be non-negative.")
+      total_cents = sum(schedule_metadata.periodic_amounts)
+      if total_cents != schedule_metadata.original_amount:
+        raise ValueError(
+          f"periodic_amounts sum ({total_cents} cents) does not equal "
+          f"original_amount ({schedule_metadata.original_amount} cents)."
+        )
+      custom_amounts_dollars = [
+        round(c / 100.0, 2) for c in schedule_metadata.periodic_amounts
+      ]
+
     accumulated_debit = 0.0
 
     for i, (p_start, p_end) in enumerate(periods):
       is_last = i == len(periods) - 1
 
-      # Last period absorbs rounding so sum(debit facts) == original_amount exactly
-      period_amount = (
-        round(original_dollars - accumulated_debit, 2)
-        if is_last and original_dollars is not None
-        else amount_dollars
-      )
+      if custom_amounts_dollars is not None:
+        # Pre-balanced curve — use verbatim, no rounding fudge needed.
+        period_amount = custom_amounts_dollars[i]
+      else:
+        # Straight-line: final period absorbs rounding so
+        # Σ(debit facts) == original_amount exactly.
+        period_amount = (
+          round(original_dollars - accumulated_debit, 2)
+          if is_last and original_dollars is not None
+          else amount_dollars
+        )
       accumulated_debit = round(accumulated_debit + period_amount, 2)
 
       # Scope: facts in periods already closed are historical (not acted on
