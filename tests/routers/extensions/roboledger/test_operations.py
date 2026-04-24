@@ -463,7 +463,7 @@ def _balanced_lines() -> list[JournalEntryLineItemInput]:
 # TestCreateJournalEntryOp removed in Phase 4a: the `create-journal-entry`
 # OperationSpec was retired in favor of
 # `create-event-block(event_type='journal_entry_recorded')`. See
-# tests/operations/roboledger/commands/event_block/python_handlers/
+# tests/operations/event_block/python_handlers/
 # test_journal_entry_recorded.py for coverage of the event-driven path.
 
 

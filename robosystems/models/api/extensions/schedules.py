@@ -275,5 +275,5 @@ class DeleteScheduleRequest(BaseModel):
 
 # DisposeScheduleRequest / DisposeScheduleResponse retired in Phase 4b.
 # Asset disposal is now an event block: `create-event-block(event_type='asset_disposed')`.
-# See operations/roboledger/commands/event_block/python_handlers/asset_disposed.py
+# See operations/event_block/python_handlers/asset_disposed.py
 # for the metadata schema (AssetDisposedMetadata).

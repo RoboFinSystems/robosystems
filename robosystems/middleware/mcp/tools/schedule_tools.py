@@ -16,10 +16,10 @@ within one.
 
 Writes (``create-schedule``, ``update-schedule``, ``delete-schedule``,
 ``truncate-schedule``) are registrar-generated from the roboledger
-``OperationSpec`` declarations. Closing-entry drafting (both
-schedule-derived and free-form manual) runs through
-``create-event-block(event_type='schedule_entry_due' |
-'manual_adjustment')``. The unified ``create-information-block`` /
+``OperationSpec`` declarations. Closing-entry drafting goes through
+``create-event-block`` — ``event_type='schedule_entry_due'`` for
+schedule-derived drafts, ``event_type='journal_entry_recorded'`` for
+free-form manual entries. The unified ``create-information-block`` /
 ``update-information-block`` / ``delete-information-block`` operations
 dispatch the same underlying schedule commands via the block-type
 registry.

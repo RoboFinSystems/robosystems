@@ -10,11 +10,14 @@ Resolution order in create_event_block:
   2. DSL registry (event_handlers table) — tenant-configurable simple handlers
 
 Current handlers:
-  - asset_disposed: atomic schedule truncation + balanced 4-leg disposal entry
-  - schedule_entry_due: draft a closing entry from a schedule's period fact
-  - manual_adjustment: balanced free-form draft entry, not tied to a schedule
-  - journal_entry_recorded: balanced journal entry (draft or posted)
-  - transaction_recorded: standalone business-event Transaction
+  - journal_entry_recorded: manual GL write — covers any entry_type
+    (standard / adjusting / closing / reversing) and either status
+    (draft / posted). Single surface for "I'm recording a journal entry."
+  - schedule_entry_due: a schedule period matured — handler drafts the
+    closing entry from the schedule's pre-computed fact.
+  - asset_disposed: an asset left the business — handler atomically
+    truncates the depreciation schedule, drops its SumEquals rule, and
+    posts the balanced disposal entry.
 """
 
 from .registry import EVENT_BLOCK_PYTHON_REGISTRY, get_python_handler

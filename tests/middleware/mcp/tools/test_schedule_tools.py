@@ -6,8 +6,8 @@ covered by `tests/middleware/mcp/test_registrar.py` + the ops-layer
 tests under `tests/operations/roboledger/schedules/`. Closing-entry
 drafting (schedule-derived and manual) runs through
 `create-event-block(event_type='schedule_entry_due' |
-'manual_adjustment')` — see the Python handler registry tests at
-`tests/operations/roboledger/commands/event_block/python_handlers/`.
+'journal_entry_recorded')` — see the Python handler registry tests at
+`tests/operations/event_block/python_handlers/`.
 
 Mocks live at the **operations layer boundary** — the read tools are
 thin shims that build arguments, call into `operations/roboledger/reads/

@@ -24,19 +24,20 @@ Every route follows the pattern:
 - Agents: `create-agent`, `update-agent`
 - Event Blocks: `create-event-block`, `update-event-block`,
   `preview-event-block`. `create-event-block` is the single write surface
-  for business events that cause GL consequences — the following event
-  types are dispatched via the Python handler registry:
-  `asset_disposed`, `schedule_entry_due`, `manual_adjustment`,
-  `journal_entry_recorded`, `transaction_recorded`.
+  for business events that cause GL consequences. Three event types are
+  dispatched via the Python handler registry: `journal_entry_recorded`
+  (manual journal entry — any type, draft or posted), `schedule_entry_due`
+  (a schedule period matured), and `asset_disposed` (atomic disposal +
+  schedule termination).
 - Journal Entries: `update-journal-entry`, `delete-journal-entry`,
   `reverse-journal-entry`. Creates go through
-  `create-event-block(event_type='journal_entry_recorded')`;
-  standalone Transaction creation uses `transaction_recorded`.
+  `create-event-block(event_type='journal_entry_recorded')` — the single
+  surface for any GL write the user originates.
 - Close Workflow: `set-close-target`, `truncate-schedule`,
-  `close-period`, `reopen-period`. Closing-entry drafting (both schedule-
-  derived and manual) now runs through
-  `create-event-block(event_type='schedule_entry_due' | 'manual_adjustment')`;
-  asset disposal via `event_type='asset_disposed'`.
+  `close-period`, `reopen-period`. Closing-entry drafting goes through
+  `create-event-block(event_type='schedule_entry_due')` (schedule-derived)
+  or `event_type='journal_entry_recorded'` (manual). Asset disposal via
+  `event_type='asset_disposed'`.
 - Reports: `create-report`, `regenerate-report`, `delete-report`,
   `share-report`
 - Publish Lists: `create-publish-list`, `update-publish-list`,
@@ -145,6 +146,35 @@ from robosystems.models.api.taxonomy_block import (
   UpdateTaxonomyBlockRequest,
 )
 from robosystems.models.core import User
+from robosystems.operations.event_block import (
+  EventNotFoundError,
+  InvalidEventTransitionError,
+)
+from robosystems.operations.event_block import (
+  create_event_block as cmd_create_event_block,
+)
+from robosystems.operations.event_block import (
+  preview_event_block as cmd_preview_event_block,
+)
+from robosystems.operations.event_block import (
+  update_event_block as cmd_update_event_block,
+)
+from robosystems.operations.event_block.engine import (
+  EngineValidationError,
+)
+from robosystems.operations.event_block.python_handlers._disposal_plan import (
+  ScheduleNotFoundError as DisposalScheduleNotFoundError,
+)
+from robosystems.operations.event_block.python_handlers.types import (
+  HandlerMetadataValidationError,
+)
+from robosystems.operations.event_block.registry import (
+  HandlerAmbiguousError,
+  HandlerNotFoundError,
+)
+from robosystems.operations.event_block.template import (
+  TemplateInterpolationError,
+)
 from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.information_block.commands import (
   create_information_block as cmd_create_information_block,
@@ -173,35 +203,6 @@ from robosystems.operations.roboledger.commands.agent import (
   update_agent as cmd_update_agent,
 )
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
-from robosystems.operations.roboledger.commands.event_block import (
-  EventNotFoundError,
-  InvalidEventTransitionError,
-)
-from robosystems.operations.roboledger.commands.event_block import (
-  create_event_block as cmd_create_event_block,
-)
-from robosystems.operations.roboledger.commands.event_block import (
-  preview_event_block as cmd_preview_event_block,
-)
-from robosystems.operations.roboledger.commands.event_block import (
-  update_event_block as cmd_update_event_block,
-)
-from robosystems.operations.roboledger.commands.event_block.engine import (
-  EngineValidationError,
-)
-from robosystems.operations.roboledger.commands.event_block.python_handlers._disposal_plan import (
-  ScheduleNotFoundError as DisposalScheduleNotFoundError,
-)
-from robosystems.operations.roboledger.commands.event_block.python_handlers.types import (
-  HandlerMetadataValidationError,
-)
-from robosystems.operations.roboledger.commands.event_block.registry import (
-  HandlerAmbiguousError,
-  HandlerNotFoundError,
-)
-from robosystems.operations.roboledger.commands.event_block.template import (
-  TemplateInterpolationError,
-)
 from robosystems.operations.roboledger.commands.event_handler import (
   EventHandlerNotFoundError,
   TemplateValidationError,
@@ -1083,10 +1084,12 @@ preview_event_block_op = _registrar.register(
 # ═══════════════════════════════════════════════════════════════════════════
 # Journal Entries
 #
-# Update / delete / reverse operations on existing journal entries. Creation
-# is handled through `create-event-block(event_type='journal_entry_recorded')`
-# — see the Python handler registry. Standalone Transactions go through
-# `event_type='transaction_recorded'` instead.
+# Update / delete / reverse operations on existing journal entries. All
+# creation (manual entries, closing entries, adjusting entries, posted
+# imports) is handled through
+# `create-event-block(event_type='journal_entry_recorded')` — the single
+# write surface for GL entries the user originates. See the Python handler
+# registry.
 # ═══════════════════════════════════════════════════════════════════════════
 
 update_journal_entry_op = _registrar.register(
@@ -1234,11 +1237,12 @@ truncate_schedule_op = _registrar.register(
 )
 
 # Closing-entry writes (schedule-derived + manual), journal entry creation,
-# standalone Transaction creation, and asset disposal are all handled via
-# create-event-block with Python-registered event types. See
-# operations/roboledger/commands/event_block/python_handlers/ for the
-# handler modules (asset_disposed, schedule_entry_due, manual_adjustment,
-# journal_entry_recorded, transaction_recorded).
+# and asset disposal are all handled via create-event-block with
+# Python-registered event types. See
+# operations/event_block/python_handlers/ for the
+# handler modules: journal_entry_recorded (manual GL writes),
+# schedule_entry_due (schedule period matured), asset_disposed (atomic
+# disposal + schedule termination).
 
 
 @router.post(

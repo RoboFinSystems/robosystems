@@ -1,60 +1,18 @@
-"""Transaction write and read models."""
+"""Transaction read models.
+
+Standalone Transaction creation is no longer a public surface — every
+GL write goes through `create-event-block(event_type='journal_entry_recorded')`,
+which auto-creates the Transaction parent inside `create_journal_entry`.
+The read shapes below are used by ledger-display routes and GraphQL.
+"""
 
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
 
 from pydantic import BaseModel
 
 from robosystems.models.api.common import PaginationInfo
-
-# ── Create ────────────────────────────────────────────────────────────────
-
-
-class CreateTransactionRequest(BaseModel):
-  """Create a standalone business-event Transaction.
-
-  Used internally by the `transaction_recorded` event handler
-  (see operations/roboledger/commands/event_block/python_handlers/);
-  the public surface is `create-event-block(event_type='transaction_recorded')`.
-
-  `amount` is in minor currency units (cents). `type` is free-form but
-  common values are: invoice, payment, bill, expense, deposit, transfer,
-  journal_entry.
-  """
-
-  type: str
-  date: date
-  amount: int
-  currency: str = "USD"
-  description: str | None = None
-  merchant_name: str | None = None
-  reference_number: str | None = None
-  number: str | None = None
-  category: str | None = None
-  due_date: date | None = None
-  status: Literal["pending", "posted"] = "pending"
-
-
-class TransactionResponse(BaseModel):
-  """Response shape for a standalone Transaction create. Used internally
-  by the `transaction_recorded` event handler."""
-
-  id: str
-  type: str
-  date: date
-  amount: int
-  currency: str
-  description: str | None = None
-  merchant_name: str | None = None
-  reference_number: str | None = None
-  number: str | None = None
-  category: str | None = None
-  due_date: date | None = None
-  status: Literal["pending", "posted", "void"]
-  source: str
-
 
 # ── Read ──────────────────────────────────────────────────────────────────
 

@@ -247,7 +247,8 @@ class GraphMCPTools:
       # registrar-generated from the roboledger OperationSpec
       # declarations; closing-entry drafting (schedule-derived and
       # manual) goes through create-event-block with
-      # event_type='schedule_entry_due' | 'manual_adjustment'.
+      # event_type='schedule_entry_due' (schedule-derived) or
+      # 'journal_entry_recorded' (manual).
       #
       # Schedule-specific read tools (list-schedule-structures,
       # get-schedule-facts) were retired in favour of the generic

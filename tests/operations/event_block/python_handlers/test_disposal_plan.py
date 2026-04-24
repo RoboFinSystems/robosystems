@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from robosystems.operations.roboledger.commands.event_block.python_handlers._disposal_plan import (
+from robosystems.operations.event_block.python_handlers._disposal_plan import (
   DisposalPlan,
   ScheduleNotFoundError,
   compute_disposal_plan,

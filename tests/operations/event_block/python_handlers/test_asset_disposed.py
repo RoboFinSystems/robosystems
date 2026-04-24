@@ -8,11 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.models.api.event_block import CreateEventBlockRequest
-from robosystems.operations.roboledger.commands.event_block.python_handlers._disposal_plan import (
+from robosystems.operations.event_block.python_handlers._disposal_plan import (
   DisposalPlan,
   ScheduleNotFoundError,
 )
-from robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed import (
+from robosystems.operations.event_block.python_handlers.asset_disposed import (
   AssetDisposedMetadata,
   dispatch,
   dispatch_preview,
@@ -67,7 +67,7 @@ class TestDispatchPreview:
 
     plan = _make_plan()
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.compute_disposal_plan",
+      "robosystems.operations.event_block.python_handlers.asset_disposed.compute_disposal_plan",
       return_value=plan,
     ):
       result = dispatch_preview(session, body, metadata)
@@ -95,7 +95,7 @@ class TestDispatchPreview:
     metadata = AssetDisposedMetadata(schedule_id="struct_missing")
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.compute_disposal_plan",
+      "robosystems.operations.event_block.python_handlers.asset_disposed.compute_disposal_plan",
       side_effect=ScheduleNotFoundError("struct_missing"),
     ):
       result = dispatch_preview(session, body, metadata)
@@ -121,7 +121,7 @@ class TestDispatchPreview:
     )
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.compute_disposal_plan",
+      "robosystems.operations.event_block.python_handlers.asset_disposed.compute_disposal_plan",
       side_effect=ValueError("proceeds_element_id is required when sale_proceeds > 0."),
     ):
       result = dispatch_preview(session, body, metadata)
@@ -153,15 +153,15 @@ class TestDispatch:
 
     with (
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.compute_disposal_plan",
+        "robosystems.operations.event_block.python_handlers.asset_disposed.compute_disposal_plan",
         return_value=plan,
       ) as compute_mock,
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.ScheduleService",
+        "robosystems.operations.event_block.python_handlers.asset_disposed.ScheduleService",
         return_value=service_mock,
       ),
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
+        "robosystems.operations.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
       ) as delete_rule_mock,
     ):
       result = dispatch(session, event, metadata, created_by="usr_test")
@@ -201,15 +201,15 @@ class TestDispatch:
 
     with (
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.compute_disposal_plan",
+        "robosystems.operations.event_block.python_handlers.asset_disposed.compute_disposal_plan",
         return_value=plan,
       ),
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.ScheduleService",
+        "robosystems.operations.event_block.python_handlers.asset_disposed.ScheduleService",
         return_value=service_mock,
       ),
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
+        "robosystems.operations.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
       ),
     ):
       dispatch(session, event, metadata, created_by="usr_test")
@@ -231,15 +231,15 @@ class TestDispatch:
 
     with (
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.compute_disposal_plan",
+        "robosystems.operations.event_block.python_handlers.asset_disposed.compute_disposal_plan",
         return_value=plan,
       ),
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed.ScheduleService",
+        "robosystems.operations.event_block.python_handlers.asset_disposed.ScheduleService",
         return_value=service_mock,
       ),
       patch(
-        "robosystems.operations.roboledger.commands.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
+        "robosystems.operations.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
       ),
     ):
       dispatch(session, event, metadata, created_by="usr_test")

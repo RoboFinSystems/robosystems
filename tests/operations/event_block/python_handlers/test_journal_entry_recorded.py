@@ -12,7 +12,7 @@ from robosystems.models.api.extensions.journal_entries import (
   JournalEntryLineItemInput,
   JournalEntryResponse,
 )
-from robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded import (
+from robosystems.operations.event_block.python_handlers.journal_entry_recorded import (
   JournalEntryRecordedMetadata,
   dispatch,
   dispatch_preview,
@@ -89,7 +89,7 @@ class TestDispatch:
     metadata = _make_metadata(status="draft")
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded.create_journal_entry",
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.create_journal_entry",
       return_value=_fake_response(),
     ) as mock_create:
       result = dispatch(session, event, metadata, created_by="usr_test")
@@ -108,7 +108,7 @@ class TestDispatch:
     metadata = _make_metadata(status="posted")
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded.create_journal_entry",
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.create_journal_entry",
       return_value=_fake_response(),
     ):
       dispatch(session, event, metadata, created_by="usr_test")
@@ -124,7 +124,7 @@ class TestDispatch:
 
     resp = _fake_response(transaction_id=None)
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded.create_journal_entry",
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.create_journal_entry",
       return_value=resp,
     ):
       result = dispatch(session, event, metadata, created_by="usr_test")
@@ -141,7 +141,7 @@ class TestDispatch:
     from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded.create_journal_entry",
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.create_journal_entry",
       side_effect=ClosedPeriodError("2026-02", date(2026, 2, 28)),
     ):
       with pytest.raises(ClosedPeriodError):
@@ -155,7 +155,7 @@ class TestDispatchPreview:
     metadata = _make_metadata()
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded.assert_period_not_closed"
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.assert_period_not_closed"
     ):
       preview = dispatch_preview(session, body, metadata)
 
@@ -171,7 +171,7 @@ class TestDispatchPreview:
     metadata = _make_metadata(status="posted")
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded.assert_period_not_closed"
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.assert_period_not_closed"
     ):
       preview = dispatch_preview(session, body, metadata)
 
@@ -189,7 +189,7 @@ class TestDispatchPreview:
     )
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded.assert_period_not_closed"
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.assert_period_not_closed"
     ):
       preview = dispatch_preview(session, body, metadata)
 
@@ -204,7 +204,7 @@ class TestDispatchPreview:
     metadata = _make_metadata()
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.journal_entry_recorded.assert_period_not_closed",
+      "robosystems.operations.event_block.python_handlers.journal_entry_recorded.assert_period_not_closed",
       side_effect=ClosedPeriodError("2026-02", date(2026, 2, 28)),
     ):
       preview = dispatch_preview(session, body, metadata)

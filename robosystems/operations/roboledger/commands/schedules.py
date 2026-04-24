@@ -393,7 +393,7 @@ def update_schedule(
 # Asset disposal was retired as a standalone operation in Phase 4b of the
 # event-driven ledger. The atomic truncate + SumEquals cleanup + balanced
 # disposal entry logic now lives in the Python handler registry at
-# operations/roboledger/commands/event_block/python_handlers/asset_disposed.py
+# operations/event_block/python_handlers/asset_disposed.py
 # and is invoked via create-event-block(event_type='asset_disposed').
 
 

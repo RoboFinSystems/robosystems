@@ -8,11 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.models.api.event_block import CreateEventBlockRequest
-from robosystems.operations.roboledger.commands.event_block.commands import (
+from robosystems.operations.event_block.commands import (
   create_event_block,
   preview_event_block,
 )
-from robosystems.operations.roboledger.commands.event_block.python_handlers.types import (
+from robosystems.operations.event_block.python_handlers.types import (
   HandlerMetadataValidationError,
   HandlerPreview,
   HandlerResult,
@@ -57,11 +57,11 @@ class TestCreateEventBlockPythonHandlerPath:
 
     with (
       patch(
-        "robosystems.operations.roboledger.commands.event_block.commands.get_python_handler",
+        "robosystems.operations.event_block.commands.get_python_handler",
         return_value=python_handler,
       ),
       patch(
-        "robosystems.operations.roboledger.commands.event_block.commands.resolve_handler"
+        "robosystems.operations.event_block.commands.resolve_handler"
       ) as dsl_resolver,
     ):
       envelope = create_event_block(session, body, created_by="usr_test")
@@ -102,7 +102,7 @@ class TestCreateEventBlockPythonHandlerPath:
     python_handler.metadata_schema.model_validate.side_effect = raise_validation
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.commands.get_python_handler",
+      "robosystems.operations.event_block.commands.get_python_handler",
       return_value=python_handler,
     ):
       with pytest.raises(HandlerMetadataValidationError):
@@ -123,7 +123,7 @@ class TestCreateEventBlockPythonHandlerPath:
     python_handler.dispatch.side_effect = RuntimeError("boom")
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.commands.get_python_handler",
+      "robosystems.operations.event_block.commands.get_python_handler",
       return_value=python_handler,
     ):
       with pytest.raises(RuntimeError, match="boom"):
@@ -157,7 +157,7 @@ class TestPreviewEventBlockPythonHandlerPath:
     )
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.commands.get_python_handler",
+      "robosystems.operations.event_block.commands.get_python_handler",
       return_value=python_handler,
     ):
       resp = preview_event_block(session, body, created_by="usr_test")
@@ -182,7 +182,7 @@ class TestPreviewEventBlockPythonHandlerPath:
     )
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.commands.get_python_handler",
+      "robosystems.operations.event_block.commands.get_python_handler",
       return_value=python_handler,
     ):
       resp = preview_event_block(session, body, created_by="usr_test")
@@ -206,7 +206,7 @@ class TestPreviewEventBlockPythonHandlerPath:
     )
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.commands.get_python_handler",
+      "robosystems.operations.event_block.commands.get_python_handler",
       return_value=python_handler,
     ):
       resp = preview_event_block(session, body, created_by="usr_test")

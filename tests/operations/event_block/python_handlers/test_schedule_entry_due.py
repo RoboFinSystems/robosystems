@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
 from robosystems.models.api.event_block import CreateEventBlockRequest
-from robosystems.operations.roboledger.commands.event_block.python_handlers.schedule_entry_due import (
+from robosystems.operations.event_block.python_handlers.schedule_entry_due import (
   ScheduleEntryDueMetadata,
   dispatch,
   dispatch_preview,
@@ -66,7 +66,7 @@ class TestDispatch:
     )
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.schedule_entry_due.ScheduleService",
+      "robosystems.operations.event_block.python_handlers.schedule_entry_due.ScheduleService",
       return_value=service_mock,
     ):
       result = dispatch(session, event, metadata, created_by="usr_test")
@@ -96,7 +96,7 @@ class TestDispatch:
     )
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.schedule_entry_due.ScheduleService",
+      "robosystems.operations.event_block.python_handlers.schedule_entry_due.ScheduleService",
       return_value=service_mock,
     ):
       result = dispatch(session, event, metadata, created_by="usr_test")
@@ -119,7 +119,7 @@ class TestDispatch:
     )
 
     with patch(
-      "robosystems.operations.roboledger.commands.event_block.python_handlers.schedule_entry_due.ScheduleService",
+      "robosystems.operations.event_block.python_handlers.schedule_entry_due.ScheduleService",
       return_value=service_mock,
     ):
       result = dispatch(session, event, metadata, created_by="usr_test")

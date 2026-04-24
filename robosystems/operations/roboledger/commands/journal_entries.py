@@ -47,10 +47,6 @@ from robosystems.models.api.extensions.journal_entries import (
   ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
-from robosystems.models.api.extensions.transactions import (
-  CreateTransactionRequest,
-  TransactionResponse,
-)
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
@@ -286,61 +282,6 @@ def create_journal_entry(
 
   line_items = _load_line_items(session, entry.id)
   return _entry_to_response(entry, line_items)
-
-
-# ── Create Transaction ────────────────────────────────────────────────────
-
-
-def create_transaction(
-  session: Session,
-  body: CreateTransactionRequest,
-  created_by: str,
-) -> TransactionResponse:
-  """Create a standalone Transaction (business event) without entries.
-
-  Use this to record an event first, then attach entries via
-  `create_journal_entry` with the returned `id` as `transaction_id`.
-  Useful when a single business event (e.g. a vendor payment) produces
-  multiple journal entries over its lifecycle.
-
-  Raises:
-    `ValueError` (422) for invalid field values.
-  """
-  now = datetime.now(UTC)
-  txn = Transaction(
-    type=body.type,
-    amount=body.amount,
-    currency=body.currency,
-    date=body.date,
-    due_date=body.due_date,
-    description=body.description,
-    merchant_name=body.merchant_name,
-    reference_number=body.reference_number,
-    number=body.number,
-    category=body.category,
-    source="native",
-    status=body.status,
-    posted_at=now if body.status == "posted" else None,
-    created_by=created_by,
-  )
-  session.add(txn)
-  session.flush()
-
-  return TransactionResponse(
-    id=txn.id,
-    type=txn.type,
-    date=txn.date,
-    amount=txn.amount,
-    currency=txn.currency,
-    description=txn.description,
-    merchant_name=txn.merchant_name,
-    reference_number=txn.reference_number,
-    number=txn.number,
-    category=txn.category,
-    due_date=txn.due_date,
-    status=txn.status,
-    source=txn.source,
-  )
 
 
 # ── Update ───────────────────────────────────────────────────────────────
