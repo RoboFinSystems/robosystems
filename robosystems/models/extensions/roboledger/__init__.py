@@ -44,10 +44,12 @@ from ..taxonomy import Taxonomy
 # RoboLedger-specific concepts
 from .dimension_junctions import (
   entry_dimensions,
+  event_dimensions,
   line_item_dimensions,
   transaction_dimensions,
 )
 from .entry import Entry
+from .event import Event
 from .fact import Fact
 from .fact_set import FactSet
 from .fiscal_calendar import FiscalCalendar, FiscalCalendarEvent
@@ -70,6 +72,7 @@ __all__ = [
   "Dimension",
   "Element",
   "Entry",
+  "Event",
   "Fact",
   "FactSet",
   "FiscalCalendar",
@@ -84,6 +87,7 @@ __all__ = [
   "Taxonomy",
   "Transaction",
   "entry_dimensions",
+  "event_dimensions",
   "line_item_dimensions",
   "transaction_dimensions",
 ]

@@ -76,3 +76,20 @@ line_item_dimensions = Table(
     primary_key=True,
   ),
 )
+
+event_dimensions = Table(
+  "event_dimensions",
+  ExtensionsBase.metadata,
+  Column(
+    "event_id",
+    String,
+    ForeignKey("events.id", ondelete="CASCADE"),
+    primary_key=True,
+  ),
+  Column(
+    "dimension_id",
+    String,
+    ForeignKey("dimensions.id", ondelete="RESTRICT"),
+    primary_key=True,
+  ),
+)

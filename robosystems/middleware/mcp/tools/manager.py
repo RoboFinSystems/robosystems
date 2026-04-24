@@ -260,6 +260,8 @@ class GraphMCPTools:
     # Information Block reads are pure reads and must stay available on
     # read-only graphs. Same gate pattern as document_tools below:
     # extension + flag only, no read_only guard.
+    self.get_information_block_tool = None
+    self.list_information_blocks_tool = None
     if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
       from .information_block_tools import (
         GetInformationBlockTool,
@@ -268,6 +270,16 @@ class GraphMCPTools:
 
       self.get_information_block_tool = GetInformationBlockTool(graph_client)
       self.list_information_blocks_tool = ListInformationBlocksTool(graph_client)
+
+    # Event Block reads (get-event-block, list-event-blocks) — same gate as
+    # information block reads: available on read-only graphs.
+    self.get_event_block_tool = None
+    self.list_event_blocks_tool = None
+    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+      from .event_block_tools import GetEventBlockTool, ListEventBlocksTool
+
+      self.get_event_block_tool = GetEventBlockTool(graph_client)
+      self.list_event_blocks_tool = ListEventBlocksTool(graph_client)
 
     # Layer 2: Taxonomy mapping read tools (gated by roboledger extension +
     # ROBOLEDGER_ENABLED). Writes — create-mapping-association,
@@ -528,6 +540,14 @@ class GraphMCPTools:
       tools.append(self.list_information_blocks_tool.get_tool_definition())
     return tools
 
+  def _get_event_block_tool_definitions(self) -> list[dict[str, Any]]:
+    tools = []
+    if self.get_event_block_tool is not None:
+      tools.append(self.get_event_block_tool.get_tool_definition())
+    if self.list_event_blocks_tool is not None:
+      tools.append(self.list_event_blocks_tool.get_tool_definition())
+    return tools
+
   def _get_search_tool_definitions(self) -> list[dict[str, Any]]:
     """
     Get text search tool definitions.
@@ -603,6 +623,9 @@ class GraphMCPTools:
 
       # Information Block read tools (cross-block-type reads)
       tools.extend(self._get_information_block_tool_definitions())
+
+      # Event Block read tools (get-event-block, list-event-blocks)
+      tools.extend(self._get_event_block_tool_definitions())
 
     # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_workspace_tool_definitions())
@@ -855,6 +878,25 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.list_information_blocks_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Event Block read tools (writes are registrar-generated, handled at Layer 0)
+      elif name == "get-event-block":
+        if self.get_event_block_tool is None:
+          raise ValueError(
+            "get-event-block tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.get_event_block_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-event-blocks":
+        if self.list_event_blocks_tool is None:
+          raise ValueError(
+            "list-event-blocks tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.list_event_blocks_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Fiscal calendar tools

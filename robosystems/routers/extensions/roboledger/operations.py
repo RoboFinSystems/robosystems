@@ -10,7 +10,7 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (34) — in logical workflow order:**
+**Registered (36) — in logical workflow order:**
 
 - Setup: `initialize`, `update-entity`
 - Ontology / Taxonomy Blocks: `create-taxonomy-block`,
@@ -21,6 +21,7 @@ Every route follows the pattern:
 - Information Blocks: `create-information-block`,
   `update-information-block`, `delete-information-block`,
   `evaluate-rules`
+- Event Blocks: `create-event-block`, `update-event-block`
 - Journal Entries: `create-transaction`, `create-journal-entry`,
   `update-journal-entry`, `delete-journal-entry`,
   `reverse-journal-entry`
@@ -82,6 +83,10 @@ from robosystems.middleware.operations import (
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
+from robosystems.models.api.event_block import (
+  CreateEventBlockRequest,
+  UpdateEventBlockRequest,
+)
 from robosystems.models.api.extensions.entity import UpdateEntityRequest
 from robosystems.models.api.extensions.fiscal_calendar import (
   ClosePeriodRequest,
@@ -146,6 +151,16 @@ from robosystems.operations.roboledger.commands._guards import (
   LibraryImmutableError,
 )
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
+from robosystems.operations.roboledger.commands.event_block import (
+  EventNotFoundError,
+  InvalidEventTransitionError,
+)
+from robosystems.operations.roboledger.commands.event_block import (
+  create_event_block as cmd_create_event_block,
+)
+from robosystems.operations.roboledger.commands.event_block import (
+  update_event_block as cmd_update_event_block,
+)
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
@@ -876,6 +891,51 @@ evaluate_rules_op = _registrar.register(
   )
 )
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Event Blocks
+#
+# Real-world business event layer (event-driven-ledger.md). Phase 1 ships
+# the envelope in capture-only mode (apply_handlers=False). The handler
+# engine (apply_handlers=True, event_handlers table) ships in Phase 3.
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_event_block_op = _registrar.register(
+  OperationSpec(
+    name="create-event-block",
+    summary="Create Event Block",
+    description=(
+      "Persist a real-world business event in capture-only mode. "
+      "`apply_handlers` must be False in Phase 1 (True raises 501). "
+      "Returns an EventBlockEnvelope with status='captured'. "
+      "Use update-event-block to transition status (captured → committed | voided)."
+    ),
+    command=cmd_create_event_block,
+    request_model=CreateEventBlockRequest,
+    error_map={
+      NotImplementedError: 501,
+      ValueError: 422,
+    },
+  )
+)
+
+update_event_block_op = _registrar.register(
+  OperationSpec(
+    name="update-event-block",
+    summary="Update Event Block",
+    description=(
+      "Apply a status transition (captured → committed | voided) and/or "
+      "field corrections (description, effective_at, metadata_patch) to an "
+      "existing event block. Only supplied fields are updated."
+    ),
+    command=cmd_update_event_block,
+    request_model=UpdateEventBlockRequest,
+    error_map={
+      EventNotFoundError: 404,
+      InvalidEventTransitionError: 422,
+    },
+  )
+)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Journal Entries
