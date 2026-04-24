@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from .asset_disposed import ASSET_DISPOSED_HANDLER
 from .journal_entry_recorded import JOURNAL_ENTRY_RECORDED_HANDLER
+from .journal_entry_reversed import JOURNAL_ENTRY_REVERSED_HANDLER
 from .schedule_entry_due import SCHEDULE_ENTRY_DUE_HANDLER
 from .types import EventBlockPythonHandler
 
@@ -21,6 +22,7 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   ASSET_DISPOSED_HANDLER.event_type: ASSET_DISPOSED_HANDLER,
   SCHEDULE_ENTRY_DUE_HANDLER.event_type: SCHEDULE_ENTRY_DUE_HANDLER,
   JOURNAL_ENTRY_RECORDED_HANDLER.event_type: JOURNAL_ENTRY_RECORDED_HANDLER,
+  JOURNAL_ENTRY_REVERSED_HANDLER.event_type: JOURNAL_ENTRY_REVERSED_HANDLER,
 }
 
 

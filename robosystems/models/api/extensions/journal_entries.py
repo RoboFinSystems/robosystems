@@ -1,10 +1,12 @@
 """Journal entry write models — native accounting CRUD surface.
 
-These are the request/response shapes for the `create-journal-entry`,
-`update-journal-entry`, `delete-journal-entry`, and
-`reverse-journal-entry` operations. They cover the ongoing write path
-a native-accounting customer uses when recording entries directly in
-RoboLedger rather than syncing from QuickBooks.
+The Pydantic shapes used by:
+  - `create-event-block(event_type='journal_entry_recorded')` for new
+    entries and `event_type='journal_entry_reversed'` for reversals (via
+    the metadata schema → `CreateJournalEntryRequest` /
+    `ReverseJournalEntryRequest` adapter calls).
+  - `update-journal-entry` / `delete-journal-entry` ops for in-place
+    draft correction.
 
 For display/read models of existing transactions and entries, see
 `transactions.py` (`LedgerEntryResponse`, `LedgerTransactionDetailResponse`,

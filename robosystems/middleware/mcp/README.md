@@ -113,10 +113,12 @@ envelope machine under the hood.
 | `create-schedule` | Create a schedule structure with pre-generated facts | `commands/schedules.create_schedule` |
 | `update-schedule` | Rename or edit schedule mechanics | `commands/schedules.update_schedule` |
 | `delete-schedule` | Remove a schedule | `commands/schedules.delete_schedule` |
-| `truncate-schedule` | Cut a schedule short at a given period | `commands/schedules.truncate_schedule` |
 | `list-period-drafts` | List pending draft entries for a period | `reads/period_drafts.list_period_drafts` |
-| `create-closing-entry` | Create a schedule-derived closing entry (ledger operation) | `commands/schedules.create_closing_entry` |
-| `create-manual-closing-entry` | Create a manually-authored closing entry (ledger operation) | `commands/schedules.create_manual_closing_entry` |
+
+Closing-entry drafting (schedule-derived + manual) and schedule
+termination go through `create-event-block` — see the event block
+section. The Python handler registry routes them to `schedule_entry_due`,
+`journal_entry_recorded`, and `asset_disposed`.
 
 **Information Block (cross-type molecular reads + writes):**
 

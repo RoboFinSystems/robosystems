@@ -15,6 +15,9 @@ from robosystems.operations.event_block.python_handlers.asset_disposed import (
 from robosystems.operations.event_block.python_handlers.journal_entry_recorded import (
   JOURNAL_ENTRY_RECORDED_HANDLER,
 )
+from robosystems.operations.event_block.python_handlers.journal_entry_reversed import (
+  JOURNAL_ENTRY_REVERSED_HANDLER,
+)
 from robosystems.operations.event_block.python_handlers.schedule_entry_due import (
   SCHEDULE_ENTRY_DUE_HANDLER,
 )
@@ -33,6 +36,10 @@ def test_journal_entry_recorded_registered() -> None:
   assert get_python_handler("journal_entry_recorded") is JOURNAL_ENTRY_RECORDED_HANDLER
 
 
+def test_journal_entry_reversed_registered() -> None:
+  assert get_python_handler("journal_entry_reversed") is JOURNAL_ENTRY_REVERSED_HANDLER
+
+
 def test_unknown_event_type_returns_none() -> None:
   assert get_python_handler("invoice_issued") is None
   assert get_python_handler("random_type") is None
@@ -44,8 +51,10 @@ def test_registry_value_is_frozen() -> None:
     ASSET_DISPOSED_HANDLER.target_status = "mutated"  # type: ignore[misc]
 
 
-def test_asset_disposed_declares_fulfilled_target_status() -> None:
+def test_fulfilled_target_status_handlers() -> None:
+  """Terminal events: status transitions straight to fulfilled."""
   assert ASSET_DISPOSED_HANDLER.target_status == "fulfilled"
+  assert JOURNAL_ENTRY_REVERSED_HANDLER.target_status == "fulfilled"
 
 
 def test_classified_target_status_handlers() -> None:
@@ -70,12 +79,14 @@ def test_asset_disposed_metadata_rejects_negative_proceeds() -> None:
     AssetDisposedMetadata(schedule_id="struct_1", proceeds=-100)
 
 
-def test_registry_has_three_handlers() -> None:
-  """Three event types produce GL writes: a manual journal entry, a
-  schedule period maturing, and an asset disposal. Anything else dispatches
-  to the DSL registry (event_handlers table)."""
+def test_registry_has_four_handlers() -> None:
+  """Four event types produce GL writes via the Python registry: a manual
+  journal entry, a reversal of a posted entry, a schedule period maturing,
+  and an asset disposal. Anything else dispatches to the DSL registry
+  (event_handlers table)."""
   assert set(EVENT_BLOCK_PYTHON_REGISTRY.keys()) == {
     "asset_disposed",
     "schedule_entry_due",
     "journal_entry_recorded",
+    "journal_entry_reversed",
   }

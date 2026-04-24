@@ -73,7 +73,9 @@ class JournalEntryNotDraftError(ValueError):
   def __init__(self, entry_id: str, status: str) -> None:
     super().__init__(
       f"Journal entry {entry_id} is {status!r}; only draft entries can be "
-      f"updated or deleted. Use reverse-journal-entry for posted entries."
+      f"updated or deleted. Fire `create-event-block(event_type="
+      f"'journal_entry_reversed', metadata={{entry_id: ...}})` for "
+      f"posted entries."
     )
     self.entry_id = entry_id
     self.status = status

@@ -127,34 +127,6 @@ class CreateManualClosingEntryRequest(BaseModel):
   )
 
 
-class TruncateScheduleRequest(BaseModel):
-  new_end_date: date = Field(
-    ...,
-    description=(
-      "New last-covered date for the schedule. Facts with period_start > "
-      "this date are deleted (along with any stale draft entries they "
-      "produced). Historical facts (already posted) are preserved."
-    ),
-  )
-  reason: str = Field(
-    ...,
-    min_length=1,
-    description="Required reason for the truncation (captured in audit log).",
-  )
-
-
-class TruncateScheduleOperation(TruncateScheduleRequest):
-  """CQRS-shaped body for `POST /operations/truncate-schedule`.
-
-  Bundles the target schedule's `structure_id` with the update payload so
-  the single-body signature matches the registrar/MCP contract. The REST
-  handler, GraphQL resolver, and MCP tool all resolve to the same
-  `cmd_truncate_schedule(session, body, created_by=...)`.
-  """
-
-  structure_id: str = Field(..., description="Target schedule structure ID.")
-
-
 class CreateClosingEntryOperation(CreateClosingEntryRequest):
   """CQRS-shaped body for `POST /operations/create-closing-entry`.
 
@@ -165,13 +137,6 @@ class CreateClosingEntryOperation(CreateClosingEntryRequest):
   structure_id: str = Field(
     ..., description="Schedule structure the closing entry is derived from."
   )
-
-
-class TruncateScheduleResponse(BaseModel):
-  structure_id: str
-  new_end_date: date
-  facts_deleted: int
-  reason: str
 
 
 # ── Responses ──────────────────────────────────────────────────────────────
@@ -249,8 +214,9 @@ class UpdateScheduleRequest(BaseModel):
   Structure row / its metadata_ JSONB column).
 
   NOT editable via this op: period_start, period_end, monthly_amount.
-  Those require fact regeneration — use truncate-schedule (end early)
-  and create-schedule (start new) instead.
+  Those require fact regeneration — fire an event block that terminates
+  the schedule (e.g., `asset_disposed`) and create a fresh schedule via
+  `create-schedule`.
 
   Omitted fields are left unchanged.
   """
@@ -267,7 +233,8 @@ class DeleteScheduleRequest(BaseModel):
   Hard deletes the Structure, all Facts tied to it, and all
   Associations tied to it. This is a permanent, irreversible
   operation. For ending a schedule early without removing history,
-  use truncate-schedule instead.
+  fire `create-event-block(event_type='asset_disposed')` instead — the
+  handler truncates the schedule + posts the disposal entry atomically.
   """
 
   structure_id: str

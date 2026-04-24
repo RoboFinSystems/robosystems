@@ -25,14 +25,12 @@ from robosystems.models.api.extensions.journal_entries import (
   JournalEntryLineItemInput,
   JournalEntryLineItemResponse,
   JournalEntryResponse,
-  ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
   auto_map_elements_op,
   delete_journal_entry_op,
-  reverse_journal_entry_op,
   update_entity_op,
   update_journal_entry_op,
 )
@@ -598,60 +596,8 @@ class TestDeleteJournalEntryOp:
     assert exc.value.status_code == 422
 
 
-class TestReverseJournalEntryOp:
-  @pytest.mark.asyncio
-  async def test_happy_path(self) -> None:
-    body = ReverseJournalEntryRequest(entry_id="je_posted")
-    reversal = _make_journal_entry_response(
-      entry_id="je_reversal",
-      status="posted",
-      reversal_of="je_posted",
-    )
-    with (
-      patch(
-        "robosystems.operations.roboledger.commands.journal_entries.reverse_journal_entry",
-        return_value=reversal,
-      ),
-      _mock_session_ctx() as mock_session,
-    ):
-      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-      mock_session.return_value.__exit__ = MagicMock(return_value=False)
-
-      envelope = await reverse_journal_entry_op(
-        body=body,
-        graph_id=GRAPH_ID,
-        user=_make_user(),
-        idempotency_key=None,
-        cache=_FakeCache(),
-      )
-    assert envelope.operation == "reverse-journal-entry"
-    assert envelope.result["reversal_of"] == "je_posted"
-    assert envelope.result["status"] == "posted"
-
-  @pytest.mark.asyncio
-  async def test_422_when_draft(self) -> None:
-    from robosystems.operations.roboledger.commands.journal_entries import (
-      JournalEntryNotPostedError,
-    )
-
-    body = ReverseJournalEntryRequest(entry_id="je_draft")
-    with (
-      patch(
-        "robosystems.operations.roboledger.commands.journal_entries.reverse_journal_entry",
-        side_effect=JournalEntryNotPostedError("je_draft", "draft"),
-      ),
-      _mock_session_ctx() as mock_session,
-    ):
-      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-      mock_session.return_value.__exit__ = MagicMock(return_value=False)
-
-      with pytest.raises(HTTPException) as exc:
-        await reverse_journal_entry_op(
-          body=body,
-          graph_id=GRAPH_ID,
-          user=_make_user(),
-          idempotency_key=None,
-          cache=_FakeCache(),
-        )
-    assert exc.value.status_code == 422
-    assert "posted" in exc.value.detail
+# TestReverseJournalEntryOp removed: the `reverse-journal-entry`
+# OperationSpec was retired in favor of
+# `create-event-block(event_type='journal_entry_reversed')`. See
+# tests/operations/event_block/python_handlers/test_journal_entry_reversed.py
+# for coverage of the event-driven path.

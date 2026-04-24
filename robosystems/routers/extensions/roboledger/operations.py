@@ -24,20 +24,26 @@ Every route follows the pattern:
 - Agents: `create-agent`, `update-agent`
 - Event Blocks: `create-event-block`, `update-event-block`,
   `preview-event-block`. `create-event-block` is the single write surface
-  for business events that cause GL consequences. Three event types are
+  for business events that cause GL consequences. Four event types are
   dispatched via the Python handler registry: `journal_entry_recorded`
-  (manual journal entry — any type, draft or posted), `schedule_entry_due`
-  (a schedule period matured), and `asset_disposed` (atomic disposal +
-  schedule termination).
-- Journal Entries: `update-journal-entry`, `delete-journal-entry`,
-  `reverse-journal-entry`. Creates go through
-  `create-event-block(event_type='journal_entry_recorded')` — the single
-  surface for any GL write the user originates.
-- Close Workflow: `set-close-target`, `truncate-schedule`,
-  `close-period`, `reopen-period`. Closing-entry drafting goes through
+  (manual journal entry — any type, draft or posted),
+  `journal_entry_reversed` (offsetting reversal of a posted entry),
+  `schedule_entry_due` (a schedule period matured), and `asset_disposed`
+  (atomic disposal + schedule termination, including the schedule
+  truncate that previously needed a separate call).
+- Journal Entries: `update-journal-entry`, `delete-journal-entry`. All
+  GL-write origination flows through
+  `create-event-block(event_type='journal_entry_recorded')`; reversal
+  through `event_type='journal_entry_reversed'`. The draft-correction
+  path (update / delete on a draft entry) stays as a CRUD surface for
+  now — it migrates to the event lifecycle when correction handlers
+  ship in a later phase.
+- Close Workflow: `set-close-target`, `close-period`, `reopen-period`.
+  Closing-entry drafting goes through
   `create-event-block(event_type='schedule_entry_due')` (schedule-derived)
   or `event_type='journal_entry_recorded'` (manual). Asset disposal via
-  `event_type='asset_disposed'`.
+  `event_type='asset_disposed'` (handles the schedule truncate
+  internally).
 - Reports: `create-report`, `regenerate-report`, `delete-report`,
   `share-report`
 - Publish Lists: `create-publish-list`, `update-publish-list`,
@@ -114,7 +120,6 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 )
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
-  ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
 from robosystems.models.api.extensions.publish_lists import (
@@ -126,9 +131,6 @@ from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
   RegenerateReportRequest,
   ShareReportRequest,
-)
-from robosystems.models.api.extensions.schedules import (
-  TruncateScheduleOperation,
 )
 from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
@@ -239,9 +241,6 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   delete_journal_entry as cmd_delete_journal_entry,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
-  reverse_journal_entry as cmd_reverse_journal_entry,
-)
-from robosystems.operations.roboledger.commands.journal_entries import (
   update_journal_entry as cmd_update_journal_entry,
 )
 from robosystems.operations.roboledger.commands.publish_lists import (
@@ -293,9 +292,6 @@ from robosystems.operations.roboledger.commands.reports import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   ScheduleNotFoundError,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  truncate_schedule as cmd_truncate_schedule,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   ElementNotFoundError,
@@ -995,6 +991,8 @@ create_event_block_op = _registrar.register(
       EngineValidationError: 422,
       HandlerMetadataValidationError: 422,
       DisposalScheduleNotFoundError: 404,
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotPostedError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
       ValueError: 422,
@@ -1098,9 +1096,10 @@ update_journal_entry_op = _registrar.register(
     summary="Update Journal Entry",
     description=(
       "Update a draft journal entry. Posted entries are immutable and "
-      "must be corrected via reverse-journal-entry. If line_items is "
-      "provided, existing line items are replaced atomically and the "
-      "new set must balance."
+      "must be corrected via "
+      "`create-event-block(event_type='journal_entry_reversed')`. If "
+      "line_items is provided, existing line items are replaced "
+      "atomically and the new set must balance."
     ),
     command=cmd_update_journal_entry,
     request_model=UpdateJournalEntryRequest,
@@ -1132,28 +1131,6 @@ delete_journal_entry_op = _registrar.register(
     requires_created_by=False,
   )
 )
-
-reverse_journal_entry_op = _registrar.register(
-  OperationSpec(
-    name="reverse-journal-entry",
-    summary="Reverse Journal Entry",
-    description=(
-      "Reverse a posted journal entry by creating a new offsetting "
-      "entry (debits ↔ credits) and marking the original as "
-      "status='reversed'. Both entries stay in the ledger — the audit "
-      "trail shows original + reversal side by side."
-    ),
-    command=cmd_reverse_journal_entry,
-    request_model=ReverseJournalEntryRequest,
-    error_map={
-      JournalEntryNotFoundError: 404,
-      JournalEntryNotPostedError: 422,
-      ClosedPeriodError: 422,
-      ValueError: 422,
-    },
-  )
-)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Close Workflow
@@ -1219,30 +1196,15 @@ async def set_close_target_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-truncate_schedule_op = _registrar.register(
-  OperationSpec(
-    name="truncate-schedule",
-    summary="Truncate Schedule (End Early)",
-    description=(
-      "End a schedule early by deleting forward facts and any stale draft "
-      "closing entries past the cutoff. Historical facts and posted entries "
-      "are preserved. Use this when a business event (asset disposal, "
-      "contract cancellation) shortens the schedule's lifespan."
-    ),
-    command=cmd_truncate_schedule,
-    request_model=TruncateScheduleOperation,
-    error_map={ValueError: 422, ScheduleNotFoundError: 404},
-    mark_stale_reason="schedule_truncated",
-  )
-)
-
-# Closing-entry writes (schedule-derived + manual), journal entry creation,
-# and asset disposal are all handled via create-event-block with
-# Python-registered event types. See
-# operations/event_block/python_handlers/ for the
-# handler modules: journal_entry_recorded (manual GL writes),
-# schedule_entry_due (schedule period matured), asset_disposed (atomic
-# disposal + schedule termination).
+# All ledger writes — closing entries, journal entries, schedule
+# truncation, asset disposal, journal entry reversal — are handled via
+# create-event-block with Python-registered event types. See
+# operations/event_block/python_handlers/ for the handler modules:
+# journal_entry_recorded (manual GL writes), journal_entry_reversed
+# (offsetting reversal of a posted entry), schedule_entry_due (schedule
+# period matured), asset_disposed (atomic disposal + schedule termination
+# — `truncate-schedule` retired as a public op since this is its only
+# real consumer).
 
 
 @router.post(

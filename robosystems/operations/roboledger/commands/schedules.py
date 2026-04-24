@@ -17,8 +17,6 @@ from robosystems.models.api.extensions.schedules import (
   CreateScheduleRequest,
   DeleteScheduleRequest,
   ScheduleCreatedResponse,
-  TruncateScheduleOperation,
-  TruncateScheduleResponse,
   UpdateScheduleRequest,
 )
 from robosystems.models.extensions import (
@@ -196,55 +194,6 @@ def create_schedule(
   )
 
 
-def truncate_schedule(
-  session: Session,
-  body: TruncateScheduleOperation,
-  created_by: str,
-) -> TruncateScheduleResponse:
-  """End a schedule early, deleting forward facts + stale drafts.
-
-  Raises `ValueError` for validation failures — caller maps to 422.
-  """
-  service = ScheduleService()
-  result = service.truncate_schedule(
-    session,
-    structure_id=body.structure_id,
-    new_end_date=body.new_end_date,
-    reason=body.reason,
-    updated_by=created_by,
-  )
-
-  # The SumEquals rule was created with expected_total = original_amount.
-  # After truncation, remaining facts sum to less than that — the rule
-  # would produce a permanent false failure. Remove it (and its VRs)
-  # so the rule engine stays clean. Same pattern the asset_disposed handler uses.
-  session.execute(
-    text(
-      "DELETE FROM verification_results WHERE rule_id IN ("
-      "  SELECT id FROM rules"
-      "  WHERE target_structure_id = :sid"
-      "  AND rule_pattern = 'SumEquals'"
-      "  AND rule_origin = 'native'"
-      ")"
-    ),
-    {"sid": body.structure_id},
-  )
-  session.query(Rule).filter(
-    Rule.target_structure_id == body.structure_id,
-    Rule.rule_pattern == "SumEquals",
-    Rule.rule_origin == "native",
-  ).delete(synchronize_session=False)
-
-  session.commit()
-
-  return TruncateScheduleResponse(
-    structure_id=result["structure_id"],
-    new_end_date=result["new_end_date"],
-    facts_deleted=result["facts_deleted"],
-    reason=result["reason"],
-  )
-
-
 def create_closing_entry(
   session: Session,
   body: CreateClosingEntryOperation,
@@ -325,7 +274,8 @@ def update_schedule(
   on the Structure row and its `metadata_` JSONB column.
 
   Period range and monthly amount are NOT editable — they define the
-  fact grid. Use truncate-schedule + create-schedule for those changes.
+  fact grid. Fire an event block that terminates the schedule (e.g.,
+  `asset_disposed`) and create a fresh schedule via `create-schedule`.
 
   Raises `ScheduleNotFoundError` if the schedule does not exist.
   """

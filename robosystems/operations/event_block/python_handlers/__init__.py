@@ -13,6 +13,9 @@ Current handlers:
   - journal_entry_recorded: manual GL write — covers any entry_type
     (standard / adjusting / closing / reversing) and either status
     (draft / posted). Single surface for "I'm recording a journal entry."
+  - journal_entry_reversed: a posted journal entry was reversed —
+    handler creates the offsetting reversing entry, marks the original
+    as `status='reversed'`, and links both rows to this event.
   - schedule_entry_due: a schedule period matured — handler drafts the
     closing entry from the schedule's pre-computed fact.
   - asset_disposed: an asset left the business — handler atomically

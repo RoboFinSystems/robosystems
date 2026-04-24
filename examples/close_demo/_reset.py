@@ -5,8 +5,11 @@ state while preserving graph infrastructure (entity, library-seeded
 taxonomies + elements + structures + associations).
 
 For production use cases:
-- Entries are corrected via reverse-journal-entry, not deleted
-- Schedules are truncated or individually deleted
+- Entries are corrected via
+  `create-event-block(event_type='journal_entry_reversed')`, not deleted
+- Schedules are terminated via
+  `create-event-block(event_type='asset_disposed')` (which truncates
+  internally) or individually deleted
 - Fiscal calendar state is managed via reopen-period
 
 Library-origin rows (``created_by = 'library-seeder'``) are protected by
