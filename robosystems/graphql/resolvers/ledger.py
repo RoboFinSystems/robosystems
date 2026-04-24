@@ -33,6 +33,7 @@ from robosystems.graphql.types.ledger import (
   AccountRollups,
   AccountTree,
   AccountTreeNode,
+  Agent,
   ClosingBookStructures,
   ElementList,
   FiscalCalendar,
@@ -62,6 +63,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   accounts as reads_accounts,
+)
+from robosystems.operations.roboledger.reads import (
+  agent as reads_agent,
 )
 from robosystems.operations.roboledger.reads import (
   closing_book as reads_closing_book,
@@ -163,6 +167,43 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return [LedgerEntity.from_pydantic(r) for r in responses]
+
+  # ── Agents ───────────────────────────────────────────────────────────────
+
+  @strawberry.field
+  def agent(
+    self,
+    info: Info[GraphQLContext, None],
+    id: str,
+  ) -> Agent | None:
+    """Fetch a single counterparty agent by id."""
+    with _open_session(info, "roboledger") as session:
+      response = reads_agent.get_agent(session, id)
+    if response is None:
+      return None
+    return Agent.from_pydantic(response)
+
+  @strawberry.field
+  def agents(
+    self,
+    info: Info[GraphQLContext, None],
+    agent_type: str | None = None,
+    source: str | None = None,
+    is_active: bool | None = True,
+    limit: int = 50,
+    offset: int = 0,
+  ) -> list[Agent]:
+    """List counterparty agents with optional filters."""
+    with _open_session(info, "roboledger") as session:
+      responses = reads_agent.list_agents(
+        session,
+        agent_type=agent_type,
+        source=source,
+        is_active=is_active,
+        limit=limit,
+        offset=offset,
+      )
+    return [Agent.from_pydantic(r) for r in responses]
 
   # ── Summary ─────────────────────────────────────────────────────────────
 

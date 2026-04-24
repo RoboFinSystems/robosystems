@@ -21,6 +21,7 @@ Every route follows the pattern:
 - Information Blocks: `create-information-block`,
   `update-information-block`, `delete-information-block`,
   `evaluate-rules`
+- Agents: `create-agent`, `update-agent`
 - Event Blocks: `create-event-block`, `update-event-block`
 - Journal Entries: `create-transaction`, `create-journal-entry`,
   `update-journal-entry`, `delete-journal-entry`,
@@ -87,6 +88,14 @@ from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
   UpdateEventBlockRequest,
 )
+from robosystems.models.api.event_handler import (
+  CreateEventHandlerRequest,
+  UpdateEventHandlerRequest,
+)
+from robosystems.models.api.extensions.agent import (
+  CreateAgentRequest,
+  UpdateAgentRequest,
+)
 from robosystems.models.api.extensions.entity import UpdateEntityRequest
 from robosystems.models.api.extensions.fiscal_calendar import (
   ClosePeriodRequest,
@@ -150,6 +159,16 @@ from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   LibraryImmutableError,
 )
+from robosystems.operations.roboledger.commands.agent import (
+  AgentNotFoundError,
+  DuplicateExternalIdError,
+)
+from robosystems.operations.roboledger.commands.agent import (
+  create_agent as cmd_create_agent,
+)
+from robosystems.operations.roboledger.commands.agent import (
+  update_agent as cmd_update_agent,
+)
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
 from robosystems.operations.roboledger.commands.event_block import (
   EventNotFoundError,
@@ -159,7 +178,30 @@ from robosystems.operations.roboledger.commands.event_block import (
   create_event_block as cmd_create_event_block,
 )
 from robosystems.operations.roboledger.commands.event_block import (
+  preview_event_block as cmd_preview_event_block,
+)
+from robosystems.operations.roboledger.commands.event_block import (
   update_event_block as cmd_update_event_block,
+)
+from robosystems.operations.roboledger.commands.event_block.engine import (
+  EngineValidationError,
+)
+from robosystems.operations.roboledger.commands.event_block.registry import (
+  HandlerAmbiguousError,
+  HandlerNotFoundError,
+)
+from robosystems.operations.roboledger.commands.event_block.template import (
+  TemplateInterpolationError,
+)
+from robosystems.operations.roboledger.commands.event_handler import (
+  EventHandlerNotFoundError,
+  TemplateValidationError,
+)
+from robosystems.operations.roboledger.commands.event_handler import (
+  create_event_handler as cmd_create_event_handler,
+)
+from robosystems.operations.roboledger.commands.event_handler import (
+  update_event_handler as cmd_update_event_handler,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   PeriodNotClosedError,
@@ -893,6 +935,44 @@ evaluate_rules_op = _registrar.register(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Agents
+#
+# Counterparty records (customers, vendors, employees, etc.) — Phase 2 of
+# the event-driven ledger. events.agent_id references this table.
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_agent_op = _registrar.register(
+  OperationSpec(
+    name="create-agent",
+    summary="Create Agent",
+    description=(
+      "Create a counterparty record (customer, vendor, employee, etc.). "
+      "The (source, external_id) pair is a dedup key — a second insert with "
+      "the same pair returns 409. Use update-agent to patch fields."
+    ),
+    command=cmd_create_agent,
+    request_model=CreateAgentRequest,
+    error_map={DuplicateExternalIdError: 409, ValueError: 422},
+  )
+)
+
+update_agent_op = _registrar.register(
+  OperationSpec(
+    name="update-agent",
+    summary="Update Agent",
+    description=(
+      "Patch counterparty fields. Only supplied fields are updated. "
+      "Set is_active=false to deactivate (agents are never deleted — they are "
+      "reference data referenced by events and transactions)."
+    ),
+    command=cmd_update_agent,
+    request_model=UpdateAgentRequest,
+    error_map={AgentNotFoundError: 404, ValueError: 422},
+  )
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Event Blocks
 #
 # Real-world business event layer (event-driven-ledger.md). Phase 1 ships
@@ -905,15 +985,19 @@ create_event_block_op = _registrar.register(
     name="create-event-block",
     summary="Create Event Block",
     description=(
-      "Persist a real-world business event in capture-only mode. "
-      "`apply_handlers` must be False in Phase 1 (True raises 501). "
-      "Returns an EventBlockEnvelope with status='captured'. "
-      "Use update-event-block to transition status (captured → committed | voided)."
+      "Persist a real-world business event. "
+      "apply_handlers=False (default): capture-only, status='captured'. "
+      "apply_handlers=True: resolves an event_handler, fires the template, "
+      "creates GL entries atomically, status='classified'. "
+      "Use preview-event-block to dry-run before committing."
     ),
     command=cmd_create_event_block,
     request_model=CreateEventBlockRequest,
     error_map={
-      NotImplementedError: 501,
+      HandlerNotFoundError: 404,
+      HandlerAmbiguousError: 409,
+      TemplateInterpolationError: 422,
+      EngineValidationError: 422,
       ValueError: 422,
     },
   )
@@ -934,6 +1018,67 @@ update_event_block_op = _registrar.register(
       EventNotFoundError: 404,
       InvalidEventTransitionError: 422,
     },
+  )
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Event Handlers
+#
+# Dynamic rule registry for event → transaction transformation (Phase 3).
+# Generalizes ClassificationRule (bank-feed only) to all event types.
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_event_handler_op = _registrar.register(
+  OperationSpec(
+    name="create-event-handler",
+    summary="Create Event Handler",
+    description=(
+      "Define a rule that fires GL transactions when a matching event block "
+      "is created with apply_handlers=True. Match criteria (event_type, "
+      "event_category, match_source, match_agent_type, etc.) act as AND-joined "
+      "filters — null fields match anything. The highest-priority matching handler "
+      "wins. AI-suggested handlers (suggested_by='ai') require approval before "
+      "they are eligible for matching."
+    ),
+    command=cmd_create_event_handler,
+    request_model=CreateEventHandlerRequest,
+    error_map={TemplateValidationError: 422, ValueError: 422},
+  )
+)
+
+update_event_handler_op = _registrar.register(
+  OperationSpec(
+    name="update-event-handler",
+    summary="Update Event Handler",
+    description=(
+      "Patch an event handler's match criteria, template, priority, or active "
+      "state. Pass approve=true to approve an AI-suggested handler; "
+      "approve=false to revoke approval. Only supplied fields are updated."
+    ),
+    command=cmd_update_event_handler,
+    request_model=UpdateEventHandlerRequest,
+    error_map={
+      EventHandlerNotFoundError: 404,
+      TemplateValidationError: 422,
+      ValueError: 422,
+    },
+  )
+)
+
+preview_event_block_op = _registrar.register(
+  OperationSpec(
+    name="preview-event-block",
+    summary="Preview Event Block",
+    description=(
+      "Dry-run: resolve the matching handler and evaluate the transaction "
+      "template without writing any rows. Returns the matched handler + planned "
+      "debit/credit lines + any validation errors. Use this before "
+      "create-event-block(apply_handlers=True) to confirm the GL plan."
+    ),
+    command=cmd_preview_event_block,
+    request_model=CreateEventBlockRequest,
+    error_map={ValueError: 422},
   )
 )
 

@@ -18,7 +18,10 @@ manual reshape.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import strawberry
+from strawberry.scalars import JSON
 
 # Register PaginationInfo first — many list-returning types reference it via
 # the Pydantic decorator, which fails if the Strawberry wrapper isn't yet
@@ -41,6 +44,9 @@ from robosystems.models.api.extensions.accounts import (
 )
 from robosystems.models.api.extensions.accounts import (
   AccountTreeNode as PydanticAccountTreeNode,
+)
+from robosystems.models.api.extensions.agent import (
+  AgentResponse as PydanticAgentResponse,
 )
 from robosystems.models.api.extensions.closing_book import (
   ClosingBookCategory as PydanticClosingBookCategory,
@@ -178,6 +184,60 @@ from robosystems.models.api.extensions.trial_balance import (
 @strawberry.experimental.pydantic.type(model=PydanticLedgerEntity, all_fields=True)
 class LedgerEntity:
   """The top-level ledger entity (company/organization) for a graph."""
+
+
+# ── Agents ────────────────────────────────────────────────────────────────
+
+
+@strawberry.type
+class Agent:
+  """A counterparty (customer, vendor, employee, etc.) referenced by events.
+
+  Hand-written because `address: dict` needs the JSON scalar — Strawberry's
+  pydantic decorator cannot map an untyped dict field.
+  """
+
+  id: str
+  agent_type: str
+  name: str
+  legal_name: str | None
+  tax_id: str | None
+  registration_number: str | None
+  duns: str | None
+  lei: str | None
+  email: str | None
+  phone: str | None
+  address: JSON | None
+  source: str
+  external_id: str | None
+  is_active: bool
+  is_1099_recipient: bool
+  created_at: datetime | None
+  updated_at: datetime | None
+  created_by: str | None
+
+  @classmethod
+  def from_pydantic(cls, row: PydanticAgentResponse) -> Agent:
+    return cls(
+      id=row.id,
+      agent_type=row.agent_type,
+      name=row.name,
+      legal_name=row.legal_name,
+      tax_id=row.tax_id,
+      registration_number=row.registration_number,
+      duns=row.duns,
+      lei=row.lei,
+      email=row.email,
+      phone=row.phone,
+      address=row.address,
+      source=row.source,
+      external_id=row.external_id,
+      is_active=row.is_active,
+      is_1099_recipient=row.is_1099_recipient,
+      created_at=row.created_at,
+      updated_at=row.updated_at,
+      created_by=row.created_by,
+    )
 
 
 # ── Summary ───────────────────────────────────────────────────────────────

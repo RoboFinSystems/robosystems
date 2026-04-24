@@ -42,6 +42,7 @@ from ..structure import Structure
 from ..taxonomy import Taxonomy
 
 # RoboLedger-specific concepts
+from .agent import Agent
 from .dimension_junctions import (
   entry_dimensions,
   event_dimensions,
@@ -50,6 +51,7 @@ from .dimension_junctions import (
 )
 from .entry import Entry
 from .event import Event
+from .event_handler import EventHandler
 from .fact import Fact
 from .fact_set import FactSet
 from .fiscal_calendar import FiscalCalendar, FiscalCalendarEvent
@@ -67,12 +69,14 @@ COA_SOURCES = ("quickbooks", "xero", "plaid", "native", "import")
 __all__ = [
   "COA_SOURCES",
   "Account",
+  "Agent",
   "Association",
   "ClassificationRule",
   "Dimension",
   "Element",
   "Entry",
   "Event",
+  "EventHandler",
   "Fact",
   "FactSet",
   "FiscalCalendar",
