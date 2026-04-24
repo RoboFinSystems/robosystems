@@ -1024,7 +1024,7 @@ update_event_block_op = _registrar.register(
 # Event Handlers
 #
 # Dynamic rule registry for event → transaction transformation (Phase 3).
-# Generalizes ClassificationRule (bank-feed only) to all event types.
+# The dynamic rule layer that drives event → GL transformation.
 # ═══════════════════════════════════════════════════════════════════════════
 
 create_event_handler_op = _registrar.register(

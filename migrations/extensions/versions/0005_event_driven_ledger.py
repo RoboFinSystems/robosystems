@@ -2,10 +2,10 @@
 
 Squashes Phases 1-4b of the event-driven ledger build into a single
 migration. The original four migrations (events table, agents +
-events.agent_id FK, event_handlers + classification_rules backfill,
-entries.triggered_by_event_id audit column) were never deployed beyond
-local development — collapsing them into one schema diff makes this
-feature easier to reason about as a unit.
+events.agent_id FK, event_handlers, entries.triggered_by_event_id audit
+column) were never deployed beyond local development — collapsing them
+into one schema diff makes this feature easier to reason about as a
+unit.
 
 Tables created:
   - ``agents``: REA counterparty registry (customers, vendors, etc.)
@@ -21,11 +21,11 @@ Columns added:
     that have no Transaction parent (e.g., closing entries). FK enforced
     against the events table (same schema, ON DELETE RESTRICT).
 
-Backfill:
-  - Existing ``classification_rules`` rows are projected into
-    ``event_handlers`` with ``event_type='bank_transaction'`` so the
-    Phase 3 dispatcher sees them on first read. The original rules table
-    stays in place for backwards compatibility.
+Tables dropped:
+  - ``classification_rules``: superseded by ``event_handlers``. The
+    original table was an artifact of the initial implementation and
+    never produced rows in any environment that matters; the model and
+    re-exports are removed in the same change.
 
 Both the public schema (template for new tenants) and every existing
 tenant schema receive the same DDL — the standard multi-tenant pattern
@@ -255,57 +255,61 @@ def _create_in_tenant(conn, schema: str) -> None:
     )
   )
 
-  # 7. classification_rules → event_handlers backfill (idempotent).
-  conn.execute(
-    text(f"""
-      INSERT INTO {schema}.event_handlers
-        (id, name, event_type, match_source,
-         transaction_template, priority, is_active, origin,
-         suggested_by, confidence, approved_by, approved_at,
-         created_at, updated_at, created_by)
-      SELECT
-        'hdl_' || substr(id, 6),
-        name,
-        'bank_transaction',
-        match_source,
-        jsonb_build_object(
-          'transactions', jsonb_build_array(
-            jsonb_build_object(
-              'entry_template', jsonb_build_object(
-                'debit',  jsonb_build_object(
-                  'element_id', debit_element_id,
-                  'amount',     '{{{{ event.amount }}}}'
-                ),
-                'credit', jsonb_build_object(
-                  'element_id', credit_element_id,
-                  'amount',     '{{{{ event.amount }}}}'
-                )
-              )
-            )
-          )
-        ),
-        priority,
-        is_active,
-        'tenant',
-        suggested_by,
-        confidence,
-        approved_by,
-        approved_at,
-        created_at,
-        updated_at,
-        created_by
-      FROM {schema}.classification_rules
-      WHERE NOT EXISTS (
-        SELECT 1 FROM {schema}.event_handlers
-        WHERE event_type = 'bank_transaction'
-          AND name = classification_rules.name
-      )
-    """)
-  )
+  # 7. Retire the legacy classification_rules table — superseded by
+  # event_handlers (no consumers, no writers, never produced rows in
+  # practice). Indexes are dropped implicitly with the table.
+  conn.execute(text(f"DROP TABLE IF EXISTS {schema}.classification_rules"))
 
 
 def _drop_in_tenant(conn, schema: str) -> None:
   # Reverse of _create_in_tenant.
+
+  # Recreate classification_rules so the migration is reversible. Mirrors
+  # the DDL from 0001_initial_schema's tenant provisioning.
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.classification_rules (
+        id VARCHAR PRIMARY KEY,
+        name VARCHAR NOT NULL,
+        description VARCHAR,
+        match_source VARCHAR,
+        match_type VARCHAR,
+        match_merchant VARCHAR,
+        match_category VARCHAR,
+        match_min_amount BIGINT,
+        match_max_amount BIGINT,
+        target_element_id VARCHAR NOT NULL REFERENCES {schema}.elements(id),
+        entry_type VARCHAR NOT NULL,
+        debit_element_id VARCHAR NOT NULL REFERENCES {schema}.elements(id),
+        credit_element_id VARCHAR NOT NULL REFERENCES {schema}.elements(id),
+        dimensions JSONB NOT NULL DEFAULT '[]'::jsonb,
+        suggested_by VARCHAR,
+        confidence FLOAT,
+        approved_by VARCHAR,
+        approved_at TIMESTAMP,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        priority INTEGER NOT NULL DEFAULT 0,
+        metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_active "
+      f"ON {schema}.classification_rules (is_active, priority) "
+      f"WHERE is_active = true"
+    )
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_rules_source "
+      f"ON {schema}.classification_rules (match_source)"
+    )
+  )
+
   conn.execute(text(f"DROP INDEX IF EXISTS {schema}.idx_{schema}_handlers_unapproved"))
   conn.execute(text(f"DROP INDEX IF EXISTS {schema}.idx_{schema}_handlers_priority"))
   conn.execute(text(f"DROP INDEX IF EXISTS {schema}.idx_{schema}_handlers_event_type"))
@@ -531,62 +535,63 @@ def upgrade() -> None:
     postgresql_where="approved_by IS NULL AND suggested_by = 'ai'",
   )
 
-  # 7. classification_rules → event_handlers backfill (public schema)
-  conn = op.get_bind()
-  conn.execute(
-    text("""
-      INSERT INTO event_handlers
-        (id, name, event_type, match_source,
-         transaction_template, priority, is_active, origin,
-         suggested_by, confidence, approved_by, approved_at,
-         created_at, updated_at, created_by)
-      SELECT
-        'hdl_' || substr(id, 6),
-        name,
-        'bank_transaction',
-        match_source,
-        jsonb_build_object(
-          'transactions', jsonb_build_array(
-            jsonb_build_object(
-              'entry_template', jsonb_build_object(
-                'debit',  jsonb_build_object(
-                  'element_id', debit_element_id,
-                  'amount',     '{{ event.amount }}'
-                ),
-                'credit', jsonb_build_object(
-                  'element_id', credit_element_id,
-                  'amount',     '{{ event.amount }}'
-                )
-              )
-            )
-          )
-        ),
-        priority,
-        is_active,
-        'tenant',
-        suggested_by,
-        confidence,
-        approved_by,
-        approved_at,
-        created_at,
-        updated_at,
-        created_by
-      FROM classification_rules
-      WHERE NOT EXISTS (
-        SELECT 1 FROM event_handlers
-        WHERE event_type = 'bank_transaction'
-          AND name = classification_rules.name
-      )
-    """)
-  )
+  # 7. Retire the legacy classification_rules table (public schema).
+  # The model is gone, no code writes here, and event_handlers is the
+  # supported surface. Drop indexes first because they were created
+  # explicitly in 0001_initial_schema and persist alongside the table.
+  op.drop_index("idx_rules_active", table_name="classification_rules")
+  op.drop_index("idx_rules_source", table_name="classification_rules")
+  op.drop_table("classification_rules")
 
   # Tenant schemas — apply the same DDL to every existing tenant.
+  conn = op.get_bind()
   for_each_tenant_schema(conn, _create_in_tenant)
 
 
 def downgrade() -> None:
   conn = op.get_bind()
   for_each_tenant_schema(conn, _drop_in_tenant)
+
+  # Recreate classification_rules in the public schema so the migration
+  # is reversible. Mirrors 0001_initial_schema.
+  op.create_table(
+    "classification_rules",
+    sa.Column("id", sa.String(), nullable=False),
+    sa.Column("name", sa.String(), nullable=False),
+    sa.Column("description", sa.String(), nullable=True),
+    sa.Column("match_source", sa.String(), nullable=True),
+    sa.Column("match_type", sa.String(), nullable=True),
+    sa.Column("match_merchant", sa.String(), nullable=True),
+    sa.Column("match_category", sa.String(), nullable=True),
+    sa.Column("match_min_amount", sa.BigInteger(), nullable=True),
+    sa.Column("match_max_amount", sa.BigInteger(), nullable=True),
+    sa.Column("target_element_id", sa.String(), nullable=False),
+    sa.Column("entry_type", sa.String(), nullable=False),
+    sa.Column("debit_element_id", sa.String(), nullable=False),
+    sa.Column("credit_element_id", sa.String(), nullable=False),
+    sa.Column("dimensions", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column("suggested_by", sa.String(), nullable=True),
+    sa.Column("confidence", sa.Float(), nullable=True),
+    sa.Column("approved_by", sa.String(), nullable=True),
+    sa.Column("approved_at", sa.DateTime(), nullable=True),
+    sa.Column("is_active", sa.Boolean(), nullable=False),
+    sa.Column("priority", sa.Integer(), nullable=False),
+    sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column("created_at", sa.DateTime(), nullable=False),
+    sa.Column("updated_at", sa.DateTime(), nullable=False),
+    sa.Column("created_by", sa.String(), nullable=False),
+    sa.ForeignKeyConstraint(["target_element_id"], ["elements.id"]),
+    sa.ForeignKeyConstraint(["debit_element_id"], ["elements.id"]),
+    sa.ForeignKeyConstraint(["credit_element_id"], ["elements.id"]),
+    sa.PrimaryKeyConstraint("id"),
+  )
+  op.create_index(
+    "idx_rules_active",
+    "classification_rules",
+    ["is_active", "priority"],
+    postgresql_where=sa.text("is_active = true"),
+  )
+  op.create_index("idx_rules_source", "classification_rules", ["match_source"])
 
   # event_handlers
   op.drop_index("idx_handlers_unapproved", table_name="event_handlers")

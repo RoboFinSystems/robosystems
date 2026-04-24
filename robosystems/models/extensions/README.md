@@ -70,7 +70,7 @@ This is called from the extensions-enabled code path when a graph first needs le
 
 The top-level files mirror `schemas/base.py` — they are **base ontology concepts** that are universally applicable to the ontology regardless of which extension consumes them. Extension-specific models live in subdirectories (`roboledger/`, `roboinvestor/`). This layering is governed by the two invariants documented in `schemas/README.md` (aspirational base + aspects-only-on-events).
 
-Concepts were historically shelved under `roboledger/` because roboledger was the first consumer, but `Entity`, `Taxonomy`, `Element`, `Dimension`, `Association`, `ClassificationRule`, `Structure`, and the `EntityTaxonomy` join table are all base concepts — they were relocated to the top level to match `schemas/base.py`. The `roboledger/__init__.py` re-exports them as a permanent affirmation that roboledger depends on base ontology concepts.
+Concepts were historically shelved under `roboledger/` because roboledger was the first consumer, but `Entity`, `Taxonomy`, `Element`, `Dimension`, `Association`, `Structure`, and the `EntityTaxonomy` join table are all base concepts — they were relocated to the top level to match `schemas/base.py`. The `roboledger/__init__.py` re-exports them as a permanent affirmation that roboledger depends on base ontology concepts.
 
 ```
 models/extensions/
@@ -84,7 +84,6 @@ models/extensions/
 │                                #   + Account alias for Element (CoA terminology)
 ├── dimension.py                 # Dimension — tags (department, class, location, fund, trust)
 ├── association.py               # Association — CoA → GAAP mappings, presentation ordering
-├── classification_rule.py       # ClassificationRule — auto-classification rules
 ├── structure.py                 # Structure — named element collection (income statement, schedule, ...)
 ├── entity_taxonomy.py           # EntityTaxonomy — join table for ENTITY_HAS_TAXONOMY
 │                                #   (multi-basis: reporting, CoA, mapping, schedule)

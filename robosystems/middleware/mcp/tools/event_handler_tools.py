@@ -97,7 +97,7 @@ class ListEventHandlersTool:
 - To see all handlers for a specific event type (e.g., 'invoice_issued')
 - To find handlers awaiting approval (approved=false)
 - To audit the active rule set before adding a new handler
-- To check if a bank_transaction handler was migrated from classification_rules
+- To check which event types currently have an active handler set
 
 **PARAMETERS:**
 - event_type (optional): Filter by event type (e.g., 'invoice_issued', 'bank_transaction')

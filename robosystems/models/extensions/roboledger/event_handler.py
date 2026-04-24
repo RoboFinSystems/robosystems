@@ -1,16 +1,11 @@
 """EventHandler model — dynamic rule registry for event → transaction transformation.
 
-Generalization of ClassificationRule (bank-feed only) to all event types.
 Each row declares which events it handles (via match criteria) and how to
 produce GL transactions (via transaction_template DSL).
 
 Phase 3 of the event-driven ledger. The handler engine (registry.py +
 engine.py) evaluates these rows when create-event-block fires with
 apply_handlers=True.
-
-Deprecation path: ClassificationRule (bank-feed bank_transaction handler)
-will migrate its rows into this table via the 0007 migration and be retired
-from the public write surface in a later phase.
 """
 
 from datetime import UTC, datetime
@@ -74,7 +69,7 @@ class EventHandler(ExtensionsBase):
   # 'hub' = platform-seeded; 'tenant' = customer-defined
   origin = Column(String, nullable=False, default="tenant")
 
-  # AI provenance — same pattern as MappingAssociation and ClassificationRule
+  # AI provenance — same pattern as MappingAssociation
   suggested_by = Column(String, nullable=True)
   confidence = Column(Float, nullable=True)
   approved_by = Column(String, nullable=True)

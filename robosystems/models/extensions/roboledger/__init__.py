@@ -3,7 +3,7 @@
 ## Canonical import paths
 
 **Base ontology concepts** (Taxonomy, Element, Account, Dimension,
-Association, ClassificationRule, Structure) have their canonical home at
+Association, Structure) have their canonical home at
 `robosystems.models.extensions.*` — that is the single source of truth
 for the declaration, inheritance chain, and test coverage.
 
@@ -35,7 +35,6 @@ and the two invariants governing the base-vs-extension split.
 
 # Base ontology concepts (live in models/extensions/ root)
 from ..association import Association
-from ..classification_rule import ClassificationRule
 from ..dimension import Dimension
 from ..element import Account, Element
 from ..structure import Structure
@@ -71,7 +70,6 @@ __all__ = [
   "Account",
   "Agent",
   "Association",
-  "ClassificationRule",
   "Dimension",
   "Element",
   "Entry",
