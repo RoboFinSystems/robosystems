@@ -21,7 +21,6 @@ from robosystems.models.api.extensions.entity import (
   UpdateEntityRequest,
 )
 from robosystems.models.api.extensions.journal_entries import (
-  CreateJournalEntryRequest,
   DeleteJournalEntryRequest,
   JournalEntryLineItemInput,
   JournalEntryLineItemResponse,
@@ -32,7 +31,6 @@ from robosystems.models.api.extensions.journal_entries import (
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
   auto_map_elements_op,
-  create_journal_entry_op,
   delete_journal_entry_op,
   reverse_journal_entry_op,
   update_entity_op,
@@ -462,68 +460,11 @@ def _balanced_lines() -> list[JournalEntryLineItemInput]:
   ]
 
 
-class TestCreateJournalEntryOp:
-  @pytest.mark.asyncio
-  async def test_happy_path(self) -> None:
-    body = CreateJournalEntryRequest(
-      posting_date=date(2026, 3, 31),
-      memo="Record cash sale",
-      line_items=_balanced_lines(),
-    )
-    with (
-      patch(
-        "robosystems.operations.roboledger.commands.journal_entries.create_journal_entry",
-        return_value=_make_journal_entry_response(),
-      ),
-      _mock_session_ctx() as mock_session,
-    ):
-      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-      mock_session.return_value.__exit__ = MagicMock(return_value=False)
-
-      envelope = await create_journal_entry_op(
-        body=body,
-        graph_id=GRAPH_ID,
-        user=_make_user(),
-        idempotency_key=None,
-        cache=_FakeCache(),
-      )
-    assert envelope.operation == "create-journal-entry"
-    assert envelope.result["id"] == "je_abc"
-    assert envelope.result["status"] == "draft"
-    assert envelope.result["total_debit"] == 10000
-    assert envelope.result["total_credit"] == 10000
-
-  @pytest.mark.asyncio
-  async def test_422_on_unbalanced(self) -> None:
-    from robosystems.operations.roboledger.commands.journal_entries import (
-      UnbalancedJournalEntryError,
-    )
-
-    body = CreateJournalEntryRequest(
-      posting_date=date(2026, 3, 31),
-      memo="Unbalanced",
-      line_items=_balanced_lines(),
-    )
-    with (
-      patch(
-        "robosystems.operations.roboledger.commands.journal_entries.create_journal_entry",
-        side_effect=UnbalancedJournalEntryError(10000, 5000),
-      ),
-      _mock_session_ctx() as mock_session,
-    ):
-      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
-      mock_session.return_value.__exit__ = MagicMock(return_value=False)
-
-      with pytest.raises(HTTPException) as exc:
-        await create_journal_entry_op(
-          body=body,
-          graph_id=GRAPH_ID,
-          user=_make_user(),
-          idempotency_key=None,
-          cache=_FakeCache(),
-        )
-    assert exc.value.status_code == 422
-    assert "balance" in exc.value.detail.lower()
+# TestCreateJournalEntryOp removed in Phase 4a: the `create-journal-entry`
+# OperationSpec was retired in favor of
+# `create-event-block(event_type='journal_entry_recorded')`. See
+# tests/operations/roboledger/commands/event_block/python_handlers/
+# test_journal_entry_recorded.py for coverage of the event-driven path.
 
 
 class TestUpdateJournalEntryOp:

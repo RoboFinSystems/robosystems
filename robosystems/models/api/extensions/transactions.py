@@ -15,9 +15,9 @@ from robosystems.models.api.common import PaginationInfo
 class CreateTransactionRequest(BaseModel):
   """Create a standalone business-event Transaction.
 
-  Use this when you want to record a real-world event (invoice, payment,
-  deposit, expense) first and then attach one or more journal entries to
-  it via `create-journal-entry` with the returned `transaction_id`.
+  Used internally by the `transaction_recorded` event handler
+  (see operations/roboledger/commands/event_block/python_handlers/);
+  the public surface is `create-event-block(event_type='transaction_recorded')`.
 
   `amount` is in minor currency units (cents). `type` is free-form but
   common values are: invoice, payment, bill, expense, deposit, transfer,
@@ -38,7 +38,8 @@ class CreateTransactionRequest(BaseModel):
 
 
 class TransactionResponse(BaseModel):
-  """Response returned by create-transaction."""
+  """Response shape for a standalone Transaction create. Used internally
+  by the `transaction_recorded` event handler."""
 
   id: str
   type: str

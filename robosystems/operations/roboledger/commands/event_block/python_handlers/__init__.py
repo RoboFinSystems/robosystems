@@ -11,6 +11,10 @@ Resolution order in create_event_block:
 
 Current handlers:
   - asset_disposed: atomic schedule truncation + balanced 4-leg disposal entry
+  - schedule_entry_due: draft a closing entry from a schedule's period fact
+  - manual_adjustment: balanced free-form draft entry, not tied to a schedule
+  - journal_entry_recorded: balanced journal entry (draft or posted)
+  - transaction_recorded: standalone business-event Transaction
 """
 
 from .registry import EVENT_BLOCK_PYTHON_REGISTRY, get_python_handler

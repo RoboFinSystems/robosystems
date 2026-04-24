@@ -189,7 +189,7 @@ class ClosePeriodTool:
 
 **NOTES:**
 - Posted entries cannot be re-drafted — use reopen-period to undo
-- Manual entries (from create-manual-closing-entry) are posted alongside schedule drafts
+- Manual entries (drafted via create-event-block event_type='manual_adjustment') are posted alongside schedule drafts
 - After close, close_target auto-advances to the next period""",
       "inputSchema": {
         "type": "object",
@@ -331,7 +331,8 @@ class ReopenPeriodTool:
 
 **NOTES:**
 - Posted entries stay posted. To "undo" a posted entry, create a reversing
-  entry via create-manual-closing-entry, or reopen + correct + re-close.
+  entry via create-event-block(event_type='manual_adjustment'), or
+  reopen + correct + re-close.
 - Reopening older periods (not the most recently closed) is allowed but
   does not decrement closed_through.""",
       "inputSchema": {

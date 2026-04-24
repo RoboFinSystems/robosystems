@@ -243,9 +243,11 @@ class GraphMCPTools:
 
       # Period-workflow read tools (span multiple blocks; not
       # Information Block tools). Writes (create-schedule,
-      # create-closing-entry, create-manual-closing-entry, truncate-schedule,
-      # update-schedule, delete-schedule) are registrar-generated from the
-      # roboledger OperationSpec declarations.
+      # truncate-schedule, update-schedule, delete-schedule) are
+      # registrar-generated from the roboledger OperationSpec
+      # declarations; closing-entry drafting (schedule-derived and
+      # manual) goes through create-event-block with
+      # event_type='schedule_entry_due' | 'manual_adjustment'.
       #
       # Schedule-specific read tools (list-schedule-structures,
       # get-schedule-facts) were retired in favour of the generic

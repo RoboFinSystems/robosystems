@@ -22,13 +22,21 @@ Every route follows the pattern:
   `update-information-block`, `delete-information-block`,
   `evaluate-rules`
 - Agents: `create-agent`, `update-agent`
-- Event Blocks: `create-event-block`, `update-event-block`
-- Journal Entries: `create-transaction`, `create-journal-entry`,
-  `update-journal-entry`, `delete-journal-entry`,
-  `reverse-journal-entry`
-- Close Workflow: `set-close-target`, `create-closing-entry`,
-  `create-manual-closing-entry`, `truncate-schedule`,
-  `close-period`, `reopen-period` (asset disposal moved to `create-event-block(event_type='asset_disposed')`)
+- Event Blocks: `create-event-block`, `update-event-block`,
+  `preview-event-block`. `create-event-block` is the single write surface
+  for business events that cause GL consequences — the following event
+  types are dispatched via the Python handler registry:
+  `asset_disposed`, `schedule_entry_due`, `manual_adjustment`,
+  `journal_entry_recorded`, `transaction_recorded`.
+- Journal Entries: `update-journal-entry`, `delete-journal-entry`,
+  `reverse-journal-entry`. Creates go through
+  `create-event-block(event_type='journal_entry_recorded')`;
+  standalone Transaction creation uses `transaction_recorded`.
+- Close Workflow: `set-close-target`, `truncate-schedule`,
+  `close-period`, `reopen-period`. Closing-entry drafting (both schedule-
+  derived and manual) now runs through
+  `create-event-block(event_type='schedule_entry_due' | 'manual_adjustment')`;
+  asset disposal via `event_type='asset_disposed'`.
 - Reports: `create-report`, `regenerate-report`, `delete-report`,
   `share-report`
 - Publish Lists: `create-publish-list`, `update-publish-list`,
@@ -104,7 +112,6 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   SetCloseTargetRequest,
 )
 from robosystems.models.api.extensions.journal_entries import (
-  CreateJournalEntryRequest,
   DeleteJournalEntryRequest,
   ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
@@ -120,15 +127,12 @@ from robosystems.models.api.extensions.reports import (
   ShareReportRequest,
 )
 from robosystems.models.api.extensions.schedules import (
-  CreateClosingEntryOperation,
-  CreateManualClosingEntryRequest,
   TruncateScheduleOperation,
 )
 from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
   LinkEntityTaxonomyRequest,
 )
-from robosystems.models.api.extensions.transactions import CreateTransactionRequest
 from robosystems.models.api.information_block import (
   CreateInformationBlockRequest,
   DeleteInformationBlockRequest,
@@ -231,12 +235,6 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   UnbalancedJournalEntryError,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
-  create_journal_entry as cmd_create_journal_entry,
-)
-from robosystems.operations.roboledger.commands.journal_entries import (
-  create_transaction as cmd_create_transaction,
-)
-from robosystems.operations.roboledger.commands.journal_entries import (
   delete_journal_entry as cmd_delete_journal_entry,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
@@ -294,12 +292,6 @@ from robosystems.operations.roboledger.commands.reports import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   ScheduleNotFoundError,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  create_closing_entry as cmd_create_closing_entry,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  create_manual_closing_entry as cmd_create_manual_closing_entry,
 )
 from robosystems.operations.roboledger.commands.schedules import (
   truncate_schedule as cmd_truncate_schedule,
@@ -1002,6 +994,8 @@ create_event_block_op = _registrar.register(
       EngineValidationError: 422,
       HandlerMetadataValidationError: 422,
       DisposalScheduleNotFoundError: 404,
+      ClosedPeriodError: 422,
+      UnbalancedJournalEntryError: 422,
       ValueError: 422,
     },
   )
@@ -1089,47 +1083,11 @@ preview_event_block_op = _registrar.register(
 # ═══════════════════════════════════════════════════════════════════════════
 # Journal Entries
 #
-# Native accounting writes: transactions (standalone business events) and
-# journal entries (balanced debit/credit sets). Entries are always created
-# as drafts; posting happens via close-period.
+# Update / delete / reverse operations on existing journal entries. Creation
+# is handled through `create-event-block(event_type='journal_entry_recorded')`
+# — see the Python handler registry. Standalone Transactions go through
+# `event_type='transaction_recorded'` instead.
 # ═══════════════════════════════════════════════════════════════════════════
-
-create_transaction_op = _registrar.register(
-  OperationSpec(
-    name="create-transaction",
-    summary="Create Transaction",
-    description=(
-      "Create a standalone business-event Transaction without entries. "
-      "Returns a transaction_id that can be passed to create-journal-entry "
-      "to attach one or more journal entries to this event. Use this when "
-      "a single event (invoice, payment, deposit) produces multiple entries "
-      "over its lifecycle."
-    ),
-    command=cmd_create_transaction,
-    request_model=CreateTransactionRequest,
-    error_map={ValueError: 422},
-  )
-)
-
-create_journal_entry_op = _registrar.register(
-  OperationSpec(
-    name="create-journal-entry",
-    summary="Create Journal Entry",
-    description=(
-      "Create a new draft journal entry with balanced line items. "
-      "Enforces DR=CR at the validation layer. Entries are always "
-      "created as drafts; posting happens via close-period or a "
-      "future per-entry post op."
-    ),
-    command=cmd_create_journal_entry,
-    request_model=CreateJournalEntryRequest,
-    error_map={
-      ClosedPeriodError: 422,
-      UnbalancedJournalEntryError: 422,
-      ValueError: 422,
-    },
-  )
-)
 
 update_journal_entry_op = _registrar.register(
   OperationSpec(
@@ -1258,40 +1216,6 @@ async def set_close_target_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-create_closing_entry_op = _registrar.register(
-  OperationSpec(
-    name="create-closing-entry",
-    summary="Create Closing Entry",
-    description=(
-      "Create a draft closing entry pre-populated from a schedule's facts "
-      "for the given period. Idempotent — safe to call repeatedly; the "
-      "`outcome` field describes what happened "
-      "(`created`, `unchanged`, `regenerated`, `removed`, `skipped`)."
-    ),
-    command=cmd_create_closing_entry,
-    request_model=CreateClosingEntryOperation,
-    error_map={ValueError: 422},
-    mark_stale_reason="closing_entry_created",
-  )
-)
-
-create_manual_closing_entry_op = _registrar.register(
-  OperationSpec(
-    name="create-manual-closing-entry",
-    summary="Create Manual Closing Entry",
-    description=(
-      "Create a draft closing entry with manually specified line items — "
-      "not tied to a schedule. Use for one-off business events (asset "
-      "disposal, correcting entry, impairment). Total debits must equal "
-      "total credits."
-    ),
-    command=cmd_create_manual_closing_entry,
-    request_model=CreateManualClosingEntryRequest,
-    error_map={ValueError: 422},
-    mark_stale_reason="manual_entry_created",
-  )
-)
-
 truncate_schedule_op = _registrar.register(
   OperationSpec(
     name="truncate-schedule",
@@ -1309,11 +1233,12 @@ truncate_schedule_op = _registrar.register(
   )
 )
 
-# Asset disposal is now handled via create-event-block with
-# event_type='asset_disposed' (Phase 4b of the event-driven ledger). The
-# standalone dispose-schedule operation was retired — its logic moved into
-# the Python handler registry at operations/roboledger/commands/event_block/
-# python_handlers/asset_disposed.py.
+# Closing-entry writes (schedule-derived + manual), journal entry creation,
+# standalone Transaction creation, and asset disposal are all handled via
+# create-event-block with Python-registered event types. See
+# operations/roboledger/commands/event_block/python_handlers/ for the
+# handler modules (asset_disposed, schedule_entry_due, manual_adjustment,
+# journal_entry_recorded, transaction_recorded).
 
 
 @router.post(

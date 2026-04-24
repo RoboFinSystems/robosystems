@@ -277,12 +277,26 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
 def create_journal_entries(
   graph_id: str, txns: list, element_lookup: dict[str, str]
 ) -> dict[str, int]:
-  """Create historical journal entries via the HTTP API.
+  """Create historical journal entries via the event-driven ledger.
 
   Each transaction becomes one journal entry with balanced line items,
-  created with status='posted' (historical data, not drafts).
+  created with status='posted' (historical data). The write goes through
+  create-event-block(event_type='journal_entry_recorded'); the Python
+  handler registry routes the metadata into the underlying journal
+  entry command.
   """
-  client = _get_ledger_client()
+  import httpx
+
+  if not CREDENTIALS_FILE.exists():
+    print("  ERROR: No credentials file")
+    return {"entries": 0, "line_items": 0}
+
+  creds = json.loads(CREDENTIALS_FILE.read_text())
+  api_key = creds.get("api_key", "")
+  headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+  url = (
+    f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/create-event-block"
+  )
 
   entry_count = 0
   line_item_count = 0
@@ -309,19 +323,33 @@ def create_journal_entries(
       continue
 
     memo = description or f"{txn_type} on {txn_date}"
-    client.create_journal_entry(
-      graph_id,
-      posting_date=txn_date.isoformat(),
-      memo=memo,
-      line_items=li_list,
-      type="standard",
-      status="posted",
-    )
+    body = {
+      "event_type": "journal_entry_recorded",
+      "event_category": "adjustment",
+      "source": "native",
+      "occurred_at": f"{txn_date.isoformat()}T00:00:00Z",
+      "metadata": {
+        "posting_date": txn_date.isoformat(),
+        "memo": memo,
+        "line_items": li_list,
+        "type": "standard",
+        "status": "posted",
+      },
+      "apply_handlers": True,
+    }
+    resp = httpx.post(url, headers=headers, json=body, timeout=30)
+    if resp.status_code not in (200, 201):
+      print(
+        f"  WARNING: create-event-block {resp.status_code} for {txn_date} — "
+        f"{resp.text[:200]}"
+      )
+      skipped += 1
+      continue
     entry_count += 1
     line_item_count += len(li_list)
 
   if skipped:
-    print(f"  WARNING: Skipped {skipped} entries (missing elements)")
+    print(f"  WARNING: Skipped {skipped} entries (missing elements or errors)")
 
   return {"entries": entry_count, "line_items": line_item_count}
 
@@ -769,7 +797,8 @@ def main() -> None:
   print(f"  Taxonomy:     {coa_taxonomy_id}")
   print(f"  Elements:     {elem_count}")
 
-  # Create journal entries (via HTTP API — exercises create-journal-entry op)
+  # Create journal entries (via HTTP API — exercises
+  # create-event-block(event_type='journal_entry_recorded'))
   print(f"\nCreating {len(txns)} journal entries...")
   entry_counts = create_journal_entries(graph_id, txns, element_lookup)
   print(f"  Entries:      {entry_counts['entries']}")

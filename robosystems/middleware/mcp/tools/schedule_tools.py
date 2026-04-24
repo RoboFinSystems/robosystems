@@ -15,12 +15,14 @@ module stays scoped to tools that operate across blocks rather than
 within one.
 
 Writes (``create-schedule``, ``update-schedule``, ``delete-schedule``,
-``truncate-schedule``, ``create-closing-entry``,
-``create-manual-closing-entry``) are registrar-generated from the
-roboledger ``OperationSpec`` declarations. The unified
-``create-information-block`` / ``update-information-block`` /
-``delete-information-block`` operations dispatch the same underlying
-schedule commands via the block-type registry.
+``truncate-schedule``) are registrar-generated from the roboledger
+``OperationSpec`` declarations. Closing-entry drafting (both
+schedule-derived and free-form manual) runs through
+``create-event-block(event_type='schedule_entry_due' |
+'manual_adjustment')``. The unified ``create-information-block`` /
+``update-information-block`` / ``delete-information-block`` operations
+dispatch the same underlying schedule commands via the block-type
+registry.
 """
 
 from datetime import date
