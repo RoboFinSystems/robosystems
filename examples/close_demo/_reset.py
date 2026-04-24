@@ -90,6 +90,19 @@ def reset_demo_state(graph_id: str) -> None:
            "(SELECT id FROM structures WHERE created_by != :seeder)"),
       {"seeder": _LIBRARY_SEEDER},
     )
+    # 6c.ii. Tenant-authored rules attached to taxonomies directly (via
+    # ``taxonomy_id`` host or ``target_taxonomy_id`` target). Phase 2.3
+    # lets tenants attach rules at the taxonomy scope; reset must clear
+    # them before dropping the tenant taxonomies in step 9.
+    session.execute(
+      text(
+        "DELETE FROM rules WHERE "
+        "taxonomy_id IN (SELECT id FROM taxonomies WHERE created_by != :seeder) "
+        "OR target_taxonomy_id IN "
+        "(SELECT id FROM taxonomies WHERE created_by != :seeder)"
+      ),
+      {"seeder": _LIBRARY_SEEDER},
+    )
     session.execute(
       text("DELETE FROM fact_sets WHERE structure_id IN "
            "(SELECT id FROM structures WHERE created_by != :seeder)"),

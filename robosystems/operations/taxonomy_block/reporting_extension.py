@@ -42,10 +42,26 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.taxonomy_block.cascade import (
+  cascade_delete_taxonomy,
+  preflight_delete,
+)
 from robosystems.operations.taxonomy_block.rule_persistence import (
   persist_tenant_rules,
 )
 from robosystems.operations.taxonomy_block.rule_reads import project_rules
+from robosystems.operations.taxonomy_block.update_apply import (
+  apply_associations_to_add,
+  apply_elements_to_add,
+  apply_rules_to_add,
+  apply_rules_to_remove,
+  apply_structures_to_add,
+  apply_top_level_fields,
+)
+from robosystems.operations.taxonomy_block.update_validator import (
+  reject_unsupported_deltas,
+  validate_update_envelope,
+)
 from robosystems.operations.taxonomy_block.validators import (
   TaxonomyBlockValidationError,
   validate_create_envelope,
@@ -255,23 +271,109 @@ def create(
   return taxonomy.id
 
 
+def _element_factory(req, taxonomy: Taxonomy, updated_by: str) -> tuple[Element, str]:
+  qname = req.qname or _qname_for_extension(taxonomy.standard, req.code, req.name)
+  element = Element(
+    code=req.code,
+    name=req.name,
+    description=req.description,
+    qname=qname,
+    balance_type=req.balance_type or "debit",
+    period_type=req.period_type or "duration",
+    element_type=req.element_type,
+    is_monetary=req.is_monetary,
+    taxonomy_id=taxonomy.id,
+    source="native",
+    is_active=True,
+    metadata_=dict(req.metadata),
+    created_by=updated_by,
+  )
+  return element, qname
+
+
 def update(
   session: Session,
   payload: UpdateTaxonomyBlockRequest,
   updated_by: str,
 ) -> str:
-  raise NotImplementedError(
-    "reporting_extension update-taxonomy-block is not implemented yet (Phase 2.4)."
+  taxonomy = session.get(Taxonomy, payload.taxonomy_id)
+  if taxonomy is None or taxonomy.taxonomy_type != REPORTING_EXTENSION_BLOCK_TYPE:
+    raise ValueError(
+      f"taxonomy {payload.taxonomy_id!r} is not a reporting_extension taxonomy."
+    )
+
+  reject_unsupported_deltas(payload)
+
+  issues = validate_update_envelope(session, taxonomy, payload)
+  if issues:
+    raise TaxonomyBlockValidationError(issues)
+
+  parent_taxonomy_id = str(taxonomy.parent_taxonomy_id)
+
+  def _library_lookup(qnames: set[str]) -> dict[str, str]:
+    return _library_qname_lookup(session, parent_taxonomy_id, qnames)
+
+  apply_top_level_fields(taxonomy, payload)
+  new_elements = apply_elements_to_add(
+    session,
+    taxonomy,
+    payload,
+    updated_by,
+    element_factory=_element_factory,
+    library_parent_lookup=_library_lookup,
   )
+  new_structures = apply_structures_to_add(session, taxonomy, payload, updated_by)
+  session.flush()
+  apply_associations_to_add(
+    session,
+    taxonomy,
+    new_elements,
+    new_structures,
+    payload,
+    updated_by,
+    library_ref_lookup=_library_lookup,
+  )
+  apply_rules_to_remove(session, taxonomy, payload)
+  apply_rules_to_add(
+    session, taxonomy, payload, new_elements, new_structures, updated_by
+  )
+  session.flush()
+  return taxonomy.id
 
 
 def delete(
   session: Session,
   payload: DeleteTaxonomyBlockRequest,
   deleted_by: str,
-) -> str:
-  raise NotImplementedError(
-    "reporting_extension delete-taxonomy-block is not implemented yet (Phase 2.4)."
+) -> int:
+  taxonomy = session.get(Taxonomy, payload.taxonomy_id)
+  if taxonomy is None or taxonomy.taxonomy_type != REPORTING_EXTENSION_BLOCK_TYPE:
+    raise ValueError(
+      f"taxonomy {payload.taxonomy_id!r} is not a reporting_extension taxonomy."
+    )
+  if taxonomy.is_locked:
+    raise ValueError("library taxonomies cannot be deleted via the envelope.")
+
+  preflight = preflight_delete(session, str(taxonomy.id))
+  if preflight.fact_count > 0 and not payload.cascade_facts:
+    raise ValueError(
+      f"taxonomy {taxonomy.id!r} has {preflight.fact_count} live facts; "
+      f"pass cascade_facts=true to delete them, or clear them first."
+    )
+  if preflight.line_item_count > 0:
+    raise ValueError(
+      f"taxonomy {taxonomy.id!r} has {preflight.line_item_count} journal "
+      f"line items referencing its elements; clear them before deleting."
+    )
+  if preflight.cross_taxonomy_mapping_count > 0:
+    raise ValueError(
+      f"taxonomy {taxonomy.id!r} is referenced by "
+      f"{preflight.cross_taxonomy_mapping_count} mapping associations "
+      f"from other taxonomies; clear those before deleting."
+    )
+
+  return cascade_delete_taxonomy(
+    session, str(taxonomy.id), cascade_facts=payload.cascade_facts
   )
 
 

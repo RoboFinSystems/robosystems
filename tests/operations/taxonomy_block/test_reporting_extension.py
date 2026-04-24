@@ -74,18 +74,24 @@ def test_create_rejects_non_reporting_standard_parent() -> None:
   assert "reporting_standard" in str(exc.value)
 
 
-def test_update_raises_not_implemented() -> None:
+def test_update_rejects_missing_taxonomy() -> None:
+  """Phase 2.4: update is live; unknown taxonomy_id raises ValueError."""
+  session = MagicMock()
+  session.get.return_value = None
   payload = UpdateTaxonomyBlockRequest(taxonomy_id="tx_1")
-  with pytest.raises(NotImplementedError) as exc:
-    reporting_extension.update(MagicMock(), payload, "usr_1")
-  assert "Phase 2.4" in str(exc.value)
+  with pytest.raises(ValueError) as exc:
+    reporting_extension.update(session, payload, "usr_1")
+  assert "not a reporting_extension" in str(exc.value)
 
 
-def test_delete_raises_not_implemented() -> None:
+def test_delete_rejects_missing_taxonomy() -> None:
+  """Phase 2.4: delete is live; unknown taxonomy_id raises ValueError."""
+  session = MagicMock()
+  session.get.return_value = None
   payload = DeleteTaxonomyBlockRequest(taxonomy_id="tx_1", reason="cleanup")
-  with pytest.raises(NotImplementedError) as exc:
-    reporting_extension.delete(MagicMock(), payload, "usr_1")
-  assert "Phase 2.4" in str(exc.value)
+  with pytest.raises(ValueError) as exc:
+    reporting_extension.delete(session, payload, "usr_1")
+  assert "not a reporting_extension" in str(exc.value)
 
 
 def test_build_envelope_returns_none_when_missing() -> None:

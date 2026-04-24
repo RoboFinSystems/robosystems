@@ -103,12 +103,13 @@ def delete_taxonomy_block(
 
   entry = _get_entry_or_422(taxonomy.taxonomy_type)
   captured_name = taxonomy.name
-  entry.dispatch_delete(session, body, created_by)
+  result = entry.dispatch_delete(session, body, created_by)
+  facts_deleted = int(result) if isinstance(result, int) else 0
 
   return DeleteTaxonomyBlockResponse(
     taxonomy_id=body.taxonomy_id,
     name=captured_name,
-    facts_deleted=0,
+    facts_deleted=facts_deleted,
     cascade_applied=body.cascade_facts,
   )
 

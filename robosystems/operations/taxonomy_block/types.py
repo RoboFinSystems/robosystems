@@ -87,10 +87,11 @@ class TaxonomyBlockRegistryEntry:
   ``(session, typed_payload, updated_by) -> taxonomy_id``. Read-only
   block types raise :class:`NotImplementedError`."""
 
-  dispatch_delete: Callable[[Session, BaseModel, str], str]
+  dispatch_delete: Callable[[Session, BaseModel, str], str | int]
   """Handler that deletes the taxonomy. Signature:
-  ``(session, typed_payload, deleted_by) -> taxonomy_id``. Read-only
-  block types raise :class:`NotImplementedError`."""
+  ``(session, typed_payload, deleted_by) -> facts_deleted`` (int) or
+  ``taxonomy_id`` (str) for handlers that don't report cascades. Read-
+  only block types raise :class:`NotImplementedError`."""
 
   dispatch_build_envelope: Callable[[Session, str], TaxonomyBlockEnvelope | None]
   """Handler that reads the taxonomy and packs its envelope. Signature:
