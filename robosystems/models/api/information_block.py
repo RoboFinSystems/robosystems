@@ -195,15 +195,15 @@ class RuleTargetLite(BaseModel):
     ...,
     description=(
       "Which atom type the rule targets — 'structure' | 'element' | "
-      "'association'. Enum closure enforced by the ``public.rules`` "
-      "CHECK constraint."
+      "'association' | 'taxonomy'. Enum closure enforced by the "
+      "``public.rules`` CHECK constraint."
     ),
   )
   target_ref_id: str = Field(
     ...,
     description=(
-      "UUID of the target atom — structure_id, element_id, or "
-      "association_id depending on ``target_kind``."
+      "UUID of the target atom — structure_id, element_id, "
+      "association_id, or taxonomy_id depending on ``target_kind``."
     ),
   )
 

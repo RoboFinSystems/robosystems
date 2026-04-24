@@ -49,3 +49,18 @@ def test_custom_ontology_is_declarative() -> None:
 def test_unknown_type_raises_keyerror() -> None:
   with pytest.raises(KeyError):
     registry_module.get("not_a_real_type")
+
+
+def test_strawberry_envelope_field_parity() -> None:
+  """Catch Pydantic→Strawberry drift — every Pydantic field should map."""
+  from robosystems.graphql.types.taxonomy_block import TaxonomyBlock
+  from robosystems.models.api.taxonomy_block import TaxonomyBlockEnvelope
+
+  pydantic_fields = set(TaxonomyBlockEnvelope.model_fields.keys())
+  strawberry_fields = {
+    f.python_name for f in TaxonomyBlock.__strawberry_definition__.fields
+  }
+  assert pydantic_fields == strawberry_fields, (
+    f"Pydantic fields not in Strawberry: {pydantic_fields - strawberry_fields}; "
+    f"Strawberry fields not in Pydantic: {strawberry_fields - pydantic_fields}"
+  )

@@ -31,6 +31,14 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.taxonomy_block.rule_persistence import (
+  persist_tenant_rules,
+)
+from robosystems.operations.taxonomy_block.rule_reads import project_rules
+from robosystems.operations.taxonomy_block.validators import (
+  TaxonomyBlockValidationError,
+  validate_create_envelope,
+)
 
 COA_BLOCK_TYPE = "chart_of_accounts"
 COA_DISPLAY_NAME = "Chart of Accounts"
@@ -113,6 +121,10 @@ def create(
       f"chart_of_accounts handler received payload with taxonomy_type="
       f"{payload.taxonomy_type!r}"
     )
+
+  issues = validate_create_envelope(payload, session)
+  if issues:
+    raise TaxonomyBlockValidationError(issues)
 
   taxonomy = Taxonomy(
     name=payload.name,
@@ -220,6 +232,17 @@ def create(
     session.add(association)
 
   session.flush()
+
+  if payload.rules:
+    persist_tenant_rules(
+      session,
+      taxonomy,
+      payload.rules,
+      elements_by_qname,
+      structures_by_name,
+      created_by,
+    )
+    session.flush()
 
   return taxonomy.id
 
@@ -355,6 +378,14 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
     if parent is not None:
       parent_taxonomy_name = str(parent.name)
 
+  rules = project_rules(
+    session,
+    taxonomy.id,
+    element_ids=[e.id for e in elements_rows],
+    structure_ids=[s.id for s in structures_rows],
+    qname_by_element_id=element_qname_by_id,
+  )
+
   return TaxonomyBlockEnvelope(
     id=taxonomy.id,
     name=taxonomy.name,
@@ -370,7 +401,7 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
     elements=elements,
     structures=structures,
     associations=associations,
-    rules=[],
+    rules=rules,
     verification_results=[],
     element_count=len(elements),
     structure_count=len(structures),

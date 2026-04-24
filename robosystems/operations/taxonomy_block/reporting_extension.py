@@ -42,6 +42,14 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.taxonomy_block.rule_persistence import (
+  persist_tenant_rules,
+)
+from robosystems.operations.taxonomy_block.rule_reads import project_rules
+from robosystems.operations.taxonomy_block.validators import (
+  TaxonomyBlockValidationError,
+  validate_create_envelope,
+)
 
 REPORTING_EXTENSION_BLOCK_TYPE = "reporting_extension"
 DISPLAY_NAME = "Reporting Extension"
@@ -91,6 +99,10 @@ def create(
       "reporting_extension requires parent_taxonomy_id — the library "
       "reporting_standard being extended."
     )
+
+  issues = validate_create_envelope(payload, session)
+  if issues:
+    raise TaxonomyBlockValidationError(issues)
 
   parent_taxonomy = session.get(Taxonomy, payload.parent_taxonomy_id)
   if parent_taxonomy is None:
@@ -228,6 +240,17 @@ def create(
     session.add(association)
 
   session.flush()
+
+  if payload.rules:
+    persist_tenant_rules(
+      session,
+      taxonomy,
+      payload.rules,
+      elements_by_qname,
+      structures_by_name,
+      created_by,
+    )
+    session.flush()
 
   return taxonomy.id
 
@@ -383,6 +406,14 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
     if parent is not None:
       parent_taxonomy_name = str(parent.name)
 
+  rules = project_rules(
+    session,
+    taxonomy.id,
+    element_ids=[e.id for e in elements_rows],
+    structure_ids=[s.id for s in structures_rows],
+    qname_by_element_id=element_qname_by_id,
+  )
+
   return TaxonomyBlockEnvelope(
     id=taxonomy.id,
     name=taxonomy.name,
@@ -398,7 +429,7 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
     elements=elements,
     structures=structures,
     associations=associations,
-    rules=[],
+    rules=rules,
     verification_results=[],
     element_count=len(elements),
     structure_count=len(structures),

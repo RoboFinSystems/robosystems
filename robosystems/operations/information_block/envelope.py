@@ -221,6 +221,10 @@ def rule_to_lite(rule: Rule) -> RuleLite:
     target = RuleTargetLite(
       target_kind="association", target_ref_id=rule.target_association_id
     )
+  elif rule.target_kind == "taxonomy" and rule.target_taxonomy_id is not None:
+    target = RuleTargetLite(
+      target_kind="taxonomy", target_ref_id=rule.target_taxonomy_id
+    )
 
   raw_vars = rule.rule_variables or []
   variables = [

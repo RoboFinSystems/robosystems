@@ -34,6 +34,7 @@ from robosystems.graphql.resolvers.information_block import InformationBlockQuer
 from robosystems.graphql.resolvers.investor import InvestorQuery
 from robosystems.graphql.resolvers.ledger import LedgerQuery
 from robosystems.graphql.resolvers.library import LibraryQuery
+from robosystems.graphql.resolvers.taxonomy_block import TaxonomyBlockQuery
 
 
 @strawberry.type
@@ -95,8 +96,18 @@ def _build_query_type() -> type:
   on the library sentinel only block types with
   `surfaces_in_library=True` surface (currently none — Schedule is
   tenant-only).
+
+  `TaxonomyBlockQuery` follows the same always-on pattern (see
+  `local/docs/specs/taxonomy-block.md`). Library reporting standards
+  surface on the sentinel; tenant CoA / custom_ontology / extensions
+  surface on the tenant graph_id via search_path.
   """
-  bases: tuple[type, ...] = (InformationBlockQuery, LibraryQuery, _BaseQuery)
+  bases: tuple[type, ...] = (
+    InformationBlockQuery,
+    TaxonomyBlockQuery,
+    LibraryQuery,
+    _BaseQuery,
+  )
   if env.ROBOLEDGER_ENABLED:
     bases = (LedgerQuery, *bases)
   if env.ROBOINVESTOR_ENABLED:
