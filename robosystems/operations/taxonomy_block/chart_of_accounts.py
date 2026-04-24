@@ -31,6 +31,7 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
 from robosystems.operations.taxonomy_block.cascade import (
   cascade_delete_taxonomy,
   preflight_delete,
@@ -248,6 +249,13 @@ def create(
     session.add(association)
 
   session.flush()
+
+  emit_auto_rules(
+    session,
+    taxonomy,
+    list(structures_by_name.values()),
+    created_by=created_by,
+  )
 
   if payload.rules:
     persist_tenant_rules(

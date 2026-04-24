@@ -158,7 +158,10 @@ _RULE_PATTERN_CHECK = (
   "rule_pattern IN ("
   "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
   "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
-  "'SumEquals', 'Variance'"
+  "'SumEquals', 'Variance', "
+  "'LeafHasClassification', 'LibraryOriginImmutability', "
+  "'NoCycles', 'NoOrphanArcs', 'ParentBeforeChild', "
+  "'UniqueQNameInTaxonomy'"
   ")"
 )
 _RULE_SEVERITY_CHECK = "rule_severity IN ('info', 'warning', 'error')"
