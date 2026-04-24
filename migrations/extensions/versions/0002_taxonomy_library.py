@@ -98,7 +98,9 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
 )
 _WIDENED_TAXONOMY_TYPE_CHECK = (
   "taxonomy_type IN ("
-  "'chart_of_accounts', 'mapping', 'schedule', "
+  # 'reporting' retained transitionally so 0001-era rows survive the widen;
+  # they're immediately backfilled to 'reporting_standard' right after.
+  "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
   "'classification-vocabulary', 'classification-assignment', 'rules', "
   "'reporting_standard', 'reporting_extension', 'custom_ontology'"
   ")"
@@ -328,6 +330,36 @@ def _widen_tenant_checks(conn, schema: str) -> None:
   t.add_check("structures", "check_structure_type", _WIDENED_STRUCTURE_TYPE_CHECK)
 
 
+def _backfill_reporting_standard(conn, schema: str) -> None:
+  """Rename library-locked ``reporting`` rows to ``reporting_standard``.
+
+  Part of the Phase 2 Taxonomy Block rename. Library-origin reporting
+  taxonomies (``is_locked=true``) carry the new ``reporting_standard``
+  type; tenant rows created under the old ``reporting`` name (none exist
+  today but the filter is defensive) stay as-is until the narrowing step
+  in a future phase."""
+  conn.execute(
+    text(
+      f"UPDATE {schema}.taxonomies "
+      f"SET taxonomy_type = 'reporting_standard' "
+      f"WHERE taxonomy_type = 'reporting' AND is_locked = true"
+    )
+  )
+
+
+def _reverse_backfill_reporting(conn, schema: str) -> None:
+  """Reverse of :func:`_backfill_reporting_standard`. Only touches library-
+  locked rows — tenant rows with the new 0002 types would violate the
+  narrow CHECK and cause the downgrade to fail loudly (by design)."""
+  conn.execute(
+    text(
+      f"UPDATE {schema}.taxonomies "
+      f"SET taxonomy_type = 'reporting' "
+      f"WHERE taxonomy_type = 'reporting_standard' AND is_locked = true"
+    )
+  )
+
+
 def _restore_narrow_tenant_checks(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
   t.add_check("associations", "check_association_type", _NARROW_ASSOCIATION_CHECK)
@@ -469,6 +501,10 @@ def _backfill_library_into_tenant(conn, schema: str) -> None:
   Order is load-bearing: schema changes first, then copy, then triggers.
   """
   _widen_tenant_checks(conn, schema)
+  # Phase 2 Taxonomy Block rename: flip any pre-existing locked
+  # ``reporting`` rows in the tenant schema to ``reporting_standard``
+  # before the library copy unions new rows in.
+  _backfill_reporting_standard(conn, schema)
   _drop_old_element_columns(conn, schema)
   _add_substitution_group_column(conn, schema)
   _add_phase_theta_columns_to_tenant(conn, schema)
@@ -818,6 +854,12 @@ def upgrade() -> None:
   op.create_check_constraint(
     "check_taxonomy_type", "taxonomies", _WIDENED_TAXONOMY_TYPE_CHECK
   )
+  # Phase 2 Taxonomy Block rename: 0001-seeded library reporting rows
+  # carry ``taxonomy_type='reporting'``; flip them to the new
+  # ``reporting_standard`` value so subsequent tenant code (Block writer,
+  # library browser) sees the canonical form. The widened CHECK still
+  # admits ``'reporting'`` transitionally so this UPDATE validates.
+  _backfill_reporting_standard(op.get_bind(), "public")
   # Phase g.1: widen structures.structure_type to admit rollforward,
   # reconciliation, policy. Pure vocabulary expansion — no data change.
   op.drop_constraint("check_structure_type", "structures", type_="check")
@@ -1183,6 +1225,9 @@ def downgrade() -> None:
   # used, so we leave them NULL).
   def _teardown_tenant(conn, schema: str) -> None:
     _drop_triggers_for_tenant(conn, schema)
+    # Reverse the Phase 2 Taxonomy Block rename before narrowing the
+    # CHECK so the locked library rows pass the 0001-era constraint.
+    _reverse_backfill_reporting(conn, schema)
     _restore_narrow_tenant_checks(conn, schema)
     _drop_phase_d_columns_from_tenant(conn, schema)
     _drop_phase_theta_columns_from_tenant(conn, schema)
@@ -1273,6 +1318,9 @@ def downgrade() -> None:
   op.create_check_constraint(
     "check_element_source", "elements", _NARROW_ELEMENT_SOURCE_CHECK
   )
+  # Reverse the Phase 2 Taxonomy Block rename on public before narrowing
+  # the CHECK so the locked library rows pass the 0001-era constraint.
+  _reverse_backfill_reporting(op.get_bind(), "public")
   op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")
   op.create_check_constraint(
     "check_taxonomy_type", "taxonomies", _NARROW_TAXONOMY_TYPE_CHECK

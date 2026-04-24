@@ -730,7 +730,11 @@ def seed_reporting_taxonomy(connection) -> None:
       "id": TAXONOMY_ID,
       "name": "US GAAP Reporting Taxonomy",
       "desc": "Standard US GAAP reporting hierarchy rooted in SFAC 6",
-      "type": "reporting_standard",
+      # 0001 seeds this row with taxonomy_type='reporting' because 0001's
+      # CHECK constraint doesn't admit 'reporting_standard'. 0002 widens the
+      # CHECK and backfills this row to 'reporting_standard' as part of the
+      # Taxonomy Block rename.
+      "type": "reporting",
       "version": "2024",
       "standard": "us-gaap",
       "ns": "http://fasb.org/us-gaap/2024",

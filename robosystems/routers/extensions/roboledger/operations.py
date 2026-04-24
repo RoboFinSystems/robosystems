@@ -10,7 +10,7 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (31):**
+**Registered (34):**
 
 - Entity: `update-entity`
 - Fiscal calendar / periods: `initialize`, `set-close-target`,
@@ -34,14 +34,14 @@ Every route follows the pattern:
 - Information Blocks (generic construction — see
   `information-block.md`): `create-information-block`,
   `update-information-block`, `delete-information-block`
+- Taxonomy Blocks (ontology curation — see
+  `taxonomy-block.md`): `create-taxonomy-block`,
+  `update-taxonomy-block`, `delete-taxonomy-block`
 
-Ontology CRUD (taxonomies, structures, elements, non-mapping associations)
-is admin-only post-Phase-1 — replaced by the Taxonomy Block envelope
-(spec: `local/docs/specs/taxonomy-block.md`). The underlying `cmd_*`
-functions in `operations/roboledger/commands/{taxonomies,elements}.py`
-remain for internal callers (library ingest, tenant provisioning, QB
-pipeline, migrations). Mapping associations stay direct (craft, not
-curation).
+Raw ontology CRUD (taxonomies, structures, elements, non-mapping
+associations) was retired in Phase 1 — the Taxonomy Block envelope is
+now the only tenant-facing construction path. Mapping associations stay
+direct (craft, not curation).
 
 `build-fact-grid` is registered separately in the sibling `views.py`
 file so it can be mounted independently of `ROBOLEDGER_ENABLED` (it
@@ -126,6 +126,11 @@ from robosystems.models.api.information_block import (
   DeleteInformationBlockRequest,
   EvaluateRulesRequest,
   UpdateInformationBlockRequest,
+)
+from robosystems.models.api.taxonomy_block import (
+  CreateTaxonomyBlockRequest,
+  DeleteTaxonomyBlockRequest,
+  UpdateTaxonomyBlockRequest,
 )
 from robosystems.models.core import User
 from robosystems.operations.extensions.staleness import mark_graph_stale
@@ -276,6 +281,15 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   InvalidCloseTargetError,
+)
+from robosystems.operations.taxonomy_block.commands import (
+  create_taxonomy_block as cmd_create_taxonomy_block,
+)
+from robosystems.operations.taxonomy_block.commands import (
+  delete_taxonomy_block as cmd_delete_taxonomy_block,
+)
+from robosystems.operations.taxonomy_block.commands import (
+  update_taxonomy_block as cmd_update_taxonomy_block,
 )
 
 router = APIRouter()
@@ -1080,6 +1094,69 @@ delete_information_block_op = _registrar.register(
       ScheduleNotFoundError: 404,
     },
     mark_stale_reason="information_block_deleted",
+  )
+)
+
+# ── Taxonomy Block (ontology curation) ────────────────────────────────────
+
+create_taxonomy_block_op = _registrar.register(
+  OperationSpec(
+    name="create-taxonomy-block",
+    summary="Create Taxonomy Block",
+    description=(
+      "Create a taxonomy block atomically: one envelope carrying the "
+      "taxonomy row plus its structures, elements, associations, and "
+      "rules. Dispatches by `taxonomy_type` — `chart_of_accounts` "
+      "(declarative tenant CoA) is live; `reporting_extension` / "
+      "`custom_ontology` / `reporting_standard` land in later sub-phases."
+    ),
+    command=cmd_create_taxonomy_block,
+    request_model=CreateTaxonomyBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+    },
+    mark_stale_reason="taxonomy_block_created",
+  )
+)
+
+update_taxonomy_block_op = _registrar.register(
+  OperationSpec(
+    name="update-taxonomy-block",
+    summary="Update Taxonomy Block",
+    description=(
+      "Incrementally mutate a taxonomy block via typed delta lists "
+      "(elements/structures/associations/rules to add, update, remove). "
+      "Dispatches by the target taxonomy's stored `taxonomy_type`. "
+      "Library-origin block types (`reporting_standard`) surface 501."
+    ),
+    command=cmd_update_taxonomy_block,
+    request_model=UpdateTaxonomyBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+    },
+    mark_stale_reason="taxonomy_block_updated",
+  )
+)
+
+delete_taxonomy_block_op = _registrar.register(
+  OperationSpec(
+    name="delete-taxonomy-block",
+    summary="Delete Taxonomy Block",
+    description=(
+      "Delete a taxonomy block and return a thin confirmation. "
+      "`cascade_facts=True` also deletes Fact rows that reference the "
+      "taxonomy's elements; default False fails the delete if such "
+      "facts exist. Library-origin block types surface 501."
+    ),
+    command=cmd_delete_taxonomy_block,
+    request_model=DeleteTaxonomyBlockRequest,
+    error_map={
+      ValueError: 422,
+      NotImplementedError: 501,
+    },
+    mark_stale_reason="taxonomy_block_deleted",
   )
 )
 

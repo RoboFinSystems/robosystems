@@ -254,7 +254,11 @@ _MAX_ASSOCIATIONS = 20000
 _MAX_RULES = 500
 
 WritableTaxonomyType = Literal[
-  "reporting_standard", "reporting_extension", "custom_ontology", "chart_of_accounts"
+  "reporting_standard",
+  "reporting_extension",
+  "custom_ontology",
+  "chart_of_accounts",
+  "schedule",
 ]
 
 
