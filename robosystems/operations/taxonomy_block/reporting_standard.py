@@ -1,6 +1,6 @@
 """Handlers for ``taxonomy_type='reporting_standard'`` — library taxonomies.
 
-Library reporting taxonomies (SFAC 6, us-gaap, FAC) are seeded through
+Library reporting taxonomies (FAC, us-gaap, rs-gaap) are seeded through
 the admin-only ``library_writer.py`` path (Arelle → JSON-LD → bulk
 insert into the ``public`` schema). The public Taxonomy Block surface
 does NOT author library rows — ``create``/``update``/``delete`` raise

@@ -312,7 +312,7 @@ def get_element(
 
 
 def get_element_by_qname(session: Session, qname: str) -> LibraryElementResponse | None:
-  """Get an element by qname ('sfac6:Assets', 'fac:CostOfRevenue', …)."""
+  """Get an element by qname ('fac:Assets', 'fac:CostOfRevenue', …)."""
   element = session.execute(
     select(Element).where(Element.qname == qname)
   ).scalar_one_or_none()
@@ -508,7 +508,7 @@ def get_element_arcs(
 
   Filters to arcs whose structure belongs to a `taxonomy_type='mapping'`
   taxonomy — the cross-taxonomy bridges (fac↔rs-gaap equivalence,
-  sfac6→fac general-special, type-subtype). Hierarchical arcs inside
+  fac→rs-gaap equivalence, type-subtype). Hierarchical arcs inside
   a single reporting taxonomy (presentation/calculation) are excluded.
 
   Each arc is returned once, oriented from this element's perspective:

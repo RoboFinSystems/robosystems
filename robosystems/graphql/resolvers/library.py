@@ -210,7 +210,7 @@ class LibraryQuery:
     id: strawberry.ID | None = None,
     qname: str | None = None,
   ) -> LibraryElement | None:
-    """Get a single element by id or by qname ('sfac6:Assets', etc)."""
+    """Get a single element by id or by qname ('fac:Assets', etc)."""
     with _open_session(info) as session:
       if id is not None:
         row = get_element(session, element_id=str(id))

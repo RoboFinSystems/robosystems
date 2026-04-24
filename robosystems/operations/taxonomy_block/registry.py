@@ -86,7 +86,7 @@ REPORTING_STANDARD_BLOCK = TaxonomyBlockRegistryEntry(
   category=reporting_standard_handlers.CATEGORY,
   icon="library",
   description=(
-    "Library reporting taxonomy (SFAC 6, us-gaap, FAC). Read-only on "
+    "Library reporting taxonomy (FAC, us-gaap, rs-gaap). Read-only on "
     "the public surface — seeded via the admin-only library writer. "
     "Phase 2.7 will route library seeding through the envelope."
   ),

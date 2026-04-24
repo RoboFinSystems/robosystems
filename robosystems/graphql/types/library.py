@@ -58,12 +58,12 @@ class LibraryReference:
 
 @strawberry.experimental.pydantic.type(model=PydanticLibraryElement, all_fields=True)
 class LibraryElement:
-  """A single library concept (from sfac6, fac, us-gaap, rs-gaap, …)."""
+  """A single library concept (from fac, us-gaap, rs-gaap, …)."""
 
 
 @strawberry.experimental.pydantic.type(model=PydanticLibraryTaxonomy, all_fields=True)
 class LibraryTaxonomy:
-  """A curated library taxonomy (sfac6, fac, us-gaap version, rs-gaap)."""
+  """A curated library taxonomy (fac, us-gaap version, rs-gaap)."""
 
 
 @strawberry.experimental.pydantic.type(model=PydanticLibraryStructure, all_fields=True)

@@ -25,10 +25,10 @@ Each seed declares its provenance in its top-level JSON-LD metadata:
 
 ```json
 {
-  "standard": "sfac6",
+  "standard": "fac",
   "forked_from": {
     "author": "Charlie Hoffman (Seattle Method)",
-    "url": "http://xbrlsite.com/seattlemethod/golden/sfac6/sfac6-entryPoint.xsd",
+    "url": "http://xbrlsite.com/seattlemethod/golden/fac/fac-entryPoint.xsd",
     "format": "XBRL taxonomy (entry point + linkbases)"
   },
   "forked_at": "2026-04-19",
@@ -50,7 +50,6 @@ Each seed declares its provenance in its top-level JSON-LD metadata:
 
 ```
 seeds/
-├── sfac6/v1/               forked — SFAC 6 elements (19 concepts)
 ├── fac/v1/                 forked — FAC fundamental concepts (~177 concepts)
 ├── rs-gaap/v1/             forked — RoboSystems canonical us-gaap (~2,000 concepts)
 ├── type-subtype/v1/        forked — rs-gaap classification linkbase
@@ -94,7 +93,7 @@ XBRL source (to audit drift, compare against a newer upstream, or adopt
 an intentional upgrade), use the archaeological one-shot:
 
 ```bash
-uv run python -m robosystems.scripts.import_upstream_seeds --only sfac6
+uv run python -m robosystems.scripts.import_upstream_seeds --only fac
 ```
 
 This will overwrite the target seed in place. Do it on a branch, diff

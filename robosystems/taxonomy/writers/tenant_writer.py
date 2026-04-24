@@ -137,7 +137,7 @@ def copy_library_into_tenant(
     return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
   # Flatten the pin into a parameterized IN clause via VALUES.
-  # E.g., ("sfac6", "v1"), ("fac", "v1"), …
+  # E.g., ("fac", "v1"), ("rs-gaap", "v1"), …
   pin_values_sql = ", ".join(f"(:s{i}, :v{i})" for i in range(len(resolved_pin)))
   pin_params: dict[str, str] = {}
   for i, (std, ver) in enumerate(resolved_pin.items()):

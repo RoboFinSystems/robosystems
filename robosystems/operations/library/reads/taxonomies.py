@@ -45,7 +45,7 @@ def list_taxonomies(
 
   Args:
       session: SQLAlchemy session (public schema for sentinel; tenant schema for graph queries).
-      standard: Optional filter by standard (sfac6, fac, us-gaap, …).
+      standard: Optional filter by standard (fac, us-gaap, …).
       include_element_count: If True, add a COUNT(*) per taxonomy.
       shared_only: If True (default), return only shared/canonical taxonomies.
           Pass False when the session is tenant-scoped to include tenant CoA taxonomies.

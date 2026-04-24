@@ -53,8 +53,8 @@ class ElementSpec(BaseModel):
   Classifications live in ClassificationSpec + ClassificationAssignmentSpec.
   """
 
-  qname: str = Field(..., description="Qualified name, e.g. 'sfac6:Assets'")
-  namespace: str = Field(..., description="Namespace prefix, e.g. 'sfac6'")
+  qname: str = Field(..., description="Qualified name, e.g. 'fac:Assets'")
+  namespace: str = Field(..., description="Namespace prefix, e.g. 'fac'")
   namespace_uri: str = Field(..., description="Full namespace URI")
   name: str = Field(..., description="Local name within the namespace")
 
@@ -70,7 +70,7 @@ class ElementSpec(BaseModel):
   )
 
   # Source / origin
-  source: str = Field(..., description="sfac6 | fac | us-gaap | ifrs | …")
+  source: str = Field(..., description="fac | us-gaap | ifrs | …")
 
   # Hierarchy (resolved at write time) — parent_id in OLTP. Independent
   # of classification: this is the element-tree hierarchy, not the
@@ -101,7 +101,7 @@ class ClassificationSpec(BaseModel):
     ..., description="Member name within the category, e.g. 'asset', 'current'."
   )
   source: str = Field(
-    ..., description="Provenance, e.g. 'us-gaap-metamodel', 'sfac6', 'system'."
+    ..., description="Provenance, e.g. 'us-gaap-metamodel', 'fac', 'system'."
   )
   name: str | None = Field(None, description="Human-readable display name")
   description: str | None = Field(None)
@@ -279,8 +279,8 @@ class RuleSpec(BaseModel):
 class TaxonomyPackage(BaseModel):
   """A fully-loaded taxonomy ready for library persistence."""
 
-  name: str = Field(..., description="Human name, e.g. 'SFAC 6 v1'")
-  standard: str = Field(..., description="sfac6 | fac | us-gaap | ifrs")
+  name: str = Field(..., description="Human name, e.g. 'FAC v1'")
+  standard: str = Field(..., description="fac | us-gaap | ifrs")
   version: str = Field(..., description="Version identifier, e.g. 'v1' or '2020'")
   namespace_uri: str = Field(..., description="Primary namespace URI for this package")
 
@@ -300,7 +300,7 @@ class TaxonomyPackage(BaseModel):
       "custom_ontology | mapping | schedule | rules | "
       "classification-vocabulary | classification-assignment — shapes "
       "how the library viewer renders this taxonomy. Concept taxonomies "
-      "(sfac6, rs-gaap) are 'reporting_standard'; equivalence + hierarchy "
+      "(rs-gaap) are 'reporting_standard'; equivalence + hierarchy "
       "arc packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB "
       "metamodel seed is 'classification-vocabulary'; rs-gaap-to-metamodel "
       "is 'classification-assignment'; verification-rule packs (fac-rules) "
