@@ -67,11 +67,11 @@ def reset_demo_state(graph_id: str) -> None:
     # 5. Facts
     session.execute(text("DELETE FROM facts"))
 
-    # 6. Tenant-origin element classifications (child of elements; must
+    # 6. Tenant-origin element traits (child of elements; must
     # be deleted before elements due to FK constraint).
     session.execute(
       text(
-        "DELETE FROM element_classifications WHERE element_id IN "
+        "DELETE FROM element_traits WHERE element_id IN "
         "(SELECT id FROM elements WHERE created_by != :seeder)"
       ),
       {"seeder": _LIBRARY_SEEDER},

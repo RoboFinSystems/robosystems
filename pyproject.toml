@@ -38,36 +38,28 @@ dependencies = [
     "strawberry-graphql[fastapi]>=0.314.0,<1.0",
     "uvicorn>=0.44.0,<1.0",
     "uvloop>=0.21.0,<1.0",
-
     # Cloud Service (AWS)
     "boto3>=1.42.0,<2.0",
-
     # OLAP Staging/Vector/Graph Databases
     "duckdb==1.4.4",
     "lancedb>=0.30.0,<1.0",
     "real-ladybug==0.13.1",
-
     # OLTP Database (Postgres)
     "alembic>=1.18.0,<2.0",
     "psycopg2-binary>=2.9.0,<3.0",
     "sqlalchemy>=2.0.0,<3.0",
-
     # In-Memory Database (Valkey)
     "redis>=7.0.0,<8.0",
-
     # Document Search (OpenSearch)
     "opensearch-py>=2.8.0,<3.0",
-
     # Data Orchestration (Dagster)
     "dagster>=1.13.1,<2.0",
     "dagster-webserver>=1.13.0,<2.0",
     "dagster-postgres>=0.29.0,<1.0",
     "dagster-aws>=0.29.0,<1.0",
-
     # Data Transformation (dbt)
     "dbt-core>=1.11.0,<2.0",
     "dbt-duckdb>=1.10.0,<2.0",
-
     # Data Processing & Analytics
     "arelle-release==2.39.5",
     "fastembed>=0.8.0,<1.0",
@@ -76,12 +68,10 @@ dependencies = [
     "pandas>=2.3.0,<3.0",
     "pyarrow>=23.0.0",
     "rdflib>=7.0.0,<8.0",
-
     # External API Integrations
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
     "stripe>=11.1.0,<12.0",
-
     # Observability
     "opentelemetry-api>=1.41.0,<2.0",
     "opentelemetry-exporter-otlp>=1.41.0,<2.0",
@@ -90,7 +80,6 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.55b0,<1.0",
     "opentelemetry-instrumentation-psycopg2>=0.55b0,<1.0",
     "opentelemetry-instrumentation-requests>=0.55b0,<1.0",
-
     # Utilities
     "aiohttp>=3.12.0",
     "bcrypt>=4.3.0,<5.0",
@@ -111,12 +100,13 @@ dependencies = [
     "requests>=2.32.0,<3.0",
     "retrying>=1.4.0,<2.0",
     "uuid6>=2025.0.0",
+    "robosystems-client>=0.3.14",
 ]
 
 [project.optional-dependencies]
 dev = [
     # RoboSystems client for demo and testing
-    "robosystems-client==0.3.13",
+    "robosystems-client==0.3.15",
 
     # Testing framework
     "pytest>=8.4.0,<9.0",
@@ -252,3 +242,6 @@ reportOptionalMemberAccess = "none"
 reportReturnType = "none"
 reportCallIssue = "none"
 reportMissingImports = "none"
+
+[tool.uv.sources]
+robosystems-client = { path = "../robosystems-python-client/dist/robosystems_client-0.3.14-py3-none-any.whl" }
