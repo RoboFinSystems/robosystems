@@ -8,7 +8,7 @@ deterministic equivalence-arc expansion downstream — the LLM does not
 pick them.
 
 Candidates are narrowed by the element's FASB elementsOfFinancialStatements
-classification: the backend returns only FAC concepts sharing the CoA
+trait: the backend returns only FAC concepts sharing the CoA
 element's EFS identifier (asset/liability/equity/revenue/expense/gain/loss).
 Typical candidate set: 7 to 40 concepts.
 """
@@ -21,9 +21,9 @@ FAC is deliberately a small, clean semantic space (~177 concepts) — filing-spe
 rs-gaap / us-gaap variants are expanded downstream via deterministic equivalence arcs. \
 You pick the semantic anchor; the system picks the variant.
 
-## Classification axis
+## Trait axis
 
-Every CoA element and every FAC candidate carries a `classification` on the \
+Every CoA element and every FAC candidate carries a `trait` on the \
 FASB elementsOfFinancialStatements axis. Primary values for CoA mapping:
 
 - **asset** — resources controlled by the entity (balance-sheet stock, debit balance)
@@ -34,7 +34,7 @@ FASB elementsOfFinancialStatements axis. Primary values for CoA mapping:
 - **gain** — non-operating credit flows (income-statement duration, credit balance)
 - **loss** — non-operating debit flows (income-statement duration, debit balance)
 
-Candidates have already been filtered to match the CoA element's classification \
+Candidates have already been filtered to match the CoA element's trait \
 (typically to a specific FAC anchor subtree), so you don't need to re-filter — focus \
 on choosing the best semantic match within the candidates.
 
@@ -144,7 +144,7 @@ def build_rs_gaap_refinement_prompt(
 
 ## CoA Account
 id={coa_element["id"]}, name={coa_element["name"]}, \
-classification={coa_element.get("classification", "?")}
+trait={coa_element.get("trait", "?")}
 
 ## Already Mapped To (FAC)
 {fac_qname}
@@ -169,7 +169,7 @@ def build_mapping_prompt(
   """
   elements_text = "\n".join(
     f"- id={e['id']}, code={e.get('code', '?')}, name={e['name']}, "
-    f"classification={e.get('classification', '?')}, "
+    f"trait={e.get('trait', '?')}, "
     f"balance_type={e.get('balance_type', '?')}, "
     f"external_source={e.get('external_source', '?')}"
     for e in elements
@@ -177,7 +177,7 @@ def build_mapping_prompt(
 
   candidates_text = "\n".join(
     f"- id={c['id']}, qname={c.get('qname', '?')}, name={c['name']}, "
-    f"classification={c.get('classification', '?')}, "
+    f"trait={c.get('trait', '?')}, "
     f"depth={c.get('depth', '?')}, is_abstract={c.get('is_abstract', False)}"
     for c in candidates
   )

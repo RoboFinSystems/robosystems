@@ -66,10 +66,10 @@ def test_element_request_accepts_loose_fields() -> None:
   req = TaxonomyBlockElementRequest(
     qname="custom:KPI",
     name="KPI",
-    classification=None,
+    trait=None,
     balance_type=None,
     period_type=None,
   )
   assert req.qname == "custom:KPI"
-  assert req.classification is None
+  assert req.trait is None
   assert req.balance_type is None

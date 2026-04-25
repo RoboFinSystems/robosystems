@@ -196,9 +196,6 @@ def _add_concept_triples(graph: Graph, concept: Any) -> None:
   if iri is None:
     return
 
-  # Type: xbrli:item for concrete concepts, abstract flag separately
-  graph.add((iri, RS.classification, Literal(_classify_concept(concept))))
-
   balance = getattr(concept, "balance", None)
   if balance:
     graph.add((iri, RS.balance, Literal(balance)))

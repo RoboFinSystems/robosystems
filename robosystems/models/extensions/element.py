@@ -11,7 +11,7 @@ substitution_group). Classifications — including SFAC 6 primitive type
 (elementsOfFinancialStatements), liquidity, activityType,
 operatingNonoperating, flowClassification, and the other 20 FASB
 metamodel trait axes — live in ``classifications`` +
-``element_classifications``, mirroring XBRL's linkbase model.
+``element_traits``, mirroring XBRL's traitConcept linkbase model.
 """
 
 from datetime import UTC, datetime

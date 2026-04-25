@@ -279,7 +279,7 @@ class AccountTreeNode:
   id: strawberry.ID
   code: str | None
   name: str
-  classification: str | None
+  trait: str | None
   account_type: str | None
   balance_type: str
   depth: int
@@ -292,7 +292,7 @@ class AccountTreeNode:
       id=strawberry.ID(node.id),
       code=node.code,
       name=node.name,
-      classification=node.classification,
+      trait=node.trait,
       account_type=node.account_type,
       balance_type=node.balance_type,
       depth=node.depth,

@@ -12,7 +12,7 @@ class AccountResponse(BaseModel):
   code: str | None = None
   name: str
   description: str | None = None
-  classification: str | None = None
+  trait: str | None = None
   sub_classification: str | None = None
   balance_type: str
   parent_id: str | None = None
@@ -34,7 +34,7 @@ class AccountTreeNode(BaseModel):
   id: str
   code: str | None = None
   name: str
-  classification: str | None = None
+  trait: str | None = None
   account_type: str | None = None
   balance_type: str
   depth: int

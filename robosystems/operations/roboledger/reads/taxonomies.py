@@ -24,13 +24,13 @@ from robosystems.models.api.extensions.taxonomies import (
 )
 from robosystems.models.extensions import (
   Association,
-  Classification,
   Element,
-  ElementClassification,
+  ElementTrait,
   Structure,
   Taxonomy,
+  Trait,
 )
-from robosystems.operations.library.reads import efs_classification_by_element
+from robosystems.operations.library.reads import efs_trait_by_element
 
 _COA_SOURCES = ("quickbooks", "xero", "plaid", "native", "import")
 
@@ -89,16 +89,14 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
 
 # Local alias for the shared library helper — keeps call sites terse and
 # makes the import site searchable (grep for ``_efs_by_element``).
-_efs_by_element = efs_classification_by_element
+_efs_by_element = efs_trait_by_element
 
 
-def element_to_response(
-  row: Element, classification: str | None = None
-) -> ElementResponse:
+def element_to_response(row: Element, trait: str | None = None) -> ElementResponse:
   """Map an Element row to the wire-facing ElementResponse.
 
   Callers that batch-load should use :func:`_efs_by_element` once and
-  pass the lookup in to avoid N+1 on the EFS classification.
+  pass the lookup in to avoid N+1 on the EFS trait.
   """
   return ElementResponse(
     id=row.id,
@@ -107,7 +105,7 @@ def element_to_response(
     description=row.description,
     qname=row.qname,
     namespace=row.namespace,
-    classification=classification,
+    trait=trait,
     balance_type=row.balance_type,
     period_type=row.period_type,
     is_abstract=row.is_abstract,
@@ -127,15 +125,15 @@ def list_elements(
   *,
   taxonomy_id: str | None = None,
   source: str | None = None,
-  classification: str | None = None,
+  trait: str | None = None,
   is_abstract: bool | None = None,
   limit: int = 100,
   offset: int = 0,
 ) -> ElementListResponse:
-  """List elements filtered by taxonomy / source / classification / abstract.
+  """List elements filtered by taxonomy / source / trait / abstract.
 
-  ``classification`` filters on the FASB elementsOfFinancialStatements
-  trait via the element_classifications junction table.
+  ``trait`` filters on the FASB elementsOfFinancialStatements
+  trait via the element_traits junction table.
   """
   query = select(Element).where(Element.is_active.is_(True))
   count_query = (
@@ -148,15 +146,13 @@ def list_elements(
   if source:
     query = query.where(Element.source == source)
     count_query = count_query.where(Element.source == source)
-  if classification:
+  if trait:
     subquery = (
-      select(ElementClassification.element_id)
-      .join(
-        Classification, Classification.id == ElementClassification.classification_id
-      )
+      select(ElementTrait.element_id)
+      .join(Trait, Trait.id == ElementTrait.trait_id)
       .where(
-        Classification.category == "elementsOfFinancialStatements",
-        Classification.identifier == classification,
+        Trait.category == "elementsOfFinancialStatements",
+        Trait.identifier == trait,
       )
     )
     query = query.where(Element.id.in_(subquery))
@@ -212,18 +208,18 @@ def get_element(session: Session, element_id: str) -> ElementResponse | None:
 
 def suggest_mapping_candidates(
   session: Session,
-  classification: str | None = None,
+  trait: str | None = None,
   element_id: str | None = None,
 ) -> list[ElementResponse]:
-  """Return FAC candidates for a CoA element, narrowed by classification.
+  """Return FAC candidates for a CoA element, narrowed by EFS trait.
 
   Filters active ``fac`` elements by the FASB
-  elementsOfFinancialStatements trait (via element_classifications).
+  elementsOfFinancialStatements trait (via element_traits).
   ``element_id`` is reserved for future per-element overrides but is
-  currently unused — classification alone drives the filter.
+  currently unused — trait alone drives the filter.
   """
   del element_id  # reserved for future per-element narrowing
-  if classification is None:
+  if trait is None:
     return []
 
   rows = (
@@ -233,14 +229,14 @@ def suggest_mapping_candidates(
         Element.source == "fac",
         Element.is_active.is_(True),
         Element.id.in_(
-          select(ElementClassification.element_id)
+          select(ElementTrait.element_id)
           .join(
-            Classification,
-            Classification.id == ElementClassification.classification_id,
+            Trait,
+            Trait.id == ElementTrait.trait_id,
           )
           .where(
-            Classification.category == "elementsOfFinancialStatements",
-            Classification.identifier == classification,
+            Trait.category == "elementsOfFinancialStatements",
+            Trait.identifier == trait,
           )
         ),
       )
@@ -285,7 +281,7 @@ def list_unmapped_elements(
       id=e.id,
       code=e.code,
       name=e.name,
-      classification=efs_map.get(e.id),
+      trait=efs_map.get(e.id),
       balance_type=e.balance_type,
       external_source=e.external_source,
     )
@@ -579,7 +575,7 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       target.id AS reporting_element_id,
       target.qname,
       target.name AS reporting_name,
-      tcls.identifier AS classification,
+      tt.identifier AS trait,
       target.balance_type,
       COALESCE(SUM(li.debit_amount), 0) AS total_debits,
       COALESCE(SUM(li.credit_amount), 0) AS total_credits
@@ -591,15 +587,15 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       AND mapping.association_type = 'mapping'
       AND mapping.structure_id = :mapping_id
   JOIN elements target ON target.id = mapping.to_element_id
-  LEFT JOIN element_classifications tec
-      ON tec.element_id = target.id AND tec.is_primary = TRUE
-  LEFT JOIN classifications tcls
-      ON tcls.id = tec.classification_id
-      AND tcls.category = 'elementsOfFinancialStatements'
+  LEFT JOIN element_traits tet
+      ON tet.element_id = target.id AND tet.is_primary = TRUE
+  LEFT JOIN traits tt
+      ON tt.id = tet.trait_id
+      AND tt.category = 'elementsOfFinancialStatements'
   WHERE e.status = 'posted'
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)
-  GROUP BY target.id, target.qname, target.name, tcls.identifier, target.balance_type
+  GROUP BY target.id, target.qname, target.name, tt.identifier, target.balance_type
   ORDER BY target.qname
 """)
 
@@ -634,7 +630,7 @@ def get_mapped_trial_balance(
         reporting_element_id=row.reporting_element_id,
         qname=row.qname,
         reporting_name=row.reporting_name,
-        classification=row.classification,
+        trait=row.trait,
         balance_type=row.balance_type,
         total_debits=debits,
         total_credits=credits,

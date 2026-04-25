@@ -22,13 +22,13 @@ from robosystems.models.api.taxonomy_block import (
 )
 from robosystems.models.extensions import (
   Association,
-  Classification,
   Element,
-  ElementClassification,
+  ElementTrait,
   Entity,
   EntityTaxonomy,
   Structure,
   Taxonomy,
+  Trait,
 )
 from robosystems.operations.taxonomy_block._helpers import qname_for
 from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
@@ -82,9 +82,9 @@ _INSTANT_CLASSIFICATIONS = frozenset(
 )
 
 
-def _derive_period_type(classification: str | None, explicit: str | None) -> str:
+def _derive_period_type(trait: str | None, explicit: str | None) -> str:
   """Force ``'instant'`` for stock concepts; pass ``explicit`` through otherwise."""
-  if classification in _INSTANT_CLASSIFICATIONS:
+  if trait in _INSTANT_CLASSIFICATIONS:
     return "instant"
   return explicit or "duration"
 
@@ -92,21 +92,21 @@ def _derive_period_type(classification: str | None, explicit: str | None) -> str
 def _assign_efs_classification(
   session: Session, element_id: str, identifier: str
 ) -> None:
-  """Link an element to the matching FASB ``elementsOfFinancialStatements`` row.
+  """Link an element to the matching FASB ``elementsOfFinancialStatements`` trait.
 
-  No-op when the Classification row is missing (library not seeded)."""
+  No-op when the Trait row is missing (library not seeded)."""
   row = session.execute(
-    select(Classification).where(
-      Classification.category == "elementsOfFinancialStatements",
-      Classification.identifier == identifier,
+    select(Trait).where(
+      Trait.category == "elementsOfFinancialStatements",
+      Trait.identifier == identifier,
     )
   ).scalar_one_or_none()
   if row is None:
     return
   session.add(
-    ElementClassification(
+    ElementTrait(
       element_id=element_id,
-      classification_id=row.id,
+      trait_id=row.id,
       is_primary=True,
     )
   )
@@ -115,11 +115,9 @@ def _assign_efs_classification(
 def _update_efs_classification(
   session: Session, element_id: str, identifier: str
 ) -> None:
-  """Re-assign an element's EFS classification — clears existing, then adds."""
+  """Re-assign an element's EFS trait — clears existing, then adds."""
   session.execute(
-    ElementClassification.__table__.delete().where(
-      ElementClassification.element_id == element_id
-    )
+    ElementTrait.__table__.delete().where(ElementTrait.element_id == element_id)
   )
   _assign_efs_classification(session, element_id, identifier)
 
@@ -226,7 +224,7 @@ def create(
       description=req.description,
       qname=qname,
       balance_type=req.balance_type or "debit",
-      period_type=_derive_period_type(req.classification, req.period_type),
+      period_type=_derive_period_type(req.trait, req.period_type),
       element_type=req.element_type,
       is_monetary=req.is_monetary,
       taxonomy_id=taxonomy.id,
@@ -238,8 +236,8 @@ def create(
     session.add(element)
     elements_by_qname[qname] = element
     parent_refs[qname] = req.parent_ref
-    if req.classification:
-      classifications_to_assign.append((qname, req.classification))
+    if req.trait:
+      classifications_to_assign.append((qname, req.trait))
 
   session.flush()
 
@@ -336,7 +334,7 @@ def _element_factory(req, taxonomy: Taxonomy, updated_by: str) -> tuple[Element,
     description=req.description,
     qname=qname,
     balance_type=req.balance_type or "debit",
-    period_type=_derive_period_type(req.classification, req.period_type),
+    period_type=_derive_period_type(req.trait, req.period_type),
     element_type=req.element_type,
     is_monetary=req.is_monetary,
     taxonomy_id=taxonomy.id,
@@ -383,11 +381,11 @@ def update(
     session, taxonomy, payload, updated_by, element_factory=_element_factory
   )
   for req in payload.elements_to_add:
-    if req.classification:
+    if req.trait:
       qname = req.qname or qname_for(taxonomy.standard, "coa", req.code, req.name)
       element = new_elements.get(qname)
       if element is not None:
-        _assign_efs_classification(session, str(element.id), req.classification)
+        _assign_efs_classification(session, str(element.id), req.trait)
 
   apply_structures_to_update(session, taxonomy, payload, updated_by)
   new_structures = apply_structures_to_add(session, taxonomy, payload, updated_by)
@@ -490,29 +488,27 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
   }
   origin = "library" if taxonomy.is_locked else "tenant"
 
-  classification_by_element: dict[str, str] = {}
+  trait_by_element: dict[str, str] = {}
   element_ids = [e.id for e in elements_rows]
   if element_ids:
     rows = session.execute(
-      select(ElementClassification, Classification)
-      .join(
-        Classification, ElementClassification.classification_id == Classification.id
-      )
+      select(ElementTrait, Trait)
+      .join(Trait, ElementTrait.trait_id == Trait.id)
       .where(
-        ElementClassification.element_id.in_(element_ids),
-        ElementClassification.is_primary.is_(True),
-        Classification.category == "elementsOfFinancialStatements",
+        ElementTrait.element_id.in_(element_ids),
+        ElementTrait.is_primary.is_(True),
+        Trait.category == "elementsOfFinancialStatements",
       )
     ).all()
-    for ec, cls in rows:
-      classification_by_element[ec.element_id] = cls.identifier
+    for et, t in rows:
+      trait_by_element[et.element_id] = t.identifier
 
   elements = [
     TaxonomyBlockElement(
       id=e.id,
       qname=e.qname,
       name=e.name,
-      classification=classification_by_element.get(e.id),
+      trait=trait_by_element.get(e.id),
       balance_type=e.balance_type,
       period_type=e.period_type,
       element_type=e.element_type,

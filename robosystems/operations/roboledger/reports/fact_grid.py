@@ -274,7 +274,7 @@ def _read_mapped_balances(
 ) -> dict[str, _Balance]:
   """Read mapped trial balance — same join as the /trial-balance/mapped endpoint.
 
-  ``classification`` is resolved via ``element_classifications`` →
+  ``classification`` is resolved via ``element_traits`` →
   ``classifications`` with ``category='elementsOfFinancialStatements'``
   (the FASB SFAC 6 trait axis). Balance-sheet classifications (asset /
   liability / equity) are stock concepts and must be loaded
@@ -299,10 +299,10 @@ def _read_mapped_balances(
         AND mapping.association_type = 'mapping'
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
-      LEFT JOIN element_classifications tec
-        ON tec.element_id = target.id AND tec.is_primary = TRUE
+      LEFT JOIN element_traits tet
+        ON tet.element_id = target.id AND tet.is_primary = TRUE
       LEFT JOIN classifications tcls
-        ON tcls.id = tec.classification_id
+        ON tcls.id = tet.trait_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
@@ -458,7 +458,7 @@ def _close_prior_periods_to_retained_earnings(
   RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
 
   # Cumulative net income from inception through period_end.
-  # Classification is resolved via element_classifications → classifications
+  # Classification is resolved via element_traits → classifications
   # (FASB elementsOfFinancialStatements trait axis).
   result = session.execute(
     text("""
@@ -475,10 +475,10 @@ def _close_prior_periods_to_retained_earnings(
         AND mapping.association_type = 'mapping'
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
-      LEFT JOIN element_classifications tec
-        ON tec.element_id = target.id AND tec.is_primary = TRUE
+      LEFT JOIN element_traits tet
+        ON tet.element_id = target.id AND tet.is_primary = TRUE
       LEFT JOIN classifications tcls
-        ON tcls.id = tec.classification_id
+        ON tcls.id = tet.trait_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
         AND e.posting_date <= :end_date
@@ -577,7 +577,7 @@ def _load_reporting_structure(
   structure_name = struct_row.name
 
   # Load all elements and associations for this structure.
-  # Classification is resolved via element_classifications → classifications
+  # Classification is resolved via element_traits → classifications
   # (FASB elementsOfFinancialStatements trait axis).
   assoc_result = session.execute(
     text("""
@@ -594,10 +594,10 @@ def _load_reporting_structure(
         ea.order_value
       FROM associations ea
       JOIN elements e ON e.id = ea.to_element_id
-      LEFT JOIN element_classifications ec
-        ON ec.element_id = e.id AND ec.is_primary = TRUE
+      LEFT JOIN element_traits et
+        ON et.element_id = e.id AND et.is_primary = TRUE
       LEFT JOIN classifications cls
-        ON cls.id = ec.classification_id
+        ON cls.id = et.trait_id
         AND cls.category = 'elementsOfFinancialStatements'
       WHERE ea.structure_id = :structure_id
         AND ea.association_type = 'presentation'
@@ -631,7 +631,7 @@ def _load_reporting_structure(
   # but not as to_element_id — these are the tree roots
   root_parent_ids: set[str] = set(children_map.keys()) - all_child_ids
 
-  # Load root element info (classification via element_classifications JOIN)
+  # Load root element info (classification via element_traits JOIN)
   if root_parent_ids:
     placeholders = ", ".join(f":p{i}" for i in range(len(root_parent_ids)))
     params = {f"p{i}": pid for i, pid in enumerate(root_parent_ids)}
@@ -640,10 +640,10 @@ def _load_reporting_structure(
         SELECT e.id, e.qname, e.name, cls.identifier AS classification,
                e.balance_type, e.is_abstract, e.depth
         FROM elements e
-        LEFT JOIN element_classifications ec
-          ON ec.element_id = e.id AND ec.is_primary = TRUE
+        LEFT JOIN element_traits et
+          ON et.element_id = e.id AND et.is_primary = TRUE
         LEFT JOIN classifications cls
-          ON cls.id = ec.classification_id
+          ON cls.id = et.trait_id
           AND cls.category = 'elementsOfFinancialStatements'
         WHERE e.id IN ({placeholders})
       """),

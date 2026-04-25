@@ -21,10 +21,10 @@ from robosystems.models.api.library import (
   LibraryElementArcResponse as PydanticLibraryElementArc,
 )
 from robosystems.models.api.library import (
-  LibraryElementClassificationResponse as PydanticLibraryElementClassification,
+  LibraryElementResponse as PydanticLibraryElement,
 )
 from robosystems.models.api.library import (
-  LibraryElementResponse as PydanticLibraryElement,
+  LibraryElementTraitResponse as PydanticLibraryElementClassification,
 )
 from robosystems.models.api.library import (
   LibraryElementTreeNode as PydanticLibraryElementTreeNode,

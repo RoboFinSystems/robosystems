@@ -21,7 +21,7 @@ class AccountRollupGroup(BaseModel):
   reporting_element_id: str
   reporting_name: str
   reporting_qname: str
-  classification: str
+  trait: str
   balance_type: str
   total: float
   accounts: list[AccountRollupRow]

@@ -644,7 +644,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/asset"
         }
@@ -1182,7 +1182,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -1249,7 +1249,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/equity"
         }
@@ -1525,7 +1525,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -1597,7 +1597,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -1674,7 +1674,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -1746,7 +1746,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -1971,7 +1971,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -2038,7 +2038,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -2105,7 +2105,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -2228,7 +2228,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -2351,7 +2351,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/asset"
         }
@@ -2423,7 +2423,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -2723,7 +2723,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/equity"
         }
@@ -2795,7 +2795,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/equity"
         }
@@ -2867,7 +2867,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/equity"
         }
@@ -2990,7 +2990,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/loss"
         }
@@ -3057,7 +3057,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -3295,7 +3295,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/asset"
         }
@@ -3362,7 +3362,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/gain"
         }
@@ -3423,7 +3423,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -3484,7 +3484,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/gain"
         }
@@ -3709,7 +3709,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -3832,7 +3832,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -3904,7 +3904,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -4027,7 +4027,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -4150,7 +4150,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -4217,7 +4217,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -4284,7 +4284,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -4351,7 +4351,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -4418,7 +4418,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -4490,7 +4490,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -5033,7 +5033,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -5100,7 +5100,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -5167,7 +5167,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -5234,7 +5234,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -5306,7 +5306,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/loss"
         }
@@ -5373,7 +5373,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -5440,7 +5440,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/loss"
         }
@@ -5507,7 +5507,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -5574,7 +5574,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -5743,7 +5743,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -5968,7 +5968,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -6040,7 +6040,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/equity"
         }
@@ -6209,7 +6209,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -7427,7 +7427,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -7499,7 +7499,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -7566,7 +7566,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -7633,7 +7633,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -7705,7 +7705,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -7772,7 +7772,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -7946,7 +7946,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -8222,7 +8222,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/asset"
         }
@@ -8294,7 +8294,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -8361,7 +8361,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -8428,7 +8428,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -8495,7 +8495,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/gain"
         }
@@ -8567,7 +8567,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -8634,7 +8634,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -8752,7 +8752,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -8819,7 +8819,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -8886,7 +8886,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -8958,7 +8958,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -9030,7 +9030,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -9153,7 +9153,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/comprehensiveIncome"
         }
@@ -9220,7 +9220,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/comprehensiveIncome"
         }
@@ -9287,7 +9287,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/comprehensiveIncome"
         }
@@ -9507,7 +9507,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/asset"
         }
@@ -9574,7 +9574,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -9646,7 +9646,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -9713,7 +9713,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/asset"
         }
@@ -9780,7 +9780,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -9852,7 +9852,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }
@@ -9919,7 +9919,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/loss"
         }
@@ -9986,7 +9986,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/asset"
         }
@@ -10053,7 +10053,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -10120,7 +10120,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -10187,7 +10187,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -10254,7 +10254,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/liability"
         }
@@ -10506,7 +10506,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -10567,7 +10567,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -10628,7 +10628,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/revenue"
         }
@@ -11017,7 +11017,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/equity"
         }
@@ -11084,7 +11084,7 @@
           "@value": "primitive"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/equity"
         }
@@ -11208,7 +11208,7 @@
           "@value": "aggregate"
         }
       ],
-      "https://robosystems.ai/vocab/classifiedAs": [
+      "https://robosystems.ai/vocab/hasTrait": [
         {
           "@id": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/elementsOfFinancialStatements/expense"
         }

@@ -4,20 +4,22 @@ Replaces the Python-dict seed (``seed_reporting_taxonomy``) with JSON-LD
 artifacts loaded from ``robosystems/taxonomy/seeds/``, aligned with
 XBRL's association model: elements carry only XBRL-intrinsic attributes
 (balance, periodType, abstract, monetary, elementType,
-substitutionGroup), and all classifications are first-class
-``classifications`` rows attached via the ``element_classifications``
-junction — mirroring XBRL's traitConcept linkbase.
+substitutionGroup). FASB metamodel trait assignments (asset, current,
+operating, …) are first-class ``traits`` rows attached via the
+``element_traits`` junction. Association structural patterns (RollUp,
+AssetsRollUp, …) live in ``classifications`` + ``association_classifications``.
 
 Schema changes (public schema):
 
 - CREATE TABLE public.element_labels (XBRL label linkbase)
 - CREATE TABLE public.element_references (XBRL reference linkbase)
-- CREATE TABLE public.classifications (OLTP mirror of graph
-  Classification node — 24 FASB metamodel trait axes + flowClassification
-  + association-level categories)
-- CREATE TABLE public.element_classifications (many-to-many junction)
+- CREATE TABLE public.traits (FASB metamodel vocabulary — 25 element-side
+  categories: 24 trait axes + flowClassification)
+- CREATE TABLE public.element_traits (element ↔ trait many-to-many junction)
+- CREATE TABLE public.classifications (association structural patterns —
+  3 categories: concept_arrangement, member_arrangement, named_disclosure)
 - DROP elements.classification + sub_classification (concocted columns;
-  replaced by element_classifications junction rows in the
+  replaced by element_traits junction rows in the
   ``elementsOfFinancialStatements`` category)
 - ADD elements.substitution_group (XBRL intrinsic; previously missing)
 - Widen source CHECK to include 'fac', 'rs-gaap'
@@ -28,11 +30,10 @@ Data changes (public schema):
 
 - DELETE 0001-seeded library rows
 - INSERT from JSON-LD seeds: fac, rs-gaap (concept taxonomies);
-  us-gaap-metamodel (classification vocabulary, 99 classifications
-  across 25 categories); rs-gaap-to-metamodel (classification
-  assignments, ~3.5k arcs); rs-gaap-hierarchy (class-subclass);
-  fac-to-rs-gaap, fac-calculations, fac-presentation, type-subtype
-  (mapping seeds)
+  us-gaap-metamodel (trait vocabulary, 99 traits across 25 categories);
+  rs-gaap-to-metamodel (trait assignments, ~1.7k arcs);
+  rs-gaap-hierarchy (class-subclass); fac-to-rs-gaap, fac-calculations,
+  fac-presentation, type-subtype (mapping seeds)
 
 Tenant-schema rollout (for every existing tenant schema ``kg*``):
 
@@ -40,8 +41,9 @@ Tenant-schema rollout (for every existing tenant schema ``kg*``):
 - Drop the old elements.classification + sub_classification columns
 - Add elements.substitution_group column
 - Copy pinned library rows from public.* (taxonomies, elements, labels,
-  references, structures, associations, classifications,
-  element_classifications) using ``copy_library_into_tenant``
+  references, structures, associations, traits, element_traits,
+  classifications, association_classifications) using
+  ``copy_library_into_tenant``
 - Install immutability triggers on the library-backing tables
 
 The immutability function ``public.raise_library_immutable()`` is
@@ -78,8 +80,9 @@ _IMMUTABLE_TABLES = (
   "element_references",
   "structures",
   "associations",
+  "traits",
+  "element_traits",
   "classifications",
-  "element_classifications",
   "association_classifications",
   "rules",
 )
@@ -101,6 +104,7 @@ _WIDENED_TAXONOMY_TYPE_CHECK = (
   # 'reporting' retained transitionally so 0001-era rows survive the widen;
   # they're immediately backfilled to 'reporting_standard' right after.
   "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
+  "'trait-vocabulary', 'trait-assignment', "
   "'classification-vocabulary', 'classification-assignment', 'rules', "
   "'reporting_standard', 'reporting_extension', 'custom_ontology'"
   ")"
@@ -189,9 +193,9 @@ _RULE_TARGET_POLYMORPHISM_CHECK = (
   ")"
 )
 
-# The 24 FASB metamodel trait axes + flowClassification + association-level
-# categories. Matches the CHECK constraint on public.classifications.category.
-_CLASSIFICATION_CATEGORY_CHECK = (
+# 25 FASB metamodel trait axes (24 axes + flowClassification).
+# Matches check_trait_category on public.traits.category.
+_TRAIT_CATEGORY_CHECK = (
   "category IN ("
   "'elementsOfFinancialStatements', 'liquidity', 'activityType', "
   "'operatingNonoperating', 'operatingIntent', 'realizationStatus', "
@@ -201,9 +205,14 @@ _CLASSIFICATION_CATEGORY_CHECK = (
   "'accrualOrPayable', 'priority', 'estimatedFutureActivity', "
   "'statisticalMeasurement', 'taxComponents', 'threshold', 'use', "
   "'indirectCashFlowReconcilingItem', "
-  "'flowClassification', "
-  "'concept_arrangement', 'member_arrangement', 'named_disclosure'"
+  "'flowClassification'"
   ")"
+)
+
+# 3 association-level structural pattern categories.
+# Matches check_classification_category on public.classifications.category.
+_CLASSIFICATION_CATEGORY_CHECK = (
+  "category IN ('concept_arrangement', 'member_arrangement', 'named_disclosure')"
 )
 
 
@@ -520,7 +529,7 @@ def _backfill_library_into_tenant(conn, schema: str) -> None:
 
 
 def _create_tenant_library_tables(conn, schema: str) -> None:
-  """Create element_labels/references/classifications/element_classifications in a tenant schema."""
+  """Create element_labels/references/traits/element_traits/classifications/association_classifications in a tenant schema."""
   conn.execute(
     text(f"""
       CREATE TABLE IF NOT EXISTS {schema}.element_labels (
@@ -568,6 +577,61 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
     )
   )
 
+  # traits: FASB metamodel vocabulary (25 element-side categories).
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.traits (
+        id VARCHAR PRIMARY KEY,
+        category VARCHAR NOT NULL,
+        identifier VARCHAR NOT NULL,
+        type VARCHAR NOT NULL,
+        name VARCHAR,
+        description VARCHAR,
+        confidence FLOAT,
+        source VARCHAR,
+        metadata JSONB NOT NULL DEFAULT '{{}}',
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        CONSTRAINT uq_{schema}_trait_category_identifier_type
+          UNIQUE (category, identifier, type),
+        CONSTRAINT check_{schema}_trait_category
+          CHECK ({_TRAIT_CATEGORY_CHECK})
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_traits_category "
+      f"ON {schema}.traits (category)"
+    )
+  )
+
+  # element_traits: element ↔ trait many-to-many junction.
+  conn.execute(
+    text(f"""
+      CREATE TABLE IF NOT EXISTS {schema}.element_traits (
+        element_id VARCHAR NOT NULL REFERENCES {schema}.elements(id),
+        trait_id VARCHAR NOT NULL REFERENCES {schema}.traits(id),
+        is_primary BOOLEAN NOT NULL DEFAULT true,
+        confidence FLOAT,
+        source VARCHAR,
+        created_at TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at TIMESTAMP NOT NULL DEFAULT now(),
+        created_by VARCHAR NOT NULL DEFAULT 'system',
+        PRIMARY KEY (element_id, trait_id)
+      )
+    """)
+  )
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_{schema}_element_traits_primary "
+      f"ON {schema}.element_traits (element_id, is_primary) "
+      f"WHERE is_primary = true"
+    )
+  )
+
+  # classifications: association structural patterns (3 association-side categories).
   conn.execute(
     text(f"""
       CREATE TABLE IF NOT EXISTS {schema}.classifications (
@@ -597,33 +661,7 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
     )
   )
 
-  conn.execute(
-    text(f"""
-      CREATE TABLE IF NOT EXISTS {schema}.element_classifications (
-        element_id VARCHAR NOT NULL REFERENCES {schema}.elements(id),
-        classification_id VARCHAR NOT NULL REFERENCES {schema}.classifications(id),
-        is_primary BOOLEAN NOT NULL DEFAULT true,
-        confidence FLOAT,
-        source VARCHAR,
-        created_at TIMESTAMP NOT NULL DEFAULT now(),
-        updated_at TIMESTAMP NOT NULL DEFAULT now(),
-        created_by VARCHAR NOT NULL DEFAULT 'system',
-        PRIMARY KEY (element_id, classification_id)
-      )
-    """)
-  )
-  conn.execute(
-    text(
-      f"CREATE INDEX IF NOT EXISTS idx_{schema}_element_classifications_primary "
-      f"ON {schema}.element_classifications (element_id, is_primary) "
-      f"WHERE is_primary = true"
-    )
-  )
-
-  # Phase epsilon — association_classifications junction. Mirrors
-  # element_classifications. FKs scoped to the tenant schema's own
-  # associations/classifications so library rows copied by
-  # copy_library_into_tenant retain their referential integrity.
+  # association_classifications: association ↔ classification many-to-many.
   conn.execute(
     text(f"""
       CREATE TABLE IF NOT EXISTS {schema}.association_classifications (
@@ -727,10 +765,10 @@ SEEDS_DIR = (
 )
 
 # Concept taxonomies first (referenced by qname from mapping + assignment
-# seeds); then the classification vocabulary; then assignments/mappings.
+# seeds); then the trait vocabulary; then assignments/mappings.
 SEED_FILES = [
-  # Classification vocabulary FIRST — FAC + rs-gaap seeds reference these
-  # via classifiedAs arcs; create_library_arcs resolves classifications via
+  # Trait vocabulary FIRST — FAC + rs-gaap seeds reference these
+  # via hasTrait arcs; create_library_arcs resolves traits via
   # DB lookup so they must be persisted in phase 1 before phase 2 runs.
   SEEDS_DIR / "us-gaap-metamodel" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld",
@@ -963,8 +1001,63 @@ def upgrade() -> None:
   op.create_index("idx_element_references_type", "element_references", ["ref_type"])
 
   # ──────────────────────────────────────────────────────────────────────
-  # 6. Classification vocabulary + junction.
+  # 6. Trait vocabulary + element_traits junction + classification + assoc junction.
   # ──────────────────────────────────────────────────────────────────────
+  # traits: FASB metamodel vocabulary (25 element-side categories).
+  op.create_table(
+    "traits",
+    sa.Column("id", sa.String(), nullable=False),
+    sa.Column("category", sa.String(), nullable=False),
+    sa.Column("identifier", sa.String(), nullable=False),
+    sa.Column("type", sa.String(), nullable=False),
+    sa.Column("name", sa.String(), nullable=True),
+    sa.Column("description", sa.String(), nullable=True),
+    sa.Column("confidence", sa.Float(), nullable=True),
+    sa.Column("source", sa.String(), nullable=True),
+    sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column("created_at", sa.DateTime(), nullable=False),
+    sa.Column("updated_at", sa.DateTime(), nullable=False),
+    sa.Column("created_by", sa.String(), nullable=False),
+    sa.CheckConstraint(_TRAIT_CATEGORY_CHECK, name="check_trait_category"),
+    sa.PrimaryKeyConstraint("id"),
+    sa.UniqueConstraint(
+      "category",
+      "identifier",
+      "type",
+      name="uq_trait_category_identifier_type",
+    ),
+  )
+  op.create_index("idx_traits_category", "traits", ["category"])
+  op.create_index("idx_traits_type", "traits", ["type"])
+
+  # element_traits: element ↔ trait many-to-many junction.
+  op.create_table(
+    "element_traits",
+    sa.Column("element_id", sa.String(), nullable=False),
+    sa.Column("trait_id", sa.String(), nullable=False),
+    sa.Column("is_primary", sa.Boolean(), nullable=False, server_default=sa.true()),
+    sa.Column("confidence", sa.Float(), nullable=True),
+    sa.Column("source", sa.String(), nullable=True),
+    sa.Column("created_at", sa.DateTime(), nullable=False),
+    sa.Column("updated_at", sa.DateTime(), nullable=False),
+    sa.Column("created_by", sa.String(), nullable=False),
+    sa.ForeignKeyConstraint(["trait_id"], ["traits.id"]),
+    sa.ForeignKeyConstraint(["element_id"], ["elements.id"]),
+    sa.PrimaryKeyConstraint("element_id", "trait_id"),
+  )
+  op.create_index(
+    "idx_element_traits_trait",
+    "element_traits",
+    ["trait_id"],
+  )
+  op.create_index(
+    "idx_element_traits_primary",
+    "element_traits",
+    ["element_id", "is_primary"],
+    postgresql_where="is_primary = true",
+  )
+
+  # classifications: association structural patterns (3 association-side categories).
   op.create_table(
     "classifications",
     sa.Column("id", sa.String(), nullable=False),
@@ -993,36 +1086,7 @@ def upgrade() -> None:
   op.create_index("idx_classifications_category", "classifications", ["category"])
   op.create_index("idx_classifications_type", "classifications", ["type"])
 
-  op.create_table(
-    "element_classifications",
-    sa.Column("element_id", sa.String(), nullable=False),
-    sa.Column("classification_id", sa.String(), nullable=False),
-    sa.Column("is_primary", sa.Boolean(), nullable=False, server_default=sa.true()),
-    sa.Column("confidence", sa.Float(), nullable=True),
-    sa.Column("source", sa.String(), nullable=True),
-    sa.Column("created_at", sa.DateTime(), nullable=False),
-    sa.Column("updated_at", sa.DateTime(), nullable=False),
-    sa.Column("created_by", sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(["classification_id"], ["classifications.id"]),
-    sa.ForeignKeyConstraint(["element_id"], ["elements.id"]),
-    sa.PrimaryKeyConstraint("element_id", "classification_id"),
-  )
-  op.create_index(
-    "idx_element_classifications_classification",
-    "element_classifications",
-    ["classification_id"],
-  )
-  op.create_index(
-    "idx_element_classifications_primary",
-    "element_classifications",
-    ["element_id", "is_primary"],
-    postgresql_where="is_primary = true",
-  )
-
-  # Phase epsilon — association_classifications junction. Mirrors
-  # element_classifications; carries association-level categories
-  # (concept_arrangement, member_arrangement, named_disclosure) that don't
-  # belong on the aggregated structures.concept_arrangement column.
+  # association_classifications: association ↔ classification many-to-many.
   op.create_table(
     "association_classifications",
     sa.Column("association_id", sa.String(), nullable=False),
@@ -1136,8 +1200,8 @@ def upgrade() -> None:
   # ──────────────────────────────────────────────────────────────────────
   # 7. Load JSON-LD seeds — two-pass to let arcs cross package boundaries.
   # ──────────────────────────────────────────────────────────────────────
-  # Phase 1 writes every package's elements + classification vocabulary;
-  # phase 2 writes every package's associations + classification
+  # Phase 1 writes every package's elements + trait vocabulary;
+  # phase 2 writes every package's associations + trait/classification
   # assignments. Splitting the phases means an arc in one seed can
   # reference an element defined in ANY other seed regardless of the
   # SEED_FILES order — without the split, arcs targeting elements that
@@ -1166,7 +1230,7 @@ def upgrade() -> None:
       print(
         f"    [phase 1] elements={counts['elements']} labels={counts['labels']} "
         f"references={counts['references']} structures={counts['structures']} "
-        f"classifications={counts['classifications']}"
+        f"traits={counts['traits']} classifications={counts['classifications']}"
       )
 
     for package in loaded_packages:
@@ -1176,6 +1240,8 @@ def upgrade() -> None:
         f"  [phase 2] {package.name}: "
         f"associations={counts['associations']} "
         f"(skipped={counts['associations_skipped']}) "
+        f"trait_assignments={counts['trait_assignments']} "
+        f"(skipped={counts['trait_assignments_skipped']}) "
         f"classification_assignments={counts['classification_assignments']} "
         f"(skipped={counts['classification_assignments_skipped']})"
       )
@@ -1254,7 +1320,8 @@ def downgrade() -> None:
   # Rules first — they FK structures / elements / associations.
   conn.execute(text("DELETE FROM public.rules"))
   conn.execute(text("DELETE FROM public.association_classifications"))
-  conn.execute(text("DELETE FROM public.element_classifications"))
+  conn.execute(text("DELETE FROM public.element_traits"))
+  conn.execute(text("DELETE FROM public.traits"))
   conn.execute(text("DELETE FROM public.classifications"))
   conn.execute(text("DELETE FROM public.element_references"))
   conn.execute(text("DELETE FROM public.element_labels"))
@@ -1301,17 +1368,18 @@ def downgrade() -> None:
   )
   op.drop_table("association_classifications")
 
-  # Drop junction + vocabulary.
+  # Drop element_traits junction + traits vocabulary.
   op.drop_index(
-    "idx_element_classifications_primary",
-    table_name="element_classifications",
+    "idx_element_traits_primary",
+    table_name="element_traits",
     postgresql_where="is_primary = true",
   )
-  op.drop_index(
-    "idx_element_classifications_classification",
-    table_name="element_classifications",
-  )
-  op.drop_table("element_classifications")
+  op.drop_index("idx_element_traits_trait", table_name="element_traits")
+  op.drop_table("element_traits")
+  op.drop_index("idx_traits_type", table_name="traits")
+  op.drop_index("idx_traits_category", table_name="traits")
+  op.drop_table("traits")
+  # Drop classification vocabulary (association-side patterns).
   op.drop_index("idx_classifications_type", table_name="classifications")
   op.drop_index("idx_classifications_category", table_name="classifications")
   op.drop_table("classifications")

@@ -46,7 +46,7 @@ _ROLLUP_SQL = text("""
     target.id AS reporting_element_id,
     target.name AS reporting_name,
     target.qname AS reporting_qname,
-    tcls.identifier AS classification,
+    t.identifier AS trait,
     target.balance_type,
     source.id AS coa_element_id,
     source.name AS coa_name,
@@ -56,20 +56,20 @@ _ROLLUP_SQL = text("""
   FROM associations mapping
   JOIN elements source ON source.id = mapping.from_element_id
   JOIN elements target ON target.id = mapping.to_element_id
-  LEFT JOIN element_classifications tec
-    ON tec.element_id = target.id AND tec.is_primary = TRUE
-  LEFT JOIN classifications tcls
-    ON tcls.id = tec.classification_id
-    AND tcls.category = 'elementsOfFinancialStatements'
+  LEFT JOIN element_traits tet
+    ON tet.element_id = target.id AND tet.is_primary = TRUE
+  LEFT JOIN traits t
+    ON t.id = tet.trait_id
+    AND t.category = 'elementsOfFinancialStatements'
   LEFT JOIN line_items li ON li.element_id = source.id
   LEFT JOIN entries e ON e.id = li.entry_id AND e.status = 'posted'
     AND (e.posting_date >= :start_date OR :start_date IS NULL)
     AND (e.posting_date <= :end_date OR :end_date IS NULL)
   WHERE mapping.structure_id = :mapping_id
     AND mapping.association_type = 'mapping'
-  GROUP BY target.id, target.name, target.qname, tcls.identifier,
+  GROUP BY target.id, target.name, target.qname, t.identifier,
            target.balance_type, source.id, source.name, source.code
-  ORDER BY tcls.identifier, target.name, source.code
+  ORDER BY t.identifier, target.name, source.code
 """)
 
 
@@ -153,7 +153,7 @@ def get_account_rollups(
         reporting_element_id=row.reporting_element_id,
         reporting_name=row.reporting_name,
         reporting_qname=row.reporting_qname or "",
-        classification=row.classification or "",
+        trait=row.trait or "",
         balance_type=row.balance_type or "debit",
         total=0.0,
         accounts=[],
@@ -175,7 +175,7 @@ def get_account_rollups(
   groups = sorted(
     groups_dict.values(),
     key=lambda g: (
-      _CLASSIFICATION_ORDER.get(g.classification, 99),
+      _CLASSIFICATION_ORDER.get(g.trait, 99),
       g.reporting_name,
     ),
   )

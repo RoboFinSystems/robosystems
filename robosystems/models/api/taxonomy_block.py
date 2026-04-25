@@ -44,7 +44,7 @@ class TaxonomyBlockElementRequest(BaseModel):
     ...,
     description="Human-readable element name (e.g. 'Total Assets').",
   )
-  classification: str | None = Field(
+  trait: str | None = Field(
     None,
     description=(
       "FASB metamodel trait for the element. Required for "
@@ -321,7 +321,7 @@ class ElementUpdatePatch(BaseModel):
   qname: str = Field(..., description="qname identifier of the element to update.")
   name: str | None = None
   description: str | None = None
-  classification: str | None = None
+  trait: str | None = None
   balance_type: str | None = None
   period_type: str | None = None
   is_monetary: bool | None = None
@@ -404,7 +404,7 @@ class TaxonomyBlockElement(BaseModel):
   id: str
   qname: str | None = None
   name: str
-  classification: str | None = None
+  trait: str | None = None
   balance_type: str | None = None
   period_type: str | None = None
   element_type: str = "concept"

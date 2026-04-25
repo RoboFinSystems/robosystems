@@ -6,7 +6,7 @@ An association can carry multiple classifications across categories —
 (aggregation / nonaggregation), and ``named_disclosure`` (SEC disclosure
 mechanics catalog entries like ``AssetsRollUp``).
 
-Mirrors the shape of :class:`ElementClassification`: composite PK on
+Mirrors the shape of :class:`ElementTrait`: composite PK on
 ``(association_id, classification_id)``, ``is_primary`` picks the
 canonical row per category, ``confidence`` + ``source`` track AI/adapter
 provenance. Structures carry an aggregate ``concept_arrangement`` column

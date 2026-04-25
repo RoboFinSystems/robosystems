@@ -36,11 +36,11 @@ from robosystems.models.api.taxonomy_block import (
 )
 from robosystems.models.extensions import (
   Association,
-  Classification,
   Element,
-  ElementClassification,
+  ElementTrait,
   Structure,
   Taxonomy,
+  Trait,
 )
 from robosystems.operations.taxonomy_block._helpers import qname_for
 from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
@@ -468,29 +468,27 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
     for e in elements_rows
   }
 
-  classification_by_element: dict[str, str] = {}
+  trait_by_element: dict[str, str] = {}
   element_ids = [e.id for e in elements_rows]
   if element_ids:
     rows = session.execute(
-      select(ElementClassification, Classification)
-      .join(
-        Classification, ElementClassification.classification_id == Classification.id
-      )
+      select(ElementTrait, Trait)
+      .join(Trait, ElementTrait.trait_id == Trait.id)
       .where(
-        ElementClassification.element_id.in_(element_ids),
-        ElementClassification.is_primary.is_(True),
-        Classification.category == "elementsOfFinancialStatements",
+        ElementTrait.element_id.in_(element_ids),
+        ElementTrait.is_primary.is_(True),
+        Trait.category == "elementsOfFinancialStatements",
       )
     ).all()
-    for ec, cls in rows:
-      classification_by_element[ec.element_id] = cls.identifier
+    for et, tr in rows:
+      trait_by_element[et.element_id] = tr.identifier
 
   elements = [
     TaxonomyBlockElement(
       id=e.id,
       qname=e.qname,
       name=e.name,
-      classification=classification_by_element.get(e.id),
+      trait=trait_by_element.get(e.id),
       balance_type=e.balance_type,
       period_type=e.period_type,
       element_type=e.element_type,

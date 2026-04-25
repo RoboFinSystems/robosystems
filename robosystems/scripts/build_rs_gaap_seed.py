@@ -17,8 +17,8 @@ After this runs the library has:
   Concepts:  sfac6, fac, rs-gaap
   Mappings:  fac-to-rs-gaap, type-subtype
 
-FAC concepts are classified on the FASB elementsOfFinancialStatements
-trait axis directly via rs:classifiedAs arcs inside fac/v1 — no separate
+FAC concepts are assigned FASB elementsOfFinancialStatements traits
+directly via rs:hasTrait arcs inside fac/v1 — no separate
 sfac6-to-fac anchoring taxonomy is emitted.
 
 Future us-gaap versions (2020, 2024) become additional mapping

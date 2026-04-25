@@ -54,14 +54,19 @@ _ASSOCIATION_COLS = (
   "approved_at, metadata, created_at, updated_at, created_by"
 )
 
-_CLASSIFICATION_COLS = (
+_TRAIT_COLS = (
   "id, category, identifier, type, name, description, confidence, source, "
   "metadata, created_at, updated_at, created_by"
 )
 
-_ELEMENT_CLASSIFICATION_COLS = (
-  "element_id, classification_id, is_primary, confidence, source, "
+_ELEMENT_TRAIT_COLS = (
+  "element_id, trait_id, is_primary, confidence, source, "
   "created_at, updated_at, created_by"
+)
+
+_CLASSIFICATION_COLS = (
+  "id, category, identifier, type, name, description, confidence, source, "
+  "metadata, created_at, updated_at, created_by"
 )
 
 _ASSOC_CLASSIFICATION_COLS = (
@@ -87,8 +92,9 @@ class CopyStats:
   element_references: int
   structures: int
   associations: int
+  traits: int
+  element_traits: int
   classifications: int
-  element_classifications: int
   association_classifications: int
   rules: int
 
@@ -101,8 +107,9 @@ class CopyStats:
       + self.element_references
       + self.structures
       + self.associations
+      + self.traits
+      + self.element_traits
       + self.classifications
-      + self.element_classifications
       + self.association_classifications
       + self.rules
     )
@@ -134,7 +141,7 @@ def copy_library_into_tenant(
   """
   resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
   if not resolved_pin:
-    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
   # Flatten the pin into a parameterized IN clause via VALUES.
   # E.g., ("fac", "v1"), ("rs-gaap", "v1"), …
@@ -235,24 +242,24 @@ def copy_library_into_tenant(
     pin_params,
   )
 
-  # Classifications — copy the full us-gaap-metamodel vocabulary (all
-  # rows with created_by='library-seeder'). Pin-independent: every
-  # tenant gets the same classification catalog.
-  cls_result = connection.execute(
+  # Traits — copy the full us-gaap-metamodel vocabulary (all rows with
+  # created_by='library-seeder'). Pin-independent: every tenant gets the
+  # same trait catalog.
+  trait_result = connection.execute(
     text(f"""
-      INSERT INTO {schema}.classifications ({_CLASSIFICATION_COLS})
-      SELECT {_CLASSIFICATION_COLS} FROM public.classifications
+      INSERT INTO {schema}.traits ({_TRAIT_COLS})
+      SELECT {_TRAIT_COLS} FROM public.traits
       WHERE created_by = 'library-seeder'
       ON CONFLICT (id) DO NOTHING
     """),
   )
 
-  # Element classifications — junction rows linking elements copied
-  # above to the classification catalog.
-  ec_result = connection.execute(
+  # Element traits — junction rows linking elements copied above to the
+  # trait catalog.
+  et_result = connection.execute(
     text(f"""
-      INSERT INTO {schema}.element_classifications ({_ELEMENT_CLASSIFICATION_COLS})
-      SELECT {_ELEMENT_CLASSIFICATION_COLS} FROM public.element_classifications
+      INSERT INTO {schema}.element_traits ({_ELEMENT_TRAIT_COLS})
+      SELECT {_ELEMENT_TRAIT_COLS} FROM public.element_traits
       WHERE element_id IN (
         SELECT id FROM public.elements
         WHERE taxonomy_id IN (
@@ -260,9 +267,20 @@ def copy_library_into_tenant(
           WHERE (standard, version) IN (VALUES {pin_values_sql})
         )
       )
-      ON CONFLICT (element_id, classification_id) DO NOTHING
+      ON CONFLICT (element_id, trait_id) DO NOTHING
     """),
     pin_params,
+  )
+
+  # Classifications — copy association-side structural pattern vocabulary
+  # (all rows with created_by='library-seeder'). Pin-independent.
+  cls_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.classifications ({_CLASSIFICATION_COLS})
+      SELECT {_CLASSIFICATION_COLS} FROM public.classifications
+      WHERE created_by = 'library-seeder'
+      ON CONFLICT (id) DO NOTHING
+    """),
   )
 
   # Association classifications — junction rows linking
@@ -308,8 +326,9 @@ def copy_library_into_tenant(
     element_references=ref_result.rowcount or 0,
     structures=struct_result.rowcount or 0,
     associations=assoc_result.rowcount or 0,
+    traits=trait_result.rowcount or 0,
+    element_traits=et_result.rowcount or 0,
     classifications=cls_result.rowcount or 0,
-    element_classifications=ec_result.rowcount or 0,
     association_classifications=ac_result.rowcount or 0,
     rules=rule_result.rowcount or 0,
   )

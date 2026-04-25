@@ -318,9 +318,9 @@ def delete(
 def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope | None:
   """Project a custom_ontology taxonomy as an envelope.
 
-  Skips the EFS classification sidecar — custom ontologies don't carry
+  Skips the EFS trait sidecar — custom ontologies don't carry
   FASB classifications by design. Every element projects with
-  ``classification=None`` and ``origin='tenant'``.
+  ``trait=None`` and ``origin='tenant'``.
   """
   taxonomy = session.get(Taxonomy, taxonomy_id)
   if taxonomy is None or taxonomy.taxonomy_type != CUSTOM_ONTOLOGY_BLOCK_TYPE:
@@ -369,7 +369,7 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
       id=e.id,
       qname=e.qname,
       name=e.name,
-      classification=None,
+      trait=None,
       balance_type=e.balance_type,
       period_type=e.period_type,
       element_type=e.element_type,

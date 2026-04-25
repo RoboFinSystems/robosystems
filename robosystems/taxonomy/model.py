@@ -51,7 +51,7 @@ class ElementSpec(BaseModel):
 
   Only XBRL-intrinsic attributes live here (balance_type, period_type,
   is_abstract, is_monetary, element_type, substitution_group).
-  Classifications live in ClassificationSpec + ClassificationAssignmentSpec.
+  FASB metamodel traits live in TraitSpec + TraitAssignmentSpec.
   """
 
   qname: str = Field(..., description="Qualified name, e.g. 'fac:Assets'")
@@ -83,19 +83,17 @@ class ElementSpec(BaseModel):
   references: list[ReferenceSpec] = Field(default_factory=list)
 
 
-class ClassificationSpec(BaseModel):
-  """A classification vocabulary entry: (category, identifier) pair.
+class TraitSpec(BaseModel):
+  """A FASB metamodel trait vocabulary entry: (category, identifier) pair.
 
-  Each entry seeds one row in the ``classifications`` table. Categories
-  are the 24 FASB metamodel trait axes plus flowClassification and the
-  association-level categories.
+  Each entry seeds one row in the ``traits`` table. Categories are the
+  25 element-side categories: 24 FASB metamodel axes + flowClassification.
   """
 
   category: str = Field(
     ...,
     description=(
-      "Classification axis, e.g. 'elementsOfFinancialStatements', "
-      "'liquidity', 'activityType'."
+      "Trait axis, e.g. 'elementsOfFinancialStatements', 'liquidity', 'activityType'."
     ),
   )
   identifier: str = Field(
@@ -108,21 +106,20 @@ class ClassificationSpec(BaseModel):
   description: str | None = Field(None)
 
 
-class ClassificationAssignmentSpec(BaseModel):
-  """Element-to-classification assignment — seeds one element_classifications row."""
+class TraitAssignmentSpec(BaseModel):
+  """Element-to-trait assignment — seeds one element_traits row."""
 
   element_qname: str = Field(..., description="Element qname being classified")
-  category: str = Field(..., description="Classification category")
+  category: str = Field(..., description="Trait category")
   identifier: str = Field(..., description="Member identifier within the category")
   source: str = Field(
     "us-gaap-metamodel",
     description=(
       "Provenance of the assignment — which seed/taxonomy declared the "
-      "(element → classification) arc. Defaults to us-gaap-metamodel "
-      "since that's where nearly all EFS assignments originate; future "
-      "seeds from other metamodels (e.g. ifrs-metamodel) should set "
-      "this explicitly so row provenance is preserved in "
-      "element_classifications.source."
+      "(element → trait) arc. Defaults to us-gaap-metamodel since that's "
+      "where nearly all EFS assignments originate; future seeds from other "
+      "metamodels (e.g. ifrs-metamodel) should set this explicitly so "
+      "row provenance is preserved in element_traits.source."
     ),
   )
   is_primary: bool = Field(
@@ -288,10 +285,8 @@ class TaxonomyPackage(BaseModel):
   elements: list[ElementSpec] = Field(default_factory=list)
   associations: list[AssociationSpec] = Field(default_factory=list)
   structures: list[StructureSpec] = Field(default_factory=list)
-  classifications: list[ClassificationSpec] = Field(default_factory=list)
-  classification_assignments: list[ClassificationAssignmentSpec] = Field(
-    default_factory=list
-  )
+  traits: list[TraitSpec] = Field(default_factory=list)
+  trait_assignments: list[TraitAssignmentSpec] = Field(default_factory=list)
   rules: list[RuleSpec] = Field(default_factory=list)
 
   taxonomy_type: str = Field(
@@ -299,12 +294,13 @@ class TaxonomyPackage(BaseModel):
     description=(
       "chart_of_accounts | reporting_standard | reporting_extension | "
       "custom_ontology | mapping | schedule | rules | "
+      "trait-vocabulary | trait-assignment | "
       "classification-vocabulary | classification-assignment — shapes "
       "how the library viewer renders this taxonomy. Concept taxonomies "
       "(rs-gaap) are 'reporting_standard'; equivalence + hierarchy "
       "arc packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB "
-      "metamodel seed is 'classification-vocabulary'; rs-gaap-to-metamodel "
-      "is 'classification-assignment'; verification-rule packs (fac-rules) "
+      "metamodel seed is 'trait-vocabulary'; rs-gaap-to-metamodel "
+      "is 'trait-assignment'; verification-rule packs (fac-rules) "
       "are 'rules'."
     ),
   )

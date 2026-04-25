@@ -72,7 +72,7 @@ def _envelope(
         id="elem_1",
         qname="acme:Cash",
         name="Cash",
-        classification="asset",
+        trait="asset",
         balance_type="debit",
         period_type="instant",
         origin="tenant",
@@ -84,7 +84,7 @@ def _envelope(
 
 _TB_FIELDS = (
   "{ id name taxonomyType displayName category elementCount "
-  "elements { id qname name classification balanceType origin } }"
+  "elements { id qname name trait balanceType origin } }"
 )
 
 

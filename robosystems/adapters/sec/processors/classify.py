@@ -588,6 +588,7 @@ class AssociationClassifier:
           classifications.append(
             {
               "identifier": class_id,
+              "category": "concept_arrangement",
               "type": classification_type,
               "source": "arcrole_analysis",
               "confidence": 1.0,
@@ -708,6 +709,7 @@ class AssociationClassifier:
       classifications.append(
         {
           "identifier": class_id,
+          "category": "named_disclosure",
           "type": disclosure_name,
           "source": "disclosure_mechanics",
           "confidence": 1.0,

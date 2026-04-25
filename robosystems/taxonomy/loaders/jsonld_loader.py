@@ -22,8 +22,6 @@ from robosystems.arelle.context import CANONICAL_CONTEXT, RS_VOCAB
 from robosystems.logger import logger
 from robosystems.taxonomy.model import (
   AssociationSpec,
-  ClassificationAssignmentSpec,
-  ClassificationSpec,
   ElementSpec,
   LabelSpec,
   ReferenceSpec,
@@ -32,6 +30,8 @@ from robosystems.taxonomy.model import (
   RuleVariableSpec,
   StructureSpec,
   TaxonomyPackage,
+  TraitAssignmentSpec,
+  TraitSpec,
 )
 
 RS_NS = RS_VOCAB  # alias for readability
@@ -193,8 +193,8 @@ def _is_concept(graph: Graph, subject: URIRef) -> bool:
   return has_balance or has_element_type or has_period
 
 
-def _is_classification(graph: Graph, subject: URIRef) -> bool:
-  """A classification node has both category and identifier predicates."""
+def _is_trait(graph: Graph, subject: URIRef) -> bool:
+  """A trait node has both category and identifier predicates."""
   has_cat = bool(list(graph.objects(subject, URIRef(f"{RS_NS}category"))))
   has_id = bool(list(graph.objects(subject, URIRef(f"{RS_NS}identifier"))))
   return has_cat and has_id
@@ -270,8 +270,8 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
   )
 
 
-def _extract_classification(graph: Graph, subject: URIRef) -> ClassificationSpec | None:
-  """Build a ClassificationSpec from a Classification node's triples."""
+def _extract_trait(graph: Graph, subject: URIRef) -> TraitSpec | None:
+  """Build a TraitSpec from a Trait node's triples."""
 
   def _single(pred: URIRef, default: Any = None) -> Any:
     vals = list(graph.objects(subject, pred))
@@ -290,7 +290,7 @@ def _extract_classification(graph: Graph, subject: URIRef) -> ClassificationSpec
       name = label.text
     elif label.role == "documentation":
       description = label.text
-  return ClassificationSpec(
+  return TraitSpec(
     category=category,
     identifier=identifier,
     source=source,
@@ -299,20 +299,20 @@ def _extract_classification(graph: Graph, subject: URIRef) -> ClassificationSpec
   )
 
 
-def _extract_classification_assignments(
+def _extract_trait_assignments(
   graph: Graph,
-) -> list[ClassificationAssignmentSpec]:
-  """Walk ``classifiedAs`` arcs and emit assignment specs.
+) -> list[TraitAssignmentSpec]:
+  """Walk ``hasTrait`` arcs and emit trait assignment specs.
 
-  Each arc connects an element (subject) to a Classification IRI of the
+  Each arc connects an element (subject) to a Trait IRI of the
   shape ``{namespace_uri}/{standard}/{version}/{category}/{identifier}``
   — e.g. ``https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/
   elementsOfFinancialStatements/asset``. We decode the last 4 IRI
   segments into (standard-as-source, version, category, identifier) so
   the assignment carries its vocabulary's provenance.
   """
-  assignments: list[ClassificationAssignmentSpec] = []
-  predicate = URIRef(f"{RS_NS}classifiedAs")
+  assignments: list[TraitAssignmentSpec] = []
+  predicate = URIRef(f"{RS_NS}hasTrait")
   for subject, obj in graph.subject_objects(predicate):
     if not isinstance(obj, URIRef):
       continue
@@ -333,7 +333,7 @@ def _extract_classification_assignments(
       parts[-1],
     )
     assignments.append(
-      ClassificationAssignmentSpec(
+      TraitAssignmentSpec(
         element_qname=element_qname,
         category=category,
         identifier=identifier,
@@ -597,11 +597,11 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
   graph = Graph()
   graph.parse(data=raw, format="json-ld")
 
-  # Find concepts + classification nodes. A subject is one or the other,
-  # not both (classifications have category+identifier, concepts have
+  # Find concepts + trait nodes. A subject is one or the other,
+  # not both (traits have category+identifier, concepts have
   # balance/period/elementType).
   elements: list[ElementSpec] = []
-  classifications: list[ClassificationSpec] = []
+  traits: list[TraitSpec] = []
   seen_subjects: set[str] = set()
   for subject in graph.subjects():
     if not isinstance(subject, URIRef):
@@ -610,10 +610,10 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     if subject_str in seen_subjects:
       continue
     seen_subjects.add(subject_str)
-    if _is_classification(graph, subject):
-      cls = _extract_classification(graph, subject)
-      if cls is not None:
-        classifications.append(cls)
+    if _is_trait(graph, subject):
+      trait = _extract_trait(graph, subject)
+      if trait is not None:
+        traits.append(trait)
     elif _is_concept(graph, subject):
       element = _extract_element(graph, subject)
       if element is not None:
@@ -621,14 +621,14 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
 
   associations = _extract_associations(graph)
   structures = _extract_structures(graph)
-  assignments = _extract_classification_assignments(graph)
+  trait_assignments = _extract_trait_assignments(graph)
   rules = _extract_rules(graph)
 
   logger.info(
     f"Loaded {name}: {len(elements)} elements, "
     f"{len(associations)} associations, {len(structures)} structures, "
-    f"{len(classifications)} classifications, "
-    f"{len(assignments)} classification assignments, "
+    f"{len(traits)} traits, "
+    f"{len(trait_assignments)} trait assignments, "
     f"{len(rules)} rules"
   )
 
@@ -650,8 +650,8 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     elements=elements,
     associations=associations,
     structures=structures,
-    classifications=classifications,
-    classification_assignments=assignments,
+    traits=traits,
+    trait_assignments=trait_assignments,
     rules=rules,
     taxonomy_type=taxonomy_type,
     is_shared=True,

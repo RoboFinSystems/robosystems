@@ -36,7 +36,7 @@ class LibraryElementResponse(BaseModel):
   qname: str = Field(..., description="Qualified name, e.g. 'fac:Assets'")
   namespace: str | None = Field(None)
   name: str
-  classification: str | None = Field(
+  trait: str | None = Field(
     None,
     description=(
       "FASB elementsOfFinancialStatements axis: asset | contraAsset | "
@@ -169,19 +169,19 @@ class LibraryElementArcResponse(BaseModel):
   peer: LibraryElementResponse
 
 
-class LibraryElementClassificationResponse(BaseModel):
-  """One classification trait assigned to a library element.
+class LibraryElementTraitResponse(BaseModel):
+  """One FASB metamodel trait assigned to a library element.
 
-  A single element can carry multiple classifications across multiple
-  categories (e.g. elementsOfFinancialStatements=expense AND
+  A single element can carry multiple traits across multiple categories
+  (e.g. elementsOfFinancialStatements=expense AND
   operatingNonoperating=operating AND liquidity=current).
   """
 
   category: str = Field(
-    ..., description="Classification axis (e.g. elementsOfFinancialStatements)"
+    ..., description="Trait axis (e.g. elementsOfFinancialStatements)"
   )
   identifier: str = Field(..., description="Value within the axis (e.g. expense)")
   name: str | None = Field(None, description="Human-readable name")
   is_primary: bool = Field(
-    False, description="True for the element's primary EFS classification"
+    False, description="True for the element's primary EFS trait assignment"
   )

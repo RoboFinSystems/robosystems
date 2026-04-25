@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.library import (
   LibraryElementArcResponse,
-  LibraryElementClassificationResponse,
   LibraryElementResponse,
+  LibraryElementTraitResponse,
   LibraryElementTreeNode,
   LibraryEquivalenceResponse,
   LibraryLabelResponse,
@@ -16,13 +16,13 @@ from robosystems.models.api.library import (
 )
 from robosystems.models.extensions import (
   Association,
-  Classification,
   Element,
-  ElementClassification,
   ElementLabel,
   ElementReference,
+  ElementTrait,
   Structure,
   Taxonomy,
+  Trait,
 )
 
 DEFAULT_ELEMENT_LIMIT = 50
@@ -91,14 +91,12 @@ def _labels_by_element(
   return grouped
 
 
-def efs_classification_by_element(
-  session: Session, element_ids: list[str]
-) -> dict[str, str]:
-  """Batch-load FASB elementsOfFinancialStatements classification identifier.
+def efs_trait_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
+  """Batch-load FASB elementsOfFinancialStatements trait identifier.
 
   Returns ``{element_id: identifier}`` — e.g., ``{"elem_xyz": "asset"}``.
-  Elements without an EFS classification assignment are absent from the
-  map (callers should default to ``None``).
+  Elements without an EFS trait assignment are absent from the map
+  (callers should default to ``None``).
 
   ``ORDER BY is_primary DESC`` ensures the primary EFS assignment wins
   when multiple rows exist for one element (the junction supports a
@@ -110,22 +108,20 @@ def efs_classification_by_element(
   if not element_ids:
     return result
   rows = session.execute(
-    select(ElementClassification.element_id, Classification.identifier)
-    .join(Classification, Classification.id == ElementClassification.classification_id)
+    select(ElementTrait.element_id, Trait.identifier)
+    .join(Trait, Trait.id == ElementTrait.trait_id)
     .where(
-      ElementClassification.element_id.in_(element_ids),
-      Classification.category == "elementsOfFinancialStatements",
+      ElementTrait.element_id.in_(element_ids),
+      Trait.category == "elementsOfFinancialStatements",
     )
-    .order_by(ElementClassification.is_primary.desc())
+    .order_by(ElementTrait.is_primary.desc())
   ).all()
   for element_id, identifier in rows:
     result.setdefault(element_id, identifier)
   return result
 
 
-# Backward-compat internal alias — callers within this module still use
-# the underscore-prefixed name.
-_efs_classification_by_element = efs_classification_by_element
+_efs_trait_by_element = efs_trait_by_element
 
 
 def _references_by_element(
@@ -169,12 +165,12 @@ def _element_to_response(
   omitted, a single-element query fires — convenient for standalone
   callers but **N+1 when walking a tree or iterating a list**. Tree /
   list walkers must build the map once via
-  :func:`_efs_classification_by_element` and pass it through.
+  :func:`_efs_trait_by_element` and pass it through.
   """
   labels = _labels_for(session, element.id) if include_labels else []
   refs = _references_for(session, element.id) if include_references else []
   if efs_map is None:
-    efs = _efs_classification_by_element(session, [element.id]).get(element.id)
+    efs = _efs_trait_by_element(session, [element.id]).get(element.id)
   else:
     efs = efs_map.get(element.id)
   return LibraryElementResponse(
@@ -182,7 +178,7 @@ def _element_to_response(
     qname=element.qname or element.name,
     namespace=element.namespace,
     name=element.name,
-    classification=efs,
+    trait=efs,
     balance_type=element.balance_type,
     period_type=element.period_type,
     is_abstract=element.is_abstract,
@@ -196,17 +192,14 @@ def _element_to_response(
   )
 
 
-def _classification_filter_subquery(category: str, identifier: str):
-  """Select element_ids whose classifications include (category, identifier)."""
+def _trait_filter_subquery(category: str, identifier: str):
+  """Select element_ids whose traits include (category, identifier)."""
   return (
-    select(ElementClassification.element_id)
-    .join(
-      Classification,
-      Classification.id == ElementClassification.classification_id,
-    )
+    select(ElementTrait.element_id)
+    .join(Trait, Trait.id == ElementTrait.trait_id)
     .where(
-      Classification.category == category,
-      Classification.identifier == identifier,
+      Trait.category == category,
+      Trait.identifier == identifier,
     )
   )
 
@@ -215,7 +208,7 @@ def list_elements(
   session: Session,
   taxonomy_id: str | None = None,
   source: str | None = None,
-  classification: str | None = None,
+  trait: str | None = None,
   activity_type: str | None = None,
   element_type: str | None = None,
   is_abstract: bool | None = None,
@@ -229,11 +222,11 @@ def list_elements(
   `include_labels` / `include_references` default False to keep list
   queries cheap; callers enable them for detail views.
 
-  `classification` filters on the FASB elementsOfFinancialStatements axis
+  `trait` filters on the FASB elementsOfFinancialStatements axis
   (asset / liability / equity / revenue / expense / ...). `activity_type`
   filters on the cash-flow activity axis (operatingActivity /
   investingActivity / financingActivity). Both filters apply independently
-  via separate EXISTS subqueries on the `element_classifications` junction
+  via separate EXISTS subqueries on the `element_traits` junction
   and can be combined (AND).
 
   `is_abstract=True` returns only abstract grouping concepts; `False`
@@ -246,15 +239,13 @@ def list_elements(
     query = query.where(Element.taxonomy_id == taxonomy_id)
   if source is not None:
     query = query.where(Element.source == source)
-  if classification is not None:
+  if trait is not None:
     query = query.where(
-      Element.id.in_(
-        _classification_filter_subquery("elementsOfFinancialStatements", classification)
-      )
+      Element.id.in_(_trait_filter_subquery("elementsOfFinancialStatements", trait))
     )
   if activity_type is not None:
     query = query.where(
-      Element.id.in_(_classification_filter_subquery("activityType", activity_type))
+      Element.id.in_(_trait_filter_subquery("activityType", activity_type))
     )
   if element_type is not None:
     query = query.where(Element.element_type == element_type)
@@ -274,7 +265,7 @@ def list_elements(
   refs_by_id = (
     _references_by_element(session, element_ids) if include_references else {}
   )
-  efs_by_id = _efs_classification_by_element(session, element_ids)
+  efs_by_id = _efs_trait_by_element(session, element_ids)
 
   return [
     LibraryElementResponse(
@@ -282,7 +273,7 @@ def list_elements(
       qname=e.qname or e.name,
       namespace=e.namespace,
       name=e.name,
-      classification=efs_by_id.get(e.id),
+      trait=efs_by_id.get(e.id),
       balance_type=e.balance_type,
       period_type=e.period_type,
       is_abstract=e.is_abstract,
@@ -415,7 +406,7 @@ def get_element_tree(
     .scalars()
     .all()
   }
-  efs_map = _efs_classification_by_element(session, all_ids)
+  efs_map = _efs_trait_by_element(session, all_ids)
 
   def _build(elem_id: str) -> LibraryElementTreeNode | None:
     elem = elements_by_id.get(elem_id)
@@ -595,30 +586,27 @@ def get_element_arcs(
   return rows
 
 
-def get_element_classifications(
+def get_element_traits(
   session: Session,
   element_id: str,
-) -> list[LibraryElementClassificationResponse]:
-  """Return all classification traits assigned to this element.
+) -> list[LibraryElementTraitResponse]:
+  """Return all FASB metamodel traits assigned to this element.
 
-  Joins element_classifications → classifications, sorted by category
-  then identifier so the caller gets a stable, grouped ordering.
+  Joins element_traits → traits, sorted by category then identifier
+  so the caller gets a stable, grouped ordering.
   """
   rows = session.execute(
-    select(Classification, ElementClassification.is_primary)
-    .join(
-      ElementClassification,
-      Classification.id == ElementClassification.classification_id,
-    )
-    .where(ElementClassification.element_id == element_id)
-    .order_by(Classification.category, Classification.identifier)
+    select(Trait, ElementTrait.is_primary)
+    .join(ElementTrait, Trait.id == ElementTrait.trait_id)
+    .where(ElementTrait.element_id == element_id)
+    .order_by(Trait.category, Trait.identifier)
   ).all()
   return [
-    LibraryElementClassificationResponse(
-      category=cls.category,
-      identifier=cls.identifier,
-      name=cls.name,
+    LibraryElementTraitResponse(
+      category=trait.category,
+      identifier=trait.identifier,
+      name=trait.name,
       is_primary=is_primary or False,
     )
-    for cls, is_primary in rows
+    for trait, is_primary in rows
   ]

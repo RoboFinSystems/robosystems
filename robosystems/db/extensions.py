@@ -163,8 +163,9 @@ _LIBRARY_IMMUTABLE_TABLES = (
   # Mirror 0002's _IMMUTABLE_TABLES so fresh tenant provisioning applies
   # triggers to the full library surface. Omitting rows here leaves new
   # graphs with weaker guarantees than migration-backfilled ones.
+  "traits",
+  "element_traits",
   "classifications",
-  "element_classifications",
   "association_classifications",
   "rules",
 )
@@ -233,6 +234,7 @@ def _widen_library_checks(conn, schema: str) -> None:
     # un-backfilled public schema; tenant writes use
     # 'reporting_standard' / 'reporting_extension' / 'custom_ontology'.
     "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
+    "'trait-vocabulary', 'trait-assignment', "
     "'classification-vocabulary', 'classification-assignment', 'rules', "
     "'reporting_standard', 'reporting_extension', 'custom_ontology'"
     ")"

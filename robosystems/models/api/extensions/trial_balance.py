@@ -7,7 +7,7 @@ class TrialBalanceRow(BaseModel):
   account_id: str
   account_code: str
   account_name: str
-  classification: str | None = None
+  trait: str | None = None
   account_type: str | None = None
   total_debits: float
   total_credits: float

@@ -21,9 +21,9 @@ from robosystems.models.api.taxonomy_block import UpdateTaxonomyBlockRequest
 from robosystems.models.extensions import (
   Association,
   Element,
-  ElementClassification,
   ElementLabel,
   ElementReference,
+  ElementTrait,
   Rule,
   Structure,
   Taxonomy,
@@ -247,7 +247,7 @@ def apply_elements_to_update(
   ``metadata_`` wholesale. ``parent_ref`` is re-resolved against the
   current in-taxonomy qname→id map, with optional library fallback.
   ``update_classification`` (handler-supplied) is invoked per element
-  when ``classification`` is non-None — CoA uses this to re-assign
+  when ``trait`` is non-None — CoA uses this to re-assign
   the FASB elementsOfFinancialStatements junction row.
   """
   if not payload.elements_to_update:
@@ -321,8 +321,8 @@ def apply_elements_to_update(
               f"not resolve in this taxonomy or the parent library."
             )
           element.parent_id = library_id
-    if patch.classification is not None and update_classification is not None:
-      update_classification(session, str(element.id), patch.classification)
+    if patch.trait is not None and update_classification is not None:
+      update_classification(session, str(element.id), patch.trait)
 
   session.flush()
 
@@ -366,11 +366,7 @@ def apply_elements_to_remove(
     )
   )
 
-  session.execute(
-    delete(ElementClassification).where(
-      ElementClassification.element_id.in_(element_ids)
-    )
-  )
+  session.execute(delete(ElementTrait).where(ElementTrait.element_id.in_(element_ids)))
   session.execute(delete(ElementLabel).where(ElementLabel.element_id.in_(element_ids)))
   session.execute(
     delete(ElementReference).where(ElementReference.element_id.in_(element_ids))

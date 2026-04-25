@@ -168,7 +168,7 @@ class ElementResponse(BaseModel):
   description: str | None = None
   qname: str | None = None
   namespace: str | None = None
-  classification: str | None = None
+  trait: str | None = None
   sub_classification: str | None = None
   balance_type: str
   period_type: str
@@ -203,7 +203,7 @@ class UnmappedElementResponse(BaseModel):
   id: str
   code: str | None = None
   name: str
-  classification: str | None = None
+  trait: str | None = None
   balance_type: str
   external_source: str | None = None
   suggested_targets: list[SuggestedTarget] = Field(default_factory=list)
@@ -218,7 +218,7 @@ class MappedTrialBalanceRow(BaseModel):
   reporting_element_id: str
   qname: str
   reporting_name: str
-  classification: str | None = None
+  trait: str | None = None
   balance_type: str | None = None
   total_debits: float
   total_credits: float
@@ -310,7 +310,7 @@ class CreateElementRequest(BaseModel):
   code: str | None = None
   name: str
   description: str | None = None
-  classification: Literal[
+  trait: Literal[
     "asset",
     "contraAsset",
     "liability",
@@ -359,12 +359,12 @@ class UpdateElementRequest(BaseModel):
   omit the field to leave unchanged, pass `null` to clear the parent
   (make root).
 
-  ``classification`` updates the element's primary FASB
-  elementsOfFinancialStatements assignment (in ``element_classifications``,
-  not a direct column on ``elements``). Omit to leave unchanged. Passing a
-  value replaces the current primary EFS assignment; there is no
-  set-to-null semantics (use the UI/admin path for full classification
-  teardown — here we only support correction of a misclassified account)."""
+  ``trait`` updates the element's primary FASB elementsOfFinancialStatements
+  trait assignment (in ``element_traits``, not a direct column on
+  ``elements``). Omit to leave unchanged. Passing a value replaces the
+  current primary EFS trait; there is no set-to-null semantics (use the
+  UI/admin path for full trait teardown — here we only support correction
+  of a misclassified account)."""
 
   element_id: str
   code: str | None = None
@@ -374,7 +374,7 @@ class UpdateElementRequest(BaseModel):
   period_type: Literal["duration", "instant"] | None = None
   parent_id: str | None = None
   currency: str | None = None
-  classification: (
+  trait: (
     Literal[
       "asset",
       "contraAsset",

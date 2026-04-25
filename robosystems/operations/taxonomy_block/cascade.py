@@ -22,9 +22,9 @@ from sqlalchemy.orm import Session
 from robosystems.models.extensions import (
   Association,
   Element,
-  ElementClassification,
   ElementLabel,
   ElementReference,
+  ElementTrait,
   Rule,
   Structure,
   Taxonomy,
@@ -141,9 +141,7 @@ def cascade_delete_taxonomy(
   # Element side-tables.
   if element_ids:
     session.execute(
-      delete(ElementClassification).where(
-        ElementClassification.element_id.in_(element_ids)
-      )
+      delete(ElementTrait).where(ElementTrait.element_id.in_(element_ids))
     )
     session.execute(
       delete(ElementLabel).where(ElementLabel.element_id.in_(element_ids))

@@ -41,7 +41,7 @@ class TaxonomyBlockElement:
   id: str
   qname: str | None
   name: str
-  classification: str | None
+  trait: str | None
   balance_type: str | None
   period_type: str | None
   element_type: str
@@ -56,7 +56,7 @@ class TaxonomyBlockElement:
       id=e.id,
       qname=e.qname,
       name=e.name,
-      classification=e.classification,
+      trait=e.trait,
       balance_type=e.balance_type,
       period_type=e.period_type,
       element_type=e.element_type,

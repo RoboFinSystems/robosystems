@@ -58,8 +58,8 @@ from robosystems.operations.library.reads import (
   get_element,
   get_element_arcs,
   get_element_by_qname,
-  get_element_classifications,
   get_element_equivalents,
+  get_element_traits,
   get_element_tree,
   get_structure,
   get_taxonomy,
@@ -192,7 +192,7 @@ class LibraryQuery:
         session,
         taxonomy_id=str(taxonomy_id) if taxonomy_id else None,
         source=source,
-        classification=classification,
+        trait=classification,
         activity_type=activity_type,
         element_type=element_type,
         is_abstract=is_abstract,
@@ -298,7 +298,7 @@ class LibraryQuery:
   ) -> list[LibraryElementClassification]:
     """All classification traits assigned to this element, grouped by category."""
     with _open_session(info) as session:
-      rows = get_element_classifications(session, element_id=str(id))
+      rows = get_element_traits(session, element_id=str(id))
       return [LibraryElementClassification.from_pydantic(r) for r in rows]
 
   # ── Structures ─────────────────────────────────────────────────────────
