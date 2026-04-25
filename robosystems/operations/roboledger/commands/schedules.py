@@ -184,6 +184,7 @@ def create_schedule(
 
   session.commit()
 
+  metadata = structure.metadata_ or {}
   return ScheduleCreatedResponse(
     structure_id=structure.id,
     name=structure.name,
@@ -191,6 +192,8 @@ def create_schedule(
     total_periods=period_row.cnt if period_row else 0,
     total_facts=count_row.cnt if count_row else 0,
     rule_summary=_rule_summary(rule_results),
+    schedule_created_event_id=metadata.get("schedule_created_event_id"),
+    pending_event_count=metadata.get("pending_event_count", 0),
   )
 
 

@@ -296,3 +296,81 @@ class TestDslHandlerResolution:
     assert resolver.call_args.kwargs["agent_type"] == "vendor"
     assert resp.would_succeed is True
     assert resp.matched_handler is not None
+
+
+class TestCreateDualityFields:
+  """Stream 1 of event-driven-ledger: create-side flow-through of REA fields."""
+
+  @staticmethod
+  def _session_with_event_id() -> MagicMock:
+    session = MagicMock()
+    added: list = []
+    session.add.side_effect = lambda obj: added.append(obj)
+
+    def fake_flush():
+      for obj in added:
+        if obj.id is None:
+          obj.id = "evt_test"
+
+    session.flush.side_effect = fake_flush
+    return session
+
+  def test_event_class_defaults_to_economic(self) -> None:
+    """Capture-only path defaults event_class to 'economic'."""
+    session = self._session_with_event_id()
+    body = _make_body(apply_handlers=False, metadata={})
+
+    envelope = create_event_block(session, body, created_by="usr_test")
+
+    added_event = session.add.call_args.args[0]
+    assert added_event.event_class == "economic"
+    assert envelope.event_class == "economic"
+
+  def test_obligated_by_event_id_round_trips_through_envelope(self) -> None:
+    """Forward-materialization link set on create surfaces in the envelope."""
+    session = self._session_with_event_id()
+    body = _make_body(
+      apply_handlers=False,
+      metadata={},
+      obligated_by_event_id="evt_asset_acquired",
+    )
+
+    envelope = create_event_block(session, body, created_by="usr_test")
+
+    added_event = session.add.call_args.args[0]
+    assert added_event.obligated_by_event_id == "evt_asset_acquired"
+    assert envelope.obligated_by_event_id == "evt_asset_acquired"
+
+  def test_discharges_event_id_round_trips_through_envelope(self) -> None:
+    """Settlement link set on create surfaces in the envelope."""
+    session = self._session_with_event_id()
+    body = _make_body(
+      apply_handlers=False,
+      metadata={},
+      discharges_event_id="evt_invoice_issued",
+    )
+
+    envelope = create_event_block(session, body, created_by="usr_test")
+
+    added_event = session.add.call_args.args[0]
+    assert added_event.discharges_event_id == "evt_invoice_issued"
+    assert envelope.discharges_event_id == "evt_invoice_issued"
+
+  def test_support_event_class_with_support_category(self) -> None:
+    """Support events (event_class='support', category='inquiry') flow through."""
+    session = self._session_with_event_id()
+    body = _make_body(
+      event_type="inquiry_logged",
+      event_category="inquiry",
+      event_class="support",
+      apply_handlers=False,
+      metadata={},
+    )
+
+    envelope = create_event_block(session, body, created_by="usr_test")
+
+    added_event = session.add.call_args.args[0]
+    assert added_event.event_class == "support"
+    assert added_event.event_category == "inquiry"
+    assert envelope.event_class == "support"
+    assert envelope.event_category == "inquiry"

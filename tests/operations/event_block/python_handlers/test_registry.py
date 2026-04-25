@@ -79,13 +79,15 @@ def test_asset_disposed_metadata_rejects_negative_proceeds() -> None:
     AssetDisposedMetadata(schedule_id="struct_1", proceeds=-100)
 
 
-def test_registry_has_four_handlers() -> None:
-  """Four event types produce GL writes via the Python registry: a manual
+def test_registry_has_five_handlers() -> None:
+  """Five event types are dispatched by the Python registry: a manual
   journal entry, a reversal of a posted entry, a schedule period maturing,
-  and an asset disposal. Anything else dispatches to the DSL registry
+  an asset disposal, and the capture-only schedule_created originator
+  (Stream 2.A). Anything else dispatches to the DSL registry
   (event_handlers table)."""
   assert set(EVENT_BLOCK_PYTHON_REGISTRY.keys()) == {
     "asset_disposed",
+    "schedule_created",
     "schedule_entry_due",
     "journal_entry_recorded",
     "journal_entry_reversed",

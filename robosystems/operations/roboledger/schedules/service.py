@@ -11,7 +11,7 @@ and MCP tools.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from robosystems.models.extensions.roboledger import (
   Association,
   Element,
   Entry,
+  Event,
   Fact,
   FactSet,
   LineItem,
@@ -392,8 +393,111 @@ class ScheduleService:
           )
         )
 
+    # Stream 2.A: materialize the obligation register.
+    # One `schedule_created` event (originator) + one `pending`
+    # `schedule_entry_due` event per period, linked via
+    # `obligated_by_event_id`. The sensor (Stream 2.B) will later flip
+    # the pending events to `classified` at each period boundary and
+    # dispatch the existing handler. Until then, the legacy close path
+    # still works because nothing reads these new rows.
+    schedule_created_event_id, pending_event_count = (
+      self._materialize_pending_obligations(
+        session,
+        structure=structure,
+        taxonomy_id=taxonomy_id,
+        period_start=period_start,
+        period_end=period_end,
+        monthly_amount=monthly_amount,
+        periods=periods,
+        created_by=created_by,
+      )
+    )
+
+    # Stash the originator event id on the structure so disposal /
+    # supersession (Streams 2.C and 2.E) can find the obligation chain
+    # without an extra query.
+    metadata["schedule_created_event_id"] = schedule_created_event_id
+    metadata["pending_event_count"] = pending_event_count
+    structure.metadata_ = metadata
+    artifact_mechanics["schedule_created_event_id"] = schedule_created_event_id
+    artifact_mechanics["pending_event_count"] = pending_event_count
+    structure.artifact_mechanics = artifact_mechanics
+
     session.flush()
     return structure
+
+  def _materialize_pending_obligations(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    taxonomy_id: str,
+    period_start: date,
+    period_end: date,
+    monthly_amount: int,
+    periods: list[tuple[date, date]],
+    created_by: str,
+  ) -> tuple[str, int]:
+    """Emit `schedule_created` + N `pending schedule_entry_due` events.
+
+    IDs are generated Python-side so the obligation linkage is set
+    without depending on a session flush — this keeps the linkage
+    verifiable in MagicMock-based tests and lets us add all rows in a
+    single batch.
+
+    Returns ``(schedule_created_event_id, pending_event_count)``.
+    """
+    schedule_created_event_id = generate_prefixed_ulid("evt")
+    now = datetime.now(UTC)
+
+    session.add(
+      Event(
+        id=schedule_created_event_id,
+        event_type="schedule_created",
+        event_category="other",
+        event_class="economic",
+        occurred_at=now,
+        source="internal",
+        status="committed",
+        metadata_={
+          "schedule_id": structure.id,
+          "taxonomy_id": taxonomy_id,
+          "period_start": period_start.isoformat(),
+          "period_end": period_end.isoformat(),
+          "monthly_amount": monthly_amount,
+          "pending_event_count": len(periods),
+        },
+        created_at=now,
+        created_by=created_by,
+      )
+    )
+
+    for p_start, p_end in periods:
+      # End-of-day so a same-day sensor sweep at midnight picks the
+      # period up exactly when it closes.
+      occurred_at = datetime.combine(p_end, time(23, 59, 59), tzinfo=UTC)
+      session.add(
+        Event(
+          id=generate_prefixed_ulid("evt"),
+          event_type="schedule_entry_due",
+          event_category="recognition",
+          event_class="economic",
+          occurred_at=occurred_at,
+          source="internal",
+          status="pending",
+          obligated_by_event_id=schedule_created_event_id,
+          metadata_={
+            "schedule_id": structure.id,
+            "posting_date": p_end.isoformat(),
+            "period_start": p_start.isoformat(),
+            "period_end": p_end.isoformat(),
+          },
+          created_at=now,
+          created_by=created_by,
+        )
+      )
+
+    return schedule_created_event_id, len(periods)
 
   def get_period_close_status(
     self,
