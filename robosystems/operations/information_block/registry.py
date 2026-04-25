@@ -12,6 +12,9 @@ per block type — ``schedule.py``, ``statement.py``, ...).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 from robosystems.models.api.extensions.schedules import (
@@ -32,6 +35,31 @@ from robosystems.operations.information_block.statement import (
   make_statement_handlers,
 )
 from robosystems.operations.information_block.types import BlockTypeRegistryEntry
+
+METRIC_BLOCK_TYPE = metric_handlers.METRIC_BLOCK_TYPE
+METRIC_DISPLAY_NAME = metric_handlers.METRIC_DISPLAY_NAME
+METRIC_CATEGORY = metric_handlers.METRIC_CATEGORY
+
+
+def make_not_implemented_handler(operation: str, message: str) -> Callable[..., Any]:
+  """Build a dispatch handler that raises :class:`NotImplementedError`.
+
+  Used by block types whose ``dispatch_{create,update,delete}`` handler
+  is intentionally a stub — either because the construction path lives
+  elsewhere (statement family flows through ``create-report``) or because
+  the evaluator has not been implemented yet (metric blocks).
+
+  The returned callable accepts and ignores the standard handler
+  arguments ``(session, payload, actor)`` so it can be plugged into
+  :class:`BlockTypeRegistryEntry` without signature gymnastics.
+  """
+
+  def _handler(*_args: Any, **_kwargs: Any) -> str:
+    raise NotImplementedError(message)
+
+  _handler.__name__ = f"_not_implemented_{operation}"
+  _handler.__qualname__ = _handler.__name__
+  return _handler
 
 
 class _EmptyPayload(BaseModel):
@@ -89,7 +117,7 @@ def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
   strings. This helper factors the common shape.
   """
   display_name, display_plural = STATEMENT_DISPLAY[block_type]
-  handlers = make_statement_handlers(block_type)
+  build_envelope = make_statement_handlers(block_type)
   return BlockTypeRegistryEntry(
     id=block_type,
     display_name=display_name,
@@ -108,10 +136,25 @@ def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
     update_request_model=_EmptyPayload,
     delete_request_model=_EmptyPayload,
     construction_mode="compositional",
-    dispatch_create=handlers["create"],
-    dispatch_update=handlers["update"],
-    dispatch_delete=handlers["delete"],
-    dispatch_build_envelope=handlers["build_envelope"],
+    dispatch_create=make_not_implemented_handler(
+      f"create-{block_type}-block",
+      "Statements are generated via create-report, not "
+      "create-information-block. Create a report with the relevant "
+      "taxonomy; the statement envelope becomes queryable via "
+      "informationBlocks(blockType=...) after the report is published.",
+    ),
+    dispatch_update=make_not_implemented_handler(
+      f"update-{block_type}-block",
+      "Statement blocks are library-seeded and immutable. Use "
+      "create-report to produce new facts; the envelope surfaces the "
+      "most recent report's facts automatically.",
+    ),
+    dispatch_delete=make_not_implemented_handler(
+      f"delete-{block_type}-block",
+      "Statement blocks are library-seeded and cannot be deleted per "
+      "tenant. Archive the underlying Report via the report APIs instead.",
+    ),
+    dispatch_build_envelope=build_envelope,
     # Statement Structures live in public.structures (library-immutable)
     # and should surface on the library sentinel, with facts=[] because
     # reports live in tenant schemas.
@@ -128,16 +171,16 @@ EQUITY_STATEMENT_BLOCK = _make_statement_entry("equity_statement", "pie-chart")
 # ── Metric (derivative) ────────────────────────────────────────────────────
 
 METRIC_BLOCK = BlockTypeRegistryEntry(
-  id=metric_handlers.METRIC_BLOCK_TYPE,
-  display_name=metric_handlers.METRIC_DISPLAY_NAME,
+  id=METRIC_BLOCK_TYPE,
+  display_name=METRIC_DISPLAY_NAME,
   display_plural="Metrics",
-  category=metric_handlers.METRIC_CATEGORY,
+  category=METRIC_CATEGORY,
   icon="gauge",
   description=(
     "Derivative block — computes its facts from one or more source "
     "blocks at read time. Covenant tests, ratios, KPI trend views. "
-    "Phase η ships the typed mechanics arm; the derivation evaluator "
-    "lands in a follow-up."
+    "Typed mechanics ship today; the derivation evaluator that "
+    "computes facts from source-block FactSets is not yet implemented."
   ),
   concept_arrangement_default="arithmetic",
   member_arrangement_default=None,
@@ -146,9 +189,20 @@ METRIC_BLOCK = BlockTypeRegistryEntry(
   update_request_model=_EmptyPayload,
   delete_request_model=_EmptyPayload,
   construction_mode="derivative",
-  dispatch_create=metric_handlers._create_not_implemented,
-  dispatch_update=metric_handlers._update_not_implemented,
-  dispatch_delete=metric_handlers._delete_not_implemented,
+  dispatch_create=make_not_implemented_handler(
+    "create-metric-block",
+    "create-metric-block is not implemented yet. The typed "
+    "MetricMechanics arm ships today; the derivation evaluator + create "
+    "path land once the rule engine stabilizes.",
+  ),
+  dispatch_update=make_not_implemented_handler(
+    "update-metric-block",
+    "update-metric-block is not implemented yet.",
+  ),
+  dispatch_delete=make_not_implemented_handler(
+    "delete-metric-block",
+    "delete-metric-block is not implemented yet.",
+  ),
   dispatch_build_envelope=metric_handlers.build_envelope,
   surfaces_in_library=False,
 )

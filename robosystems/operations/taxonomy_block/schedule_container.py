@@ -57,14 +57,21 @@ def create(
   return taxonomy.id
 
 
+_ADMIN_ONLY_MESSAGE = (
+  "schedule-container update/delete are intentionally not exposed on the "
+  "public envelope; admin-only via library_creator. The schedule artifacts "
+  "themselves live as Schedule Information Blocks and are mutated through "
+  "that surface."
+)
+
+
 def update(
   session: Session,
   payload: UpdateTaxonomyBlockRequest,
   updated_by: str,
 ) -> str:
-  raise NotImplementedError(
-    "schedule-container update-taxonomy-block is not implemented yet."
-  )
+  """Intentionally not exposed; admin-only via library_creator."""
+  raise NotImplementedError(_ADMIN_ONLY_MESSAGE)
 
 
 def delete(
@@ -72,9 +79,8 @@ def delete(
   payload: DeleteTaxonomyBlockRequest,
   deleted_by: str,
 ) -> str:
-  raise NotImplementedError(
-    "schedule-container delete-taxonomy-block is not implemented yet."
-  )
+  """Intentionally not exposed; admin-only via library_creator."""
+  raise NotImplementedError(_ADMIN_ONLY_MESSAGE)
 
 
 def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope | None:

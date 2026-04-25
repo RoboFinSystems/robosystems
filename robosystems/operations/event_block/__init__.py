@@ -1,7 +1,7 @@
-"""Event Block commands — Phase 1 + Phase 3 write surface.
+"""Event Block commands — create, update, and preview operations.
 
-Re-exports the same names that lived in the old event_block.py so all
-existing imports continue to work unchanged.
+Re-exports the public command surface so callers import a stable module
+path regardless of internal layout.
 """
 
 from .commands import (

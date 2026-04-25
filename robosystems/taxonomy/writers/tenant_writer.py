@@ -265,7 +265,7 @@ def copy_library_into_tenant(
     pin_params,
   )
 
-  # Association classifications (Phase epsilon) — junction rows linking
+  # Association classifications — junction rows linking
   # associations copied above to the classification catalog.
   ac_result = connection.execute(
     text(f"""

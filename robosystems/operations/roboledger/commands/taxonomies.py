@@ -140,8 +140,9 @@ def create_taxonomy(
 ) -> TaxonomyResponse:
   """Insert a new taxonomy row and return its response representation.
 
-  Internal only — retired from the public surface in Phase 1 of the
-  Taxonomy Block refactor. Tenant writes use ``create-taxonomy-block``.
+  Internal helper. Tenant writes go through the taxonomy block surface
+  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
+  invoked indirectly by those operations.
   """
   taxonomy = Taxonomy(
     id=generate_prefixed_ulid("tax"),
@@ -163,8 +164,9 @@ def create_structure(
 ) -> StructureResponse:
   """Insert a new structure row and return its response representation.
 
-  Internal only — retired from the public surface in Phase 1 of the
-  Taxonomy Block refactor. Tenant writes use ``create-taxonomy-block``.
+  Internal helper. Tenant writes go through the taxonomy block surface
+  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
+  invoked indirectly by those operations.
   """
   # Tenants can only add structures to tenant-origin taxonomies.
   assert_tenant_taxonomy(session, body.taxonomy_id)
@@ -311,8 +313,9 @@ def _delete_association_dependents(
 def update_taxonomy(session: Session, body: UpdateTaxonomyRequest) -> TaxonomyResponse:
   """Update mutable fields on a taxonomy.
 
-  Internal only — retired from the public surface in Phase 1 of the
-  Taxonomy Block refactor. Tenant writes use ``update-taxonomy-block``.
+  Internal helper. Tenant writes go through the taxonomy block surface
+  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
+  invoked indirectly by those operations.
 
   Uses `model_dump(exclude_unset=True)` — omitted fields are left
   unchanged, explicit nulls are applied. `taxonomy_type` is immutable
@@ -338,8 +341,9 @@ def update_taxonomy(session: Session, body: UpdateTaxonomyRequest) -> TaxonomyRe
 def delete_taxonomy(session: Session, body: DeleteTaxonomyRequest) -> TaxonomyResponse:
   """Soft delete — sets `is_active=false`.
 
-  Internal only — retired from the public surface in Phase 1 of the
-  Taxonomy Block refactor. Tenant writes use ``delete-taxonomy-block``.
+  Internal helper. Tenant writes go through the taxonomy block surface
+  (``delete-taxonomy-block``); this is invoked indirectly by that
+  operation.
 
   Historical references (structures, elements, associations) remain
   valid. The taxonomy is simply no longer offered for new writes.
@@ -365,8 +369,9 @@ def update_structure(
 ) -> StructureResponse:
   """Update mutable fields on a structure.
 
-  Internal only — retired from the public surface in Phase 1 of the
-  Taxonomy Block refactor. Tenant writes use ``update-taxonomy-block``.
+  Internal helper. Tenant writes go through the taxonomy block surface
+  (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
+  invoked indirectly by those operations.
 
   `structure_type` and `taxonomy_id` are immutable.
   Raises `StructureNotFoundError` if the structure does not exist.
@@ -391,8 +396,9 @@ def delete_structure(
 ) -> StructureResponse:
   """Soft delete — sets `is_active=false`.
 
-  Internal only — retired from the public surface in Phase 1 of the
-  Taxonomy Block refactor. Tenant writes use ``delete-taxonomy-block``.
+  Internal helper. Tenant writes go through the taxonomy block surface
+  (``delete-taxonomy-block``); this is invoked indirectly by that
+  operation.
 
   Raises `StructureNotFoundError` if the structure does not exist.
   """

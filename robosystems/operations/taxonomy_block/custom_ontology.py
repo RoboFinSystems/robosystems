@@ -10,8 +10,8 @@ forcing.
 
 Validation below the Pydantic layer is minimal — ``ValueError`` for
 unresolved ``parent_ref`` / ``structure_ref`` / ``from_ref`` /
-``to_ref`` only. The structural rule layer (cycles, orphans, unique
-qnames) lands in Phase 2.3.
+``to_ref`` only. Structural rules (cycles, orphans, unique qnames) are
+enforced by the shared create-envelope validator.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.taxonomy_block._helpers import qname_for
 from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
 from robosystems.operations.taxonomy_block.cascade import (
   cascade_delete_taxonomy,
@@ -57,7 +58,6 @@ from robosystems.operations.taxonomy_block.update_apply import (
   apply_top_level_fields,
 )
 from robosystems.operations.taxonomy_block.update_validator import (
-  reject_unsupported_deltas,
   validate_update_envelope,
 )
 from robosystems.operations.taxonomy_block.validators import (
@@ -69,13 +69,6 @@ CUSTOM_ONTOLOGY_BLOCK_TYPE = "custom_ontology"
 DISPLAY_NAME = "Custom Ontology"
 DISPLAY_PLURAL = "Custom Ontologies"
 CATEGORY = "Custom"
-
-
-def _qname_for_custom(standard: str | None, code: str | None, name: str) -> str:
-  """Derive the envelope-local qname when the tenant didn't supply one."""
-  ns = standard or "custom"
-  token = code or name.replace(" ", "")
-  return f"{ns}:{token}"
 
 
 def create(
@@ -119,7 +112,7 @@ def create(
   parent_refs: dict[str, str | None] = {}
 
   for req in payload.elements:
-    qname = req.qname or _qname_for_custom(payload.standard, req.code, req.name)
+    qname = req.qname or qname_for(payload.standard, "custom", req.code, req.name)
     element = Element(
       code=req.code,
       name=req.name,
@@ -222,7 +215,7 @@ def create(
 
 
 def _element_factory(req, taxonomy: Taxonomy, updated_by: str) -> tuple[Element, str]:
-  qname = req.qname or _qname_for_custom(taxonomy.standard, req.code, req.name)
+  qname = req.qname or qname_for(taxonomy.standard, "custom", req.code, req.name)
   element = Element(
     code=req.code,
     name=req.name,
@@ -251,8 +244,6 @@ def update(
     raise ValueError(
       f"taxonomy {payload.taxonomy_id!r} is not a custom_ontology taxonomy."
     )
-
-  reject_unsupported_deltas(payload)
 
   issues = validate_update_envelope(session, taxonomy, payload)
   if issues:

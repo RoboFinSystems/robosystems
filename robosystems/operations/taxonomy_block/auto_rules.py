@@ -1,8 +1,8 @@
-"""Structural auto-rule emission for Taxonomy Block envelopes (Phase 2.3.1).
+"""Structural auto-rule emission for Taxonomy Block envelopes.
 
 At create time, each taxonomy block gets a set of ``rule_origin='auto'``
 Rule rows that encode its structural invariants — the same invariants the
-Phase 2.3 validator checks pre-write, now persisted so ``evaluate-rules``
+create-envelope validator checks pre-write, persisted so ``evaluate-rules``
 can re-check them post-write on demand.
 
 Auto-rules are tied to the taxonomy via ``taxonomy_id`` (ownership) and

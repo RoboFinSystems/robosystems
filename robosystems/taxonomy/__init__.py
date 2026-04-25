@@ -16,6 +16,6 @@ supporting runtime:
   git and edited in place (see `seeds/README.md`). Upstream XBRL is not
   tracked; `scripts/import_upstream_seeds.py` is kept as an archaeological
   one-shot for re-bootstrapping a seed from source.
-- `seed.py` — legacy Python-dict seed (retained for the initial migration
-  downgrade path; retired when Phase 1 lands).
+- `seed.py` — legacy Python-dict seed (retained for compatibility during
+  the JSON-LD migration).
 """

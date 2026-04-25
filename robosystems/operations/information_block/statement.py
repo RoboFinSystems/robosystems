@@ -1,8 +1,8 @@
 """Handlers for the statement family of Information Block types.
 
 Four block types — ``balance_sheet``, ``income_statement``,
-``cash_flow_statement``, ``equity_statement`` — share one handler body
-parameterised on the block_type string. Each corresponds to a
+``cash_flow_statement``, ``equity_statement`` — share one envelope
+builder parameterised on the block_type string. Each corresponds to a
 library-seeded Structure in ``public.structures``; seeds live in
 :mod:`robosystems.taxonomy.seed` (``seed_reporting_taxonomy``).
 
@@ -11,19 +11,18 @@ Structure exists before any tenant action; per-tenant facts come from
 ``create-report`` calls; the envelope materialises on GET by pulling
 the library atoms together with the tenant's most-recent report facts.
 
-Because statements aren't created via ``create-information-block``,
-``dispatch_create`` for every statement block type raises
-:class:`NotImplementedError`, which the registrar's error map
-translates to an HTTP 501 with a pointer to ``create-report``.
+Statements aren't created via ``create-information-block``; the
+``dispatch_create``/``update``/``delete`` handlers in the registry
+entry are the not-implemented stubs built by
+``make_not_implemented_handler``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
 from sqlalchemy import select
 
 from robosystems.models.api.information_block import (
@@ -32,16 +31,12 @@ from robosystems.models.api.information_block import (
   InformationModelResponse,
   StatementMechanics,
 )
-from robosystems.models.extensions import Association, Element, Structure, Taxonomy
 from robosystems.models.extensions.roboledger import Fact, Report
 from robosystems.operations.information_block.envelope import (
   association_to_connection,
   element_to_lite,
   fact_to_lite,
-  load_classifications_for_associations,
-  load_latest_fact_set_for_structure,
-  load_rules_for_structure,
-  load_verification_results_for_structure,
+  load_base_envelope_atoms,
 )
 
 if TYPE_CHECKING:
@@ -60,56 +55,6 @@ STATEMENT_DISPLAY: dict[str, tuple[str, str]] = {
 STATEMENT_CATEGORY = "Reporting"
 
 
-def _create_not_implemented(
-  session: Session, payload: BaseModel, created_by: str
-) -> str:
-  """``dispatch_create`` for every statement block type.
-
-  Statements are generated through ``create-report``, not through
-  ``create-information-block``. Raising here propagates to the router's
-  error map and becomes HTTP 501.
-  """
-  raise NotImplementedError(
-    "Statements are generated via create-report, not "
-    "create-information-block. Create a report with the relevant "
-    "taxonomy; the statement envelope becomes queryable via "
-    "informationBlocks(blockType=...) after the report is published."
-  )
-
-
-def _update_not_implemented(
-  session: Session, payload: BaseModel, updated_by: str
-) -> str:
-  """``dispatch_update`` for every statement block type.
-
-  Statement Structures are library-seeded and immutable from a tenant
-  perspective. There is nothing to update — the envelope reflects the
-  library shape plus the tenant's report facts. Changes to what
-  surfaces come from creating a new Report, not from mutating the
-  block.
-  """
-  raise NotImplementedError(
-    "Statement blocks are library-seeded and immutable. Use "
-    "create-report to produce new facts; the envelope surfaces the "
-    "most recent report's facts automatically."
-  )
-
-
-def _delete_not_implemented(
-  session: Session, payload: BaseModel, deleted_by: str
-) -> str:
-  """``dispatch_delete`` for every statement block type.
-
-  Statement Structures are library-seeded and shared across tenants —
-  they cannot be deleted per-tenant. To stop receiving facts on a
-  statement block, archive the underlying Reports instead.
-  """
-  raise NotImplementedError(
-    "Statement blocks are library-seeded and cannot be deleted per "
-    "tenant. Archive the underlying Report via the report APIs instead."
-  )
-
-
 def _build_statement_envelope(
   session: Session,
   structure_id: str,
@@ -122,38 +67,25 @@ def _build_statement_envelope(
   expected block_type — lets :func:`get_information_block` cleanly
   return nothing to the caller.
 
-  Phase b surfaces facts from the **most recent** Report that has at
-  least one fact for this structure's elements. Scoping by element
-  membership — rather than taking the latest Report of any type —
-  avoids an empty envelope when a tenant's most recent report is for a
-  different statement (e.g. asking for the BS envelope when the newest
-  report is an IS). On the library sentinel the search_path is
-  ``public`` and the Report table is empty, so ``facts`` comes back
-  empty, which is the correct behaviour for the sentinel. Phase z
-  replaces this heuristic with explicit ``fact_set_id`` selection.
+  Surfaces facts from the **most recent** Report that has at least one
+  fact for this structure's elements. Scoping by element membership —
+  rather than taking the latest Report of any type — avoids an empty
+  envelope when a tenant's most recent report is for a different
+  statement (e.g. asking for the BS envelope when the newest report is
+  an IS). On the library sentinel the search_path is ``public`` and the
+  Report table is empty, so ``facts`` comes back empty, which is the
+  correct behaviour for the sentinel. A future revision of this
+  behaviour will replace the heuristic with explicit ``fact_set_id``
+  selection once write paths stamp FactSet rows on every report.
   """
-  structure = session.get(Structure, structure_id)
-  if structure is None or structure.structure_type != block_type:
+  atoms = load_base_envelope_atoms(
+    session, structure_id, expected_block_type=block_type
+  )
+  if atoms is None:
     return None
 
-  taxonomy_name = session.execute(
-    select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
-  ).scalar()
-
-  associations = (
-    session.execute(select(Association).where(Association.structure_id == structure_id))
-    .scalars()
-    .all()
-  )
-
-  element_ids = {a.from_element_id for a in associations} | {
-    a.to_element_id for a in associations
-  }
-  elements = (
-    session.execute(select(Element).where(Element.id.in_(element_ids))).scalars().all()
-    if element_ids
-    else []
-  )
+  structure = atoms.structure
+  element_ids = atoms.element_ids
 
   facts: list[Fact] = []
   if element_ids:
@@ -177,26 +109,13 @@ def _build_statement_envelope(
         .all()
       )
 
-  # Prefer the typed Phase δ column; fall back to the Phase β empty
-  # tagged body for library-seeded rows that pre-date the backfill.
+  # Mechanics are read from the typed ``artifact_mechanics`` column when
+  # populated; library-seeded rows that haven't been enriched fall back
+  # to an empty tagged body so the discriminated union still validates.
   if structure.artifact_mechanics:
     mechanics = StatementMechanics.model_validate(structure.artifact_mechanics)
   else:
     mechanics = StatementMechanics(kind="statement_renderer")
-
-  rules = load_rules_for_structure(
-    session,
-    structure_id,
-    element_ids=list(element_ids),
-    association_ids=[a.id for a in associations],
-  )
-
-  classifications_by_assoc = load_classifications_for_associations(
-    session, [a.id for a in associations]
-  )
-
-  fact_set = load_latest_fact_set_for_structure(session, structure_id)
-  verification_results = load_verification_results_for_structure(session, structure_id)
 
   display_name, _display_plural = STATEMENT_DISPLAY[block_type]
   return InformationBlockEnvelope(
@@ -206,7 +125,7 @@ def _build_statement_envelope(
     display_name=display_name,
     category=STATEMENT_CATEGORY,
     taxonomy_id=structure.taxonomy_id,
-    taxonomy_name=taxonomy_name,
+    taxonomy_name=atoms.taxonomy_name,
     information_model=InformationModelResponse(
       concept_arrangement=structure.concept_arrangement or "roll_up",
       member_arrangement=structure.member_arrangement or "aggregation",
@@ -217,36 +136,33 @@ def _build_statement_envelope(
       template=None,
       mechanics=mechanics,
     ),
-    elements=[element_to_lite(e) for e in elements],
+    elements=[element_to_lite(e) for e in atoms.elements],
     connections=[
-      association_to_connection(a, classifications_by_assoc.get(a.id, []))
-      for a in associations
+      association_to_connection(a, atoms.classifications_by_assoc.get(a.id, []))
+      for a in atoms.associations
     ],
     facts=[fact_to_lite(f) for f in facts],
-    rules=rules,
-    fact_set=fact_set,
-    verification_results=verification_results,
+    rules=atoms.rules,
+    fact_set=atoms.fact_set,
+    verification_results=atoms.verification_results,
   )
 
 
-def make_statement_handlers(block_type: str) -> dict[str, Callable[..., Any]]:
-  """Build the dispatch handlers for one statement type.
+def make_statement_handlers(
+  block_type: str,
+) -> Callable[[Session, str], InformationBlockEnvelope | None]:
+  """Build the envelope handler for one statement type.
 
-  ``functools.partial`` binds the ``block_type`` keyword on the
-  envelope builder so the registry entry holds a two-argument callable
-  matching :class:`BlockTypeRegistryEntry.dispatch_build_envelope`'s
-  signature ``(session, structure_id) -> envelope | None``.
+  ``functools.partial`` binds the ``block_type`` keyword on the envelope
+  builder so the registry entry holds a two-argument callable matching
+  :class:`BlockTypeRegistryEntry.dispatch_build_envelope`'s signature
+  ``(session, structure_id) -> envelope | None``.
 
-  Create / update / delete all raise :class:`NotImplementedError` for
-  the statement family — statement Structures are library-seeded and
-  their per-tenant content comes from Reports, not block mutations.
+  The create / update / delete handlers for statement block types are
+  not built here — the registry installs not-implemented stubs via
+  ``make_not_implemented_handler`` for those slots.
   """
-  return {
-    "create": _create_not_implemented,
-    "update": _update_not_implemented,
-    "delete": _delete_not_implemented,
-    "build_envelope": partial(_build_statement_envelope, block_type=block_type),
-  }
+  return partial(_build_statement_envelope, block_type=block_type)
 
 
 __all__ = [

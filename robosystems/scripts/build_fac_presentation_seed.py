@@ -5,7 +5,9 @@ form the presentation linkbase — the scaffold that organizes how a
 statement is rendered. This seed emits those relationships as reified
 ``link:presentationArc`` equivalents — one arc node per (parent, child,
 structure, order) triple, matching the XBRL 2.1 presentation linkbase
-shape (Charlie Hoffmann's sfac6-pre.xml is the canonical reference).
+shape (Charlie Hoffmann's FAC presentation linkbase is the canonical
+reference; the upstream filename retains the historical sfac6-pre.xml
+convention).
 
 Structure:
 

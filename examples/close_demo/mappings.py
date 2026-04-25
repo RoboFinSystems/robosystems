@@ -1,9 +1,9 @@
 """CoA to FAC mapping definitions for Cascade Advisory Group LLC.
 
-Per Phase 3b, CoA elements map to FAC (Fundamental Accounting Concepts)
-as the primary reporting target. FAC is a small, stable set of
-high-level statement concepts. Deterministic expansion to rs-gaap /
-us-gaap happens via equivalence arcs on the FAC side.
+CoA elements map to FAC (Fundamental Accounting Concepts) as the
+primary reporting target. FAC is a small, stable set of high-level
+statement concepts. Deterministic expansion to rs-gaap / us-gaap
+happens via equivalence arcs on the FAC side.
 
 The demo resolves FAC qnames → element IDs at runtime against the
 library in the entity graph.

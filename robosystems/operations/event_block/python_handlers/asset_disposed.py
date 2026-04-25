@@ -21,10 +21,10 @@ Event status after success: 'fulfilled' (disposal is terminal — no further wor
 All writes happen in one session. If any step raises, the outer transaction
 rolls back — nothing persists, no half-disposed state.
 
-Stream 2.C migration note: prior versions called `ScheduleService.truncate_schedule`
-to hard-delete forward facts. That path is gone — the obligation register is
-now the single source of truth for "what's still due", and voiding events is
-how a disposal terminates a schedule's remaining lifespan.
+The obligation register is the single source of truth for what is still due.
+Disposal terminates a schedule's remaining lifespan by voiding the schedule's
+pending ``schedule_entry_due`` events; forward facts are left in place as a
+historical record.
 """
 
 from __future__ import annotations
@@ -73,9 +73,8 @@ class AssetDisposedMetadata(BaseModel):
   reason: str = Field(
     "asset_disposed_event",
     description=(
-      "Free-text disposal reason. Stored on the event row's narrative; "
-      "purely informational since Stream 2.C — no longer drives schedule "
-      "truncation."
+      "Free-text disposal reason. Stored on the event row's narrative as "
+      "informational context; does not drive any side effect on the schedule."
     ),
   )
 
@@ -95,8 +94,8 @@ def _void_pending_obligations_for_schedule(
   — the GL's disposal entry is the authoritative end-state.
 
   Returns 0 (no-op) when the structure is missing or has no
-  ``schedule_created_event_id`` — covers schedules created before
-  Stream 2.A and any test fixtures that build Structure rows directly.
+  ``schedule_created_event_id`` — covers schedules without an originating
+  event row (e.g. test fixtures that build Structure rows directly).
   """
   structure = session.get(Structure, structure_id)
   if structure is None:

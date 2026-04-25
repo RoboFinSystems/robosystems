@@ -2,6 +2,11 @@
 
 Tenant-scoped table. The OLTP representation of Structure nodes in the graph.
 Each structure belongs to a taxonomy and contains element associations.
+
+During the metadata_ → artifact_mechanics transition, both columns are
+populated on write and the read paths prefer ``artifact_mechanics``.
+``metadata_`` remains for backward compatibility with rows written before
+the typed mechanics column landed.
 """
 
 from datetime import UTC, datetime
@@ -55,30 +60,28 @@ class Structure(ExtensionsBase):
   # State
   is_active = Column(Boolean, nullable=False, default=True)
 
-  # Information Model axis columns (Phase δ)
+  # Information Model axis columns.
   # concept_arrangement: roll_up | roll_forward | variance | adjustment |
   # set | arithmetic | textblock. Nullable until every block type
-  # declares a default; CHECK constraint deferred to a later phase so
+  # declares a default; the CHECK constraint is intentionally absent so
   # the vocabulary can expand without a migration round-trip.
   concept_arrangement = Column(String, nullable=True)
   # member_arrangement: aggregation | nonaggregation. Null for
   # non-hypercube block types.
   member_arrangement = Column(String, nullable=True)
 
-  # Typed Artifact Mechanics (Phase δ). Pydantic discriminated union
-  # (see models/api/information_block.py::ArtifactMechanics) persisted
-  # as JSONB. Read-path validates shape on envelope build; Schedule
-  # writes stamp this column alongside metadata_ during the migration
-  # window, then metadata_'s entry_template + schedule_metadata keys
-  # are retired in a later phase.
+  # Typed Artifact Mechanics. Pydantic discriminated union (see
+  # ``models/api/information_block.py::ArtifactMechanics``) persisted as
+  # JSONB. Read paths validate shape on envelope build; writes stamp this
+  # column alongside ``metadata_``.
   artifact_mechanics = Column(JSONB, nullable=True)
 
-  # Renderer caveat, e.g. "(in thousands, except per share)". Phase δ.
+  # Renderer caveat, e.g. "(in thousands, except per share)".
   parenthetical_note = Column(String, nullable=True)
 
-  # Nullable FK to structure_templates. The templates table lands in a
-  # later phase; this column is added now so Phase δ writes that pin a
-  # template don't require another round-trip. No FK constraint yet.
+  # Nullable FK to ``structure_templates``. No FK constraint yet so
+  # writes that pin a template don't require coordinated lifecycle with
+  # the templates table.
   template_id = Column(String, nullable=True)
 
   # Metadata

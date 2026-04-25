@@ -1,9 +1,10 @@
-"""Pending-obligation promotion — Stream 2.B's reusable core.
+"""Pending-obligation promotion — reusable core sweep.
 
-Materialized `pending` `schedule_entry_due` events sit dormant until their
-period boundary passes. At that point a sweep flips them to `classified`
-(committing to the obligation), then optionally dispatches the
-`schedule_entry_due` Python handler to draft the closing entry on the GL.
+Materialized ``pending`` ``schedule_entry_due`` events sit dormant until
+their period boundary passes. At that point a sweep flips them to
+``classified`` (committing to the obligation), then optionally dispatches
+the ``schedule_entry_due`` Python handler to draft the closing entry on the
+GL.
 
 Two surfaces call this:
 
@@ -24,18 +25,18 @@ The ``dispatch_handlers`` flag distinguishes the two operating modes:
 
 - ``False`` (co-pilot, default): flip status only. The operator (or
   another job) is responsible for actually drafting the entry. Useful
-  during early rollout when handler dispatch should be observable
-  before it's automatic.
+  when handler dispatch should be observable before it's automatic.
 - ``True`` (autopilot): also call the registered Python handler so the
   draft entry lands in the GL immediately on the same tick.
 
-Stream 2.E will promote this from a process-wide env var to a
-per-graph column on ``Graph``.
+Mode is selected per graph via ``Graph.auto_dispatch_obligations``, with the
+``EXTENSIONS_PROMOTION_AUTO_DISPATCH`` env var as the deployment-wide default
+when the column is NULL.
 
 Idempotence
 -----------
 
-The flip is `UPDATE … WHERE status='pending' AND occurred_at <= :as_of`
+The flip is ``UPDATE … WHERE status='pending' AND occurred_at <= :as_of``
 so re-running the function is safe — already-classified rows are
 skipped. Handler dispatch is idempotent at the schedule-entry level
 (``ScheduleService.create_closing_entry`` reconciles to the existing

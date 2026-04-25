@@ -230,7 +230,7 @@ def _widen_library_checks(conn, schema: str) -> None:
   widened_taxonomy_type = (
     "taxonomy_type IN ("
     # 'reporting' retained transitionally for any rows copied from an
-    # un-backfilled public schema; Phase 2 tenant writes use
+    # un-backfilled public schema; tenant writes use
     # 'reporting_standard' / 'reporting_extension' / 'custom_ontology'.
     "'chart_of_accounts', 'reporting', 'mapping', 'schedule', "
     "'classification-vocabulary', 'classification-assignment', 'rules', "

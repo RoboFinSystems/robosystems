@@ -15,17 +15,11 @@ materialized `schedule_entry_due` events point at via
         ▼
     Entry (draft → posted at close-period)
 
-When Stream 4 introduces domain-specific originators
-(``asset_acquired`` / ``prepaid_recorded`` / ``contract_signed``),
-``schedule_created`` events themselves get an
-``obligated_by_event_id`` pointing at the upstream domain event so
-the disposal cascade and AR/AP queries traverse uniformly.
-
 ScheduleService.create_schedule emits this event directly inside its
 own unit of work — it is NOT created via create-event-block by
 external callers. Registering it here is what gives the row a known
-event_type, a metadata schema for validation, and a place for future
-agents to dry-run via preview.
+event_type, a metadata schema for validation, and a place for agents
+to dry-run via preview.
 """
 
 from __future__ import annotations

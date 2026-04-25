@@ -38,8 +38,9 @@ RS_NS = RS_VOCAB  # alias for readability
 
 # Enum closures for rule axes. Kept here so both the loader (for
 # cheap sanity-checking during parse) and the migration CHECK
-# constraints can import one canonical source. Expand when Phase δ.3's
-# parser produces rules under the not-yet-seeded categories or patterns.
+# constraints can import one canonical source. Update RULE_CATEGORY_VALUES
+# and RULE_PATTERN_VALUES when new categories or patterns are added to the
+# seed.
 RULE_CATEGORY_VALUES: frozenset[str] = frozenset(
   {
     "AutomatedAccountingAndReportingChecks",

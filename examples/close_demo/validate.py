@@ -171,7 +171,11 @@ class _Validator:
     self._check("factSet non-null", b.get("factSet") is not None)
     rules = b.get("rules", [])
     self._check("rules present", len(rules) > 0, f"{len(rules)} rules")
-    se = [r for r in rules if r.get("rulePattern") == "SumEquals" and r.get("ruleOrigin") == "native"]
+    se = [
+      r
+      for r in rules
+      if r.get("rulePattern") == "SumEquals" and r.get("ruleOrigin") == "native"
+    ]
     self._check("native SumEquals rule in envelope", len(se) == 1, f"{len(se)} found")
 
   # ── Dispose smoke test ───────────────────────────────────────────────────
@@ -358,7 +362,11 @@ class _Validator:
         f"{fs['periodStart']} → {fs['periodEnd']}",
       )
 
-    se = [r for r in b.get("rules", []) if r.get("rulePattern") == "SumEquals" and r.get("ruleOrigin") == "native"]
+    se = [
+      r
+      for r in b.get("rules", [])
+      if r.get("rulePattern") == "SumEquals" and r.get("ruleOrigin") == "native"
+    ]
     self._check("SumEquals rule present", len(se) == 1, f"{len(se)} found")
 
     duration = [f for f in b.get("facts", []) if f.get("periodType") == "duration"]
@@ -373,7 +381,9 @@ class _Validator:
       payload = client.evaluate_rules(self.graph_id, structure_id=sid)
       summary = payload.get("summary")
       if summary is None:
-        self._check("evaluate-rules all-pass", False, "summary=null (no rules evaluated)")
+        self._check(
+          "evaluate-rules all-pass", False, "summary=null (no rules evaluated)"
+        )
       else:
         fails = summary.get("fail", 0) + summary.get("error", 0)
         self._check("evaluate-rules all-pass", fails == 0, f"summary={summary}")

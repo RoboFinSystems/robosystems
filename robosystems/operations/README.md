@@ -58,7 +58,7 @@ operations/
 │   ├── schedule.py            # Schedule block type handler (declarative construction)
 │   ├── statement.py           # Statement block type handlers (compositional, stub)
 │   ├── metric.py              # Metric block type handler (derivative, stub)
-│   ├── classify.py            # Association classifier scaffold (Phase δ.3)
+│   ├── classify.py            # Association classifier scaffold (not yet implemented)
 │   └── rules/                 # Rule evaluation engine
 │       ├── engine.py          # evaluate_rules_for_structure — entry point
 │       ├── evaluators.py      # Per-pattern dispatch (EqualTo, RollUp, Exists, CoExists, …)
@@ -140,11 +140,11 @@ The registry (`registry.py`) maps `block_type` strings to `BlockTypeRegistryEntr
 | `equity_statement` | compositional | `statement.py` | Yes |
 | `metric` | derivative | `metric.py` | No |
 
-Statement and metric dispatch handlers currently raise `NotImplementedError` (→ HTTP 501) — their data models are wired, but the construction logic ships in later phases.
+Statement and metric dispatch handlers currently raise `NotImplementedError` (→ HTTP 501) — their data models are wired, but the construction logic is not yet implemented.
 
 ## Rule Evaluation Engine
 
-`information_block/rules/` implements the Phase δ.3 rule evaluation engine:
+`information_block/rules/` implements the rule evaluation engine:
 
 - **`engine.py`** — entry point: loads rules scoped to a structure (via `envelope.load_rules_for_structure`), binds `$Variable` references to in-scope facts via qname lookup, dispatches per-pattern, writes `VerificationResult` rows, calls `session.flush()` before returning
 - **`evaluators.py`** — pattern dispatchers: `EqualTo`/`RollUp`/`RollForward` (arithmetic equality with configurable tolerance), `Exists` (fact presence), `CoExists` (all-or-nothing binding); other patterns return `skipped`

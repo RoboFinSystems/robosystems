@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from robosystems.operations.information_block import statement as statement_handlers
+from robosystems.operations.information_block.registry import REGISTRY
 
 
 def _exec_result(
@@ -25,9 +26,8 @@ def _exec_result(
 ) -> MagicMock:
   """Build a MagicMock shaped like a SQLAlchemy Result object.
 
-  ``all_rows`` covers the ``.all()`` path (used by the Phase epsilon
-  association-classifications loader which queries tuples rather than
-  scalars).
+  ``all_rows`` covers the ``.all()`` path used by the association-
+  classifications loader, which queries tuples rather than scalars.
   """
   result = MagicMock()
   if scalars_all is not None:
@@ -37,7 +37,6 @@ def _exec_result(
   if scalar is not None:
     result.scalar.return_value = scalar
   else:
-    # Default: execute().scalar() returns None (no latest report).
     result.scalar.return_value = None
   return result
 
@@ -53,12 +52,10 @@ def _make_statement_structure(
   concept_arrangement: str | None = "roll_up",
   member_arrangement: str | None = "aggregation",
 ) -> MagicMock:
-  """Shape a MagicMock like a Phase δ Structure row for a statement block.
+  """Shape a MagicMock like a Structure row for a statement block.
 
-  The envelope builder now reads typed columns (artifact_mechanics,
-  concept/member_arrangement, parenthetical_note) off the row, so
-  MagicMock's auto-attribute behaviour would otherwise inject unwanted
-  truthy values — this helper pins every field the builder touches.
+  Pins every field the envelope builder touches so MagicMock's
+  auto-attribute behaviour doesn't inject unwanted truthy values.
   """
   structure = MagicMock()
   structure.id = structure_id
@@ -79,66 +76,67 @@ def _make_statement_structure(
 
 class TestCreate:
   def test_create_raises_not_implemented_with_create_report_pointer(self) -> None:
-    session = MagicMock()
+    entry = REGISTRY["balance_sheet"]
     with pytest.raises(NotImplementedError) as exc:
-      statement_handlers._create_not_implemented(session, MagicMock(), "usr_test")
+      entry.dispatch_create(MagicMock(), MagicMock(), "usr_test")
     assert "create-report" in str(exc.value)
 
   @pytest.mark.parametrize(
     "block_type",
     ["balance_sheet", "income_statement", "cash_flow_statement", "equity_statement"],
   )
-  def test_every_statement_handler_binds_the_not_implemented_create(
+  def test_every_statement_type_raises_not_implemented_on_create(
     self, block_type: str
   ) -> None:
-    """Every handler pair wires the same 501-producing ``create``."""
-    handlers = statement_handlers.make_statement_handlers(block_type)
-    assert handlers["create"] is statement_handlers._create_not_implemented
+    """All four statement block types share the same 501-producing create handler."""
+    entry = REGISTRY[block_type]
+    with pytest.raises(NotImplementedError, match="create-report"):
+      entry.dispatch_create(MagicMock(), MagicMock(), "usr_test")
 
 
 class TestUpdate:
   def test_update_raises_not_implemented(self) -> None:
-    session = MagicMock()
+    entry = REGISTRY["balance_sheet"]
     with pytest.raises(NotImplementedError) as exc:
-      statement_handlers._update_not_implemented(session, MagicMock(), "usr_test")
+      entry.dispatch_update(MagicMock(), MagicMock(), "usr_test")
     assert "library-seeded" in str(exc.value)
 
   @pytest.mark.parametrize(
     "block_type",
     ["balance_sheet", "income_statement", "cash_flow_statement", "equity_statement"],
   )
-  def test_every_statement_handler_binds_not_implemented_update(
+  def test_every_statement_type_raises_not_implemented_on_update(
     self, block_type: str
   ) -> None:
-    handlers = statement_handlers.make_statement_handlers(block_type)
-    assert handlers["update"] is statement_handlers._update_not_implemented
+    entry = REGISTRY[block_type]
+    with pytest.raises(NotImplementedError):
+      entry.dispatch_update(MagicMock(), MagicMock(), "usr_test")
 
 
 class TestDelete:
   def test_delete_raises_not_implemented(self) -> None:
-    session = MagicMock()
+    entry = REGISTRY["balance_sheet"]
     with pytest.raises(NotImplementedError) as exc:
-      statement_handlers._delete_not_implemented(session, MagicMock(), "usr_test")
+      entry.dispatch_delete(MagicMock(), MagicMock(), "usr_test")
     assert "library-seeded" in str(exc.value)
 
   @pytest.mark.parametrize(
     "block_type",
     ["balance_sheet", "income_statement", "cash_flow_statement", "equity_statement"],
   )
-  def test_every_statement_handler_binds_not_implemented_delete(
+  def test_every_statement_type_raises_not_implemented_on_delete(
     self, block_type: str
   ) -> None:
-    handlers = statement_handlers.make_statement_handlers(block_type)
-    assert handlers["delete"] is statement_handlers._delete_not_implemented
+    entry = REGISTRY[block_type]
+    with pytest.raises(NotImplementedError):
+      entry.dispatch_delete(MagicMock(), MagicMock(), "usr_test")
 
 
 class TestBuildEnvelope:
   def test_returns_none_when_structure_missing(self) -> None:
     session = MagicMock()
     session.get.return_value = None
-    build = statement_handlers.make_statement_handlers("balance_sheet")[
-      "build_envelope"
-    ]
+    build = statement_handlers.make_statement_handlers("balance_sheet")
     assert build(session, "struct_missing") is None
 
   def test_returns_none_when_structure_is_wrong_block_type(self) -> None:
@@ -147,9 +145,7 @@ class TestBuildEnvelope:
     structure = MagicMock()
     structure.structure_type = "schedule"
     session.get.return_value = structure
-    build = statement_handlers.make_statement_handlers("balance_sheet")[
-      "build_envelope"
-    ]
+    build = statement_handlers.make_statement_handlers("balance_sheet")
     assert build(session, "struct_other") is None
 
   def test_returns_envelope_with_empty_facts_when_no_reports_exist(self) -> None:
@@ -162,9 +158,8 @@ class TestBuildEnvelope:
       description="Assets + Liabilities + Equity",
     )
     session.get.return_value = structure
-    # Query order: taxonomy name, associations, rules, fact_set.
-    # Element/report queries skip when element_ids is empty; the
-    # association-classifications query skips when associations is empty.
+    # Query order (no associations → no elements or classifications queries):
+    # taxonomy name → associations → rules → fact_set → verification_results
     session.execute.side_effect = [
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
@@ -173,9 +168,7 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[]),  # verification results
     ]
 
-    build = statement_handlers.make_statement_handlers("balance_sheet")[
-      "build_envelope"
-    ]
+    build = statement_handlers.make_statement_handlers("balance_sheet")
     envelope = build(session, "struct_balance_sheet")
 
     assert envelope is not None
@@ -193,7 +186,6 @@ class TestBuildEnvelope:
     assert envelope.elements == []
     assert envelope.connections == []
     assert envelope.facts == []
-    # Reserved-for-later-phase fields default-empty.
     assert envelope.rules == []
     assert envelope.dimensions == []
     assert envelope.fact_set is None
@@ -239,20 +231,21 @@ class TestBuildEnvelope:
     element_sales.balance_type = "credit"
     element_sales.period_type = "duration"
 
+    # Query order (1 association → elements + classifications queries run):
+    # taxonomy → associations → elements → rules → classifications →
+    # fact_set → verification_results → latest_report_id
     session.execute.side_effect = [
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[association]),  # associations
       _exec_result(scalars_all=[element_revenue, element_sales]),  # elements
-      _exec_result(scalar=None),  # no reports → facts=[]
       _exec_result(scalars_all=[]),  # rules
       _exec_result(all_rows=[]),  # association classifications
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
+      _exec_result(scalar=None),  # latest report id → None (no reports)
     ]
 
-    build = statement_handlers.make_statement_handlers("income_statement")[
-      "build_envelope"
-    ]
+    build = statement_handlers.make_statement_handlers("income_statement")
     envelope = build(session, "struct_income_statement")
 
     assert envelope is not None
@@ -303,21 +296,22 @@ class TestBuildEnvelope:
     fact.fact_scope = "in_scope"
     fact.fact_set_id = None
 
+    # Query order (1 association, report found):
+    # taxonomy → associations → elements → rules → classifications →
+    # fact_set → verification_results → latest_report_id → facts
     session.execute.side_effect = [
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[assoc]),  # associations
       _exec_result(scalars_all=[element]),  # elements
-      _exec_result(scalar="rep_latest"),  # latest_report_id
-      _exec_result(scalars_all=[fact]),  # facts
       _exec_result(scalars_all=[]),  # rules
       _exec_result(all_rows=[]),  # association classifications
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
+      _exec_result(scalar="rep_latest"),  # latest_report_id
+      _exec_result(scalars_all=[fact]),  # facts
     ]
 
-    build = statement_handlers.make_statement_handlers("balance_sheet")[
-      "build_envelope"
-    ]
+    build = statement_handlers.make_statement_handlers("balance_sheet")
     envelope = build(session, "struct_balance_sheet")
 
     assert envelope is not None
@@ -339,18 +333,16 @@ class TestBuildEnvelope:
       name=statement_handlers.STATEMENT_DISPLAY[block_type][0],
     )
     session.get.return_value = structure
-    # Query order: taxonomy name, associations, rules, fact_set.
-    # Elements/report queries skip when there are no associations; the
-    # association-classifications query skips too.
+    # No associations → no elements or classifications queries.
     session.execute.side_effect = [
       _exec_result(scalar="US GAAP"),
-      _exec_result(scalars_all=[]),
+      _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
     ]
 
-    build = statement_handlers.make_statement_handlers(block_type)["build_envelope"]
+    build = statement_handlers.make_statement_handlers(block_type)
     envelope = build(session, f"struct_{block_type}")
 
     assert envelope is not None

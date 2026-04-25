@@ -96,7 +96,7 @@ The `Query` root is built at class-construction time from whichever domain mixin
 - Does **not** have `InvestorQuery` in the schema
 - Introspection reports only ledger + information-block fields — there's no way for a client to discover or call `portfolios` on a deployment where investor is off
 
-This is strictly better than the alternative ("expose everything, throw `INVESTOR_NOT_INITIALIZED` at runtime") because clients can branch on the actual schema shape rather than trial-and-error against runtime errors. The tradeoff is that introspection tooling sees a different schema per deployment — fine for now since we don't publish a single SDL.
+This is strictly better than the alternative ("expose everything, throw `INVESTOR_NOT_INITIALIZED` at runtime") because clients can branch on the actual schema shape rather than trial-and-error against runtime errors. The tradeoff is that introspection tooling sees a different schema per deployment. We don't publish a single SDL; the schema is composed dynamically per tenant feature-flag combination.
 
 Per-domain gating also short-circuits the router: if both flags are off, the FastAPI router that mounts `/extensions/{graph_id}/graphql` never mounts at all (see `main.py` line ~369).
 

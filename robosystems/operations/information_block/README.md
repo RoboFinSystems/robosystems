@@ -2,7 +2,7 @@
 
 The Information Block subsystem provides a registry-driven, type-safe system for constructing and reading structured financial data blocks — schedules, statements, rollforwards, reconciliations, metrics, and policies.
 
-**Architectural context**: `local/docs/specs/information-block.md` has the full spec with phase breakdown. This README is the code-level orientation.
+**Architectural context**: `local/docs/specs/information-block.md` has the full spec. This README is the code-level orientation.
 
 ## What is an Information Block?
 
@@ -23,7 +23,7 @@ information_block/
 ├── schedule.py        # block_type='schedule' handler (declarative construction)
 ├── statement.py       # block_type='balance_sheet|income_statement|...' handlers (stub)
 ├── metric.py          # block_type='metric' handler (stub)
-├── classify.py        # Scaffold for the Phase δ.3 association classifier (see below)
+├── classify.py        # Scaffold for the association classifier (not yet implemented)
 └── rules/
     ├── engine.py      # evaluate_rules_for_structure — entry point
     ├── evaluators.py  # Per-pattern dispatch (EqualTo, RollUp, Exists, CoExists, …)
@@ -41,7 +41,7 @@ Each registered block type declares one of three construction modes:
 | `compositional` | Atoms exist from report ingest; block is a view assembled at read time | `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement` |
 | `derivative` | Facts are computed from other blocks at read time | `metric` |
 
-Phase a only ships full `declarative` support. Compositional and derivative handlers raise `NotImplementedError` (→ HTTP 501) until their phases land.
+The compositional family (statements) and the derivative family (metrics) raise `NotImplementedError` (→ HTTP 501) on the create / update / delete paths today — statements are produced via `create-report`, and the metric derivation evaluator is not yet implemented. Their `build_envelope` paths are fully wired and surface read envelopes normally.
 
 ## Adding a New Block Type
 
@@ -91,12 +91,15 @@ results = evaluate_rules_for_structure(
 
 The engine loads rules via `envelope.load_rules_for_structure` (so element- and association-scoped rules are included), binds `$Variable` names to fact values via qname lookup, dispatches to the per-pattern evaluator, writes one `VerificationResult` row per rule, and returns the written rows. `session.flush()` is called before returning; the caller owns `commit`.
 
-**Binding semantics**: schedule facts are structure-scoped (`Fact.structure_id`). Statement facts are currently report-scoped (`Fact.report_id`, `structure_id=NULL`) — the engine falls back to the most recent matching report for non-schedule blocks until the FactSet expand pass stamps `structure_id` on every fact.
+**Binding semantics**: schedule facts are structure-scoped (`Fact.structure_id`). Statement facts are currently report-scoped (`Fact.report_id`, `structure_id=NULL`) — the engine falls back to the most recent matching report for non-schedule blocks until report-write paths stamp `structure_id` on every fact.
 
 **Expression safety**: `expressions.py` rewrites `$Variable` → `_var_Name`, normalizes bare `=` → `==`, parses with `ast.parse(mode='eval')`, then walks the AST through a whitelist. `eval()` is never called — the AST is evaluated recursively by `_eval_arith`.
 
-## classify.py — Scaffold, Not Yet Implemented
+## Status of Pending Components
 
-`classify.py` is a deliberate empty scaffold that reserves the import path for the Phase δ.3 OLTP association classifier. The current classification implementation lives in the SEC adapter at `adapters/sec/processors/classify.py` (Cypher/parquet-based). The Phase δ.3 extraction will move a Postgres-backed version here so it can run directly over OLTP `associations` + `elements` rows and produce `association_classifications` rows for any tenant — not just SEC-ingested graphs.
+- **Rule evaluation engine**: pattern dispatchers and the safe expression parser are implemented and wired through `evaluate-rules`. Handles `EqualTo` / `RollUp` / `RollForward` / `Exists` / `CoExists` / `SumEquals`; other patterns return `skipped`.
+- **Association classifier (`classify.py`)**: not yet implemented. The current SEC-side classifier lives in `adapters/sec/processors/classify.py` and writes graph-side Classification nodes; a Postgres-backed version that runs over OLTP `associations` + `elements` and produces `association_classifications` rows for any tenant has not been ported. The `classify.py` module reserves the import path so handlers have a stable hook.
+- **FactSet expansion**: not yet implemented. Write paths do not yet stamp every fact with a `fact_set_id`, so `FactSetLite` on the envelope is `None` for blocks whose creation pre-dates FactSet stamping.
+- **Metric derivation evaluator**: not yet implemented. `MetricMechanics` is registered as a typed union arm; the create / update / delete paths raise `NotImplementedError` and `build_envelope` returns the typed mechanics with `facts=[]`.
 
-If the classifier grows into multiple files, promote `classify.py` → `classify/` then. Don't do it preemptively.
+If `classify.py` grows into multiple files, promote it to `classify/` then — don't do it preemptively.

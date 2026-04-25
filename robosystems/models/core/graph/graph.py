@@ -177,15 +177,14 @@ class Graph(Model):
   # schema at provision time. See robosystems/taxonomy/pins.py.
   taxonomy_pin = Column(JSONB, nullable=True)
 
-  # Stream 2.E: per-graph autopilot for the period-boundary obligation
-  # promoter. When False (default — co-pilot), the sensor flips matured
-  # `pending` schedule_entry_due events to `classified` but stops there;
-  # an operator/agent drives draft creation. When True (autopilot), the
+  # Per-graph autopilot for the period-boundary obligation promoter.
+  # When False (default — co-pilot), the sensor flips matured `pending`
+  # schedule_entry_due events to `classified` but stops there; an
+  # operator/agent drives draft creation. When True (autopilot), the
   # sensor also dispatches the registered handler so the closing-entry
-  # draft lands in the GL on the same tick. Replaces the
-  # process-wide EXTENSIONS_PROMOTION_AUTO_DISPATCH env var introduced
-  # in Stream 2.B; the env var stays as the default when this column is
-  # NULL on legacy rows during the rollout window.
+  # draft lands in the GL on the same tick. Overrides the process-wide
+  # EXTENSIONS_PROMOTION_AUTO_DISPATCH env var; the env var supplies the
+  # default when this column is NULL.
   auto_dispatch_obligations = Column(Boolean, nullable=True)
 
   # Lifecycle status

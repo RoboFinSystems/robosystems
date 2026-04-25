@@ -1,22 +1,15 @@
 """FactSet model — period-specific instantiation of a Structure.
 
-Phase ζ data-model landing. From the spec §5.3:
+A Structure accumulates many FactSets over time — one per period run.
+Structure = Information Model + Mechanics declaration (persistent);
+FactSet = a period-specific instantiation of that Structure;
+Information Block envelope = Structure + FactSet for a given period.
 
-    A Structure accumulates many FactSets over time — one per period run.
-    Structure = Information Model + Mechanics declaration (persistent).
-    FactSet    = a period-specific instantiation of that Structure.
-    Information Block envelope = Structure + FactSet for a given period.
-
-The table exists so statements and schedules share one period-scoped
-grouping concept instead of the split today (statements use ``report_id``,
-schedules use ``fact_set_id`` as a free-floating string). Over the expand
-pass, ``create_report`` creates a FactSet row first and stamps all facts
-with ``fact_set_id``; ``report_id`` retires once every reader resolves
-through FactSet.
-
-The blitz ships the table + FKs + writer support. Backfill of existing
-rows, ``report_id`` column retirement, and the dimension seeder are
-expand-pass work.
+The table provides one period-scoped grouping concept that statements
+and schedules share. ``create_report`` creates a FactSet row first and
+stamps all facts with ``fact_set_id``; the legacy ``report_id`` column
+remains as a back-pointer for readers that have not yet been migrated
+to resolve through FactSet.
 """
 
 from datetime import UTC, datetime
@@ -64,7 +57,7 @@ class FactSet(ExtensionsBase):
 
   # Kind of FactSet — 'report' for statement renderers, 'schedule' for
   # closing-entry generators, 'custom' for agent-authored derivative
-  # blocks (Phase η). Enum closure enforced by CHECK above.
+  # blocks. Enum closure enforced by the CHECK constraint above.
   factset_type = Column(String, nullable=False, default="report")
 
   # Multi-tenant + cross-link fields. ``entity_id`` matches

@@ -194,8 +194,8 @@ class RuleTargetSpec(BaseModel):
 class RuleVariableSpec(BaseModel):
   """Binding from a `$Variable` in the rule expression to a concept qname.
 
-  The engine (Phase δ.3) evaluates `rule_expression` by looking each
-  variable up in the Structure's in-scope fact set and substituting the
+  The rule engine evaluates `rule_expression` by looking up each
+  variable in the Structure's in-scope fact set and substituting the
   value. This spec is the compile-time binding table.
   """
 
@@ -247,7 +247,7 @@ class RuleSpec(BaseModel):
     description=(
       "XPath-flavored predicate (verbatim from Charlie's XBRL Formula "
       "linkbases) or natural-language condition for structural rules. "
-      "Evaluation DSL selection is the engine's job (Phase δ.3)."
+      "Evaluation DSL selection is the engine's job."
     ),
   )
   rule_target: RuleTargetSpec | None = Field(

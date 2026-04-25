@@ -51,8 +51,8 @@ Every route follows the pattern:
   `remove-publish-list-member`
 
 Raw ontology CRUD (taxonomies, structures, elements, non-mapping
-associations) was retired in Phase 1 — the Taxonomy Block envelope is
-now the only tenant-facing construction path. Mapping associations stay
+associations) is not exposed publicly — the Taxonomy Block envelope is
+the only tenant-facing construction path. Mapping associations stay
 direct (craft, not curation).
 
 `build-fact-grid` is registered separately in the sibling `views.py`
@@ -594,7 +594,7 @@ async def update_entity_op(
 #
 # Taxonomy Block is the only tenant-facing path for ontology curation.
 # Raw CRUD (create-taxonomy, create-structure, create/update/delete-element,
-# create-associations) was retired from the public surface in Phase 1.
+# create-associations) is not exposed on the public surface.
 # ═══════════════════════════════════════════════════════════════════════════
 
 create_taxonomy_block_op = _registrar.register(
@@ -928,8 +928,8 @@ evaluate_rules_op = _registrar.register(
 # ═══════════════════════════════════════════════════════════════════════════
 # Agents
 #
-# Counterparty records (customers, vendors, employees, etc.) — Phase 2 of
-# the event-driven ledger. events.agent_id references this table.
+# Counterparty records (customers, vendors, employees, etc.).
+# events.agent_id references this table.
 # ═══════════════════════════════════════════════════════════════════════════
 
 create_agent_op = _registrar.register(
@@ -966,9 +966,10 @@ update_agent_op = _registrar.register(
 # ═══════════════════════════════════════════════════════════════════════════
 # Event Blocks
 #
-# Real-world business event layer (event-driven-ledger.md). Phase 1 ships
-# the envelope in capture-only mode (apply_handlers=False). The handler
-# engine (apply_handlers=True, event_handlers table) ships in Phase 3.
+# Real-world business event layer (event-driven-ledger.md). Two write
+# modes: apply_handlers=False captures the event without firing GL
+# postings; apply_handlers=True resolves an event_handler and fires its
+# transaction template atomically with the event row.
 # ═══════════════════════════════════════════════════════════════════════════
 
 create_event_block_op = _registrar.register(
@@ -1022,8 +1023,7 @@ update_event_block_op = _registrar.register(
 # ═══════════════════════════════════════════════════════════════════════════
 # Event Handlers
 #
-# Dynamic rule registry for event → transaction transformation (Phase 3).
-# The dynamic rule layer that drives event → GL transformation.
+# Dynamic rule registry that drives event → GL transformation.
 # ═══════════════════════════════════════════════════════════════════════════
 
 create_event_handler_op = _registrar.register(

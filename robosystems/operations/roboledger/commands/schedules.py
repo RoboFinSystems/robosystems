@@ -325,9 +325,9 @@ def update_schedule(
     }
 
   structure.metadata_ = metadata
-  # Phase δ: keep artifact_mechanics in sync with metadata_ while both
-  # live on the row. Envelope reads prefer artifact_mechanics; writes
-  # stamp both during the transition window.
+  # Dual-column write: envelope reads prefer artifact_mechanics; writes
+  # stamp both columns so older rows that pre-date artifact_mechanics
+  # remain readable through metadata_.
   # periods_with_entries is transient (queried from facts at read time) —
   # intentionally excluded rather than using ScheduleMechanics.model_dump().
   structure.artifact_mechanics = {
@@ -336,10 +336,10 @@ def update_schedule(
     "schedule_metadata": metadata.get("schedule_metadata"),
   }
 
-  # Stream 2.E: void + re-materialize the pending obligation chain when
-  # the entry template changed. Same transaction as the metadata update
-  # so a partial state is impossible — either the new template + new
-  # pending events both land, or neither does.
+  # When the entry template changed, void and re-materialize the pending
+  # obligation chain in the same transaction so partial state is
+  # impossible: either the new template + new pending events both land,
+  # or neither does.
   if template_changed:
     ScheduleService().supersede_pending_obligations(
       session,
@@ -371,18 +371,11 @@ def update_schedule(
   )
 
 
-# Asset disposal was retired as a standalone operation in Phase 4b of the
-# event-driven ledger. The atomic truncate + SumEquals cleanup + balanced
-# disposal entry logic now lives in the Python handler registry at
-# operations/event_block/python_handlers/asset_disposed.py
-# and is invoked via create-event-block(event_type='asset_disposed').
-
-
 def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   """Delete a schedule — cascades through facts and associations.
 
   Deletion order respects FK constraints:
-  1. Pending obligation events (Stream 2.E: void before parent disappears)
+  1. Pending obligation events (voided before the parent disappears)
   2. Verification results (referencing rules / structure_id)
   3. Facts and FactSets (referencing structure_id)
   4. Rules and association classifications (referencing associations)

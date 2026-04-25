@@ -185,7 +185,7 @@ def _filter_tables_for_extensions(
 #       postgres_scanner.
 #   (2) Declared in schemas/extensions/roboinvestor.py for schema
 #       completeness but not yet backed by OLTP tables or materialization
-#       SQL — deferred Phase 2 work.
+#       SQL — not yet implemented.
 _UNMATERIALIZED_TABLES: frozenset[str] = frozenset(
   {
     # Category 1: SEC XBRL-only (not written from extensions OLTP)
@@ -203,7 +203,7 @@ _UNMATERIALIZED_TABLES: frozenset[str] = frozenset(
     "FACT_HAS_DIMENSION",
     "ENTITY_EVOLVED_FROM",
     "ENTITY_OWNS_ENTITY",
-    # Category 2: roboinvestor Phase 2 — schema-declared, OLTP not yet wired
+    # Category 2: roboinvestor schema-declared, OLTP not yet wired
     "Trade",
     "Benchmark",
     "MarketData",

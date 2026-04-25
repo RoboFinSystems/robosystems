@@ -1,4 +1,5 @@
-"""Handlers for ``block_type='schedule'`` — the first Information Block type.
+"""Handlers for ``block_type='schedule'`` — the declarative construction
+mode reference.
 
 Two public handlers bind the generic construction machinery to the
 existing Schedule POC:
@@ -9,10 +10,10 @@ existing Schedule POC:
   packs them into the typed :class:`InformationBlockEnvelope`.
 
 Schedule is the reference implementation of the **declarative**
-construction mode (user declares the mechanics + seed params; the
-system generates atoms). Phase b's Statement block type will be the
-reference **compositional** mode; Phase η's Metric block type will be
-the reference **derivative** mode.
+construction mode — the user declares the mechanics + seed params and
+the system generates atoms. The statement family covers the
+**compositional** mode and the metric block covers the **derivative**
+mode.
 """
 
 from __future__ import annotations
@@ -33,16 +34,13 @@ from robosystems.models.api.information_block import (
   InformationModelResponse,
   ScheduleMechanics,
 )
-from robosystems.models.extensions import Association, Element, Structure, Taxonomy
+from robosystems.models.extensions import Structure
 from robosystems.models.extensions.roboledger import Entry, Fact
 from robosystems.operations.information_block.envelope import (
   association_to_connection,
   element_to_lite,
   fact_to_lite,
-  load_classifications_for_associations,
-  load_latest_fact_set_for_structure,
-  load_rules_for_structure,
-  load_verification_results_for_structure,
+  load_base_envelope_atoms,
 )
 from robosystems.operations.roboledger.commands.schedules import (
   create_schedule as cmd_create_schedule,
@@ -114,10 +112,10 @@ def _load_schedule_mechanics(
 ) -> ScheduleMechanics:
   """Build the typed Schedule mechanics from a Structure row.
 
-  Prefers the Phase δ typed column (``artifact_mechanics``). Falls back
-  to the legacy ``metadata_`` JSONB shape for Schedule rows that
-  pre-date the Phase δ backfill — both paths produce the same
-  :class:`ScheduleMechanics` envelope arm.
+  Reads from the typed ``artifact_mechanics`` column when populated and
+  falls back to the legacy ``metadata_`` JSONB shape for Schedule rows
+  that pre-date the typed-column backfill — both paths produce the
+  same :class:`ScheduleMechanics` envelope arm.
   """
   mechanics_blob = structure.artifact_mechanics
   if mechanics_blob:
@@ -131,8 +129,9 @@ def _load_schedule_mechanics(
   if not raw_entry_template:
     raise ValueError(
       f"Schedule structure {structure.id!r} has no entry_template in metadata_ "
-      "and no artifact_mechanics — the row may be corrupted or from an unsupported "
-      "pre-δ path. Check the Schedule creation path and the Phase δ backfill."
+      "and no artifact_mechanics — the row may be corrupted or written by an "
+      "unsupported legacy path. Check the Schedule creation path and the "
+      "artifact_mechanics backfill."
     )
   return ScheduleMechanics(
     kind="closing_entry_generator",
@@ -153,18 +152,20 @@ def build_envelope(
 
   Returns ``None`` when the structure doesn't exist or isn't a schedule,
   so the generic reader can cleanly distinguish misses from errors.
-
-  Phase δ reads mechanics from the typed ``artifact_mechanics`` column,
-  falling back to legacy ``metadata_`` JSONB for rows that pre-date the
-  backfill.
+  Mechanics are read from the typed ``artifact_mechanics`` column with
+  fallback to legacy ``metadata_`` JSONB.
   """
-  structure = session.get(Structure, structure_id)
-  if structure is None or structure.structure_type != SCHEDULE_BLOCK_TYPE:
+  atoms = load_base_envelope_atoms(
+    session, structure_id, expected_block_type=SCHEDULE_BLOCK_TYPE
+  )
+  if atoms is None:
     return None
 
+  structure = atoms.structure
+
   # Runtime state: how many closing entries (draft OR posted) trace back
-  # to this schedule. Phase ζ makes this derivable from typed FactSets
-  # and this counter gets removed.
+  # to this schedule. Kept on the mechanics arm until typed FactSets
+  # make this derivable.
   periods_with_entries = (
     session.execute(
       select(func.count(Entry.id)).where(
@@ -176,28 +177,6 @@ def build_envelope(
   )
 
   mechanics = _load_schedule_mechanics(structure, periods_with_entries)
-
-  taxonomy_name = session.execute(
-    select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
-  ).scalar()
-
-  associations = (
-    session.execute(select(Association).where(Association.structure_id == structure_id))
-    .scalars()
-    .all()
-  )
-
-  element_ids = {a.to_element_id for a in associations} | {
-    a.from_element_id for a in associations
-  }
-  if element_ids:
-    elements = (
-      session.execute(select(Element).where(Element.id.in_(element_ids)))
-      .scalars()
-      .all()
-    )
-  else:
-    elements = []
 
   # Schedules publish only in-scope facts — historical facts were
   # already reflected in opening balances and shouldn't surface as
@@ -213,20 +192,6 @@ def build_envelope(
     .all()
   )
 
-  rules = load_rules_for_structure(
-    session,
-    structure_id,
-    element_ids=list(element_ids),
-    association_ids=[a.id for a in associations],
-  )
-
-  classifications_by_assoc = load_classifications_for_associations(
-    session, [a.id for a in associations]
-  )
-
-  fact_set = load_latest_fact_set_for_structure(session, structure_id)
-  verification_results = load_verification_results_for_structure(session, structure_id)
-
   return InformationBlockEnvelope(
     id=structure.id,
     block_type=SCHEDULE_BLOCK_TYPE,
@@ -234,7 +199,7 @@ def build_envelope(
     display_name=SCHEDULE_DISPLAY_NAME,
     category=SCHEDULE_CATEGORY,
     taxonomy_id=structure.taxonomy_id,
-    taxonomy_name=taxonomy_name,
+    taxonomy_name=atoms.taxonomy_name,
     information_model=InformationModelResponse(
       concept_arrangement=structure.concept_arrangement or "roll_forward",
       member_arrangement=structure.member_arrangement,
@@ -245,15 +210,15 @@ def build_envelope(
       template=None,
       mechanics=mechanics,
     ),
-    elements=[element_to_lite(e) for e in elements],
+    elements=[element_to_lite(e) for e in atoms.elements],
     connections=[
-      association_to_connection(a, classifications_by_assoc.get(a.id, []))
-      for a in associations
+      association_to_connection(a, atoms.classifications_by_assoc.get(a.id, []))
+      for a in atoms.associations
     ],
     facts=[fact_to_lite(f) for f in facts],
-    rules=rules,
-    fact_set=fact_set,
-    verification_results=verification_results,
+    rules=atoms.rules,
+    fact_set=atoms.fact_set,
+    verification_results=atoms.verification_results,
   )
 
 

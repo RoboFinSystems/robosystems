@@ -35,7 +35,7 @@ FASB elementsOfFinancialStatements axis. Primary values for CoA mapping:
 - **loss** — non-operating debit flows (income-statement duration, debit balance)
 
 Candidates have already been filtered to match the CoA element's classification \
-(typically to a specific SFAC 6 anchor subtree), so you don't need to re-filter — focus \
+(typically to a specific FAC anchor subtree), so you don't need to re-filter — focus \
 on choosing the best semantic match within the candidates.
 
 ## Matching Rules
@@ -161,7 +161,7 @@ def build_mapping_prompt(
   Args:
       elements: CoA elements to map (from get-unmapped-elements).
       candidates: FAC concepts to match against (from suggest-mapping; anchor-narrowed
-          via the element's SFAC 6 tagging when available, classification-only
+          via the element's FAC tagging when available, classification-only
           fallback otherwise).
 
   Returns:

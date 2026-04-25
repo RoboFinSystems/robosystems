@@ -10,10 +10,10 @@ Mirrors the shape of :class:`ElementClassification`: composite PK on
 ``(association_id, classification_id)``, ``is_primary`` picks the
 canonical row per category, ``confidence`` + ``source`` track AI/adapter
 provenance. Structures carry an aggregate ``concept_arrangement`` column
-(Phase δ.1) for the common case where every association in the structure
-shares the same pattern; the junction enables the disaggregated view
-when they differ (e.g. a statement with a RollUp trunk and RollForward
-branches).
+as an optimized junction for the common case where every association in
+the structure shares the same classifications; the per-row junction
+enables the disaggregated view when they differ (e.g. a statement with a
+RollUp trunk and RollForward branches).
 """
 
 from datetime import UTC, datetime

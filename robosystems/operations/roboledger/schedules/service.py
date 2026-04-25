@@ -196,11 +196,11 @@ class ScheduleService:
         "periodic_amounts": schedule_metadata.periodic_amounts,
       }
 
-    # Phase δ: stamp the typed artifact_mechanics column alongside the
-    # legacy metadata_ blob so the envelope builder's typed-column read
-    # path works from creation. metadata_ is kept populated during the
-    # transition window — it's retired in a later phase once the spec
-    # follow-ups remove the fallback path on the read side.
+    # Stamp the typed artifact_mechanics column alongside the legacy
+    # metadata_ blob so the envelope builder's typed-column read path
+    # works from creation. metadata_ stays populated during the
+    # transition window for backward compatibility with rows written
+    # before artifact_mechanics landed.
     # periods_with_entries is a transient read-time value (queried from facts),
     # not a stored property — intentionally excluded here rather than using
     # ScheduleMechanics.model_dump(); it is injected by the envelope builder.
@@ -393,13 +393,11 @@ class ScheduleService:
           )
         )
 
-    # Stream 2.A: materialize the obligation register.
-    # One `schedule_created` event (originator) + one `pending`
-    # `schedule_entry_due` event per period, linked via
-    # `obligated_by_event_id`. The sensor (Stream 2.B) will later flip
-    # the pending events to `classified` at each period boundary and
-    # dispatch the existing handler. Until then, the legacy close path
-    # still works because nothing reads these new rows.
+    # Materialize the obligation register: one `schedule_created` event
+    # (originator) + one `pending` `schedule_entry_due` event per period,
+    # linked via `obligated_by_event_id`. The obligation sensor flips the
+    # pending events to `classified` at each period boundary and dispatches
+    # the existing handler.
     schedule_created_event_id, pending_event_count = (
       self._materialize_pending_obligations(
         session,
@@ -414,9 +412,9 @@ class ScheduleService:
       )
     )
 
-    # Stash the originator event id on the structure so disposal /
-    # supersession (Streams 2.C and 2.E) can find the obligation chain
-    # without an extra query.
+    # Stash the originator event id on the structure so disposal and
+    # supersession paths can find the obligation chain without an extra
+    # query.
     metadata["schedule_created_event_id"] = schedule_created_event_id
     metadata["pending_event_count"] = pending_event_count
     structure.metadata_ = metadata
@@ -551,8 +549,8 @@ class ScheduleService:
       tripping the close-period gate after their parent disappears.
 
     Returns the number of voided rows. Returns 0 (no-op) when the
-    schedule has no ``schedule_created_event_id`` stamped (legacy
-    schedules created before Stream 2.A) or when no pending
+    schedule has no ``schedule_created_event_id`` stamped (rows from
+    before the obligation register existed) or when no pending
     obligations exist.
 
     Also decrements the originator's ``metadata.pending_event_count``
@@ -625,8 +623,8 @@ class ScheduleService:
     replacement events created.
 
     Returns 0 when the schedule has no ``schedule_created_event_id``
-    stamped (legacy schedules created before Stream 2.A) or when no
-    pending events exist.
+    stamped (rows from before the obligation register existed) or when
+    no pending events exist.
     """
     metadata = structure.metadata_ or {}
     schedule_created_event_id = metadata.get("schedule_created_event_id")

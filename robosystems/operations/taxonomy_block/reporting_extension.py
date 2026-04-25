@@ -42,6 +42,7 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.taxonomy_block._helpers import qname_for
 from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
 from robosystems.operations.taxonomy_block.cascade import (
   cascade_delete_taxonomy,
@@ -65,7 +66,6 @@ from robosystems.operations.taxonomy_block.update_apply import (
   apply_top_level_fields,
 )
 from robosystems.operations.taxonomy_block.update_validator import (
-  reject_unsupported_deltas,
   validate_update_envelope,
 )
 from robosystems.operations.taxonomy_block.validators import (
@@ -77,13 +77,6 @@ REPORTING_EXTENSION_BLOCK_TYPE = "reporting_extension"
 DISPLAY_NAME = "Reporting Extension"
 DISPLAY_PLURAL = "Reporting Extensions"
 CATEGORY = "Reporting"
-
-
-def _qname_for_extension(standard: str | None, code: str | None, name: str) -> str:
-  """Derive an envelope-local qname when the tenant didn't supply one."""
-  ns = standard or "ext"
-  token = code or name.replace(" ", "")
-  return f"{ns}:{token}"
 
 
 def _library_qname_lookup(
@@ -159,7 +152,7 @@ def create(
   parent_refs: dict[str, str | None] = {}
 
   for req in payload.elements:
-    qname = req.qname or _qname_for_extension(payload.standard, req.code, req.name)
+    qname = req.qname or qname_for(payload.standard, "ext", req.code, req.name)
     element = Element(
       code=req.code,
       name=req.name,
@@ -285,7 +278,7 @@ def create(
 
 
 def _element_factory(req, taxonomy: Taxonomy, updated_by: str) -> tuple[Element, str]:
-  qname = req.qname or _qname_for_extension(taxonomy.standard, req.code, req.name)
+  qname = req.qname or qname_for(taxonomy.standard, "ext", req.code, req.name)
   element = Element(
     code=req.code,
     name=req.name,
@@ -314,8 +307,6 @@ def update(
     raise ValueError(
       f"taxonomy {payload.taxonomy_id!r} is not a reporting_extension taxonomy."
     )
-
-  reject_unsupported_deltas(payload)
 
   issues = validate_update_envelope(session, taxonomy, payload)
   if issues:

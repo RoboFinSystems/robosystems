@@ -14,7 +14,7 @@ persistence.
 Namespace / formula concept filtering: XBRL Formula / Variable /
 Validation linkbase concepts are skipped at extraction time to keep
 seed artifacts focused on reporting taxonomy. Full formula ingest is
-Phase 1 work (validation rules engine).
+deferred to the validation rules engine.
 """
 
 from __future__ import annotations
@@ -142,9 +142,9 @@ def _concept_iri(concept: Any) -> URIRef | None:
 def _classify_concept(concept: Any) -> str:
   """Derive the classification (asset/liability/equity/revenue/expense).
 
-  Heuristic for POC: use balance + periodType as signals, fall back to
-  name-based inference. Real classification logic should come from the
-  type-subtype linkbase — Phase 1 work.
+  Heuristic: use balance + periodType as signals, fall back to
+  name-based inference. Authoritative classification will eventually
+  come from the type-subtype linkbase.
   """
   balance = getattr(concept, "balance", None)
   period_type = getattr(concept, "periodType", None)

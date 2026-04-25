@@ -11,9 +11,6 @@ Four block types:
   * ``reporting_extension`` — tenant, extends a library ``reporting_standard``
   * ``chart_of_accounts`` — tenant, CoA curation
   * ``custom_ontology`` — tenant, declarative
-
-Phase 2.1 lands only the request/response shapes. Handlers, registry
-entries, and the validator/auto-rules engine arrive in later sub-phases.
 """
 
 from __future__ import annotations
@@ -348,8 +345,8 @@ class UpdateTaxonomyBlockRequest(BaseModel):
 
   Top-level fields (name / description / version) apply to the taxonomy
   row itself. The delta lists mutate atoms incrementally — the validator
-  (Phase 2.3) re-runs the seven-phase check across the projected post-
-  update state before anything commits.
+  re-runs every create-time check across the projected post-update
+  state before anything commits.
   """
 
   taxonomy_id: str

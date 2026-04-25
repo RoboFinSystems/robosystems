@@ -8,9 +8,11 @@ top-level :class:`InformationBlock` is hand-written because its
 Strawberry's pydantic decorator can't unwrap union types cleanly; the
 ``from_pydantic`` classmethod does the construction explicitly.
 
-Phase a ships ``ScheduleMechanicsType`` as the only mechanics variant.
-New block types add their ``*MechanicsType`` wrapper and extend the
-union in :class:`InformationBlock.artifact_mechanics`'s return type.
+The ``mechanics`` field is exposed as ``scalars.JSON`` with a ``kind``
+discriminator embedded in the payload. Promoting it to a typed
+``strawberry.union(...)`` is deferred until each mechanics arm grows
+typed fields worth exposing as a union; until then, clients branch on
+the embedded ``kind`` tag.
 """
 
 from __future__ import annotations
@@ -64,8 +66,7 @@ class InformationBlockElement:
 
 @strawberry.experimental.pydantic.type(model=PydanticClassification, all_fields=True)
 class InformationBlockClassification:
-  """An association-level classification bundled inside the envelope
-  (Phase epsilon)."""
+  """An association-level classification bundled inside the envelope."""
 
 
 @strawberry.experimental.pydantic.type(model=PydanticConnection, all_fields=True)
@@ -84,7 +85,7 @@ class InformationBlockFact:
 
 @strawberry.experimental.pydantic.type(model=PydanticFactSet, all_fields=True)
 class InformationBlockFactSet:
-  """Period-specific instantiation of the Structure (Phase ζ)."""
+  """Period-specific instantiation of the Structure."""
 
 
 @strawberry.experimental.pydantic.type(model=PydanticInformationModel, all_fields=True)
@@ -104,24 +105,19 @@ class InformationBlockRuleVariable:
 
 @strawberry.experimental.pydantic.type(model=PydanticRule, all_fields=True)
 class InformationBlockRule:
-  """A verification rule bundled inside the envelope (Phase δ.2)."""
+  """A verification rule bundled inside the envelope."""
 
 
 @strawberry.experimental.pydantic.type(
   model=PydanticVerificationResult, all_fields=True
 )
 class InformationBlockVerificationResult:
-  """Persisted outcome of a rule evaluation (Phase iota data model)."""
+  """Persisted outcome of a rule evaluation."""
 
 
-# The `mechanics` field is exposed as ``scalars.JSON`` with a `kind`
-# discriminator in the payload. Phases a + b ship ScheduleMechanics +
-# StatementMechanics as Pydantic union arms (shape-validated on the
-# server side); promoting this to a typed ``strawberry.union(...)``
-# on the GraphQL side is deferred until Phase d, when
-# ``artifact_mechanics`` becomes a real column and both arms gain typed
-# fields worth exposing as a union. Until then, clients branch on the
-# embedded ``kind`` tag.
+# Mechanics + template are exposed as ``scalars.JSON`` with a ``kind``
+# discriminator embedded in the payload — see the module docstring for
+# why this is preferred over a typed Strawberry union.
 MechanicsPayload = strawberry.scalars.JSON
 
 
@@ -178,8 +174,9 @@ class InformationBlock:
   facts: list[InformationBlockFact]
   rules: list[InformationBlockRule]
 
-  # Dimensions still typed as JSON until Phase ζ's content side lands.
-  # fact_set + verification_results are typed as of Phase ζ + iota.
+  # Dimensions stay typed as JSON until the dimension catalog exposes
+  # typed fields worth promoting; fact_set + verification_results are
+  # typed leaves driven by their Pydantic models above.
   dimensions: list[MechanicsPayload]
   fact_set: InformationBlockFactSet | None
   verification_results: list[InformationBlockVerificationResult]
@@ -202,8 +199,9 @@ class InformationBlock:
       ],
       facts=[InformationBlockFact.from_pydantic(f) for f in envelope.facts],
       rules=[InformationBlockRule.from_pydantic(r) for r in envelope.rules],
-      # dimensions / verification_results still pass through as JSON
-      # until their phases land; fact_set is typed as of Phase ζ.
+      # dimensions still passes through as JSON; fact_set and
+      # verification_results are typed leaves driven by their Pydantic
+      # arms.
       dimensions=list(envelope.dimensions),
       fact_set=(
         InformationBlockFactSet.from_pydantic(envelope.fact_set)

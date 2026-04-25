@@ -1,6 +1,6 @@
 """Transaction template DSL — {{ expr }} interpolation.
 
-Phase 3 ships immediate postings only. Supported expressions:
+Supported expressions:
   {{ event.amount }}               — event.amount (int, cents)
   {{ event.metadata.foo }}         — nested metadata field
   {{ event.metadata.foo }} / 2     — integer division
@@ -9,7 +9,6 @@ Phase 3 ships immediate postings only. Supported expressions:
 Rules:
 - All {{ ... }} tokens are resolved before arithmetic.
 - Arithmetic: only  `/ N`  trailing suffix is supported (integer division).
-  Future: `* N`, `+ N`, `- N` can be added here without touching callers.
 - Resolution errors raise TemplateInterpolationError with a descriptive message.
 - int results are returned as int; string results as str.
 """
