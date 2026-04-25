@@ -41,6 +41,7 @@ from .graph_tools import (
   MaterializeTool,
   SwitchWorkspaceTool,
 )
+from .graphql_tool import GraphqlQueryTool, GraphqlSchemaTool
 from .memory_tools import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .schema_tool import SchemaTool
 
@@ -127,6 +128,16 @@ class GraphMCPTools:
     # Layer 1: Core tools (always available for any graph)
     self.cypher_tool = CypherTool(graph_client)
     self.schema_tool = SchemaTool(graph_client)
+
+    # Layer 1: GraphQL escape-hatch tools (gated by EXTENSIONS_GRAPHQL_ENABLED)
+    # MCP_GRAPHQL_ENABLED is a runtime kill switch checked at dispatch time.
+    self.graphql_schema_tool: GraphqlSchemaTool | None = None
+    self.graphql_query_tool: GraphqlQueryTool | None = None
+    if env.EXTENSIONS_GRAPHQL_ENABLED:
+      self.graphql_schema_tool = GraphqlSchemaTool(graph_client)
+      self.graphql_query_tool = GraphqlQueryTool(
+        graph_client, schema_extensions=self.schema_extensions
+      )
 
     # Layer 2: Schema extension tools (gated by schema_extensions)
     self.example_queries_tool = None
@@ -641,6 +652,12 @@ class GraphMCPTools:
       self.schema_tool.get_tool_definition(),
     ]
 
+    # Layer 1: GraphQL escape-hatch (EXTENSIONS_GRAPHQL_ENABLED + MCP_GRAPHQL_ENABLED)
+    if self.graphql_schema_tool is not None and env.MCP_GRAPHQL_ENABLED:
+      tools.append(self.graphql_schema_tool.get_tool_definition())
+    if self.graphql_query_tool is not None and env.MCP_GRAPHQL_ENABLED:
+      tools.append(self.graphql_query_tool.get_tool_definition())
+
     # Layer 2: Schema extension tools (roboledger)
     if self._has_extension("roboledger"):
       tools.append(self.example_queries_tool.get_tool_definition())
@@ -752,6 +769,34 @@ class GraphMCPTools:
             "schema": result,
           }
           return json.dumps(cache_info, indent=2)
+
+      elif name == "get-graphql-schema":
+        if self.graphql_schema_tool is None:
+          raise ValueError(
+            "get-graphql-schema is not available. "
+            "Set EXTENSIONS_GRAPHQL_ENABLED=true to enable this feature."
+          )
+        if not env.MCP_GRAPHQL_ENABLED:
+          raise ValueError(
+            "get-graphql-schema is temporarily disabled. "
+            "Set MCP_GRAPHQL_ENABLED=true to re-enable."
+          )
+        result = await self.graphql_schema_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "query-graphql":
+        if self.graphql_query_tool is None:
+          raise ValueError(
+            "query-graphql is not available. "
+            "Set EXTENSIONS_GRAPHQL_ENABLED=true to enable this feature."
+          )
+        if not env.MCP_GRAPHQL_ENABLED:
+          raise ValueError(
+            "query-graphql is temporarily disabled. "
+            "Set MCP_GRAPHQL_ENABLED=true to re-enable."
+          )
+        result = await self.graphql_query_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
 
       # Layer 2: Schema extension tools (roboledger-gated)
       elif name == "get-example-queries":
