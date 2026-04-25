@@ -115,9 +115,14 @@ def _assign_efs_classification(
 def _update_efs_classification(
   session: Session, element_id: str, identifier: str
 ) -> None:
-  """Re-assign an element's EFS trait — clears existing, then adds."""
+  """Re-assign an element's EFS trait — clears existing EFS rows, then adds."""
   session.execute(
-    ElementTrait.__table__.delete().where(ElementTrait.element_id == element_id)
+    ElementTrait.__table__.delete().where(
+      ElementTrait.element_id == element_id,
+      ElementTrait.trait_id.in_(
+        select(Trait.id).where(Trait.category == "elementsOfFinancialStatements")
+      ),
+    )
   )
   _assign_efs_classification(session, element_id, identifier)
 

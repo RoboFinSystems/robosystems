@@ -75,7 +75,12 @@ class LibraryStructure:
   model=PydanticLibraryElementClassification, all_fields=True
 )
 class LibraryElementClassification:
-  """A classification trait assigned to a library element."""
+  """A trait assigned to a library element.
+
+  Named ``LibraryElementClassification`` for GraphQL schema stability —
+  the external field name predates the classification→trait rename and
+  is kept to avoid a breaking API change for existing clients.
+  """
 
 
 @strawberry.experimental.pydantic.type(

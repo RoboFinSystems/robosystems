@@ -124,7 +124,7 @@ def create_library_taxonomy_elements(
   created_by: str = "library-seeder",
 ) -> tuple[str, dict[str, int]]:
   """Insert Taxonomy + Elements + Labels + References + Structures +
-  Classifications + default catch-all structure for one package.
+  Traits + default catch-all structure for one package.
 
   Must be called for every package before ``create_library_arcs`` runs for
   any of them — the arcs pass resolves cross-package qname/classification
@@ -352,9 +352,9 @@ def create_library_arcs(
   package: TaxonomyPackage,
   created_by: str = "library-seeder",
 ) -> dict[str, int]:
-  """Insert Associations + ClassificationAssignments for one package.
+  """Insert Associations + TraitAssignments for one package.
 
-  Resolves qnames + classifications via DB lookup so cross-package arcs work
+  Resolves qnames + traits via DB lookup so cross-package arcs work
   regardless of which seed defined the target element.
   """
   counts: dict[str, int] = {
@@ -362,6 +362,9 @@ def create_library_arcs(
     "associations_skipped": 0,
     "trait_assignments": 0,
     "trait_assignments_skipped": 0,
+    # AssociationClassification seed-time loading is not yet implemented;
+    # TaxonomyPackage has no classification_assignments field, so these
+    # counters always stay 0.  Reserved for when that path is added.
     "classification_assignments": 0,
     "classification_assignments_skipped": 0,
   }

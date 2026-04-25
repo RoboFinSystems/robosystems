@@ -795,7 +795,7 @@ def upgrade() -> None:
   # 1. Drop concocted classification columns + their CHECK + index.
   # ──────────────────────────────────────────────────────────────────────
   # These columns live on the 0001 schema. Replaced by
-  # element_classifications junction rows in the
+  # element_traits junction rows in the
   # 'elementsOfFinancialStatements' category (seeded from
   # us-gaap-metamodel/v1).
   op.drop_constraint("check_element_classification", "elements", type_="check")
@@ -1309,6 +1309,17 @@ def downgrade() -> None:
     _restore_narrow_tenant_checks(conn, schema)
     _drop_phase_d_columns_from_tenant(conn, schema)
     _drop_phase_theta_columns_from_tenant(conn, schema)
+    # Drop tenant-schema library tables created by _create_tenant_library_tables.
+    # Delete in FK order before dropping to avoid constraint errors when data exists.
+    for tbl in (
+      "association_classifications",
+      "element_traits",
+      "traits",
+      "classifications",
+      "element_references",
+      "element_labels",
+    ):
+      conn.execute(text(f"DROP TABLE IF EXISTS {schema}.{tbl} CASCADE"))
 
   for_each_tenant_schema(conn, _teardown_tenant)
   conn.execute(text("DROP FUNCTION IF EXISTS public.raise_library_immutable()"))

@@ -78,7 +78,7 @@ _RULE_COLS = (
   "id, taxonomy_id, rule_category, rule_pattern, rule_expression, "
   "rule_message, rule_severity, rule_origin, target_kind, "
   "target_structure_id, target_element_id, target_association_id, "
-  "rule_variables, metadata, created_at, updated_at, created_by"
+  "target_taxonomy_id, rule_variables, metadata, created_at, updated_at, created_by"
 )
 
 

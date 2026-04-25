@@ -296,7 +296,11 @@ class LibraryQuery:
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
   ) -> list[LibraryElementClassification]:
-    """All classification traits assigned to this element, grouped by category."""
+    """All traits assigned to this element, grouped by category.
+
+    Field name kept as ``library_element_classifications`` for GraphQL
+    schema stability — see ``LibraryElementClassification`` in types/library.py.
+    """
     with _open_session(info) as session:
       rows = get_element_traits(session, element_id=str(id))
       return [LibraryElementClassification.from_pydantic(r) for r in rows]
