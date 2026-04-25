@@ -96,6 +96,10 @@ def apply_handler(
     else (event.occurred_at.date() if event.occurred_at else date.today())
   )
 
+  # One timestamp per handler invocation keeps the audit trail coherent —
+  # Transaction, Entry, and every LineItem share the same created_at/updated_at.
+  now = datetime.now(UTC)
+
   created_transactions: list[Transaction] = []
 
   for i, entry_spec in enumerate(template["transactions"]):
@@ -144,8 +148,8 @@ def apply_handler(
       triggered_by_event_id=event.id,
       status="pending",
       description=event.description or handler.name,
-      created_at=datetime.now(UTC),
-      updated_at=datetime.now(UTC),
+      created_at=now,
+      updated_at=now,
       created_by=created_by,
     )
     session.add(txn)
@@ -159,8 +163,8 @@ def apply_handler(
       status="draft",
       memo=event.description or handler.name,
       provenance="event_handler",
-      created_at=datetime.now(UTC),
-      updated_at=datetime.now(UTC),
+      created_at=now,
+      updated_at=now,
       created_by=created_by,
     )
     session.add(entry)
@@ -173,8 +177,8 @@ def apply_handler(
       debit_amount=debit_cents,
       credit_amount=0,
       line_order=0,
-      created_at=datetime.now(UTC),
-      updated_at=datetime.now(UTC),
+      created_at=now,
+      updated_at=now,
     )
     # Create credit LineItem
     credit_li = LineItem(
@@ -183,8 +187,8 @@ def apply_handler(
       debit_amount=0,
       credit_amount=credit_cents,
       line_order=1,
-      created_at=datetime.now(UTC),
-      updated_at=datetime.now(UTC),
+      created_at=now,
+      updated_at=now,
     )
     session.add(debit_li)
     session.add(credit_li)

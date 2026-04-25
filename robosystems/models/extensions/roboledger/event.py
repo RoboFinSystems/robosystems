@@ -1,10 +1,9 @@
-"""Event model — real-world business event layer (event-driven-ledger.md Phase 1).
+"""Event model — real-world business event layer (event-driven-ledger.md).
 
-Phase 1 delivers capture-only mode (apply_handlers=False). Handler matching
-and transaction generation ship in Phase 3. The triggered_by_event_id column
-on transactions links the audit chain once handlers start firing.
-
-agent_id is plain VARCHAR (no FK) until Phase 2 adds the agents table.
+Status lifecycle: captured → classified → committed → pending → fulfilled,
+with voided and superseded as terminal off-ramps. The triggered_by_event_id
+column on transactions and entries links GL rows back to the originating
+event for the audit chain.
 """
 
 from datetime import UTC, datetime
@@ -31,7 +30,13 @@ class Event(ExtensionsBase):
     Index("idx_events_occurred_at", "occurred_at"),
     Index("idx_events_status", "status"),
     Index("idx_events_agent", "agent_id"),
-    Index("idx_events_source_external", "source", "external_id"),
+    Index(
+      "idx_events_source_external",
+      "source",
+      "external_id",
+      unique=True,
+      postgresql_where="external_id IS NOT NULL",
+    ),
     CheckConstraint(
       "status IN ('captured', 'classified', 'committed', 'pending', 'fulfilled', 'voided', 'superseded')",
       name="check_event_status",
@@ -53,8 +58,7 @@ class Event(ExtensionsBase):
   event_type = Column(String, nullable=False)
   event_category = Column(String, nullable=False)
 
-  # REA primitives
-  # agent_id is plain VARCHAR until Phase 2 adds the agents table + FK constraint.
+  # REA primitives. agent_id FK to agents(id) enforced at the DB level.
   agent_id = Column(String, nullable=True)
   resource_type = Column(String, nullable=True)
   resource_element_id = Column(String, nullable=True)

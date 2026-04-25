@@ -1,9 +1,4 @@
-"""API models for the Event Block surface (event-driven-ledger.md Phase 1).
-
-Phase 1 ships the capture-only envelope: apply_handlers must be False (the
-handler engine ships in Phase 3). The envelope shape is designed to be stable
-across phases — Phase 3 populates matched_handlers and triggered_transactions.
-"""
+"""API models for the Event Block surface (event-driven-ledger.md)."""
 
 from __future__ import annotations
 
@@ -12,27 +7,50 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+EventCategory = Literal[
+  "sales",
+  "purchase",
+  "financing",
+  "payroll",
+  "treasury",
+  "adjustment",
+  "recognition",
+  "other",
+]
+ResourceType = Literal[
+  "goods",
+  "services",
+  "money",
+  "right",
+  "obligation",
+  "information",
+  "labor",
+]
+
 
 class CreateEventBlockRequest(BaseModel):
-  """Write surface for a single business event.
-
-  Phase 1: apply_handlers must be False. Passing True raises 501.
-  """
+  """Write surface for a single business event."""
 
   event_type: str = Field(
     ...,
     description="Open vocabulary: 'invoice_issued' | 'contract_signed' | 'bank_transaction' | ...",
   )
-  event_category: str = Field(
+  event_category: EventCategory = Field(
     ...,
-    description="'sales' | 'purchase' | 'financing' | 'payroll' | 'treasury' | 'adjustment' | 'recognition' | 'other'",
+    description=(
+      "REA economic classification. One of: sales, purchase, financing, "
+      "payroll, treasury, adjustment, recognition, other."
+    ),
   )
 
-  # REA primitives (all nullable in Phase 1; agent_id populated once Phase 2 agents table lands)
-  agent_id: str | None = Field(None, description="Counterparty agent id (Phase 2+)")
-  resource_type: str | None = Field(
+  # REA primitives
+  agent_id: str | None = Field(None, description="Counterparty agent id")
+  resource_type: ResourceType | None = Field(
     None,
-    description="'goods' | 'services' | 'money' | 'right' | 'obligation' | 'information' | 'labor'",
+    description=(
+      "REA resource kind. One of: goods, services, money, right, obligation, "
+      "information, labor."
+    ),
   )
   resource_element_id: str | None = Field(
     None, description="Specific element being exchanged, if applicable"
@@ -51,7 +69,14 @@ class CreateEventBlockRequest(BaseModel):
   source: str = Field(
     ..., description="'quickbooks' | 'xero' | 'plaid' | 'native' | 'scheduled' | ..."
   )
-  external_id: str | None = Field(None, description="Source-system dedup key")
+  external_id: str | None = Field(
+    None,
+    description=(
+      "Source-system dedup key. (source, external_id) is enforced unique "
+      "when external_id is provided, so retries from external adapters are "
+      "idempotent at the DB level."
+    ),
+  )
   external_url: str | None = Field(
     None, description="Deep link back to source-system record"
   )
@@ -67,10 +92,12 @@ class CreateEventBlockRequest(BaseModel):
   )
   dimension_ids: list[str] = Field(default_factory=list)
 
-  # Phase 1: only False is accepted; True raises 501 (handler engine ships in Phase 3)
   apply_handlers: bool = Field(
     False,
-    description="Must be False in Phase 1. Pass True only once the handler engine (Phase 3) is live.",
+    description=(
+      "When True, resolves the event_type to a handler (Python registry "
+      "first, then DSL) and fires it atomically with event creation."
+    ),
   )
 
 
@@ -114,13 +141,18 @@ class UpdateEventBlockRequest(BaseModel):
   event_id: str
 
   # Status transition
-  transition_to: Literal["committed", "voided", "superseded"] | None = Field(
+  transition_to: (
+    Literal["committed", "pending", "fulfilled", "voided", "superseded"] | None
+  ) = Field(
     None,
     description=(
       "Status transition. Valid moves depend on current status: "
-      "captured → committed | voided; committed → pending | fulfilled | voided; "
-      "pending → fulfilled | voided. Terminal states (fulfilled, voided, superseded) "
-      "accept no further transitions."
+      "captured → committed | voided; classified → committed | pending | "
+      "fulfilled | voided; committed → pending | fulfilled | voided; "
+      "pending → fulfilled | voided. Terminal states (fulfilled, voided, "
+      "superseded) accept no further transitions. Note: classified and "
+      "fulfilled are usually set by handlers, not by callers, but the "
+      "transition is allowed for corrections."
     ),
   )
   superseded_by_id: str | None = Field(

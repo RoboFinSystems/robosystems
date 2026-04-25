@@ -203,25 +203,7 @@ def create_event_block(
     return _to_envelope(event, body.dimension_ids)
 
   # Capture-only path (apply_handlers=False)
-  event = Event(
-    event_type=body.event_type,
-    event_category=body.event_category,
-    agent_id=body.agent_id,
-    resource_type=body.resource_type,
-    resource_element_id=body.resource_element_id,
-    occurred_at=body.occurred_at,
-    effective_at=body.effective_at,
-    source=body.source,
-    external_id=body.external_id,
-    external_url=body.external_url,
-    amount=body.amount,
-    currency=body.currency,
-    description=body.description,
-    metadata_=body.metadata,
-    status="captured",
-    created_at=datetime.now(UTC),
-    created_by=created_by,
-  )
+  event = _build_event_row(body, created_by, status="captured")
   session.add(event)
   session.flush()
 
@@ -396,8 +378,17 @@ def preview_event_block(
     try:
       debit_amount_str = et.get("debit", {}).get("amount", "")
       credit_amount_str = et.get("credit", {}).get("amount", "")
-      debit_cents = int(interpolate(debit_amount_str, context))
-      credit_cents = int(interpolate(credit_amount_str, context))
+      debit_raw = interpolate(debit_amount_str, context)
+      credit_raw = interpolate(credit_amount_str, context)
+      try:
+        debit_cents = int(debit_raw)
+        credit_cents = int(credit_raw)
+      except (TypeError, ValueError):
+        errors.append(
+          f"Entry {i}: amount expression resolved to non-numeric value "
+          f"(debit={debit_raw!r}, credit={credit_raw!r})"
+        )
+        continue
 
       if debit_cents != credit_cents:
         errors.append(
@@ -414,7 +405,7 @@ def preview_event_block(
           interpolated_credit_amount=str(credit_cents),
         )
       )
-    except (TemplateInterpolationError, EngineValidationError, ValueError) as e:
+    except (TemplateInterpolationError, EngineValidationError) as e:
       errors.append(f"Entry {i}: {e}")
 
   return PreviewEventBlockResponse(

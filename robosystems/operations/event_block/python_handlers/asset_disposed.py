@@ -21,7 +21,7 @@ rolls back — nothing persists, no half-disposed state.
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from sqlalchemy import text, update
+from sqlalchemy import delete, text, update
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -88,11 +88,13 @@ def _delete_sum_equals_rule(session: Session, structure_id: str) -> None:
     ),
     {"sid": structure_id},
   )
-  session.query(Rule).filter(
-    Rule.target_structure_id == structure_id,
-    Rule.rule_pattern == "SumEquals",
-    Rule.rule_origin == "native",
-  ).delete(synchronize_session=False)
+  session.execute(
+    delete(Rule).where(
+      Rule.target_structure_id == structure_id,
+      Rule.rule_pattern == "SumEquals",
+      Rule.rule_origin == "native",
+    )
+  )
 
 
 def dispatch(

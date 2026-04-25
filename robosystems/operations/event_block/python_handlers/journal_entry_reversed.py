@@ -35,8 +35,6 @@ from robosystems.operations.roboledger.commands._guards import (
   assert_period_not_closed,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
-  JournalEntryNotFoundError,
-  JournalEntryNotPostedError,
   reverse_journal_entry,
 )
 
@@ -187,12 +185,6 @@ def dispatch_preview(
     },
     validation_errors=[],
   )
-
-
-# Keep imports referenced for static analysis even though they're not
-# directly raised here — `reverse_journal_entry` raises them inside dispatch
-# and tests patch them by name.
-_ = (JournalEntryNotFoundError, JournalEntryNotPostedError)
 
 
 JOURNAL_ENTRY_REVERSED_HANDLER = EventBlockPythonHandler(

@@ -157,10 +157,13 @@ def _create_in_tenant(conn, schema: str) -> None:
         f"ON {schema}.events ({col})"
       )
     )
+  # Partial unique index: dedup key for external source ingestion, mirrors
+  # the agents table. Native-source events (external_id NULL) are exempt.
   conn.execute(
     text(
-      f"CREATE INDEX IF NOT EXISTS idx_{schema}_events_source_external "
-      f"ON {schema}.events (source, external_id)"
+      f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{schema}_events_source_external "
+      f"ON {schema}.events (source, external_id) "
+      f"WHERE external_id IS NOT NULL"
     )
   )
 
@@ -438,7 +441,13 @@ def upgrade() -> None:
   op.create_index("idx_events_occurred_at", "events", ["occurred_at"])
   op.create_index("idx_events_status", "events", ["status"])
   op.create_index("idx_events_agent", "events", ["agent_id"])
-  op.create_index("idx_events_source_external", "events", ["source", "external_id"])
+  op.create_index(
+    "idx_events_source_external",
+    "events",
+    ["source", "external_id"],
+    unique=True,
+    postgresql_where="external_id IS NOT NULL",
+  )
 
   # 3. event_dimensions junction
   op.create_table(
