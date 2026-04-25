@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import robosystems.middleware.mcp.tools.graphql_tool as gt
+
 MODULE = "robosystems.middleware.mcp.tools.graphql_tool"
 
 
@@ -23,8 +25,6 @@ MODULE = "robosystems.middleware.mcp.tools.graphql_tool"
 @pytest.fixture(autouse=True)
 def clear_schema_cache():
   """Reset the process-lifetime SDL/introspection cache between tests."""
-  import robosystems.middleware.mcp.tools.graphql_tool as gt
-
   gt._SCHEMA_CACHE.clear()
   yield
   gt._SCHEMA_CACHE.clear()
@@ -33,8 +33,6 @@ def clear_schema_cache():
 @pytest.fixture(autouse=True)
 def reset_gql_schema():
   """Reset the lazy gql_schema reference so each test starts clean."""
-  import robosystems.middleware.mcp.tools.graphql_tool as gt
-
   original = gt.gql_schema
   gt.gql_schema = None
   yield
@@ -63,9 +61,7 @@ def mock_user():
 
 class TestGraphqlSchemaTool:
   def _make_tool(self, mock_client):
-    from robosystems.middleware.mcp.tools.graphql_tool import GraphqlSchemaTool
-
-    return GraphqlSchemaTool(mock_client)
+    return gt.GraphqlSchemaTool(mock_client)
 
   def _fake_schema(self, sdl: str = "type Query { hello: String }"):
     """Create a MagicMock whose str() returns `sdl`."""
@@ -119,6 +115,40 @@ class TestGraphqlSchemaTool:
     assert "__schema" in parsed
 
   @pytest.mark.asyncio
+  async def test_introspection_failure_not_cached(self, mock_client):
+    """If introspection returns errors, don't cache the failure as 'null'."""
+    tool = self._make_tool(mock_client)
+
+    failing = MagicMock()
+    failing_result = MagicMock()
+    failing_result.data = None
+    err = MagicMock()
+    err.message = "schema unavailable"
+    failing_result.errors = [err]
+    failing.execute_sync = MagicMock(return_value=failing_result)
+
+    succeeding = MagicMock()
+    succeeding_result = MagicMock()
+    succeeding_result.data = {"__schema": {"types": []}}
+    succeeding_result.errors = None
+    succeeding.execute_sync = MagicMock(return_value=succeeding_result)
+
+    with patch(f"{MODULE}._ensure_gql_schema", return_value=failing):
+      first = await tool.execute({"format": "introspection"})
+
+    assert first["error"] == "introspection_failed"
+    # Cache should NOT contain "null" — failure must not poison the cache
+    assert "introspection" not in gt._SCHEMA_CACHE
+
+    # Subsequent call with a working schema should succeed
+    with patch(f"{MODULE}._ensure_gql_schema", return_value=succeeding):
+      second = await tool.execute({"format": "introspection"})
+
+    assert "schema" in second
+    parsed = json.loads(second["schema"])
+    assert "__schema" in parsed
+
+  @pytest.mark.asyncio
   async def test_sdl_cached_on_second_call(self, mock_client):
     tool = self._make_tool(mock_client)
     fake = self._fake_schema()
@@ -145,9 +175,7 @@ class TestGraphqlSchemaTool:
 
 class TestGraphqlQueryTool:
   def _make_tool(self, mock_client, schema_extensions=("roboledger",)):
-    from robosystems.middleware.mcp.tools.graphql_tool import GraphqlQueryTool
-
-    return GraphqlQueryTool(mock_client, schema_extensions=schema_extensions)
+    return gt.GraphqlQueryTool(mock_client, schema_extensions=schema_extensions)
 
   def _fake_schema_with_result(self, data=None, errors=None):
     """Return (fake_schema, fake_execute_result) pair."""
@@ -220,6 +248,83 @@ class TestGraphqlQueryTool:
     result = await tool.execute({"query": aliased})
     assert result["error"] == "query_too_complex"
     assert "alias" in result["message"].lower()
+
+  @pytest.mark.asyncio
+  async def test_fragment_spread_field_limit(self, mock_client):
+    """Fragment spreads must be expanded for complexity counting.
+
+    Without expansion, an agent could hide 1000+ fields behind a single
+    fragment spread that counts as 0. This test ensures the bypass is
+    closed: a 199-field fragment spread twice yields 398 total fields,
+    which exceeds the 200 limit.
+    """
+    tool = self._make_tool(mock_client)
+    fragment_fields = " ".join(f"f{i}" for i in range(199))
+    query = f"fragment A on Query {{ {fragment_fields} }} {{ ...A ...A }}"
+    result = await tool.execute({"query": query})
+    assert result["error"] == "query_too_complex"
+    assert "field" in result["message"].lower()
+
+  @pytest.mark.asyncio
+  async def test_fragment_spread_under_limit_passes(self, mock_client, mock_user):
+    """A fragment spread expanding to under the limit should execute."""
+    tool = self._make_tool(mock_client)
+    fake_schema, _ = self._fake_schema_with_result(data={"f0": 1})
+
+    # 50 fields x 2 spreads = 100 total, well under 200
+    fragment_fields = " ".join(f"f{i}" for i in range(50))
+    query = f"fragment A on Query {{ {fragment_fields} }} {{ ...A ...A }}"
+
+    with (
+      patch(f"{MODULE}._ensure_gql_schema", return_value=fake_schema),
+      patch.object(tool, "_fetch_user", return_value=mock_user),
+    ):
+      result = await tool.execute({"query": query})
+
+    # Should reach execution (no complexity error returned)
+    assert "error" not in result or result.get("error") != "query_too_complex"
+
+  @pytest.mark.asyncio
+  async def test_fragment_cycle_does_not_loop(self, mock_client, mock_user):
+    """Cyclic fragments must not cause infinite recursion in the walker.
+
+    GraphQL itself rejects cyclic spreads at validation time, but the MCP
+    complexity walker runs before validation. The visited-set guard ensures
+    we don't loop forever.
+    """
+    tool = self._make_tool(mock_client)
+    fake_schema, _ = self._fake_schema_with_result(data={"f": 1})
+
+    query = "fragment A on Query { ...B } fragment B on Query { ...A f } { ...A }"
+
+    with (
+      patch(f"{MODULE}._ensure_gql_schema", return_value=fake_schema),
+      patch.object(tool, "_fetch_user", return_value=mock_user),
+    ):
+      # Should terminate (not hang) and not raise RecursionError
+      result = await tool.execute({"query": query})
+
+    # Either passes complexity (small enough) or fails at execution — either way
+    # the test simply asserts the walker didn't blow up.
+    assert isinstance(result, dict)
+
+  @pytest.mark.asyncio
+  async def test_unused_fragment_does_not_inflate_count(self, mock_client, mock_user):
+    """A fragment never spread should contribute zero to complexity."""
+    tool = self._make_tool(mock_client)
+    fake_schema, _ = self._fake_schema_with_result(data={"hello": "world"})
+
+    # Fragment with 250 fields, but operation only selects 1 — should pass
+    huge = " ".join(f"f{i}" for i in range(250))
+    query = f"fragment Unused on Query {{ {huge} }} {{ hello }}"
+
+    with (
+      patch(f"{MODULE}._ensure_gql_schema", return_value=fake_schema),
+      patch.object(tool, "_fetch_user", return_value=mock_user),
+    ):
+      result = await tool.execute({"query": query})
+
+    assert "data" in result
 
   @pytest.mark.asyncio
   async def test_valid_query_returns_data(self, mock_client, mock_user):
@@ -316,13 +421,11 @@ class TestGraphqlQueryTool:
 
   @pytest.mark.asyncio
   async def test_unauthenticated_when_no_user_id(self):
-    from robosystems.middleware.mcp.tools.graphql_tool import GraphqlQueryTool
-
     client = MagicMock()
     client.graph_id = "kgtest123"
     client.user_id = None
 
-    tool = GraphqlQueryTool(client, schema_extensions=("roboledger",))
+    tool = gt.GraphqlQueryTool(client, schema_extensions=("roboledger",))
 
     gql_err = MagicMock()
     gql_err.message = "Authentication required"
@@ -336,3 +439,21 @@ class TestGraphqlQueryTool:
     ctx = fake_schema.execute.call_args.kwargs["context_value"]
     assert ctx["user"] is None
     assert "errors" in result
+
+  @pytest.mark.asyncio
+  async def test_user_lookup_runs_on_thread(self, mock_client, mock_user):
+    """`_fetch_user` (sync DB) must run via asyncio.to_thread, not block loop."""
+    tool = self._make_tool(mock_client)
+    fake_schema, _ = self._fake_schema_with_result(data={})
+
+    with (
+      patch(f"{MODULE}._ensure_gql_schema", return_value=fake_schema),
+      patch.object(tool, "_fetch_user", return_value=mock_user) as fetch,
+      patch(
+        f"{MODULE}.asyncio.to_thread", new=AsyncMock(return_value=mock_user)
+      ) as to_thread,
+    ):
+      await tool.execute({"query": "{ hello }"})
+
+    # _fetch_user should have been wrapped by asyncio.to_thread
+    to_thread.assert_called_once_with(fetch)
