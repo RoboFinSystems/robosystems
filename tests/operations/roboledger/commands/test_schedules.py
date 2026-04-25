@@ -106,3 +106,141 @@ def test_update_schedule_keeps_omitted_metadata_null_in_typed_mechanics() -> Non
 
   assert response.name == "New Name"
   assert structure.artifact_mechanics["schedule_metadata"] is None
+
+
+def test_update_schedule_template_change_triggers_supersession() -> None:
+  """Stream 2.E: changing entry_template voids + re-materializes pending events."""
+  from unittest.mock import patch
+
+  from robosystems.models.api.extensions.schedules import EntryTemplateRequest
+
+  structure = MagicMock()
+  structure.id = "struct_sched"
+  structure.name = "Existing"
+  structure.taxonomy_id = "tax_1"
+  structure.metadata_ = {
+    "entry_template": {
+      "debit_element_id": "elem_dr_old",
+      "credit_element_id": "elem_cr_old",
+      "entry_type": "closing",
+      "memo_template": "Old memo",
+      "auto_reverse": False,
+    },
+    "schedule_created_event_id": "evt_origin",
+  }
+
+  session = MagicMock()
+  session.execute.side_effect = [
+    _exec_result(row=structure),
+    _exec_result(fetchone_row=MagicMock(cnt=12)),
+    _exec_result(fetchone_row=MagicMock(cnt=12)),
+  ]
+
+  with patch(
+    "robosystems.operations.roboledger.commands.schedules."
+    "ScheduleService.supersede_pending_obligations",
+    return_value=12,
+  ) as supersede:
+    update_schedule(
+      session,
+      UpdateScheduleRequest(
+        structure_id="struct_sched",
+        entry_template=EntryTemplateRequest(
+          debit_element_id="elem_dr_new",
+          credit_element_id="elem_cr_new",
+          entry_type="closing",
+          memo_template="New memo",
+          auto_reverse=False,
+        ),
+      ),
+      updated_by="usr_admin",
+    )
+
+  supersede.assert_called_once()
+  kwargs = supersede.call_args.kwargs
+  assert kwargs["structure"] is structure
+  assert kwargs["created_by"] == "usr_admin"
+
+
+def test_update_schedule_no_template_change_skips_supersession() -> None:
+  """Renaming the schedule must not touch the obligation chain."""
+  from unittest.mock import patch
+
+  structure = MagicMock()
+  structure.id = "struct_sched"
+  structure.name = "Old Name"
+  structure.taxonomy_id = "tax_1"
+  structure.metadata_ = {
+    "entry_template": {
+      "debit_element_id": "elem_dr",
+      "credit_element_id": "elem_cr",
+    },
+    "schedule_created_event_id": "evt_origin",
+  }
+
+  session = MagicMock()
+  session.execute.side_effect = [
+    _exec_result(row=structure),
+    _exec_result(fetchone_row=MagicMock(cnt=2)),
+    _exec_result(fetchone_row=MagicMock(cnt=1)),
+  ]
+
+  with patch(
+    "robosystems.operations.roboledger.commands.schedules."
+    "ScheduleService.supersede_pending_obligations",
+  ) as supersede:
+    update_schedule(
+      session,
+      UpdateScheduleRequest(structure_id="struct_sched", name="New Name"),
+    )
+
+  supersede.assert_not_called()
+
+
+def test_update_schedule_identical_template_skips_supersession() -> None:
+  """Submitting the exact same template values is a no-op for the chain."""
+  from unittest.mock import patch
+
+  from robosystems.models.api.extensions.schedules import EntryTemplateRequest
+
+  structure = MagicMock()
+  structure.id = "struct_sched"
+  structure.name = "Existing"
+  structure.taxonomy_id = "tax_1"
+  structure.metadata_ = {
+    "entry_template": {
+      "debit_element_id": "elem_dr",
+      "credit_element_id": "elem_cr",
+      "entry_type": "closing",
+      "memo_template": "memo",
+      "auto_reverse": False,
+    },
+    "schedule_created_event_id": "evt_origin",
+  }
+
+  session = MagicMock()
+  session.execute.side_effect = [
+    _exec_result(row=structure),
+    _exec_result(fetchone_row=MagicMock(cnt=2)),
+    _exec_result(fetchone_row=MagicMock(cnt=1)),
+  ]
+
+  with patch(
+    "robosystems.operations.roboledger.commands.schedules."
+    "ScheduleService.supersede_pending_obligations",
+  ) as supersede:
+    update_schedule(
+      session,
+      UpdateScheduleRequest(
+        structure_id="struct_sched",
+        entry_template=EntryTemplateRequest(
+          debit_element_id="elem_dr",
+          credit_element_id="elem_cr",
+          entry_type="closing",
+          memo_template="memo",
+          auto_reverse=False,
+        ),
+      ),
+    )
+
+  supersede.assert_not_called()

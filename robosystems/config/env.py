@@ -662,6 +662,19 @@ class EnvConfig:
     get_parameter_value("EXTENSIONS_GRAPHQL_ENABLED", "true").lower() == "true",
   )
 
+  # Period-boundary obligation promoter (Stream 2.B). When True, the
+  # Dagster sensor not only flips matured `pending` schedule_entry_due
+  # events to `classified` but also dispatches the registered handler so
+  # the closing-entry draft lands in the GL on the same tick. Defaults
+  # to False (co-pilot mode): status flips, drafts wait for an explicit
+  # operator action. Stream 2.E will move this to a per-graph column on
+  # the Graph row so different tenants can run different cadences.
+  EXTENSIONS_PROMOTION_AUTO_DISPATCH = get_bool_env(
+    "EXTENSIONS_PROMOTION_AUTO_DISPATCH",
+    get_parameter_value("EXTENSIONS_PROMOTION_AUTO_DISPATCH", "false").lower()
+    == "true",
+  )
+
   # --- Derived: EXTENSIONS_ENABLED ---
   # Whether the extensions PostgreSQL database should open at all.
   # Computed at class-body evaluation time from the per-domain flags

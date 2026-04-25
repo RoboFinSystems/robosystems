@@ -133,7 +133,7 @@ class TestDispatchPreview:
 
 class TestDispatch:
   def test_dispatch_happy_path_invokes_all_steps(self) -> None:
-    """Full atomic disposal fires truncate → delete rule → post entry → link event."""
+    """Full atomic disposal: void obligations → drop rule → post entry → link event."""
     session = MagicMock()
     event = _make_event()
     metadata = AssetDisposedMetadata(
@@ -161,6 +161,10 @@ class TestDispatch:
         return_value=service_mock,
       ),
       patch(
+        "robosystems.operations.event_block.python_handlers.asset_disposed._void_pending_obligations_for_schedule",
+        return_value=12,
+      ) as void_mock,
+      patch(
         "robosystems.operations.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
       ) as delete_rule_mock,
     ):
@@ -168,11 +172,14 @@ class TestDispatch:
 
     # compute was called
     compute_mock.assert_called_once()
-    # truncate_schedule was called
-    service_mock.truncate_schedule.assert_called_once()
-    tr_kwargs = service_mock.truncate_schedule.call_args.kwargs
-    assert tr_kwargs["structure_id"] == "struct_schedule"
-    assert tr_kwargs["new_end_date"] == event.occurred_at.date()
+    # Pending obligations were voided
+    void_mock.assert_called_once_with(
+      session,
+      structure_id="struct_schedule",
+      disposal_event_id=event.id,
+    )
+    # truncate_schedule is no longer called — the void chain replaces it
+    assert not service_mock.truncate_schedule.called
     # SumEquals rule was deleted
     delete_rule_mock.assert_called_once_with(session, "struct_schedule")
     # Manual closing entry was created with the plan's line items
@@ -209,6 +216,10 @@ class TestDispatch:
         return_value=service_mock,
       ),
       patch(
+        "robosystems.operations.event_block.python_handlers.asset_disposed._void_pending_obligations_for_schedule",
+        return_value=0,
+      ),
+      patch(
         "robosystems.operations.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
       ),
     ):
@@ -239,6 +250,10 @@ class TestDispatch:
         return_value=service_mock,
       ),
       patch(
+        "robosystems.operations.event_block.python_handlers.asset_disposed._void_pending_obligations_for_schedule",
+        return_value=0,
+      ),
+      patch(
         "robosystems.operations.event_block.python_handlers.asset_disposed._delete_sum_equals_rule"
       ),
     ):
@@ -255,3 +270,79 @@ class TestDispatch:
 
     with pytest.raises(ValueError, match="requires occurred_at"):
       dispatch(session, event, metadata, created_by="usr_test")
+
+
+class TestVoidPendingObligationsForSchedule:
+  """Stream 2.C — disposal voids the obligation chain instead of truncating facts."""
+
+  @staticmethod
+  def _structure_with_event(schedule_created_event_id: str | None) -> MagicMock:
+    structure = MagicMock()
+    structure.metadata_ = (
+      {"schedule_created_event_id": schedule_created_event_id}
+      if schedule_created_event_id is not None
+      else {}
+    )
+    return structure
+
+  def test_voids_pending_obligations_linked_via_obligated_by(self) -> None:
+    """Update query targets pending events on the schedule's originator chain."""
+    from robosystems.operations.event_block.python_handlers.asset_disposed import (
+      _void_pending_obligations_for_schedule,
+    )
+
+    session = MagicMock()
+    session.get.return_value = self._structure_with_event("evt_schedule_created")
+    update_result = MagicMock(rowcount=11)
+    session.execute.return_value = update_result
+
+    voided = _void_pending_obligations_for_schedule(
+      session,
+      structure_id="struct_schedule",
+      disposal_event_id="evt_disposal",
+    )
+
+    assert voided == 11
+    # The execute call carries the right WHERE clause + SET values.
+    update_stmt = session.execute.call_args.args[0]
+    rendered = str(update_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "events.obligated_by_event_id = 'evt_schedule_created'" in rendered
+    assert "events.status = 'pending'" in rendered
+    assert "status='voided'" in rendered.replace(" = ", "=")
+    assert "replaced_by_event_id='evt_disposal'" in rendered.replace(" = ", "=")
+
+  def test_returns_zero_when_structure_missing(self) -> None:
+    """Defensive no-op when the structure can't be loaded."""
+    from robosystems.operations.event_block.python_handlers.asset_disposed import (
+      _void_pending_obligations_for_schedule,
+    )
+
+    session = MagicMock()
+    session.get.return_value = None
+
+    voided = _void_pending_obligations_for_schedule(
+      session,
+      structure_id="struct_missing",
+      disposal_event_id="evt_disposal",
+    )
+
+    assert voided == 0
+    session.execute.assert_not_called()
+
+  def test_returns_zero_when_structure_predates_stream_2a(self) -> None:
+    """Schedules created before the originator-id stamping land are no-op disposed."""
+    from robosystems.operations.event_block.python_handlers.asset_disposed import (
+      _void_pending_obligations_for_schedule,
+    )
+
+    session = MagicMock()
+    session.get.return_value = self._structure_with_event(None)
+
+    voided = _void_pending_obligations_for_schedule(
+      session,
+      structure_id="struct_old",
+      disposal_event_id="evt_disposal",
+    )
+
+    assert voided == 0
+    session.execute.assert_not_called()

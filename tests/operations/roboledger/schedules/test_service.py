@@ -634,6 +634,137 @@ class TestCreateScheduleMaterializesObligations:
     assert sum(1 for e in events if e.event_type == "schedule_created") == 1
     assert sum(1 for e in events if e.event_type == "schedule_entry_due") == 84
 
+  def test_supersede_no_op_when_schedule_predates_stream_2a(self):
+    """Schedules with no schedule_created_event_id stamped return 0 cleanly."""
+    structure = MagicMock()
+    structure.metadata_ = {}  # legacy row with no event linkage
+    session = MagicMock()
+
+    svc = ScheduleService()
+    count = svc.supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 0
+    session.execute.assert_not_called()
+
+  def test_supersede_no_op_when_no_pending_events(self):
+    """All obligations already classified/fulfilled — nothing to supersede."""
+    structure = MagicMock()
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value = iter([])
+
+    svc = ScheduleService()
+    count = svc.supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 0
+    session.add.assert_not_called()
+
+  def test_supersede_voids_pending_and_emits_replacements_with_chain_links(self):
+    """Each pending event gets voided + linked to a fresh replacement event."""
+    from types import SimpleNamespace
+
+    structure = MagicMock()
+    structure.id = "struct_supersede"
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+
+    pending_a = SimpleNamespace(
+      id="evt_old_a",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={
+        "schedule_id": "struct_supersede",
+        "posting_date": "2026-01-31",
+        "period_start": "2026-01-01",
+        "period_end": "2026-01-31",
+      },
+    )
+    pending_b = SimpleNamespace(
+      id="evt_old_b",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={
+        "schedule_id": "struct_supersede",
+        "posting_date": "2026-02-28",
+        "period_start": "2026-02-01",
+        "period_end": "2026-02-28",
+      },
+    )
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value = iter([pending_a, pending_b])
+
+    svc = ScheduleService()
+    count = svc.supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 2
+    # Old events are voided + linked forward
+    assert pending_a.status == "voided"
+    assert pending_b.status == "voided"
+    assert pending_a.replaced_by_event_id is not None
+    assert pending_b.replaced_by_event_id is not None
+    # Each replacement was added
+    added = [c[0][0] for c in session.add.call_args_list]
+    from robosystems.models.extensions.roboledger import Event
+
+    new_events = [e for e in added if isinstance(e, Event)]
+    assert len(new_events) == 2
+    # Each new event points back at its predecessor and forward at the
+    # same originator
+    by_predecessor = {e.replaces_event_id: e for e in new_events}
+    assert by_predecessor["evt_old_a"].id == pending_a.replaced_by_event_id
+    assert by_predecessor["evt_old_b"].id == pending_b.replaced_by_event_id
+    for new_evt in new_events:
+      assert new_evt.obligated_by_event_id == "evt_origin"
+      assert new_evt.status == "pending"
+      assert new_evt.event_type == "schedule_entry_due"
+    # Period metadata carries through unchanged — only the template differs.
+    new_a = by_predecessor["evt_old_a"]
+    assert new_a.metadata_["period_start"] == "2026-01-01"
+    assert new_a.metadata_["period_end"] == "2026-01-31"
+
+  def test_supersede_skips_legacy_events_missing_period_metadata(self):
+    """Defensive: a malformed pending row doesn't crash the supersession."""
+    from types import SimpleNamespace
+
+    structure = MagicMock()
+    structure.id = "struct_legacy"
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+
+    good = SimpleNamespace(
+      id="evt_good",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={
+        "schedule_id": "struct_legacy",
+        "posting_date": "2026-01-31",
+        "period_start": "2026-01-01",
+        "period_end": "2026-01-31",
+      },
+    )
+    malformed = SimpleNamespace(
+      id="evt_malformed",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={"schedule_id": "struct_legacy"},  # no period info
+    )
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value = iter([good, malformed])
+
+    svc = ScheduleService()
+    count = svc.supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 1
+    assert good.status == "voided"
+    # Malformed row left as-is, NOT voided (so a follow-up data fix is possible)
+    assert malformed.status == "pending"
+
   def test_schedule_created_metadata_round_trips_through_handler(self):
     """The schedule_created event payload validates against its registered metadata schema.
 

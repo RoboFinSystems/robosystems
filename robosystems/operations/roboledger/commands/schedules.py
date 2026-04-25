@@ -269,7 +269,9 @@ def _load_schedule_or_404(session: Session, structure_id: str) -> Structure:
 
 
 def update_schedule(
-  session: Session, body: UpdateScheduleRequest
+  session: Session,
+  body: UpdateScheduleRequest,
+  updated_by: str = "system",
 ) -> ScheduleCreatedResponse:
   """Update mutable fields on a schedule.
 
@@ -280,6 +282,12 @@ def update_schedule(
   fact grid. Fire an event block that terminates the schedule (e.g.,
   `asset_disposed`) and create a fresh schedule via `create-schedule`.
 
+  When the entry template changes, all remaining `pending`
+  schedule_entry_due obligations are voided and replaced with a fresh
+  set linked via `replaces_event_id` / `replaced_by_event_id` (Stream
+  2.E supersession). Already-classified / fulfilled obligations are
+  untouched — the new template applies prospectively.
+
   Raises `ScheduleNotFoundError` if the schedule does not exist.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
@@ -287,16 +295,24 @@ def update_schedule(
   if body.name is not None:
     structure.name = body.name
 
+  existing_template = (
+    dict(structure.metadata_["entry_template"])
+    if structure.metadata_ and structure.metadata_.get("entry_template")
+    else {}
+  )
   metadata = dict(structure.metadata_) if structure.metadata_ else {}
+  template_changed = False
 
   if body.entry_template is not None:
-    metadata["entry_template"] = {
+    new_template = {
       "debit_element_id": body.entry_template.debit_element_id,
       "credit_element_id": body.entry_template.credit_element_id,
       "entry_type": body.entry_template.entry_type,
       "memo_template": body.entry_template.memo_template,
       "auto_reverse": body.entry_template.auto_reverse,
     }
+    template_changed = new_template != existing_template
+    metadata["entry_template"] = new_template
 
   if body.schedule_metadata is not None:
     metadata["schedule_metadata"] = {
@@ -319,6 +335,18 @@ def update_schedule(
     "entry_template": metadata.get("entry_template", {}),
     "schedule_metadata": metadata.get("schedule_metadata"),
   }
+
+  # Stream 2.E: void + re-materialize the pending obligation chain when
+  # the entry template changed. Same transaction as the metadata update
+  # so a partial state is impossible — either the new template + new
+  # pending events both land, or neither does.
+  if template_changed:
+    ScheduleService().supersede_pending_obligations(
+      session,
+      structure=structure,
+      created_by=updated_by,
+    )
+
   session.commit()
 
   # Recount for response (same as create_schedule response shape)

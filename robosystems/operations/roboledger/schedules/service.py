@@ -499,6 +499,95 @@ class ScheduleService:
 
     return schedule_created_event_id, len(periods)
 
+  def supersede_pending_obligations(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    created_by: str,
+  ) -> int:
+    """Void each pending obligation and emit a replacement linked via the
+    correction chain.
+
+    Used by ``update_schedule`` when the ``entry_template`` changes — the
+    period range stays the same (periods aren't editable), but the new
+    template represents a different intent for each future closing entry.
+    Re-materializing the pending events under the same originating
+    ``schedule_created`` event keeps the obligation register pointing at
+    a consistent set of "what's still due" with a queryable supersession
+    history (``replaces_event_id`` ↔ ``replaced_by_event_id``).
+
+    Already-classified / fulfilled / voided events are untouched — the
+    new template applies prospectively. Returns the number of
+    replacement events created.
+
+    Returns 0 when the schedule has no ``schedule_created_event_id``
+    stamped (legacy schedules created before Stream 2.A) or when no
+    pending events exist.
+    """
+    metadata = structure.metadata_ or {}
+    schedule_created_event_id = metadata.get("schedule_created_event_id")
+    if not schedule_created_event_id:
+      return 0
+
+    existing_pending = list(
+      session.execute(
+        select(Event).where(
+          Event.obligated_by_event_id == schedule_created_event_id,
+          Event.status == "pending",
+        )
+      ).scalars()
+    )
+    if not existing_pending:
+      return 0
+
+    now = datetime.now(UTC)
+    new_count = 0
+
+    for old_evt in existing_pending:
+      old_meta = old_evt.metadata_ or {}
+      period_start_iso = old_meta.get("period_start")
+      period_end_iso = old_meta.get("period_end")
+      if not period_start_iso or not period_end_iso:
+        # Legacy / malformed row — skip rather than crash. The void below
+        # is also skipped so we don't strand a row in an inconsistent state.
+        continue
+
+      new_event_id = generate_prefixed_ulid("evt")
+      # Both sides of the supersession chain so the audit trail resolves
+      # backward and forward: same shape as update_event_block's superseded
+      # transition.
+      old_evt.status = "voided"
+      old_evt.replaced_by_event_id = new_event_id
+
+      period_end = date.fromisoformat(period_end_iso)
+      occurred_at = datetime.combine(period_end, time(23, 59, 59), tzinfo=UTC)
+
+      session.add(
+        Event(
+          id=new_event_id,
+          event_type="schedule_entry_due",
+          event_category="recognition",
+          event_class="economic",
+          occurred_at=occurred_at,
+          source="internal",
+          status="pending",
+          obligated_by_event_id=schedule_created_event_id,
+          replaces_event_id=old_evt.id,
+          metadata_={
+            "schedule_id": structure.id,
+            "posting_date": period_end_iso,
+            "period_start": period_start_iso,
+            "period_end": period_end_iso,
+          },
+          created_at=now,
+          created_by=created_by,
+        )
+      )
+      new_count += 1
+
+    return new_count
+
   def get_period_close_status(
     self,
     session: Session,
