@@ -39,8 +39,8 @@ from robosystems.operations.roboledger.commands._guards import (
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   UnbalancedJournalEntryError,
-  _validate_and_normalize_lines,
   create_journal_entry,
+  validate_and_normalize_lines,
 )
 
 from .types import (
@@ -139,7 +139,7 @@ def dispatch_preview(
     errors.append(str(e))
 
   try:
-    _normalized, total_debit, total_credit = _validate_and_normalize_lines(
+    _normalized, total_debit, total_credit = validate_and_normalize_lines(
       metadata.line_items
     )
   except UnbalancedJournalEntryError as e:

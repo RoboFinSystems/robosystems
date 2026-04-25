@@ -54,12 +54,16 @@ class InvalidEventTransitionError(Exception):
 
 
 # Valid outbound transitions from each status.
-# Terminal states have empty sets — no further transitions allowed.
+# Terminal states (fulfilled, voided, superseded) have empty sets — no further
+# transitions allowed. `superseded` is reachable from any non-terminal state
+# so corrections can replace an event regardless of how far it has progressed.
 _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
-  "captured": frozenset({"committed", "voided"}),
-  "classified": frozenset({"committed", "pending", "fulfilled", "voided"}),
-  "committed": frozenset({"pending", "fulfilled", "voided"}),
-  "pending": frozenset({"fulfilled", "voided"}),
+  "captured": frozenset({"committed", "voided", "superseded"}),
+  "classified": frozenset(
+    {"committed", "pending", "fulfilled", "voided", "superseded"}
+  ),
+  "committed": frozenset({"pending", "fulfilled", "voided", "superseded"}),
+  "pending": frozenset({"fulfilled", "voided", "superseded"}),
   "fulfilled": frozenset(),
   "voided": frozenset(),
   "superseded": frozenset(),
@@ -84,6 +88,7 @@ def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
     id=event.id,
     event_type=event.event_type,
     event_category=event.event_category,
+    event_class=event.event_class,
     status=event.status,
     occurred_at=event.occurred_at,
     effective_at=event.effective_at,
@@ -100,6 +105,8 @@ def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
     resource_element_id=event.resource_element_id,
     replaced_by_event_id=event.replaced_by_event_id,
     replaces_event_id=event.replaces_event_id,
+    obligated_by_event_id=event.obligated_by_event_id,
+    discharges_event_id=event.discharges_event_id,
     created_at=event.created_at,
     created_by=event.created_by,
   )
@@ -123,6 +130,7 @@ def _build_event_row(
   return Event(
     event_type=body.event_type,
     event_category=body.event_category,
+    event_class=body.event_class,
     agent_id=body.agent_id,
     resource_type=body.resource_type,
     resource_element_id=body.resource_element_id,
@@ -136,6 +144,8 @@ def _build_event_row(
     description=body.description,
     metadata_=body.metadata,
     status=status,
+    obligated_by_event_id=body.obligated_by_event_id,
+    discharges_event_id=body.discharges_event_id,
     created_at=datetime.now(UTC),
     created_by=created_by,
   )
@@ -246,10 +256,25 @@ def update_event_block(
         f"Cannot transition event from '{event.status}' to '{body.transition_to}'. "
         f"Allowed transitions: {sorted(allowed) if allowed else 'none (terminal state)'}."
       )
-    event.status = body.transition_to
 
-    if body.transition_to == "superseded" and body.superseded_by_id is not None:
-      event.replaced_by_event_id = body.superseded_by_id
+    if body.transition_to == "superseded":
+      if body.superseded_by_id is None:
+        raise InvalidEventTransitionError(
+          "transition_to='superseded' requires superseded_by_id."
+        )
+      if body.superseded_by_id == event.id:
+        raise InvalidEventTransitionError("An event cannot supersede itself.")
+      successor = session.get(Event, body.superseded_by_id)
+      if successor is None:
+        raise EventNotFoundError(
+          f"Superseding event not found: {body.superseded_by_id}"
+        )
+      # Set both sides of the correction chain atomically so the backward
+      # link query ("which event does B replace?") resolves.
+      event.replaced_by_event_id = successor.id
+      successor.replaces_event_id = event.id
+
+    event.status = body.transition_to
 
   if body.description is not None:
     event.description = body.description
@@ -261,6 +286,12 @@ def update_event_block(
     merged = dict(event.metadata_ or {})
     merged.update(body.metadata_patch)
     event.metadata_ = merged
+
+  if body.obligated_by_event_id is not None:
+    event.obligated_by_event_id = body.obligated_by_event_id
+
+  if body.discharges_event_id is not None:
+    event.discharges_event_id = body.discharges_event_id
 
   session.commit()
   return _to_envelope(event, _load_dimension_ids(session, event.id))

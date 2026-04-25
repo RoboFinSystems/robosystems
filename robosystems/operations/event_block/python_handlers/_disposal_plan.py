@@ -84,12 +84,16 @@ def compute_disposal_plan(
   if not credit_element_id:
     raise ValueError("Disposal requires entry_template.credit_element_id.")
 
-  # Accumulated depreciation = most recent cumulative instant fact up to disposal_date
+  # Accumulated depreciation = most recent cumulative in-scope instant fact
+  # up to disposal_date. fact_scope='in_scope' parity with schedule_entry_due:
+  # post-truncation / amendment chains can leave out-of-scope instant facts
+  # behind, and picking one would produce a wrong NBV silently.
   acc_row = session.execute(
     text(
       "SELECT value FROM facts "
       "WHERE structure_id = :sid AND element_id = :eid "
       "AND period_type = 'instant' AND period_end <= :d "
+      "AND fact_scope = 'in_scope' "
       "ORDER BY period_end DESC LIMIT 1"
     ),
     {"sid": structure_id, "eid": credit_element_id, "d": disposal_date},

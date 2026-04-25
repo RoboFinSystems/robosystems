@@ -7,7 +7,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+EventClass = Literal["economic", "support"]
 EventCategory = Literal[
+  # Economic categories — change resources, drive GL postings.
   "sales",
   "purchase",
   "financing",
@@ -16,6 +18,12 @@ EventCategory = Literal[
   "adjustment",
   "recognition",
   "other",
+  # Support categories — value-chain / audit-trail primitives, no GL impact.
+  # Valid only when event_class='support'; the DB CHECK enforces the pairing.
+  "control",
+  "approval",
+  "reconciliation",
+  "inquiry",
 ]
 ResourceType = Literal[
   "goods",
@@ -38,8 +46,19 @@ class CreateEventBlockRequest(BaseModel):
   event_category: EventCategory = Field(
     ...,
     description=(
-      "REA economic classification. One of: sales, purchase, financing, "
-      "payroll, treasury, adjustment, recognition, other."
+      "REA classification. Economic categories (sales, purchase, financing, "
+      "payroll, treasury, adjustment, recognition, other) require "
+      "event_class='economic'. Support categories (control, approval, "
+      "reconciliation, inquiry) require event_class='support'. The DB CHECK "
+      "rejects mismatched pairings."
+    ),
+  )
+  event_class: EventClass = Field(
+    "economic",
+    description=(
+      "REA event class. 'economic' events change resources and drive GL "
+      "postings; 'support' events are audit-trail / value-chain primitives "
+      "(typically captured with apply_handlers=False)."
     ),
   )
 
@@ -92,6 +111,24 @@ class CreateEventBlockRequest(BaseModel):
   )
   dimension_ids: list[str] = Field(default_factory=list)
 
+  # REA duality chain (forward-materialization + settlement links).
+  # Both are application-validated self-references; same nullable-FK pattern
+  # as the correction chain.
+  obligated_by_event_id: str | None = Field(
+    None,
+    description=(
+      "Forward-materialization link: the event that scheduled or obligated "
+      "this one (e.g. depreciation entries point at the asset_acquired event)."
+    ),
+  )
+  discharges_event_id: str | None = Field(
+    None,
+    description=(
+      "Settlement link: the obligation this event discharges (e.g. "
+      "cash_received pointing at the originating sale_invoiced)."
+    ),
+  )
+
   apply_handlers: bool = Field(
     False,
     description=(
@@ -121,12 +158,17 @@ class EventBlockEnvelope(BaseModel):
   metadata: dict[str, Any]
   dimension_ids: list[str]
 
+  event_class: str
+
   agent_id: str | None = None
   resource_type: str | None = None
   resource_element_id: str | None = None
 
   replaced_by_event_id: str | None = None
   replaces_event_id: str | None = None
+
+  obligated_by_event_id: str | None = None
+  discharges_event_id: str | None = None
 
   created_at: datetime
   created_by: str
@@ -147,12 +189,13 @@ class UpdateEventBlockRequest(BaseModel):
     None,
     description=(
       "Status transition. Valid moves depend on current status: "
-      "captured → committed | voided; classified → committed | pending | "
-      "fulfilled | voided; committed → pending | fulfilled | voided; "
-      "pending → fulfilled | voided. Terminal states (fulfilled, voided, "
-      "superseded) accept no further transitions. Note: classified and "
-      "fulfilled are usually set by handlers, not by callers, but the "
-      "transition is allowed for corrections."
+      "captured → committed | voided | superseded; "
+      "classified → committed | pending | fulfilled | voided | superseded; "
+      "committed → pending | fulfilled | voided | superseded; "
+      "pending → fulfilled | voided | superseded. Terminal states "
+      "(fulfilled, voided, superseded) accept no further transitions. "
+      "Note: classified and fulfilled are usually set by handlers, not by "
+      "callers, but the transition is allowed for corrections."
     ),
   )
   superseded_by_id: str | None = Field(
@@ -166,6 +209,15 @@ class UpdateEventBlockRequest(BaseModel):
   metadata_patch: dict[str, Any] = Field(
     default_factory=dict,
     description="Key-value pairs merged into existing metadata (additive patch, not replace).",
+  )
+
+  # Duality late-binding (e.g. mark a payment as discharging an invoice
+  # after the fact, when the link wasn't known at capture time).
+  obligated_by_event_id: str | None = Field(
+    None, description="Set/update the forward-materialization link."
+  )
+  discharges_event_id: str | None = Field(
+    None, description="Set/update the settlement link."
   )
 
 

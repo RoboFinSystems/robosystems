@@ -113,7 +113,7 @@ class UnbalancedJournalEntryError(ValueError):
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
-def _validate_and_normalize_lines(
+def validate_and_normalize_lines(
   lines: list[JournalEntryLineItemInput],
 ) -> tuple[list[dict], int, int]:
   """Validate each line and compute totals. Returns (normalized, dr, cr).
@@ -233,9 +233,7 @@ def create_journal_entry(
   """
   assert_period_not_closed(session, body.posting_date)
 
-  normalized, total_debit, _total_credit = _validate_and_normalize_lines(
-    body.line_items
-  )
+  normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
 
   status = body.status
   now = datetime.now(UTC) if status == "posted" else None
@@ -330,7 +328,7 @@ def update_journal_entry(
       JournalEntryLineItemInput(**li) if isinstance(li, dict) else li
       for li in replacement_lines
     ]
-    normalized, _dr, _cr = _validate_and_normalize_lines(new_line_inputs)
+    normalized, _dr, _cr = validate_and_normalize_lines(new_line_inputs)
 
     session.query(LineItem).filter(LineItem.entry_id == entry.id).delete(
       synchronize_session=False
