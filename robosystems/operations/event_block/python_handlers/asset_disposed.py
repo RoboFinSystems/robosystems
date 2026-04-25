@@ -5,17 +5,26 @@ apply_handlers=True. Atomically:
 
 1. Computes the disposal plan (NBV, gain/loss, line items) from the schedule's
    existing facts.
-2. Truncates forward facts past the disposal date via ScheduleService.
+2. Voids all `pending` `schedule_entry_due` obligations linked to the
+   schedule via its originating `schedule_created` event. The voided rows
+   carry `replaced_by_event_id` pointing at the disposal event so the audit
+   chain stays queryable. Facts stay in place as a historical record (the
+   GL has the disposal entry that nets the asset gone).
 3. Deletes the schedule's SumEquals rule (it's no longer satisfiable after
-   the forward facts are gone) plus any verification_results rows that
+   the obligations are voided) plus any verification_results rows that
    reference it.
-4. Posts a balanced 4-leg disposal entry via ScheduleService.create_manual_closing_entry.
+4. Posts a balanced disposal entry via ScheduleService.create_manual_closing_entry.
 5. Links the resulting Entry to the event via triggered_by_event_id.
 
 Event status after success: 'fulfilled' (disposal is terminal — no further work).
 
 All writes happen in one session. If any step raises, the outer transaction
 rolls back — nothing persists, no half-disposed state.
+
+Stream 2.C migration note: prior versions called `ScheduleService.truncate_schedule`
+to hard-delete forward facts. That path is gone — the obligation register is
+now the single source of truth for "what's still due", and voiding events is
+how a disposal terminates a schedule's remaining lifespan.
 """
 
 from __future__ import annotations
@@ -26,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.api.event_block import CreateEventBlockRequest
-from robosystems.models.extensions import Rule
+from robosystems.models.extensions import Rule, Structure
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.roboledger.schedules.service import ScheduleService
@@ -63,7 +72,40 @@ class AssetDisposedMetadata(BaseModel):
   memo: str | None = Field(None, description="Closing entry memo (optional)")
   reason: str = Field(
     "asset_disposed_event",
-    description="Truncation reason recorded on the schedule's audit log",
+    description=(
+      "Free-text disposal reason. Stored on the event row's narrative; "
+      "purely informational since Stream 2.C — no longer drives schedule "
+      "truncation."
+    ),
+  )
+
+
+def _void_pending_obligations_for_schedule(
+  session: Session,
+  *,
+  structure_id: str,
+  disposal_event_id: str,
+) -> int:
+  """Void all `pending` schedule_entry_due events for a disposed schedule.
+
+  Thin wrapper that loads the structure and delegates to the shared
+  ``ScheduleService.void_pending_obligations``. Each voided row
+  carries ``replaced_by_event_id=disposal_event_id`` so the audit
+  chain answers "what voided this obligation?". Facts stay in place
+  — the GL's disposal entry is the authoritative end-state.
+
+  Returns 0 (no-op) when the structure is missing or has no
+  ``schedule_created_event_id`` — covers schedules created before
+  Stream 2.A and any test fixtures that build Structure rows directly.
+  """
+  structure = session.get(Structure, structure_id)
+  if structure is None:
+    return 0
+  return ScheduleService().void_pending_obligations(
+    session,
+    structure=structure,
+    void_reason="asset_disposed",
+    voided_by_event_id=disposal_event_id,
   )
 
 
@@ -122,21 +164,18 @@ def dispatch(
     gain_loss_element_id=metadata.gain_loss_element_id,
   )
 
-  service = ScheduleService()
-
-  # 2. Truncate forward facts + delete stale drafts
-  service.truncate_schedule(
+  # 2. Void any remaining `pending` obligations on this schedule.
+  voided_count = _void_pending_obligations_for_schedule(
     session,
     structure_id=metadata.schedule_id,
-    new_end_date=disposal_date,
-    reason=metadata.reason,
-    updated_by=created_by,
+    disposal_event_id=event.id,
   )
 
   # 3. Delete the now-invalid SumEquals rule
   _delete_sum_equals_rule(session, metadata.schedule_id)
 
   # 4. Post the disposal entry
+  service = ScheduleService()
   memo = metadata.memo or f"Asset disposal for schedule {metadata.schedule_id}"
   entry_result = service.create_manual_closing_entry(
     session,
@@ -155,12 +194,14 @@ def dispatch(
   )
 
   logger.info(
-    "asset_disposed event %s fired: schedule=%s entry=%s nbv=%s gain_loss=%s",
+    "asset_disposed event %s fired: schedule=%s entry=%s nbv=%s gain_loss=%s "
+    "voided_obligations=%s",
     event.id,
     metadata.schedule_id,
     entry_result.entry_id,
     plan.nbv,
     plan.gain_loss,
+    voided_count,
   )
 
   return HandlerResult(entry_ids=[entry_result.entry_id])

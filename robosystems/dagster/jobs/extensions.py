@@ -140,3 +140,89 @@ def materialize_extensions_to_graph(
 def extensions_materialize_job():
   """Materialize all extension data from PostgreSQL OLTP to LadybugDB graph."""
   materialize_extensions_to_graph()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Stream 2.B — Period-boundary obligation promotion
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class PromoteObligationsConfig(Config):
+  """Config for promoting matured pending obligations on one graph."""
+
+  graph_id: str
+  # ISO timestamp cutoff. Events with `occurred_at <= as_of_iso` are
+  # eligible. The sensor stamps `datetime.now(UTC)` per RunRequest so
+  # each run captures its own wall clock — Dagster's run dedup keys off
+  # the timestamp + graph_id.
+  as_of_iso: str
+  dispatch_handlers: bool = False
+
+
+@op(out={"promotion_result": Out(dict)})
+def promote_obligations_for_graph(
+  context: OpExecutionContext,
+  config: PromoteObligationsConfig,
+) -> dict[str, Any]:
+  """Open a tenant-scoped session and run the promotion sweep.
+
+  Defers all real logic to ``promote_pending_obligations`` so the same
+  function can be called from an admin CLI / REPL during incidents.
+  """
+  from datetime import datetime
+
+  from robosystems.db.extensions import extensions_session
+  from robosystems.operations.event_block.promotion import (
+    promote_pending_obligations,
+  )
+
+  graph_id = config.graph_id
+  as_of = datetime.fromisoformat(config.as_of_iso)
+  context.log.info(
+    f"Promoting obligations for {graph_id} (as_of={as_of.isoformat()}, "
+    f"dispatch={config.dispatch_handlers})"
+  )
+
+  with extensions_session(graph_id) as session:
+    result = promote_pending_obligations(
+      session,
+      graph_id,
+      as_of=as_of,
+      dispatch_handlers=config.dispatch_handlers,
+    )
+
+  context.log.info(
+    f"Promotion complete for {graph_id}: "
+    f"classified={result.classified_count} "
+    f"dispatched={result.dispatched_count} "
+    f"errors={result.error_count}"
+  )
+
+  if result.errors:
+    # Non-fatal: status flips already committed. Surface as warnings so
+    # the run is yellow not red — operators investigate via logs.
+    for evt_id, msg in result.errors:
+      context.log.warning(f"Promotion error for event {evt_id}: {msg}")
+
+  return {
+    "graph_id": graph_id,
+    "classified_count": result.classified_count,
+    "dispatched_count": result.dispatched_count,
+    "error_count": result.error_count,
+    "classified_event_ids": result.classified_event_ids,
+    "dispatched_event_ids": result.dispatched_event_ids,
+  }
+
+
+@job(
+  tags={"dagster/priority": "1", "pipeline": "extensions"},
+  description="Promote matured pending schedule obligations for one graph",
+)
+def extensions_promote_obligations_job():
+  """One-graph wrapper that runs the promotion sweep.
+
+  The companion sensor fires one RunRequest per graph that has work to
+  do — same fan-out shape as ``stale_graph_materialization_sensor`` so
+  Dagster's per-run logging, dedup, and retry semantics apply uniformly.
+  """
+  promote_obligations_for_graph()

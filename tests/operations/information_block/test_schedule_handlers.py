@@ -87,7 +87,7 @@ class TestUpdate:
       result = schedule_handlers.update(session, body, "usr_test")
 
     assert result == "struct_existing"
-    mock_cmd.assert_called_once_with(session, body)
+    mock_cmd.assert_called_once_with(session, body, updated_by="usr_test")
 
 
 class TestDelete:

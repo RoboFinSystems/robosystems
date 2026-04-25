@@ -11,9 +11,9 @@ and MCP tools.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -21,6 +21,7 @@ from robosystems.models.extensions.roboledger import (
   Association,
   Element,
   Entry,
+  Event,
   Fact,
   FactSet,
   LineItem,
@@ -392,8 +393,309 @@ class ScheduleService:
           )
         )
 
+    # Stream 2.A: materialize the obligation register.
+    # One `schedule_created` event (originator) + one `pending`
+    # `schedule_entry_due` event per period, linked via
+    # `obligated_by_event_id`. The sensor (Stream 2.B) will later flip
+    # the pending events to `classified` at each period boundary and
+    # dispatch the existing handler. Until then, the legacy close path
+    # still works because nothing reads these new rows.
+    schedule_created_event_id, pending_event_count = (
+      self._materialize_pending_obligations(
+        session,
+        structure=structure,
+        taxonomy_id=taxonomy_id,
+        period_start=period_start,
+        period_end=period_end,
+        monthly_amount=monthly_amount,
+        periods=periods,
+        closed_through=closed_through,
+        created_by=created_by,
+      )
+    )
+
+    # Stash the originator event id on the structure so disposal /
+    # supersession (Streams 2.C and 2.E) can find the obligation chain
+    # without an extra query.
+    metadata["schedule_created_event_id"] = schedule_created_event_id
+    metadata["pending_event_count"] = pending_event_count
+    structure.metadata_ = metadata
+    artifact_mechanics["schedule_created_event_id"] = schedule_created_event_id
+    artifact_mechanics["pending_event_count"] = pending_event_count
+    structure.artifact_mechanics = artifact_mechanics
+
     session.flush()
     return structure
+
+  def _materialize_pending_obligations(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    taxonomy_id: str,
+    period_start: date,
+    period_end: date,
+    monthly_amount: int,
+    periods: list[tuple[date, date]],
+    created_by: str,
+    closed_through: date | None = None,
+  ) -> tuple[str, int]:
+    """Emit `schedule_created` + N `schedule_entry_due` events.
+
+    Periods at or before ``closed_through`` are emitted as ``voided``
+    (with `metadata.void_reason='historical'`) so the close-period
+    gate doesn't treat backfilled historical periods as outstanding
+    obligations. Periods after ``closed_through`` (and all periods
+    when ``closed_through`` is None) are emitted as ``pending``.
+
+    The returned ``pending_event_count`` reflects only the still-open
+    obligations — historical voids are excluded from the count.
+
+    IDs are generated Python-side so the obligation linkage is set
+    without depending on a session flush — this keeps the linkage
+    verifiable in MagicMock-based tests and lets us add all rows in a
+    single batch.
+
+    Returns ``(schedule_created_event_id, pending_event_count)``.
+    """
+    schedule_created_event_id = generate_prefixed_ulid("evt")
+    now = datetime.now(UTC)
+
+    pending_count = sum(
+      1 for _p_start, p_end in periods if not closed_through or p_end > closed_through
+    )
+
+    # `event_category='other'` reflects that schedule_created is an
+    # operator/system act of recording an obligation register, not a
+    # GL-impact event in any of the standard REA categories. The
+    # actual GL events are the per-period schedule_entry_due children
+    # (event_category='recognition'), which the handler dispatches.
+    session.add(
+      Event(
+        id=schedule_created_event_id,
+        event_type="schedule_created",
+        event_category="other",
+        event_class="economic",
+        occurred_at=now,
+        source="internal",
+        status="committed",
+        metadata_={
+          "schedule_id": structure.id,
+          "taxonomy_id": taxonomy_id,
+          "period_start": period_start.isoformat(),
+          "period_end": period_end.isoformat(),
+          "monthly_amount": monthly_amount,
+          "pending_event_count": pending_count,
+        },
+        created_at=now,
+        created_by=created_by,
+      )
+    )
+
+    for p_start, p_end in periods:
+      # End-of-day so a same-day sensor sweep at midnight picks the
+      # period up exactly when it closes.
+      occurred_at = datetime.combine(p_end, time(23, 59, 59), tzinfo=UTC)
+      is_historical = closed_through is not None and p_end <= closed_through
+      event_metadata: dict[str, object] = {
+        "schedule_id": structure.id,
+        "posting_date": p_end.isoformat(),
+        "period_start": p_start.isoformat(),
+        "period_end": p_end.isoformat(),
+      }
+      if is_historical:
+        # Stamped at create time — never picked up by the close gate
+        # or the promotion sensor (both filter on status='pending').
+        # Kept in the obligation register as an audit-trail "I knew
+        # about this period; it predates the close".
+        event_metadata["void_reason"] = "historical"
+      session.add(
+        Event(
+          id=generate_prefixed_ulid("evt"),
+          event_type="schedule_entry_due",
+          event_category="recognition",
+          event_class="economic",
+          occurred_at=occurred_at,
+          source="internal",
+          status="voided" if is_historical else "pending",
+          obligated_by_event_id=schedule_created_event_id,
+          metadata_=event_metadata,
+          created_at=now,
+          created_by=created_by,
+        )
+      )
+
+    return schedule_created_event_id, pending_count
+
+  def void_pending_obligations(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    void_reason: str,
+    voided_by_event_id: str | None = None,
+  ) -> int:
+    """Void all `pending` schedule_entry_due events for a schedule.
+
+    Shared helper for the two lifecycle paths that retire a schedule's
+    remaining obligations:
+
+    - **Disposal** (asset_disposed handler): pass ``voided_by_event_id``
+      = the disposal event id so the audit chain answers "what voided
+      this obligation?". Caller also clears the schedule's SumEquals
+      rule and posts the disposal entry.
+    - **Schedule deletion** (cmd_delete_schedule): pass no
+      ``voided_by_event_id`` — the originating ``schedule_created``
+      event row is about to be deleted along with the schedule, so the
+      pending children are voided pre-emptively to keep them from
+      tripping the close-period gate after their parent disappears.
+
+    Returns the number of voided rows. Returns 0 (no-op) when the
+    schedule has no ``schedule_created_event_id`` stamped (legacy
+    schedules created before Stream 2.A) or when no pending
+    obligations exist.
+
+    Also decrements the originator's ``metadata.pending_event_count``
+    so reads of the obligation register stay accurate (the count is
+    stamped at create time and represents "still-open obligations").
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    metadata = structure.metadata_ or {}
+    schedule_created_event_id = metadata.get("schedule_created_event_id")
+    if not schedule_created_event_id:
+      return 0
+
+    update_values: dict[str, object] = {"status": "voided"}
+    if voided_by_event_id is not None:
+      update_values["replaced_by_event_id"] = voided_by_event_id
+
+    result = session.execute(
+      update(Event)
+      .where(
+        Event.obligated_by_event_id == schedule_created_event_id,
+        Event.status == "pending",
+      )
+      .values(**update_values)
+    )
+    voided_count = int(result.rowcount or 0)
+    if voided_count == 0:
+      return 0
+
+    # Decrement the originator's pending_event_count and stamp the
+    # void_reason so audits can attribute the void wave to its cause.
+    originator = session.get(Event, schedule_created_event_id)
+    if originator is not None:
+      orig_meta = dict(originator.metadata_ or {})
+      current = int(orig_meta.get("pending_event_count", 0))
+      orig_meta["pending_event_count"] = max(0, current - voided_count)
+      orig_meta.setdefault("void_history", []).append(
+        {
+          "voided_count": voided_count,
+          "void_reason": void_reason,
+          "voided_by_event_id": voided_by_event_id,
+          "voided_at": datetime.now(UTC).isoformat(),
+        }
+      )
+      originator.metadata_ = orig_meta
+      flag_modified(originator, "metadata_")
+
+    return voided_count
+
+  def supersede_pending_obligations(
+    self,
+    session: Session,
+    *,
+    structure: Structure,
+    created_by: str,
+  ) -> int:
+    """Void each pending obligation and emit a replacement linked via the
+    correction chain.
+
+    Used by ``update_schedule`` when the ``entry_template`` changes — the
+    period range stays the same (periods aren't editable), but the new
+    template represents a different intent for each future closing entry.
+    Re-materializing the pending events under the same originating
+    ``schedule_created`` event keeps the obligation register pointing at
+    a consistent set of "what's still due" with a queryable supersession
+    history (``replaces_event_id`` ↔ ``replaced_by_event_id``).
+
+    Already-classified / fulfilled / voided events are untouched — the
+    new template applies prospectively. Returns the number of
+    replacement events created.
+
+    Returns 0 when the schedule has no ``schedule_created_event_id``
+    stamped (legacy schedules created before Stream 2.A) or when no
+    pending events exist.
+    """
+    metadata = structure.metadata_ or {}
+    schedule_created_event_id = metadata.get("schedule_created_event_id")
+    if not schedule_created_event_id:
+      return 0
+
+    existing_pending = list(
+      session.execute(
+        select(Event).where(
+          Event.obligated_by_event_id == schedule_created_event_id,
+          Event.status == "pending",
+        )
+      ).scalars()
+    )
+    if not existing_pending:
+      return 0
+
+    now = datetime.now(UTC)
+    new_count = 0
+
+    for old_evt in existing_pending:
+      old_meta = old_evt.metadata_ or {}
+      period_start_iso = old_meta.get("period_start")
+      period_end_iso = old_meta.get("period_end")
+      if not period_start_iso or not period_end_iso:
+        # Legacy / malformed row — skip rather than crash. The void below
+        # is also skipped so we don't strand a row in an inconsistent state.
+        logger.warning(
+          "supersede_pending_obligations: skipping malformed event %s "
+          "on schedule %s (missing period_start/period_end metadata)",
+          old_evt.id,
+          structure.id,
+        )
+        continue
+
+      new_event_id = generate_prefixed_ulid("evt")
+      # Both sides of the supersession chain so the audit trail resolves
+      # backward and forward: same shape as update_event_block's superseded
+      # transition.
+      old_evt.status = "voided"
+      old_evt.replaced_by_event_id = new_event_id
+
+      period_end = date.fromisoformat(period_end_iso)
+      occurred_at = datetime.combine(period_end, time(23, 59, 59), tzinfo=UTC)
+
+      session.add(
+        Event(
+          id=new_event_id,
+          event_type="schedule_entry_due",
+          event_category="recognition",
+          event_class="economic",
+          occurred_at=occurred_at,
+          source="internal",
+          status="pending",
+          obligated_by_event_id=schedule_created_event_id,
+          replaces_event_id=old_evt.id,
+          metadata_={
+            "schedule_id": structure.id,
+            "posting_date": period_end_iso,
+            "period_start": period_start_iso,
+            "period_end": period_end_iso,
+          },
+          created_at=now,
+          created_by=created_by,
+        )
+      )
+      new_count += 1
+
+    return new_count
 
   def get_period_close_status(
     self,

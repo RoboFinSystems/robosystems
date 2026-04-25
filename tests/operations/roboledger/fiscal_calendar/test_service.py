@@ -56,6 +56,19 @@ class _InMemorySession:
 
 
 class _Query:
+  # Map BinaryExpression.operator → predicate. SQLAlchemy comparison
+  # operators expose themselves at .operator as the actual Python operator
+  # functions (operator.eq, operator.le, …), so this mapping covers the
+  # common cases the in-memory stub needs to evaluate.
+  _OP_PREDICATES = {
+    "eq": lambda v, c: v == c,
+    "ne": lambda v, c: v is not None and v != c,
+    "le": lambda v, c: v is not None and v <= c,
+    "lt": lambda v, c: v is not None and v < c,
+    "ge": lambda v, c: v is not None and v >= c,
+    "gt": lambda v, c: v is not None and v > c,
+  }
+
   def __init__(self, session: _InMemorySession, model):
     self._session = session
     self._model = model
@@ -65,37 +78,44 @@ class _Query:
     self._filters.extend(criteria)
     return self
 
-  def one_or_none(self):
-    rows = list(self._session._objects.get(self._model, []))
-    # Evaluate simple equality filters by reflection
+  def _apply_filters(self, rows: list) -> list:
+    """Evaluate the queued criteria against the in-memory rows.
+
+    SQLAlchemy ``BinaryExpression`` exposes ``.left.name`` for the column
+    name, ``.right.value`` for the comparand, and ``.operator`` for the
+    Python operator (``operator.eq``, ``operator.le``, …). We reflect
+    on ``.operator.__name__`` so the stub handles ``==``, ``!=``,
+    ``<=``, ``>=``, ``<``, and ``>`` uniformly. Anything we can't decode
+    is silently ignored — same defensive contract as the original stub.
+    """
     for criterion in self._filters:
-      # Criteria come from SQLAlchemy's BinaryExpression, which exposes
-      # .left.name for the column and .right.value for the comparand.
       try:
         col_name = criterion.left.name  # type: ignore[attr-defined]
         comparand = criterion.right.value  # type: ignore[attr-defined]
+        op_name = criterion.operator.__name__  # type: ignore[attr-defined]
       except AttributeError:
         continue
-      rows = [r for r in rows if getattr(r, col_name, None) == comparand]
+      predicate = self._OP_PREDICATES.get(op_name)
+      if predicate is None:
+        continue
+      rows = [r for r in rows if predicate(getattr(r, col_name, None), comparand)]
+    return rows
+
+  def one_or_none(self):
+    rows = self._apply_filters(list(self._session._objects.get(self._model, [])))
     if len(rows) > 1:
       raise RuntimeError(f"Expected 0 or 1 {self._model.__name__}, got {len(rows)}")
     return rows[0] if rows else None
 
   def all(self):
-    return list(self._session._objects.get(self._model, []))
+    return self._apply_filters(list(self._session._objects.get(self._model, [])))
 
   def first(self):
-    # Evaluate filters the same way one_or_none() does, but return the
-    # first match without raising on duplicates.
-    rows = list(self._session._objects.get(self._model, []))
-    for criterion in self._filters:
-      try:
-        col_name = criterion.left.name  # type: ignore[attr-defined]
-        comparand = criterion.right.value  # type: ignore[attr-defined]
-      except AttributeError:
-        continue
-      rows = [r for r in rows if getattr(r, col_name, None) == comparand]
+    rows = self._apply_filters(list(self._session._objects.get(self._model, [])))
     return rows[0] if rows else None
+
+  def count(self):
+    return len(self._apply_filters(list(self._session._objects.get(self._model, []))))
 
   def order_by(self, *args):
     return self
@@ -725,6 +745,119 @@ class TestCloseableGate:
         today=date(2026, 3, 1),
       )
       assert result.is_closeable
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# closeable_gate — pending obligations gate (Stream 2.D)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestPendingObligationsGate:
+  """Stream 2.D: a period cannot be closed while `pending` schedule_entry_due
+  events exist for any period that has occurred at or before the period_end.
+  """
+
+  @staticmethod
+  def _pending_event(occurred_at: datetime, status: str = "pending"):
+    """Build a stand-in Event row that the in-memory _Query stub can filter."""
+    from robosystems.models.extensions.roboledger.event import Event
+
+    evt = Event(
+      event_type="schedule_entry_due",
+      event_category="recognition",
+      event_class="economic",
+      occurred_at=occurred_at,
+      status=status,
+      source="internal",
+      created_by="usr_test",
+    )
+    return evt
+
+  def _service_with_calendar(self):
+    svc, session = _service()
+    svc.initialize(session, GRAPH_ID, closed_through="2025-12", actor_id="u1")
+    return svc, session
+
+  def test_pending_obligation_in_period_blocks(self):
+    svc, session = self._service_with_calendar()
+    session.add(self._pending_event(datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC)))
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert not result.is_closeable
+    assert CloseableGateResult.PENDING_OBLIGATIONS in result.blockers
+
+  def test_pending_obligation_strictly_after_period_end_does_not_block(self):
+    """Future-period obligations are fine — they belong to a later close."""
+    svc, session = self._service_with_calendar()
+    # Feb obligation while we're trying to close Jan
+    session.add(self._pending_event(datetime(2026, 2, 28, 23, 59, 59, tzinfo=UTC)))
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert result.is_closeable
+    assert CloseableGateResult.PENDING_OBLIGATIONS not in result.blockers
+
+  def test_classified_obligation_does_not_block(self):
+    """`classified` events have already been picked up; their drafts are in the GL."""
+    svc, session = self._service_with_calendar()
+    session.add(
+      self._pending_event(
+        datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC), status="classified"
+      )
+    )
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert result.is_closeable
+
+  def test_voided_obligation_does_not_block(self):
+    """Voided obligations (e.g., from a disposal) are no longer pending."""
+    svc, session = self._service_with_calendar()
+    session.add(
+      self._pending_event(
+        datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC), status="voided"
+      )
+    )
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert result.is_closeable
+
+  def test_other_event_type_does_not_block(self):
+    """Only `schedule_entry_due` events count as obligations for this gate."""
+    from robosystems.models.extensions.roboledger.event import Event
+
+    svc, session = self._service_with_calendar()
+    session.add(
+      Event(
+        event_type="journal_entry_recorded",
+        event_category="other",
+        event_class="economic",
+        occurred_at=datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC),
+        status="pending",
+        source="native",
+        created_by="usr_test",
+      )
+    )
+
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-01", today=date(2026, 2, 1))
+
+    assert result.is_closeable
+
+  def test_pending_obligation_combines_with_other_blockers(self):
+    """The new gate composes with the existing blockers, not short-circuit."""
+    svc, session = self._service_with_calendar()
+    session.add(self._pending_event(datetime(2026, 1, 31, 23, 59, 59, tzinfo=UTC)))
+
+    # Try to close Feb (sequence violation) while period is incomplete and
+    # pending obligation exists.
+    result = svc.closeable_gate(session, GRAPH_ID, "2026-02", today=date(2026, 2, 5))
+
+    assert not result.is_closeable
+    assert CloseableGateResult.SEQUENCE in result.blockers
+    assert CloseableGateResult.PERIOD_INCOMPLETE in result.blockers
+    assert CloseableGateResult.PENDING_OBLIGATIONS in result.blockers
 
 
 # ────────────────────────────────────────────────────────────────────────────

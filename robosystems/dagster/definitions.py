@@ -135,10 +135,18 @@ if env.EXTENSIONS_ENABLED:
   from robosystems.dagster.jobs.extensions import (
     extensions_materialize_job as _ext_mat_job,
   )
+  from robosystems.dagster.jobs.extensions import (
+    extensions_promote_obligations_job as _ext_promote_job,
+  )
+  from robosystems.dagster.sensors.scheduled_obligation_promoter import (
+    scheduled_obligation_promotion_sensor as _ext_promote_sensor,
+  )
 
-  _extensions_jobs: list = [_ext_mat_job]
+  _extensions_jobs: list = [_ext_mat_job, _ext_promote_job]
+  _extensions_sensors: list = [_ext_promote_sensor]
 else:
   _extensions_jobs = []
+  _extensions_sensors = []
 # erp = erp_pipeline()
 
 # Collect shared replica deps from all enabled adapter pipelines
@@ -250,6 +258,8 @@ all_sensors = [
   graph_usage_monitor_sensor,
   # Platform: Worker reliability
   worker_inflight_reaper_sensor,
+  # Extensions: period-boundary obligation promoter (Stream 2.B)
+  *_extensions_sensors,
   # Adapter: SEC pipeline
   *sec["sensors"],
 ]

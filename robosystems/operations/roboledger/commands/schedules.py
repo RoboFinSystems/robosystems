@@ -184,6 +184,7 @@ def create_schedule(
 
   session.commit()
 
+  metadata = structure.metadata_ or {}
   return ScheduleCreatedResponse(
     structure_id=structure.id,
     name=structure.name,
@@ -191,6 +192,8 @@ def create_schedule(
     total_periods=period_row.cnt if period_row else 0,
     total_facts=count_row.cnt if count_row else 0,
     rule_summary=_rule_summary(rule_results),
+    schedule_created_event_id=metadata.get("schedule_created_event_id"),
+    pending_event_count=metadata.get("pending_event_count", 0),
   )
 
 
@@ -266,7 +269,9 @@ def _load_schedule_or_404(session: Session, structure_id: str) -> Structure:
 
 
 def update_schedule(
-  session: Session, body: UpdateScheduleRequest
+  session: Session,
+  body: UpdateScheduleRequest,
+  updated_by: str = "system",
 ) -> ScheduleCreatedResponse:
   """Update mutable fields on a schedule.
 
@@ -277,6 +282,12 @@ def update_schedule(
   fact grid. Fire an event block that terminates the schedule (e.g.,
   `asset_disposed`) and create a fresh schedule via `create-schedule`.
 
+  When the entry template changes, all remaining `pending`
+  schedule_entry_due obligations are voided and replaced with a fresh
+  set linked via `replaces_event_id` / `replaced_by_event_id` (Stream
+  2.E supersession). Already-classified / fulfilled obligations are
+  untouched — the new template applies prospectively.
+
   Raises `ScheduleNotFoundError` if the schedule does not exist.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
@@ -284,16 +295,24 @@ def update_schedule(
   if body.name is not None:
     structure.name = body.name
 
+  existing_template = (
+    dict(structure.metadata_["entry_template"])
+    if structure.metadata_ and structure.metadata_.get("entry_template")
+    else {}
+  )
   metadata = dict(structure.metadata_) if structure.metadata_ else {}
+  template_changed = False
 
   if body.entry_template is not None:
-    metadata["entry_template"] = {
+    new_template = {
       "debit_element_id": body.entry_template.debit_element_id,
       "credit_element_id": body.entry_template.credit_element_id,
       "entry_type": body.entry_template.entry_type,
       "memo_template": body.entry_template.memo_template,
       "auto_reverse": body.entry_template.auto_reverse,
     }
+    template_changed = new_template != existing_template
+    metadata["entry_template"] = new_template
 
   if body.schedule_metadata is not None:
     metadata["schedule_metadata"] = {
@@ -316,6 +335,18 @@ def update_schedule(
     "entry_template": metadata.get("entry_template", {}),
     "schedule_metadata": metadata.get("schedule_metadata"),
   }
+
+  # Stream 2.E: void + re-materialize the pending obligation chain when
+  # the entry template changed. Same transaction as the metadata update
+  # so a partial state is impossible — either the new template + new
+  # pending events both land, or neither does.
+  if template_changed:
+    ScheduleService().supersede_pending_obligations(
+      session,
+      structure=structure,
+      created_by=updated_by,
+    )
+
   session.commit()
 
   # Recount for response (same as create_schedule response shape)
@@ -351,15 +382,24 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   """Delete a schedule — cascades through facts and associations.
 
   Deletion order respects FK constraints:
-  1. Verification results (referencing rules / structure_id)
-  2. Facts and FactSets (referencing structure_id)
-  3. Rules and association classifications (referencing associations)
-  4. Associations (referencing structure_id)
-  5. Structure row itself
+  1. Pending obligation events (Stream 2.E: void before parent disappears)
+  2. Verification results (referencing rules / structure_id)
+  3. Facts and FactSets (referencing structure_id)
+  4. Rules and association classifications (referencing associations)
+  5. Associations (referencing structure_id)
+  6. Structure row itself
 
   Raises `ScheduleNotFoundError` if the schedule does not exist.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
+  # Void any pending obligations first so they can't outlive their
+  # `schedule_created` originator and trip the close-period gate
+  # after the schedule is gone.
+  ScheduleService().void_pending_obligations(
+    session,
+    structure=structure,
+    void_reason="schedule_deleted",
+  )
   association_ids = (
     session.execute(
       select(Association.id).where(Association.structure_id == structure.id)

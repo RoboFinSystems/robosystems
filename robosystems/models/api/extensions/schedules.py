@@ -202,6 +202,12 @@ class ScheduleCreatedResponse(BaseModel):
   total_periods: int
   total_facts: int
   rule_summary: dict[str, int] | None = None
+  # Stream 2.A — every schedule is now backed by an event chain. Callers
+  # can use `schedule_created_event_id` as the obligation-register handle
+  # and `pending_event_count` as a quick sanity check that materialization
+  # produced one event per period.
+  schedule_created_event_id: str | None = None
+  pending_event_count: int = 0
 
 
 # ── Update / delete ──────────────────────────────────────────────────────

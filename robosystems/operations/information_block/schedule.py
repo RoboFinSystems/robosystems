@@ -86,12 +86,11 @@ def update(
 ) -> str:
   """Update a schedule via the existing command, return its structure_id.
 
-  The underlying ``cmd_update_schedule`` does not take an
-  ``updated_by`` parameter today; the dispatch signature accepts it for
-  consistency with :func:`create` and will wire through once audit
-  tracking on schedule updates is added.
+  ``updated_by`` is forwarded so any side effects of the update (Stream
+  2.E supersession of pending obligations when the entry template
+  changes) record the right actor on the freshly emitted event rows.
   """
-  response = cmd_update_schedule(session, payload)
+  response = cmd_update_schedule(session, payload, updated_by=updated_by)
   return response.structure_id
 
 

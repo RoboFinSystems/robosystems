@@ -22,11 +22,12 @@ connection exists," which passes the gate unconditionally.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
+from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.fiscal_calendar import (
   FiscalCalendar,
   FiscalCalendarEvent,
@@ -63,6 +64,7 @@ class CloseableGateResult:
   SYNC_STALE = "sync_stale"
   NO_CALENDAR = "calendar_not_initialized"
   ALREADY_CLOSED = "period_already_closed"
+  PENDING_OBLIGATIONS = "pending_obligations"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -645,6 +647,27 @@ class FiscalCalendarService:
         )
         if last_sync_date < period_end:
           blockers.append(CloseableGateResult.SYNC_STALE)
+
+    # Gate 4: pending obligations. Stream 2.D — schedules materialize one
+    # `pending` `schedule_entry_due` event per period. The period cannot be
+    # closed while any of those obligations remain pending, because the
+    # corresponding draft entries either haven't been created yet (Stream
+    # 2.B sensor flips them to `classified` and dispatches the handler) or
+    # the operator has not yet voided them. The user-facing remedy is to
+    # promote each obligation (manually via `update-event-block`, or
+    # automatically once Stream 2.B's sensor lands) or to void them.
+    period_end_dt = datetime.combine(period_end, time(23, 59, 59), tzinfo=UTC)
+    pending_count = (
+      session.query(Event)
+      .filter(
+        Event.event_type == "schedule_entry_due",
+        Event.status == "pending",
+        Event.occurred_at <= period_end_dt,
+      )
+      .count()
+    )
+    if pending_count > 0:
+      blockers.append(CloseableGateResult.PENDING_OBLIGATIONS)
 
     return CloseableGateResult(is_closeable=not blockers, blockers=blockers)
 

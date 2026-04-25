@@ -16,6 +16,9 @@ Current handlers:
   - journal_entry_reversed: a posted journal entry was reversed —
     handler creates the offsetting reversing entry, marks the original
     as `status='reversed'`, and links both rows to this event.
+  - schedule_created: a schedule was recorded — capture-only originator
+    that materialized schedule_entry_due events point at via
+    `obligated_by_event_id`. Emitted by ScheduleService.create_schedule.
   - schedule_entry_due: a schedule period matured — handler drafts the
     closing entry from the schedule's pre-computed fact.
   - asset_disposed: an asset left the business — handler atomically

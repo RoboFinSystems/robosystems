@@ -453,6 +453,520 @@ class TestCreateScheduleSourceTransactionId:
     assert structure.artifact_mechanics["source_transaction_id"] is None
 
 
+class TestCreateScheduleMaterializesObligations:
+  """Stream 2.A — schedule creation emits 1 schedule_created + N pending events."""
+
+  @staticmethod
+  def _added_events(session: MagicMock) -> list:
+    from robosystems.models.extensions.roboledger import Event
+
+    return [
+      call[0][0] for call in session.add.call_args_list if isinstance(call[0][0], Event)
+    ]
+
+  def test_emits_one_schedule_created_plus_one_pending_per_period(self):
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="3-month schedule",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    events = self._added_events(session)
+    creators = [e for e in events if e.event_type == "schedule_created"]
+    pending = [e for e in events if e.event_type == "schedule_entry_due"]
+
+    assert len(creators) == 1
+    assert len(pending) == 3
+    assert creators[0].status == "committed"
+    assert all(e.status == "pending" for e in pending)
+    assert all(e.event_class == "economic" for e in events)
+
+  def test_pending_events_link_back_to_schedule_created(self):
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Linked obligations",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 2, 28),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    events = self._added_events(session)
+    creator = next(e for e in events if e.event_type == "schedule_created")
+    pending = [e for e in events if e.event_type == "schedule_entry_due"]
+
+    assert all(e.obligated_by_event_id == creator.id for e in pending)
+
+  def test_pending_event_metadata_carries_period_and_schedule_id(self):
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Metadata round-trip",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 2, 28),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    events = self._added_events(session)
+    structure = session.add.call_args_list[0][0][0]
+    pending = sorted(
+      (e for e in events if e.event_type == "schedule_entry_due"),
+      key=lambda e: e.metadata_["period_start"],
+    )
+
+    assert pending[0].metadata_ == {
+      "schedule_id": structure.id,
+      "posting_date": "2026-01-31",
+      "period_start": "2026-01-01",
+      "period_end": "2026-01-31",
+    }
+    assert pending[1].metadata_["period_start"] == "2026-02-01"
+    assert pending[1].metadata_["period_end"] == "2026-02-28"
+    # schedule_entry_due handler picks this up unchanged.
+    assert pending[0].metadata_["schedule_id"] == structure.id
+
+  def test_originator_event_id_stamped_on_structure(self):
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Stamped",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    events = self._added_events(session)
+    creator = next(e for e in events if e.event_type == "schedule_created")
+    structure = session.add.call_args_list[0][0][0]
+
+    assert structure.metadata_["schedule_created_event_id"] == creator.id
+    assert structure.metadata_["pending_event_count"] == 1
+    assert structure.artifact_mechanics["schedule_created_event_id"] == creator.id
+    assert structure.artifact_mechanics["pending_event_count"] == 1
+
+  def test_pending_event_occurred_at_is_period_end_end_of_day(self):
+    """Sensor sweeps `occurred_at <= today`; period-end EOD is the right anchor."""
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Timestamps",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    events = self._added_events(session)
+    pending = next(e for e in events if e.event_type == "schedule_entry_due")
+    assert pending.occurred_at.date() == date(2026, 1, 31)
+    assert pending.occurred_at.hour == 23
+    assert pending.occurred_at.minute == 59
+
+  def test_historical_periods_emit_voided_not_pending(self):
+    """Backfilled periods (period_end <= closed_through) emit as voided.
+
+    Without this, a tenant who imports historical depreciation would
+    have every backfilled period block the close-period gate
+    indefinitely. The historical events stay as audit-trail rows but
+    don't count toward pending obligations.
+    """
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Backfilled depreciation",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2025, 1, 1),
+        period_end=date(2026, 6, 30),  # 18 periods total
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+        closed_through=date(2026, 3, 31),  # first 15 periods are historical
+      )
+
+    events = self._added_events(session)
+    schedule_entry_due = [e for e in events if e.event_type == "schedule_entry_due"]
+    pending = [e for e in schedule_entry_due if e.status == "pending"]
+    voided = [e for e in schedule_entry_due if e.status == "voided"]
+
+    assert len(schedule_entry_due) == 18
+    assert len(voided) == 15  # Jan 2025 - Mar 2026 (15 months)
+    assert len(pending) == 3  # Apr, May, Jun 2026
+    assert all(e.metadata_.get("void_reason") == "historical" for e in voided)
+    assert all("void_reason" not in e.metadata_ for e in pending)
+
+    # Originator's pending_event_count reflects only still-open obligations
+    creator = next(e for e in events if e.event_type == "schedule_created")
+    assert creator.metadata_["pending_event_count"] == 3
+
+  def test_no_closed_through_means_all_periods_pending(self):
+    """Backwards-compatibility: omitting closed_through emits every period as pending."""
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Fresh schedule",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+    pending = [
+      e
+      for e in self._added_events(session)
+      if e.event_type == "schedule_entry_due" and e.status == "pending"
+    ]
+    assert len(pending) == 3
+
+  def test_seven_year_schedule_emits_84_pending_events(self):
+    """Sanity check: the obligation register matches the period count."""
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="84-month depreciation",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2032, 12, 31),
+        monthly_amount=41_667,
+        entry_template=_make_entry_template(),
+        schedule_metadata=_make_schedule_metadata(),
+        created_by="usr_test",
+      )
+
+    events = self._added_events(session)
+    assert sum(1 for e in events if e.event_type == "schedule_created") == 1
+    assert sum(1 for e in events if e.event_type == "schedule_entry_due") == 84
+
+  def test_void_pending_obligations_decrements_originator_count(self):
+    """Voiding pending obligations updates the originator's pending_event_count."""
+    structure = MagicMock()
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+
+    originator = MagicMock()
+    originator.metadata_ = {"pending_event_count": 12}
+
+    session = MagicMock()
+    update_result = MagicMock(rowcount=12)
+    session.execute.return_value = update_result
+    session.get.return_value = originator
+
+    svc = ScheduleService()
+    voided = svc.void_pending_obligations(
+      session,
+      structure=structure,
+      void_reason="schedule_deleted",
+    )
+
+    assert voided == 12
+    assert originator.metadata_["pending_event_count"] == 0
+    assert len(originator.metadata_["void_history"]) == 1
+    assert originator.metadata_["void_history"][0]["voided_count"] == 12
+    assert originator.metadata_["void_history"][0]["void_reason"] == "schedule_deleted"
+    assert originator.metadata_["void_history"][0]["voided_by_event_id"] is None
+
+  def test_void_pending_obligations_with_disposal_event_link(self):
+    """Disposal passes voided_by_event_id; the void carries the audit link."""
+    structure = MagicMock()
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+
+    originator = MagicMock()
+    originator.metadata_ = {"pending_event_count": 6}
+
+    session = MagicMock()
+    session.execute.return_value = MagicMock(rowcount=4)
+    session.get.return_value = originator
+
+    svc = ScheduleService()
+    voided = svc.void_pending_obligations(
+      session,
+      structure=structure,
+      void_reason="asset_disposed",
+      voided_by_event_id="evt_disposal_42",
+    )
+
+    assert voided == 4
+    assert originator.metadata_["pending_event_count"] == 2  # 6 - 4
+    history = originator.metadata_["void_history"][0]
+    assert history["voided_by_event_id"] == "evt_disposal_42"
+    assert history["void_reason"] == "asset_disposed"
+
+    # The UPDATE statement carries replaced_by_event_id when a voider exists
+    update_stmt = session.execute.call_args.args[0]
+    rendered = str(update_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "replaced_by_event_id='evt_disposal_42'" in rendered.replace(" = ", "=")
+
+  def test_void_pending_obligations_no_op_when_no_originator(self):
+    """Legacy schedules with no schedule_created_event_id return 0 cleanly."""
+    structure = MagicMock()
+    structure.metadata_ = {}
+    session = MagicMock()
+
+    svc = ScheduleService()
+    voided = svc.void_pending_obligations(
+      session, structure=structure, void_reason="schedule_deleted"
+    )
+
+    assert voided == 0
+    session.execute.assert_not_called()
+
+  def test_void_pending_obligations_no_op_when_no_pending_rows(self):
+    """When the UPDATE matches zero rows, originator metadata is untouched."""
+    structure = MagicMock()
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+
+    session = MagicMock()
+    session.execute.return_value = MagicMock(rowcount=0)
+
+    svc = ScheduleService()
+    voided = svc.void_pending_obligations(
+      session, structure=structure, void_reason="schedule_deleted"
+    )
+
+    assert voided == 0
+    # session.get not called since we short-circuit before the originator load
+    session.get.assert_not_called()
+
+  def test_supersede_no_op_when_schedule_predates_stream_2a(self):
+    """Schedules with no schedule_created_event_id stamped return 0 cleanly."""
+    structure = MagicMock()
+    structure.metadata_ = {}  # legacy row with no event linkage
+    session = MagicMock()
+
+    svc = ScheduleService()
+    count = svc.supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 0
+    session.execute.assert_not_called()
+
+  def test_supersede_no_op_when_no_pending_events(self):
+    """All obligations already classified/fulfilled — nothing to supersede."""
+    structure = MagicMock()
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value = iter([])
+
+    svc = ScheduleService()
+    count = svc.supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 0
+    session.add.assert_not_called()
+
+  def test_supersede_voids_pending_and_emits_replacements_with_chain_links(self):
+    """Each pending event gets voided + linked to a fresh replacement event."""
+    from types import SimpleNamespace
+
+    structure = MagicMock()
+    structure.id = "struct_supersede"
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+
+    pending_a = SimpleNamespace(
+      id="evt_old_a",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={
+        "schedule_id": "struct_supersede",
+        "posting_date": "2026-01-31",
+        "period_start": "2026-01-01",
+        "period_end": "2026-01-31",
+      },
+    )
+    pending_b = SimpleNamespace(
+      id="evt_old_b",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={
+        "schedule_id": "struct_supersede",
+        "posting_date": "2026-02-28",
+        "period_start": "2026-02-01",
+        "period_end": "2026-02-28",
+      },
+    )
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value = iter([pending_a, pending_b])
+
+    svc = ScheduleService()
+    count = svc.supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 2
+    # Old events are voided + linked forward
+    assert pending_a.status == "voided"
+    assert pending_b.status == "voided"
+    assert pending_a.replaced_by_event_id is not None
+    assert pending_b.replaced_by_event_id is not None
+    # Each replacement was added
+    added = [c[0][0] for c in session.add.call_args_list]
+    from robosystems.models.extensions.roboledger import Event
+
+    new_events = [e for e in added if isinstance(e, Event)]
+    assert len(new_events) == 2
+    # Each new event points back at its predecessor and forward at the
+    # same originator
+    by_predecessor = {e.replaces_event_id: e for e in new_events}
+    assert by_predecessor["evt_old_a"].id == pending_a.replaced_by_event_id
+    assert by_predecessor["evt_old_b"].id == pending_b.replaced_by_event_id
+    for new_evt in new_events:
+      assert new_evt.obligated_by_event_id == "evt_origin"
+      assert new_evt.status == "pending"
+      assert new_evt.event_type == "schedule_entry_due"
+    # Period metadata carries through unchanged — only the template differs.
+    new_a = by_predecessor["evt_old_a"]
+    assert new_a.metadata_["period_start"] == "2026-01-01"
+    assert new_a.metadata_["period_end"] == "2026-01-31"
+
+  def test_supersede_skips_legacy_events_missing_period_metadata(self):
+    """Defensive: a malformed pending row doesn't crash the supersession."""
+    from types import SimpleNamespace
+
+    structure = MagicMock()
+    structure.id = "struct_legacy"
+    structure.metadata_ = {"schedule_created_event_id": "evt_origin"}
+
+    good = SimpleNamespace(
+      id="evt_good",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={
+        "schedule_id": "struct_legacy",
+        "posting_date": "2026-01-31",
+        "period_start": "2026-01-01",
+        "period_end": "2026-01-31",
+      },
+    )
+    malformed = SimpleNamespace(
+      id="evt_malformed",
+      status="pending",
+      replaced_by_event_id=None,
+      metadata_={"schedule_id": "struct_legacy"},  # no period info
+    )
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value = iter([good, malformed])
+
+    svc = ScheduleService()
+    count = svc.supersede_pending_obligations(
+      session, structure=structure, created_by="usr_test"
+    )
+
+    assert count == 1
+    assert good.status == "voided"
+    # Malformed row left as-is, NOT voided (so a follow-up data fix is possible)
+    assert malformed.status == "pending"
+
+  def test_schedule_created_metadata_round_trips_through_handler(self):
+    """The schedule_created event payload validates against its registered metadata schema.
+
+    A real DB flush would assign Structure.id; the MagicMock session is a
+    no-op, so we patch session.add to stamp an id on the first Structure
+    it sees. This makes the schedule_id linkage verifiable end-to-end.
+    """
+    from robosystems.models.extensions.roboledger import Structure
+    from robosystems.operations.event_block.python_handlers.schedule_created import (
+      ScheduleCreatedMetadata,
+    )
+
+    session = _mock_session()
+    session.execute.return_value = MagicMock(
+      fetchone=MagicMock(return_value=MagicMock(id="tax_01"))
+    )
+
+    def _stamp_structure_id(obj):
+      if isinstance(obj, Structure) and obj.id is None:
+        obj.id = "struct_test_01"
+
+    session.add.side_effect = _stamp_structure_id
+
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Schema check",
+        taxonomy_id="tax_01",
+        element_ids=["elem_depr", "elem_accum"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+
+    events = self._added_events(session)
+    creator = next(e for e in events if e.event_type == "schedule_created")
+    parsed = ScheduleCreatedMetadata.model_validate(creator.metadata_)
+    assert parsed.schedule_id == "struct_test_01"
+    assert parsed.pending_event_count == 3
+    assert parsed.period_start == date(2026, 1, 1)
+
+
 class TestCreateClosingEntry:
   def _mock_schedule_structure(self):
     struct = MagicMock()
