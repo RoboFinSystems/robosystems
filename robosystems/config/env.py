@@ -577,6 +577,10 @@ class EnvConfig:
     "MCP_VECTOR_SEARCH_ENABLED",
     get_parameter_value("MCP_VECTOR_SEARCH_ENABLED", "false").lower() == "true",
   )
+  MCP_GRAPHQL_ENABLED = get_bool_env(
+    "MCP_GRAPHQL_ENABLED",
+    get_parameter_value("MCP_GRAPHQL_ENABLED", "true").lower() == "true",
+  )
   SEMANTIC_SEARCH_ENABLED = get_bool_env(
     "SEMANTIC_SEARCH_ENABLED",
     get_parameter_value("SEMANTIC_SEARCH_ENABLED", "false").lower() == "true",

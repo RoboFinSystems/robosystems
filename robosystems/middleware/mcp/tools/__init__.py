@@ -18,6 +18,7 @@ from .graph_tools import (
   MaterializeTool,
   SwitchWorkspaceTool,
 )
+from .graphql_tool import GraphqlQueryTool, GraphqlSchemaTool
 from .manager import GraphMCPTools
 from .memory_tools import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .resolve_element_tool import ResolveElementTool
@@ -35,6 +36,8 @@ __all__ = [
   "ExampleQueriesTool",
   "GetGraphSyncStatusTool",
   "GraphMCPTools",
+  "GraphqlQueryTool",
+  "GraphqlSchemaTool",
   "ListSubgraphsTool",
   "MaterializeTool",
   "ResolveElementTool",

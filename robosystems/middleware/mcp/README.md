@@ -35,6 +35,7 @@ mcp/
     │ # Layer 1: Core tools (always available)
     ├── cypher_tool.py       # read-graph-cypher
     ├── schema_tool.py       # get-graph-schema
+    ├── graphql_tool.py      # get-graphql-schema, query-graphql (EXTENSIONS_GRAPHQL_ENABLED + MCP_GRAPHQL_ENABLED)
     │
     │ # Layer 2a: Schema-extension analytical tools (roboledger gated)
     ├── example_queries_tool.py     # get-example-queries
@@ -72,6 +73,18 @@ Tools are organized into four availability layers with conditional gating. `Grap
 |------|-------------|
 | `read-graph-cypher` | Execute read-only Cypher queries with validation |
 | `get-graph-schema` | Get complete database schema (cached 60s) |
+| `get-graphql-schema` | Return extensions GraphQL schema SDL or JSON introspection (process-lifetime cache). Requires `EXTENSIONS_GRAPHQL_ENABLED=true` and `MCP_GRAPHQL_ENABLED=true`. |
+| `query-graphql` | Execute a read-only GraphQL query against the extensions surface. Mutations and subscriptions rejected before execution. Complexity limits: depth 10, fields 200, aliases 20. Same gate as above. |
+
+**GraphQL tool pattern** — call `get-graphql-schema` once per conversation to discover available types, then call `query-graphql` with parameterized queries. The graph_id always comes from the MCP context (URL-scoped), never from query arguments.
+
+```
+1. get-graphql-schema      → SDL   (once; process-lifetime cache)
+2. [agent reasons]         → write a typed query against the SDL
+3. query-graphql(query)    → data  (one call, nested typed response)
+```
+
+`MCP_GRAPHQL_ENABLED` is an SSM-toggleable kill switch (default: `true` when `EXTENSIONS_GRAPHQL_ENABLED=true`). Flip to `false` to disable both tools without a redeploy.
 
 ### Layer 2a: Schema-extension analytical tools
 
