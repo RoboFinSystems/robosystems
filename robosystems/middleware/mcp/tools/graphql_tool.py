@@ -19,6 +19,7 @@ field / alias complexity gate prevents runaway queries.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -31,7 +32,6 @@ from graphql import (
 from graphql import (
   parse as gql_parse,
 )
-from graphql.error import GraphQLSyntaxError
 
 from robosystems.logger import logger
 
@@ -86,8 +86,19 @@ def _reject_non_query(doc: DocumentNode) -> str | None:
 def _walk_complexity(
   selections: Any,
   depth: int,
+  fragments: dict[str, Any],
+  visited: set[str],
 ) -> tuple[int, int, int]:
-  """Recursively walk a selection set, returning (max_depth, fields, aliases)."""
+  """Recursively walk a selection set, returning (max_depth, fields, aliases).
+
+  ``fragments`` maps fragment name → ``FragmentDefinitionNode`` so that
+  ``FragmentSpreadNode``s can be expanded inline — counting their fields the
+  same way they would actually execute. Without this expansion, agents could
+  bypass the field-count limit by hiding fields behind named fragments.
+
+  ``visited`` tracks fragment names currently being expanded, providing
+  cycle protection on top of GraphQL's own cyclic-spread prohibition.
+  """
   max_depth = depth
   total_fields = 0
   total_aliases = 0
@@ -100,29 +111,61 @@ def _walk_complexity(
         total_aliases += 1
       if sel.selection_set:
         child_depth, child_fields, child_aliases = _walk_complexity(
-          sel.selection_set.selections, depth + 1
+          sel.selection_set.selections, depth + 1, fragments, visited
         )
         max_depth = max(max_depth, child_depth)
         total_fields += child_fields
         total_aliases += child_aliases
-    elif sel_kind in ("InlineFragmentNode", "FragmentSpreadNode"):
-      if hasattr(sel, "selection_set") and sel.selection_set:
+    elif sel_kind == "InlineFragmentNode":
+      if sel.selection_set:
         child_depth, child_fields, child_aliases = _walk_complexity(
-          sel.selection_set.selections, depth
+          sel.selection_set.selections, depth, fragments, visited
         )
         max_depth = max(max_depth, child_depth)
         total_fields += child_fields
         total_aliases += child_aliases
+    elif sel_kind == "FragmentSpreadNode":
+      name = sel.name.value
+      if name in visited:
+        # Cycle — GraphQL spec already forbids this; defense in depth.
+        continue
+      fragment = fragments.get(name)
+      if fragment is None or not fragment.selection_set:
+        continue
+      visited.add(name)
+      try:
+        child_depth, child_fields, child_aliases = _walk_complexity(
+          fragment.selection_set.selections, depth, fragments, visited
+        )
+      finally:
+        visited.discard(name)
+      max_depth = max(max_depth, child_depth)
+      total_fields += child_fields
+      total_aliases += child_aliases
 
   return max_depth, total_fields, total_aliases
 
 
 def _check_complexity(doc: DocumentNode) -> str | None:
-  """Return an error string if the document exceeds complexity limits."""
+  """Return an error string if the document exceeds complexity limits.
+
+  Only ``OperationDefinitionNode``s are walked; ``FragmentDefinitionNode``s
+  are inlined into operations via spread expansion. An unused fragment
+  contributes zero cost, which is correct — it never executes.
+  """
+  fragments: dict[str, Any] = {}
   for defn in doc.definitions:
-    if not hasattr(defn, "selection_set") or defn.selection_set is None:
+    if type(defn).__name__ == "FragmentDefinitionNode":
+      fragments[defn.name.value] = defn
+
+  for defn in doc.definitions:
+    if type(defn).__name__ != "OperationDefinitionNode":
       continue
-    depth, fields, aliases = _walk_complexity(defn.selection_set.selections, 1)
+    if not getattr(defn, "selection_set", None):
+      continue
+    depth, fields, aliases = _walk_complexity(
+      defn.selection_set.selections, 1, fragments, set()
+    )
     if depth > _MAX_DEPTH:
       return f"Query depth {depth} exceeds limit of {_MAX_DEPTH}"
     if fields > _MAX_FIELDS:
@@ -188,8 +231,15 @@ class GraphqlSchemaTool(BaseTool):
         get_introspection_query(),
         context_value=_anon_ctx(),
       )
-      if r.errors:
-        logger.warning(f"Introspection query returned errors: {r.errors}")
+      if r.errors or r.data is None:
+        # Don't cache failure — let the next call retry. Caching ``"null"``
+        # would be a permanent process-lifetime poison pill until restart.
+        logger.warning(f"Introspection query failed: {r.errors}")
+        return {
+          "error": "introspection_failed",
+          "message": "; ".join(str(e.message) for e in (r.errors or []))
+          or "no data returned",
+        }
       result = json.dumps(r.data)
 
     _SCHEMA_CACHE[format_] = result
@@ -254,11 +304,12 @@ class GraphqlQueryTool(BaseTool):
     if not query:
       return {"error": "invalid_query", "message": "query is required"}
 
-    # Parse first — surface syntax errors before mutation check
+    # Parse first — surface syntax errors before mutation check.
+    # ``GraphQLSyntaxError`` is the typical case, but graphql-core can raise
+    # other ``GraphQLError`` subclasses for malformed documents (e.g. unicode
+    # issues), so catch them all uniformly.
     try:
       doc = gql_parse(query)
-    except GraphQLSyntaxError as e:
-      return {"error": "parse_error", "message": str(e)}
     except Exception as e:
       return {"error": "parse_error", "message": str(e)}
 
@@ -277,7 +328,7 @@ class GraphqlQueryTool(BaseTool):
 
     schema = _ensure_gql_schema()
 
-    ctx = self._build_context()
+    ctx = await self._build_context()
     variables = arguments.get("variables") or {}
     operation_name = arguments.get("operationName")
 
@@ -301,13 +352,20 @@ class GraphqlQueryTool(BaseTool):
       ]
     return response
 
-  def _build_context(self) -> dict[str, Any]:
-    user = self._fetch_user()
+  async def _build_context(self) -> dict[str, Any]:
+    # ``_fetch_user`` is sync (uses the platform DB sync session). Run it on
+    # a worker thread so the event loop isn't blocked while the DB query
+    # is in flight.
+    user = await asyncio.to_thread(self._fetch_user)
     return {
       "request": SimpleNamespace(),
       "user": user,
       "graph_id": self.client.graph_id,
       "schema_extensions": self._schema_extensions,
+      # Hardcoded — the GraphQL MCP tools are intentionally scoped to user
+      # entity graphs. Shared repositories (SEC, library) are read-only and
+      # exercise different MCP paths; if a resolver ever branches on
+      # graph_type for a shared-repo MCP call, that's a bug to surface.
       "graph_type": "entity",
     }
 
