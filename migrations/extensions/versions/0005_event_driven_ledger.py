@@ -1,15 +1,20 @@
 """Event-driven ledger schema (consolidated).
 
 Squashes Phases 1-4b of the event-driven ledger build into a single
-migration. The original four migrations (events table, agents +
-events.agent_id FK, event_handlers, entries.triggered_by_event_id audit
-column) were never deployed beyond local development — collapsing them
-into one schema diff makes this feature easier to reason about as a
-unit.
+migration, plus the REA duality + ``event_class`` schema additions
+proposed alongside the spec revision. The original four migrations
+(events table, agents + events.agent_id FK, event_handlers,
+entries.triggered_by_event_id audit column) and the duality follow-up
+were never deployed beyond local development — collapsing them into one
+schema diff makes this feature easier to reason about as a unit.
 
 Tables created:
   - ``agents``: REA counterparty registry (customers, vendors, etc.)
-  - ``events``: real-world business events with status lifecycle, FK to agents
+  - ``events``: real-world business events with status lifecycle, FK to
+    agents. Includes the duality chain (``obligated_by_event_id`` for
+    forward-materialized scheduled events; ``discharges_event_id`` for
+    settlement of obligations) and ``event_class`` (``'economic'`` vs
+    ``'support'``) orthogonal to ``event_category``.
   - ``event_dimensions``: M:N junction between events and dimensions
   - ``event_handlers``: dynamic rule registry that drives event → GL writes
 
@@ -55,9 +60,13 @@ _STATUS_CHECK = (
   "'fulfilled', 'voided', 'superseded')"
 )
 _CATEGORY_CHECK = (
-  "event_category IN ('sales', 'purchase', 'financing', 'payroll', "
-  "'treasury', 'adjustment', 'recognition', 'other')"
+  "(event_class = 'economic' AND event_category IN ("
+  "'sales', 'purchase', 'financing', 'payroll', "
+  "'treasury', 'adjustment', 'recognition', 'other')) "
+  "OR (event_class = 'support' AND event_category IN ("
+  "'control', 'approval', 'reconciliation', 'inquiry'))"
 )
+_EVENT_CLASS_CHECK = "event_class IN ('economic', 'support')"
 _RESOURCE_TYPE_CHECK = (
   "resource_type IN ('goods', 'services', 'money', 'right', "
   "'obligation', 'information', 'labor') OR resource_type IS NULL"
@@ -121,6 +130,7 @@ def _create_in_tenant(conn, schema: str) -> None:
         id VARCHAR PRIMARY KEY,
         event_type VARCHAR NOT NULL,
         event_category VARCHAR NOT NULL,
+        event_class VARCHAR NOT NULL DEFAULT 'economic',
         agent_id VARCHAR REFERENCES {schema}.agents(id),
         resource_type VARCHAR,
         resource_element_id VARCHAR,
@@ -132,6 +142,8 @@ def _create_in_tenant(conn, schema: str) -> None:
         external_url VARCHAR,
         replaced_by_event_id VARCHAR,
         replaces_event_id VARCHAR,
+        obligated_by_event_id VARCHAR,
+        discharges_event_id VARCHAR,
         amount BIGINT,
         currency VARCHAR NOT NULL DEFAULT 'USD',
         description VARCHAR,
@@ -140,6 +152,7 @@ def _create_in_tenant(conn, schema: str) -> None:
         created_by VARCHAR NOT NULL,
         CONSTRAINT check_{schema}_event_status CHECK ({_STATUS_CHECK}),
         CONSTRAINT check_{schema}_event_category CHECK ({_CATEGORY_CHECK}),
+        CONSTRAINT check_{schema}_event_class CHECK ({_EVENT_CLASS_CHECK}),
         CONSTRAINT check_{schema}_event_resource_type CHECK ({_RESOURCE_TYPE_CHECK})
       )
     """)
@@ -150,6 +163,8 @@ def _create_in_tenant(conn, schema: str) -> None:
     ("occurred_at", "occurred_at"),
     ("status", "status"),
     ("agent", "agent_id"),
+    ("obligated_by", "obligated_by_event_id"),
+    ("discharges", "discharges_event_id"),
   ]:
     conn.execute(
       text(
@@ -333,6 +348,8 @@ def _drop_in_tenant(conn, schema: str) -> None:
   conn.execute(text(f"DROP TABLE IF EXISTS {schema}.event_dimensions"))
   for idx_suffix in (
     "source_external",
+    "discharges",
+    "obligated_by",
     "agent",
     "status",
     "occurred_at",
@@ -406,6 +423,7 @@ def upgrade() -> None:
     sa.Column("id", sa.String(), nullable=False),
     sa.Column("event_type", sa.String(), nullable=False),
     sa.Column("event_category", sa.String(), nullable=False),
+    sa.Column("event_class", sa.String(), nullable=False, server_default="economic"),
     sa.Column("agent_id", sa.String(), nullable=True),
     sa.Column("resource_type", sa.String(), nullable=True),
     sa.Column("resource_element_id", sa.String(), nullable=True),
@@ -417,6 +435,8 @@ def upgrade() -> None:
     sa.Column("external_url", sa.String(), nullable=True),
     sa.Column("replaced_by_event_id", sa.String(), nullable=True),
     sa.Column("replaces_event_id", sa.String(), nullable=True),
+    sa.Column("obligated_by_event_id", sa.String(), nullable=True),
+    sa.Column("discharges_event_id", sa.String(), nullable=True),
     sa.Column("amount", sa.BigInteger(), nullable=True),
     sa.Column("currency", sa.String(), nullable=False, server_default="USD"),
     sa.Column("description", sa.String(), nullable=True),
@@ -432,6 +452,7 @@ def upgrade() -> None:
     sa.Column("created_by", sa.String(), nullable=False),
     sa.CheckConstraint(_STATUS_CHECK, name="check_event_status"),
     sa.CheckConstraint(_CATEGORY_CHECK, name="check_event_category"),
+    sa.CheckConstraint(_EVENT_CLASS_CHECK, name="check_event_class"),
     sa.CheckConstraint(_RESOURCE_TYPE_CHECK, name="check_event_resource_type"),
     sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], name="fk_events_agent_id"),
     sa.PrimaryKeyConstraint("id"),
@@ -441,6 +462,8 @@ def upgrade() -> None:
   op.create_index("idx_events_occurred_at", "events", ["occurred_at"])
   op.create_index("idx_events_status", "events", ["status"])
   op.create_index("idx_events_agent", "events", ["agent_id"])
+  op.create_index("idx_events_obligated_by", "events", ["obligated_by_event_id"])
+  op.create_index("idx_events_discharges", "events", ["discharges_event_id"])
   op.create_index(
     "idx_events_source_external",
     "events",
@@ -624,6 +647,8 @@ def downgrade() -> None:
   # event_dimensions + events
   op.drop_table("event_dimensions")
   op.drop_index("idx_events_source_external", table_name="events")
+  op.drop_index("idx_events_discharges", table_name="events")
+  op.drop_index("idx_events_obligated_by", table_name="events")
   op.drop_index("idx_events_agent", table_name="events")
   op.drop_index("idx_events_status", table_name="events")
   op.drop_index("idx_events_occurred_at", table_name="events")

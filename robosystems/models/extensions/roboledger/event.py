@@ -4,6 +4,19 @@ Status lifecycle: captured → classified → committed → pending → fulfille
 with voided and superseded as terminal off-ramps. The triggered_by_event_id
 column on transactions and entries links GL rows back to the originating
 event for the audit chain.
+
+Two REA-aligned link columns let events express duality at the event
+layer rather than only at the GL: ``obligated_by_event_id`` points at the
+event that scheduled this one (forward materialization — e.g. a depreciation
+schedule entry pointing back at the asset_acquired event); ``discharges_event_id``
+points at the obligation this event settles (e.g. cash_received pointing at
+the originating sale_invoiced). Both are nullable, application-validated
+self-references, matching the existing pattern for ``replaced_by_event_id``.
+
+``event_class`` (``'economic' | 'support'``) is orthogonal to ``event_category``.
+Economic events change resources; support events (control, approval,
+reconciliation, inquiry) are audit-trail / value-chain primitives that
+don't move resources.
 """
 
 from datetime import UTC, datetime
@@ -30,6 +43,8 @@ class Event(ExtensionsBase):
     Index("idx_events_occurred_at", "occurred_at"),
     Index("idx_events_status", "status"),
     Index("idx_events_agent", "agent_id"),
+    Index("idx_events_obligated_by", "obligated_by_event_id"),
+    Index("idx_events_discharges", "discharges_event_id"),
     Index(
       "idx_events_source_external",
       "source",
@@ -42,8 +57,16 @@ class Event(ExtensionsBase):
       name="check_event_status",
     ),
     CheckConstraint(
-      "event_category IN ('sales', 'purchase', 'financing', 'payroll', 'treasury', 'adjustment', 'recognition', 'other')",
+      "(event_class = 'economic' AND event_category IN ("
+      "'sales', 'purchase', 'financing', 'payroll', "
+      "'treasury', 'adjustment', 'recognition', 'other')) "
+      "OR (event_class = 'support' AND event_category IN ("
+      "'control', 'approval', 'reconciliation', 'inquiry'))",
       name="check_event_category",
+    ),
+    CheckConstraint(
+      "event_class IN ('economic', 'support')",
+      name="check_event_class",
     ),
     CheckConstraint(
       "resource_type IN ('goods', 'services', 'money', 'right', 'obligation', 'information', 'labor') OR resource_type IS NULL",
@@ -57,6 +80,7 @@ class Event(ExtensionsBase):
   # Event identity
   event_type = Column(String, nullable=False)
   event_category = Column(String, nullable=False)
+  event_class = Column(String, nullable=False, default="economic")
 
   # REA primitives. agent_id FK to agents(id) enforced at the DB level.
   agent_id = Column(String, nullable=True)
@@ -78,6 +102,12 @@ class Event(ExtensionsBase):
   # Correction chain (self-referential FKs — enforced via migration, not ORM relationship)
   replaced_by_event_id = Column(String, nullable=True)
   replaces_event_id = Column(String, nullable=True)
+
+  # Duality chain (REA): forward-materialization + settlement links.
+  # Both are application-validated self-references; same pattern as the
+  # correction chain above.
+  obligated_by_event_id = Column(String, nullable=True)
+  discharges_event_id = Column(String, nullable=True)
 
   # Economic value (minor currency units — cents, signed)
   amount = Column(BigInteger, nullable=True)
