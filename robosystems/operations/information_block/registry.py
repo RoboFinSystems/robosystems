@@ -36,12 +36,9 @@ from robosystems.operations.information_block.statement import (
 )
 from robosystems.operations.information_block.types import BlockTypeRegistryEntry
 
-# Metric block display identity. Kept here (next to the registration) so
-# the handler module doesn't need to re-export wire-shape constants that
-# are only consumed at registry-build time.
-METRIC_BLOCK_TYPE = "metric"
-METRIC_DISPLAY_NAME = "Metric"
-METRIC_CATEGORY = "Reporting"
+METRIC_BLOCK_TYPE = metric_handlers.METRIC_BLOCK_TYPE
+METRIC_DISPLAY_NAME = metric_handlers.METRIC_DISPLAY_NAME
+METRIC_CATEGORY = metric_handlers.METRIC_CATEGORY
 
 
 def make_not_implemented_handler(operation: str, message: str) -> Callable[..., Any]:

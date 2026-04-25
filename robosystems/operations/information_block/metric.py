@@ -29,6 +29,10 @@ from robosystems.operations.information_block.envelope import (
 if TYPE_CHECKING:
   from sqlalchemy.orm import Session
 
+METRIC_BLOCK_TYPE = "metric"
+METRIC_DISPLAY_NAME = "Metric"
+METRIC_CATEGORY = "Reporting"
+
 
 def build_envelope(
   session: Session, structure_id: str
@@ -41,14 +45,6 @@ def build_envelope(
   metric block as a placeholder.
   """
   from sqlalchemy import select
-
-  # Imported here so the module-level constants can stay in registry.py
-  # without dragging the registry into metric.py's import chain.
-  from robosystems.operations.information_block.registry import (
-    METRIC_BLOCK_TYPE,
-    METRIC_CATEGORY,
-    METRIC_DISPLAY_NAME,
-  )
 
   structure = session.get(Structure, structure_id)
   if structure is None or structure.structure_type != METRIC_BLOCK_TYPE:
@@ -90,5 +86,8 @@ def build_envelope(
 
 
 __all__ = [
+  "METRIC_BLOCK_TYPE",
+  "METRIC_CATEGORY",
+  "METRIC_DISPLAY_NAME",
   "build_envelope",
 ]
