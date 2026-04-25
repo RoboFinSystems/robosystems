@@ -81,7 +81,10 @@ class CreateEventHandlerRequest(BaseModel):
   match_resource_type: str | None = None
   match_metadata_expression: dict | None = Field(
     None,
-    description='JSONPath-style equality map, e.g. {"metadata.category": "payroll"}',
+    description=(
+      "JSONPath-style equality map against event.metadata, e.g. "
+      '{"category": "payroll"} or {"metadata.category": "payroll"}'
+    ),
   )
 
   # Template

@@ -177,8 +177,11 @@ class LedgerQuery:
     id: str,
   ) -> Agent | None:
     """Fetch a single counterparty agent by id."""
-    with _open_session(info, "roboledger") as session:
-      response = reads_agent.get_agent(session, id)
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_agent.get_agent(session, id)
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
     if response is None:
       return None
     return Agent.from_pydantic(response)
@@ -194,15 +197,19 @@ class LedgerQuery:
     offset: int = 0,
   ) -> list[Agent]:
     """List counterparty agents with optional filters."""
-    with _open_session(info, "roboledger") as session:
-      responses = reads_agent.list_agents(
-        session,
-        agent_type=agent_type,
-        source=source,
-        is_active=is_active,
-        limit=limit,
-        offset=offset,
-      )
+    _validate_pagination(limit, offset)
+    try:
+      with _open_session(info, "roboledger") as session:
+        responses = reads_agent.list_agents(
+          session,
+          agent_type=agent_type,
+          source=source,
+          is_active=is_active,
+          limit=limit,
+          offset=offset,
+        )
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
     return [Agent.from_pydantic(r) for r in responses]
 
   # ── Summary ─────────────────────────────────────────────────────────────

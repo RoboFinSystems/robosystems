@@ -26,6 +26,7 @@ from robosystems.models.api.extensions.accounts import (
 from robosystems.models.api.extensions.accounts import (
   AccountTreeResponse,
 )
+from robosystems.models.api.extensions.agent import AgentResponse
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
 
 GRAPH_ID = "kg01234567890abcdef"
@@ -284,6 +285,75 @@ class TestEntitiesResolver:
     assert err.extensions == {"code": "LEDGER_NOT_INITIALIZED"}
 
 
+class TestAgentResolvers:
+  def _agent(self) -> AgentResponse:
+    return AgentResponse(
+      id="agt_01",
+      agent_type="vendor",
+      name="Vendor Co",
+      source="native",
+      external_id="ven_123",
+      is_active=True,
+      is_1099_recipient=False,
+    )
+
+  def test_returns_agent_when_found(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.agent.get_agent",
+        return_value=self._agent(),
+      ),
+    ):
+      result = schema.execute_sync(
+        'query { agent(id: "agt_01") { id name agentType source externalId } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data == {
+      "agent": {
+        "id": "agt_01",
+        "name": "Vendor Co",
+        "agentType": "vendor",
+        "source": "native",
+        "externalId": "ven_123",
+      }
+    }
+
+  def test_agent_raises_typed_error_when_schema_not_initialized(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.agent.get_agent",
+        side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
+      ),
+    ):
+      result = schema.execute_sync(
+        'query { agent(id: "agt_01") { id } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+  def test_agents_raises_typed_error_when_schema_not_initialized(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.agent.list_agents",
+        side_effect=ValueError("bad graph_id"),
+      ),
+    ):
+      result = schema.execute_sync(
+        "query { agents { id } }",
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+
 class TestAccountTreeResolver:
   """The recursive `AccountTreeNode` round-trip is the highest-risk part
   of the schema because the Pydantic decorator can't synthesize it."""
@@ -482,6 +552,14 @@ class TestPaginationBounds:
   def test_bounds_apply_to_transactions_too(self) -> None:
     result = schema.execute_sync(
       "query { transactions(limit: 99999) { pagination { total } } }",
+      context_value=_ctx(),
+    )
+    assert result.errors is not None
+    assert any("limit must be between" in str(e.message) for e in result.errors)
+
+  def test_bounds_apply_to_agents_too(self) -> None:
+    result = schema.execute_sync(
+      "query { agents(limit: 0) { id } }",
       context_value=_ctx(),
     )
     assert result.errors is not None

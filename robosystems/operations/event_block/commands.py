@@ -24,6 +24,7 @@ from robosystems.models.api.event_handler import (
   PreviewEventBlockResponse,
   TransactionPreview,
 )
+from robosystems.models.extensions.roboledger.agent import Agent
 from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
 )
@@ -104,6 +105,16 @@ def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
   )
 
 
+def _resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
+  """Load the counterparty's agent_type for DSL handler matching."""
+  if agent_id is None:
+    return None
+  agent = session.get(Agent, agent_id)
+  if agent is None:
+    return None
+  return agent.agent_type
+
+
 def _build_event_row(
   body: CreateEventBlockRequest,
   created_by: str,
@@ -176,12 +187,13 @@ def create_event_block(
       return _to_envelope(event, body.dimension_ids)
 
     # 2. Fall through to the DSL registry (Phase 3 path)
+    agent_type = _resolve_agent_type(session, body.agent_id)
     handler = resolve_handler(
       session,
       event_type=body.event_type,
       event_category=body.event_category,
       source=body.source,
-      agent_type=None,  # resolved from agent row in Phase 4+
+      agent_type=agent_type,
       resource_type=body.resource_type,
       metadata=body.metadata,
     )
@@ -321,6 +333,7 @@ def preview_event_block(
   errors: list[str] = []
   matched_handler_response = None
   planned: list[TransactionPreview] = []
+  agent_type = _resolve_agent_type(session, body.agent_id)
 
   try:
     handler = resolve_handler(
@@ -328,7 +341,7 @@ def preview_event_block(
       event_type=body.event_type,
       event_category=body.event_category,
       source=body.source,
-      agent_type=None,
+      agent_type=agent_type,
       resource_type=body.resource_type,
       metadata=body.metadata,
     )

@@ -57,7 +57,8 @@ class EventHandler(ExtensionsBase):
   match_source = Column(String, nullable=True)
   match_agent_type = Column(String, nullable=True)
   match_resource_type = Column(String, nullable=True)
-  # Simple JSONPath-like equality map: {"metadata.foo": "bar"}
+  # Simple JSONPath-like equality map against event.metadata.
+  # Accepts both {"foo": "bar"} and {"metadata.foo": "bar"}.
   match_metadata_expression = Column(JSONB, nullable=True)
 
   # DSL — shape: {"transactions": [{"entry_template": {"debit": {...}, "credit": {...}}}]}

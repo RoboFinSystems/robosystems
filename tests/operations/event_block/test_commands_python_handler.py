@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.models.api.event_block import CreateEventBlockRequest
+from robosystems.models.extensions.roboledger.event_handler import EventHandler
 from robosystems.operations.event_block.commands import (
   create_event_block,
   preview_event_block,
@@ -213,3 +214,85 @@ class TestPreviewEventBlockPythonHandlerPath:
 
     assert resp.would_succeed is False
     assert resp.validation_errors  # non-empty
+
+
+class TestDslHandlerResolution:
+  @staticmethod
+  def _session_with_event_id() -> MagicMock:
+    session = MagicMock()
+    added: list = []
+    session.add.side_effect = lambda obj: added.append(obj)
+
+    def fake_flush():
+      for obj in added:
+        if getattr(obj, "id", None) is None and obj.__class__.__name__ == "Event":
+          obj.id = "evt_test"
+
+    session.flush.side_effect = fake_flush
+    return session
+
+  @staticmethod
+  def _handler() -> EventHandler:
+    return EventHandler(
+      id="hdl_test",
+      name="Customer-Specific Handler",
+      event_type="invoice_issued",
+      transaction_template={"transactions": []},
+      priority=10,
+      is_active=True,
+      origin="tenant",
+      created_by="usr_test",
+    )
+
+  def test_create_event_block_passes_agent_type_to_dsl_resolver(self) -> None:
+    session = self._session_with_event_id()
+    session.get.return_value = MagicMock(agent_type="customer")
+    body = _make_body(
+      event_type="invoice_issued",
+      event_category="sales",
+      metadata={},
+      agent_id="agt_customer",
+    )
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.get_python_handler",
+        return_value=None,
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.resolve_handler",
+        return_value=self._handler(),
+      ) as resolver,
+      patch("robosystems.operations.event_block.commands.apply_handler"),
+    ):
+      envelope = create_event_block(session, body, created_by="usr_test")
+
+    assert resolver.call_args.kwargs["agent_type"] == "customer"
+    assert envelope.id == "evt_test"
+    assert envelope.status == "classified"
+
+  def test_preview_event_block_passes_agent_type_to_dsl_resolver(self) -> None:
+    session = MagicMock()
+    session.get.return_value = MagicMock(agent_type="vendor")
+    body = _make_body(
+      event_type="invoice_issued",
+      event_category="purchase",
+      metadata={},
+      agent_id="agt_vendor",
+    )
+
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.get_python_handler",
+        return_value=None,
+      ),
+      patch(
+        "robosystems.operations.event_block.commands.resolve_handler",
+        return_value=self._handler(),
+      ) as resolver,
+    ):
+      resp = preview_event_block(session, body, created_by="usr_test")
+
+    assert resolver.call_args.kwargs["agent_type"] == "vendor"
+    assert resp.would_succeed is True
+    assert resp.matched_handler is not None

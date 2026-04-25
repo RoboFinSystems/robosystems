@@ -122,9 +122,10 @@ def get_agent_activity(
   ).scalar_one()
 
   txn_count = session.execute(
-    select(func.count())
+    select(func.count(Transaction.id))
     .select_from(Transaction)
-    .where(Transaction.triggered_by_event_id.in_(event_ids) if event_ids else False)
+    .join(Event, Transaction.triggered_by_event_id == Event.id)
+    .where(Event.agent_id == agent_id)
   ).scalar_one()
 
   from robosystems.operations.roboledger.reads.event_block import list_event_blocks

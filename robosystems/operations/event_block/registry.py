@@ -47,11 +47,23 @@ def _matches_metadata_expression(
   expression: dict | None,
   event_metadata: dict,
 ) -> bool:
-  """Simple dot-path equality match against event.metadata."""
+  """Simple dot-path equality match against event.metadata.
+
+  Accepts both root-relative paths ("category") and the historically
+  documented metadata-prefixed form ("metadata.category").
+  """
   if not expression:
     return True
   for path, expected in expression.items():
-    # Support nested paths like "category" or "sub.key"
+    # Support nested paths like "category" or "sub.key". Keep backward
+    # compatibility with the documented "metadata.foo" form.
+    if path == "metadata":
+      node = event_metadata
+      if node != expected:
+        return False
+      continue
+    if path.startswith("metadata."):
+      path = path.removeprefix("metadata.")
     parts = path.split(".")
     node: object = event_metadata
     for part in parts:

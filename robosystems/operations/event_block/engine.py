@@ -163,6 +163,7 @@ def apply_handler(
       status="draft",
       memo=event.description or handler.name,
       provenance="event_handler",
+      triggered_by_event_id=event.id,
       created_at=now,
       updated_at=now,
       created_by=created_by,
