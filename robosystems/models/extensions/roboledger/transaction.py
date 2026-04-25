@@ -31,6 +31,11 @@ class Transaction(ExtensionsBase):
     Index("idx_transactions_source", "source"),
     Index("idx_transactions_merchant", "merchant_name"),
     Index("idx_transactions_created", "created_at"),
+    Index(
+      "idx_transactions_triggered_by_event",
+      "triggered_by_event_id",
+      postgresql_where="triggered_by_event_id IS NOT NULL",
+    ),
     CheckConstraint(
       "status IN ('pending', 'posted', 'void')",
       name="check_transaction_status",
@@ -66,6 +71,10 @@ class Transaction(ExtensionsBase):
   source = Column(String, nullable=False, default="native")
   source_id = Column(String, nullable=True)
   connection_id = Column(String, nullable=True)
+
+  # Event audit chain — links this transaction to the business event that caused it.
+  # Null for legacy transactions and explicit journal entries (no upstream event).
+  triggered_by_event_id = Column(String, nullable=True)
 
   # State
   status = Column(String, nullable=False, default="pending")

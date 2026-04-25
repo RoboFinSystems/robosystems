@@ -14,10 +14,13 @@ with ``blockType="schedule"`` and ``get-information-block``. This
 module stays scoped to tools that operate across blocks rather than
 within one.
 
-Writes (``create-schedule``, ``update-schedule``, ``delete-schedule``,
-``truncate-schedule``, ``create-closing-entry``,
-``create-manual-closing-entry``) are registrar-generated from the
-roboledger ``OperationSpec`` declarations. The unified
+Writes (``create-schedule``, ``update-schedule``, ``delete-schedule``)
+are registrar-generated from the roboledger ``OperationSpec``
+declarations. Closing-entry drafting goes through ``create-event-block``
+— ``event_type='schedule_entry_due'`` for schedule-derived drafts,
+``event_type='journal_entry_recorded'`` for free-form manual entries.
+Schedule termination (truncate forward facts) is handled internally by
+the ``asset_disposed`` event handler. The unified
 ``create-information-block`` / ``update-information-block`` /
 ``delete-information-block`` operations dispatch the same underlying
 schedule commands via the block-type registry.

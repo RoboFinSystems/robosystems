@@ -1,7 +1,7 @@
 """Unit tests for journal entry CRUD commands.
 
 Tests cover:
-- _validate_and_normalize_lines — balance enforcement, per-line validation
+- validate_and_normalize_lines — balance enforcement, per-line validation
 - create_journal_entry — draft/posted status, closed-period gate, session writes
 - update_journal_entry — draft-only gate, scalar updates, line replacement,
   unbalanced-before-delete safety, period gate on date change
@@ -30,11 +30,11 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   JournalEntryNotFoundError,
   JournalEntryNotPostedError,
   UnbalancedJournalEntryError,
-  _validate_and_normalize_lines,
   create_journal_entry,
   delete_journal_entry,
   reverse_journal_entry,
   update_journal_entry,
+  validate_and_normalize_lines,
 )
 
 MODULE = "robosystems.operations.roboledger.commands.journal_entries"
@@ -102,21 +102,21 @@ def _scalars_exec(values):
   return r
 
 
-# ── _validate_and_normalize_lines ────────────────────────────────────────
+# ── validate_and_normalize_lines ────────────────────────────────────────
 
 
 class TestValidateAndNormalizeLines:
   def test_empty_list_raises(self):
     with pytest.raises(ValueError, match="at least one line item"):
-      _validate_and_normalize_lines([])
+      validate_and_normalize_lines([])
 
   def test_missing_element_id_raises(self):
     with pytest.raises(ValueError, match="missing element_id"):
-      _validate_and_normalize_lines([_line(element_id="", debit=100)])
+      validate_and_normalize_lines([_line(element_id="", debit=100)])
 
   def test_negative_debit_raises(self):
     with pytest.raises(ValueError, match="non-negative"):
-      _validate_and_normalize_lines(
+      validate_and_normalize_lines(
         [
           _line("elem_a", debit=-100),
           _line("elem_b", credit=100),
@@ -125,7 +125,7 @@ class TestValidateAndNormalizeLines:
 
   def test_negative_credit_raises(self):
     with pytest.raises(ValueError, match="non-negative"):
-      _validate_and_normalize_lines(
+      validate_and_normalize_lines(
         [
           _line("elem_a", debit=100),
           _line("elem_b", credit=-100),
@@ -134,7 +134,7 @@ class TestValidateAndNormalizeLines:
 
   def test_both_debit_and_credit_raises(self):
     with pytest.raises(ValueError, match="cannot have both"):
-      _validate_and_normalize_lines(
+      validate_and_normalize_lines(
         [
           _line("elem_a", debit=100, credit=100),
         ]
@@ -142,11 +142,11 @@ class TestValidateAndNormalizeLines:
 
   def test_zero_amounts_raises(self):
     with pytest.raises(ValueError, match="non-zero"):
-      _validate_and_normalize_lines([_line("elem_a")])  # debit=0, credit=0
+      validate_and_normalize_lines([_line("elem_a")])  # debit=0, credit=0
 
   def test_unbalanced_raises_with_amounts(self):
     with pytest.raises(UnbalancedJournalEntryError) as exc_info:
-      _validate_and_normalize_lines(
+      validate_and_normalize_lines(
         [
           _line("elem_a", debit=1000),
           _line("elem_b", credit=900),
@@ -161,14 +161,14 @@ class TestValidateAndNormalizeLines:
       _line("elem_b", debit=500),
       _line("elem_c", credit=1000),
     ]
-    normalized, total_dr, total_cr = _validate_and_normalize_lines(lines)
+    normalized, total_dr, total_cr = validate_and_normalize_lines(lines)
     assert total_dr == 1000
     assert total_cr == 1000
     assert len(normalized) == 3
 
   def test_normalized_dict_has_expected_keys(self):
     lines = [_line("elem_a", debit=200), _line("elem_b", credit=200)]
-    normalized, _, _ = _validate_and_normalize_lines(lines)
+    normalized, _, _ = validate_and_normalize_lines(lines)
     assert normalized[0]["element_id"] == "elem_a"
     assert normalized[0]["debit_amount"] == 200
     assert normalized[0]["credit_amount"] == 0
@@ -178,7 +178,7 @@ class TestValidateAndNormalizeLines:
   def test_many_lines_balance(self):
     lines = [_line(f"elem_{i}", debit=100) for i in range(5)]
     lines += [_line("elem_credit", credit=500)]
-    normalized, dr, cr = _validate_and_normalize_lines(lines)
+    normalized, dr, cr = validate_and_normalize_lines(lines)
     assert dr == cr == 500
     assert len(normalized) == 6
 

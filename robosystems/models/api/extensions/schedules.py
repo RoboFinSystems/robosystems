@@ -127,34 +127,6 @@ class CreateManualClosingEntryRequest(BaseModel):
   )
 
 
-class TruncateScheduleRequest(BaseModel):
-  new_end_date: date = Field(
-    ...,
-    description=(
-      "New last-covered date for the schedule. Facts with period_start > "
-      "this date are deleted (along with any stale draft entries they "
-      "produced). Historical facts (already posted) are preserved."
-    ),
-  )
-  reason: str = Field(
-    ...,
-    min_length=1,
-    description="Required reason for the truncation (captured in audit log).",
-  )
-
-
-class TruncateScheduleOperation(TruncateScheduleRequest):
-  """CQRS-shaped body for `POST /operations/truncate-schedule`.
-
-  Bundles the target schedule's `structure_id` with the update payload so
-  the single-body signature matches the registrar/MCP contract. The REST
-  handler, GraphQL resolver, and MCP tool all resolve to the same
-  `cmd_truncate_schedule(session, body, created_by=...)`.
-  """
-
-  structure_id: str = Field(..., description="Target schedule structure ID.")
-
-
 class CreateClosingEntryOperation(CreateClosingEntryRequest):
   """CQRS-shaped body for `POST /operations/create-closing-entry`.
 
@@ -165,13 +137,6 @@ class CreateClosingEntryOperation(CreateClosingEntryRequest):
   structure_id: str = Field(
     ..., description="Schedule structure the closing entry is derived from."
   )
-
-
-class TruncateScheduleResponse(BaseModel):
-  structure_id: str
-  new_end_date: date
-  facts_deleted: int
-  reason: str
 
 
 # ── Responses ──────────────────────────────────────────────────────────────
@@ -249,8 +214,9 @@ class UpdateScheduleRequest(BaseModel):
   Structure row / its metadata_ JSONB column).
 
   NOT editable via this op: period_start, period_end, monthly_amount.
-  Those require fact regeneration — use truncate-schedule (end early)
-  and create-schedule (start new) instead.
+  Those require fact regeneration — fire an event block that terminates
+  the schedule (e.g., `asset_disposed`) and create a fresh schedule via
+  `create-schedule`.
 
   Omitted fields are left unchanged.
   """
@@ -267,68 +233,14 @@ class DeleteScheduleRequest(BaseModel):
   Hard deletes the Structure, all Facts tied to it, and all
   Associations tied to it. This is a permanent, irreversible
   operation. For ending a schedule early without removing history,
-  use truncate-schedule instead.
+  fire `create-event-block(event_type='asset_disposed')` instead — the
+  handler truncates the schedule + posts the disposal entry atomically.
   """
 
   structure_id: str
 
 
-class DisposeScheduleRequest(BaseModel):
-  """Dispose a schedule early — combines truncation with a disposal closing entry.
-
-  Computes net book value from the schedule's own facts, truncates forward
-  periods, and creates a balanced disposal entry in one atomic operation.
-  Use when an asset is sold or abandoned before the schedule runs to completion.
-  """
-
-  structure_id: str = Field(..., description="Target schedule structure ID.")
-  disposal_date: date = Field(
-    ...,
-    description=(
-      "Last day of the final period (month-end). Forward facts past this "
-      "date are deleted; the disposal entry is posted on this date."
-    ),
-  )
-  sale_proceeds: int | None = Field(
-    None,
-    ge=0,
-    description=(
-      "Cash received from the sale in cents. None or 0 for abandonment "
-      "(no cash received). If provided, `proceeds_element_id` is required."
-    ),
-  )
-  proceeds_element_id: str | None = Field(
-    None,
-    description="Element to debit for sale proceeds (e.g., Cash or AR). Required when sale_proceeds > 0.",
-  )
-  gain_loss_element_id: str | None = Field(
-    None,
-    description=(
-      "Element for gain or loss on disposal. Required when net book value > 0 "
-      "after applying sale proceeds. Optional when asset is fully depreciated "
-      "(NBV = 0, no gain/loss line needed)."
-    ),
-  )
-  memo: str = Field(
-    ..., min_length=1, description="Memo for the disposal closing entry."
-  )
-  reason: str = Field(
-    ..., min_length=1, description="Reason for disposal (audit trail)."
-  )
-
-
-class DisposeScheduleResponse(BaseModel):
-  structure_id: str
-  disposal_date: date
-  original_amount: int = Field(..., description="Original cost basis in cents.")
-  accumulated_depreciation: int = Field(
-    ..., description="Total depreciation posted through disposal_date in cents."
-  )
-  net_book_value: int = Field(
-    ..., description="Remaining book value at disposal in cents."
-  )
-  gain_loss: int = Field(
-    ..., description="Gain (positive) or loss (negative) on disposal in cents."
-  )
-  facts_deleted: int
-  closing_entry: ClosingEntryResponse
+# DisposeScheduleRequest / DisposeScheduleResponse retired in Phase 4b.
+# Asset disposal is now an event block: `create-event-block(event_type='asset_disposed')`.
+# See operations/event_block/python_handlers/asset_disposed.py
+# for the metadata schema (AssetDisposedMetadata).

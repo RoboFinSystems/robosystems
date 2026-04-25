@@ -5,9 +5,9 @@ in the separate 'extensions' database with schema-per-graph-id tenancy.
 
 Top-level files mirror schemas/base.py — they are base ontology concepts
 universally applicable regardless of which extension consumes them
-(Entity, Taxonomy, Element, Dimension, Association, ClassificationRule,
-Structure, plus the EntityTaxonomy join table). Extension-specific
-models live in subfolders (roboledger/, roboinvestor/).
+(Entity, Taxonomy, Element, Dimension, Association, Structure, plus the
+EntityTaxonomy join table). Extension-specific models live in subfolders
+(roboledger/, roboinvestor/).
 
 See schemas/base.py for the two invariants governing the base-vs-extension
 split and the aspects-only-on-events rule.
@@ -17,7 +17,6 @@ split and the aspects-only-on-events rule.
 from .association import Association
 from .association_classification import AssociationClassification
 from .classification import Classification
-from .classification_rule import ClassificationRule
 from .dimension import Dimension
 from .element import Account, Element
 from .element_classification import ElementClassification
@@ -66,7 +65,6 @@ __all__ = [
   "Association",
   "AssociationClassification",
   "Classification",
-  "ClassificationRule",
   "Dimension",
   "Element",
   "ElementClassification",

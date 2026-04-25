@@ -25,9 +25,10 @@ Perform the month-end close for the current target period. Follow the company's 
    - `removed` — stale draft existed but the schedule no longer produces a fact for this period; cleaned up
    - `skipped` — no draft existed and no in-scope fact; nothing to do (e.g., a matured prepaid)
 
-5. **Handle one-off business events**: If the user mentions anything that isn't a recurring schedule — an asset sold, a correcting entry, an impairment, a customer refund — use the manual-entry path:
-   - If a schedule needs to end early (asset sold, contract cancelled, prepaid refunded), use `truncate-schedule` with `new_end_date` and a clear `reason`. This deletes future facts so no more drafts get produced for that schedule.
-   - Then use `create-manual-closing-entry` to record the event itself. Line items in cents; total debits must equal total credits. Write a clear `memo` citing the business event.
+5. **Handle one-off business events**: If the user mentions anything that isn't a recurring schedule — an asset sold, a correcting entry, an impairment, a customer refund — fire `create-event-block` with the right `event_type`:
+   - **Asset sold or retired** → `event_type='asset_disposed'`. The handler atomically truncates the linked schedule (no future drafts), drops the schedule's SumEquals rule, and posts the balanced disposal entry. One call replaces the old "truncate + manual entry" pair.
+   - **Free-form correction / impairment / one-off adjustment** → `event_type='journal_entry_recorded'` with `metadata.type='closing'` (or `'adjusting'`) and explicit `line_items`. Total debits must equal total credits. Write a clear `memo` citing the business event.
+   - **Reverse a posted entry** → `event_type='journal_entry_reversed'` with `metadata.entry_id`. Handler creates the offsetting reversing entry and marks the original as `status='reversed'`.
 
 6. **Review all drafts**: Call `list-period-drafts` for the target period. This returns every draft entry (schedule-derived AND manual) with full line-item detail. Summarize for the user: total debits, total credits, balanced? If anything doesn't look right, flag it.
 
@@ -45,8 +46,8 @@ Perform the month-end close for the current target period. Follow the company's 
 - **Cite your sources** — reference the specific policy document when explaining why an entry was created or why a schedule was truncated.
 - **Flag anomalies** — unusual amounts, missing schedules, unbalanced drafts, schedules that should have existed but don't — call them out explicitly.
 - **Never post entries manually** — only `close-period` transitions drafts to posted. Creating an entry directly in "posted" status would skip the review step.
-- **Idempotency is your friend** — `create-closing-entry` is safe to re-call. If you're not sure whether you drafted something, call it again and check the outcome.
-- **Truncations require a reason** — always capture why a schedule was ended early. This is the audit trail.
+- **Idempotency is your friend** — `create-event-block(event_type='schedule_entry_due')` is safe to re-call. If you're not sure whether you drafted something, call it again and check the outcome.
+- **Disposals carry the reason** — capture why an asset left the business in the event's `metadata` (or `description`). The `asset_disposed` handler stamps it on the audit trail.
 
 ## Period Dates
 
@@ -78,14 +79,8 @@ Expected workflow:
 1. `get-fiscal-calendar` → target is (say) 2026-03
 2. `search-documents("month-end close procedures")`
 3. `get-period-close-status(period_start=2026-03-01, period_end=2026-03-31)`
-4. `create-closing-entry` for each schedule (including Computer Equipment Depreciation for March, which should still fire — the sale was mid-month but March's full depreciation is recognized)
-5. `truncate-schedule` for Computer Equipment Depreciation with `new_end_date=2026-03-31` and `reason="Computer sold on 2026-03-15"` — deletes all future facts
-6. `create-manual-closing-entry` for the disposal itself:
-   - DR Cash (1000): $3,000.00
-   - DR Accumulated Depreciation (1350): $1,866.62 (whatever the schedule had accumulated through March)
-   - CR Computer Equipment (1300): $4,800.00 (original cost)
-   - CR Gain on Sale: plug for the balance
-   - `memo`: "Sold computer to Vendor X on 2026-03-15 for $3,000. Original cost $4,800, accumulated depreciation $1,866.62, gain $66.62."
-7. `list-period-drafts(period="2026-03")` — review all 6 drafts
-8. Report to user: "I drafted 5 schedule entries plus a 4-line disposal entry for the computer sale. Totals balance. Review and approve."
-9. On user approval: `close-period(period="2026-03")` — posts all 6 atomically.
+4. For each active schedule, `create-event-block(event_type='schedule_entry_due', metadata={schedule_id, posting_date, period_start, period_end})` — this includes Computer Equipment Depreciation for March, which should still fire (the sale was mid-month but March's full depreciation is recognized).
+5. `create-event-block(event_type='asset_disposed', metadata={schedule_id: ..., proceeds: 300000, proceeds_element_id: elem_cash, gain_loss_element_id: elem_gain_loss})` — the handler computes NBV from the schedule's existing facts, truncates forward facts, drops the SumEquals rule, and drafts the balanced 4-leg disposal entry. The event itself transitions to `fulfilled` (the disposal is terminal); the resulting Entry is a draft alongside the schedule entries. The event's `description` carries the business note ("Sold computer to Vendor X on 2026-03-15 for $3,000").
+6. `list-period-drafts(period="2026-03")` — review all 6 drafts (5 schedule + 1 disposal). Confirm totals balance.
+7. Report to user: "I drafted 5 schedule entries plus a 4-line disposal entry for the computer sale. Totals balance. Review and approve."
+8. On user approval: `close-period(period="2026-03")` — posts all 6 atomically.

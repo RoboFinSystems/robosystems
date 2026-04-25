@@ -47,10 +47,6 @@ from robosystems.models.api.extensions.journal_entries import (
   ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
-from robosystems.models.api.extensions.transactions import (
-  CreateTransactionRequest,
-  TransactionResponse,
-)
 from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.line_item import LineItem
 from robosystems.models.extensions.roboledger.transaction import Transaction
@@ -77,7 +73,9 @@ class JournalEntryNotDraftError(ValueError):
   def __init__(self, entry_id: str, status: str) -> None:
     super().__init__(
       f"Journal entry {entry_id} is {status!r}; only draft entries can be "
-      f"updated or deleted. Use reverse-journal-entry for posted entries."
+      f"updated or deleted. Fire `create-event-block(event_type="
+      f"'journal_entry_reversed', metadata={{entry_id: ...}})` for "
+      f"posted entries."
     )
     self.entry_id = entry_id
     self.status = status
@@ -115,7 +113,7 @@ class UnbalancedJournalEntryError(ValueError):
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
-def _validate_and_normalize_lines(
+def validate_and_normalize_lines(
   lines: list[JournalEntryLineItemInput],
 ) -> tuple[list[dict], int, int]:
   """Validate each line and compute totals. Returns (normalized, dr, cr).
@@ -235,9 +233,7 @@ def create_journal_entry(
   """
   assert_period_not_closed(session, body.posting_date)
 
-  normalized, total_debit, _total_credit = _validate_and_normalize_lines(
-    body.line_items
-  )
+  normalized, total_debit, _total_credit = validate_and_normalize_lines(body.line_items)
 
   status = body.status
   now = datetime.now(UTC) if status == "posted" else None
@@ -288,61 +284,6 @@ def create_journal_entry(
   return _entry_to_response(entry, line_items)
 
 
-# ── Create Transaction ────────────────────────────────────────────────────
-
-
-def create_transaction(
-  session: Session,
-  body: CreateTransactionRequest,
-  created_by: str,
-) -> TransactionResponse:
-  """Create a standalone Transaction (business event) without entries.
-
-  Use this to record an event first, then attach entries via
-  `create_journal_entry` with the returned `id` as `transaction_id`.
-  Useful when a single business event (e.g. a vendor payment) produces
-  multiple journal entries over its lifecycle.
-
-  Raises:
-    `ValueError` (422) for invalid field values.
-  """
-  now = datetime.now(UTC)
-  txn = Transaction(
-    type=body.type,
-    amount=body.amount,
-    currency=body.currency,
-    date=body.date,
-    due_date=body.due_date,
-    description=body.description,
-    merchant_name=body.merchant_name,
-    reference_number=body.reference_number,
-    number=body.number,
-    category=body.category,
-    source="native",
-    status=body.status,
-    posted_at=now if body.status == "posted" else None,
-    created_by=created_by,
-  )
-  session.add(txn)
-  session.flush()
-
-  return TransactionResponse(
-    id=txn.id,
-    type=txn.type,
-    date=txn.date,
-    amount=txn.amount,
-    currency=txn.currency,
-    description=txn.description,
-    merchant_name=txn.merchant_name,
-    reference_number=txn.reference_number,
-    number=txn.number,
-    category=txn.category,
-    due_date=txn.due_date,
-    status=txn.status,
-    source=txn.source,
-  )
-
-
 # ── Update ───────────────────────────────────────────────────────────────
 
 
@@ -387,7 +328,7 @@ def update_journal_entry(
       JournalEntryLineItemInput(**li) if isinstance(li, dict) else li
       for li in replacement_lines
     ]
-    normalized, _dr, _cr = _validate_and_normalize_lines(new_line_inputs)
+    normalized, _dr, _cr = validate_and_normalize_lines(new_line_inputs)
 
     session.query(LineItem).filter(LineItem.entry_id == entry.id).delete(
       synchronize_session=False

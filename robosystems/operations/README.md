@@ -2,6 +2,48 @@
 
 Business logic kernel for the platform. All domain logic lives here — GraphQL resolvers, named command operation routers, and MCP tools are transports that delegate to these functions.
 
+## Architectural shapes
+
+Every operation on the platform fits one of four shapes. Knowing
+which shape an op has tells you what to expect: write semantics, audit
+chain, idempotency, error envelope, transport exposure pattern.
+
+- **Block envelopes** (`taxonomy_block/`, `information_block/`,
+  `event_block/`) — molecule-level compositional writes with a
+  registry that dispatches by block type. Multiple atoms validated
+  and persisted atomically under one envelope. Future:
+  `report_block/`.
+- **Events** (handlers under `event_block/python_handlers/` plus
+  tenant-configurable rules in the `event_handlers` DSL registry) —
+  REA business occurrences via `create-event-block`. The discriminator
+  is `event_type`; the handler dispatches accordingly. Events EXPLAIN
+  the ledger: every triggered Transaction / Entry carries
+  `triggered_by_event_id` back to the originating event.
+- **Workflows** (kernels like `roboledger/fiscal_calendar/`,
+  `graph/`, `library/`, `taxonomy/writers/`) — procedural operations
+  on the books: close a period, materialize the graph, regenerate a
+  report, run the rules engine. Workflows MANAGE state. Not events:
+  closing a period isn't a real-world occurrence — the customers
+  didn't change behavior on March 31. Workflows have their own
+  `OperationEnvelope` audit log via the dispatch middleware.
+- **Master Data CRUD** (kernels under `roboledger/commands/agent.py`,
+  `event_handler.py`, `taxonomies.py`) — reference data writes that
+  support the other shapes: counterparties, dynamic rule rows,
+  per-row mapping associations, entity adoption links. Standard
+  create / update / delete verbs.
+
+The directory layout below mirrors these shapes — cross-domain Block
+envelopes sit at the top level (`information_block/`,
+`taxonomy_block/`, `event_block/`); domain kernels (`roboledger/`,
+`roboinvestor/`) hold reads + commands + services; cross-cutting
+infrastructure (`graph/`, `library/`, `providers/`, `agents/`, `aws/`)
+lives at the top level too.
+
+When designing a new op, the first question is *which shape am I
+building*, not *what verb to use*. The shape tells you which directory
+to write into, what envelope wraps it, and how MCP / GraphQL / REST
+expose it.
+
 ## Directory Structure
 
 ```

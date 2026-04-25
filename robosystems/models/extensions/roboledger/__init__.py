@@ -3,7 +3,7 @@
 ## Canonical import paths
 
 **Base ontology concepts** (Taxonomy, Element, Account, Dimension,
-Association, ClassificationRule, Structure) have their canonical home at
+Association, Structure) have their canonical home at
 `robosystems.models.extensions.*` — that is the single source of truth
 for the declaration, inheritance chain, and test coverage.
 
@@ -35,19 +35,22 @@ and the two invariants governing the base-vs-extension split.
 
 # Base ontology concepts (live in models/extensions/ root)
 from ..association import Association
-from ..classification_rule import ClassificationRule
 from ..dimension import Dimension
 from ..element import Account, Element
 from ..structure import Structure
 from ..taxonomy import Taxonomy
 
 # RoboLedger-specific concepts
+from .agent import Agent
 from .dimension_junctions import (
   entry_dimensions,
+  event_dimensions,
   line_item_dimensions,
   transaction_dimensions,
 )
 from .entry import Entry
+from .event import Event
+from .event_handler import EventHandler
 from .fact import Fact
 from .fact_set import FactSet
 from .fiscal_calendar import FiscalCalendar, FiscalCalendarEvent
@@ -65,11 +68,13 @@ COA_SOURCES = ("quickbooks", "xero", "plaid", "native", "import")
 __all__ = [
   "COA_SOURCES",
   "Account",
+  "Agent",
   "Association",
-  "ClassificationRule",
   "Dimension",
   "Element",
   "Entry",
+  "Event",
+  "EventHandler",
   "Fact",
   "FactSet",
   "FiscalCalendar",
@@ -84,6 +89,7 @@ __all__ = [
   "Taxonomy",
   "Transaction",
   "entry_dimensions",
+  "event_dimensions",
   "line_item_dimensions",
   "transaction_dimensions",
 ]

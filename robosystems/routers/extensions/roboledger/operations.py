@@ -10,7 +10,7 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (34) — in logical workflow order:**
+**Registered (36) — in logical workflow order:**
 
 - Setup: `initialize`, `update-entity`
 - Ontology / Taxonomy Blocks: `create-taxonomy-block`,
@@ -21,12 +21,29 @@ Every route follows the pattern:
 - Information Blocks: `create-information-block`,
   `update-information-block`, `delete-information-block`,
   `evaluate-rules`
-- Journal Entries: `create-transaction`, `create-journal-entry`,
-  `update-journal-entry`, `delete-journal-entry`,
-  `reverse-journal-entry`
-- Close Workflow: `set-close-target`, `create-closing-entry`,
-  `create-manual-closing-entry`, `truncate-schedule`,
-  `dispose-schedule`, `close-period`, `reopen-period`
+- Agents: `create-agent`, `update-agent`
+- Event Blocks: `create-event-block`, `update-event-block`,
+  `preview-event-block`. `create-event-block` is the single write surface
+  for business events that cause GL consequences. Four event types are
+  dispatched via the Python handler registry: `journal_entry_recorded`
+  (manual journal entry — any type, draft or posted),
+  `journal_entry_reversed` (offsetting reversal of a posted entry),
+  `schedule_entry_due` (a schedule period matured), and `asset_disposed`
+  (atomic disposal + schedule termination, including the schedule
+  truncate that previously needed a separate call).
+- Journal Entries: `update-journal-entry`, `delete-journal-entry`. All
+  GL-write origination flows through
+  `create-event-block(event_type='journal_entry_recorded')`; reversal
+  through `event_type='journal_entry_reversed'`. The draft-correction
+  path (update / delete on a draft entry) stays as a CRUD surface for
+  now — it migrates to the event lifecycle when correction handlers
+  ship in a later phase.
+- Close Workflow: `set-close-target`, `close-period`, `reopen-period`.
+  Closing-entry drafting goes through
+  `create-event-block(event_type='schedule_entry_due')` (schedule-derived)
+  or `event_type='journal_entry_recorded'` (manual). Asset disposal via
+  `event_type='asset_disposed'` (handles the schedule truncate
+  internally).
 - Reports: `create-report`, `regenerate-report`, `delete-report`,
   `share-report`
 - Publish Lists: `create-publish-list`, `update-publish-list`,
@@ -82,6 +99,18 @@ from robosystems.middleware.operations import (
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
+from robosystems.models.api.event_block import (
+  CreateEventBlockRequest,
+  UpdateEventBlockRequest,
+)
+from robosystems.models.api.event_handler import (
+  CreateEventHandlerRequest,
+  UpdateEventHandlerRequest,
+)
+from robosystems.models.api.extensions.agent import (
+  CreateAgentRequest,
+  UpdateAgentRequest,
+)
 from robosystems.models.api.extensions.entity import UpdateEntityRequest
 from robosystems.models.api.extensions.fiscal_calendar import (
   ClosePeriodRequest,
@@ -90,9 +119,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   SetCloseTargetRequest,
 )
 from robosystems.models.api.extensions.journal_entries import (
-  CreateJournalEntryRequest,
   DeleteJournalEntryRequest,
-  ReverseJournalEntryRequest,
   UpdateJournalEntryRequest,
 )
 from robosystems.models.api.extensions.publish_lists import (
@@ -105,17 +132,10 @@ from robosystems.models.api.extensions.reports import (
   RegenerateReportRequest,
   ShareReportRequest,
 )
-from robosystems.models.api.extensions.schedules import (
-  CreateClosingEntryOperation,
-  CreateManualClosingEntryRequest,
-  DisposeScheduleRequest,
-  TruncateScheduleOperation,
-)
 from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
   LinkEntityTaxonomyRequest,
 )
-from robosystems.models.api.extensions.transactions import CreateTransactionRequest
 from robosystems.models.api.information_block import (
   CreateInformationBlockRequest,
   DeleteInformationBlockRequest,
@@ -128,6 +148,35 @@ from robosystems.models.api.taxonomy_block import (
   UpdateTaxonomyBlockRequest,
 )
 from robosystems.models.core import User
+from robosystems.operations.event_block import (
+  EventNotFoundError,
+  InvalidEventTransitionError,
+)
+from robosystems.operations.event_block import (
+  create_event_block as cmd_create_event_block,
+)
+from robosystems.operations.event_block import (
+  preview_event_block as cmd_preview_event_block,
+)
+from robosystems.operations.event_block import (
+  update_event_block as cmd_update_event_block,
+)
+from robosystems.operations.event_block.engine import (
+  EngineValidationError,
+)
+from robosystems.operations.event_block.python_handlers._disposal_plan import (
+  ScheduleNotFoundError as DisposalScheduleNotFoundError,
+)
+from robosystems.operations.event_block.python_handlers.types import (
+  HandlerMetadataValidationError,
+)
+from robosystems.operations.event_block.registry import (
+  HandlerAmbiguousError,
+  HandlerNotFoundError,
+)
+from robosystems.operations.event_block.template import (
+  TemplateInterpolationError,
+)
 from robosystems.operations.extensions.staleness import mark_graph_stale
 from robosystems.operations.information_block.commands import (
   create_information_block as cmd_create_information_block,
@@ -145,7 +194,27 @@ from robosystems.operations.roboledger.commands._guards import (
   ClosedPeriodError,
   LibraryImmutableError,
 )
+from robosystems.operations.roboledger.commands.agent import (
+  AgentNotFoundError,
+  DuplicateExternalIdError,
+)
+from robosystems.operations.roboledger.commands.agent import (
+  create_agent as cmd_create_agent,
+)
+from robosystems.operations.roboledger.commands.agent import (
+  update_agent as cmd_update_agent,
+)
 from robosystems.operations.roboledger.commands.entity import update_parent_entity
+from robosystems.operations.roboledger.commands.event_handler import (
+  EventHandlerNotFoundError,
+  TemplateValidationError,
+)
+from robosystems.operations.roboledger.commands.event_handler import (
+  create_event_handler as cmd_create_event_handler,
+)
+from robosystems.operations.roboledger.commands.event_handler import (
+  update_event_handler as cmd_update_event_handler,
+)
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
@@ -169,16 +238,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   UnbalancedJournalEntryError,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
-  create_journal_entry as cmd_create_journal_entry,
-)
-from robosystems.operations.roboledger.commands.journal_entries import (
-  create_transaction as cmd_create_transaction,
-)
-from robosystems.operations.roboledger.commands.journal_entries import (
   delete_journal_entry as cmd_delete_journal_entry,
-)
-from robosystems.operations.roboledger.commands.journal_entries import (
-  reverse_journal_entry as cmd_reverse_journal_entry,
 )
 from robosystems.operations.roboledger.commands.journal_entries import (
   update_journal_entry as cmd_update_journal_entry,
@@ -232,18 +292,6 @@ from robosystems.operations.roboledger.commands.reports import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   ScheduleNotFoundError,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  create_closing_entry as cmd_create_closing_entry,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  create_manual_closing_entry as cmd_create_manual_closing_entry,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  dispose_schedule as cmd_dispose_schedule,
-)
-from robosystems.operations.roboledger.commands.schedules import (
-  truncate_schedule as cmd_truncate_schedule,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   ElementNotFoundError,
@@ -878,43 +926,73 @@ evaluate_rules_op = _registrar.register(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Journal Entries
+# Agents
 #
-# Native accounting writes: transactions (standalone business events) and
-# journal entries (balanced debit/credit sets). Entries are always created
-# as drafts; posting happens via close-period.
+# Counterparty records (customers, vendors, employees, etc.) — Phase 2 of
+# the event-driven ledger. events.agent_id references this table.
 # ═══════════════════════════════════════════════════════════════════════════
 
-create_transaction_op = _registrar.register(
+create_agent_op = _registrar.register(
   OperationSpec(
-    name="create-transaction",
-    summary="Create Transaction",
+    name="create-agent",
+    summary="Create Agent",
     description=(
-      "Create a standalone business-event Transaction without entries. "
-      "Returns a transaction_id that can be passed to create-journal-entry "
-      "to attach one or more journal entries to this event. Use this when "
-      "a single event (invoice, payment, deposit) produces multiple entries "
-      "over its lifecycle."
+      "Create a counterparty record (customer, vendor, employee, etc.). "
+      "The (source, external_id) pair is a dedup key — a second insert with "
+      "the same pair returns 409. Use update-agent to patch fields."
     ),
-    command=cmd_create_transaction,
-    request_model=CreateTransactionRequest,
-    error_map={ValueError: 422},
+    command=cmd_create_agent,
+    request_model=CreateAgentRequest,
+    error_map={DuplicateExternalIdError: 409, ValueError: 422},
   )
 )
 
-create_journal_entry_op = _registrar.register(
+update_agent_op = _registrar.register(
   OperationSpec(
-    name="create-journal-entry",
-    summary="Create Journal Entry",
+    name="update-agent",
+    summary="Update Agent",
     description=(
-      "Create a new draft journal entry with balanced line items. "
-      "Enforces DR=CR at the validation layer. Entries are always "
-      "created as drafts; posting happens via close-period or a "
-      "future per-entry post op."
+      "Patch counterparty fields. Only supplied fields are updated. "
+      "Set is_active=false to deactivate (agents are never deleted — they are "
+      "reference data referenced by events and transactions)."
     ),
-    command=cmd_create_journal_entry,
-    request_model=CreateJournalEntryRequest,
+    command=cmd_update_agent,
+    request_model=UpdateAgentRequest,
+    error_map={AgentNotFoundError: 404, ValueError: 422},
+  )
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Event Blocks
+#
+# Real-world business event layer (event-driven-ledger.md). Phase 1 ships
+# the envelope in capture-only mode (apply_handlers=False). The handler
+# engine (apply_handlers=True, event_handlers table) ships in Phase 3.
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_event_block_op = _registrar.register(
+  OperationSpec(
+    name="create-event-block",
+    summary="Create Event Block",
+    description=(
+      "Persist a real-world business event. "
+      "apply_handlers=False (default): capture-only, status='captured'. "
+      "apply_handlers=True: resolves an event_handler, fires the template, "
+      "creates GL entries atomically, status='classified'. "
+      "Use preview-event-block to dry-run before committing."
+    ),
+    command=cmd_create_event_block,
+    request_model=CreateEventBlockRequest,
     error_map={
+      HandlerNotFoundError: 404,
+      HandlerAmbiguousError: 409,
+      TemplateInterpolationError: 422,
+      EngineValidationError: 422,
+      HandlerMetadataValidationError: 422,
+      DisposalScheduleNotFoundError: 404,
+      JournalEntryNotFoundError: 404,
+      JournalEntryNotPostedError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
       ValueError: 422,
@@ -922,15 +1000,106 @@ create_journal_entry_op = _registrar.register(
   )
 )
 
+update_event_block_op = _registrar.register(
+  OperationSpec(
+    name="update-event-block",
+    summary="Update Event Block",
+    description=(
+      "Apply a status transition (captured → committed | voided) and/or "
+      "field corrections (description, effective_at, metadata_patch) to an "
+      "existing event block. Only supplied fields are updated."
+    ),
+    command=cmd_update_event_block,
+    request_model=UpdateEventBlockRequest,
+    error_map={
+      EventNotFoundError: 404,
+      InvalidEventTransitionError: 422,
+    },
+  )
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Event Handlers
+#
+# Dynamic rule registry for event → transaction transformation (Phase 3).
+# The dynamic rule layer that drives event → GL transformation.
+# ═══════════════════════════════════════════════════════════════════════════
+
+create_event_handler_op = _registrar.register(
+  OperationSpec(
+    name="create-event-handler",
+    summary="Create Event Handler",
+    description=(
+      "Define a rule that fires GL transactions when a matching event block "
+      "is created with apply_handlers=True. Match criteria (event_type, "
+      "event_category, match_source, match_agent_type, etc.) act as AND-joined "
+      "filters — null fields match anything. The highest-priority matching handler "
+      "wins. AI-suggested handlers (suggested_by='ai') require approval before "
+      "they are eligible for matching."
+    ),
+    command=cmd_create_event_handler,
+    request_model=CreateEventHandlerRequest,
+    error_map={TemplateValidationError: 422, ValueError: 422},
+  )
+)
+
+update_event_handler_op = _registrar.register(
+  OperationSpec(
+    name="update-event-handler",
+    summary="Update Event Handler",
+    description=(
+      "Patch an event handler's match criteria, template, priority, or active "
+      "state. Pass approve=true to approve an AI-suggested handler; "
+      "approve=false to revoke approval. Only supplied fields are updated."
+    ),
+    command=cmd_update_event_handler,
+    request_model=UpdateEventHandlerRequest,
+    error_map={
+      EventHandlerNotFoundError: 404,
+      TemplateValidationError: 422,
+      ValueError: 422,
+    },
+  )
+)
+
+preview_event_block_op = _registrar.register(
+  OperationSpec(
+    name="preview-event-block",
+    summary="Preview Event Block",
+    description=(
+      "Dry-run: resolve the matching handler and evaluate the transaction "
+      "template without writing any rows. Returns the matched handler + planned "
+      "debit/credit lines + any validation errors. Use this before "
+      "create-event-block(apply_handlers=True) to confirm the GL plan."
+    ),
+    command=cmd_preview_event_block,
+    request_model=CreateEventBlockRequest,
+    error_map={ValueError: 422},
+  )
+)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Journal Entries
+#
+# Update / delete / reverse operations on existing journal entries. All
+# creation (manual entries, closing entries, adjusting entries, posted
+# imports) is handled through
+# `create-event-block(event_type='journal_entry_recorded')` — the single
+# write surface for GL entries the user originates. See the Python handler
+# registry.
+# ═══════════════════════════════════════════════════════════════════════════
+
 update_journal_entry_op = _registrar.register(
   OperationSpec(
     name="update-journal-entry",
     summary="Update Journal Entry",
     description=(
       "Update a draft journal entry. Posted entries are immutable and "
-      "must be corrected via reverse-journal-entry. If line_items is "
-      "provided, existing line items are replaced atomically and the "
-      "new set must balance."
+      "must be corrected via "
+      "`create-event-block(event_type='journal_entry_reversed')`. If "
+      "line_items is provided, existing line items are replaced "
+      "atomically and the new set must balance."
     ),
     command=cmd_update_journal_entry,
     request_model=UpdateJournalEntryRequest,
@@ -962,28 +1131,6 @@ delete_journal_entry_op = _registrar.register(
     requires_created_by=False,
   )
 )
-
-reverse_journal_entry_op = _registrar.register(
-  OperationSpec(
-    name="reverse-journal-entry",
-    summary="Reverse Journal Entry",
-    description=(
-      "Reverse a posted journal entry by creating a new offsetting "
-      "entry (debits ↔ credits) and marking the original as "
-      "status='reversed'. Both entries stay in the ledger — the audit "
-      "trail shows original + reversal side by side."
-    ),
-    command=cmd_reverse_journal_entry,
-    request_model=ReverseJournalEntryRequest,
-    error_map={
-      JournalEntryNotFoundError: 404,
-      JournalEntryNotPostedError: 422,
-      ClosedPeriodError: 422,
-      ValueError: 422,
-    },
-  )
-)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Close Workflow
@@ -1049,76 +1196,15 @@ async def set_close_target_op(
   return await _dispatch(ctx, _runner, cache)
 
 
-create_closing_entry_op = _registrar.register(
-  OperationSpec(
-    name="create-closing-entry",
-    summary="Create Closing Entry",
-    description=(
-      "Create a draft closing entry pre-populated from a schedule's facts "
-      "for the given period. Idempotent — safe to call repeatedly; the "
-      "`outcome` field describes what happened "
-      "(`created`, `unchanged`, `regenerated`, `removed`, `skipped`)."
-    ),
-    command=cmd_create_closing_entry,
-    request_model=CreateClosingEntryOperation,
-    error_map={ValueError: 422},
-    mark_stale_reason="closing_entry_created",
-  )
-)
-
-create_manual_closing_entry_op = _registrar.register(
-  OperationSpec(
-    name="create-manual-closing-entry",
-    summary="Create Manual Closing Entry",
-    description=(
-      "Create a draft closing entry with manually specified line items — "
-      "not tied to a schedule. Use for one-off business events (asset "
-      "disposal, correcting entry, impairment). Total debits must equal "
-      "total credits."
-    ),
-    command=cmd_create_manual_closing_entry,
-    request_model=CreateManualClosingEntryRequest,
-    error_map={ValueError: 422},
-    mark_stale_reason="manual_entry_created",
-  )
-)
-
-truncate_schedule_op = _registrar.register(
-  OperationSpec(
-    name="truncate-schedule",
-    summary="Truncate Schedule (End Early)",
-    description=(
-      "End a schedule early by deleting forward facts and any stale draft "
-      "closing entries past the cutoff. Historical facts and posted entries "
-      "are preserved. Use this when a business event (asset disposal, "
-      "contract cancellation) shortens the schedule's lifespan."
-    ),
-    command=cmd_truncate_schedule,
-    request_model=TruncateScheduleOperation,
-    error_map={ValueError: 422, ScheduleNotFoundError: 404},
-    mark_stale_reason="schedule_truncated",
-  )
-)
-
-dispose_schedule_op = _registrar.register(
-  OperationSpec(
-    name="dispose-schedule",
-    summary="Dispose Schedule (Sale or Abandonment)",
-    description=(
-      "Atomically truncate a schedule past the disposal date and create a "
-      "balanced disposal closing entry. Computes accumulated depreciation "
-      "from the schedule's own facts, derives net book value and gain/loss, "
-      "removes forward facts, and books the disposal entry in one call. "
-      "Use when an asset is sold or abandoned before the schedule runs to "
-      "completion. For abandonment with no proceeds, omit `sale_proceeds` "
-      "and `proceeds_element_id`."
-    ),
-    command=cmd_dispose_schedule,
-    request_model=DisposeScheduleRequest,
-    error_map={ValueError: 422, ScheduleNotFoundError: 404},
-    mark_stale_reason="schedule_disposed",
-  )
-)
+# All ledger writes — closing entries, journal entries, schedule
+# truncation, asset disposal, journal entry reversal — are handled via
+# create-event-block with Python-registered event types. See
+# operations/event_block/python_handlers/ for the handler modules:
+# journal_entry_recorded (manual GL writes), journal_entry_reversed
+# (offsetting reversal of a posted entry), schedule_entry_due (schedule
+# period matured), asset_disposed (atomic disposal + schedule termination
+# — `truncate-schedule` retired as a public op since this is its only
+# real consumer).
 
 
 @router.post(

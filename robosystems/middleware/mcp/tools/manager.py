@@ -243,9 +243,13 @@ class GraphMCPTools:
 
       # Period-workflow read tools (span multiple blocks; not
       # Information Block tools). Writes (create-schedule,
-      # create-closing-entry, create-manual-closing-entry, truncate-schedule,
-      # update-schedule, delete-schedule) are registrar-generated from the
-      # roboledger OperationSpec declarations.
+      # update-schedule, delete-schedule) are registrar-generated from
+      # the roboledger OperationSpec declarations; closing-entry
+      # drafting (schedule-derived and manual) goes through
+      # create-event-block with event_type='schedule_entry_due'
+      # (schedule-derived) or 'journal_entry_recorded' (manual).
+      # Schedule termination is handled inside the asset_disposed
+      # handler; there is no public truncate op.
       #
       # Schedule-specific read tools (list-schedule-structures,
       # get-schedule-facts) were retired in favour of the generic
@@ -260,6 +264,8 @@ class GraphMCPTools:
     # Information Block reads are pure reads and must stay available on
     # read-only graphs. Same gate pattern as document_tools below:
     # extension + flag only, no read_only guard.
+    self.get_information_block_tool = None
+    self.list_information_blocks_tool = None
     if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
       from .information_block_tools import (
         GetInformationBlockTool,
@@ -268,6 +274,36 @@ class GraphMCPTools:
 
       self.get_information_block_tool = GetInformationBlockTool(graph_client)
       self.list_information_blocks_tool = ListInformationBlocksTool(graph_client)
+
+    # Agent reads (get-agent, list-agents, agent-activity)
+    self.get_agent_tool = None
+    self.list_agents_tool = None
+    self.agent_activity_tool = None
+    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+      from .agent_tools import AgentActivityTool, GetAgentTool, ListAgentsTool
+
+      self.get_agent_tool = GetAgentTool(graph_client)
+      self.list_agents_tool = ListAgentsTool(graph_client)
+      self.agent_activity_tool = AgentActivityTool(graph_client)
+
+    # Event Handler reads (get-event-handler, list-event-handlers)
+    self.get_event_handler_tool = None
+    self.list_event_handlers_tool = None
+    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+      from .event_handler_tools import GetEventHandlerTool, ListEventHandlersTool
+
+      self.get_event_handler_tool = GetEventHandlerTool(graph_client)
+      self.list_event_handlers_tool = ListEventHandlersTool(graph_client)
+
+    # Event Block reads (get-event-block, list-event-blocks) — same gate as
+    # information block reads: available on read-only graphs.
+    self.get_event_block_tool = None
+    self.list_event_blocks_tool = None
+    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+      from .event_block_tools import GetEventBlockTool, ListEventBlocksTool
+
+      self.get_event_block_tool = GetEventBlockTool(graph_client)
+      self.list_event_blocks_tool = ListEventBlocksTool(graph_client)
 
     # Layer 2: Taxonomy mapping read tools (gated by roboledger extension +
     # ROBOLEDGER_ENABLED). Writes — create-mapping-association,
@@ -528,6 +564,32 @@ class GraphMCPTools:
       tools.append(self.list_information_blocks_tool.get_tool_definition())
     return tools
 
+  def _get_agent_tool_definitions(self) -> list[dict[str, Any]]:
+    tools = []
+    if self.get_agent_tool is not None:
+      tools.append(self.get_agent_tool.get_tool_definition())
+    if self.list_agents_tool is not None:
+      tools.append(self.list_agents_tool.get_tool_definition())
+    if self.agent_activity_tool is not None:
+      tools.append(self.agent_activity_tool.get_tool_definition())
+    return tools
+
+  def _get_event_handler_tool_definitions(self) -> list[dict[str, Any]]:
+    tools = []
+    if self.get_event_handler_tool is not None:
+      tools.append(self.get_event_handler_tool.get_tool_definition())
+    if self.list_event_handlers_tool is not None:
+      tools.append(self.list_event_handlers_tool.get_tool_definition())
+    return tools
+
+  def _get_event_block_tool_definitions(self) -> list[dict[str, Any]]:
+    tools = []
+    if self.get_event_block_tool is not None:
+      tools.append(self.get_event_block_tool.get_tool_definition())
+    if self.list_event_blocks_tool is not None:
+      tools.append(self.list_event_blocks_tool.get_tool_definition())
+    return tools
+
   def _get_search_tool_definitions(self) -> list[dict[str, Any]]:
     """
     Get text search tool definitions.
@@ -603,6 +665,15 @@ class GraphMCPTools:
 
       # Information Block read tools (cross-block-type reads)
       tools.extend(self._get_information_block_tool_definitions())
+
+      # Agent read tools (get-agent, list-agents, agent-activity)
+      tools.extend(self._get_agent_tool_definitions())
+
+      # Event Handler read tools (get-event-handler, list-event-handlers)
+      tools.extend(self._get_event_handler_tool_definitions())
+
+      # Event Block read tools (get-event-block, list-event-blocks)
+      tools.extend(self._get_event_block_tool_definitions())
 
     # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_workspace_tool_definitions())
@@ -855,6 +926,72 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.list_information_blocks_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Agent read tools (writes are registrar-generated, handled at Layer 0)
+      elif name == "get-agent":
+        if self.get_agent_tool is None:
+          raise ValueError(
+            "get-agent tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.get_agent_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-agents":
+        if self.list_agents_tool is None:
+          raise ValueError(
+            "list-agents tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.list_agents_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "agent-activity":
+        if self.agent_activity_tool is None:
+          raise ValueError(
+            "agent-activity tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.agent_activity_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Event Handler read tools (writes are registrar-generated)
+      elif name == "get-event-handler":
+        if self.get_event_handler_tool is None:
+          raise ValueError(
+            "get-event-handler tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.get_event_handler_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-event-handlers":
+        if self.list_event_handlers_tool is None:
+          raise ValueError(
+            "list-event-handlers tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.list_event_handlers_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Event Block read tools (writes are registrar-generated, handled at Layer 0)
+      elif name == "get-event-block":
+        if self.get_event_block_tool is None:
+          raise ValueError(
+            "get-event-block tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.get_event_block_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-event-blocks":
+        if self.list_event_blocks_tool is None:
+          raise ValueError(
+            "list-event-blocks tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.list_event_blocks_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Fiscal calendar tools
