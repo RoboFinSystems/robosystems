@@ -123,20 +123,28 @@ def promote_pending_obligations(
   if not candidates:
     return result
 
-  # Single bulk status flip — committing to the obligation. We mutate
-  # the in-session ORM rows directly so subsequent dispatch calls see
-  # the updated status without an extra round trip.
-  for event in candidates:
-    event.status = "classified"
-    result.classified_event_ids.append(event.id)
-
   if not dispatch_handlers:
+    # Co-pilot mode: single bulk UPDATE instead of per-row ORM mutation.
+    # No need to keep the ORM objects in the dirty set — we don't dispatch
+    # a handler that would read event.status, so the round-trip savings are
+    # significant on long schedules (a 30-year mortgage is 360 rows).
+    candidate_ids = [evt.id for evt in candidates]
+    session.query(Event).filter(Event.id.in_(candidate_ids)).update(
+      {"status": "classified"}, synchronize_session="fetch"
+    )
+    result.classified_event_ids.extend(candidate_ids)
     logger.info(
       "promote_pending_obligations[%s]: classified %s events (co-pilot mode)",
       graph_id,
       result.classified_count,
     )
     return result
+
+  # Autopilot mode: mutate ORM rows so subsequent handler.dispatch calls
+  # see status='classified' without an extra round trip.
+  for event in candidates:
+    event.status = "classified"
+    result.classified_event_ids.append(event.id)
 
   handler = get_python_handler("schedule_entry_due")
   if handler is None:  # pragma: no cover — registered at module import

@@ -88,38 +88,25 @@ def _void_pending_obligations_for_schedule(
 ) -> int:
   """Void all `pending` schedule_entry_due events for a disposed schedule.
 
-  Resolves the schedule's originating `schedule_created` event id from
-  `structure.metadata_['schedule_created_event_id']` (stamped by Stream
-  2.A's materialization), then voids every pending obligation whose
-  `obligated_by_event_id` matches.
+  Thin wrapper that loads the structure and delegates to the shared
+  ``ScheduleService.void_pending_obligations``. Each voided row
+  carries ``replaced_by_event_id=disposal_event_id`` so the audit
+  chain answers "what voided this obligation?". Facts stay in place
+  — the GL's disposal entry is the authoritative end-state.
 
-  Each voided row carries `replaced_by_event_id = disposal_event_id` so
-  the audit chain answers "what voided this obligation?" without an
-  extra join. Facts stay in place — the GL's disposal entry is the
-  authoritative end-state.
-
-  Returns the number of voided rows. Returns 0 (no-op) when the
-  schedule has no `schedule_created_event_id` — covers schedules
-  created before Stream 2.A and any external test fixtures that build
-  Structure rows directly.
+  Returns 0 (no-op) when the structure is missing or has no
+  ``schedule_created_event_id`` — covers schedules created before
+  Stream 2.A and any test fixtures that build Structure rows directly.
   """
   structure = session.get(Structure, structure_id)
   if structure is None:
     return 0
-  metadata = structure.metadata_ or {}
-  schedule_created_event_id = metadata.get("schedule_created_event_id")
-  if not schedule_created_event_id:
-    return 0
-
-  result = session.execute(
-    update(Event)
-    .where(
-      Event.obligated_by_event_id == schedule_created_event_id,
-      Event.status == "pending",
-    )
-    .values(status="voided", replaced_by_event_id=disposal_event_id)
+  return ScheduleService().void_pending_obligations(
+    session,
+    structure=structure,
+    void_reason="asset_disposed",
+    voided_by_event_id=disposal_event_id,
   )
-  return result.rowcount or 0
 
 
 def _delete_sum_equals_rule(session: Session, structure_id: str) -> None:

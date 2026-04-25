@@ -43,6 +43,7 @@ from dagster import (
   SensorEvaluationContext,
   sensor,
 )
+from dateutil import parser as date_parser
 
 from robosystems.config import env
 from robosystems.dagster.jobs.extensions import extensions_promote_obligations_job
@@ -103,8 +104,6 @@ def scheduled_obligation_promotion_sensor(context: SensorEvaluationContext):
         in_progress = json.loads(context.cursor)
       except (json.JSONDecodeError, TypeError):
         in_progress = {}
-
-    from dateutil import parser as date_parser
 
     active_in_progress: dict[str, str] = {}
     for gid, submitted_at_str in in_progress.items():
@@ -196,12 +195,3 @@ def scheduled_obligation_promotion_sensor(context: SensorEvaluationContext):
     # `db` (platform DB) is closed here. Per-graph extensions sessions
     # are managed by the helper above's context manager.
     db.close()
-
-
-def _eligible_period_for_promotion(period_end: datetime, today: datetime) -> bool:
-  """Eligible iff the period has fully elapsed (period_end <= today).
-
-  Exposed as a thin wrapper over a date comparison so unit tests have a
-  testable seam without monkey-patching the sensor's globals.
-  """
-  return period_end <= today

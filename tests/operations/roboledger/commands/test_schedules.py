@@ -50,6 +50,8 @@ class _Query:
 def test_delete_schedule_removes_information_block_dependents_before_structure() -> (
   None
 ):
+  from unittest.mock import patch
+
   structure = MagicMock()
   structure.id = "struct_sched"
 
@@ -62,10 +64,15 @@ def test_delete_schedule_removes_information_block_dependents_before_structure()
   ]
   session.query.side_effect = lambda model: _Query(model, deleted_models)
 
-  result = delete_schedule(
-    session,
-    DeleteScheduleRequest(structure_id="struct_sched"),
-  )
+  with patch(
+    "robosystems.operations.roboledger.commands.schedules."
+    "ScheduleService.void_pending_obligations",
+    return_value=0,
+  ):
+    result = delete_schedule(
+      session,
+      DeleteScheduleRequest(structure_id="struct_sched"),
+    )
 
   assert result == {"deleted": True}
   assert deleted_models == [
@@ -78,6 +85,41 @@ def test_delete_schedule_removes_information_block_dependents_before_structure()
   ]
   session.delete.assert_called_once_with(structure)
   session.commit.assert_called_once()
+
+
+def test_delete_schedule_voids_pending_obligations_before_deletion() -> None:
+  """Pending obligations must be voided so they don't outlive their originator."""
+  from unittest.mock import patch
+
+  structure = MagicMock()
+  structure.id = "struct_sched"
+
+  deleted_models: list[type] = []
+  session = MagicMock()
+  session.execute.side_effect = [
+    _exec_result(row=structure),
+    _exec_result(scalars_all=[]),
+    _exec_result(scalars_all=[]),
+  ]
+  session.query.side_effect = lambda model: _Query(model, deleted_models)
+
+  with patch(
+    "robosystems.operations.roboledger.commands.schedules."
+    "ScheduleService.void_pending_obligations",
+    return_value=12,
+  ) as void:
+    delete_schedule(
+      session,
+      DeleteScheduleRequest(structure_id="struct_sched"),
+    )
+
+  void.assert_called_once()
+  kwargs = void.call_args.kwargs
+  assert kwargs["structure"] is structure
+  assert kwargs["void_reason"] == "schedule_deleted"
+  # Schedule deletion does NOT pass voided_by_event_id — there is no
+  # successor event, the schedule simply ceases to exist.
+  assert "voided_by_event_id" not in kwargs or kwargs.get("voided_by_event_id") is None
 
 
 def test_update_schedule_keeps_omitted_metadata_null_in_typed_mechanics() -> None:

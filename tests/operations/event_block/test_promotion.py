@@ -60,6 +60,12 @@ class TestCoPilotMode:
     assert result.error_count == 0
 
   def test_flips_pending_to_classified(self) -> None:
+    """Co-pilot path uses a bulk UPDATE — verify the result tracks every event id.
+
+    The bulk path doesn't mutate the in-memory ORM rows (the UPDATE goes
+    straight through SQLAlchemy's bulk machinery), so we check the
+    PromotionResult and the bulk update call instead of `event.status`.
+    """
     e1 = _pending_event("evt_1", period_end="2026-01-31")
     e2 = _pending_event("evt_2", period_end="2026-01-31")
     session = _session_returning([e1, e2])
@@ -68,10 +74,14 @@ class TestCoPilotMode:
       session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
     )
 
-    assert e1.status == "classified"
-    assert e2.status == "classified"
     assert set(result.classified_event_ids) == {"evt_1", "evt_2"}
     assert result.dispatched_count == 0  # co-pilot — no dispatch
+    # Two .query() calls: one to load candidates, one to bulk-update by id
+    assert session.query.call_count == 2
+    bulk_update_call = session.query.return_value.filter.return_value.update
+    bulk_update_call.assert_called_once_with(
+      {"status": "classified"}, synchronize_session="fetch"
+    )
 
   def test_does_not_call_handler_dispatch(self) -> None:
     e1 = _pending_event("evt_1")
@@ -230,12 +240,12 @@ class TestQueryShape:
       session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
     )
 
-    # session.query(Event).filter(<criteria>).all()
+    # The first .filter() call is the candidate load:
+    # session.query(Event).filter(event_type, status, occurred_at).all()
+    # (The second .filter() is the bulk-update by id list — different shape.)
     query = session.query.return_value
-    query.filter.assert_called_once()
-    # The criteria are SQLAlchemy expressions; we verify shape by string.
-    criteria = query.filter.call_args.args
-    rendered = " | ".join(str(c) for c in criteria)
+    candidate_filter_args = query.filter.call_args_list[0].args
+    rendered = " | ".join(str(c) for c in candidate_filter_args)
     assert "events.event_type" in rendered
     assert "events.status" in rendered
     assert "events.occurred_at" in rendered

@@ -382,15 +382,24 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   """Delete a schedule — cascades through facts and associations.
 
   Deletion order respects FK constraints:
-  1. Verification results (referencing rules / structure_id)
-  2. Facts and FactSets (referencing structure_id)
-  3. Rules and association classifications (referencing associations)
-  4. Associations (referencing structure_id)
-  5. Structure row itself
+  1. Pending obligation events (Stream 2.E: void before parent disappears)
+  2. Verification results (referencing rules / structure_id)
+  3. Facts and FactSets (referencing structure_id)
+  4. Rules and association classifications (referencing associations)
+  5. Associations (referencing structure_id)
+  6. Structure row itself
 
   Raises `ScheduleNotFoundError` if the schedule does not exist.
   """
   structure = _load_schedule_or_404(session, body.structure_id)
+  # Void any pending obligations first so they can't outlive their
+  # `schedule_created` originator and trip the close-period gate
+  # after the schedule is gone.
+  ScheduleService().void_pending_obligations(
+    session,
+    structure=structure,
+    void_reason="schedule_deleted",
+  )
   association_ids = (
     session.execute(
       select(Association.id).where(Association.structure_id == structure.id)
