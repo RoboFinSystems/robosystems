@@ -20,8 +20,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 BASE_URL = "http://localhost:8000"
 CREDENTIALS_FILE = Path(".local/config.json")
 
@@ -56,33 +54,27 @@ class _Validator:
   def __init__(self, graph_id: str, api_key: str) -> None:
     self.graph_id = graph_id
     self.api_key = api_key
-    self._h = {"X-API-Key": api_key, "Content-Type": "application/json"}
     self.results: list[_Result] = []
     # (graph_id, structure_id) pairs created by this run — deleted in cleanup()
     self._cleanup: list[tuple[str, str]] = []
+    self._ledger = None
+    self._gqlc = None
 
   # ── Primitives ───────────────────────────────────────────────────────────
 
-  def _op(self, name: str, body: dict[str, Any]) -> dict[str, Any]:
-    url = f"{BASE_URL}/extensions/roboledger/{self.graph_id}/operations/{name}"
-    r = httpx.post(url, headers=self._h, json=body, timeout=30)
-    if not r.is_success:
-      raise RuntimeError(f"{r.status_code} {r.text}")
-    return r.json()
+  def _client(self):
+    if self._ledger is None:
+      from robosystems_client.clients.ledger_client import LedgerClient
+
+      self._ledger = LedgerClient({"base_url": BASE_URL, "token": self.api_key})
+    return self._ledger
 
   def _gql(self, query: str) -> dict[str, Any]:
-    url = f"{BASE_URL}/extensions/{self.graph_id}/graphql"
-    r = httpx.post(url, headers=self._h, json={"query": query}, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    if "errors" in data:
-      raise RuntimeError(data["errors"])
-    return data["data"]
+    if self._gqlc is None:
+      from robosystems_client.graphql.client import GraphQLClient
 
-  def _client(self):
-    from robosystems_client.clients.ledger_client import LedgerClient
-
-    return LedgerClient({"base_url": BASE_URL, "token": self.api_key})
+      self._gqlc = GraphQLClient(BASE_URL, token=self.api_key)
+    return self._gqlc.execute(self.graph_id, query)
 
   def _sub(self, title: str) -> None:
     print(f"  {_BOLD}{title}{_RESET}")
@@ -138,12 +130,11 @@ class _Validator:
 
   def evaluate_rules(self) -> None:
     self._sub("evaluate-rules (all schedules)")
+    client = self._client()
     data = self._gql('{ informationBlocks(blockType: "schedule") { id name } }')
     for b in data.get("informationBlocks", []):
       try:
-        payload = self._op("evaluate-rules", {"structure_id": b["id"]}).get(
-          "result", {}
-        )
+        payload = client.evaluate_rules(self.graph_id, structure_id=b["id"])
         summary = payload.get("summary")
         # None means no rules were evaluated — treat as a failure so we catch
         # cases where the SumEquals rule wasn't created or wasn't found.
@@ -222,24 +213,23 @@ class _Validator:
 
     # Preview the disposal first — confirm NBV/gain-loss computation
     # before firing the handler for real.
+    disposal_body = {
+      "event_type": "asset_disposed",
+      "event_category": "adjustment",
+      "source": "native",
+      "occurred_at": "2026-03-31T00:00:00Z",
+      "metadata": {
+        "schedule_id": sid,
+        "proceeds": 0,
+        "gain_loss_element_id": dr_id,
+        "memo": "Validation disposal",
+        "reason": "e2e test",
+      },
+      "apply_handlers": True,
+    }
+
     try:
-      preview = self._op(
-        "preview-event-block",
-        {
-          "event_type": "asset_disposed",
-          "event_category": "adjustment",
-          "source": "native",
-          "occurred_at": "2026-03-31T00:00:00Z",
-          "metadata": {
-            "schedule_id": sid,
-            "proceeds": 0,
-            "gain_loss_element_id": dr_id,
-            "memo": "Validation disposal",
-            "reason": "e2e test",
-          },
-          "apply_handlers": True,
-        },
-      ).get("result", {})
+      preview = client.preview_event_block(self.graph_id, disposal_body)
       self._check(
         "preview would_succeed",
         preview.get("would_succeed") is True,
@@ -258,25 +248,17 @@ class _Validator:
       self._check("preview-event-block call", False, str(exc))
       return
 
-    # Execute the disposal via create-event-block
+    # Execute the disposal via dispose_schedule (event-block under the hood)
     try:
-      payload = self._op(
-        "create-event-block",
-        {
-          "event_type": "asset_disposed",
-          "event_category": "adjustment",
-          "source": "native",
-          "occurred_at": "2026-03-31T00:00:00Z",
-          "metadata": {
-            "schedule_id": sid,
-            "proceeds": 0,
-            "gain_loss_element_id": dr_id,
-            "memo": "Validation disposal",
-            "reason": "e2e test",
-          },
-          "apply_handlers": True,
-        },
-      ).get("result", {})
+      payload = client.dispose_schedule(
+        self.graph_id,
+        structure_id=sid,
+        disposal_date="2026-03-31",
+        memo="Validation disposal",
+        reason="e2e test",
+        sale_proceeds=0,
+        gain_loss_element_id=dr_id,
+      )
 
       self._check(
         "event status = fulfilled",
@@ -285,7 +267,7 @@ class _Validator:
       )
       self._check("event id returned", bool(payload.get("id")), payload.get("id", ""))
     except Exception as exc:
-      self._check("create-event-block(asset_disposed) call", False, str(exc))
+      self._check("dispose_schedule call", False, str(exc))
       return
 
     try:
@@ -388,7 +370,7 @@ class _Validator:
       )
 
     try:
-      payload = self._op("evaluate-rules", {"structure_id": sid}).get("result", {})
+      payload = client.evaluate_rules(self.graph_id, structure_id=sid)
       summary = payload.get("summary")
       if summary is None:
         self._check("evaluate-rules all-pass", False, "summary=null (no rules evaluated)")
@@ -420,15 +402,14 @@ def _prepaid_elements(graph_id: str, api_key: str) -> tuple[str, str]:
   Prefers Business Insurance (clearest prepaid pattern). Falls back to any
   schedule. Returns ('', '') when no schedules exist yet.
   """
-  url = f"{BASE_URL}/extensions/{graph_id}/graphql"
-  headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+  from robosystems_client.graphql.client import GraphQLClient
+
   query = """
     { informationBlocks(blockType: "schedule") { name artifact { mechanics } } }
   """
   try:
-    r = httpx.post(url, headers=headers, json={"query": query}, timeout=15)
-    r.raise_for_status()
-    blocks = r.json().get("data", {}).get("informationBlocks", [])
+    data = GraphQLClient(BASE_URL, token=api_key, timeout=15).execute(graph_id, query)
+    blocks = data.get("informationBlocks", [])
     # Prefer a prepaid (insurance) schedule — avoid depreciation
     ordered = sorted(
       blocks,

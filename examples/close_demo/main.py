@@ -55,21 +55,41 @@ COMPANY_NAME = "Cascade Advisory Group LLC"
 # ---------------------------------------------------------------------------
 
 
+def _client_config() -> dict[str, str]:
+  """Build the standard SDK client config from saved credentials."""
+  if not CREDENTIALS_FILE.exists():
+    print("  ERROR: No credentials file. Run `just demo-user` first.")
+    sys.exit(1)
+  creds = json.loads(CREDENTIALS_FILE.read_text())
+  return {"base_url": BASE_URL, "token": creds.get("api_key", "")}
+
+
 def _get_ledger_client():
   """Construct a LedgerClient from saved credentials."""
   from robosystems_client.clients.ledger_client import LedgerClient
 
-  if not CREDENTIALS_FILE.exists():
-    print("  ERROR: No credentials file. Run `just demo-user` first.")
-    sys.exit(1)
+  return LedgerClient(_client_config())
 
-  creds = json.loads(CREDENTIALS_FILE.read_text())
-  return LedgerClient(
-    {
-      "base_url": BASE_URL,
-      "token": creds.get("api_key", ""),
-    }
-  )
+
+def _get_document_client():
+  """Construct a DocumentClient from saved credentials."""
+  from robosystems_client.clients.document_client import DocumentClient
+
+  return DocumentClient(_client_config())
+
+
+def _get_graph_client():
+  """Construct a GraphClient from saved credentials."""
+  from robosystems_client.clients.graph_client import GraphClient
+
+  return GraphClient(_client_config())
+
+
+def _get_operation_client():
+  """Construct an OperationClient from saved credentials."""
+  from robosystems_client.clients.operation_client import OperationClient
+
+  return OperationClient(_client_config())
 
 
 # ---------------------------------------------------------------------------
@@ -280,30 +300,19 @@ def create_journal_entries(
   """Create historical journal entries via the event-driven ledger.
 
   Each transaction becomes one journal entry with balanced line items,
-  created with status='posted' (historical data). The write goes through
-  create-event-block(event_type='journal_entry_recorded'); the Python
-  handler registry routes the metadata into the underlying journal
+  created with status='posted' (historical data). Routes through
+  ``LedgerClient.create_journal_entry()`` which posts to
+  ``create-event-block(event_type='journal_entry_recorded')`` — the Python
+  handler registry forwards the metadata into the underlying journal
   entry command.
   """
-  import httpx
-
-  if not CREDENTIALS_FILE.exists():
-    print("  ERROR: No credentials file")
-    return {"entries": 0, "line_items": 0}
-
-  creds = json.loads(CREDENTIALS_FILE.read_text())
-  api_key = creds.get("api_key", "")
-  headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
-  url = (
-    f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/create-event-block"
-  )
+  client = _get_ledger_client()
 
   entry_count = 0
   line_item_count = 0
   skipped = 0
 
   for txn_date, txn_type, description, _amount, lines in txns:
-    # Build line items, mapping codes → element IDs
     li_list = []
     for elem_code, debit, credit in lines:
       elem_id = element_lookup.get(elem_code)
@@ -323,26 +332,17 @@ def create_journal_entries(
       continue
 
     memo = description or f"{txn_type} on {txn_date}"
-    body = {
-      "event_type": "journal_entry_recorded",
-      "event_category": "adjustment",
-      "source": "native",
-      "occurred_at": f"{txn_date.isoformat()}T00:00:00Z",
-      "metadata": {
-        "posting_date": txn_date.isoformat(),
-        "memo": memo,
-        "line_items": li_list,
-        "type": "standard",
-        "status": "posted",
-      },
-      "apply_handlers": True,
-    }
-    resp = httpx.post(url, headers=headers, json=body, timeout=30)
-    if resp.status_code not in (200, 201):
-      print(
-        f"  WARNING: create-event-block {resp.status_code} for {txn_date} — "
-        f"{resp.text[:200]}"
+    try:
+      client.create_journal_entry(
+        graph_id,
+        posting_date=txn_date.isoformat(),
+        memo=memo,
+        line_items=li_list,
+        type="standard",
+        status="posted",
       )
+    except Exception as e:
+      print(f"  WARNING: create-journal-entry failed for {txn_date} — {e}")
       skipped += 1
       continue
     entry_count += 1
@@ -424,66 +424,54 @@ def run_ai_mapping(graph_id: str) -> None:
   Requires Bedrock to be configured (BEDROCK_REGION + IAM role with
   bedrock:InvokeModel). Skipped when --ai is not passed.
 
-  Finds the coa_mapping structure, dispatches the async agent operation,
-  and polls until it completes or times out.
+  Finds the coa_mapping structure, dispatches the async agent operation
+  via ``LedgerClient.auto_map_elements()``, then waits via
+  ``OperationClient.monitor_operation()`` (SSE with polling fallback).
   """
-  import httpx
+  from robosystems_client.clients.operation_client import (
+    MonitorOptions,
+    OperationStatus,
+  )
 
-  if not CREDENTIALS_FILE.exists():
-    print("  ERROR: No credentials file")
-    return
-
-  creds = json.loads(CREDENTIALS_FILE.read_text())
-  api_key = creds.get("api_key", "")
-  headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
-
-  # Find the coa_mapping structure ID
-  client = _get_ledger_client()
-  structures = client.list_structures(graph_id, structure_type="coa_mapping")
+  ledger = _get_ledger_client()
+  structures = ledger.list_structures(graph_id, structure_type="coa_mapping")
   if not structures:
     print("  ERROR: No coa_mapping structure found — was the CoA taxonomy created?")
     return
   mapping_id = structures[0]["id"]
   print(f"  Mapping structure: {mapping_id}")
 
-  # Dispatch the async agent operation
   try:
-    resp = httpx.post(
-      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/auto-map-elements",
-      headers=headers,
-      json={"mapping_id": mapping_id},
-      timeout=30,
-    )
+    ack = ledger.auto_map_elements(graph_id, mapping_id)
   except Exception as e:
     print(f"  ERROR: Failed to trigger auto-map-elements: {e}")
     return
 
-  if resp.status_code not in (200, 201, 202):
-    print(f"  ERROR: auto-map-elements returned {resp.status_code}: {resp.text[:200]}")
+  op_id = ack.get("operation_id", "")
+  print(f"  Dispatched (operation: {op_id})")
+  print("  Monitoring… (mapping 27 accounts, may take 1–3 min)")
+
+  ops = _get_operation_client()
+  try:
+    result = ops.monitor_operation(op_id, MonitorOptions(timeout=300))
+  except TimeoutError:
+    print("  WARNING: AI mapping timed out after 5 min (may still be running)")
     return
 
-  data = resp.json()
-  op_id = data.get("operationId", data.get("operation_id", ""))
-  print(f"  Dispatched (operation: {op_id})")
-  print("  Polling… (mapping 27 accounts, may take 1–3 min)")
+  payload = result.result if isinstance(result.result, dict) else {}
 
-  status, result = _poll_operation(api_key, op_id, timeout_seconds=300)
-  if status == "completed":
-    mapped = result.get("mapped", "?")
-    flagged = result.get("flagged", "?")
-    skipped = result.get("skipped", "?")
-    coverage = result.get("coverage_percent", "?")
-    print(f"  Done — mapped: {mapped}, flagged: {flagged}, skipped: {skipped}")
-    print(f"  Coverage: {coverage}%")
-  elif status == "failed":
-    error = result.get("error", "unknown")
-    print(f"  WARNING: AI mapping failed: {error}")
+  if result.status == OperationStatus.COMPLETED:
+    print(
+      f"  Done — mapped: {payload.get('mapped', '?')}, "
+      f"flagged: {payload.get('flagged', '?')}, "
+      f"skipped: {payload.get('skipped', '?')}"
+    )
+    print(f"  Coverage: {payload.get('coverage_percent', '?')}%")
+  elif result.status == OperationStatus.FAILED:
+    print(f"  WARNING: AI mapping failed: {result.error or 'unknown'}")
     print("  Falling back to hardcoded mappings...")
-    # Not calling create_mappings here — caller decides fallback policy.
-  elif status == "timeout":
-    print("  WARNING: AI mapping timed out after 5 min (may still be running)")
   else:
-    print(f"  WARNING: Polling error: {result.get('error', 'unknown')}")
+    print(f"  WARNING: Unexpected operation status: {result.status}")
 
 
 # ---------------------------------------------------------------------------
@@ -632,38 +620,23 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
 
 
 def upload_policies(graph_id: str) -> int:
-  """Upload accounting policy documents via the API."""
-  import httpx
-
+  """Upload accounting policy documents via ``DocumentClient.upload()``."""
   from .policies import DOCUMENTS
 
-  if CREDENTIALS_FILE.exists():
-    creds = json.loads(CREDENTIALS_FILE.read_text())
-    api_key = creds.get("api_key", "")
-  else:
-    print("  WARNING: No credentials file, skipping document upload")
-    return 0
-
+  client = _get_document_client()
   uploaded = 0
   for doc in DOCUMENTS:
     try:
-      resp = httpx.post(
-        f"{BASE_URL}/v1/graphs/{graph_id}/documents",
-        headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-        json={
-          "title": doc["title"],
-          "content": doc["content"],
-          "folder": doc["folder"],
-          "tags": doc["tags"],
-        },
-        timeout=30,
+      client.upload(
+        graph_id,
+        title=doc["title"],
+        content=doc["content"],
+        folder=doc["folder"],
+        tags=doc["tags"],
       )
-      if resp.status_code in (200, 201):
-        uploaded += 1
-      else:
-        print(f"  WARNING: Failed to upload '{doc['title']}': {resp.status_code}")
+      uploaded += 1
     except Exception as e:
-      print(f"  WARNING: Document upload failed: {e}")
+      print(f"  WARNING: Failed to upload '{doc['title']}': {e}")
 
   return uploaded
 
@@ -673,73 +646,32 @@ def upload_policies(graph_id: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _poll_operation(
-  api_key: str,
-  operation_id: str,
-  timeout_seconds: int = 120,
-  interval_seconds: float = 2.0,
-) -> tuple[str, dict]:
-  """Poll /v1/operations/{id}/status until it terminates or times out."""
-  import httpx
-
-  deadline = time.time() + timeout_seconds
-  url = f"{BASE_URL}/v1/operations/{operation_id}/status"
-  headers = {"X-API-Key": api_key}
-
-  while time.time() < deadline:
-    try:
-      resp = httpx.get(url, headers=headers, timeout=10)
-      if resp.status_code == 200:
-        data = resp.json()
-        status = data.get("status")
-        if status in ("completed", "failed"):
-          return status, data.get("result") or {}
-    except Exception as e:
-      return "error", {"error": str(e)}
-    time.sleep(interval_seconds)
-
-  return "timeout", {}
-
-
 def materialize_graph(graph_id: str) -> None:
-  """Materialize OLTP data into LadybugDB graph."""
-  import httpx
+  """Materialize OLTP data into LadybugDB graph.
 
-  if not CREDENTIALS_FILE.exists():
-    print("  WARNING: No credentials file, skipping materialization")
-    return
+  Routes through ``GraphClient.materialize()`` — the SDK handles SSE
+  monitoring (with polling fallback) and surfaces a typed result.
+  """
+  from robosystems_client.clients.graph_client import MaterializationOptions
 
-  creds = json.loads(CREDENTIALS_FILE.read_text())
-  api_key = creds.get("api_key", "")
-
+  client = _get_graph_client()
   try:
-    resp = httpx.post(
-      f"{BASE_URL}/v1/graphs/{graph_id}/operations/materialize",
-      headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-      json={"force": True, "rebuild": True, "source": "extensions"},
-      timeout=30,
+    result = client.materialize(
+      graph_id,
+      MaterializationOptions(
+        force=True,
+        rebuild=True,
+        on_progress=lambda msg: print(f"  {msg}"),
+      ),
     )
-    if resp.status_code not in (200, 201, 202):
-      print(f"  WARNING: Trigger failed: {resp.status_code}")
-      return
-
-    data = resp.json()
-    op_id = data.get("operationId", data.get("operation_id", ""))
-    print(f"  Triggered (operation: {op_id})")
-    print("  Polling operation status...")
-
-    status, result = _poll_operation(api_key, op_id)
-    if status == "completed":
-      print("  Done")
-    elif status == "failed":
-      error = result.get("error", "unknown")
-      print(f"  WARNING: Materialization failed: {error}")
-    elif status == "timeout":
-      print("  WARNING: Materialization timed out after 120s (may still be running)")
-    else:
-      print(f"  WARNING: Polling error: {result.get('error', 'unknown')}")
   except Exception as e:
     print(f"  WARNING: Materialization failed: {e}")
+    return
+
+  if result.success:
+    print("  Done")
+  else:
+    print(f"  WARNING: Materialization failed: {result.error or result.message}")
 
 
 # ---------------------------------------------------------------------------
