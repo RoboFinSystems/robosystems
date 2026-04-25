@@ -1,22 +1,23 @@
 """TaxonomyPackage → ORM-session inserts for library-origin taxonomies.
 
-Admin-only. Three-phase flow so cross-package arcs resolve via DB lookup
+Admin-only. Three-pass flow so cross-package arcs resolve via DB lookup
 regardless of seed load order:
 
-  Phase 1 — create_library_taxonomy_elements: Taxonomy + Elements + Labels +
-             References + Structures + Classifications per package.
-  Phase 2 — create_library_arcs: Associations + ClassificationAssignments per
-             package (needs every package's elements in the DB first).
-  Phase 3 — create_library_rules: Rules with polymorphic target resolution
-             (needs structures + elements from all packages).
+  ``create_library_taxonomy_elements`` — Taxonomy + Elements + Labels +
+    References + Structures + Classifications per package.
+  ``create_library_arcs`` — Associations + ClassificationAssignments per
+    package (needs every package's elements in the DB first).
+  ``create_library_rules`` — Rules with polymorphic target resolution
+    (needs structures + elements from all packages).
 
 Used by migration 0002 and any future migration that adds or updates library
 seeds. Not routed through the public envelope or registry — takes TaxonomyPackage
 directly because the envelope model (TaxonomyBlockElementRequest) is missing
 library-specific fields (source, labels, references, classifications).
 
-Deterministic UUID5 IDs match library_writer.py's keying exactly so re-runs
-are idempotent and existing seeded DBs are not disturbed.
+Key derivation must remain stable across re-seeds: same input → same UUID5,
+so re-runs hit ON CONFLICT rather than inserting duplicates and existing
+seeded DBs are not disturbed.
 """
 
 from __future__ import annotations
@@ -62,8 +63,8 @@ _ALLOWED_SOURCES = frozenset(
 
 
 # ── Deterministic ID helpers ──────────────────────────────────────────────────
-# Keying matches library_writer.py exactly — same input → same UUID5 →
-# re-runs hit ON CONFLICT rather than inserting duplicates.
+# Key derivation must remain stable across re-seeds: same input → same UUID5
+# → re-runs hit ON CONFLICT rather than inserting duplicates.
 
 
 def _taxonomy_id(standard: str, version: str) -> str:
@@ -114,7 +115,7 @@ def _default_role_uri(package: TaxonomyPackage) -> str:
   return f"{package.namespace_uri}default"
 
 
-# ── Phase 1 ───────────────────────────────────────────────────────────────────
+# ── Taxonomy & elements ───────────────────────────────────────────────────────
 
 
 def create_library_taxonomy_elements(
@@ -122,11 +123,11 @@ def create_library_taxonomy_elements(
   package: TaxonomyPackage,
   created_by: str = "library-seeder",
 ) -> tuple[str, dict[str, int]]:
-  """Phase 1: Taxonomy + Elements + Labels + References + Structures +
-  Classifications + default catch-all structure.
+  """Insert Taxonomy + Elements + Labels + References + Structures +
+  Classifications + default catch-all structure for one package.
 
   Must be called for every package before ``create_library_arcs`` runs for
-  any of them — phase 2 resolves cross-package qname/classification
+  any of them — the arcs pass resolves cross-package qname/classification
   references via DB lookups, which requires the full element + vocabulary
   universe to already be persisted.
 
@@ -316,7 +317,7 @@ def create_library_taxonomy_elements(
   return taxonomy_id, counts
 
 
-# ── Phase 2 ───────────────────────────────────────────────────────────────────
+# ── Cross-package arcs ────────────────────────────────────────────────────────
 
 
 def _resolve_element_id(session: Session, qname: str) -> str | None:
@@ -352,7 +353,7 @@ def create_library_arcs(
   package: TaxonomyPackage,
   created_by: str = "library-seeder",
 ) -> dict[str, int]:
-  """Phase 2: Associations + ClassificationAssignments.
+  """Insert Associations + ClassificationAssignments for one package.
 
   Resolves qnames + classifications via DB lookup so cross-package arcs work
   regardless of which seed defined the target element.
@@ -460,7 +461,7 @@ def create_library_arcs(
   return counts
 
 
-# ── Phase 3 ───────────────────────────────────────────────────────────────────
+# ── Rules ─────────────────────────────────────────────────────────────────────
 
 
 def _resolve_structure_id_by_role(session: Session, role_uri: str) -> str | None:
@@ -476,10 +477,11 @@ def create_library_rules(
   package: TaxonomyPackage,
   created_by: str = "library-seeder",
 ) -> dict[str, int]:
-  """Phase 3: Rules with polymorphic target resolution.
+  """Insert Rules with polymorphic target resolution for one package.
 
-  Must run after phase 2 globally so structure + element targets resolve.
-  Association-targeted rules are not yet supported (logs + skips).
+  Must run after the cross-package arcs pass globally so structure +
+  element targets resolve. Association-targeted rules are not yet
+  supported (logs + skips).
   """
   counts: dict[str, int] = {"rules": 0, "rules_skipped": 0}
   taxonomy_id = _taxonomy_id(package.standard, package.version)

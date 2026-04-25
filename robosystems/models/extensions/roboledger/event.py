@@ -5,13 +5,15 @@ with voided and superseded as terminal off-ramps. The triggered_by_event_id
 column on transactions and entries links GL rows back to the originating
 event for the audit chain.
 
-Two REA-aligned link columns let events express duality at the event
-layer rather than only at the GL: ``obligated_by_event_id`` points at the
-event that scheduled this one (forward materialization — e.g. a depreciation
-schedule entry pointing back at the asset_acquired event); ``discharges_event_id``
-points at the obligation this event settles (e.g. cash_received pointing at
-the originating sale_invoiced). Both are nullable, application-validated
-self-references, matching the existing pattern for ``replaced_by_event_id``.
+Two REA duality links — economic relationships expressing obligation origin
+(``obligated_by_event_id``) and obligation discharge (``discharges_event_id``)
+— let events express duality at the event layer rather than only at the GL:
+``obligated_by_event_id`` points at the event that scheduled this one
+(forward materialization — e.g. a depreciation schedule entry pointing back
+at the asset_acquired event); ``discharges_event_id`` points at the
+obligation this event settles (e.g. cash_received pointing at the originating
+sale_invoiced). Both are nullable, application-validated self-references,
+matching the existing pattern for ``replaced_by_event_id``.
 
 ``event_class`` (``'economic' | 'support'``) is orthogonal to ``event_category``.
 Economic events change resources; support events (control, approval,

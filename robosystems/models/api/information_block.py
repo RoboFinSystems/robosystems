@@ -5,10 +5,9 @@ Wire-facing types for the cross-domain Information Block construct
 ``create-information-block`` operation, the GraphQL ``informationBlock``/
 ``informationBlocks`` fields, and the MCP read tools.
 
-Phase a ships only the ``schedule`` block type; new block types register
-their own ``*Mechanics`` model and add it to the ``ArtifactMechanics``
-discriminated union here. The envelope shape itself stays invariant —
-adding a block type is a union-arm edit, not an envelope redesign.
+Adding a block type: register its ``*Mechanics`` model and add it to
+the ``ArtifactMechanics`` discriminated union here. The envelope shape
+stays invariant — a union-arm edit, not an envelope redesign.
 """
 
 from __future__ import annotations
@@ -107,8 +106,7 @@ class ConnectionLite(BaseModel):
   """Connection (= Association) projection.
 
   Renamed at the API boundary to match Charlie's ontology vocabulary.
-  The underlying storage is still ``associations``; Phase g keeps that
-  table name stable.
+  The underlying storage table is still ``associations``.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -129,10 +127,10 @@ class ConnectionLite(BaseModel):
   classifications: list[ClassificationLite] = Field(
     default_factory=list,
     description=(
-      "Association-level classifications (Phase epsilon) — "
-      "concept_arrangement, member_arrangement, named_disclosure rows "
-      "from the junction. Empty for library-seeded associations that "
-      "haven't been classified yet."
+      "Association-level classifications — concept_arrangement, "
+      "member_arrangement, named_disclosure rows from the junction. "
+      "Empty for library-seeded associations that haven't been "
+      "classified yet."
     ),
   )
 
@@ -156,11 +154,10 @@ class FactLite(BaseModel):
 class FactSetLite(BaseModel):
   """FactSet projection — period-specific instantiation of the Structure.
 
-  Phase ζ data-model landing. The envelope carries one ``FactSetLite``
-  per block when a FactSet row exists for the requested period; older
-  writes (pre-Phase-ζ ``create_report`` / ``create_schedule`` paths) may
-  still leave ``fact_set`` null until the expand pass stamps FactSet
-  rows on every write.
+  The envelope carries one ``FactSetLite`` per block when a FactSet row
+  exists for the requested period; legacy writes that pre-date FactSet
+  stamping leave ``fact_set`` null until the expand pass starts
+  populating those rows.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -222,10 +219,10 @@ class RuleVariableLite(BaseModel):
 
 
 class VerificationResultLite(BaseModel):
-  """Persisted outcome of one Rule evaluation (Phase iota data model).
+  """Persisted outcome of one Rule evaluation.
 
-  One row per ``public.verification_results`` entry the engine (Phase
-  δ.3) writes. The envelope surfaces them so the block viewer's
+  One row per ``public.verification_results`` entry the rule engine
+  writes. The envelope surfaces them so the block viewer's
   "Verification Results" tab and MCP ``list-verification-failures``
   tool can render + aggregate without a second round-trip.
   """
@@ -252,10 +249,11 @@ class VerificationResultLite(BaseModel):
 class RuleLite(BaseModel):
   """Rule projection for the Information Block envelope.
 
-  One row per ``public.rules`` entry scoped to this block. The engine
-  (Phase δ.3) consumes ``rule_expression`` + ``rule_variables`` to
-  evaluate against the in-scope fact set; until then the envelope just
-  surfaces the rules so the UI can render them as a checklist.
+  One row per ``public.rules`` entry scoped to this block. The rule
+  engine consumes ``rule_expression`` + ``rule_variables`` to evaluate
+  against the in-scope fact set; the envelope surfaces the rules so
+  the UI can render them as a checklist alongside any persisted
+  verification results.
   """
 
   model_config = ConfigDict(from_attributes=True)
@@ -308,12 +306,12 @@ class RuleLite(BaseModel):
 class ScheduleMechanics(BaseModel):
   """Closing-entry generator mechanics for ``block_type='schedule'``.
 
-  Phase δ: reads directly from the typed ``structures.artifact_mechanics``
-  JSONB column. ``entry_template`` and ``schedule_metadata`` are typed
+  Reads directly from the typed ``structures.artifact_mechanics`` JSONB
+  column. ``entry_template`` and ``schedule_metadata`` are typed
   sub-models (reusing the wire-level request shapes so OpenAPI emits one
   canonical type per concept); the envelope builder falls back to
-  ``structures.metadata_`` for pre-δ Schedule rows that the tenant
-  backfill hasn't yet migrated.
+  ``structures.metadata_`` for legacy Schedule rows that the tenant
+  backfill hasn't yet migrated to the typed column.
   """
 
   kind: Literal["closing_entry_generator"] = "closing_entry_generator"
@@ -336,26 +334,27 @@ class ScheduleMechanics(BaseModel):
     default=0,
     description=(
       "Number of in-scope periods that have at least one closing entry "
-      "posted. Runtime state — Phase ζ migrates this to the typed FactSet "
-      "envelope where it becomes derivable from fact_sets."
+      "posted. Runtime state derived at envelope-build time from the "
+      "Entry table."
     ),
   )
 
 
 class MetricMechanics(BaseModel):
-  """Derivative mechanics for ``block_type='metric'`` (Phase η data model).
+  """Derivative mechanics for ``block_type='metric'``.
 
   A metric block composes its facts from one or more source blocks at
-  read time — covenant tests, ratios, KPI trend computations. Phase η
-  ships the typed arm so the discriminated union covers all three
+  read time — covenant tests, ratios, KPI trend computations. The typed
+  arm ships today so the discriminated union covers all three
   construction modes (declarative / compositional / derivative); the
-  actual derivation evaluator ships in a follow-up.
+  derivation evaluator that actually computes facts from source-block
+  FactSets is not yet implemented.
 
   ``source_block_ids`` is the ordered list of Structure ids this metric
   derives from; ``derivation_type`` names the kind of computation
   (``ratio``, ``trailing_twelve_month``, ``covenant_test``, …), and
-  ``expression`` carries the agent-authored derivation string evaluated
-  at envelope build time.
+  ``expression`` carries the agent-authored derivation string that the
+  evaluator will consume at envelope build time.
   """
 
   kind: Literal["metric"] = "metric"
@@ -363,9 +362,9 @@ class MetricMechanics(BaseModel):
     default_factory=list,
     description=(
       "Ordered list of Structure ids this metric sources from. Must be "
-      "non-empty at evaluation time; the blitz landing allows empty "
-      "lists so library scaffolding can register metric templates "
-      "before source linkage is wired."
+      "non-empty at evaluation time; empty lists are accepted so library "
+      "scaffolding can register metric templates before source linkage "
+      "is wired."
     ),
   )
   derivation_type: str | None = Field(
@@ -373,8 +372,8 @@ class MetricMechanics(BaseModel):
     description=(
       "Free-form label for the derivation kind — 'ratio', "
       "'trailing_twelve_month', 'covenant_test', etc. The evaluator "
-      "dispatches on this tag; future phases may lock the set with a "
-      "CHECK constraint once the derivation catalog stabilizes."
+      "dispatches on this tag; the set may be locked with a CHECK "
+      "constraint once the derivation catalog stabilizes."
     ),
   )
   expression: str | None = Field(
@@ -382,8 +381,7 @@ class MetricMechanics(BaseModel):
     description=(
       "Derivation expression in the metric DSL — evaluated at envelope "
       "read time to produce the derivative fact value. Opaque string "
-      "during the blitz; the rule-engine work (Phase δ.3) lands the "
-      "parser / evaluator in a follow-up."
+      "today; the metric-side parser / evaluator is not yet implemented."
     ),
   )
   unit: str = Field(
@@ -399,12 +397,11 @@ class StatementMechanics(BaseModel):
   """Renderer mechanics for the statement family of block types.
 
   Covers ``balance_sheet``, ``income_statement``, ``cash_flow_statement``,
-  and ``equity_statement``. Phase δ adds typed mechanics fields alongside
-  the existing Phase β tagged body; the fields are all optional so
-  library-seeded rows that haven't been enriched yet still validate.
-  The existing ``statement(...)`` GraphQL field continues to serve
-  rendered output; this mechanics model is the source of truth for
-  future renderer configuration.
+  and ``equity_statement``. All fields are optional so library-seeded
+  rows that haven't been enriched yet still validate against an empty
+  tagged body. The existing ``statement(...)`` GraphQL field continues
+  to serve rendered output; this mechanics model is the source of truth
+  for future renderer configuration.
   """
 
   kind: Literal["statement_renderer"] = "statement_renderer"
@@ -412,9 +409,9 @@ class StatementMechanics(BaseModel):
     None,
     description=(
       "Pinned template id — when set, the renderer uses that template's "
-      "layout instead of the block's default. The templates table lands "
-      "in a later phase; the column lands now so tenant writes can stamp "
-      "it without another migration round-trip."
+      "layout instead of the block's default. The templates table is "
+      "not yet implemented; the column is reserved so tenant writes can "
+      "stamp it without another migration round-trip when it lands."
     ),
   )
   rollup_root_element_ids: list[str] = Field(
@@ -472,13 +469,14 @@ class ArtifactResponse(BaseModel):
     None, description="Structure.description — the block's human-readable topic."
   )
   parenthetical_note: str | None = Field(
-    None, description="e.g. 'in thousands', 'except per share'. Phase d."
+    None, description="e.g. 'in thousands', 'except per share'."
   )
   template: dict[str, Any] | None = Field(
     None,
     description=(
       "Reusable layout (ordering, subtotals, styling) when attached. "
-      "Phase i delivers first-class templates; null in Phase a."
+      "First-class templates are not yet implemented; this field is "
+      "always null on currently-shipped block types."
     ),
   )
   mechanics: ArtifactMechanics
@@ -493,8 +491,9 @@ class InformationBlockEnvelope(BaseModel):
   One envelope per block instance. Carries the block's identity + type,
   Information-Model attributes, the Artifact branch (mechanics +
   topic/template), and bundled atoms (elements, connections, facts).
-  Rules / dimensions / FactSet / verificationResults are present-but-
-  empty until the corresponding phases land.
+  Rules / dimensions / FactSet / verification_results are present-but-
+  empty for blocks where the upstream content (rule engine, FactSet
+  expand, dimension catalog) has not yet been implemented.
   """
 
   id: str
@@ -533,11 +532,11 @@ class InformationBlockEnvelope(BaseModel):
   fact_set: FactSetLite | None = Field(
     None,
     description=(
-      "The period-specific FactSet this envelope instantiates (Phase ζ). "
-      "Null when the underlying block has no FactSet row yet — typically "
+      "The period-specific FactSet this envelope instantiates. Null "
+      "when the underlying block has no FactSet row yet — typically "
       "library-seeded statement Structures with no tenant-generated "
-      "facts, or Schedule rows written before the create-side stamping "
-      "(expand pass) lands."
+      "facts, or Schedule rows written before the create-side FactSet "
+      "stamping was added."
     ),
   )
   verification_results: list[VerificationResultLite] = Field(default_factory=list)
@@ -634,7 +633,7 @@ class DeleteInformationBlockResponse(BaseModel):
 
 
 class EvaluateRulesRequest(BaseModel):
-  """Request body for the ``evaluate-rules`` operation (Phase delta.3).
+  """Request body for the ``evaluate-rules`` operation.
 
   Runs every rule scoped to ``structure_id`` (plus element/association-
   scoped rules for the structure's atoms), binds ``$Variable`` references
@@ -651,8 +650,8 @@ class EvaluateRulesRequest(BaseModel):
     None,
     description=(
       "Optional FactSet id to stamp on each VerificationResult row. "
-      "Allows results to be scoped to a specific period run when the "
-      "FactSet table is populated (Phase zeta expand pass)."
+      "Allows results to be scoped to a specific period run once write "
+      "paths populate the FactSet table on every run."
     ),
   )
   period_start: date | None = Field(

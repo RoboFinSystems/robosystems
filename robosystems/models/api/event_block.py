@@ -111,9 +111,10 @@ class CreateEventBlockRequest(BaseModel):
   )
   dimension_ids: list[str] = Field(default_factory=list)
 
-  # REA duality chain (forward-materialization + settlement links).
-  # Both are application-validated self-references; same nullable-FK pattern
-  # as the correction chain.
+  # REA duality links — economic relationships expressing obligation origin
+  # (`obligated_by_event_id`) and obligation discharge (`discharges_event_id`).
+  # Forward-materialization + settlement links. Both are application-validated
+  # self-references; same nullable-FK pattern as the correction chain.
   obligated_by_event_id: str | None = Field(
     None,
     description=(

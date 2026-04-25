@@ -1,4 +1,12 @@
-"""Event Block reads — get and list event envelopes."""
+"""Event Block reads — get and list event envelopes.
+
+Owns the canonical ``_load_dimension_ids`` and ``_to_envelope`` helpers used
+by both the read path here and the write path in
+``operations/event_block/commands.py``. ``_to_envelope`` populates every
+field declared on ``EventBlockEnvelope``, including ``event_class`` and the
+REA duality links (``obligated_by_event_id``, ``discharges_event_id``), so
+agents reading events via MCP see the same shape that creators wrote.
+"""
 
 from __future__ import annotations
 
@@ -24,11 +32,12 @@ def _load_dimension_ids(session: Session, event_id: str) -> list[str]:
   )
 
 
-def _to_envelope(session: Session, event: Event) -> EventBlockEnvelope:
+def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
   return EventBlockEnvelope(
     id=event.id,
     event_type=event.event_type,
     event_category=event.event_category,
+    event_class=event.event_class,
     status=event.status,
     occurred_at=event.occurred_at,
     effective_at=event.effective_at,
@@ -39,12 +48,14 @@ def _to_envelope(session: Session, event: Event) -> EventBlockEnvelope:
     currency=event.currency,
     description=event.description,
     metadata=dict(event.metadata_ or {}),
-    dimension_ids=_load_dimension_ids(session, event.id),
+    dimension_ids=dimension_ids,
     agent_id=event.agent_id,
     resource_type=event.resource_type,
     resource_element_id=event.resource_element_id,
     replaced_by_event_id=event.replaced_by_event_id,
     replaces_event_id=event.replaces_event_id,
+    obligated_by_event_id=event.obligated_by_event_id,
+    discharges_event_id=event.discharges_event_id,
     created_at=event.created_at,
     created_by=event.created_by,
   )
@@ -54,7 +65,7 @@ def get_event_block(session: Session, event_id: str) -> EventBlockEnvelope | Non
   event = session.get(Event, event_id)
   if event is None:
     return None
-  return _to_envelope(session, event)
+  return _to_envelope(event, _load_dimension_ids(session, event.id))
 
 
 def list_event_blocks(
@@ -82,4 +93,4 @@ def list_event_blocks(
 
   stmt = stmt.order_by(Event.occurred_at.desc()).limit(limit).offset(offset)
   events = session.execute(stmt).scalars().all()
-  return [_to_envelope(session, e) for e in events]
+  return [_to_envelope(e, _load_dimension_ids(session, e.id)) for e in events]

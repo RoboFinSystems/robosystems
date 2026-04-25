@@ -1,25 +1,26 @@
-"""Seven-phase validator pipeline for Taxonomy Block create payloads.
+"""Validator pipeline for Taxonomy Block create payloads.
 
-Runs before any handler writes. Collects every issue across all phases
-and surfaces them as a single :class:`TaxonomyBlockValidationError` —
-tenants see every problem in one response, not the first-fail shape
-the inline handler checks produced.
+Runs before any handler writes. Collects every issue across all
+checks and surfaces them as a single
+:class:`TaxonomyBlockValidationError` — tenants see every problem in
+one response, not the first-fail shape the inline handler checks
+produced.
 
-Phases (see ``local/docs/specs/taxonomy-block.md`` §3.1):
+Checks (see ``local/docs/specs/taxonomy-block.md`` §3.1):
 
-1. Reference resolution — parent_ref / structure_ref / from_ref /
-   to_ref / rule targets all resolve locally or (for
-   ``reporting_extension``) in the parent library.
-2. Uniqueness — element qnames and structure names unique within the
-   envelope.
-3. Structural integrity — no cycles in parent_child or summation_item
-   arcs.
-4. Type-specific — CoA classification discipline; extension namespace
-   prefix.
-5. Library-origin respect — tenants can't smuggle library-origin rows
-   in ``elements[]``.
-6. Rule expression parse — safe-AST parse of every tenant rule
-   expression; every ``variable_qname`` resolves.
+* Reference resolution — parent_ref / structure_ref / from_ref /
+  to_ref / rule targets all resolve locally or (for
+  ``reporting_extension``) in the parent library.
+* Uniqueness — element qnames and structure names unique within the
+  envelope.
+* Structural integrity — no cycles in parent_child or summation_item
+  arcs.
+* Type-specific — CoA classification discipline; extension namespace
+  prefix.
+* Library-origin respect — tenants can't smuggle library-origin rows
+  in ``elements[]``.
+* Rule expression parse — safe-AST parse of every tenant rule
+  expression; every ``variable_qname`` resolves.
 
 Returned issues don't distinguish fatal / warning — every issue
 aborts the envelope. The `severity` field on tenant-authored rules is
@@ -51,7 +52,7 @@ from robosystems.operations.information_block.rules.expressions import (
 class ValidationIssue:
   """One problem discovered by the validator.
 
-  ``phase`` names which phase caught it (for diagnosis); ``code`` is a
+  ``phase`` names which check caught it (for diagnosis); ``code`` is a
   stable machine-readable tag (for API consumers); ``message`` is
   human-readable; ``context`` carries the offending atoms (qnames,
   structure names, etc.) for reconstruction.
@@ -64,7 +65,7 @@ class ValidationIssue:
 
 
 class TaxonomyBlockValidationError(ValueError):
-  """Aggregate exception raised when any validator phase produces issues."""
+  """Aggregate exception raised when any validator check produces issues."""
 
   def __init__(self, issues: list[ValidationIssue]):
     self.issues = issues
@@ -77,7 +78,7 @@ def validate_create_envelope(
   payload: CreateTaxonomyBlockRequest,
   session: Session,
 ) -> list[ValidationIssue]:
-  """Run all phases; return the full list of issues (empty when valid)."""
+  """Run all checks; return the full list of issues (empty when valid)."""
   issues: list[ValidationIssue] = []
   issues.extend(_phase_reference_resolution(payload, session))
   issues.extend(_phase_uniqueness(payload))

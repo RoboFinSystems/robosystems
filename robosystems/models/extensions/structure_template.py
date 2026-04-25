@@ -1,14 +1,11 @@
 """StructureTemplate model — reusable layout/configuration for a Structure.
 
-Phase iota data-model landing. Each row describes a template a Structure
-can pin via ``structures.template_id`` to override default rendering /
-slot ordering / subtotal labels. Library-seeded templates (the four
-statement types + common Schedule variants) share the vocabulary with
-tenant-authored templates so the same column powers both cases.
-
-The blitz ships the table + FK target. Library content (the four
-statement templates + common Schedule variants) lands in the expand
-pass once template shapes are finalized.
+Reusable templates for Structure rows. A template defines the canonical
+shape (axes, mechanics, slot ordering, subtotal labels) that one or more
+Structures instantiate via ``structures.template_id``. Library-seeded
+templates (the four statement types + common Schedule variants) share
+the vocabulary with tenant-authored templates so the same column powers
+both cases.
 """
 
 from datetime import UTC, datetime

@@ -1,10 +1,16 @@
-"""Event Block commands — Phase 1 + Phase 3 write surface.
+"""Event Block commands — create, update, and preview operations.
 
-Phase 1: create (apply_handlers=False) + update (status transitions + corrections).
-Phase 3: apply_handlers=True fires the handler engine; preview_event_block is a
-dry-run that returns the plan without persisting rows.
+Functions are pure: ``(Session, RequestModel, created_by) → ResponseModel``.
 
-All functions are pure: (Session, RequestModel, created_by) → ResponseModel.
+- ``create_event_block``: persists an event row. With ``apply_handlers=False``
+  the row lands in ``status='captured'`` and nothing else is written. With
+  ``apply_handlers=True`` the event is resolved against the Python registry
+  first, falling back to the DSL registry; the matched handler fires and
+  produces GL rows atomically with the event row.
+- ``update_event_block``: applies status transitions and field corrections to
+  an existing event.
+- ``preview_event_block``: dry-runs handler resolution + template evaluation
+  and returns the plan without persisting anything.
 """
 
 from __future__ import annotations
@@ -12,7 +18,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.event_block import (
@@ -29,6 +34,10 @@ from robosystems.models.extensions.roboledger.dimension_junctions import (
   event_dimensions,
 )
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.operations.roboledger.reads.event_block import (
+  _load_dimension_ids,
+  _to_envelope,
+)
 
 from .engine import EngineValidationError, apply_handler
 from .python_handlers import get_python_handler
@@ -68,48 +77,6 @@ _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
   "voided": frozenset(),
   "superseded": frozenset(),
 }
-
-
-def _load_dimension_ids(session: Session, event_id: str) -> list[str]:
-  rows = (
-    session.execute(
-      select(event_dimensions.c.dimension_id).where(
-        event_dimensions.c.event_id == event_id
-      )
-    )
-    .scalars()
-    .all()
-  )
-  return list(rows)
-
-
-def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
-  return EventBlockEnvelope(
-    id=event.id,
-    event_type=event.event_type,
-    event_category=event.event_category,
-    event_class=event.event_class,
-    status=event.status,
-    occurred_at=event.occurred_at,
-    effective_at=event.effective_at,
-    source=event.source,
-    external_id=event.external_id,
-    external_url=event.external_url,
-    amount=event.amount,
-    currency=event.currency,
-    description=event.description,
-    metadata=dict(event.metadata_ or {}),
-    dimension_ids=dimension_ids,
-    agent_id=event.agent_id,
-    resource_type=event.resource_type,
-    resource_element_id=event.resource_element_id,
-    replaced_by_event_id=event.replaced_by_event_id,
-    replaces_event_id=event.replaces_event_id,
-    obligated_by_event_id=event.obligated_by_event_id,
-    discharges_event_id=event.discharges_event_id,
-    created_at=event.created_at,
-    created_by=event.created_by,
-  )
 
 
 def _resolve_agent_type(session: Session, agent_id: str | None) -> str | None:
@@ -158,10 +125,12 @@ def create_event_block(
 ) -> EventBlockEnvelope:
   """Persist an event block, optionally firing the handler engine.
 
-  apply_handlers=False: capture-only (Phase 1 behaviour, status='captured').
-  apply_handlers=True: resolves handler and fires it atomically.
+  ``apply_handlers=False``: capture-only — persists the event row in
+  ``status='captured'`` and writes no GL rows.
+  ``apply_handlers=True``: resolves the event_type to a handler and fires
+  it atomically alongside the event row.
 
-  Handler resolution:
+  Handler resolution order:
     1. Python registry (hub-defined complex workflows, e.g., asset_disposed)
     2. DSL registry (event_handlers table, tenant-configurable simple templates)
 
@@ -196,7 +165,7 @@ def create_event_block(
       session.commit()
       return _to_envelope(event, body.dimension_ids)
 
-    # 2. Fall through to the DSL registry (Phase 3 path)
+    # 2. Fall through to the DSL registry
     agent_type = _resolve_agent_type(session, body.agent_id)
     handler = resolve_handler(
       session,

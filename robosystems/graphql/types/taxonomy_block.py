@@ -7,8 +7,8 @@ can't derive, so the leaves use explicit ``@strawberry.type`` + a
 hand-written because ``verification_results`` is an opaque JSON list.
 ``from_pydantic`` on the envelope constructs the full tree explicitly.
 
-Verification results will gain a typed shape in Phase 2.3 alongside the
-auto-rules engine; until then clients consume the raw JSON.
+Verification results carry an opaque JSON shape; clients consume the
+raw payload as the rule-evaluation surface stabilizes.
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ class TaxonomyBlockAssociation:
 
 @strawberry.type
 class TaxonomyBlockRule:
-  """A verification rule bundled inside a Taxonomy Block envelope (Phase 2.3)."""
+  """A verification rule bundled inside a Taxonomy Block envelope."""
 
   id: str
   name: str
@@ -177,8 +177,8 @@ class TaxonomyBlock:
   associations: list[TaxonomyBlockAssociation]
   rules: list[TaxonomyBlockRule]
 
-  # Phase 2.3 gives verification_results a typed shape; until then the
-  # list carries opaque JSON objects.
+  # ``verification_results`` is an opaque JSON list; clients receive the
+  # raw payload until the rule-evaluation surface stabilizes.
   verification_results: list[VerificationResultPayload]
 
   element_count: int

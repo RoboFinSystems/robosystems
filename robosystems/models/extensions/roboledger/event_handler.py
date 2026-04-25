@@ -1,11 +1,9 @@
 """EventHandler model — dynamic rule registry for event → transaction transformation.
 
 Each row declares which events it handles (via match criteria) and how to
-produce GL transactions (via transaction_template DSL).
-
-Phase 3 of the event-driven ledger. The handler engine (registry.py +
-engine.py) evaluates these rows when create-event-block fires with
-apply_handlers=True.
+produce GL transactions (via the ``transaction_template`` DSL). The handler
+engine (``operations/event_block/registry.py`` + ``engine.py``) evaluates
+these rows when ``create-event-block`` fires with ``apply_handlers=True``.
 """
 
 from datetime import UTC, datetime

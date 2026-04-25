@@ -1,12 +1,12 @@
 """Update-path validator — projects the post-delta state and reuses create phases.
 
-Phase 2.4.1 update scope covers all deltas: ``_to_add``, ``_to_update``,
-and ``_to_remove`` for every atom type, plus ``rules_to_add`` /
+Update scope covers all deltas: ``_to_add``, ``_to_update``, and
+``_to_remove`` for every atom type, plus ``rules_to_add`` /
 ``rules_to_remove`` and top-level field updates. This validator
 synthesizes a virtual :class:`CreateTaxonomyBlockRequest` representing
 the post-delta state of the taxonomy (DB rows minus removals, with
-mutations applied, plus additions), then runs the six create-time
-phases against that projection. Delta-specific guards (library origin
+mutations applied, plus additions), then runs the create-time phases
+against that projection. Delta-specific guards (library origin
 immutability, live fact/line-item dependencies, cross-taxonomy
 mappings, orphan children) run after the projection check.
 """
@@ -597,16 +597,6 @@ def _validate_associations_to_remove(
   return issues
 
 
-def reject_unsupported_deltas(payload: UpdateTaxonomyBlockRequest) -> None:
-  """No-op since Phase 2.4.1 ships all delta kinds.
-
-  Kept as a stable export for callers pinned to the pre-2.4.1 import,
-  until a follow-up cleanup removes the call sites.
-  """
-  return None
-
-
 __all__ = [
-  "reject_unsupported_deltas",
   "validate_update_envelope",
 ]

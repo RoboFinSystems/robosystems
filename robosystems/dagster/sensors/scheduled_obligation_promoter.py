@@ -1,4 +1,4 @@
-"""Dagster sensor for the period-boundary obligation promoter (Stream 2.B).
+"""Dagster sensor for the period-boundary obligation promoter.
 
 Walks every active entity graph; for any graph that has matured `pending`
 `schedule_entry_due` events, fires a RunRequest against
@@ -124,10 +124,9 @@ def scheduled_obligation_promotion_sensor(context: SensorEvaluationContext):
       .all()
     )
 
-    # Per-graph autopilot flag added in Stream 2.E. The env var stays
-    # as the fallback default for legacy rows where the column is NULL,
-    # so a deployment-wide override still works during the rollout
-    # window.
+    # Per-graph autopilot flag on Graph.auto_dispatch_obligations. The env
+    # var supplies the deployment-wide default for rows where the column
+    # is NULL.
     env_default_auto_dispatch = bool(env.EXTENSIONS_PROMOTION_AUTO_DISPATCH)
     as_of_iso = now.isoformat()
 

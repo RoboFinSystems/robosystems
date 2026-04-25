@@ -49,15 +49,18 @@ def _matches_metadata_expression(
 ) -> bool:
   """Simple dot-path equality match against event.metadata.
 
-  Accepts both root-relative paths ("category") and the historically
-  documented metadata-prefixed form ("metadata.category").
+  Three supported path forms:
+  - ``"foo"`` — root-relative key inside event.metadata (``metadata["foo"]``).
+  - ``"metadata.foo"`` — same target as ``"foo"``; the ``metadata.`` prefix
+    is stripped before traversal so DSL authors can write either form.
+  - ``"metadata"`` — bare literal that compares the entire metadata dict to
+    the expected value.
   """
   if not expression:
     return True
   for path, expected in expression.items():
-    # Support nested paths like "category" or "sub.key". Keep backward
-    # compatibility with the documented "metadata.foo" form.
     if path == "metadata":
+      # Bare ``metadata`` literal: compare the whole metadata dict.
       node = event_metadata
       if node != expected:
         return False

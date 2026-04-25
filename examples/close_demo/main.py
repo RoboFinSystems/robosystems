@@ -362,9 +362,9 @@ def create_journal_entries(
 def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
   """Create mapping associations between CoA elements and FAC reporting concepts.
 
-  Per Phase 3b, CoA → FAC (Fundamental Accounting Concepts) is the
-  primary mapping target. FAC → rs-gaap expansion is handled by
-  equivalence arcs on the FAC side.
+  CoA → FAC (Fundamental Accounting Concepts) is the primary mapping
+  target. FAC → rs-gaap expansion is handled by equivalence arcs on
+  the FAC side.
 
   Uses `LedgerClient.create_associations()` — the bulk HTTP API — to
   exercise the same path the frontend UI and MCP tools use.
@@ -388,10 +388,9 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
     if e.get("qname")
   }
 
-  # Walk MAPPINGS and post each association one-by-one. The bulk
-  # create-associations op was retired in Phase 1; mappings now go
-  # through create-mapping-association which takes a single pair. The
-  # demo's mapping set is ~20 rows so per-call latency is fine.
+  # Walk MAPPINGS and post each association one-by-one through
+  # create-mapping-association which takes a single pair. The demo's
+  # mapping set is ~20 rows so per-call latency is fine.
   created = 0
   for coa_code, fac_qname in MAPPINGS:
     coa_id = element_lookup.get(coa_code)

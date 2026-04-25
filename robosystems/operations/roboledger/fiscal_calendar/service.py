@@ -1,7 +1,10 @@
-"""FiscalCalendarService — rolling close state management.
+"""Rolling close state for the fiscal calendar.
 
-This is the Phase 1 foundation. It does NOT yet drive close workflows
-(that's Phase 4 / CloseAgent). What it DOES do:
+Tracks closed_through and close_target pointers and validates closeable
+preconditions; close workflow orchestration lives in the close-period
+operation.
+
+Responsibilities:
 
 - Lazily creates a `FiscalCalendar` row per graph (idempotent)
 - Maintains the `closed_through_period` ← `close_target_period` pointers
@@ -648,14 +651,14 @@ class FiscalCalendarService:
         if last_sync_date < period_end:
           blockers.append(CloseableGateResult.SYNC_STALE)
 
-    # Gate 4: pending obligations. Stream 2.D — schedules materialize one
-    # `pending` `schedule_entry_due` event per period. The period cannot be
-    # closed while any of those obligations remain pending, because the
-    # corresponding draft entries either haven't been created yet (Stream
-    # 2.B sensor flips them to `classified` and dispatches the handler) or
-    # the operator has not yet voided them. The user-facing remedy is to
-    # promote each obligation (manually via `update-event-block`, or
-    # automatically once Stream 2.B's sensor lands) or to void them.
+    # Gate 4: pending obligations. Schedules materialize one `pending`
+    # `schedule_entry_due` event per period. The period cannot be closed
+    # while any of those obligations remain pending: the corresponding
+    # draft entries have either not yet been classified by the obligation
+    # sensor or the operator has not yet voided them. The user-facing
+    # remedy is to promote each obligation (manually via
+    # `update-event-block`, or automatically via the obligation sensor)
+    # or to void them.
     period_end_dt = datetime.combine(period_end, time(23, 59, 59), tzinfo=UTC)
     pending_count = (
       session.query(Event)

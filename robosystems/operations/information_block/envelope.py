@@ -1,13 +1,15 @@
 """Cross-type assembly helpers for building Information Block envelopes.
 
-Block-type handlers (``schedule.py`` today, more in future phases) each
-own the logic that's specific to their shape. The helpers here are the
-generic atom → Lite conversions shared by every handler — one place to
-maintain the ORM → wire-shape mapping so Phase b's Statement handler
-doesn't diverge from Phase a's Schedule handler.
+Block-type handlers (``schedule.py``, ``statement.py``, ``metric.py``)
+each own the logic that's specific to their shape. The helpers here are
+the generic atom -> Lite conversions shared by every handler — one
+place to maintain the ORM -> wire-shape mapping so handlers don't
+diverge.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -29,6 +31,7 @@ from robosystems.models.extensions import (
   Classification,
   Element,
   Rule,
+  Structure,
   VerificationResult,
 )
 from robosystems.models.extensions.roboledger import Fact, FactSet
@@ -168,7 +171,7 @@ def load_verification_results_for_structure(
 
   Returns the full history ordered by ``evaluated_at`` descending so
   the envelope exposes the most recent run first. Empty list when no
-  rows — the common case while the engine (Phase δ.3) ships.
+  rows — the common case until the rule engine writes results.
   """
   rows = (
     session.execute(
@@ -190,9 +193,8 @@ def load_latest_fact_set_for_structure(
   Ordered by ``period_end`` descending then ``created_at`` descending so
   a Structure with multiple FactSets (e.g. a Schedule accumulating
   period runs) surfaces the latest slice. Returns ``None`` when no
-  FactSet row exists — Phase ζ sitting in the data-model-only blitz
-  means library-seeded Structures won't have one until creation paths
-  start stamping them (expand pass).
+  FactSet row exists — typically library-seeded Structures whose
+  tenant has not yet generated facts.
   """
   row = session.execute(
     select(FactSet)
@@ -285,11 +287,102 @@ def load_rules_for_structure(
   return [rule_to_lite(r) for r in rules]
 
 
+@dataclass(frozen=True)
+class BaseEnvelopeAtoms:
+  """Shared atoms loaded by every block-type ``build_envelope``.
+
+  The block-specific handlers add mechanics + the per-block fact filter
+  on top; everything else (Structure, taxonomy_name, associations,
+  elements, rules, classifications, fact_set, verification_results) is
+  identical across the registered block types.
+  """
+
+  structure: Structure
+  taxonomy_name: str | None
+  associations: list[Association]
+  elements: list[Element]
+  element_ids: list[str]
+  rules: list[RuleLite]
+  classifications_by_assoc: dict[str, list[ClassificationLite]]
+  fact_set: FactSetLite | None
+  verification_results: list[VerificationResultLite]
+
+
+def load_base_envelope_atoms(
+  session: Session, structure_id: str, *, expected_block_type: str
+) -> BaseEnvelopeAtoms | None:
+  """Load every atom shared by Information Block envelope builders.
+
+  Returns ``None`` when the Structure doesn't exist or its
+  ``structure_type`` doesn't match ``expected_block_type`` — handlers
+  surface that as a clean miss to :func:`get_information_block`. Loading
+  order: Structure -> taxonomy name -> associations -> elements -> rules
+  -> classifications -> fact_set -> verification_results, matching the
+  order each individual handler used to inline.
+  """
+  from robosystems.models.extensions import Taxonomy
+
+  structure = session.get(Structure, structure_id)
+  if structure is None or structure.structure_type != expected_block_type:
+    return None
+
+  taxonomy_name = session.execute(
+    select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
+  ).scalar()
+
+  associations = list(
+    session.execute(select(Association).where(Association.structure_id == structure_id))
+    .scalars()
+    .all()
+  )
+
+  element_id_set = {a.from_element_id for a in associations} | {
+    a.to_element_id for a in associations
+  }
+  element_ids = [e for e in element_id_set if e is not None]
+  if element_ids:
+    elements = list(
+      session.execute(select(Element).where(Element.id.in_(element_ids)))
+      .scalars()
+      .all()
+    )
+  else:
+    elements = []
+
+  rules = load_rules_for_structure(
+    session,
+    structure_id,
+    element_ids=element_ids,
+    association_ids=[a.id for a in associations],
+  )
+
+  classifications_by_assoc = load_classifications_for_associations(
+    session, [a.id for a in associations]
+  )
+
+  fact_set = load_latest_fact_set_for_structure(session, structure_id)
+  verification_results = load_verification_results_for_structure(session, structure_id)
+
+  return BaseEnvelopeAtoms(
+    structure=structure,
+    taxonomy_name=taxonomy_name,
+    associations=associations,
+    elements=elements,
+    element_ids=element_ids,
+    rules=rules,
+    classifications_by_assoc=classifications_by_assoc,
+    fact_set=fact_set,
+    verification_results=verification_results,
+  )
+
+
 __all__ = [
+  "BaseEnvelopeAtoms",
   "association_to_connection",
   "element_to_lite",
   "fact_set_to_lite",
   "fact_to_lite",
+  "load_base_envelope_atoms",
   "load_classifications_for_associations",
   "load_latest_fact_set_for_structure",
   "load_rules_for_structure",

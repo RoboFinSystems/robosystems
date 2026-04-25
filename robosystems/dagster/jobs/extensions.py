@@ -143,7 +143,7 @@ def extensions_materialize_job():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Stream 2.B — Period-boundary obligation promotion
+# Period-boundary obligation promotion
 # ─────────────────────────────────────────────────────────────────────────
 
 

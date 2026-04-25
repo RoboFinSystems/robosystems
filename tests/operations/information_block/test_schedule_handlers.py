@@ -117,7 +117,7 @@ class TestBuildEnvelope:
     assert schedule_handlers.build_envelope(session, "struct_other") is None
 
   def test_packs_mechanics_from_typed_artifact_mechanics_column(self) -> None:
-    """Phase δ reads mechanics from structures.artifact_mechanics column.
+    """Mechanics are read from the typed artifact_mechanics column.
 
     This is the post-backfill path every Schedule row takes: the typed
     JSONB column is the authoritative source; metadata_ carries the
@@ -153,13 +153,13 @@ class TestBuildEnvelope:
     structure.metadata_ = {"should_be_ignored": True}
     session.get.return_value = structure
     session.execute.side_effect = [
-      _exec_result(scalar=5),  # periods_with_entries count
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
-      _exec_result(scalars_all=[]),  # facts
       _exec_result(scalars_all=[]),  # rules
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
+      _exec_result(scalar=5),  # periods_with_entries count
+      _exec_result(scalars_all=[]),  # facts
     ]
 
     envelope = schedule_handlers.build_envelope(session, "struct_abc")
@@ -209,6 +209,11 @@ class TestBuildEnvelope:
     structure.metadata_ = {}  # no entry_template key
     session.get.return_value = structure
     session.execute.side_effect = [
+      _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # associations
+      _exec_result(scalars_all=[]),  # rules
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalars_all=[]),  # verification results
       _exec_result(scalar=0),  # periods_with_entries
     ]
 
@@ -216,7 +221,7 @@ class TestBuildEnvelope:
       schedule_handlers.build_envelope(session, "struct_corrupted")
 
   def test_falls_back_to_metadata_jsonb_when_artifact_mechanics_null(self) -> None:
-    """Pre-δ Schedule rows lacking artifact_mechanics still surface.
+    """Schedule rows lacking artifact_mechanics still surface via metadata_.
 
     The migration backfills every existing Schedule row, so this path is
     only exercised by rows inserted between DDL and backfill — or rows
@@ -242,13 +247,13 @@ class TestBuildEnvelope:
     }
     session.get.return_value = structure
     session.execute.side_effect = [
-      _exec_result(scalar=0),  # periods_with_entries
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
-      _exec_result(scalars_all=[]),  # facts
       _exec_result(scalars_all=[]),  # rules
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
+      _exec_result(scalar=0),  # periods_with_entries
+      _exec_result(scalars_all=[]),  # facts
     ]
 
     envelope = schedule_handlers.build_envelope(session, "struct_legacy")

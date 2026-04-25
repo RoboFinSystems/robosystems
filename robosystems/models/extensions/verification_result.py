@@ -1,7 +1,6 @@
 """VerificationResult model — persisted outcome of a Rule evaluation.
 
-Phase iota data-model landing. Each row records one evaluation of a Rule
-against a particular FactSet / Structure context:
+Each row records a single rule's outcome against a fact set:
 
 - ``rule_id`` FKs the rule being evaluated.
 - ``structure_id`` (nullable) FKs the block the rule was evaluated
@@ -13,8 +12,9 @@ against a particular FactSet / Structure context:
 - ``status`` IN ('pass','fail','error','skipped') captures the
   outcome; ``message`` carries the human-readable explanation.
 
-The engine (Phase δ.3) is the producer; this model exists so engine
-output has a durable home that MCP tools + the block viewer can read.
+Rows are written by the rule evaluation engine; this model exists so
+engine output has a durable home that MCP tools + the block viewer can
+read.
 """
 
 from datetime import UTC, datetime

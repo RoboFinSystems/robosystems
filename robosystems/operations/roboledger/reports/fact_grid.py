@@ -84,7 +84,7 @@ class FactGrid:
   unmapped_count: int = 0
 
 
-# ── Phase 1: Generate facts (structure-agnostic) ─────────────────────────
+# ── Stage 1: Generate facts (structure-agnostic) ─────────────────────────
 
 
 def generate_report_facts(
@@ -152,7 +152,7 @@ def generate_report_facts(
   )
 
 
-# ── Phase 2: Render structure view ───────────────────────────────────────
+# ── Stage 2: Render structure view ───────────────────────────────────────
 
 
 def render_structure_view(

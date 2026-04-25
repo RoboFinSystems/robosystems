@@ -6,9 +6,9 @@ tools (``get-information-block`` / ``list-information-blocks``). Shape
 is defined once; agents, SDK callers, and the UI all see the same
 envelope.
 
-Phase a only knows about ``block_type='schedule'``; unknown block_type
-filters raise :class:`ValueError`. Future phases add more entries to
-the registry — no changes needed here.
+Unknown ``block_type`` filters raise :class:`ValueError`; new block
+types register themselves in the registry and surface here without
+changes to this module.
 """
 
 from __future__ import annotations
@@ -35,9 +35,9 @@ def get_information_block(
   try:
     entry = registry_module.get(structure.structure_type)
   except KeyError:
-    # Existing rows with a structure_type that isn't yet modeled as a
-    # block type (e.g. 'balance_sheet' before Phase b) surface as
-    # None rather than raising — the envelope just can't be built.
+    # Existing rows whose structure_type isn't a registered block type
+    # surface as ``None`` rather than raising — the envelope just can't
+    # be built.
     return None
   return entry.dispatch_build_envelope(session, structure_id)
 

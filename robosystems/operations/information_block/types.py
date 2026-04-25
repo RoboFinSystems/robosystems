@@ -40,8 +40,7 @@ class BlockTypeRegistryEntry:
 
   id: str
   """Stable discriminator — e.g. 'schedule'. Matches the block_type
-  string on the wire and the structure_type value in the DB (Phase γ
-  renames the column)."""
+  string on the wire and the ``structure_type`` value in the DB."""
 
   display_name: str
   """Human-readable singular name, e.g. 'Schedule'."""
@@ -71,8 +70,9 @@ class BlockTypeRegistryEntry:
   mechanics_schema: type[BaseModel]
   """Pydantic model for the block's Artifact Mechanics (e.g.
   :class:`ScheduleMechanics`). Used by the envelope builder to
-  shape-validate what lives in the metadata_ JSONB (Phase a) or in
-  the typed ``artifact_mechanics`` column (Phase d)."""
+  shape-validate the typed ``artifact_mechanics`` JSONB column (with
+  legacy fallback to ``metadata_`` for rows that pre-date the
+  backfill)."""
 
   create_request_model: type[BaseModel]
   """Pydantic model that the ``create-information-block`` dispatcher
@@ -94,7 +94,7 @@ class BlockTypeRegistryEntry:
   """Declarative (user declares shape + seed params; atoms generated) /
   compositional (atoms exist from ingest; block is a view materialized
   on read) / derivative (atoms come from other blocks via rules).
-  Shapes what the dispatcher does — Phase a only ships declarative."""
+  Shapes what the dispatcher does."""
 
   dispatch_create: Callable[[Session, BaseModel, str], str]
   """Handler that creates the block. Signature:

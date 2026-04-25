@@ -258,7 +258,7 @@ all_sensors = [
   graph_usage_monitor_sensor,
   # Platform: Worker reliability
   worker_inflight_reaper_sensor,
-  # Extensions: period-boundary obligation promoter (Stream 2.B)
+  # Extensions: period-boundary obligation promoter
   *_extensions_sensors,
   # Adapter: SEC pipeline
   *sec["sensors"],

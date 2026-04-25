@@ -6,10 +6,9 @@ the block type's display metadata, request/response schemas, and the
 four dispatch handlers (create, update, delete, build_envelope) that
 make the generic construction and read machinery work.
 
-The registry itself is added in Phase 2.2 as a
-``dict[str, TaxonomyBlockRegistryEntry]`` populated at module import.
-Adding a block type is a code change — a new registry literal plus the
-module that holds its handlers.
+The registry is a ``dict[str, TaxonomyBlockRegistryEntry]`` populated
+at module import. Adding a block type is a code change — a new
+registry literal plus the module that holds its handlers.
 """
 
 from __future__ import annotations

@@ -27,10 +27,10 @@ For each ``{variable_name, variable_qname}`` entry in
    table (``fact_scope = 'in_scope'``, most recent ``period_end`` first).
    Structure-scoped facts win. If no structure fact exists, facts from
    the latest matching statement/report are accepted via one pinned
-   ``report_id`` because report creation still writes structure-agnostic
-   facts until the FactSet expand pass stamps ``structure_id``/
-   ``fact_set_id``. Schedules do not use that fallback; their own
-   generated facts are the source of truth. None on miss.
+   ``report_id`` because report-write paths currently write
+   structure-agnostic facts (``structure_id`` / ``fact_set_id`` are not
+   yet stamped on every fact). Schedules do not use that fallback;
+   their own generated facts are the source of truth. None on miss.
 
 One query per variable (N+1 is fine for 3-5 variables per rule).
 """

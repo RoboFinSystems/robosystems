@@ -1,4 +1,4 @@
-"""Tests for Taxonomy Block update handlers (Phase 2.4 / Phase 2.4.1)."""
+"""Tests for Taxonomy Block update handlers."""
 
 from __future__ import annotations
 
@@ -9,13 +9,9 @@ import pytest
 from robosystems.models.api.taxonomy_block import (
   ElementUpdatePatch,
   StructureUpdatePatch,
-  TaxonomyBlockElementRequest,
   UpdateTaxonomyBlockRequest,
 )
 from robosystems.operations.taxonomy_block import custom_ontology
-from robosystems.operations.taxonomy_block.update_validator import (
-  reject_unsupported_deltas,
-)
 
 
 def _fake_taxonomy(taxonomy_type: str, *, is_locked: bool = False) -> MagicMock:
@@ -30,53 +26,6 @@ def _fake_taxonomy(taxonomy_type: str, *, is_locked: bool = False) -> MagicMock:
   taxonomy.parent_taxonomy_id = None
   taxonomy.namespace_uri = None
   return taxonomy
-
-
-class TestRejectUnsupportedDeltasIsNoop:
-  """Phase 2.4.1 ships every delta kind; the function is now a no-op."""
-
-  def test_elements_to_update_accepted(self) -> None:
-    payload = UpdateTaxonomyBlockRequest(
-      taxonomy_id="tax_1",
-      elements_to_update=[ElementUpdatePatch(qname="x:A", name="A")],
-    )
-    reject_unsupported_deltas(payload)  # no raise
-
-  def test_elements_to_remove_accepted(self) -> None:
-    payload = UpdateTaxonomyBlockRequest(
-      taxonomy_id="tax_1", elements_to_remove=["x:A"]
-    )
-    reject_unsupported_deltas(payload)  # no raise
-
-  def test_structures_to_update_accepted(self) -> None:
-    payload = UpdateTaxonomyBlockRequest(
-      taxonomy_id="tax_1",
-      structures_to_update=[StructureUpdatePatch(structure_id="s1", name="new")],
-    )
-    reject_unsupported_deltas(payload)  # no raise
-
-  def test_structures_to_remove_accepted(self) -> None:
-    payload = UpdateTaxonomyBlockRequest(
-      taxonomy_id="tax_1", structures_to_remove=["s1"]
-    )
-    reject_unsupported_deltas(payload)  # no raise
-
-  def test_associations_to_remove_accepted(self) -> None:
-    payload = UpdateTaxonomyBlockRequest(
-      taxonomy_id="tax_1", associations_to_remove=["assoc_1"]
-    )
-    reject_unsupported_deltas(payload)  # no raise
-
-  def test_empty_payload_accepted(self) -> None:
-    payload = UpdateTaxonomyBlockRequest(taxonomy_id="tax_1")
-    reject_unsupported_deltas(payload)  # no raise
-
-  def test_additive_deltas_accepted(self) -> None:
-    payload = UpdateTaxonomyBlockRequest(
-      taxonomy_id="tax_1",
-      elements_to_add=[TaxonomyBlockElementRequest(qname="x:A", name="A")],
-    )
-    reject_unsupported_deltas(payload)  # no raise
 
 
 class TestCustomOntologyUpdate:
@@ -120,7 +69,7 @@ class TestCustomOntologyUpdate:
     assert tax.version == "v2"
 
 
-# ── Phase 2.4.1 — delta validator unit tests ───────────────────────────────
+# ── Delta validator unit tests ─────────────────────────────────────────────
 
 
 def _mock_execute_result(value: list) -> MagicMock:

@@ -2,10 +2,7 @@
 
 REA-aligned: Agent is the counterparty in a business event. Distinct from
 Entity (the reporting entity / graph owner). Agents are the external actors
-events are exchanged with.
-
-Phase 2 of the event-driven ledger. agent_id on events gains a real FK to
-this table once this migration runs.
+events are exchanged with. ``events.agent_id`` carries a FK to this table.
 """
 
 from datetime import UTC, datetime

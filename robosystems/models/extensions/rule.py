@@ -1,4 +1,6 @@
-"""Rule model — verification rules sourced from the Seattle Method (Phase d.2).
+"""Verification rules: pattern- and expression-based validations evaluated against fact sets.
+
+The initial rule corpus is sourced from the Seattle Method linkbases.
 
 Tenant-scoped table. Each row is one rule in the canonical Seattle
 Method taxonomy: ``rule_category`` names the governance axis

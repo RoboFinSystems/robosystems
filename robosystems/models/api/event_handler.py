@@ -1,11 +1,15 @@
 """API models for Event Handler — the dynamic event → transaction rule registry.
 
-Phase 3 of the event-driven ledger. EventHandlers are the rules that fire
-GL transactions when create-event-block is called with apply_handlers=True.
+EventHandlers map ``event_type`` plus optional match expressions onto a
+transaction template. When ``create-event-block`` runs with
+``apply_handlers=True``, the registry resolves the matching handler and the
+engine evaluates its template to produce GL rows.
 
-TransactionTemplate is the DSL shape. Phase 3 ships immediate postings only
-(debit/credit legs + {{ expr }} interpolation). Recurring/schedule blocks
-come in Phase 4 alongside revenue recognition.
+``TransactionTemplate`` is the DSL shape: immediate postings only
+(debit/credit legs + ``{{ expr }}`` interpolation). Recurring / schedule-block
+templates are not yet implemented — periodic side effects are produced today
+via the obligation register (``schedule_entry_due`` events), not via DSL
+template recurrence.
 """
 
 from __future__ import annotations

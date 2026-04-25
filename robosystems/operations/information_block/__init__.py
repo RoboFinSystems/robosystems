@@ -10,8 +10,8 @@ Public surface:
   the reads.
 
 See ``local/docs/specs/information-block.md`` for the architectural
-context and ``docs/specs/financial-viewer.md`` for the companion View
-layer.
+context and ``local/docs/specs/financial-viewer.md`` for the companion
+View layer.
 """
 
 from __future__ import annotations

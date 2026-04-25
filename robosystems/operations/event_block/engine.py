@@ -1,9 +1,9 @@
 """Handler engine — evaluate a transaction_template and produce GL rows.
 
-Phase 3: immediate postings only. One template entry → one Transaction +
-one Entry + two LineItems (debit + credit). All rows are flushed but not
-committed; the caller (create_event_block) commits the whole unit of work
-atomically so failures roll back cleanly.
+Immediate postings only: one template entry → one Transaction + one Entry +
+two LineItems (debit + credit). All rows are flushed but not committed; the
+caller (``create_event_block``) commits the whole unit of work atomically so
+failures roll back cleanly.
 """
 
 from __future__ import annotations

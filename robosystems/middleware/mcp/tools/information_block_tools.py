@@ -9,8 +9,8 @@ envelope for any registered block type. Two tools:
 
 These are the eventual unified replacement for the block-type-specific
 read tools in ``schedule_tools.py`` (``list-schedule-structures``,
-``get-schedule-facts``). Both surfaces ship in parallel until agents
-migrate; no breaking change in Phase a.
+``get-schedule-facts``). Both surfaces ship in parallel during the
+migration so callers can switch over without a breaking change.
 
 The ``create-information-block`` **write** tool is NOT in this module —
 it's auto-generated from the OperationSpec via
@@ -60,7 +60,8 @@ A typed envelope with:
 - information_model (concept + member arrangement)
 - artifact (topic, mechanics — typed per block_type)
 - elements, connections, facts (bundled atoms)
-- rules, dimensions, fact_set, verification_results (populated in later phases)
+- rules, dimensions, fact_set, verification_results (populated as
+  the rule engine + FactSet expand work progresses)
 
 **RELATED TOOLS:**
 - list-information-blocks — browse available blocks

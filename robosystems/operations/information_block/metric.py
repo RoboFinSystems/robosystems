@@ -1,16 +1,18 @@
 """Handlers for ``block_type='metric'`` — the derivative construction mode.
 
-Phase η data-model landing: ``MetricMechanics`` now exists as a typed
-arm of the ``ArtifactMechanics`` discriminated union, and ``metric`` is
-registered as a known block type. The derivation evaluator that
-actually computes metric values from source-block FactSets ships in a
-follow-up — the create/update/delete handlers raise ``NotImplementedError``
-in the meantime, mirroring the statement-family handler pattern.
+Typed :class:`MetricMechanics` ships as one arm of the
+``ArtifactMechanics`` discriminated union, and ``metric`` is registered
+as a known block type. The envelope builder reads mechanics from the
+typed ``artifact_mechanics`` column and surfaces the block as a
+placeholder with ``facts=[]``; the derivation evaluator that computes
+metric values from source-block FactSets is not yet implemented. The
+create/update/delete handlers raise :class:`NotImplementedError` via
+the registry's ``make_not_implemented_handler`` factory.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from robosystems.models.api.information_block import (
   ArtifactResponse,
@@ -27,43 +29,26 @@ from robosystems.operations.information_block.envelope import (
 if TYPE_CHECKING:
   from sqlalchemy.orm import Session
 
-METRIC_BLOCK_TYPE = "metric"
-METRIC_DISPLAY_NAME = "Metric"
-METRIC_CATEGORY = "Reporting"
-
-
-def _create_not_implemented(session: Session, body: Any, created_by: str) -> str:
-  """Create raises until Phase η's expand pass lands the evaluator."""
-  raise NotImplementedError(
-    "create-metric-block is not implemented yet. Phase η ships the "
-    "typed MetricMechanics arm; the derivation evaluator + create path "
-    "land in a follow-up once the Rule engine (Phase δ.3) stabilizes."
-  )
-
-
-def _update_not_implemented(session: Session, body: Any, created_by: str) -> str:
-  raise NotImplementedError(
-    "update-metric-block is not implemented yet (Phase η follow-up)."
-  )
-
-
-def _delete_not_implemented(session: Session, body: Any, created_by: str) -> str:
-  raise NotImplementedError(
-    "delete-metric-block is not implemented yet (Phase η follow-up)."
-  )
-
 
 def build_envelope(
   session: Session, structure_id: str
 ) -> InformationBlockEnvelope | None:
   """Reload a metric Structure and pack it into the Information Block envelope.
 
-  Pre-evaluator behaviour: mechanics are read off the typed
-  ``artifact_mechanics`` column; ``facts`` stays empty until the
-  derivation evaluator lands. The envelope shape is stable so callers
-  and UI can already render a metric block as a placeholder.
+  Mechanics are read off the typed ``artifact_mechanics`` column;
+  ``facts`` stays empty until the derivation evaluator is implemented.
+  The envelope shape is stable so callers and UI can already render a
+  metric block as a placeholder.
   """
   from sqlalchemy import select
+
+  # Imported here so the module-level constants can stay in registry.py
+  # without dragging the registry into metric.py's import chain.
+  from robosystems.operations.information_block.registry import (
+    METRIC_BLOCK_TYPE,
+    METRIC_CATEGORY,
+    METRIC_DISPLAY_NAME,
+  )
 
   structure = session.get(Structure, structure_id)
   if structure is None or structure.structure_type != METRIC_BLOCK_TYPE:
@@ -105,8 +90,5 @@ def build_envelope(
 
 
 __all__ = [
-  "METRIC_BLOCK_TYPE",
-  "METRIC_CATEGORY",
-  "METRIC_DISPLAY_NAME",
   "build_envelope",
 ]

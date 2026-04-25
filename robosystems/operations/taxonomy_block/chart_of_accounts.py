@@ -1,8 +1,5 @@
 """Handlers for ``taxonomy_type='chart_of_accounts'`` — tenant CoA curation.
 
-Phase 2.2 minimum viable handler: ``create`` + ``build_envelope``.
-Update and delete surface ``NotImplementedError`` until later sub-phases.
-
 The CoA block is the reference implementation of the **declarative**
 construction mode for taxonomy blocks — tenant declares the full
 envelope (taxonomy + structures + elements + associations) and the
@@ -33,6 +30,7 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.taxonomy_block._helpers import qname_for
 from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
 from robosystems.operations.taxonomy_block.cascade import (
   cascade_delete_taxonomy,
@@ -56,7 +54,6 @@ from robosystems.operations.taxonomy_block.update_apply import (
   apply_top_level_fields,
 )
 from robosystems.operations.taxonomy_block.update_validator import (
-  reject_unsupported_deltas,
   validate_update_envelope,
 )
 from robosystems.operations.taxonomy_block.validators import (
@@ -125,18 +122,6 @@ def _update_efs_classification(
     )
   )
   _assign_efs_classification(session, element_id, identifier)
-
-
-def _qname_for_coa(standard: str | None, code: str | None, name: str) -> str:
-  """Derive the envelope-local qname for a CoA element.
-
-  Prefers the tenant-supplied ``qname`` on the request; falls back to
-  ``<standard>:<code>`` or ``<standard>:<name>`` so qname is always set
-  (the DB column is nullable, but the envelope design treats qname as
-  the canonical identifier)."""
-  ns = standard or "coa"
-  token = code or name.replace(" ", "")
-  return f"{ns}:{token}"
 
 
 def _auto_link_entity(session: Session, taxonomy_id: str) -> None:
@@ -234,7 +219,7 @@ def create(
 
   classifications_to_assign: list[tuple[str, str]] = []
   for req in payload.elements:
-    qname = req.qname or _qname_for_coa(payload.standard, req.code, req.name)
+    qname = req.qname or qname_for(payload.standard, "coa", req.code, req.name)
     element = Element(
       code=req.code,
       name=req.name,
@@ -344,7 +329,7 @@ def create(
 
 
 def _element_factory(req, taxonomy: Taxonomy, updated_by: str) -> tuple[Element, str]:
-  qname = req.qname or _qname_for_coa(taxonomy.standard, req.code, req.name)
+  qname = req.qname or qname_for(taxonomy.standard, "coa", req.code, req.name)
   element = Element(
     code=req.code,
     name=req.name,
@@ -374,8 +359,6 @@ def update(
       f"taxonomy {payload.taxonomy_id!r} is not a chart_of_accounts taxonomy."
     )
 
-  reject_unsupported_deltas(payload)
-
   issues = validate_update_envelope(session, taxonomy, payload)
   if issues:
     raise TaxonomyBlockValidationError(issues)
@@ -401,7 +384,7 @@ def update(
   )
   for req in payload.elements_to_add:
     if req.classification:
-      qname = req.qname or _qname_for_coa(taxonomy.standard, req.code, req.name)
+      qname = req.qname or qname_for(taxonomy.standard, "coa", req.code, req.name)
       element = new_elements.get(qname)
       if element is not None:
         _assign_efs_classification(session, str(element.id), req.classification)

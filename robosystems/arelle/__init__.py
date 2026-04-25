@@ -6,8 +6,8 @@ seed pipeline (Charlie Hoffman's FAC + SFAC 6 artifacts) and — in the
 future — the SEC filing processor.
 
 The underlying Arelle client still lives at
-`robosystems.adapters.sec.client.arelle` during the POC phase; full
-promotion of the client to this module is Phase 1 work.
+`robosystems.adapters.sec.client.arelle`; promotion of that client into
+this module is not yet complete.
 
 Entry points:
 

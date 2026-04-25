@@ -202,9 +202,9 @@ class ScheduleCreatedResponse(BaseModel):
   total_periods: int
   total_facts: int
   rule_summary: dict[str, int] | None = None
-  # Stream 2.A — every schedule is now backed by an event chain. Callers
-  # can use `schedule_created_event_id` as the obligation-register handle
-  # and `pending_event_count` as a quick sanity check that materialization
+  # Every schedule is backed by an event chain. Callers can use
+  # `schedule_created_event_id` as the obligation-register handle and
+  # `pending_event_count` as a quick sanity check that materialization
   # produced one event per period.
   schedule_created_event_id: str | None = None
   pending_event_count: int = 0
@@ -246,7 +246,7 @@ class DeleteScheduleRequest(BaseModel):
   structure_id: str
 
 
-# DisposeScheduleRequest / DisposeScheduleResponse retired in Phase 4b.
-# Asset disposal is now an event block: `create-event-block(event_type='asset_disposed')`.
-# See operations/event_block/python_handlers/asset_disposed.py
-# for the metadata schema (AssetDisposedMetadata).
+# Asset disposal is an event block:
+# `create-event-block(event_type='asset_disposed')`. See
+# operations/event_block/python_handlers/asset_disposed.py for the
+# metadata schema (AssetDisposedMetadata).

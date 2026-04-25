@@ -56,6 +56,7 @@ def create(
   payload: CreateTaxonomyBlockRequest,
   created_by: str,
 ) -> str:
+  """Intentionally not exposed; admin-only via library_creator."""
   raise NotImplementedError(_ADMIN_ONLY_MESSAGE)
 
 
@@ -64,6 +65,7 @@ def update(
   payload: UpdateTaxonomyBlockRequest,
   updated_by: str,
 ) -> str:
+  """Intentionally not exposed; admin-only via library_creator."""
   raise NotImplementedError(_ADMIN_ONLY_MESSAGE)
 
 
@@ -72,6 +74,7 @@ def delete(
   payload: DeleteTaxonomyBlockRequest,
   deleted_by: str,
 ) -> str:
+  """Intentionally not exposed; admin-only via library_creator."""
   raise NotImplementedError(_ADMIN_ONLY_MESSAGE)
 
 

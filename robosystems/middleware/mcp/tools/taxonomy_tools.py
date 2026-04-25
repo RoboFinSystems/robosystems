@@ -103,7 +103,7 @@ class SuggestMappingTool:
 - Narrows by classification (asset→Assets subtree, revenue→Revenues subtree, etc.)
 
 **HOW IT WORKS:**
-- Reads the shared US GAAP reporting taxonomy (SFAC 6 → us-gaap hierarchy)
+- Reads the shared US GAAP reporting taxonomy (FAC → us-gaap hierarchy)
 - Filters by the same classification as the source element
 - Returns candidate concepts with qname, name, and hierarchy depth
 

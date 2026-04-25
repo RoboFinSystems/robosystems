@@ -1,7 +1,7 @@
 """Operations for the taxonomy library.
 
 The taxonomy library is the public schema's shared reference material
-(SFAC 6 + FAC + us-gaap + future rs-gaap). Tenants pull copies during
+(FAC + us-gaap + rs-gaap). Tenants pull copies during
 provisioning but never modify library rows.
 
 This module exposes reads (no writes — library mutation goes through
