@@ -3463,8 +3463,8 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.0,<3.0" },
     { name = "retrying", specifier = ">=1.4.0,<2.0" },
     { name = "rich", marker = "extra == 'dev'", specifier = ">=14.0.0,<15.0" },
-    { name = "robosystems-client", path = "../robosystems-python-client/dist/robosystems_client-0.3.14-py3-none-any.whl" },
-    { name = "robosystems-client", marker = "extra == 'dev'", path = "../robosystems-python-client/dist/robosystems_client-0.3.14-py3-none-any.whl" },
+    { name = "robosystems-client", specifier = ">=0.3.14" },
+    { name = "robosystems-client", marker = "extra == 'dev'", specifier = "==0.3.15" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.0,<1.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0,<3.0" },
     { name = "sse-starlette", specifier = ">=3.3.0,<4.0" },
@@ -3487,8 +3487,8 @@ lambda = [
 
 [[package]]
 name = "robosystems-client"
-version = "0.3.14"
-source = { path = "../robosystems-python-client/dist/robosystems_client-0.3.14-py3-none-any.whl" }
+version = "0.3.15"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
@@ -3496,27 +3496,10 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "typing-extensions" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/a3/17/2b0c9de685ad30f6c4fdb06f3e806f33c2dcee7017589834e256729e877a/robosystems_client-0.3.15.tar.gz", hash = "sha256:bbc60e8211dda9bd98ab3cd68545ab310f91667c96ab0973eed51a0302410a48", size = 293072, upload-time = "2026-04-25T23:53:28.51Z" }
 wheels = [
-    { filename = "robosystems_client-0.3.14-py3-none-any.whl", hash = "sha256:cce1539a19b5efdc3df6fa25b10d6b9db8306525894db38dcbd7aab2602bd4d0" },
+    { url = "https://files.pythonhosted.org/packages/28/68/69d5f5b11841d15d08d636a7e314e814642a87f99093a0647c4430b815f3/robosystems_client-0.3.15-py3-none-any.whl", hash = "sha256:dacd89b6e17302ec2e97b5fd895af7fbc92a7b2bb942c35f1a6721e414091fa7", size = 677538, upload-time = "2026-04-25T23:53:26.408Z" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "attrs", specifier = ">=23.0.0" },
-    { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.21.0" },
-    { name = "build", marker = "extra == 'dev'", specifier = ">=1.0.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "openapi-python-client", marker = "extra == 'dev'", specifier = ">=0.21.8" },
-    { name = "pydantic", specifier = ">=2.11.7" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.5" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.26.0" },
-    { name = "pytest-httpx", marker = "extra == 'dev'", specifier = ">=0.30.0" },
-    { name = "python-dateutil", specifier = ">=2.8.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12" },
-    { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0.0" },
-    { name = "typing-extensions", specifier = ">=4.0.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "rpds-py"

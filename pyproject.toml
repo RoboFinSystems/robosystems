@@ -242,6 +242,3 @@ reportOptionalMemberAccess = "none"
 reportReturnType = "none"
 reportCallIssue = "none"
 reportMissingImports = "none"
-
-[tool.uv.sources]
-robosystems-client = { path = "../robosystems-python-client/dist/robosystems_client-0.3.14-py3-none-any.whl" }
