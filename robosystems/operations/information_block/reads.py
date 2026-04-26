@@ -18,16 +18,22 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.information_block import InformationBlockEnvelope
 from robosystems.models.extensions import Structure
+from robosystems.models.extensions.roboledger import FactSet
 from robosystems.operations.information_block import registry as registry_module
 
 
 def get_information_block(
-  session: Session, structure_id: str
+  session: Session,
+  structure_id: str,
+  fact_set_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Fetch one block by id, dispatching via the structure's block_type.
 
   Returns ``None`` when the structure doesn't exist or its type isn't
-  registered — callers map that to a GraphQL null / REST 404.
+  registered — callers map that to a GraphQL null / REST 404. When
+  ``fact_set_id`` is provided the envelope is rehydrated from that
+  specific FactSet instead of the latest one (used by Report Block
+  rehydration to surface a frozen snapshot).
   """
   structure = session.get(Structure, structure_id)
   if structure is None:
@@ -39,7 +45,27 @@ def get_information_block(
     # surface as ``None`` rather than raising — the envelope just can't
     # be built.
     return None
-  return entry.dispatch_build_envelope(session, structure_id)
+  return entry.dispatch_build_envelope(session, structure_id, fact_set_id)
+
+
+def get_information_block_for_fact_set(
+  session: Session, fact_set_id: str
+) -> InformationBlockEnvelope | None:
+  """Rehydrate the Information Block envelope pinned to a FactSet.
+
+  Looks up the FactSet's Structure, then dispatches the registered
+  block-type handler with the explicit fact_set pin. Returns ``None``
+  when the FactSet doesn't exist, has no Structure, or its
+  ``structure_type`` isn't a registered block type.
+
+  Used by the Report Block read path: each ReportBlockItem pins a
+  ``fact_set_id``; assembling the envelope for that item is exactly
+  this lookup.
+  """
+  fact_set = session.get(FactSet, fact_set_id)
+  if fact_set is None or fact_set.structure_id is None:
+    return None
+  return get_information_block(session, fact_set.structure_id, fact_set_id)
 
 
 def list_information_blocks(
@@ -118,5 +144,6 @@ def list_information_blocks(
 
 __all__ = [
   "get_information_block",
+  "get_information_block_for_fact_set",
   "list_information_blocks",
 ]

@@ -86,6 +86,7 @@ STATEMENT_CATEGORY = "Reporting"
 def _build_statement_envelope(
   session: Session,
   structure_id: str,
+  fact_set_id: str | None = None,
   *,
   block_type: str,
 ) -> InformationBlockEnvelope | None:
@@ -108,7 +109,10 @@ def _build_statement_envelope(
   the switch is a strict simplification (one less query per envelope).
   """
   atoms = load_base_envelope_atoms(
-    session, structure_id, expected_block_type=block_type
+    session,
+    structure_id,
+    expected_block_type=block_type,
+    fact_set_id=fact_set_id,
   )
   if atoms is None:
     return None
@@ -454,13 +458,15 @@ def _load_element_classifications(
 
 def make_statement_handlers(
   block_type: str,
-) -> Callable[[Session, str], InformationBlockEnvelope | None]:
+) -> Callable[..., InformationBlockEnvelope | None]:
   """Build the envelope handler for one statement type.
 
   ``functools.partial`` binds the ``block_type`` keyword on the envelope
-  builder so the registry entry holds a two-argument callable matching
+  builder so the registry entry holds a callable matching
   :class:`BlockTypeRegistryEntry.dispatch_build_envelope`'s signature
-  ``(session, structure_id) -> envelope | None``.
+  ``(session, structure_id, fact_set_id?=None) -> envelope | None``.
+  The ``fact_set_id`` arg is used by Report Block rehydration to pin
+  the envelope to a specific FactSet snapshot.
 
   The create / update / delete handlers for statement block types are
   not built here — the registry installs not-implemented stubs via

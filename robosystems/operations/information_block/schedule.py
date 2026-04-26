@@ -146,17 +146,24 @@ def _load_schedule_mechanics(
 
 
 def build_envelope(
-  session: Session, structure_id: str
+  session: Session, structure_id: str, fact_set_id: str | None = None
 ) -> InformationBlockEnvelope | None:
   """Reload a schedule Structure and pack its Information Block envelope.
 
   Returns ``None`` when the structure doesn't exist or isn't a schedule,
   so the generic reader can cleanly distinguish misses from errors.
   Mechanics are read from the typed ``artifact_mechanics`` column with
-  fallback to legacy ``metadata_`` JSONB.
+  fallback to legacy ``metadata_`` JSONB. ``fact_set_id`` pins the
+  envelope to a specific FactSet snapshot (Report Block rehydration);
+  facts are still read from the Structure's full set since schedule
+  facts are stamped with ``structure_id`` directly — the pin only
+  scopes the ``fact_set`` projection.
   """
   atoms = load_base_envelope_atoms(
-    session, structure_id, expected_block_type=SCHEDULE_BLOCK_TYPE
+    session,
+    structure_id,
+    expected_block_type=SCHEDULE_BLOCK_TYPE,
+    fact_set_id=fact_set_id,
   )
   if atoms is None:
     return None

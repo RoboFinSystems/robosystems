@@ -311,6 +311,11 @@ class XBRLGraphProcessor:
           result.factset_fact_rels_df,
           "relationships/FACT_SET_CONTAINS_FACT.parquet",
         )
+        if not result.report_factset_rels_df.empty:
+          self.parquet_writer.write_dataframe(
+            result.report_factset_rels_df,
+            "relationships/REPORT_HAS_FACT_SET.parquet",
+          )
         logger.info(
           f"Wrote {len(result.factsets_df)} structure FactSets "
           f"with {len(result.factset_fact_rels_df)} fact links"

@@ -186,6 +186,17 @@ REPORTING_RELATIONSHIPS = [
     description="Structure has a pre-computed set of facts for rendering",
     properties=[],
   ),
+  # Report → FactSet (the package-mode container edge). A Report groups
+  # N FactSets — one per statement Structure produced for the period.
+  # Lets the graph traverse "give me the FactSets of this Report" in one
+  # hop, instead of the two-hop ``Report → Fact ← FactSet`` path.
+  Relationship(
+    name="REPORT_HAS_FACT_SET",
+    from_node="Report",
+    to_node="FactSet",
+    description="Report contains FactSets (one per statement Structure)",
+    properties=[],
+  ),
   Relationship(
     name="REPORT_USES_TAXONOMY",
     from_node="Report",

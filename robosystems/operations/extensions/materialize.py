@@ -90,6 +90,7 @@ RELATIONSHIP_TABLES = [
   "FACT_HAS_UNIT",
   "FACT_HAS_ENTITY",
   "STRUCTURE_HAS_FACT_SET",
+  "REPORT_HAS_FACT_SET",
   "FACT_SET_CONTAINS_FACT",
   # Investor layer
   "ENTITY_HAS_PORTFOLIO",
@@ -157,6 +158,7 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "FACT_HAS_UNIT": "roboledger",
   "FACT_HAS_ENTITY": "roboledger",
   "STRUCTURE_HAS_FACT_SET": "roboledger",
+  "REPORT_HAS_FACT_SET": "roboledger",
   "FACT_SET_CONTAINS_FACT": "roboledger",
   # roboinvestor edges
   "ENTITY_HAS_PORTFOLIO": "roboinvestor",
@@ -937,12 +939,20 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
   tables["STRUCTURE_HAS_FACT_SET"] = f"""
     CREATE OR REPLACE TABLE STRUCTURE_HAS_FACT_SET AS
-    SELECT DISTINCT
+    SELECT
       structure_id                    AS src,
-      fact_set_id                     AS dst
-    FROM postgres_scan('{c}', '{s}', 'facts')
-    WHERE fact_set_id IS NOT NULL
-      AND structure_id IS NOT NULL
+      id                              AS dst
+    FROM postgres_scan('{c}', '{s}', 'fact_sets')
+    WHERE structure_id IS NOT NULL
+  """
+
+  tables["REPORT_HAS_FACT_SET"] = f"""
+    CREATE OR REPLACE TABLE REPORT_HAS_FACT_SET AS
+    SELECT
+      report_id                       AS src,
+      id                              AS dst
+    FROM postgres_scan('{c}', '{s}', 'fact_sets')
+    WHERE report_id IS NOT NULL
   """
 
   tables["FACT_SET_CONTAINS_FACT"] = f"""

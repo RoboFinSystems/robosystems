@@ -205,6 +205,25 @@ def load_latest_fact_set_for_structure(
   return fact_set_to_lite(row) if row is not None else None
 
 
+def load_fact_set_by_id_for_structure(
+  session: Session, structure_id: str, fact_set_id: str
+) -> FactSetLite | None:
+  """Fetch a specific FactSet pinned to a Structure.
+
+  Used by the Report Block rehydration path to load the exact FactSet
+  snapshot that a ``ReportBlockItem`` pins, instead of the latest one.
+  Returns ``None`` when the FactSet doesn't exist or doesn't belong to
+  the named Structure — callers surface that as a clean miss to the
+  envelope reader.
+  """
+  row = session.execute(
+    select(FactSet).where(
+      FactSet.id == fact_set_id, FactSet.structure_id == structure_id
+    )
+  ).scalar()
+  return fact_set_to_lite(row) if row is not None else None
+
+
 def rule_to_lite(rule: Rule) -> RuleLite:
   """Project a :class:`Rule` ORM row onto :class:`RuleLite`.
 
@@ -309,7 +328,11 @@ class BaseEnvelopeAtoms:
 
 
 def load_base_envelope_atoms(
-  session: Session, structure_id: str, *, expected_block_type: str
+  session: Session,
+  structure_id: str,
+  *,
+  expected_block_type: str,
+  fact_set_id: str | None = None,
 ) -> BaseEnvelopeAtoms | None:
   """Load every atom shared by Information Block envelope builders.
 
@@ -319,6 +342,11 @@ def load_base_envelope_atoms(
   order: Structure -> taxonomy name -> associations -> elements -> rules
   -> classifications -> fact_set -> verification_results, matching the
   order each individual handler used to inline.
+
+  When ``fact_set_id`` is provided the atoms are pinned to that specific
+  FactSet (used by Report Block rehydration). Returns ``None`` if the
+  named FactSet doesn't belong to this Structure — callers treat the
+  pin mismatch as a clean miss.
   """
   from robosystems.models.extensions import Taxonomy
 
@@ -360,7 +388,12 @@ def load_base_envelope_atoms(
     session, [a.id for a in associations]
   )
 
-  fact_set = load_latest_fact_set_for_structure(session, structure_id)
+  if fact_set_id is not None:
+    fact_set = load_fact_set_by_id_for_structure(session, structure_id, fact_set_id)
+    if fact_set is None:
+      return None
+  else:
+    fact_set = load_latest_fact_set_for_structure(session, structure_id)
   verification_results = load_verification_results_for_structure(session, structure_id)
 
   return BaseEnvelopeAtoms(
@@ -384,6 +417,7 @@ __all__ = [
   "fact_to_lite",
   "load_base_envelope_atoms",
   "load_classifications_for_associations",
+  "load_fact_set_by_id_for_structure",
   "load_latest_fact_set_for_structure",
   "load_rules_for_structure",
   "load_verification_results_for_structure",

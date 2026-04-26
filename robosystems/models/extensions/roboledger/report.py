@@ -1,14 +1,41 @@
-"""Report model — generated report configurations.
+"""Report model — the package-mode container and unit of materialization.
 
-Stores the configuration needed to produce a report. A report is tied to a
-Taxonomy (which contains multiple Structures like IS, BS, CF). Facts are
-generated for all mapped elements across all structures in the taxonomy.
-References Report/Fact/FactSet nodes in the graph after materialization.
+A Report is a named, period-scoped, lockable container for the FactSets
+generated for one reporting period. It is the digital equivalent of a
+signed financial-report package ("Q1 2026 Financial Statements") and
+the atomic unit that materialises to the graph (one graph Report node
++ its FactSet/Fact nodes per Report row).
+
+The Report has two orthogonal lifecycles:
+
+* ``generation_status`` (pending → generating → complete → published) —
+  the *computation* lifecycle. Tracks whether facts have been generated.
+* ``filing_status`` (draft → under_review → filed → archived) — the
+  *business* lifecycle. Tracks whether the package has been reviewed and
+  filed. ``filed`` is the immutable, locked state.
+
+Restatements create a new Report with ``supersedes_id`` pointing at the
+prior filed version; the prior row's ``superseded_by_id`` closes the
+link. The graph version chain follows the OLTP chain 1:1.
+
+The package-mode viewer renders a Report by loading its attached
+FactSets (one per Structure on the Report) and rehydrating each as an
+``InformationBlockEnvelope`` via ``get_information_block_for_fact_set``.
 """
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, Index, String
+from sqlalchemy import (
+  Boolean,
+  CheckConstraint,
+  Column,
+  Date,
+  DateTime,
+  Float,
+  ForeignKey,
+  Index,
+  String,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 
 from robosystems.db.extensions import ExtensionsBase
@@ -20,6 +47,12 @@ class Report(ExtensionsBase):
   __table_args__ = (
     Index("idx_reports_taxonomy", "taxonomy_id"),
     Index("idx_reports_status", "generation_status"),
+    Index("idx_reports_filing_status", "filing_status"),
+    Index("idx_reports_supersedes", "supersedes_id"),
+    CheckConstraint(
+      "filing_status IN ('draft', 'under_review', 'filed', 'archived')",
+      name="check_report_filing_status",
+    ),
   )
 
   # Identity
@@ -46,6 +79,18 @@ class Report(ExtensionsBase):
   graph_report_id = Column(String, nullable=True)
   last_generated = Column(DateTime, nullable=True)
   generation_status = Column(String, nullable=False, default="pending")
+
+  # Filing lifecycle — orthogonal to generation_status. ``filed`` is
+  # the immutable locked state; ``archived`` is for superseded versions.
+  filing_status = Column(String, nullable=False, default="draft")
+  filed_at = Column(DateTime, nullable=True)
+  filed_by = Column(String, nullable=True)
+
+  # Restatement chain — restating a filed Report creates a new row with
+  # ``supersedes_id`` pointing at the prior version; the prior row's
+  # ``superseded_by_id`` closes the link.
+  supersedes_id = Column(String, ForeignKey("reports.id"), nullable=True)
+  superseded_by_id = Column(String, ForeignKey("reports.id"), nullable=True)
 
   # AI provenance
   ai_generated = Column(Boolean, nullable=False, default=False)
