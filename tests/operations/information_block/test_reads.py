@@ -17,6 +17,7 @@ from robosystems.models.api.information_block import (
 )
 from robosystems.operations.information_block.reads import (
   get_information_block,
+  get_information_block_for_fact_set,
   list_information_blocks,
 )
 from robosystems.operations.information_block.registry import SCHEDULE_BLOCK
@@ -221,3 +222,63 @@ class TestListInformationBlocks:
       )
     assert len(result) == 1
     assert result[0].block_type == "balance_sheet"
+
+
+# ── get_information_block_for_fact_set ─────────────────────────────────────
+
+
+class TestGetInformationBlockForFactSet:
+  """The Report-Block read path: pin envelope rehydration to a FactSet id."""
+
+  def _patched_session(
+    self,
+    *,
+    fact_set: object | None,
+    structure: object | None = None,
+  ) -> MagicMock:
+    """Session whose ``get`` returns the FactSet first, Structure second."""
+    session = MagicMock()
+    session.get.side_effect = [fact_set, structure]
+    return session
+
+  def test_returns_none_when_fact_set_missing(self) -> None:
+    session = MagicMock()
+    session.get.return_value = None
+    assert get_information_block_for_fact_set(session, "fs_missing") is None
+
+  def test_returns_none_when_fact_set_has_no_structure(self) -> None:
+    """Legacy FactSets with a null ``structure_id`` can't drive a handler."""
+    fs = MagicMock()
+    fs.structure_id = None
+    session = MagicMock()
+    session.get.return_value = fs
+    assert get_information_block_for_fact_set(session, "fs_legacy") is None
+
+  def test_returns_none_when_block_type_unregistered(self) -> None:
+    fs = MagicMock()
+    fs.id = "fs_01"
+    fs.structure_id = "struct_coa"
+    structure = MagicMock()
+    structure.structure_type = "chart_of_accounts"
+    session = self._patched_session(fact_set=fs, structure=structure)
+
+    assert get_information_block_for_fact_set(session, "fs_01") is None
+
+  def test_dispatches_with_fact_set_pin(self) -> None:
+    """The pin (fact_set_id) is forwarded to the handler unchanged."""
+    fs = MagicMock()
+    fs.id = "fs_01"
+    fs.structure_id = "struct_1"
+    structure = MagicMock()
+    structure.structure_type = "schedule"
+    session = self._patched_session(fact_set=fs, structure=structure)
+
+    expected = _envelope("struct_1")
+    mock_build = MagicMock(return_value=expected)
+    patched = _schedule_entry_with_build(mock_build)
+
+    with patch.dict(REGISTRY_PATH, {"schedule": patched}):
+      result = get_information_block_for_fact_set(session, "fs_01")
+
+    assert result is expected
+    mock_build.assert_called_once_with(session, "struct_1", "fs_01")
