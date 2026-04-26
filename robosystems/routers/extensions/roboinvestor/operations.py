@@ -16,6 +16,8 @@ has been retired. Securities remain Master Data CRUD.
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from robosystems.db.extensions import extensions_session
@@ -192,9 +194,10 @@ delete_portfolio_block_op = _registrar.register(
       PortfolioNotFoundError: (404, lambda _e: "Portfolio not found."),
       ActivePositionsRequireConfirmationError: (
         409,
-        lambda e: (  # type: ignore[attr-defined]
-          f"Portfolio has {e.active_count} active position(s); set "
-          "confirm_active_positions=true to cascade-delete."
+        lambda e: (
+          f"Portfolio has "
+          f"{cast(ActivePositionsRequireConfirmationError, e).active_count} "
+          "active position(s); set confirm_active_positions=true to cascade-delete."
         ),
       ),
     },

@@ -173,15 +173,21 @@ class HoldingsList:
 class EntityLite:
   """Lightweight entity reference."""
 
+  id: strawberry.ID
+
 
 @strawberry.experimental.pydantic.type(model=PydanticSecurityLite, all_fields=True)
 class SecurityLite:
   """Lightweight security with issuer and cross-graph reference."""
 
+  id: strawberry.ID
+
 
 @strawberry.experimental.pydantic.type(model=PydanticPositionBlock, all_fields=True)
 class PositionBlock:
   """A position with its embedded security."""
+
+  id: strawberry.ID
 
 
 @strawberry.experimental.pydantic.type(
@@ -189,3 +195,5 @@ class PositionBlock:
 )
 class PortfolioBlock:
   """Portfolio-centric molecule envelope — portfolio + positions + securities + entities."""
+
+  id: strawberry.ID

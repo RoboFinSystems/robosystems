@@ -55,8 +55,8 @@ def get_portfolio_block(session: Session, portfolio_id: str) -> PortfolioBlockEn
     .all()
   )
 
-  sec_map: dict = {}
-  entity_map: dict = {}
+  sec_map: dict[str, Security] = {}
+  entity_map: dict[str, Entity] = {}
   if positions:
     security_ids = {p.security_id for p in positions}
     securities = (
@@ -64,14 +64,14 @@ def get_portfolio_block(session: Session, portfolio_id: str) -> PortfolioBlockEn
       .scalars()
       .all()
     )
-    sec_map = {s.id: s for s in securities}
+    sec_map = {str(s.id): s for s in securities}
 
     issuer_ids = {s.entity_id for s in securities if s.entity_id}
     if issuer_ids:
       issuers = (
         session.execute(select(Entity).where(Entity.id.in_(issuer_ids))).scalars().all()
       )
-      entity_map = {e.id: e for e in issuers}
+      entity_map = {str(e.id): e for e in issuers}
 
   position_blocks: list[PositionBlock] = []
   total_cost = 0.0
@@ -82,6 +82,9 @@ def get_portfolio_block(session: Session, portfolio_id: str) -> PortfolioBlockEn
     sec = sec_map.get(p.security_id)
     issuer = entity_map.get(sec.entity_id) if sec and sec.entity_id else None
 
+    if sec is None:
+      continue
+
     cost_dollars = float(p.cost_basis) / 100.0
     value_dollars = (
       float(p.current_value) / 100.0 if p.current_value is not None else None
@@ -90,9 +93,6 @@ def get_portfolio_block(session: Session, portfolio_id: str) -> PortfolioBlockEn
     if value_dollars is not None:
       total_value += value_dollars
       has_value = True
-
-    if sec is None:
-      continue
 
     position_blocks.append(
       PositionBlock(

@@ -405,7 +405,6 @@ class TestDeletePortfolioBlock:
     session.execute.side_effect = [
       _scalar_one(portfolio),
       _scalar(0),  # active count
-      _scalar(1),  # total positions count
       _scalars_all([disposed]),  # the deletion scan
     ]
 
@@ -425,7 +424,6 @@ class TestDeletePortfolioBlock:
     session.execute.side_effect = [
       _scalar_one(portfolio),
       _scalar(1),  # active count
-      _scalar(1),  # total positions count
       _scalars_all([active]),
     ]
 

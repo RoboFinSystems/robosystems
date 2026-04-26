@@ -15,7 +15,7 @@ hit by the position deltas.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -74,7 +74,7 @@ def _validate_securities_exist(session: Session, security_ids: list[str]) -> Non
   )
   missing = unique_ids - set(found)
   if missing:
-    raise SecurityNotFoundError(sorted(missing)[0])
+    raise SecurityNotFoundError(sorted(missing))
 
 
 def _add_position(
@@ -197,7 +197,7 @@ def update_portfolio_block(
   for spec in body.positions.dispose:
     row = position_map[spec.id]
     row.status = "disposed"
-    row.disposition_date = date.today()
+    row.disposition_date = datetime.now(UTC).date()
     if spec.disposition_reason is not None:
       meta = dict(row.metadata_) if isinstance(row.metadata_, dict) else {}
       meta["disposition_reason"] = spec.disposition_reason
@@ -239,15 +239,6 @@ def delete_portfolio_block(
   if active_count and not body.confirm_active_positions:
     raise ActivePositionsRequireConfirmationError(active_count)
 
-  total_positions = int(
-    session.execute(
-      select(func.count())
-      .select_from(Position)
-      .where(Position.portfolio_id == body.portfolio_id)
-    ).scalar()
-    or 0
-  )
-
   positions_to_delete = (
     session.execute(select(Position).where(Position.portfolio_id == body.portfolio_id))
     .scalars()
@@ -262,7 +253,7 @@ def delete_portfolio_block(
   return DeletePortfolioBlockResponse(
     deleted=True,
     portfolio_id=body.portfolio_id,
-    positions_deleted=total_positions,
+    positions_deleted=len(positions_to_delete),
   )
 
 
