@@ -89,15 +89,21 @@ resolve_feature_flag() {
         return
     fi
 
-    # In staging/prod, read from SSM Parameter Store
+    # In staging/prod, read from SSM Parameter Store via boto3.
+    # The runtime image does not ship the awscli binary, but boto3 is in the
+    # application venv, so we shell out to Python instead.
     if [[ "${ENVIRONMENT:-dev}" != "dev" ]]; then
         local ssm_path="/robosystems/${ENVIRONMENT}/features/${flag_name}"
         local ssm_value
-        ssm_value=$(aws ssm get-parameter \
-            --name "$ssm_path" \
-            --query "Parameter.Value" \
-            --output text \
-            --region "${AWS_REGION:-us-east-1}" 2>/dev/null || echo "")
+        ssm_value=$(python -c "
+import os, sys, boto3
+from botocore.exceptions import ClientError
+try:
+    client = boto3.client('ssm', region_name=os.environ.get('AWS_REGION', 'us-east-1'))
+    print(client.get_parameter(Name='${ssm_path}')['Parameter']['Value'], end='')
+except ClientError:
+    sys.exit(0)
+" 2>/dev/null || echo "")
         if [[ -n "$ssm_value" ]]; then
             echo "$ssm_value"
             return
@@ -128,6 +134,13 @@ run_db_init() {
     roboinvestor_enabled=$(resolve_feature_flag "ROBOINVESTOR_ENABLED" "false")
     if [[ "$roboledger_enabled" == "true" || "$roboinvestor_enabled" == "true" ]]; then
         echo "Extensions enabled — running extensions migrations..."
+        # Alembic cannot CREATE DATABASE; ensure the extensions DB exists first.
+        # Locally this is handled by docker/postgres-init.sh; in staging/prod
+        # nothing else creates it on RDS.
+        ensure_database_exists "extensions" || {
+            echo "✗ Failed to ensure extensions database exists"
+            return 1
+        }
         if ! uv run alembic -c migrations/extensions.ini upgrade head; then
             echo "✗ Extensions migration failed"
             return 1
