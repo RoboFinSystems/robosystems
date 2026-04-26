@@ -12,7 +12,7 @@ just start
 just demo
 
 # Or run individual demos
-just demo-close
+just demo-roboledger
 just demo-custom-graph
 just demo-sec NVDA 2025
 ```

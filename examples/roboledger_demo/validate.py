@@ -1,4 +1,4 @@
-"""Information Block validation — Step 7 of the close demo.
+"""Information Block validation — Step 7 of the roboledger demo.
 
 Runs after schedules are created to verify:
   - FactSet rows exist for every schedule
@@ -9,7 +9,7 @@ Runs after schedules are created to verify:
 
 Can also be run standalone against any graph:
 
-    uv run python -m examples.close_demo.validate <graph_id>
+    uv run python -m examples.roboledger_demo.validate <graph_id>
 """
 
 from __future__ import annotations
@@ -481,7 +481,7 @@ def _main() -> None:
   else:
     graph_id = creds.get("graphs", {}).get("cascade_demo", "")
     if not graph_id:
-      print("Usage: uv run python -m examples.close_demo.validate <graph_id>")
+      print("Usage: uv run python -m examples.roboledger_demo.validate <graph_id>")
       sys.exit(1)
 
   print(f"{_BOLD}Information Block Validation{_RESET}  graph={graph_id}")

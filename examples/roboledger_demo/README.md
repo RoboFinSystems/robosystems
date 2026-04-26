@@ -1,6 +1,6 @@
-# AI Month-End Close Demo
+# RoboLedger End-to-End Demo
 
-Demonstrates the full AI-assisted month-end close workflow using synthetic data for a boutique consulting firm (Cascade Advisory Group LLC).
+Demonstrates the full RoboLedger workflow — bulk OLTP import, taxonomy & schedule blocks, fiscal calendar, a filed FY 2025 annual report, and an AI-driven month-end close — using synthetic data for a boutique consulting firm (Cascade Advisory Group LLC).
 
 Data is generated on a **rolling 16-month window ending at the current month**, so the demo always covers "recent history" no matter when it's run. The OLTP load path is the same `OLTPLoader` the QuickBooks pipeline uses in production — synthetic data is written to a DuckDB file in the exact shape dbt produces, then handed off to the loader.
 
@@ -13,13 +13,13 @@ The demo also initializes a **fiscal calendar** with `closed_through = month_bef
 just start
 
 # Run the demo setup (creates graph, loads data, creates schedules, uploads policies)
-uv run python -m examples.close_demo.main
+uv run python -m examples.roboledger_demo.main
 
 # Or load into an existing graph
-uv run python -m examples.close_demo.main <graph_id>
+uv run python -m examples.roboledger_demo.main <graph_id>
 
 # Dry run (validate data only)
-uv run python -m examples.close_demo.main --dry-run
+uv run python -m examples.roboledger_demo.main --dry-run
 ```
 
 ## What Gets Created
@@ -36,6 +36,7 @@ uv run python -m examples.close_demo.main --dry-run
 | **Schedules** | 6 | 2 depreciation + 4 prepaid amortization schedules (staggered renewals) |
 | **Schedule Facts** | mixed | Historical (pre-target) vs in_scope (target onward) — close workflow only acts on in_scope |
 | **Documents** | 4 | Close procedures, depreciation policy, prepaid policy, revenue policy |
+| **FY 2025 Report** | 1 | Annual report — generated, packaged, and **filed** as a Plan C capstone (Report Block lifecycle end-to-end). The current period stays queued for the AI close workflow. |
 
 ## The Company
 

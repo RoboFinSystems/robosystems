@@ -640,7 +640,9 @@ class TestFileReportOp:
         "robosystems.routers.extensions.roboledger.operations.cmd_file_report",
         return_value=_make_filed_report_response(),
       ),
-      _mock_session_ctx() as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -670,7 +672,9 @@ class TestFileReportOp:
         "robosystems.routers.extensions.roboledger.operations.cmd_file_report",
         side_effect=ReportNotFoundError("rpt_missing"),
       ),
-      _mock_session_ctx() as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -700,7 +704,9 @@ class TestFileReportOp:
           "Report 'rpt_01' is in 'archived'; can only file from 'draft' or 'under_review'."
         ),
       ),
-      _mock_session_ctx() as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -730,7 +736,9 @@ class TestTransitionFilingStatusOp:
         "robosystems.routers.extensions.roboledger.operations.cmd_transition_filing_status",
         return_value=response,
       ),
-      _mock_session_ctx() as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)
@@ -760,7 +768,9 @@ class TestTransitionFilingStatusOp:
           "Report 'rpt_01' cannot transition from 'under_review' to 'filed'."
         ),
       ),
-      _mock_session_ctx() as mock_session,
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
     ):
       mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
       mock_session.return_value.__exit__ = MagicMock(return_value=False)

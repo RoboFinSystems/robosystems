@@ -1,4 +1,4 @@
-"""Demo-only reset logic for close_demo.
+"""Demo-only reset logic for roboledger_demo.
 
 This is NOT a production operation. It selectively wipes demo-generated
 state while preserving graph infrastructure (entity, library-seeded

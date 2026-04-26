@@ -6,7 +6,7 @@ Callers own session lifetime and translate domain exceptions into
 transport errors.
 
 They are the single source of truth for taxonomy-layer writes. The
-REST operation surface, MCP tools, agents, and seeders (close_demo)
+REST operation surface, MCP tools, agents, and seeders (roboledger_demo)
 all delegate here.
 """
 
