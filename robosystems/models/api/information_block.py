@@ -485,6 +485,106 @@ class ArtifactResponse(BaseModel):
   mechanics: ArtifactMechanics
 
 
+# ── View projections ───────────────────────────────────────────────────────
+
+
+class RenderingRowLite(BaseModel):
+  """One row of a server-side rendered statement.
+
+  Mirrors :class:`FactRow` from the legacy
+  :mod:`robosystems.operations.roboledger.reports.fact_grid` but lives at
+  the API boundary so envelope consumers don't depend on the
+  fact-grid module. ``values`` is one entry per period column in
+  :class:`RenderingLite.periods`.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  element_id: str
+  element_qname: str | None = None
+  element_name: str
+  classification: str | None = Field(
+    None,
+    description=(
+      "FASB elementsOfFinancialStatements trait identifier — 'asset', "
+      "'liability', 'equity', 'revenue', 'expense'. Surfaced so the "
+      "viewer can color-code or group rows without a follow-up trait "
+      "lookup."
+    ),
+  )
+  balance_type: str | None = None
+  values: list[float | None] = Field(default_factory=list)
+  is_subtotal: bool = False
+  depth: int = 0
+
+
+class RenderingPeriodLite(BaseModel):
+  """One period column in a rendered statement."""
+
+  model_config = ConfigDict(from_attributes=True)
+
+  start: date
+  end: date
+  label: str | None = None
+
+
+class ValidationLite(BaseModel):
+  """Outcome of guard-rail validation on a rendered statement.
+
+  Distinct from :class:`VerificationResultLite` (which surfaces the
+  rule-engine outcomes from ``public.verification_results``). This lite
+  type carries the synchronous guard-rail checks computed at
+  envelope-build time — accounting equation, totals foot, etc.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  passed: bool = True
+  checks: list[str] = Field(default_factory=list)
+  failures: list[str] = Field(default_factory=list)
+  warnings: list[str] = Field(default_factory=list)
+
+
+class RenderingLite(BaseModel):
+  """Pre-computed rendering projection of an Information Block.
+
+  Computed server-side at envelope-build time for blocks where rendering
+  is deterministic (the statement family today; future block types add
+  their own rendering builders). The frontend's ``BlockView``
+  ``Rendering`` projection consumes this directly — no client-side
+  rollup, depth computation, or calculation walk needed.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  rows: list[RenderingRowLite] = Field(default_factory=list)
+  periods: list[RenderingPeriodLite] = Field(default_factory=list)
+  validation: ValidationLite | None = None
+  unmapped_count: int = 0
+
+
+class ViewProjections(BaseModel):
+  """Charlie's six ``type-of View`` arms, surfaced at the envelope boundary.
+
+  Each projection is computed server-side at envelope-build time when
+  its source data is available. The frontend's ``BlockView`` dispatcher
+  routes to the projection component matching the user's selected view
+  mode; missing projections (those still in backlog) render as empty
+  states without breaking the dispatcher.
+
+  Today: ``rendering`` is computed for the statement family.
+  Other arms (``fact_table``, ``model_structure``, ``verification_results``,
+  ``report_elements``, ``business_rules``) come online as their backend
+  support lands; ``fact_table`` is trivially derivable from
+  ``InformationBlockEnvelope.facts`` and may stay as a frontend-only
+  projection.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  rendering: RenderingLite | None = None
+
+
 # ── Envelope root ──────────────────────────────────────────────────────────
 
 
@@ -543,6 +643,17 @@ class InformationBlockEnvelope(BaseModel):
     ),
   )
   verification_results: list[VerificationResultLite] = Field(default_factory=list)
+
+  view: ViewProjections = Field(
+    default_factory=ViewProjections,
+    description=(
+      "Server-computed view projections (Charlie's six type-of View "
+      "arms). ``view.rendering`` carries pre-computed rows + periods + "
+      "validation for blocks where rendering is deterministic (the "
+      "statement family today). Other projections come online as "
+      "their backend support lands — see :class:`ViewProjections`."
+    ),
+  )
 
 
 # ── Request models ─────────────────────────────────────────────────────────
@@ -702,11 +813,16 @@ __all__ = [
   "InformationBlockEnvelope",
   "InformationModelResponse",
   "MetricMechanics",
+  "RenderingLite",
+  "RenderingPeriodLite",
+  "RenderingRowLite",
   "RuleLite",
   "RuleTargetLite",
   "RuleVariableLite",
   "ScheduleMechanics",
   "StatementMechanics",
   "UpdateInformationBlockRequest",
+  "ValidationLite",
   "VerificationResultLite",
+  "ViewProjections",
 ]
