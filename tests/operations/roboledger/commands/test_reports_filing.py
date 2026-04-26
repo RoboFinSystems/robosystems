@@ -9,7 +9,10 @@ import pytest
 
 from robosystems.operations.roboledger.commands.reports import (
   InvalidFilingTransitionError,
+  NotAuthorizedError,
+  ReportNotFiledError,
   ReportNotFoundError,
+  delete_report,
   file_report,
   transition_filing_status,
 )
@@ -111,6 +114,37 @@ def test_file_report_rejects_archived() -> None:
     file_report(session, "rpt_01", filed_by="user_01")
 
 
+def test_file_report_blocks_when_generation_status_pending() -> None:
+  """Filing must reject reports whose generation hasn't completed.
+
+  An in-progress / pending / failed generation_status would lock an
+  empty or partial snapshot in the audit trail. The server gates on
+  generation_status reaching ``complete`` or ``published`` regardless
+  of what the UI thinks.
+  """
+  session = MagicMock()
+  report = _make_report_def(filing_status="draft")
+  report.generation_status = "generating"
+  session.get.return_value = report
+
+  with pytest.raises(InvalidFilingTransitionError) as exc:
+    file_report(session, "rpt_01", filed_by="user_01")
+
+  assert "generating" in str(exc.value)
+
+
+def test_file_report_blocks_when_generation_status_failed() -> None:
+  session = MagicMock()
+  report = _make_report_def(filing_status="draft")
+  report.generation_status = "failed"
+  session.get.return_value = report
+
+  with pytest.raises(InvalidFilingTransitionError) as exc:
+    file_report(session, "rpt_01", filed_by="user_01")
+
+  assert "failed" in str(exc.value)
+
+
 def test_file_report_raises_when_report_missing() -> None:
   session = MagicMock()
   session.get.return_value = None
@@ -180,3 +214,45 @@ def test_transition_raises_when_report_missing() -> None:
 
   with pytest.raises(ReportNotFoundError):
     transition_filing_status(session, "rpt_missing", "under_review")
+
+
+# ─── delete_report — filing-status immutability guard ───────────────────────
+
+
+def test_delete_report_blocks_filed_status() -> None:
+  """Filed reports cannot be deleted — the audit trail is immutable.
+
+  Reaching ``archived`` via ``transition_filing_status`` is the only
+  retirement path once a report is filed.
+  """
+  session = MagicMock()
+  report = _make_report_def(filing_status="filed", filed_by="user_01")
+  report.created_by = "user_01"
+  session.get.return_value = report
+
+  with pytest.raises(ReportNotFiledError) as exc:
+    delete_report(session, "rpt_01", acting_user_id="user_01")
+
+  assert "filed" in str(exc.value)
+
+
+def test_delete_report_blocks_archived_status() -> None:
+  session = MagicMock()
+  report = _make_report_def(filing_status="archived", filed_by="user_01")
+  report.created_by = "user_01"
+  session.get.return_value = report
+
+  with pytest.raises(ReportNotFiledError):
+    delete_report(session, "rpt_01", acting_user_id="user_01")
+
+
+def test_delete_report_authorization_check_runs_before_status_check() -> None:
+  """Owner check should fire before the filing-status check so a hostile
+  caller can't probe filing status by attempting deletion."""
+  session = MagicMock()
+  report = _make_report_def(filing_status="filed", filed_by="user_01")
+  report.created_by = "user_01"
+  session.get.return_value = report
+
+  with pytest.raises(NotAuthorizedError):
+    delete_report(session, "rpt_01", acting_user_id="user_other")

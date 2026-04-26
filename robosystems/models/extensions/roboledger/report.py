@@ -83,7 +83,7 @@ class Report(ExtensionsBase):
   # Filing lifecycle — orthogonal to generation_status. ``filed`` is
   # the immutable locked state; ``archived`` is for superseded versions.
   filing_status = Column(String, nullable=False, default="draft")
-  filed_at = Column(DateTime, nullable=True)
+  filed_at = Column(DateTime(timezone=True), nullable=True)
   filed_by = Column(String, nullable=True)
 
   # Restatement chain — restating a filed Report creates a new row with

@@ -709,13 +709,20 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     return None
   mapping_id = structures[0]["id"]
 
-  # Find the FAC reporting taxonomy (seeded by the platform on graph create)
-  taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
-  fac_tax = next((t for t in taxonomies if t.get("name", "").startswith("fac")), None)
-  if not fac_tax:
-    print("  ERROR: No FAC reporting taxonomy seeded on this graph")
+  # Find the FAC presentation taxonomy. This is where the proper
+  # income_statement / cash_flow_statement structures live (with
+  # associations to FAC elements). The bare ``fac v1`` reporting_standard
+  # only has a default placeholder structure with no associations, which
+  # is why the report would otherwise have zero rendered statements.
+  taxonomies = client.list_taxonomies(graph_id, taxonomy_type="mapping")
+  fac_pres = next(
+    (t for t in taxonomies if t.get("name", "").startswith("fac-presentation")),
+    None,
+  )
+  if not fac_pres:
+    print("  ERROR: No fac-presentation taxonomy seeded on this graph")
     return None
-  taxonomy_id = fac_tax["id"]
+  taxonomy_id = fac_pres["id"]
 
   body = CreateReportRequest(
     name="FY 2025 Annual Report",

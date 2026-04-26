@@ -768,7 +768,13 @@ class AssociationClassifier:
           seen.add(rid)
           report_ids.append(rid)
     except Exception as e:
-      logger.debug(f"FactSet report lookup failed: {e}")
+      # A miss here means REPORT_HAS_FACT_SET edges never land for this
+      # filing — the package query won't be able to traverse from Report
+      # to its FactSets. Log loud enough to be noticed in CloudWatch.
+      logger.warning(
+        f"FactSet report lookup failed; REPORT_HAS_FACT_SET edges will "
+        f"be missing for this filing: {e}"
+      )
 
     # Get all structures and their elements (both FROM and TO)
     try:

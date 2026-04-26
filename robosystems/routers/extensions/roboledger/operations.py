@@ -276,6 +276,7 @@ from robosystems.operations.roboledger.commands.reports import (
   NoEntityError,
   NotAuthorizedError,
   PublishListEmptyError,
+  ReportNotFiledError,
   ReportNotFoundError,
   ReportNotPublishedError,
   TaxonomyNotFoundError,
@@ -1530,6 +1531,8 @@ async def delete_report_op(
           raise HTTPException(
             status_code=403, detail="Not authorized to delete this report."
           )
+        except ReportNotFiledError as e:
+          raise HTTPException(status_code=422, detail=str(e))
     except (ValueError, ProgrammingError):
       raise _ledger_404()
     if not deleted:

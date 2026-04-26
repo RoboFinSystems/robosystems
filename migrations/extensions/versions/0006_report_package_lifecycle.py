@@ -46,7 +46,7 @@ def _add_lifecycle_columns_in_tenant(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
 
   t.add_column("reports", "filing_status", "VARCHAR", nullable=False, default="'draft'")
-  t.add_column("reports", "filed_at", "TIMESTAMP")
+  t.add_column("reports", "filed_at", "TIMESTAMP WITH TIME ZONE")
   t.add_column("reports", "filed_by", "VARCHAR")
   t.add_column("reports", "supersedes_id", "VARCHAR")
   t.add_column("reports", "superseded_by_id", "VARCHAR")
@@ -111,7 +111,9 @@ def upgrade() -> None:
       server_default="draft",
     ),
   )
-  op.add_column("reports", sa.Column("filed_at", sa.DateTime(), nullable=True))
+  op.add_column(
+    "reports", sa.Column("filed_at", sa.DateTime(timezone=True), nullable=True)
+  )
   op.add_column("reports", sa.Column("filed_by", sa.String(), nullable=True))
   op.add_column("reports", sa.Column("supersedes_id", sa.String(), nullable=True))
   op.add_column("reports", sa.Column("superseded_by_id", sa.String(), nullable=True))

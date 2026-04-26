@@ -461,14 +461,15 @@ class ReportNotFiledError(Exception):
 def file_report(session: Session, report_id: str, filed_by: str) -> ReportResponse:
   """Transition a Report to ``filed`` — locks the package.
 
-  Allowed from ``draft`` or ``under_review``. Stamps ``filed_at`` and
-  ``filed_by`` for audit. Raises :class:`ReportNotFoundError` when the
-  Report doesn't exist and :class:`InvalidFilingTransitionError` when
-  the current status isn't a legal source for filing.
+  Allowed from ``draft`` or ``under_review`` and only when generation
+  has reached ``published``. Stamps ``filed_at`` and ``filed_by`` for
+  audit. Raises :class:`ReportNotFoundError` when the Report doesn't
+  exist and :class:`InvalidFilingTransitionError` when the current
+  filing or generation status isn't a legal source for filing.
 
-  ``filing_status`` is orthogonal to ``generation_status`` — filing a
-  Report doesn't require ``generation_status='complete'``, but a UI
-  built on top of this normally gates the action on completion.
+  ``filing_status`` and ``generation_status`` are orthogonal axes, but
+  filing an in-progress or failed report would lock an empty / partial
+  snapshot — so the server gates on ``generation_status='published'``.
   """
   from datetime import UTC, datetime
 
@@ -486,6 +487,16 @@ def file_report(session: Session, report_id: str, filed_by: str) -> ReportRespon
     raise InvalidFilingTransitionError(
       f"Report '{report_id}' is in '{report_def.filing_status}'; "
       f"can only file from 'draft' or 'under_review'."
+    )
+  # ``complete`` and ``published`` both mean "generation finished
+  # successfully" in this codebase (see closing_book.py:63 which treats
+  # them interchangeably). Filing a ``pending`` / ``generating`` /
+  # ``failed`` report would lock an empty or partial snapshot.
+  if report_def.generation_status not in {"complete", "published"}:
+    raise InvalidFilingTransitionError(
+      f"Report '{report_id}' has generation_status="
+      f"'{report_def.generation_status}'; can only file once generation "
+      f"has reached 'complete' or 'published'."
     )
 
   report_def.filing_status = "filed"
@@ -537,6 +548,9 @@ def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool
   """Delete a report and its generated facts.
 
   Raises `NotAuthorizedError` if the caller doesn't own the report.
+  Raises `ReportNotFiledError` if the report is in a locked filing
+  state (``filed`` or ``archived``) — the Report Block lifecycle treats
+  filed/archived as immutable so the audit trail can't be erased.
   Returns True if a row was deleted, False if the report did not exist.
   """
   report_def = session.get(Report, report_id)
@@ -544,6 +558,12 @@ def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool
     return False
   if report_def.created_by != acting_user_id:
     raise NotAuthorizedError("Not authorized to delete this report.")
+  if report_def.filing_status in {"filed", "archived"}:
+    raise ReportNotFiledError(
+      f"Report '{report_id}' is '{report_def.filing_status}' and cannot "
+      f"be deleted. Reach 'archived' via transition-filing-status if "
+      f"retiring; deletion is only available for 'draft' or 'under_review'."
+    )
 
   session.execute(
     text("DELETE FROM facts WHERE report_id = :report_id"),
