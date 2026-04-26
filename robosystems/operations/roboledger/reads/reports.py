@@ -9,9 +9,15 @@ the GraphQL resolver can call them.
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+  from robosystems.models.api.extensions.report_package import (
+    ReportPackageEnvelope,
+  )
 
 from robosystems.models.api.extensions.reports import (
   FactRowResponse,
@@ -226,6 +232,11 @@ def report_to_response(
     last_generated=report_def.last_generated,
     structures=structures,
     entity_name=entity_name,
+    filing_status=report_def.filing_status,
+    filed_at=report_def.filed_at,
+    filed_by=report_def.filed_by,
+    supersedes_id=report_def.supersedes_id,
+    superseded_by_id=report_def.superseded_by_id,
     source_graph_id=report_def.source_graph_id,
     source_report_id=report_def.source_report_id,
     shared_at=report_def.shared_at,
@@ -257,6 +268,103 @@ def get_report(session: Session, report_id: str) -> ReportResponse | None:
   structures = load_structures(session, report_def.taxonomy_id)
   entity_name = resolve_entity_name(session, report_def)
   return report_to_response(report_def, structures, entity_name)
+
+
+# Display order for the package mode — drives ``ReportPackageItem.display_order``
+# when a Structure has no explicit ordering metadata of its own. New
+# statement-family block types should be added here as they're seeded.
+_STRUCTURE_TYPE_DISPLAY_ORDER: dict[str, int] = {
+  "balance_sheet": 1,
+  "income_statement": 2,
+  "cash_flow_statement": 3,
+  "equity_statement": 4,
+  "schedule": 100,
+}
+
+
+def get_report_package(
+  session: Session, report_id: str
+) -> ReportPackageEnvelope | None:
+  """Rehydrate a Report as a package — metadata + N rendered items.
+
+  Loads the Report row, then queries its FactSets via
+  ``fact_sets.report_id`` (the Report owns its FactSets — see
+  ``models/extensions/roboledger/fact_set.py``). Each FactSet is
+  rehydrated into a full ``InformationBlockEnvelope`` via
+  :func:`get_information_block_for_fact_set` so the frontend renders
+  the package without per-section refetches.
+
+  Returns ``None`` when the Report doesn't exist. Items are ordered by
+  ``Structure.structure_type`` (BS → IS → CF → Equity → Schedule) with
+  ties broken by ``fact_set.created_at``.
+  """
+  from robosystems.models.api.extensions.report_package import (
+    ReportPackageEnvelope,
+    ReportPackageItem,
+  )
+  from robosystems.models.extensions.roboledger import FactSet
+  from robosystems.operations.information_block.reads import (
+    get_information_block_for_fact_set,
+  )
+
+  report_def = session.get(Report, report_id)
+  if report_def is None:
+    return None
+
+  entity_name = resolve_entity_name(session, report_def)
+
+  # Load FactSets (with their Structures) attached to this Report.
+  rows = session.execute(
+    select(FactSet, Structure)
+    .join(Structure, Structure.id == FactSet.structure_id, isouter=True)
+    .where(FactSet.report_id == report_id)
+    .order_by(FactSet.created_at)
+  ).all()
+
+  items: list[ReportPackageItem] = []
+  for fs, structure in rows:
+    envelope = get_information_block_for_fact_set(session, fs.id)
+    if envelope is None:
+      # FactSets whose Structure isn't a registered block type are
+      # skipped — they're a real data row but the package mode has no
+      # way to render them.
+      continue
+    structure_type = structure.structure_type if structure is not None else None
+    items.append(
+      ReportPackageItem(
+        fact_set_id=fs.id,
+        structure_id=fs.structure_id,
+        display_order=_STRUCTURE_TYPE_DISPLAY_ORDER.get(structure_type or "", 50),
+        block=envelope,
+      )
+    )
+
+  items.sort(key=lambda it: (it.display_order, it.fact_set_id))
+
+  return ReportPackageEnvelope(
+    id=report_def.id,
+    name=report_def.name,
+    description=report_def.description,
+    taxonomy_id=report_def.taxonomy_id,
+    period_type=report_def.period_type,
+    period_start=report_def.period_start,
+    period_end=report_def.period_end,
+    generation_status=report_def.generation_status,
+    last_generated=report_def.last_generated,
+    filing_status=report_def.filing_status,
+    filed_at=report_def.filed_at,
+    filed_by=report_def.filed_by,
+    supersedes_id=report_def.supersedes_id,
+    superseded_by_id=report_def.superseded_by_id,
+    source_graph_id=report_def.source_graph_id,
+    source_report_id=report_def.source_report_id,
+    shared_at=report_def.shared_at,
+    entity_name=entity_name,
+    ai_generated=report_def.ai_generated,
+    created_at=report_def.created_at,
+    created_by=report_def.created_by,
+    items=items,
+  )
 
 
 def get_statement(

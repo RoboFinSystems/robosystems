@@ -57,6 +57,7 @@ from robosystems.graphql.types.ledger import (
   TrialBalance,
   UnmappedElement,
 )
+from robosystems.graphql.types.report_package import ReportPackage
 from robosystems.operations.roboledger.fiscal_calendar import FiscalCalendarService
 from robosystems.operations.roboledger.reads import (
   account_rollups as reads_account_rollups,
@@ -656,6 +657,26 @@ class LedgerQuery:
     if response is None:
       return None
     return Report.from_pydantic(response)
+
+  @strawberry.field
+  def report_package(
+    self,
+    info: Info[GraphQLContext, None],
+    report_id: str,
+  ) -> ReportPackage | None:
+    """Rehydrate a Report as a package — Report metadata + N rendered
+    Information Block envelopes (one per attached FactSet). Drives the
+    ``/reports/[id]`` package viewer; replaces the per-statement
+    ``getStatement`` round-trip path.
+    """
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_reports.get_report_package(session, report_id)
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    if response is None:
+      return None
+    return ReportPackage.from_pydantic(response)
 
   @strawberry.field
   def statement(

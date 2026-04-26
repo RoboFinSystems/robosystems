@@ -436,6 +436,103 @@ def regenerate_report(
   return resp
 
 
+# ── Filing lifecycle ──────────────────────────────────────────────────────
+
+
+class InvalidFilingTransitionError(Exception):
+  """Raised when a filing-status transition isn't on the legal lifecycle graph."""
+
+
+# Legal transitions per the Plan-C lifecycle:
+#   draft ↔ under_review → filed ↔ archived
+# ``filed`` is reached via :func:`file_report` so audit fields land cleanly;
+# this map covers the non-file moves available to the generic transition op.
+_LEGAL_NON_FILE_TRANSITIONS: dict[str, set[str]] = {
+  "draft": {"under_review"},
+  "under_review": {"draft"},
+  "filed": {"archived"},
+}
+
+
+class ReportNotFiledError(Exception):
+  """Raised when an op requires a ``filed`` Report and got something else."""
+
+
+def file_report(session: Session, report_id: str, filed_by: str) -> ReportResponse:
+  """Transition a Report to ``filed`` — locks the package.
+
+  Allowed from ``draft`` or ``under_review``. Stamps ``filed_at`` and
+  ``filed_by`` for audit. Raises :class:`ReportNotFoundError` when the
+  Report doesn't exist and :class:`InvalidFilingTransitionError` when
+  the current status isn't a legal source for filing.
+
+  ``filing_status`` is orthogonal to ``generation_status`` — filing a
+  Report doesn't require ``generation_status='complete'``, but a UI
+  built on top of this normally gates the action on completion.
+  """
+  from datetime import UTC, datetime
+
+  from robosystems.operations.roboledger.reads.reports import (
+    load_structures,
+    report_to_response,
+    resolve_entity_name,
+  )
+
+  report_def = session.get(Report, report_id)
+  if report_def is None:
+    raise ReportNotFoundError(report_id)
+
+  if report_def.filing_status not in {"draft", "under_review"}:
+    raise InvalidFilingTransitionError(
+      f"Report '{report_id}' is in '{report_def.filing_status}'; "
+      f"can only file from 'draft' or 'under_review'."
+    )
+
+  report_def.filing_status = "filed"
+  report_def.filed_at = datetime.now(UTC)
+  report_def.filed_by = filed_by
+  session.flush()
+
+  structures = load_structures(session, report_def.taxonomy_id)
+  entity_name = resolve_entity_name(session, report_def)
+  return report_to_response(report_def, structures, entity_name)
+
+
+def transition_filing_status(
+  session: Session, report_id: str, target_status: str
+) -> ReportResponse:
+  """Move a Report along the non-file legs of the filing lifecycle.
+
+  Use :func:`file_report` to reach ``filed`` (so audit fields land).
+  Other transitions (submit for review, withdraw, archive) are routed
+  through here so the legal-transition graph stays in one place.
+  """
+  from robosystems.operations.roboledger.reads.reports import (
+    load_structures,
+    report_to_response,
+    resolve_entity_name,
+  )
+
+  report_def = session.get(Report, report_id)
+  if report_def is None:
+    raise ReportNotFoundError(report_id)
+
+  legal_targets = _LEGAL_NON_FILE_TRANSITIONS.get(report_def.filing_status, set())
+  if target_status not in legal_targets:
+    raise InvalidFilingTransitionError(
+      f"Report '{report_id}' cannot transition from "
+      f"'{report_def.filing_status}' to '{target_status}'. "
+      f"Legal targets from here: {sorted(legal_targets)}."
+    )
+
+  report_def.filing_status = target_status
+  session.flush()
+
+  structures = load_structures(session, report_def.taxonomy_id)
+  entity_name = resolve_entity_name(session, report_def)
+  return report_to_response(report_def, structures, entity_name)
+
+
 def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool:
   """Delete a report and its generated facts.
 

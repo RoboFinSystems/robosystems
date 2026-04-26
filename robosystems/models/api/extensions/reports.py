@@ -96,6 +96,13 @@ class ReportResponse(BaseModel):
   structures: list[StructureSummary] = Field(default_factory=list)
   # Entity context
   entity_name: str | None = None
+  # Filing lifecycle (orthogonal to ``generation_status``)
+  filing_status: str = "draft"
+  filed_at: datetime | None = None
+  filed_by: str | None = None
+  # Restatement chain
+  supersedes_id: str | None = None
+  superseded_by_id: str | None = None
   # Sharing provenance (populated for received reports)
   source_graph_id: str | None = None
   source_report_id: str | None = None
