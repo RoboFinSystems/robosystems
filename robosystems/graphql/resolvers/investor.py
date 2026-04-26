@@ -22,7 +22,7 @@ from robosystems.graphql.resolvers._common import (
 )
 from robosystems.graphql.types.investor import (
   HoldingsList,
-  Portfolio,
+  PortfolioBlock,
   PortfolioList,
   Position,
   PositionList,
@@ -31,6 +31,9 @@ from robosystems.graphql.types.investor import (
 )
 from robosystems.operations.roboinvestor.reads import (
   holdings as reads_holdings,
+)
+from robosystems.operations.roboinvestor.reads import (
+  portfolio_block as reads_portfolio_block,
 )
 from robosystems.operations.roboinvestor.reads import (
   portfolios as reads_portfolios,
@@ -87,22 +90,6 @@ class InvestorQuery:
     except (ValueError, ProgrammingError):
       _raise_investor_not_initialized()
     return PortfolioList.from_pydantic(response)
-
-  @strawberry.field
-  def portfolio(
-    self,
-    info: Info[GraphQLContext, None],
-    portfolio_id: str,
-  ) -> Portfolio | None:
-    """Single portfolio by id."""
-    try:
-      with _open_session(info, "roboinvestor") as session:
-        response = reads_portfolios.get_portfolio(session, portfolio_id)
-    except (ValueError, ProgrammingError):
-      _raise_investor_not_initialized()
-    if response is None:
-      return None
-    return Portfolio.from_pydantic(response)
 
   # ── Securities ──────────────────────────────────────────────────────────
 
@@ -209,3 +196,21 @@ class InvestorQuery:
     except (ValueError, ProgrammingError):
       _raise_investor_not_initialized()
     return HoldingsList.from_pydantic(response)
+
+  # ── Portfolio Block (molecule envelope) ─────────────────────────────────
+
+  @strawberry.field
+  def portfolio_block(
+    self,
+    info: Info[GraphQLContext, None],
+    portfolio_id: str,
+  ) -> PortfolioBlock | None:
+    """Portfolio-centric molecule: portfolio + active positions + securities + entities."""
+    try:
+      with _open_session(info, "roboinvestor") as session:
+        response = reads_portfolio_block.get_portfolio_block(session, portfolio_id)
+    except reads_holdings.PortfolioNotFoundError:
+      return None
+    except (ValueError, ProgrammingError):
+      _raise_investor_not_initialized()
+    return PortfolioBlock.from_pydantic(response)

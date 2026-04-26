@@ -72,7 +72,7 @@ class TestSchemaComposition:
     query_block = sdl[start:end]
     for field_name in [
       "portfolios",
-      "portfolio",
+      "portfolioBlock",
       "securities",
       "security",
       "positions",

@@ -162,48 +162,19 @@ class TestPortfoliosResolver:
     assert err.extensions == {"code": "INVESTOR_NOT_INITIALIZED"}
 
 
-class TestPortfolioResolver:
-  def test_returns_single_portfolio(self) -> None:
-    pf = PortfolioResponse(
-      id="pf_01",
-      name="Main Fund",
-      strategy="long_only",
-      base_currency="USD",
-      created_at=datetime(2024, 1, 1, tzinfo=UTC),
-      updated_at=datetime(2024, 1, 1, tzinfo=UTC),
+class TestPortfolioResolverDeprecated:
+  """Singular `portfolio(id)` was removed in Phase a-prime; `portfolioBlock`
+  is strictly stronger. Confirms the field is no longer in the schema."""
+
+  def test_singular_portfolio_query_rejected(self) -> None:
+    result = schema.execute_sync(
+      'query { portfolio(portfolioId: "pf_01") { id } }',
+      context_value=_ctx(),
     )
-
-    with (
-      _patch_session(),
-      patch(
-        "robosystems.operations.roboinvestor.reads.portfolios.get_portfolio",
-        return_value=pf,
-      ),
-    ):
-      result = schema.execute_sync(
-        'query { portfolio(portfolioId: "pf_01") { id name strategy } }',
-        context_value=_ctx(),
-      )
-
-    assert result.errors is None
-    assert result.data["portfolio"]["id"] == "pf_01"
-    assert result.data["portfolio"]["strategy"] == "long_only"
-
-  def test_returns_null_when_missing(self) -> None:
-    with (
-      _patch_session(),
-      patch(
-        "robosystems.operations.roboinvestor.reads.portfolios.get_portfolio",
-        return_value=None,
-      ),
-    ):
-      result = schema.execute_sync(
-        'query { portfolio(portfolioId: "pf_x") { id } }',
-        context_value=_ctx(),
-      )
-
-    assert result.errors is None
-    assert result.data == {"portfolio": None}
+    assert result.errors is not None
+    assert any(
+      "Cannot query field 'portfolio'" in str(e.message) for e in result.errors
+    )
 
 
 class TestSecurityResolver:
