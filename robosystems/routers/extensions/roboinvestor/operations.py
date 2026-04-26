@@ -1,6 +1,6 @@
 """RoboInvestor operation routes.
 
-All 9 operations are declared on a single `OperationRegistrar`. The
+All operations are declared on a single `OperationRegistrar`. The
 registrar mounts each spec as a `POST /extensions/roboinvestor/{graph_id}
 /operations/{op_name}` route, wires in the auth dependency + feature
 gate, translates domain exceptions via each spec's `error_map`, and
@@ -8,9 +8,10 @@ emits the `OperationEnvelope` + audit trail. MCP tools for every spec
 are auto-generated via `MCPRegistrar` — no MCP-specific code lives
 here.
 
-To add a new RoboInvestor operation: write the ops command, add a
-Pydantic request model to `models/api/extensions/investor.py`, and
-declare an `OperationSpec` here.
+Portfolio + position writes flow through the **Portfolio Block**
+envelope ops (`create-portfolio-block`, `update-portfolio-block`,
+`delete-portfolio-block`); atom-level CRUD on portfolios/positions
+has been retired. Securities remain Master Data CRUD.
 """
 
 from __future__ import annotations
@@ -34,45 +35,35 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.extensions.investor import (
-  CreatePortfolioRequest,
-  CreatePositionRequest,
+  CreatePortfolioBlockRequest,
   CreateSecurityRequest,
-  DeletePortfolioOperation,
-  DeletePositionOperation,
+  DeletePortfolioBlockOperation,
   DeleteSecurityOperation,
-  UpdatePortfolioOperation,
-  UpdatePositionOperation,
+  UpdatePortfolioBlockOperation,
   UpdateSecurityOperation,
 )
-from robosystems.operations.roboinvestor.commands.portfolios import (
-  PortfolioHasActivePositionsError,
-  PortfolioNotFoundError,
-)
-from robosystems.operations.roboinvestor.commands.portfolios import (
-  create_portfolio as cmd_create_portfolio,
-)
-from robosystems.operations.roboinvestor.commands.portfolios import (
-  delete_portfolio as cmd_delete_portfolio,
-)
-from robosystems.operations.roboinvestor.commands.portfolios import (
-  update_portfolio as cmd_update_portfolio,
-)
-from robosystems.operations.roboinvestor.commands.positions import (
+from robosystems.operations.roboinvestor.commands.portfolio_block import (
+  ActivePositionsRequireConfirmationError,
   DuplicateActivePositionError,
+  PortfolioNotFoundError,
   PositionNotFoundError,
+  PositionPortfolioMismatchError,
+  SecurityNotFoundError,
 )
-from robosystems.operations.roboinvestor.commands.positions import (
-  create_position as cmd_create_position,
+from robosystems.operations.roboinvestor.commands.portfolio_block import (
+  create_portfolio_block as cmd_create_portfolio_block,
 )
-from robosystems.operations.roboinvestor.commands.positions import (
-  soft_delete_position as cmd_soft_delete_position,
+from robosystems.operations.roboinvestor.commands.portfolio_block import (
+  delete_portfolio_block as cmd_delete_portfolio_block,
 )
-from robosystems.operations.roboinvestor.commands.positions import (
-  update_position as cmd_update_position,
+from robosystems.operations.roboinvestor.commands.portfolio_block import (
+  update_portfolio_block as cmd_update_portfolio_block,
 )
 from robosystems.operations.roboinvestor.commands.securities import (
   EntityNotFoundError,
-  SecurityNotFoundError,
+)
+from robosystems.operations.roboinvestor.commands.securities import (
+  SecurityNotFoundError as SecurityMasterNotFoundError,
 )
 from robosystems.operations.roboinvestor.commands.securities import (
   create_security as cmd_create_security,
@@ -143,54 +134,67 @@ _registrar = OperationRegistrar(
 )
 
 
-# ── Portfolio ─────────────────────────────────────────────────────────────
+# ── Portfolio Block ───────────────────────────────────────────────────────
 
-create_portfolio_op = _registrar.register(
+create_portfolio_block_op = _registrar.register(
   OperationSpec(
-    name="create-portfolio",
-    summary="Create Portfolio",
+    name="create-portfolio-block",
+    summary="Create Portfolio Block",
     description=(
-      "Create an investment portfolio within this graph. Portfolios are "
-      "logical groupings of securities (stocks, notes, warrants) owned by "
-      "the entity; subsequent positions attach to the portfolio."
+      "Create a portfolio with optional initial positions in a single "
+      "atomic envelope. Each position references an existing security; "
+      "this operation never mints securities (use `create-security`). "
+      "Whole envelope validates before any write."
     ),
-    command=cmd_create_portfolio,
-    request_model=CreatePortfolioRequest,
+    command=cmd_create_portfolio_block,
+    request_model=CreatePortfolioBlockRequest,
+    error_map={
+      SecurityNotFoundError: (404, lambda e: f"Security not found: {e}"),
+      DuplicateActivePositionError: (409, str),
+    },
   )
 )
 
-update_portfolio_op = _registrar.register(
+update_portfolio_block_op = _registrar.register(
   OperationSpec(
-    name="update-portfolio",
-    summary="Update Portfolio",
+    name="update-portfolio-block",
+    summary="Update Portfolio Block",
     description=(
-      "Update mutable fields on a portfolio (name, description, strategy, "
-      "inception_date, base_currency). Unset fields are ignored — "
-      "partial updates are explicit."
+      "Patch portfolio fields and apply position deltas (`add` / "
+      "`update` / `dispose`) atomically. Partial failures roll back."
     ),
-    command=cmd_update_portfolio,
-    request_model=UpdatePortfolioOperation,
-    error_map={PortfolioNotFoundError: (404, lambda _e: "Portfolio not found.")},
-    requires_created_by=False,
-  )
-)
-
-delete_portfolio_op = _registrar.register(
-  OperationSpec(
-    name="delete-portfolio",
-    summary="Delete Portfolio",
-    description=(
-      "Hard-delete a portfolio. Returns 409 if the portfolio has active "
-      "positions — dispose (soft-delete) them first."
-    ),
-    command=cmd_delete_portfolio,
-    request_model=DeletePortfolioOperation,
+    command=cmd_update_portfolio_block,
+    request_model=UpdatePortfolioBlockOperation,
     error_map={
       PortfolioNotFoundError: (404, lambda _e: "Portfolio not found."),
-      PortfolioHasActivePositionsError: (
+      PositionNotFoundError: (404, lambda e: f"Position not found: {e}"),
+      PositionPortfolioMismatchError: (409, str),
+      SecurityNotFoundError: (404, lambda e: f"Security not found: {e}"),
+      DuplicateActivePositionError: (409, str),
+    },
+  )
+)
+
+delete_portfolio_block_op = _registrar.register(
+  OperationSpec(
+    name="delete-portfolio-block",
+    summary="Delete Portfolio Block",
+    description=(
+      "Cascade-delete the portfolio plus all of its positions. When "
+      "active positions exist, the request must include "
+      "`confirm_active_positions: true` — safety belt to prevent "
+      "accidental cascade. Disposed-only portfolios delete without "
+      "the flag."
+    ),
+    command=cmd_delete_portfolio_block,
+    request_model=DeletePortfolioBlockOperation,
+    error_map={
+      PortfolioNotFoundError: (404, lambda _e: "Portfolio not found."),
+      ActivePositionsRequireConfirmationError: (
         409,
         lambda e: (  # type: ignore[attr-defined]
-          f"Portfolio has {e.active_count} active position(s). Dispose them first."
+          f"Portfolio has {e.active_count} active position(s); set "
+          "confirm_active_positions=true to cascade-delete."
         ),
       ),
     },
@@ -198,7 +202,8 @@ delete_portfolio_op = _registrar.register(
   )
 )
 
-# ── Security ──────────────────────────────────────────────────────────────
+
+# ── Security (Master Data CRUD) ───────────────────────────────────────────
 
 create_security_op = _registrar.register(
   OperationSpec(
@@ -226,7 +231,7 @@ update_security_op = _registrar.register(
     ),
     command=cmd_update_security,
     request_model=UpdateSecurityOperation,
-    error_map={SecurityNotFoundError: (404, lambda _e: "Security not found.")},
+    error_map={SecurityMasterNotFoundError: (404, lambda _e: "Security not found.")},
     requires_created_by=False,
   )
 )
@@ -241,60 +246,7 @@ delete_security_op = _registrar.register(
     ),
     command=cmd_soft_delete_security,
     request_model=DeleteSecurityOperation,
-    error_map={SecurityNotFoundError: (404, lambda _e: "Security not found.")},
-    requires_created_by=False,
-  )
-)
-
-# ── Position ──────────────────────────────────────────────────────────────
-
-create_position_op = _registrar.register(
-  OperationSpec(
-    name="create-position",
-    summary="Create Position",
-    description=(
-      "Open a position in a security within a portfolio. One active "
-      "position per (portfolio, security) pair — creating a second "
-      "active position returns 409. Dispose an existing position via "
-      "`delete-position` before opening a new one."
-    ),
-    command=cmd_create_position,
-    request_model=CreatePositionRequest,
-    error_map={
-      PortfolioNotFoundError: (404, lambda _e: "Portfolio not found."),
-      SecurityNotFoundError: (404, lambda _e: "Security not found."),
-      DuplicateActivePositionError: (409, str),
-    },
-  )
-)
-
-update_position_op = _registrar.register(
-  OperationSpec(
-    name="update-position",
-    summary="Update Position",
-    description=(
-      "Update mutable fields on a position (quantity, cost basis, "
-      "valuation, notes, status). Use `delete-position` for soft disposal "
-      "instead of setting `status` manually."
-    ),
-    command=cmd_update_position,
-    request_model=UpdatePositionOperation,
-    error_map={PositionNotFoundError: (404, lambda _e: "Position not found.")},
-    requires_created_by=False,
-  )
-)
-
-delete_position_op = _registrar.register(
-  OperationSpec(
-    name="delete-position",
-    summary="Delete Position",
-    description=(
-      "Soft-delete the position (`status='disposed'`). Historical holding "
-      "records referencing it remain valid."
-    ),
-    command=cmd_soft_delete_position,
-    request_model=DeletePositionOperation,
-    error_map={PositionNotFoundError: (404, lambda _e: "Position not found.")},
+    error_map={SecurityMasterNotFoundError: (404, lambda _e: "Security not found.")},
     requires_created_by=False,
   )
 )

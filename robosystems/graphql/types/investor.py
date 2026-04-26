@@ -16,6 +16,9 @@ from strawberry.scalars import JSON
 
 from robosystems.graphql.types.common import PaginationInfo
 from robosystems.models.api.extensions.investor import (
+  EntityLite as PydanticEntityLite,
+)
+from robosystems.models.api.extensions.investor import (
   HoldingResponse as PydanticHoldingResponse,
 )
 from robosystems.models.api.extensions.investor import (
@@ -25,10 +28,16 @@ from robosystems.models.api.extensions.investor import (
   HoldingsListResponse as PydanticHoldingsListResponse,
 )
 from robosystems.models.api.extensions.investor import (
+  PortfolioBlockEnvelope as PydanticPortfolioBlockEnvelope,
+)
+from robosystems.models.api.extensions.investor import (
   PortfolioListResponse as PydanticPortfolioListResponse,
 )
 from robosystems.models.api.extensions.investor import (
   PortfolioResponse as PydanticPortfolioResponse,
+)
+from robosystems.models.api.extensions.investor import (
+  PositionBlock as PydanticPositionBlock,
 )
 from robosystems.models.api.extensions.investor import (
   PositionListResponse as PydanticPositionListResponse,
@@ -38,6 +47,9 @@ from robosystems.models.api.extensions.investor import (
 )
 from robosystems.models.api.extensions.investor import (
   SecurityListResponse as PydanticSecurityListResponse,
+)
+from robosystems.models.api.extensions.investor import (
+  SecurityLite as PydanticSecurityLite,
 )
 from robosystems.models.api.extensions.investor import (
   SecurityResponse as PydanticSecurityResponse,
@@ -152,3 +164,28 @@ class Holding:
 )
 class HoldingsList:
   """Full holdings view for a portfolio."""
+
+
+# ── Portfolio Block (molecule envelope) ───────────────────────────────────
+
+
+@strawberry.experimental.pydantic.type(model=PydanticEntityLite, all_fields=True)
+class EntityLite:
+  """Lightweight entity reference."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticSecurityLite, all_fields=True)
+class SecurityLite:
+  """Lightweight security with issuer and cross-graph reference."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticPositionBlock, all_fields=True)
+class PositionBlock:
+  """A position with its embedded security."""
+
+
+@strawberry.experimental.pydantic.type(
+  model=PydanticPortfolioBlockEnvelope, all_fields=True
+)
+class PortfolioBlock:
+  """Portfolio-centric molecule envelope — portfolio + positions + securities + entities."""
