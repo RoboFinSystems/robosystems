@@ -289,7 +289,7 @@ class LedgerQuery:
       with _open_session(info, "roboledger") as session:
         response = reads_accounts.list_accounts(
           session,
-          classification=classification,
+          trait=classification,
           is_active=is_active,
           limit=limit,
           offset=offset,
@@ -448,7 +448,7 @@ class LedgerQuery:
           session,
           taxonomy_id=taxonomy_id,
           source=source,
-          classification=classification,
+          trait=classification,
           is_abstract=is_abstract,
           limit=limit,
           offset=offset,

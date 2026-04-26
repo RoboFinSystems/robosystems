@@ -4,8 +4,8 @@ Admin-only. Three-pass flow so cross-package arcs resolve via DB lookup
 regardless of seed load order:
 
   ``create_library_taxonomy_elements`` — Taxonomy + Elements + Labels +
-    References + Structures + Classifications per package.
-  ``create_library_arcs`` — Associations + ClassificationAssignments per
+    References + Structures + Traits per package.
+  ``create_library_arcs`` — Associations + TraitAssignments per
     package (needs every package's elements in the DB first).
   ``create_library_rules`` — Rules with polymorphic target resolution
     (needs structures + elements from all packages).
@@ -29,18 +29,18 @@ from sqlalchemy.orm import Session
 from robosystems.logger import logger
 from robosystems.models.extensions import (
   Association,
-  Classification,
   Element,
-  ElementClassification,
   ElementLabel,
   ElementReference,
+  ElementTrait,
   Rule,
   Structure,
   Taxonomy,
+  Trait,
 )
 from robosystems.taxonomy.model import (
-  ClassificationAssignmentSpec,
   TaxonomyPackage,
+  TraitAssignmentSpec,
 )
 from robosystems.utils.uuid import generate_deterministic_uuid
 
@@ -85,9 +85,9 @@ def _reference_id(element_id: str, citation: str) -> str:
   return generate_deterministic_uuid(f"{element_id}:{citation}", namespace="reference")
 
 
-def _classification_id(category: str, identifier: str, type_: str = "system") -> str:
+def _trait_id(category: str, identifier: str, type_: str = "system") -> str:
   return generate_deterministic_uuid(
-    f"{category}:{identifier}:{type_}", namespace="classification"
+    f"{category}:{identifier}:{type_}", namespace="trait"
   )
 
 
@@ -124,7 +124,7 @@ def create_library_taxonomy_elements(
   created_by: str = "library-seeder",
 ) -> tuple[str, dict[str, int]]:
   """Insert Taxonomy + Elements + Labels + References + Structures +
-  Classifications + default catch-all structure for one package.
+  Traits + default catch-all structure for one package.
 
   Must be called for every package before ``create_library_arcs`` runs for
   any of them — the arcs pass resolves cross-package qname/classification
@@ -139,6 +139,7 @@ def create_library_taxonomy_elements(
     "labels": 0,
     "references": 0,
     "structures": 0,
+    "traits": 0,
     "classifications": 0,
   }
 
@@ -290,29 +291,29 @@ def create_library_taxonomy_elements(
     .on_conflict_do_nothing(index_elements=["id"])
   )
 
-  for cls in package.classifications:
-    cls_id = _classification_id(cls.category, cls.identifier, cls.source)
+  for trait in package.traits:
+    trt_id = _trait_id(trait.category, trait.identifier, trait.source)
     session.execute(
-      pg_insert(Classification.__table__)
+      pg_insert(Trait.__table__)
       .values(
-        id=cls_id,
-        category=cls.category,
-        identifier=cls.identifier,
-        type=cls.source,
-        name=cls.name,
-        description=cls.description,
+        id=trt_id,
+        category=trait.category,
+        identifier=trait.identifier,
+        type=trait.source,
+        name=trait.name,
+        description=trait.description,
         metadata={},
         created_by=created_by,
       )
       .on_conflict_do_update(
         index_elements=["id"],
         set_={
-          "name": pg_insert(Classification.__table__).excluded.name,
-          "description": pg_insert(Classification.__table__).excluded.description,
+          "name": pg_insert(Trait.__table__).excluded.name,
+          "description": pg_insert(Trait.__table__).excluded.description,
         },
       )
     )
-    counts["classifications"] += 1
+    counts["traits"] += 1
 
   return taxonomy_id, counts
 
@@ -337,12 +338,10 @@ def _bulk_resolve_element_ids(session: Session, qnames: set[str]) -> dict[str, s
   return {row[0]: row[1] for row in rows}
 
 
-def _resolve_classification_id(
-  session: Session, category: str, identifier: str
-) -> str | None:
+def _resolve_trait_id(session: Session, category: str, identifier: str) -> str | None:
   row = session.execute(
-    select(Classification.id)
-    .where(Classification.category == category, Classification.identifier == identifier)
+    select(Trait.id)
+    .where(Trait.category == category, Trait.identifier == identifier)
     .limit(1)
   ).scalar_one_or_none()
   return row
@@ -353,24 +352,29 @@ def create_library_arcs(
   package: TaxonomyPackage,
   created_by: str = "library-seeder",
 ) -> dict[str, int]:
-  """Insert Associations + ClassificationAssignments for one package.
+  """Insert Associations + TraitAssignments for one package.
 
-  Resolves qnames + classifications via DB lookup so cross-package arcs work
+  Resolves qnames + traits via DB lookup so cross-package arcs work
   regardless of which seed defined the target element.
   """
   counts: dict[str, int] = {
     "associations": 0,
     "associations_skipped": 0,
+    "trait_assignments": 0,
+    "trait_assignments_skipped": 0,
+    # AssociationClassification seed-time loading is not yet implemented;
+    # TaxonomyPackage has no classification_assignments field, so these
+    # counters always stay 0.  Reserved for when that path is added.
     "classification_assignments": 0,
     "classification_assignments_skipped": 0,
   }
 
   default_struct_id = _structure_id(_default_role_uri(package))
 
-  # Bulk-resolve all qnames needed by associations and classification
-  # assignments in one query to avoid O(N) round trips for large packages.
+  # Bulk-resolve all qnames needed by associations and trait assignments
+  # in one query to avoid O(N) round trips for large packages.
   all_qnames = {q for a in package.associations for q in (a.from_qname, a.to_qname)}
-  all_qnames |= {asn.element_qname for asn in package.classification_assignments}
+  all_qnames |= {asn.element_qname for asn in package.trait_assignments}
   element_id_map = _bulk_resolve_element_ids(session, all_qnames)
 
   unresolved: list[tuple[str, str, str]] = []
@@ -414,48 +418,48 @@ def create_library_arcs(
       "" if len(unresolved) <= 5 else f" (+{len(unresolved) - 5} more)",
     )
 
-  skipped_assignments: list[ClassificationAssignmentSpec] = []
-  for asn in package.classification_assignments:
+  skipped_trait_assignments: list[TraitAssignmentSpec] = []
+  for asn in package.trait_assignments:
     elem_id = element_id_map.get(asn.element_qname)
     if elem_id is None:
-      skipped_assignments.append(asn)
+      skipped_trait_assignments.append(asn)
       continue
-    cls_id = _resolve_classification_id(session, asn.category, asn.identifier)
-    if cls_id is None:
-      skipped_assignments.append(asn)
+    trt_id = _resolve_trait_id(session, asn.category, asn.identifier)
+    if trt_id is None:
+      skipped_trait_assignments.append(asn)
       continue
     session.execute(
-      pg_insert(ElementClassification.__table__)
+      pg_insert(ElementTrait.__table__)
       .values(
         element_id=elem_id,
-        classification_id=cls_id,
+        trait_id=trt_id,
         is_primary=asn.is_primary,
         confidence=asn.confidence,
         source=asn.source,
         created_by=created_by,
       )
       .on_conflict_do_update(
-        index_elements=["element_id", "classification_id"],
+        index_elements=["element_id", "trait_id"],
         set_={
-          "is_primary": pg_insert(ElementClassification.__table__).excluded.is_primary,
-          "confidence": pg_insert(ElementClassification.__table__).excluded.confidence,
-          "source": pg_insert(ElementClassification.__table__).excluded.source,
+          "is_primary": pg_insert(ElementTrait.__table__).excluded.is_primary,
+          "confidence": pg_insert(ElementTrait.__table__).excluded.confidence,
+          "source": pg_insert(ElementTrait.__table__).excluded.source,
         },
       )
     )
-    counts["classification_assignments"] += 1
+    counts["trait_assignments"] += 1
 
-  counts["classification_assignments_skipped"] = len(skipped_assignments)
-  if skipped_assignments:
-    sample = skipped_assignments[:5]
+  counts["trait_assignments_skipped"] = len(skipped_trait_assignments)
+  if skipped_trait_assignments:
+    sample = skipped_trait_assignments[:5]
     logger.warning(
-      "[%s] %d classification assignment(s) skipped — element/classification not in library. Sample: %s%s",
+      "[%s] %d trait assignment(s) skipped — element/trait not in library. Sample: %s%s",
       package.name,
-      len(skipped_assignments),
+      len(skipped_trait_assignments),
       ", ".join(f"{a.element_qname} --{a.category}--> {a.identifier}" for a in sample),
       ""
-      if len(skipped_assignments) <= 5
-      else f" (+{len(skipped_assignments) - 5} more)",
+      if len(skipped_trait_assignments) <= 5
+      else f" (+{len(skipped_trait_assignments) - 5} more)",
     )
 
   return counts

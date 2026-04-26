@@ -294,19 +294,19 @@ def get_statement(
     )
 
   # Classification (FASB elementsOfFinancialStatements trait) is resolved via
-  # the element_classifications junction table.
+  # the element_traits junction table.
   fact_rows = session.execute(
     text("""
       SELECT rf.element_id, rf.value, rf.period_start, rf.period_end,
              rf.period_type, e.qname, e.name,
-             cls.identifier AS classification, e.balance_type
+             t.identifier AS trait, e.balance_type
       FROM facts rf
       JOIN elements e ON e.id = rf.element_id
-      LEFT JOIN element_classifications ec
-        ON ec.element_id = e.id AND ec.is_primary = TRUE
-      LEFT JOIN classifications cls
-        ON cls.id = ec.classification_id
-        AND cls.category = 'elementsOfFinancialStatements'
+      LEFT JOIN element_traits et
+        ON et.element_id = e.id AND et.is_primary = TRUE
+      LEFT JOIN traits t
+        ON t.id = et.trait_id
+        AND t.category = 'elementsOfFinancialStatements'
       WHERE rf.report_id = :report_id
     """),
     {"report_id": report_id},
@@ -317,7 +317,7 @@ def get_statement(
       element_id=r.element_id,
       element_qname=r.qname,
       element_name=r.name,
-      classification=r.classification,
+      classification=r.trait,
       balance_type=r.balance_type or "debit",
       value=r.value,
       period_start=r.period_start,
@@ -353,7 +353,7 @@ def get_statement(
       element_id=r.element_id,
       element_qname=r.element_qname,
       element_name=r.element_name,
-      classification=r.classification,
+      trait=r.classification,
       values=r.values,
       is_subtotal=r.is_subtotal,
       depth=r.depth,
@@ -492,7 +492,7 @@ def get_live_financial_statement(
       LiveStatementFactRow(
         qname=row.element_qname,
         name=row.element_name,
-        classification=row.classification,
+        trait=row.classification,
         values=row.values,
         depth=row.depth,
         is_subtotal=row.is_subtotal,

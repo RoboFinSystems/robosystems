@@ -78,14 +78,12 @@ class TestFacRoundTrip:
     missing = required - present
     assert not missing, f"Missing FAC elements: {missing}"
 
-  def test_has_efs_classification_assignments(
-    self, fac_package: TaxonomyPackage
-  ) -> None:
+  def test_has_efs_trait_assignments(self, fac_package: TaxonomyPackage) -> None:
     # FAC concepts carry rs:classifiedAs arcs pointing at
     # elementsOfFinancialStatements identifiers.
     efs_assignments = [
       a
-      for a in fac_package.classification_assignments
+      for a in fac_package.trait_assignments
       if a.category == "elementsOfFinancialStatements"
     ]
     assert len(efs_assignments) >= 80, (
@@ -146,7 +144,6 @@ class TestPackageShape:
       namespace="fac",
       namespace_uri="http://xbrlsite.com/fac#",
       name="Assets",
-      classification="asset",
       balance_type="debit",
       period_type="instant",
       source="fac",

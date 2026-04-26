@@ -139,7 +139,6 @@ BASE_NODES = [
       Property(name="is_textblock", type="BOOLEAN"),
       Property(name="substitution_group", type="STRING"),
       Property(name="item_type", type="STRING"),
-      Property(name="classification", type="STRING"),  # indexed
       Property(name="canonical_concept", type="STRING"),
       Property(name="canonical_confidence", type="DOUBLE"),
       Property(name="embedding", type="FLOAT[384]"),
@@ -205,10 +204,10 @@ BASE_NODES = [
       Property(name="is_typed", type="BOOLEAN"),
     ],
   ),
-  # XBRL Taxonomy Infrastructure — Structure, Association, Classification
-  # These are base ontology concepts (taxonomy link networks and pattern metadata),
-  # not roboledger-specific. Any extension that works with a formal taxonomy
-  # (XBRL, RDF, etc.) traverses these nodes.
+  # XBRL Taxonomy Infrastructure — Structure, Association, Trait, Classification
+  # These are base ontology concepts (taxonomy link networks and pattern/trait
+  # metadata), not roboledger-specific. Any extension that works with a formal
+  # taxonomy (XBRL, RDF, etc.) traverses these nodes.
   Node(
     name="Structure",
     description="XBRL taxonomy structure",
@@ -239,10 +238,26 @@ BASE_NODES = [
     ],
   ),
   Node(
-    name="Classification",
-    description="Structural pattern classification for associations (RollUp, RollForward, Hierarchy, etc.)",
+    name="Trait",
+    description="FASB us-gaap metamodel vocabulary member — describes what an element IS "
+    "(e.g. elementsOfFinancialStatements=asset, liquidity=current, activityType=operatingActivity). "
+    "Covers 25 element-side categories: 24 metamodel axes + flowClassification.",
     properties=[
       Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="category", type="STRING"),
+      Property(name="type", type="STRING"),
+      Property(name="source", type="STRING"),
+      Property(name="confidence", type="DOUBLE"),
+    ],
+  ),
+  Node(
+    name="Classification",
+    description="Structural pattern classification for associations — describes what KIND OF PATTERN "
+    "a set of associations forms (RollUp, RollForward, AssetsRollUp, etc.). "
+    "Covers 3 association-side categories: concept_arrangement, member_arrangement, named_disclosure.",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),
+      Property(name="category", type="STRING"),
       Property(name="type", type="STRING"),
       Property(name="source", type="STRING"),
       Property(name="confidence", type="DOUBLE"),
@@ -374,6 +389,13 @@ BASE_RELATIONSHIPS = [
     from_node="Association",
     to_node="Element",
     description="Association to element (child)",
+    properties=[],
+  ),
+  Relationship(
+    name="ELEMENT_HAS_TRAIT",
+    from_node="Element",
+    to_node="Trait",
+    description="Element has FASB metamodel trait assignment (many-to-many; one edge per axis category)",
     properties=[],
   ),
   Relationship(

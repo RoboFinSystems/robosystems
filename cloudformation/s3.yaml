@@ -187,9 +187,24 @@ Resources:
             Status: Enabled
             Prefix: shared-repositories/backups/
             ExpirationInDays: 90
-          # Everything else transitions to IA after 30 days
-          - Id: TransitionToIA
+          # Backups and rotated instance databases transition to IA after 30 days.
+          # shared-repositories/databases/ is intentionally excluded — those files
+          # are read on every replica boot and incur $0.01/GB SIA retrieval fees.
+          - Id: TransitionGraphBackupsToIA
             Status: Enabled
+            Prefix: graph-backups/
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+          - Id: TransitionGraphDatabasesToIA
+            Status: Enabled
+            Prefix: graph-databases/
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+          - Id: TransitionSharedRepoBackupsToIA
+            Status: Enabled
+            Prefix: shared-repositories/backups/
             Transitions:
               - TransitionInDays: 30
                 StorageClass: STANDARD_IA

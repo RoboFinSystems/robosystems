@@ -15,22 +15,22 @@ from robosystems.models.api.extensions.trial_balance import (
 
 _TRIAL_BALANCE_SQL = text("""
   SELECT a.id, a.code, a.name,
-         cls.identifier AS classification,
+         t.identifier AS trait,
          a.metadata->>'account_type' AS account_type,
          COALESCE(SUM(li.debit_amount), 0) AS total_debits,
          COALESCE(SUM(li.credit_amount), 0) AS total_credits
   FROM elements a
   JOIN line_items li ON li.element_id = a.id
   JOIN entries e ON e.id = li.entry_id
-  LEFT JOIN element_classifications ec
-    ON ec.element_id = a.id AND ec.is_primary = TRUE
-  LEFT JOIN classifications cls
-    ON cls.id = ec.classification_id
-    AND cls.category = 'elementsOfFinancialStatements'
+  LEFT JOIN element_traits et
+    ON et.element_id = a.id AND et.is_primary = TRUE
+  LEFT JOIN traits t
+    ON t.id = et.trait_id
+    AND t.category = 'elementsOfFinancialStatements'
   WHERE e.status = 'posted'
     AND (e.posting_date >= :start_date OR :start_date IS NULL)
     AND (e.posting_date <= :end_date OR :end_date IS NULL)
-  GROUP BY a.id, a.code, a.name, cls.identifier, a.metadata->>'account_type'
+  GROUP BY a.id, a.code, a.name, t.identifier, a.metadata->>'account_type'
   ORDER BY a.code
 """)
 
@@ -59,7 +59,7 @@ def get_trial_balance(
         account_id=row.id,
         account_code=row.code,
         account_name=row.name,
-        classification=row.classification,
+        trait=row.trait,
         account_type=row.account_type,
         total_debits=debits,
         total_credits=credits,

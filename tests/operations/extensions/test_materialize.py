@@ -161,6 +161,7 @@ class TestTableOrdering:
       "Dimension",
       "Structure",
       "Association",
+      "Trait",
       "Taxonomy",
       "Period",
       "Unit",
@@ -201,6 +202,7 @@ class TestTableOrdering:
       "STRUCTURE_HAS_ASSOCIATION",
       "ASSOCIATION_HAS_FROM_ELEMENT",
       "ASSOCIATION_HAS_TO_ELEMENT",
+      "ELEMENT_HAS_TRAIT",
     }
     # RoboLedger edges: three-level ledger + dimensional tags + reporting
     assert set(by_extension["roboledger"]) == {

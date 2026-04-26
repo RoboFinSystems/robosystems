@@ -292,14 +292,14 @@ def _phase_type_specific(
   if payload.taxonomy_type == "chart_of_accounts":
     for element in payload.elements:
       qname = _element_qname(element, payload)
-      if element.classification is None:
+      if element.trait is None:
         issues.append(
           ValidationIssue(
             phase="type_specific",
             code="coa_missing_classification",
             message=(
               f"chart_of_accounts element {qname!r} must declare a "
-              f"classification (asset/liability/equity/revenue/expense/...)."
+              f"trait (asset/liability/equity/revenue/expense/...)."
             ),
             context={"element_qname": qname},
           )
@@ -307,7 +307,7 @@ def _phase_type_specific(
         continue
       if (
         element.period_type is not None
-        and element.classification in _INSTANT_CLASSIFICATIONS
+        and element.trait in _INSTANT_CLASSIFICATIONS
         and element.period_type != "instant"
       ):
         issues.append(
@@ -315,20 +315,20 @@ def _phase_type_specific(
             phase="type_specific",
             code="coa_period_type_mismatch",
             message=(
-              f"chart_of_accounts element {qname!r} classification "
-              f"{element.classification!r} requires period_type='instant'; "
+              f"chart_of_accounts element {qname!r} trait "
+              f"{element.trait!r} requires period_type='instant'; "
               f"got {element.period_type!r}."
             ),
             context={
               "element_qname": qname,
-              "classification": element.classification,
+              "trait": element.trait,
               "period_type": element.period_type,
             },
           )
         )
       if (
         element.period_type is not None
-        and element.classification in _DURATION_CLASSIFICATIONS
+        and element.trait in _DURATION_CLASSIFICATIONS
         and element.period_type != "duration"
       ):
         issues.append(
@@ -336,13 +336,13 @@ def _phase_type_specific(
             phase="type_specific",
             code="coa_period_type_mismatch",
             message=(
-              f"chart_of_accounts element {qname!r} classification "
-              f"{element.classification!r} requires period_type='duration'; "
+              f"chart_of_accounts element {qname!r} trait "
+              f"{element.trait!r} requires period_type='duration'; "
               f"got {element.period_type!r}."
             ),
             context={
               "element_qname": qname,
-              "classification": element.classification,
+              "trait": element.trait,
               "period_type": element.period_type,
             },
           )

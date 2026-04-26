@@ -38,7 +38,7 @@ def _basic_coa(
       TaxonomyBlockElementRequest(
         qname="coa:Cash",
         name="Cash",
-        classification="asset",
+        trait="asset",
         balance_type="debit",
         period_type="instant",
       )
@@ -60,7 +60,7 @@ class TestReferenceResolution:
         TaxonomyBlockElementRequest(
           qname="coa:A",
           name="A",
-          classification="asset",
+          trait="asset",
           balance_type="debit",
           period_type="instant",
           parent_ref="coa:GhostParent",
@@ -90,7 +90,7 @@ class TestUniqueness:
     dup = TaxonomyBlockElementRequest(
       qname="coa:Cash",
       name="Cash",
-      classification="asset",
+      trait="asset",
       balance_type="debit",
       period_type="instant",
     )
@@ -111,7 +111,7 @@ class TestStructuralIntegrity:
       TaxonomyBlockElementRequest(
         qname=f"coa:{n}",
         name=n,
-        classification="asset",
+        trait="asset",
         balance_type="debit",
         period_type="instant",
       )
@@ -152,7 +152,7 @@ class TestStructuralIntegrity:
       TaxonomyBlockElementRequest(
         qname=f"coa:{n}",
         name=n,
-        classification="asset",
+        trait="asset",
         balance_type="debit",
         period_type="instant",
       )
@@ -203,7 +203,7 @@ class TestTypeSpecific:
         TaxonomyBlockElementRequest(
           qname="coa:WrongPeriod",
           name="WrongPeriod",
-          classification="asset",
+          trait="asset",
           balance_type="debit",
           period_type="duration",
         )
@@ -234,7 +234,7 @@ class TestLibraryOriginRespect:
         TaxonomyBlockElementRequest(
           qname="coa:Sneaky",
           name="Sneaky",
-          classification="asset",
+          trait="asset",
           balance_type="debit",
           period_type="instant",
           metadata={"origin": "library"},
@@ -290,14 +290,14 @@ class TestErrorAggregation:
         TaxonomyBlockElementRequest(
           qname="coa:Dup",
           name="Dup",
-          classification="asset",
+          trait="asset",
           balance_type="debit",
           period_type="instant",
         ),
         TaxonomyBlockElementRequest(
           qname="coa:Dup",
           name="Dup",
-          classification="asset",
+          trait="asset",
           balance_type="debit",
           period_type="instant",
         ),

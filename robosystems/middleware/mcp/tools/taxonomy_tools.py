@@ -50,7 +50,7 @@ class GetUnmappedElementsTool:
 
 **RETURNS:**
 - List of unmapped CoA elements with id, code, name, classification, balance_type
-- Classification (asset/liability/equity/revenue/expense) helps narrow the target reporting concept
+- EFS trait (asset/liability/equity/revenue/expense) helps narrow the target reporting concept
 
 **WORKFLOW:**
 1. Call this tool to see unmapped elements
@@ -139,20 +139,20 @@ class SuggestMappingTool:
         if source is None:
           return {"error": f"Element {element_id} not found"}
 
-        classification = classification_override or source.classification
+        classification = classification_override or source.trait
         if not classification:
           return {
             "source_element": {
               "id": source.id,
               "code": source.code,
               "name": source.name,
-              "classification": source.classification,
+              "trait": source.trait,
             },
             "candidates": [],
           }
 
         candidates = suggest_mapping_candidates(
-          session, classification=classification, element_id=element_id
+          session, trait=classification, element_id=element_id
         )
 
         return {
@@ -160,14 +160,14 @@ class SuggestMappingTool:
             "id": source.id,
             "code": source.code,
             "name": source.name,
-            "classification": source.classification,
+            "trait": source.trait,
           },
           "candidates": [
             {
               "id": c.id,
               "qname": c.qname,
               "name": c.name,
-              "classification": c.classification,
+              "trait": c.trait,
               "is_abstract": c.is_abstract,
               "depth": c.depth,
               "source": c.source,

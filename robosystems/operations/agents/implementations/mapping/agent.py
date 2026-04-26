@@ -116,12 +116,12 @@ class MappingAgent(Agent):
     # [(coa_element_dict, fac_element_id)]
     confirmed_fac: list[tuple[dict, str]] = []
 
-    # 2. Group by classification for efficient candidate lookup. Elements
-    # without a classification can't be narrowed structurally — skip them
+    # 2. Group by trait for efficient candidate lookup. Elements
+    # without a trait can't be narrowed structurally — skip them
     # rather than invent a default.
     by_classification: dict[str, list[dict]] = defaultdict(list)
     for elem in elements:
-      cls = elem.get("classification")
+      cls = elem.get("trait")
       if cls is None:
         skipped += 1
         continue
@@ -130,7 +130,7 @@ class MappingAgent(Agent):
     # Build an id→element lookup for the refinement pass.
     elem_by_id: dict[str, dict] = {e["id"]: e for e in elements}
 
-    # 3. Get candidates per classification via suggest-mapping tool
+    # 3. Get candidates per trait via suggest-mapping tool
     candidates_by_cls: dict[str, list[dict]] = {}
     for cls, cls_elements in by_classification.items():
       suggest_result = await suggest_tool.execute(

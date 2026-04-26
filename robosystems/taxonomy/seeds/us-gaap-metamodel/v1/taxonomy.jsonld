@@ -69,7 +69,7 @@
   },
   "standard": "us-gaap-metamodel",
   "version": "v1",
-  "taxonomy_type": "classification-vocabulary",
+  "taxonomy_type": "trait-vocabulary",
   "namespace_uri": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/",
   "forked_from": {
     "author": "FASB us-gaap 2026 metamodel (XBRL US)",
@@ -81,7 +81,7 @@
   "@graph": [
     {
       "@id": "metamodel:statisticalMeasurement/arithmeticAverage",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "statisticalMeasurement"
@@ -106,7 +106,7 @@
     },
     {
       "@id": "metamodel:statisticalMeasurement/maximum",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "statisticalMeasurement"
@@ -131,7 +131,7 @@
     },
     {
       "@id": "metamodel:statisticalMeasurement/median",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "statisticalMeasurement"
@@ -156,7 +156,7 @@
     },
     {
       "@id": "metamodel:statisticalMeasurement/minimum",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "statisticalMeasurement"
@@ -181,7 +181,7 @@
     },
     {
       "@id": "metamodel:statisticalMeasurement/weightedAverage",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "statisticalMeasurement"
@@ -206,7 +206,7 @@
     },
     {
       "@id": "metamodel:accrualOrPayable/accrual",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "accrualOrPayable"
@@ -231,7 +231,7 @@
     },
     {
       "@id": "metamodel:use/allocation",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "use"
@@ -256,7 +256,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/contraAsset",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -281,7 +281,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/contraEquity",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -306,7 +306,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/contraLiability",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -331,7 +331,7 @@
     },
     {
       "@id": "metamodel:convertibility/convertible",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "convertibility"
@@ -356,7 +356,7 @@
     },
     {
       "@id": "metamodel:liquidity/current",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "liquidity"
@@ -381,7 +381,7 @@
     },
     {
       "@id": "metamodel:use/derecognize",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "use"
@@ -406,7 +406,7 @@
     },
     {
       "@id": "metamodel:leaseType/directFinancingLease",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "leaseType"
@@ -431,7 +431,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/distributionToOwners",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -456,7 +456,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/equity",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -481,7 +481,7 @@
     },
     {
       "@id": "metamodel:estimatedFutureActivity/estimatedFutureCashReceipt",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "estimatedFutureActivity"
@@ -506,7 +506,7 @@
     },
     {
       "@id": "metamodel:estimatedFutureActivity/estimatedFutureExpense",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "estimatedFutureActivity"
@@ -531,7 +531,7 @@
     },
     {
       "@id": "metamodel:estimatedFutureActivity/estimatedFutureMaturity",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "estimatedFutureActivity"
@@ -556,7 +556,7 @@
     },
     {
       "@id": "metamodel:estimatedFutureActivity/estimatedFutureObligation",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "estimatedFutureActivity"
@@ -581,7 +581,7 @@
     },
     {
       "@id": "metamodel:estimatedFutureActivity/estimatedFuturePayment",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "estimatedFutureActivity"
@@ -606,7 +606,7 @@
     },
     {
       "@id": "metamodel:estimatedFutureActivity/estimatedFutureRevenue",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "estimatedFutureActivity"
@@ -631,7 +631,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/expense",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -656,7 +656,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/expenseReversal",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -681,7 +681,7 @@
     },
     {
       "@id": "metamodel:recordedValue/faceOrParValue",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -706,7 +706,7 @@
     },
     {
       "@id": "metamodel:leaseType/financeLease",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "leaseType"
@@ -731,7 +731,7 @@
     },
     {
       "@id": "metamodel:activityType/financingActivity",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "activityType"
@@ -756,7 +756,7 @@
     },
     {
       "@id": "metamodel:interestRateType/fixedRate",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "interestRateType"
@@ -781,7 +781,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/gain",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -806,7 +806,7 @@
     },
     {
       "@id": "metamodel:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "indirectCashFlowReconcilingItem"
@@ -831,7 +831,7 @@
     },
     {
       "@id": "metamodel:recordedValue/intrinsicValue",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -856,7 +856,7 @@
     },
     {
       "@id": "metamodel:activityType/investingActivity",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "activityType"
@@ -881,7 +881,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/investmentByOwners",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -906,7 +906,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/loss",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -931,7 +931,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/metric",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -956,7 +956,7 @@
     },
     {
       "@id": "metamodel:taxComponents/nonTaxableRevenue",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -981,7 +981,7 @@
     },
     {
       "@id": "metamodel:convertibility/nonconvertible",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "convertibility"
@@ -1006,7 +1006,7 @@
     },
     {
       "@id": "metamodel:liquidity/noncurrent",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "liquidity"
@@ -1031,7 +1031,7 @@
     },
     {
       "@id": "metamodel:taxComponents/nondeductibleExpense",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1056,7 +1056,7 @@
     },
     {
       "@id": "metamodel:operatingNonoperating/nonoperating",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "operatingNonoperating"
@@ -1081,7 +1081,7 @@
     },
     {
       "@id": "metamodel:activityType/operatingActivity",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "activityType"
@@ -1106,7 +1106,7 @@
     },
     {
       "@id": "metamodel:leaseType/operatingLease",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "leaseType"
@@ -1131,7 +1131,7 @@
     },
     {
       "@id": "metamodel:operatingNonoperating/operating",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "operatingNonoperating"
@@ -1156,7 +1156,7 @@
     },
     {
       "@id": "metamodel:derivativeInstrument/option",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeInstrument"
@@ -1181,7 +1181,7 @@
     },
     {
       "@id": "metamodel:accrualOrPayable/payable",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "accrualOrPayable"
@@ -1206,7 +1206,7 @@
     },
     {
       "@id": "metamodel:realizationStatus/realized",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "realizationStatus"
@@ -1231,7 +1231,7 @@
     },
     {
       "@id": "metamodel:use/reclassification",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "use"
@@ -1256,7 +1256,7 @@
     },
     {
       "@id": "metamodel:use/recognize",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "use"
@@ -1281,7 +1281,7 @@
     },
     {
       "@id": "metamodel:taxComponents/reconcilingTaxItem",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1306,7 +1306,7 @@
     },
     {
       "@id": "metamodel:recordedValue/recordedAsEstimate",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -1331,7 +1331,7 @@
     },
     {
       "@id": "metamodel:recordedValue/recordedAtAmortizedCostAfterAllowanceForCreditLoss",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -1356,7 +1356,7 @@
     },
     {
       "@id": "metamodel:recordedValue/recordedAtAmortizedCost",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -1381,7 +1381,7 @@
     },
     {
       "@id": "metamodel:recordedValue/recordedAtHistoricalCost",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -1406,7 +1406,7 @@
     },
     {
       "@id": "metamodel:recordedValue/recordedAtLowerOfCarryingValueOrFairValue",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -1431,7 +1431,7 @@
     },
     {
       "@id": "metamodel:recordedValue/recordedAtLowerOfCarryingValueOrFairValueLessCostToSell",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -1456,7 +1456,7 @@
     },
     {
       "@id": "metamodel:use/remeasurement",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "use"
@@ -1481,7 +1481,7 @@
     },
     {
       "@id": "metamodel:recordedValue/reportedAtFairValue",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "recordedValue"
@@ -1506,7 +1506,7 @@
     },
     {
       "@id": "metamodel:restriction/restricted",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "restriction"
@@ -1531,7 +1531,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/revenue",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -1556,7 +1556,7 @@
     },
     {
       "@id": "metamodel:creditStructure/revolvingLoan",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "creditStructure"
@@ -1581,7 +1581,7 @@
     },
     {
       "@id": "metamodel:leaseType/salesTypeLease",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "leaseType"
@@ -1606,7 +1606,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxBenefits",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1631,7 +1631,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxCarryforward",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1656,7 +1656,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxContingency",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1681,7 +1681,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxCredit",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1706,7 +1706,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxDeductibleExpense",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1731,7 +1731,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxDeductibleNonExpenseItem",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1756,7 +1756,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxExpense",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1781,7 +1781,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxSettlement",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1806,7 +1806,7 @@
     },
     {
       "@id": "metamodel:taxComponents/taxableRevenue",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "taxComponents"
@@ -1831,7 +1831,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/temporaryEquity",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -1856,7 +1856,7 @@
     },
     {
       "@id": "metamodel:creditStructure/termLoan",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "creditStructure"
@@ -1881,7 +1881,7 @@
     },
     {
       "@id": "metamodel:threshold/threshold",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "threshold"
@@ -1906,7 +1906,7 @@
     },
     {
       "@id": "metamodel:realizationStatus/unrealized",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "realizationStatus"
@@ -1931,7 +1931,7 @@
     },
     {
       "@id": "metamodel:restriction/unrestricted",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "restriction"
@@ -1956,7 +1956,7 @@
     },
     {
       "@id": "metamodel:interestRateType/variableRate",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "interestRateType"
@@ -1981,7 +1981,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/asset",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -2006,7 +2006,7 @@
     },
     {
       "@id": "metamodel:derivativeContract/commodityContract",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeContract"
@@ -2031,7 +2031,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/comprehensiveIncome",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -2056,7 +2056,7 @@
     },
     {
       "@id": "metamodel:derivativeContract/creditRiskContract",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeContract"
@@ -2081,7 +2081,7 @@
     },
     {
       "@id": "metamodel:hedging/designatedAsHedgingInstrument",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "hedging"
@@ -2106,7 +2106,7 @@
     },
     {
       "@id": "metamodel:derivativeContract/equityContract",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeContract"
@@ -2131,7 +2131,7 @@
     },
     {
       "@id": "metamodel:derivativeContract/foreignExchangeContract",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeContract"
@@ -2156,7 +2156,7 @@
     },
     {
       "@id": "metamodel:derivativeInstrument/forwardContracts",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeInstrument"
@@ -2181,7 +2181,7 @@
     },
     {
       "@id": "metamodel:derivativeInstrument/future",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeInstrument"
@@ -2206,7 +2206,7 @@
     },
     {
       "@id": "metamodel:derivativeContract/interestRateContract",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeContract"
@@ -2231,7 +2231,7 @@
     },
     {
       "@id": "metamodel:elementsOfFinancialStatements/liability",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "elementsOfFinancialStatements"
@@ -2256,7 +2256,7 @@
     },
     {
       "@id": "metamodel:hedging/nondesignated",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "hedging"
@@ -2281,7 +2281,7 @@
     },
     {
       "@id": "metamodel:debtGuarantee/securedDebt",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "debtGuarantee"
@@ -2306,7 +2306,7 @@
     },
     {
       "@id": "metamodel:operatingIntent/segmentContinuingOperations",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "operatingIntent"
@@ -2331,7 +2331,7 @@
     },
     {
       "@id": "metamodel:operatingIntent/segmentDiscontinuedOperations",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "operatingIntent"
@@ -2356,7 +2356,7 @@
     },
     {
       "@id": "metamodel:priority/seniorDebtObligations",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "priority"
@@ -2381,7 +2381,7 @@
     },
     {
       "@id": "metamodel:priority/subordinatedDebt",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "priority"
@@ -2406,7 +2406,7 @@
     },
     {
       "@id": "metamodel:derivativeInstrument/swap",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "derivativeInstrument"
@@ -2431,7 +2431,7 @@
     },
     {
       "@id": "metamodel:debtGuarantee/unsecuredDebt",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "debtGuarantee"
@@ -2456,7 +2456,7 @@
     },
     {
       "@id": "metamodel:flowClassification/inflow",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "flowClassification"
@@ -2481,7 +2481,7 @@
     },
     {
       "@id": "metamodel:flowClassification/outflow",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "flowClassification"
@@ -2506,7 +2506,7 @@
     },
     {
       "@id": "metamodel:flowClassification/accrual",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "flowClassification"
@@ -2531,7 +2531,7 @@
     },
     {
       "@id": "metamodel:flowClassification/contra",
-      "@type": "rs:Classification",
+      "@type": "rs:Trait",
       "https://robosystems.ai/vocab/category": [
         {
           "@value": "flowClassification"

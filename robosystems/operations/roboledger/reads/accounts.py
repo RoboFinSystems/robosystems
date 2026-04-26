@@ -16,12 +16,12 @@ from robosystems.models.api.extensions.accounts import (
   AccountTreeResponse,
 )
 from robosystems.models.extensions import (
-  Classification,
   Element,
-  ElementClassification,
+  ElementTrait,
+  Trait,
 )
 from robosystems.models.extensions.roboledger import COA_SOURCES
-from robosystems.operations.library.reads import efs_classification_by_element
+from robosystems.operations.library.reads import efs_trait_by_element
 
 
 def _parse_meta(raw: Any) -> dict[str, Any]:
@@ -36,16 +36,14 @@ def _parse_meta(raw: Any) -> dict[str, Any]:
 
 
 # Local alias for the shared library helper.
-_efs_by_element = efs_classification_by_element
+_efs_by_element = efs_trait_by_element
 
 
-def account_to_response(
-  row: Element, classification: str | None = None
-) -> AccountResponse:
+def account_to_response(row: Element, trait: str | None = None) -> AccountResponse:
   """Map an Element row to the wire-facing AccountResponse.
 
   Callers that batch-load elements should also batch-load the FASB EFS
-  classification via :func:`_efs_by_element` and pass it through, so
+  trait via :func:`_efs_by_element` and pass it through, so
   list endpoints avoid N+1 lookups.
   """
   meta = _parse_meta(row.metadata_)
@@ -54,7 +52,7 @@ def account_to_response(
     code=row.code,
     name=row.name,
     description=row.description,
-    classification=classification,
+    trait=trait,
     balance_type=row.balance_type,
     parent_id=row.parent_id,
     depth=row.depth,
@@ -70,30 +68,28 @@ def account_to_response(
 def list_accounts(
   session: Session,
   *,
-  classification: str | None = None,
+  trait: str | None = None,
   is_active: bool | None = None,
   limit: int = 100,
   offset: int = 0,
 ) -> AccountListResponse:
-  """List Chart of Accounts elements filtered by classification + is_active.
+  """List Chart of Accounts elements filtered by trait + is_active.
 
-  ``classification`` filters on the FASB elementsOfFinancialStatements
-  trait via the element_classifications junction table.
+  ``trait`` filters on the FASB elementsOfFinancialStatements
+  trait via the element_traits junction table.
   """
   query = select(Element).where(Element.source.in_(COA_SOURCES))
   count_query = (
     select(func.count()).select_from(Element).where(Element.source.in_(COA_SOURCES))
   )
 
-  if classification is not None:
+  if trait is not None:
     subquery = (
-      select(ElementClassification.element_id)
-      .join(
-        Classification, Classification.id == ElementClassification.classification_id
-      )
+      select(ElementTrait.element_id)
+      .join(Trait, Trait.id == ElementTrait.trait_id)
       .where(
-        Classification.category == "elementsOfFinancialStatements",
-        Classification.identifier == classification,
+        Trait.category == "elementsOfFinancialStatements",
+        Trait.identifier == trait,
       )
     )
     query = query.where(Element.id.in_(subquery))
@@ -136,7 +132,7 @@ def get_account_tree(session: Session) -> AccountTreeResponse:
       id=r.id,
       code=r.code,
       name=r.name,
-      classification=efs_map.get(r.id),
+      trait=efs_map.get(r.id),
       account_type=meta.get("account_type"),
       balance_type=r.balance_type,
       depth=r.depth,

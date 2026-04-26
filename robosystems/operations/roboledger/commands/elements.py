@@ -29,12 +29,12 @@ from robosystems.models.api.extensions.taxonomies import (
   UpdateElementRequest,
 )
 from robosystems.models.extensions import (
-  Classification,
   Element,
-  ElementClassification,
+  ElementTrait,
   Taxonomy,
+  Trait,
 )
-from robosystems.operations.library.reads import efs_classification_by_element
+from robosystems.operations.library.reads import efs_trait_by_element
 from robosystems.operations.roboledger.commands._guards import (
   LibraryImmutableError,
   assert_not_library_origin,
@@ -86,9 +86,7 @@ class ElementQNameConflictError(ValueError):
     self.qname = qname
 
 
-def _element_to_response(
-  row: Element, classification: str | None = None
-) -> ElementResponse:
+def _element_to_response(row: Element, trait: str | None = None) -> ElementResponse:
   return ElementResponse(
     id=row.id,
     code=row.code,
@@ -96,7 +94,7 @@ def _element_to_response(
     description=row.description,
     qname=row.qname,
     namespace=row.namespace,
-    classification=classification,
+    trait=trait,
     balance_type=row.balance_type,
     period_type=row.period_type,
     is_abstract=row.is_abstract,
@@ -233,7 +231,7 @@ def create_element(
 
   depth, path = _hierarchy_for_parent(session, body.parent_id)
 
-  resolved_period_type = _derive_period_type(body.classification, body.period_type)
+  resolved_period_type = _derive_period_type(body.trait, body.period_type)
   resolved_qname = body.qname or _derive_qname(body.name, body.source, body.namespace)
 
   element = Element(
@@ -272,33 +270,33 @@ def create_element(
     raise
 
   # Assign the primary FASB elementsOfFinancialStatements trait so that
-  # downstream report renderers (which JOIN through element_classifications)
+  # downstream report renderers (which JOIN through element_traits)
   # see the native account's economic nature.
-  _assign_efs_classification(session, element.id, body.classification)
+  _assign_efs_classification(session, element.id, body.trait)
 
-  return _element_to_response(element, body.classification)
+  return _element_to_response(element, body.trait)
 
 
 def _assign_efs_classification(
   session: Session, element_id: str, efs_identifier: str
 ) -> None:
-  """Link a native element to the matching FASB EFS classification.
+  """Link a native element to the matching FASB EFS trait.
 
-  No-op if the EFS Classification row is missing (e.g., in tests that
+  No-op if the EFS Trait row is missing (e.g., in tests that
   don't seed the library).
   """
-  classification_row = session.execute(
-    select(Classification).where(
-      Classification.category == "elementsOfFinancialStatements",
-      Classification.identifier == efs_identifier,
+  trait_row = session.execute(
+    select(Trait).where(
+      Trait.category == "elementsOfFinancialStatements",
+      Trait.identifier == efs_identifier,
     )
   ).scalar_one_or_none()
-  if classification_row is None:
+  if trait_row is None:
     return
   session.add(
-    ElementClassification(
+    ElementTrait(
       element_id=element_id,
-      classification_id=classification_row.id,
+      trait_id=trait_row.id,
       is_primary=True,
     )
   )
@@ -332,9 +330,9 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
 
   updates = body.model_dump(exclude_unset=True)
   updates.pop("element_id", None)
-  # classification isn't a column on elements — it's an element_classifications
+  # trait isn't a column on elements — it's an element_traits
   # row. Pop it here and reconcile the junction after the scalar updates land.
-  new_classification: str | None = updates.pop("classification", None)
+  new_classification: str | None = updates.pop("trait", None)
 
   # Handle reparent separately so we can cascade path/depth changes.
   reparent = "parent_id" in updates
@@ -392,25 +390,25 @@ def update_element(session: Session, body: UpdateElementRequest) -> ElementRespo
   session.flush()
   if new_classification is not None:
     _reassign_efs_classification(session, element.id, new_classification)
-  efs = efs_classification_by_element(session, [element.id]).get(element.id)
+  efs = efs_trait_by_element(session, [element.id]).get(element.id)
   return _element_to_response(element, efs)
 
 
 def _reassign_efs_classification(
   session: Session, element_id: str, efs_identifier: str
 ) -> None:
-  """Replace the primary EFS assignment for an element.
+  """Replace the primary EFS trait assignment for an element.
 
   Correction path for misclassified native accounts. Demotes any existing
   primary EFS row (same junction kept as an audit trail but flipped to
   is_primary=False) and inserts — or re-promotes — the chosen identifier.
-  No-op if the target Classification row isn't in the library (shouldn't
+  No-op if the target Trait row isn't in the library (shouldn't
   happen in prod; guarded so tests that skip the library seed still pass).
   """
   target = session.execute(
-    select(Classification).where(
-      Classification.category == "elementsOfFinancialStatements",
-      Classification.identifier == efs_identifier,
+    select(Trait).where(
+      Trait.category == "elementsOfFinancialStatements",
+      Trait.identifier == efs_identifier,
     )
   ).scalar_one_or_none()
   if target is None:
@@ -418,14 +416,14 @@ def _reassign_efs_classification(
 
   existing = (
     session.execute(
-      select(ElementClassification)
+      select(ElementTrait)
       .join(
-        Classification,
-        Classification.id == ElementClassification.classification_id,
+        Trait,
+        Trait.id == ElementTrait.trait_id,
       )
       .where(
-        ElementClassification.element_id == element_id,
-        Classification.category == "elementsOfFinancialStatements",
+        ElementTrait.element_id == element_id,
+        Trait.category == "elementsOfFinancialStatements",
       )
     )
     .scalars()
@@ -433,7 +431,7 @@ def _reassign_efs_classification(
   )
   found_target = False
   for row in existing:
-    if row.classification_id == target.id:
+    if row.trait_id == target.id:
       row.is_primary = True
       found_target = True
     else:
@@ -441,9 +439,9 @@ def _reassign_efs_classification(
 
   if not found_target:
     session.add(
-      ElementClassification(
+      ElementTrait(
         element_id=element_id,
-        classification_id=target.id,
+        trait_id=target.id,
         is_primary=True,
       )
     )
@@ -472,5 +470,5 @@ def delete_element(session: Session, body: DeleteElementRequest) -> ElementRespo
 
   element.is_active = False
   session.flush()
-  efs = efs_classification_by_element(session, [element.id]).get(element.id)
+  efs = efs_trait_by_element(session, [element.id]).get(element.id)
   return _element_to_response(element, efs)

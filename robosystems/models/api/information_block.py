@@ -51,7 +51,11 @@ class ElementLite(BaseModel):
 
 class ClassificationLite(BaseModel):
   """Classification projection — one row per `association_classifications`
-  or `element_classifications` junction entry.
+  junction entry.
+
+  Association-side only: concept_arrangement, member_arrangement,
+  named_disclosure. Element-side FASB metamodel traits (asset, current,
+  operating, …) live in `TraitLite` via `element_traits`.
 
   Carries enough for the envelope caller to render / filter by category +
   identifier without a follow-up lookup. The full `public.classifications`
@@ -65,10 +69,9 @@ class ClassificationLite(BaseModel):
   category: str = Field(
     ...,
     description=(
-      "One of the categories in the `public.classifications` CHECK "
-      "constraint — e.g. 'concept_arrangement', 'member_arrangement', "
-      "'named_disclosure' for association-level; 'liquidity', "
-      "'activityType', etc. for element-level."
+      "One of the 3 association-level categories in the "
+      "`public.classifications` CHECK constraint: 'concept_arrangement', "
+      "'member_arrangement', or 'named_disclosure'."
     ),
   )
   identifier: str = Field(

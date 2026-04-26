@@ -19,9 +19,9 @@ from .association_classification import AssociationClassification
 from .classification import Classification
 from .dimension import Dimension
 from .element import Account, Element
-from .element_classification import ElementClassification
 from .element_label import ElementLabel
 from .element_reference import ElementReference
+from .element_trait import ElementTrait
 from .entity import Entity
 from .entity_taxonomy import EntityTaxonomy
 
@@ -55,6 +55,7 @@ from .rule import Rule
 from .structure import Structure
 from .structure_template import StructureTemplate
 from .taxonomy import Taxonomy
+from .trait import Trait
 from .verification_result import VerificationResult
 
 __all__ = [
@@ -67,9 +68,9 @@ __all__ = [
   "Classification",
   "Dimension",
   "Element",
-  "ElementClassification",
   "ElementLabel",
   "ElementReference",
+  "ElementTrait",
   "Entity",
   "EntityTaxonomy",
   "Entry",
@@ -91,6 +92,7 @@ __all__ = [
   "Structure",
   "StructureTemplate",
   "Taxonomy",
+  "Trait",
   "Transaction",
   "VerificationResult",
   "entry_dimensions",

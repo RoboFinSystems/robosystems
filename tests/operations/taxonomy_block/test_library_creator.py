@@ -16,19 +16,17 @@ from unittest.mock import MagicMock
 
 from robosystems.operations.taxonomy_block.library_creator import (
   _association_id,
-  _classification_id,
   _element_id,
   _rule_id,
   _structure_id,
   _taxonomy_id,
+  _trait_id,
   create_library_arcs,
   create_library_rules,
   create_library_taxonomy_elements,
 )
 from robosystems.taxonomy.model import (
   AssociationSpec,
-  ClassificationAssignmentSpec,
-  ClassificationSpec,
   ElementSpec,
   LabelSpec,
   ReferenceSpec,
@@ -37,6 +35,8 @@ from robosystems.taxonomy.model import (
   RuleVariableSpec,
   StructureSpec,
   TaxonomyPackage,
+  TraitAssignmentSpec,
+  TraitSpec,
 )
 
 # ── ID helper stability tests ─────────────────────────────────────────────────
@@ -77,9 +77,9 @@ class TestIdHelpers:
   def test_rule_id_different_standard(self) -> None:
     assert _rule_id("fac", "rule-1") != _rule_id("rs-gaap", "rule-1")
 
-  def test_classification_id_stable(self) -> None:
-    id1 = _classification_id("elementsOfFinancialStatements", "asset", "system")
-    id2 = _classification_id("elementsOfFinancialStatements", "asset", "system")
+  def test_trait_id_stable(self) -> None:
+    id1 = _trait_id("elementsOfFinancialStatements", "asset", "system")
+    id2 = _trait_id("elementsOfFinancialStatements", "asset", "system")
     assert id1 == id2
 
 
@@ -112,8 +112,8 @@ def _make_package(
   elements: list[ElementSpec] | None = None,
   structures: list[StructureSpec] | None = None,
   associations: list[AssociationSpec] | None = None,
-  classifications: list[ClassificationSpec] | None = None,
-  classification_assignments: list[ClassificationAssignmentSpec] | None = None,
+  traits: list[TraitSpec] | None = None,
+  trait_assignments: list[TraitAssignmentSpec] | None = None,
   rules: list[RuleSpec] | None = None,
 ) -> TaxonomyPackage:
   return TaxonomyPackage(
@@ -125,8 +125,8 @@ def _make_package(
     elements=elements or [],
     structures=structures or [],
     associations=associations or [],
-    classifications=classifications or [],
-    classification_assignments=classification_assignments or [],
+    traits=traits or [],
+    trait_assignments=trait_assignments or [],
     rules=rules or [],
   )
 
@@ -179,14 +179,14 @@ class TestCreateLibraryTaxonomyElements:
 
   def test_writes_classifications(self) -> None:
     session = MagicMock()
-    cls = ClassificationSpec(
+    cls = TraitSpec(
       category="elementsOfFinancialStatements",
       identifier="asset",
       source="us-gaap-metamodel",
     )
-    package = _make_package(classifications=[cls])
+    package = _make_package(traits=[cls])
     _, counts = create_library_taxonomy_elements(session, package)
-    assert counts["classifications"] == 1
+    assert counts["traits"] == 1
 
   def test_empty_package_writes_only_taxonomy(self) -> None:
     session = MagicMock()
@@ -195,7 +195,7 @@ class TestCreateLibraryTaxonomyElements:
     assert counts["elements"] == 0
     assert counts["labels"] == 0
     assert counts["structures"] == 0
-    assert counts["classifications"] == 0
+    assert counts["traits"] == 0
 
 
 # ── Phase 2 tests ─────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ class TestCreateLibraryArcs:
     """Mock session where _bulk_resolve_element_ids returns the given map.
 
     _bulk_resolve_element_ids calls session.execute(...).all() and expects a
-    sequence of (qname, id) tuples.  _resolve_classification_id still calls
+    sequence of (qname, id) tuples.  _resolve_trait_id still calls
     session.execute(...).scalar_one_or_none(), so both can be configured
     independently on the same return_value mock.
     """
@@ -244,28 +244,28 @@ class TestCreateLibraryArcs:
 
   def test_skips_unresolved_classification_assignment(self) -> None:
     session = self._session_with_element_map({})
-    asn = ClassificationAssignmentSpec(
+    asn = TraitAssignmentSpec(
       element_qname="fac:Assets",
       category="elementsOfFinancialStatements",
       identifier="asset",
     )
-    package = _make_package(classification_assignments=[asn])
+    package = _make_package(trait_assignments=[asn])
     counts = create_library_arcs(session, package)
-    assert counts["classification_assignments"] == 0
-    assert counts["classification_assignments_skipped"] == 1
+    assert counts["trait_assignments"] == 0
+    assert counts["trait_assignments_skipped"] == 1
 
   def test_writes_classification_assignment_when_resolved(self) -> None:
     session = self._session_with_element_map({"fac:Assets": "elem_id"})
     session.execute.return_value.scalar_one_or_none.return_value = "cls_id"
-    asn = ClassificationAssignmentSpec(
+    asn = TraitAssignmentSpec(
       element_qname="fac:Assets",
       category="elementsOfFinancialStatements",
       identifier="asset",
     )
-    package = _make_package(classification_assignments=[asn])
+    package = _make_package(trait_assignments=[asn])
     counts = create_library_arcs(session, package)
-    assert counts["classification_assignments"] == 1
-    assert counts["classification_assignments_skipped"] == 0
+    assert counts["trait_assignments"] == 1
+    assert counts["trait_assignments_skipped"] == 0
 
 
 # ── Phase 3 tests ─────────────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ NODE_TABLES = [
   "Dimension",
   "Structure",
   "Association",
+  "Trait",
   # Reporting layer
   "Taxonomy",
   "Report",
@@ -71,6 +72,7 @@ RELATIONSHIP_TABLES = [
   "STRUCTURE_HAS_ASSOCIATION",
   "ASSOCIATION_HAS_FROM_ELEMENT",
   "ASSOCIATION_HAS_TO_ELEMENT",
+  "ELEMENT_HAS_TRAIT",
   "TRANSACTION_HAS_DIMENSION",
   "ENTRY_HAS_DIMENSION",
   "LINE_ITEM_HAS_DIMENSION",
@@ -114,6 +116,7 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "Dimension": "base",
   "Structure": "base",
   "Association": "base",
+  "Trait": "base",
   "Taxonomy": "base",
   "Period": "base",
   "Unit": "base",
@@ -136,6 +139,7 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "STRUCTURE_HAS_ASSOCIATION": "base",
   "ASSOCIATION_HAS_FROM_ELEMENT": "base",
   "ASSOCIATION_HAS_TO_ELEMENT": "base",
+  "ELEMENT_HAS_TRAIT": "base",
   # roboledger edges
   "ENTITY_HAS_TRANSACTION": "roboledger",
   "TRANSACTION_HAS_ENTRY": "roboledger",
@@ -373,24 +377,6 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'entities')
   """
 
-  # Classification is resolved via element_classifications → classifications
-  # (FASB elementsOfFinancialStatements trait axis).
-  #
-  # The element_classifications table uses `is_primary` per-category — an
-  # element can legitimately have multiple is_primary=TRUE rows, one per
-  # category (elementsOfFinancialStatements, flowClassification,
-  # realizationStatus, etc.). A naive two-stage LEFT JOIN with the
-  # category filter on the classifications join (not the EC join) fans
-  # the output out to N rows per element — N = count of is_primary=TRUE
-  # EC rows — with only one carrying the real classification and the
-  # rest showing `cls = NULL`. The COPY then rejects the batch as a
-  # duplicate-PK violation, which silently cascades to every
-  # Element-targeting edge table (LINE_ITEM_RELATES_TO_ELEMENT,
-  # ASSOCIATION_HAS_{FROM,TO}_ELEMENT, FACT_HAS_ELEMENT).
-  #
-  # Pre-filter in a subquery so exactly the single elementsOfFinancial-
-  # Statements classification (if any) reaches the outer join — no
-  # fan-out, no DISTINCT ON, no ORDER-BY-dependent pick.
   tables["Element"] = f"""
     CREATE OR REPLACE TABLE Element AS
     SELECT
@@ -403,7 +389,6 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       END || e.code                   AS qname,
       e.name,
       e.description,
-      efs.classification_identifier   AS classification,
       NULL::VARCHAR                   AS item_type,
       e.balance_type                  AS balance,
       CASE WHEN e.is_placeholder THEN true ELSE false END AS is_abstract,
@@ -423,16 +408,18 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::DOUBLE                    AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
     FROM postgres_scan('{c}', '{s}', 'elements') e
-    LEFT JOIN (
-      SELECT ec.element_id,
-             cls.identifier AS classification_identifier
-      FROM postgres_scan('{c}', '{s}', 'element_classifications') ec
-      JOIN postgres_scan('{c}', '{s}', 'classifications') cls
-        ON cls.id = ec.classification_id
-      WHERE ec.is_primary = TRUE
-        AND cls.category = 'elementsOfFinancialStatements'
-    ) efs ON efs.element_id = e.id
     WHERE e.is_active = true
+  """
+
+  tables["Trait"] = f"""
+    CREATE OR REPLACE TABLE "Trait" AS
+    SELECT
+      id          AS identifier,
+      category    AS category,
+      type        AS type,
+      source      AS source,
+      confidence  AS confidence
+    FROM postgres_scan('{c}', '{s}', 'traits')
   """
 
   tables["Transaction"] = f"""
@@ -659,6 +646,14 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       to_element_id                   AS dst
     FROM postgres_scan('{c}', '{s}', 'associations')
     WHERE association_type = 'presentation'
+  """
+
+  tables["ELEMENT_HAS_TRAIT"] = f"""
+    CREATE OR REPLACE TABLE ELEMENT_HAS_TRAIT AS
+    SELECT
+      element_id                      AS src,
+      trait_id                        AS dst
+    FROM postgres_scan('{c}', '{s}', 'element_traits')
   """
 
   # Dimension junction tables (may be empty if no dimensions loaded yet)

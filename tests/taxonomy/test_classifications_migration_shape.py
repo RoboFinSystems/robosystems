@@ -40,7 +40,7 @@ _spec.loader.exec_module(mig_0002)
 class TestImmutableTables:
   def test_association_classifications_is_immutable_in_tenant_schemas(self) -> None:
     """Library-seeded association classifications must be trigger-protected
-    against UPDATE/DELETE — same contract as element_classifications /
+    against UPDATE/DELETE — same contract as element_traits /
     rules / structures."""
     assert "association_classifications" in mig_0002._IMMUTABLE_TABLES
 
@@ -79,10 +79,11 @@ class TestCopyStats:
       element_references=1,
       structures=1,
       associations=1,
+      traits=1,
+      element_traits=1,
       classifications=1,
-      element_classifications=1,
       association_classifications=7,
       rules=1,
     )
     assert stats.association_classifications == 7
-    assert stats.total == 16
+    assert stats.total == 17

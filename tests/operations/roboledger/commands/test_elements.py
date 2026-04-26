@@ -200,7 +200,7 @@ class TestCreateElement:
       taxonomy_id=taxonomy_id,
       code="TEST",
       name="Test Element",
-      classification="asset",
+      trait="asset",
       parent_id=parent_id,
     )
 
@@ -244,7 +244,7 @@ class TestCreateElement:
     taxonomy = MagicMock()
     session.execute.return_value.scalar_one_or_none.return_value = taxonomy
     create_element(session, self._body(), "usr_1")
-    # Two adds: the Element itself and the ElementClassification junction
+    # Two adds: the Element itself and the ElementTrait junction
     # row that anchors it to the FASB elementsOfFinancialStatements trait.
     assert session.add.call_count == 2
     session.flush.assert_called()

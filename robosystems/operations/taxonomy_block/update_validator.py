@@ -96,7 +96,7 @@ def validate_update_envelope(
         TaxonomyBlockElementRequest(
           qname=qname,
           name=str(e.name),
-          classification=_element_classification_hint(e),
+          trait=_element_classification_hint(e),
           balance_type=str(e.balance_type) if e.balance_type else None,
           period_type=str(e.period_type) if e.period_type else None,
           element_type=str(e.element_type) if e.element_type else "concept",
@@ -113,10 +113,8 @@ def validate_update_envelope(
       TaxonomyBlockElementRequest(
         qname=qname,
         name=patch.name if patch.name is not None else str(e.name),
-        classification=(
-          patch.classification
-          if patch.classification is not None
-          else _element_classification_hint(e)
+        trait=(
+          patch.trait if patch.trait is not None else _element_classification_hint(e)
         ),
         balance_type=(
           patch.balance_type
@@ -237,14 +235,13 @@ def validate_update_envelope(
 
 
 def _element_classification_hint(element: Element) -> str | None:
-  """Best-effort classification for projection — None if not carried on the row.
+  """Best-effort EFS trait for projection — None if not carried on the row.
 
-  The live DB row doesn't always carry a classification (it lives in
-  the element_classifications junction), but for update validation we
-  don't need to re-check classifications of rows that already
-  validated at create time. Return None so the CoA type-specific phase
-  skips them (it only rejects *new* rows with missing classification
-  when the payload explicitly adds them).
+  The live DB row doesn't always carry a trait (it lives in the
+  element_traits junction), but for update validation we don't need to
+  re-check traits of rows that already validated at create time. Return
+  None so the CoA type-specific phase skips them (it only rejects *new*
+  rows with missing trait when the payload explicitly adds them).
   """
   return None
 

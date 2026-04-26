@@ -21,10 +21,10 @@ from robosystems.models.api.library import (
   LibraryElementArcResponse as PydanticLibraryElementArc,
 )
 from robosystems.models.api.library import (
-  LibraryElementClassificationResponse as PydanticLibraryElementClassification,
+  LibraryElementResponse as PydanticLibraryElement,
 )
 from robosystems.models.api.library import (
-  LibraryElementResponse as PydanticLibraryElement,
+  LibraryElementTraitResponse as PydanticLibraryElementClassification,
 )
 from robosystems.models.api.library import (
   LibraryElementTreeNode as PydanticLibraryElementTreeNode,
@@ -75,7 +75,12 @@ class LibraryStructure:
   model=PydanticLibraryElementClassification, all_fields=True
 )
 class LibraryElementClassification:
-  """A classification trait assigned to a library element."""
+  """A trait assigned to a library element.
+
+  Named ``LibraryElementClassification`` for GraphQL schema stability —
+  the external field name predates the classification→trait rename and
+  is kept to avoid a breaking API change for existing clients.
+  """
 
 
 @strawberry.experimental.pydantic.type(

@@ -1,48 +1,20 @@
-"""Classification model — OLTP mirror of the graph `Classification` node.
+"""Classification model — structural pattern classification for associations.
 
-The graph already has `Classification` in `schemas/base.py`
-(properties: identifier, type, source, confidence) attached to
-associations via `ASSOCIATION_HAS_CLASSIFICATION`. This table is the
-OLTP counterpart, extended with a `category` axis per the
-`information-modeling.md` spec.
+Covers the three association-level categories attached to Associations via
+`association_classifications`:
 
-A Classification is a named tag in a specific category:
-`(category='elementsOfFinancialStatements', identifier='asset')`,
-`(category='liquidity', identifier='current')`,
-`(category='concept_arrangement', identifier='RollUp')`, etc. Categories
-are the 24 FASB metamodel trait axes plus flowClassification and the
-existing concept / member / disclosure arrangements:
-
-**FASB us-gaap metamodel trait axes** (attached to Elements via
-`element_classifications`):
-
-- `elementsOfFinancialStatements` — SFAC 6 primitives (asset, liability,
-  equity, revenue, expense, gain, loss, contraAsset, contraLiability,
-  contraEquity, temporaryEquity, comprehensiveIncome, investmentByOwners,
-  distributionToOwners, expenseReversal, metric)
-- `liquidity` — current / noncurrent
-- `activityType` — operatingActivity / investingActivity / financingActivity
-- `operatingNonoperating` — operating / nonoperating
-- `operatingIntent`, `realizationStatus`, `recordedValue`, `restriction`,
-  `hedging`, `leaseType`, `interestRateType`, `convertibility`,
-  `creditStructure`, `debtGuarantee`, `derivativeContract`,
-  `derivativeInstrument`, `accrualOrPayable`, `priority`,
-  `estimatedFutureActivity`, `statisticalMeasurement`, `taxComponents`,
-  `threshold`, `use`, `indirectCashFlowReconcilingItem`
-- `flowClassification` — inflow / outflow / accrual / contra (from FASB's
-  instant-* arcroles)
-
-**Association-level categories** (attached to Associations via
-`association_classifications`):
-
-- `concept_arrangement` — Charlie's patterns (RollUp, Adjustment, …)
+- `concept_arrangement` — Charlie's FAC patterns (RollUp, RollForward,
+  Adjustment, Variance, Set, MemberAggregation, Textblock, …)
 - `member_arrangement`  — Aggregation / Nonaggregation
-- `named_disclosure`    — SEC disclosure mechanics catalog
+- `named_disclosure`    — SEC disclosure mechanics catalog (AssetsRollUp,
+  CashFlowStatement, …)
 
-The single registry keeps one vocabulary for both surfaces.
+Element-level FASB metamodel traits (asset, liability, current, operating,
+etc.) live in :class:`~robosystems.models.extensions.trait.Trait` +
+:class:`~robosystems.models.extensions.element_trait.ElementTrait` instead.
 
-`id` is shared with the graph node so an OLTP row and its graph
-counterpart refer to the same classification.
+`id` is shared with the graph `Classification` node so an OLTP row and its
+graph counterpart refer to the same classification.
 """
 
 from datetime import UTC, datetime
@@ -75,18 +47,7 @@ class Classification(ExtensionsBase):
     Index("idx_classifications_type", "type"),
     CheckConstraint(
       "category IN ("
-      # FASB us-gaap metamodel trait axes (24)
-      "'elementsOfFinancialStatements', 'liquidity', 'activityType', "
-      "'operatingNonoperating', 'operatingIntent', 'realizationStatus', "
-      "'recordedValue', 'restriction', 'hedging', 'leaseType', "
-      "'interestRateType', 'convertibility', 'creditStructure', "
-      "'debtGuarantee', 'derivativeContract', 'derivativeInstrument', "
-      "'accrualOrPayable', 'priority', 'estimatedFutureActivity', "
-      "'statisticalMeasurement', 'taxComponents', 'threshold', 'use', "
-      "'indirectCashFlowReconcilingItem', "
-      # Flow classification (FASB instant-* arcroles)
-      "'flowClassification', "
-      # Association-level categories
+      # Association-level structural pattern categories
       "'concept_arrangement', 'member_arrangement', 'named_disclosure'"
       ")",
       name="check_classification_category",
@@ -100,9 +61,8 @@ class Classification(ExtensionsBase):
   category = Column(String, nullable=False)
   identifier = Column(String, nullable=False)
 
-  # Where this classification comes from: 'us-gaap-metamodel' | 'fac' |
-  # 'rs-gaap' | 'sec' (SEC disclosure mechanics) | 'system' (built-in) |
-  # 'user'.
+  # Where this classification comes from: 'fac' | 'sec' (SEC disclosure
+  # mechanics) | 'system' (built-in) | 'user'.
   type = Column(String, nullable=False, default="system")
 
   # Display

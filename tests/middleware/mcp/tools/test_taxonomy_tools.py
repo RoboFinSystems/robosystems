@@ -43,12 +43,12 @@ def _patch_session():
     yield session
 
 
-def _unmapped(id="elem_1", code="1000", name="Cash", classification="asset"):
+def _unmapped(id="elem_1", code="1000", name="Cash", trait="asset"):
   return UnmappedElementResponse(
     id=id,
     code=code,
     name=name,
-    classification=classification,
+    trait=trait,
     balance_type="debit",
     external_source="quickbooks",
   )
@@ -58,7 +58,7 @@ def _element(
   id="elem_1",
   code="1000",
   name="Cash",
-  classification="asset",
+  trait="asset",
   qname=None,
   source="quickbooks",
   is_abstract=False,
@@ -71,7 +71,7 @@ def _element(
     description=None,
     qname=qname,
     namespace=None,
-    classification=classification,
+    trait=trait,
     sub_classification=None,
     balance_type="debit",
     period_type="instant",
@@ -159,7 +159,7 @@ class TestSuggestMappingTool:
   async def test_returns_candidates_by_classification(self, mock_graph_client):
     tool = SuggestMappingTool(mock_graph_client)
     source = _element(
-      id="elem_1", name="Product Revenue", classification="revenue", source="quickbooks"
+      id="elem_1", name="Product Revenue", trait="revenue", source="quickbooks"
     )
     candidates = [
       _element(
@@ -167,7 +167,7 @@ class TestSuggestMappingTool:
         qname="fac:Revenues",
         name="Revenues",
         source="fac",
-        classification="revenue",
+        trait="revenue",
         is_abstract=True,
       ),
       _element(
@@ -175,7 +175,7 @@ class TestSuggestMappingTool:
         qname="us-gaap:Revenues",
         name="Revenue",
         source="us-gaap",
-        classification="revenue",
+        trait="revenue",
         depth=1,
       ),
     ]

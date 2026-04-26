@@ -251,7 +251,7 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
     {
       "qname": f"coa:{code}",
       "name": name,
-      "classification": classification,
+      "trait": classification,
       "balance_type": balance_type,
       "description": description,
       "code": code,
