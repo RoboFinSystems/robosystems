@@ -314,9 +314,13 @@ def get_report_package(
   entity_name = resolve_entity_name(session, report_def)
 
   # Load FactSets (with their Structures) attached to this Report.
+  # Inner join is correct: a FactSet without a Structure can't drive a
+  # registered handler (``get_information_block_for_fact_set`` returns
+  # None for a null ``structure_id``), so the orphan is dropped here
+  # rather than dragged through the rehydration step.
   rows = session.execute(
     select(FactSet, Structure)
-    .join(Structure, Structure.id == FactSet.structure_id, isouter=True)
+    .join(Structure, Structure.id == FactSet.structure_id)
     .where(FactSet.report_id == report_id)
     .order_by(FactSet.created_at)
   ).all()

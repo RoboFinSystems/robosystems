@@ -564,3 +564,107 @@ class TestPaginationBounds:
     )
     assert result.errors is not None
     assert any("limit must be between" in str(e.message) for e in result.errors)
+
+
+class TestReportPackageResolver:
+  """GraphQL ``reportPackage(reportId)`` field — Plan-C package mode read."""
+
+  def _make_envelope(self):
+    """Minimal ReportPackageEnvelope for resolver projection tests."""
+    from datetime import UTC
+    from datetime import date as _date
+    from datetime import datetime as _dt
+
+    from robosystems.models.api.extensions.report_package import (
+      ReportPackageEnvelope,
+    )
+
+    return ReportPackageEnvelope(
+      id="rpt_01",
+      name="Q1 2026 Statements",
+      description=None,
+      taxonomy_id="tax_usgaap_reporting",
+      period_type="quarterly",
+      period_start=_date(2026, 1, 1),
+      period_end=_date(2026, 3, 31),
+      generation_status="complete",
+      last_generated=_dt(2026, 4, 1, tzinfo=UTC),
+      filing_status="filed",
+      filed_at=_dt(2026, 4, 15, tzinfo=UTC),
+      filed_by="usr_01",
+      supersedes_id=None,
+      superseded_by_id=None,
+      source_graph_id=None,
+      source_report_id=None,
+      shared_at=None,
+      entity_name="Acme LLC",
+      ai_generated=False,
+      created_at=_dt(2026, 4, 1, tzinfo=UTC),
+      created_by="usr_01",
+      items=[],
+    )
+
+  def test_returns_package_when_found(self) -> None:
+    envelope = self._make_envelope()
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.reports.get_report_package",
+        return_value=envelope,
+      ),
+    ):
+      result = schema.execute_sync(
+        """
+        query Q($id: String!) {
+          reportPackage(reportId: $id) {
+            id name filingStatus filedBy entityName items { factSetId }
+          }
+        }
+        """,
+        variable_values={"id": "rpt_01"},
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data is not None
+    pkg = result.data["reportPackage"]
+    assert pkg["id"] == "rpt_01"
+    assert pkg["filingStatus"] == "filed"
+    assert pkg["filedBy"] == "usr_01"
+    assert pkg["entityName"] == "Acme LLC"
+    assert pkg["items"] == []
+
+  def test_returns_null_when_report_missing(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.reports.get_report_package",
+        return_value=None,
+      ),
+    ):
+      result = schema.execute_sync(
+        "query Q($id: String!) { reportPackage(reportId: $id) { id } }",
+        variable_values={"id": "rpt_missing"},
+        context_value=_ctx(),
+      )
+    assert result.errors is None
+    assert result.data == {"reportPackage": None}
+
+  def test_raises_typed_error_when_schema_not_initialized(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.reports.get_report_package",
+        side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
+      ),
+    ):
+      result = schema.execute_sync(
+        "query Q($id: String!) { reportPackage(reportId: $id) { id } }",
+        variable_values={"id": "rpt_01"},
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    err = result.errors[0]
+    assert "Ledger not initialized" in err.message
+    assert err.extensions == {"code": "LEDGER_NOT_INITIALIZED"}

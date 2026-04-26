@@ -354,6 +354,16 @@ def load_base_envelope_atoms(
   if structure is None or structure.structure_type != expected_block_type:
     return None
 
+  # Validate the FactSet pin (when provided) before doing the heavy
+  # association / element / rule loads — a mismatched pin is a clean
+  # miss and shouldn't pay for atoms that won't be returned.
+  if fact_set_id is not None:
+    fact_set = load_fact_set_by_id_for_structure(session, structure_id, fact_set_id)
+    if fact_set is None:
+      return None
+  else:
+    fact_set = load_latest_fact_set_for_structure(session, structure_id)
+
   taxonomy_name = session.execute(
     select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)
   ).scalar()
@@ -388,12 +398,6 @@ def load_base_envelope_atoms(
     session, [a.id for a in associations]
   )
 
-  if fact_set_id is not None:
-    fact_set = load_fact_set_by_id_for_structure(session, structure_id, fact_set_id)
-    if fact_set is None:
-      return None
-  else:
-    fact_set = load_latest_fact_set_for_structure(session, structure_id)
   verification_results = load_verification_results_for_structure(session, structure_id)
 
   return BaseEnvelopeAtoms(

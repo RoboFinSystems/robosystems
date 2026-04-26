@@ -45,10 +45,15 @@ def build_envelope(
   metric block as a placeholder. ``fact_set_id`` is accepted for
   signature parity with the registry contract; metric blocks have no
   FactSet today so the pin is a no-op.
+
+  TODO: honor ``fact_set_id`` once metric FactSets land — without the
+  pin a metric block surfaced inside a *filed* Report Block would
+  render today's evaluation rather than the snapshot reviewed at file
+  time.
   """
   from sqlalchemy import select
 
-  del fact_set_id  # currently unused; metric FactSet wiring lands later
+  del fact_set_id  # see TODO above; metric FactSet wiring lands later
 
   structure = session.get(Structure, structure_id)
   if structure is None or structure.structure_type != METRIC_BLOCK_TYPE:

@@ -159,12 +159,13 @@ class TestBuildEnvelope:
     )
     session.get.return_value = structure
     # Query order (no associations → no elements or classifications queries):
-    # taxonomy name → associations → rules → fact_set → verification_results
+    # fact_set (validated first so a stale pin doesn't pay for atom loads)
+    # → taxonomy name → associations → rules → verification_results
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
     ]
 
@@ -232,17 +233,16 @@ class TestBuildEnvelope:
     element_sales.period_type = "duration"
 
     # Query order (1 association → elements + classifications queries run):
-    # taxonomy → associations → elements → rules → classifications →
-    # fact_set → verification_results → latest_report_id
+    # fact_set → taxonomy → associations → elements → rules → classifications →
+    # verification_results
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[association]),  # associations
       _exec_result(scalars_all=[element_revenue, element_sales]),  # elements
       _exec_result(scalars_all=[]),  # rules
       _exec_result(all_rows=[]),  # association classifications
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
-      _exec_result(scalar=None),  # latest report id → None (no reports)
     ]
 
     build = statement_handlers.make_statement_handlers("income_statement")
@@ -314,17 +314,19 @@ class TestBuildEnvelope:
     fact.fact_scope = "in_scope"
     fact.fact_set_id = "fset_balance_sheet_2026q1"
 
-    # Query order (Plan B — fact_set_id read path):
-    # taxonomy → associations → elements → rules → assoc-classifications →
-    # fact_set → verification_results → facts (filtered by fact_set.id) →
+    # Query order (Plan B — fact_set_id read path; FactSet validated
+    # first so the pin path can short-circuit on mismatch):
+    # fact_set → taxonomy → associations → elements → rules →
+    # assoc-classifications → verification_results →
+    # facts (filtered by fact_set.id) →
     # element-classifications (rendering projection trait lookup)
     session.execute.side_effect = [
+      _exec_result(scalar=fact_set),  # latest fact set
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[assoc]),  # associations
       _exec_result(scalars_all=[element]),  # elements
       _exec_result(scalars_all=[]),  # rules
       _exec_result(all_rows=[]),  # association classifications
-      _exec_result(scalar=fact_set),  # latest fact set
       _exec_result(scalars_all=[]),  # verification results
       _exec_result(scalars_all=[fact]),  # facts (filtered by fact_set.id)
       _exec_result(all_rows=[]),  # element classifications (Plan B)
@@ -357,10 +359,10 @@ class TestBuildEnvelope:
     session.get.return_value = structure
     # No associations → no elements or classifications queries.
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
     ]
 

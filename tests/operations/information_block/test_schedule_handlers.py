@@ -153,10 +153,10 @@ class TestBuildEnvelope:
     structure.metadata_ = {"should_be_ignored": True}
     session.get.return_value = structure
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
       _exec_result(scalar=5),  # periods_with_entries count
       _exec_result(scalars_all=[]),  # facts
@@ -209,10 +209,10 @@ class TestBuildEnvelope:
     structure.metadata_ = {}  # no entry_template key
     session.get.return_value = structure
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
       _exec_result(scalar=0),  # periods_with_entries
     ]
@@ -247,10 +247,10 @@ class TestBuildEnvelope:
     }
     session.get.return_value = structure
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
       _exec_result(scalar=0),  # periods_with_entries
       _exec_result(scalars_all=[]),  # facts
@@ -263,3 +263,62 @@ class TestBuildEnvelope:
     assert mechanics.schedule_metadata is None
     assert mechanics.periods_with_entries == 0
     assert envelope.information_model.concept_arrangement == "roll_forward"
+
+  def test_facts_filtered_by_fact_set_pin_for_report_package(self) -> None:
+    """When a fact_set_id is supplied (Report-Block rehydration), the
+    facts query must filter by ``Fact.fact_set_id``. Without the pin
+    a filed Report would render today's drafts instead of the
+    snapshot the package was reviewed against."""
+    from sqlalchemy.sql.elements import BinaryExpression
+
+    session = MagicMock()
+    structure = MagicMock()
+    structure.id = "struct_dep"
+    structure.structure_type = "schedule"
+    structure.name = "Equipment Depreciation"
+    structure.description = None
+    structure.taxonomy_id = "tax_01"
+    structure.concept_arrangement = "roll_forward"
+    structure.member_arrangement = None
+    structure.parenthetical_note = None
+    structure.artifact_mechanics = {
+      "kind": "closing_entry_generator",
+      "entry_template": {
+        "debit_element_id": "elem_dep",
+        "credit_element_id": "elem_accum",
+      },
+    }
+    structure.metadata_ = {}
+    session.get.return_value = structure
+
+    fact_set = MagicMock()
+    fact_set.id = "fs_pinned"
+    fact_set.structure_id = "struct_dep"
+    fact_set.period_start = date(2026, 1, 1)
+    fact_set.period_end = date(2026, 1, 31)
+    fact_set.factset_type = "schedule"
+    fact_set.entity_id = "ent_demo"
+    fact_set.report_id = None
+
+    session.execute.side_effect = [
+      _exec_result(scalar=fact_set),  # fact_set lookup (pinned)
+      _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # associations
+      _exec_result(scalars_all=[]),  # rules
+      _exec_result(scalars_all=[]),  # verification results
+      _exec_result(scalar=0),  # periods_with_entries
+      _exec_result(scalars_all=[]),  # facts (filtered by pin)
+    ]
+
+    schedule_handlers.build_envelope(session, "struct_dep", fact_set_id="fs_pinned")
+
+    # Inspect the facts query: the pin filter must appear in the WHERE.
+    facts_query = session.execute.call_args_list[6].args[0]
+    where_clause = str(facts_query.compile(compile_kwargs={"literal_binds": True}))
+    assert "fact_set_id = 'fs_pinned'" in where_clause
+    # And the structure / scope filters must still be present.
+    assert "structure_id = 'struct_dep'" in where_clause
+    assert "fact_scope = 'in_scope'" in where_clause
+    # Sanity check: BinaryExpression import is exercised so we don't
+    # silently lose the type if the SQLAlchemy WHERE shape changes.
+    del BinaryExpression

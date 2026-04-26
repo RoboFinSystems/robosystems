@@ -6,9 +6,16 @@ rehydrated as an :class:`InformationBlock`. The resolver lives in
 are split into this file because they're hand-written rather than
 auto-derived from Pydantic (the ``block`` field needs the manual
 ``InformationBlock.from_pydantic`` projection).
+
+Date / datetime fields use Strawberry's native scalar types so the
+GraphQL schema is consistent with the auto-derived ``Report`` type
+(which exposes them via Strawberry's pydantic integration). Codegen
+on the client side maps these to typed Date / DateTime values.
 """
 
 from __future__ import annotations
+
+import datetime as _dt
 
 import strawberry
 
@@ -50,14 +57,14 @@ class ReportPackage:
   description: str | None
   taxonomy_id: str
   period_type: str
-  period_start: str | None
-  period_end: str | None
+  period_start: _dt.date | None
+  period_end: _dt.date | None
 
   generation_status: str
-  last_generated: str | None
+  last_generated: _dt.datetime | None
 
   filing_status: str
-  filed_at: str | None
+  filed_at: _dt.datetime | None
   filed_by: str | None
 
   supersedes_id: str | None
@@ -65,11 +72,11 @@ class ReportPackage:
 
   source_graph_id: str | None
   source_report_id: str | None
-  shared_at: str | None
+  shared_at: _dt.datetime | None
 
   entity_name: str | None
   ai_generated: bool
-  created_at: str
+  created_at: _dt.datetime
   created_by: str
 
   items: list[ReportPackageItem]
@@ -82,23 +89,21 @@ class ReportPackage:
       description=envelope.description,
       taxonomy_id=envelope.taxonomy_id,
       period_type=envelope.period_type,
-      period_start=envelope.period_start.isoformat() if envelope.period_start else None,
-      period_end=envelope.period_end.isoformat() if envelope.period_end else None,
+      period_start=envelope.period_start,
+      period_end=envelope.period_end,
       generation_status=envelope.generation_status,
-      last_generated=(
-        envelope.last_generated.isoformat() if envelope.last_generated else None
-      ),
+      last_generated=envelope.last_generated,
       filing_status=envelope.filing_status,
-      filed_at=envelope.filed_at.isoformat() if envelope.filed_at else None,
+      filed_at=envelope.filed_at,
       filed_by=envelope.filed_by,
       supersedes_id=envelope.supersedes_id,
       superseded_by_id=envelope.superseded_by_id,
       source_graph_id=envelope.source_graph_id,
       source_report_id=envelope.source_report_id,
-      shared_at=envelope.shared_at.isoformat() if envelope.shared_at else None,
+      shared_at=envelope.shared_at,
       entity_name=envelope.entity_name,
       ai_generated=envelope.ai_generated,
-      created_at=envelope.created_at.isoformat(),
+      created_at=envelope.created_at,
       created_by=envelope.created_by,
       items=[ReportPackageItem.from_pydantic(it) for it in envelope.items],
     )

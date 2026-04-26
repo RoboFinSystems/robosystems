@@ -754,11 +754,19 @@ class AssociationClassifier:
     report_factset_rels: list[dict] = []
 
     # SEC filings produce one Report per ingestion; pull its identifier
-    # so each new FactSet can emit a REPORT_HAS_FACT_SET edge.
+    # so each new FactSet can emit a REPORT_HAS_FACT_SET edge. Dedupe
+    # defensively — if a filing somehow loaded multiple Report nodes,
+    # we still emit one edge per (report, fact_set) pair without
+    # multiplying duplicates.
     report_ids: list[str] = []
     try:
       report_rows = ctx.execute("MATCH (r:Report) RETURN r.identifier AS report_id")
-      report_ids = [row["report_id"] for row in report_rows if row.get("report_id")]
+      seen: set[str] = set()
+      for row in report_rows:
+        rid = row.get("report_id")
+        if rid and rid not in seen:
+          seen.add(rid)
+          report_ids.append(rid)
     except Exception as e:
       logger.debug(f"FactSet report lookup failed: {e}")
 
