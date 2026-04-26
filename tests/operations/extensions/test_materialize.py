@@ -222,6 +222,7 @@ class TestTableOrdering:
       "FACT_HAS_UNIT",
       "FACT_HAS_ENTITY",
       "STRUCTURE_HAS_FACT_SET",
+      "REPORT_HAS_FACT_SET",
       "FACT_SET_CONTAINS_FACT",
     }
     # RoboInvestor edges (entity↔portfolio + security issuance + portfolio structure)

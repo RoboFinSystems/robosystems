@@ -44,6 +44,15 @@ from robosystems.models.api.information_block import (
   InformationModelResponse as PydanticInformationModel,
 )
 from robosystems.models.api.information_block import (
+  RenderingLite as PydanticRendering,
+)
+from robosystems.models.api.information_block import (
+  RenderingPeriodLite as PydanticRenderingPeriod,
+)
+from robosystems.models.api.information_block import (
+  RenderingRowLite as PydanticRenderingRow,
+)
+from robosystems.models.api.information_block import (
   RuleLite as PydanticRule,
 )
 from robosystems.models.api.information_block import (
@@ -53,7 +62,13 @@ from robosystems.models.api.information_block import (
   RuleVariableLite as PydanticRuleVariable,
 )
 from robosystems.models.api.information_block import (
+  ValidationLite as PydanticValidation,
+)
+from robosystems.models.api.information_block import (
   VerificationResultLite as PydanticVerificationResult,
+)
+from robosystems.models.api.information_block import (
+  ViewProjections as PydanticViewProjections,
 )
 
 # ── Leaf types — auto-derived from Pydantic ────────────────────────────────
@@ -113,6 +128,31 @@ class InformationBlockRule:
 )
 class InformationBlockVerificationResult:
   """Persisted outcome of a rule evaluation."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticRenderingRow, all_fields=True)
+class InformationBlockRenderingRow:
+  """One row of a server-side rendered statement."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticRenderingPeriod, all_fields=True)
+class InformationBlockRenderingPeriod:
+  """One period column in a rendered statement."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticValidation, all_fields=True)
+class InformationBlockValidation:
+  """Outcome of guard-rail validation on a rendered statement."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticRendering, all_fields=True)
+class InformationBlockRendering:
+  """Pre-computed rendering projection — rows + periods + validation."""
+
+
+@strawberry.experimental.pydantic.type(model=PydanticViewProjections, all_fields=True)
+class InformationBlockViewProjections:
+  """Charlie's six type-of View arms surfaced in the envelope."""
 
 
 # Mechanics + template are exposed as ``scalars.JSON`` with a ``kind``
@@ -181,6 +221,8 @@ class InformationBlock:
   fact_set: InformationBlockFactSet | None
   verification_results: list[InformationBlockVerificationResult]
 
+  view: InformationBlockViewProjections
+
   @classmethod
   def from_pydantic(cls, envelope: PydanticInformationBlock) -> InformationBlock:
     return cls(
@@ -212,6 +254,7 @@ class InformationBlock:
         InformationBlockVerificationResult.from_pydantic(vr)
         for vr in envelope.verification_results
       ],
+      view=InformationBlockViewProjections.from_pydantic(envelope.view),
     )
 
 
@@ -223,9 +266,14 @@ __all__ = [
   "InformationBlockElement",
   "InformationBlockFact",
   "InformationBlockFactSet",
+  "InformationBlockRendering",
+  "InformationBlockRenderingPeriod",
+  "InformationBlockRenderingRow",
   "InformationBlockRule",
   "InformationBlockRuleTarget",
   "InformationBlockRuleVariable",
+  "InformationBlockValidation",
   "InformationBlockVerificationResult",
+  "InformationBlockViewProjections",
   "InformationModel",
 ]

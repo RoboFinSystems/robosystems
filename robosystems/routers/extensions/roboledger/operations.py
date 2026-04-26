@@ -127,6 +127,10 @@ from robosystems.models.api.extensions.publish_lists import (
   CreatePublishListRequest,
   UpdatePublishListRequest,
 )
+from robosystems.models.api.extensions.report_package import (
+  FileReportRequest,
+  TransitionFilingStatusRequest,
+)
 from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
   RegenerateReportRequest,
@@ -268,9 +272,11 @@ from robosystems.operations.roboledger.commands.publish_lists import (
   update_publish_list as cmd_update_publish_list,
 )
 from robosystems.operations.roboledger.commands.reports import (
+  InvalidFilingTransitionError,
   NoEntityError,
   NotAuthorizedError,
   PublishListEmptyError,
+  ReportNotFiledError,
   ReportNotFoundError,
   ReportNotPublishedError,
   TaxonomyNotFoundError,
@@ -285,10 +291,16 @@ from robosystems.operations.roboledger.commands.reports import (
   delete_report as cmd_delete_report,
 )
 from robosystems.operations.roboledger.commands.reports import (
+  file_report as cmd_file_report,
+)
+from robosystems.operations.roboledger.commands.reports import (
   regenerate_report as cmd_regenerate_report,
 )
 from robosystems.operations.roboledger.commands.reports import (
   share_report as cmd_share_report,
+)
+from robosystems.operations.roboledger.commands.reports import (
+  transition_filing_status as cmd_transition_filing_status,
 )
 from robosystems.operations.roboledger.commands.schedules import (
   ScheduleNotFoundError,
@@ -1519,6 +1531,8 @@ async def delete_report_op(
           raise HTTPException(
             status_code=403, detail="Not authorized to delete this report."
           )
+        except ReportNotFiledError as e:
+          raise HTTPException(status_code=422, detail=str(e))
     except (ValueError, ProgrammingError):
       raise _ledger_404()
     if not deleted:
@@ -1582,6 +1596,111 @@ async def share_report_op(
       raise HTTPException(
         status_code=422, detail="Only published reports can be shared."
       )
+    except (ValueError, ProgrammingError):
+      raise _ledger_404()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/file-report",
+  response_model=OperationEnvelope,
+  operation_id="opFileReport",
+  summary="File Report",
+  description=(
+    "Transitions the Report's filing_status to 'filed' — locks the package. "
+    "Allowed from 'draft' or 'under_review'. Stamps filed_at + filed_by."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/file-report",
+  method="POST",
+  business_event_type="ledger_file_report",
+)
+async def file_report_op(
+  body: FileReportRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="file-report",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        try:
+          return cmd_file_report(session, body.report_id, filed_by=str(user.id))
+        except ReportNotFoundError:
+          raise HTTPException(
+            status_code=404, detail=f"Report '{body.report_id}' not found."
+          )
+        except InvalidFilingTransitionError as e:
+          raise HTTPException(status_code=422, detail=str(e))
+    except (ValueError, ProgrammingError):
+      raise _ledger_404()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/transition-filing-status",
+  response_model=OperationEnvelope,
+  operation_id="opTransitionFilingStatus",
+  summary="Transition Filing Status",
+  description=(
+    "Move a Report along the non-file legs of the filing lifecycle "
+    "(draft ↔ under_review, filed → archived). Use 'file-report' to "
+    "reach 'filed' so audit fields land cleanly."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/transition-filing-status",
+  method="POST",
+  business_event_type="ledger_transition_filing_status",
+)
+async def transition_filing_status_op(
+  body: TransitionFilingStatusRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="transition-filing-status",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        try:
+          return cmd_transition_filing_status(
+            session, body.report_id, body.target_status
+          )
+        except ReportNotFoundError:
+          raise HTTPException(
+            status_code=404, detail=f"Report '{body.report_id}' not found."
+          )
+        except InvalidFilingTransitionError as e:
+          raise HTTPException(status_code=422, detail=str(e))
     except (ValueError, ProgrammingError):
       raise _ledger_404()
 

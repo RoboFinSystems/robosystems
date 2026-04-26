@@ -146,7 +146,7 @@ def _load_schedule_mechanics(
 
 
 def build_envelope(
-  session: Session, structure_id: str
+  session: Session, structure_id: str, fact_set_id: str | None = None
 ) -> InformationBlockEnvelope | None:
   """Reload a schedule Structure and pack its Information Block envelope.
 
@@ -154,9 +154,20 @@ def build_envelope(
   so the generic reader can cleanly distinguish misses from errors.
   Mechanics are read from the typed ``artifact_mechanics`` column with
   fallback to legacy ``metadata_`` JSONB.
+
+  ``fact_set_id`` pins the envelope to a specific FactSet snapshot —
+  the Report-Block rehydration path uses this to surface the frozen
+  fact slice that was reviewed at file time. When provided, facts are
+  filtered by ``fact_set_id`` so that viewing a filed Report shows the
+  exact snapshot rather than today's facts. The default (no pin)
+  publishes every in-scope fact for the Structure, which is what the
+  live closing-book mode expects.
   """
   atoms = load_base_envelope_atoms(
-    session, structure_id, expected_block_type=SCHEDULE_BLOCK_TYPE
+    session,
+    structure_id,
+    expected_block_type=SCHEDULE_BLOCK_TYPE,
+    fact_set_id=fact_set_id,
   )
   if atoms is None:
     return None
@@ -181,16 +192,16 @@ def build_envelope(
   # Schedules publish only in-scope facts — historical facts were
   # already reflected in opening balances and shouldn't surface as
   # envelope data (they'd confuse agents into re-drafting closed work).
-  facts = (
-    session.execute(
-      select(Fact).where(
-        Fact.structure_id == structure_id,
-        Fact.fact_scope == "in_scope",
-      )
-    )
-    .scalars()
-    .all()
-  )
+  # When a FactSet pin is supplied (Report-Block rehydration), facts
+  # are also scoped to that pinned snapshot so a filed Report renders
+  # the exact slice reviewed at file time, not today's drafts.
+  fact_filters = [
+    Fact.structure_id == structure_id,
+    Fact.fact_scope == "in_scope",
+  ]
+  if fact_set_id is not None:
+    fact_filters.append(Fact.fact_set_id == fact_set_id)
+  facts = session.execute(select(Fact).where(*fact_filters)).scalars().all()
 
   return InformationBlockEnvelope(
     id=structure.id,

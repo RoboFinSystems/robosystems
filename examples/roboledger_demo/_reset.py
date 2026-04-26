@@ -1,4 +1,4 @@
-"""Demo-only reset logic for close_demo.
+"""Demo-only reset logic for roboledger_demo.
 
 This is NOT a production operation. It selectively wipes demo-generated
 state while preserving graph infrastructure (entity, library-seeded
@@ -50,19 +50,35 @@ def reset_demo_state(graph_id: str) -> None:
 
   with extensions_session(graph_id) as session:
     # 1-3. All entries + line items + transactions (tenant-generated;
-    # the library itself never authors these).
+    # the library itself never authors these). Dimension tables
+    # FK back to their parent rows so wipe them first.
+    session.execute(text("DELETE FROM line_item_dimensions"))
     session.execute(text("DELETE FROM line_items"))
+    session.execute(text("DELETE FROM entry_dimensions"))
     session.execute(text("DELETE FROM entries"))
+    session.execute(text("DELETE FROM transaction_dimensions"))
     session.execute(text("DELETE FROM transactions"))
+
+    # 3b. Events + their dimensions. Events power journal_entry_recorded
+    # / asset_disposed / schedule_entry_due — none library-seeded. Must
+    # delete event_dimensions first (FK), then events (which referenced
+    # entries above via triggered_by_event_id), then agents (events.agent_id).
+    session.execute(text("DELETE FROM event_dimensions"))
+    session.execute(text("DELETE FROM events"))
+    session.execute(text("DELETE FROM agents"))
+    session.execute(text("DELETE FROM dimensions"))
 
     # 4. Tenant-origin associations. The library's immutability triggers
     # raise on any UPDATE/DELETE of rows with created_by='library-seeder',
     # so we filter those out explicitly. CoA mapping arcs created by the
     # demo (created_by='coa-classifier' or the demo user) are fair game.
+    # association_classifications FK associations → wipe first.
+    session.execute(text("DELETE FROM association_classifications"))
     session.execute(
       text("DELETE FROM associations WHERE created_by != :seeder"),
       {"seeder": _LIBRARY_SEEDER},
     )
+    session.execute(text("DELETE FROM classifications"))
 
     # 5. Facts
     session.execute(text("DELETE FROM facts"))
@@ -107,13 +123,18 @@ def reset_demo_state(graph_id: str) -> None:
       ),
       {"seeder": _LIBRARY_SEEDER},
     )
-    session.execute(
-      text(
-        "DELETE FROM fact_sets WHERE structure_id IN "
-        "(SELECT id FROM structures WHERE created_by != :seeder)"
-      ),
-      {"seeder": _LIBRARY_SEEDER},
-    )
+    # 6c.iii. Reports + dependents. Reports are not library-seeded, so
+    # wipe everything. report_shares.report_id and publish_list_members
+    # FK to their parents — delete children first. fact_sets.report_id
+    # FKs reports, so all fact_sets must go before reports.
+    session.execute(text("DELETE FROM report_shares"))
+    session.execute(text("DELETE FROM publish_list_members"))
+    session.execute(text("DELETE FROM publish_lists"))
+    # All fact_sets — the structure-id filter above only catches tenant-
+    # owned structures, but report fact_sets attach to library structures
+    # (e.g. fac default). Safe to wipe all: no fact_sets are library-seeded.
+    session.execute(text("DELETE FROM fact_sets"))
+    session.execute(text("DELETE FROM reports"))
 
     # 7. Tenant-origin structures (any the demo created — anchor
     # structure, schedules, report layouts).
@@ -121,6 +142,8 @@ def reset_demo_state(graph_id: str) -> None:
       text("DELETE FROM structures WHERE created_by != :seeder"),
       {"seeder": _LIBRARY_SEEDER},
     )
+    session.execute(text("DELETE FROM structure_templates"))
+    session.execute(text("DELETE FROM event_handlers"))
 
     # 8. Entity taxonomy linkages (will be re-created by demo setup).
     session.query(EntityTaxonomy).delete(synchronize_session=False)

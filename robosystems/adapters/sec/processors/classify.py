@@ -512,6 +512,7 @@ class AssociationClassifier:
     factsets_df: pd.DataFrame
     structure_factset_rels_df: pd.DataFrame
     factset_fact_rels_df: pd.DataFrame
+    report_factset_rels_df: pd.DataFrame
 
   def classify(self, output_dir: Path) -> ClassifyResult:
     """Run classification on a filing's parquet output.
@@ -534,6 +535,7 @@ class AssociationClassifier:
       factsets_df=pd.DataFrame(),
       structure_factset_rels_df=pd.DataFrame(),
       factset_fact_rels_df=pd.DataFrame(),
+      report_factset_rels_df=pd.DataFrame(),
     )
 
     # Check that required parquet files exist
@@ -607,9 +609,12 @@ class AssociationClassifier:
       relationships.extend(semantic_rels)
 
       # Layer 3: Build structure-level FactSets
-      factsets_df, struct_fs_rels_df, fs_fact_rels_df = self._build_structure_factsets(
-        ctx
-      )
+      (
+        factsets_df,
+        struct_fs_rels_df,
+        fs_fact_rels_df,
+        report_fs_rels_df,
+      ) = self._build_structure_factsets(ctx)
 
     classifications_df = (
       pd.DataFrame(classifications) if classifications else pd.DataFrame()
@@ -640,6 +645,7 @@ class AssociationClassifier:
       factsets_df=factsets_df,
       structure_factset_rels_df=struct_fs_rels_df,
       factset_fact_rels_df=fs_fact_rels_df,
+      report_factset_rels_df=report_fs_rels_df,
     )
 
   def _classify_semantic(
@@ -729,19 +735,46 @@ class AssociationClassifier:
 
   def _build_structure_factsets(
     self, ctx: TempLadybugContext
-  ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+  ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Build pre-computed FactSets per Structure.
 
     For each Structure, collects all Elements from its associations, then
     finds all Facts in the report that reference those elements. Creates a
-    FactSet per Structure as a rendering manifest.
+    FactSet per Structure as a rendering manifest. Each FactSet is also
+    linked back to the filing's Report so the package can be traversed
+    via ``REPORT_HAS_FACT_SET``.
 
     Returns:
-        (factsets_df, structure_factset_rels_df, factset_fact_rels_df)
+        (factsets_df, structure_factset_rels_df, factset_fact_rels_df,
+         report_factset_rels_df)
     """
     factsets: list[dict] = []
     structure_factset_rels: list[dict] = []
     factset_fact_rels: list[dict] = []
+    report_factset_rels: list[dict] = []
+
+    # SEC filings produce one Report per ingestion; pull its identifier
+    # so each new FactSet can emit a REPORT_HAS_FACT_SET edge. Dedupe
+    # defensively — if a filing somehow loaded multiple Report nodes,
+    # we still emit one edge per (report, fact_set) pair without
+    # multiplying duplicates.
+    report_ids: list[str] = []
+    try:
+      report_rows = ctx.execute("MATCH (r:Report) RETURN r.identifier AS report_id")
+      seen: set[str] = set()
+      for row in report_rows:
+        rid = row.get("report_id")
+        if rid and rid not in seen:
+          seen.add(rid)
+          report_ids.append(rid)
+    except Exception as e:
+      # A miss here means REPORT_HAS_FACT_SET edges never land for this
+      # filing — the package query won't be able to traverse from Report
+      # to its FactSets. Log loud enough to be noticed in CloudWatch.
+      logger.warning(
+        f"FactSet report lookup failed; REPORT_HAS_FACT_SET edges will "
+        f"be missing for this filing: {e}"
+      )
 
     # Get all structures and their elements (both FROM and TO)
     try:
@@ -802,6 +835,8 @@ class AssociationClassifier:
       fs_id = generate_uuid7()
       factsets.append({"identifier": fs_id})
       structure_factset_rels.append({"from": structure_id, "to": fs_id})
+      for report_id in report_ids:
+        report_factset_rels.append({"from": report_id, "to": fs_id})
 
       for fact_row in facts:
         fact_id = fact_row.get("fact_id")
@@ -815,5 +850,8 @@ class AssociationClassifier:
     fs_fact_df = (
       pd.DataFrame(factset_fact_rels) if factset_fact_rels else pd.DataFrame()
     )
+    report_fs_df = (
+      pd.DataFrame(report_factset_rels) if report_factset_rels else pd.DataFrame()
+    )
 
-    return factsets_df, struct_fs_df, fs_fact_df
+    return factsets_df, struct_fs_df, fs_fact_df, report_fs_df

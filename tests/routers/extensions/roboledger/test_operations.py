@@ -27,10 +27,17 @@ from robosystems.models.api.extensions.journal_entries import (
   JournalEntryResponse,
   UpdateJournalEntryRequest,
 )
+from robosystems.models.api.extensions.report_package import (
+  FileReportRequest,
+  TransitionFilingStatusRequest,
+)
+from robosystems.models.api.extensions.reports import ReportResponse
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
   auto_map_elements_op,
   delete_journal_entry_op,
+  file_report_op,
+  transition_filing_status_op,
   update_entity_op,
   update_journal_entry_op,
 )
@@ -601,3 +608,180 @@ class TestDeleteJournalEntryOp:
 # `create-event-block(event_type='journal_entry_reversed')`. See
 # tests/operations/event_block/python_handlers/test_journal_entry_reversed.py
 # for coverage of the event-driven path.
+
+
+# ── Filing lifecycle ops (Plan C) ──────────────────────────────────────────
+
+
+def _make_filed_report_response() -> ReportResponse:
+  """Stand-in for the ReportResponse returned by file_report / transition."""
+  return ReportResponse(
+    id="rpt_01",
+    name="Q1 2026 Statements",
+    taxonomy_id="tax_usgaap_reporting",
+    generation_status="complete",
+    period_type="quarterly",
+    period_start=date(2026, 1, 1),
+    period_end=date(2026, 3, 31),
+    comparative=True,
+    created_at=datetime(2026, 4, 1, tzinfo=UTC),
+    filing_status="filed",
+    filed_at=datetime(2026, 4, 15, tzinfo=UTC),
+    filed_by="usr_test123",
+  )
+
+
+class TestFileReportOp:
+  @pytest.mark.asyncio
+  async def test_happy_path_wraps_filed_report_in_envelope(self) -> None:
+    body = FileReportRequest(report_id="rpt_01")
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_file_report",
+        return_value=_make_filed_report_response(),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await file_report_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert isinstance(envelope, OperationEnvelope)
+    assert envelope.operation == "file-report"
+    assert envelope.status == "completed"
+    assert envelope.result is not None
+    assert envelope.result["filing_status"] == "filed"
+    assert envelope.result["filed_by"] == "usr_test123"
+
+  @pytest.mark.asyncio
+  async def test_404_when_report_missing(self) -> None:
+    from robosystems.operations.roboledger.commands.reports import ReportNotFoundError
+
+    body = FileReportRequest(report_id="rpt_missing")
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_file_report",
+        side_effect=ReportNotFoundError("rpt_missing"),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await file_report_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 404
+    assert "rpt_missing" in exc.value.detail
+
+  @pytest.mark.asyncio
+  async def test_422_when_transition_illegal(self) -> None:
+    from robosystems.operations.roboledger.commands.reports import (
+      InvalidFilingTransitionError,
+    )
+
+    body = FileReportRequest(report_id="rpt_01")
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_file_report",
+        side_effect=InvalidFilingTransitionError(
+          "Report 'rpt_01' is in 'archived'; can only file from 'draft' or 'under_review'."
+        ),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await file_report_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+    assert "archived" in exc.value.detail
+
+
+class TestTransitionFilingStatusOp:
+  @pytest.mark.asyncio
+  async def test_happy_path_returns_transitioned_report(self) -> None:
+    response = _make_filed_report_response()
+    response.filing_status = "under_review"
+    body = TransitionFilingStatusRequest(
+      report_id="rpt_01", target_status="under_review"
+    )
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_transition_filing_status",
+        return_value=response,
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await transition_filing_status_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    assert envelope.operation == "transition-filing-status"
+    assert envelope.result is not None
+    assert envelope.result["filing_status"] == "under_review"
+
+  @pytest.mark.asyncio
+  async def test_422_when_transition_illegal(self) -> None:
+    from robosystems.operations.roboledger.commands.reports import (
+      InvalidFilingTransitionError,
+    )
+
+    body = TransitionFilingStatusRequest(report_id="rpt_01", target_status="filed")
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_transition_filing_status",
+        side_effect=InvalidFilingTransitionError(
+          "Report 'rpt_01' cannot transition from 'under_review' to 'filed'."
+        ),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await transition_filing_status_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+    assert "filed" in exc.value.detail

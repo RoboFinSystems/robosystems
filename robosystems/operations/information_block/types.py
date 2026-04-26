@@ -115,11 +115,13 @@ class BlockTypeRegistryEntry:
   Returns the deleted structure_id for the response envelope. Block
   types that don't support deletion raise :class:`NotImplementedError`."""
 
-  dispatch_build_envelope: Callable[[Session, str], InformationBlockEnvelope | None]
+  dispatch_build_envelope: Callable[..., InformationBlockEnvelope | None]
   """Handler that reads the block and packs its envelope. Signature:
-  ``(session, structure_id) -> InformationBlockEnvelope | None``.
+  ``(session, structure_id, fact_set_id=None) -> InformationBlockEnvelope | None``.
   Returns None when the structure_id doesn't exist or its row doesn't
-  belong to this block type."""
+  belong to this block type. ``fact_set_id`` pins the envelope to a
+  specific FactSet snapshot (used by Report Block rehydration); when
+  omitted the latest FactSet is used."""
 
   surfaces_in_library: bool = False
   """When True, ``list_information_blocks`` surfaces this block type on

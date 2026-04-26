@@ -24,9 +24,9 @@ def write_demo_duckdb(
   Args:
     duckdb_path: Destination .duckdb file (overwritten if it exists).
     accounts: List of (code, name, classification, sub_classification,
-      balance_type, parent_code) tuples from close_demo.data.ACCOUNTS.
+      balance_type, parent_code) tuples from roboledger_demo.data.ACCOUNTS.
     transactions: List of (date, type, description, merchant, lines) tuples
-      from close_demo.data.get_all_transactions(), where `lines` is
+      from roboledger_demo.data.get_all_transactions(), where `lines` is
       [(account_code, debit_cents, credit_cents), ...].
 
   Returns:
@@ -270,7 +270,7 @@ def _insert_line_items(con, rows: list[tuple]) -> None:
 
 def default_duckdb_path() -> Path:
   """Return the default working path for the demo DuckDB file."""
-  return Path("/tmp/close_demo/close_demo.duckdb")
+  return Path("/tmp/roboledger_demo/roboledger_demo.duckdb")
 
 
 if __name__ == "__main__":

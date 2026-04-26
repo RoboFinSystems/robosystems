@@ -159,12 +159,13 @@ class TestBuildEnvelope:
     )
     session.get.return_value = structure
     # Query order (no associations → no elements or classifications queries):
-    # taxonomy name → associations → rules → fact_set → verification_results
+    # fact_set (validated first so a stale pin doesn't pay for atom loads)
+    # → taxonomy name → associations → rules → verification_results
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
     ]
 
@@ -232,17 +233,16 @@ class TestBuildEnvelope:
     element_sales.period_type = "duration"
 
     # Query order (1 association → elements + classifications queries run):
-    # taxonomy → associations → elements → rules → classifications →
-    # fact_set → verification_results → latest_report_id
+    # fact_set → taxonomy → associations → elements → rules → classifications →
+    # verification_results
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[association]),  # associations
       _exec_result(scalars_all=[element_revenue, element_sales]),  # elements
       _exec_result(scalars_all=[]),  # rules
       _exec_result(all_rows=[]),  # association classifications
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
-      _exec_result(scalar=None),  # latest report id → None (no reports)
     ]
 
     build = statement_handlers.make_statement_handlers("income_statement")
@@ -256,7 +256,16 @@ class TestBuildEnvelope:
     assert {e.id for e in envelope.elements} == {"elem_revenue", "elem_sales"}
     assert envelope.facts == []
 
-  def test_facts_populated_from_most_recent_report(self) -> None:
+  def test_facts_populated_from_latest_fact_set(self) -> None:
+    """Plan B: envelope reads facts via the canonical fact_set_id pin.
+
+    The previous behaviour scanned for the latest Report touching any of
+    the structure's elements and filtered by report_id. After Plan B
+    (Apr 2026) the read path uses the FactSet (= the Block instance per
+    Charlie's PDF) loaded by ``load_latest_fact_set_for_structure``,
+    eliminating one query and aligning with the canonical pin used by
+    Report Block items.
+    """
     session = MagicMock()
     structure = _make_statement_structure(
       structure_id="struct_balance_sheet",
@@ -285,6 +294,15 @@ class TestBuildEnvelope:
     element.balance_type = "debit"
     element.period_type = "instant"
 
+    fact_set = MagicMock()
+    fact_set.id = "fset_balance_sheet_2026q1"
+    fact_set.structure_id = "struct_balance_sheet"
+    fact_set.period_start = date(2026, 1, 1)
+    fact_set.period_end = date(2026, 3, 31)
+    fact_set.factset_type = "report"
+    fact_set.entity_id = "ent_demo"
+    fact_set.report_id = "rep_latest"
+
     fact = MagicMock()
     fact.id = "fact_1"
     fact.element_id = "elem_cash"
@@ -294,21 +312,24 @@ class TestBuildEnvelope:
     fact.period_type = "instant"
     fact.unit = "USD"
     fact.fact_scope = "in_scope"
-    fact.fact_set_id = None
+    fact.fact_set_id = "fset_balance_sheet_2026q1"
 
-    # Query order (1 association, report found):
-    # taxonomy → associations → elements → rules → classifications →
-    # fact_set → verification_results → latest_report_id → facts
+    # Query order (Plan B — fact_set_id read path; FactSet validated
+    # first so the pin path can short-circuit on mismatch):
+    # fact_set → taxonomy → associations → elements → rules →
+    # assoc-classifications → verification_results →
+    # facts (filtered by fact_set.id) →
+    # element-classifications (rendering projection trait lookup)
     session.execute.side_effect = [
+      _exec_result(scalar=fact_set),  # latest fact set
       _exec_result(scalar="US GAAP"),  # taxonomy name
       _exec_result(scalars_all=[assoc]),  # associations
       _exec_result(scalars_all=[element]),  # elements
       _exec_result(scalars_all=[]),  # rules
       _exec_result(all_rows=[]),  # association classifications
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
-      _exec_result(scalar="rep_latest"),  # latest_report_id
-      _exec_result(scalars_all=[fact]),  # facts
+      _exec_result(scalars_all=[fact]),  # facts (filtered by fact_set.id)
+      _exec_result(all_rows=[]),  # element classifications (Plan B)
     ]
 
     build = statement_handlers.make_statement_handlers("balance_sheet")
@@ -320,6 +341,9 @@ class TestBuildEnvelope:
     assert envelope.facts[0].element_id == "elem_cash"
     assert envelope.facts[0].value == 100_000.0
     assert envelope.facts[0].period_end == date(2026, 3, 31)
+    assert envelope.facts[0].fact_set_id == "fset_balance_sheet_2026q1"
+    assert envelope.fact_set is not None
+    assert envelope.fact_set.id == "fset_balance_sheet_2026q1"
 
   @pytest.mark.parametrize(
     "block_type",
@@ -335,10 +359,10 @@ class TestBuildEnvelope:
     session.get.return_value = structure
     # No associations → no elements or classifications queries.
     session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),
       _exec_result(scalars_all=[]),  # associations
       _exec_result(scalars_all=[]),  # rules
-      _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalars_all=[]),  # verification results
     ]
 

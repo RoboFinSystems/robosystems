@@ -328,7 +328,7 @@ migrate-reset db="platform" env=_local_env:
 
 # Run all demos
 demo:
-    @just demo-close
+    @just demo-roboledger
     @just demo-custom-graph
     @just demo-sec
 
@@ -351,9 +351,9 @@ demo-sec-subscribe plan="sec-starter":
 demo-sec-query *args:
     uv run examples/sec_demo/query_examples.py {{ args }}
 
-# Run AI close demo — sets up synthetic consulting company with schedules, mappings, and policies
-demo-close *args="":
-    EXTENSIONS_ENABLED=true UV_ENV_FILE={{_local_env}} uv run python -m examples.close_demo.main {{args}}
+# Run RoboLedger end-to-end demo — synthetic consulting company, schedules, mappings, policies, FY 2025 filed report, and a queued period for AI close
+demo-roboledger *args="":
+    EXTENSIONS_ENABLED=true UV_ENV_FILE={{_local_env}} uv run python -m examples.roboledger_demo.main {{args}}
 
 # Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
 demo-custom-graph flags="new-graph" real_s3="false" base_url="http://localhost:8000":

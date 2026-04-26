@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 from robosystems.models.api.information_block import FactSetLite
 from robosystems.operations.information_block.envelope import (
   fact_set_to_lite,
+  load_fact_set_by_id_for_structure,
   load_latest_fact_set_for_structure,
 )
 
@@ -82,3 +83,31 @@ class TestLoadLatestFactSetForStructure:
     assert lite is not None
     assert lite.id == "fs_2026Q1"
     assert lite.factset_type == "report"
+
+
+class TestLoadFactSetByIdForStructure:
+  """Pin lookup for the Report-Block read path — match Structure + id, or None."""
+
+  def test_returns_none_when_no_match(self) -> None:
+    """The query joins on both id AND structure_id; a mismatched pin
+    surfaces as no row."""
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar.return_value = None
+    session.execute.return_value = result
+
+    assert load_fact_set_by_id_for_structure(session, "struct_bs", "fs_wrong") is None
+    session.execute.assert_called_once()
+
+  def test_projects_match_to_lite(self) -> None:
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar.return_value = _make_fact_set(
+      fs_id="fs_pinned", structure_id="struct_bs"
+    )
+    session.execute.return_value = result
+
+    lite = load_fact_set_by_id_for_structure(session, "struct_bs", "fs_pinned")
+    assert lite is not None
+    assert lite.id == "fs_pinned"
+    assert lite.structure_id == "struct_bs"

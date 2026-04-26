@@ -132,6 +132,7 @@ dmypy.json
 # AI - Claude Code
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 CLAUDE.local.md
 
 .gemini/

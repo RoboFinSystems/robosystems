@@ -101,7 +101,7 @@ See RoboSystems in action with runnable demos that create graphs, load data, and
 
 ```bash
 just demo-sec               # Loads NVIDIA's SEC XBRL data via Dagster pipeline
-just demo-close             # Entity accounting month close demo
+just demo-roboledger        # End-to-end RoboLedger demo: bulk OLTP, schedules, FY 2025 filed report, AI close
 just demo-custom-graph      # Builds custom graph schema with relationship networks
 ```
 

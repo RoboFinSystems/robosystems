@@ -547,25 +547,42 @@ def _extract_rules(graph: Graph) -> list[RuleSpec]:
 
 
 def _extract_structures(graph: Graph) -> list[StructureSpec]:
-  """Extract extended link roles as structures."""
+  """Extract extended link roles as structures.
+
+  The seed JSON-LD may carry an explicit ``structureType`` for each
+  extended-link role (the authoritative classification). When present,
+  it wins. Only roles missing that property fall through to the
+  name-based heuristic on the ``roleUri`` — and the heuristic must stay
+  permissive (it sees abbreviations like ``BS-classified`` /
+  ``IS-multistep`` in real-world taxonomies, not full English).
+  """
   structures: list[StructureSpec] = []
   role_pred = URIRef(f"{RS_NS}roleUri")
   name_pred = URIRef(f"{RS_NS}structureName")
+  type_pred = URIRef(f"{RS_NS}structureType")
   for subject, role_uri in graph.subject_objects(role_pred):
     names = list(graph.objects(subject, name_pred))
     name = str(names[0]) if names else str(role_uri).rsplit("/", 1)[-1]
-    # Heuristic structure_type from role URI
-    role_str = str(role_uri).lower()
-    if "balancesheet" in role_str:
-      stype = "balance_sheet"
-    elif "income" in role_str or "operations" in role_str:
-      stype = "income_statement"
-    elif "cashflow" in role_str:
-      stype = "cash_flow_statement"
-    elif "equity" in role_str or "changesin" in role_str:
-      stype = "equity_statement"
+    explicit_types = list(graph.objects(subject, type_pred))
+    if explicit_types:
+      stype = str(explicit_types[0])
     else:
-      stype = "custom"
+      role_str = str(role_uri).lower()
+      if "balancesheet" in role_str or "/bs-" in role_str or "/bs/" in role_str:
+        stype = "balance_sheet"
+      elif (
+        "income" in role_str
+        or "operations" in role_str
+        or "/is-" in role_str
+        or "/is/" in role_str
+      ):
+        stype = "income_statement"
+      elif "cashflow" in role_str or "/cf-" in role_str or "/cf/" in role_str:
+        stype = "cash_flow_statement"
+      elif "equity" in role_str or "changesin" in role_str:
+        stype = "equity_statement"
+      else:
+        stype = "custom"
     structures.append(
       StructureSpec(name=name, role_uri=str(role_uri), structure_type=stype)
     )

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Cascade Advisory Group LLC — AI Month-End Close Demo
+"""Cascade Advisory Group LLC — RoboLedger End-to-End Demo
 
 Sets up a complete demo environment with synthetic consulting company data,
-CoA→GAAP mappings, depreciation/prepaid schedules, and accounting policy
-documents. After running, use Claude Desktop or MCP tools to simulate
-a month-end close.
+CoA→GAAP mappings, depreciation/prepaid schedules, accounting policy
+documents, and a filed FY 2025 annual report. After running, use Claude
+Desktop or MCP tools to simulate the close workflow on the queued period.
 
 Data is generated for a rolling 16-month window ending at the current month,
 so the demo stays evergreen. OLTP load goes through the same `OLTPLoader`
@@ -21,10 +21,10 @@ path that the QuickBooks pipeline uses in production.
   access in `_reset.py` — this is intentionally NOT a product operation.
 
 Usage:
-    uv run python -m examples.close_demo.main                        # Create new graph + load
-    uv run python -m examples.close_demo.main <graph_id>             # Load into existing graph
-    uv run python -m examples.close_demo.main --dry-run              # Validate data only
-    uv run python -m examples.close_demo.main --ai                    # Use MappingAgent instead of hardcoded mappings (requires Bedrock)
+    uv run python -m examples.roboledger_demo.main                        # Create new graph + load
+    uv run python -m examples.roboledger_demo.main <graph_id>             # Load into existing graph
+    uv run python -m examples.roboledger_demo.main --dry-run              # Validate data only
+    uv run python -m examples.roboledger_demo.main --ai                    # Use MappingAgent instead of hardcoded mappings (requires Bedrock)
 
 Requires: Docker stack running (just start)
 """
@@ -507,7 +507,7 @@ def initialize_fiscal_calendar(graph_id: str) -> str:
     graph_id,
     closed_through=closed_through,
     earliest_data_period=demo_start_period,
-    note="close_demo initialization",
+    note="roboledger_demo initialization",
   )
 
   fc = result.get("fiscal_calendar", {})
@@ -674,6 +674,93 @@ def materialize_graph(graph_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Step 7: Generate + file FY 2025 annual report (Plan C capstone)
+# ---------------------------------------------------------------------------
+
+
+def generate_fy2025_report(graph_id: str) -> str | None:
+  """Create a published, filed FY 2025 annual report.
+
+  Exercises the Report Block lifecycle end-to-end: ``create-report`` →
+  ``get-report-package`` → ``file-report``. The result is a frozen,
+  filed snapshot of the prior year visible at ``/reports/{id}`` in the
+  package viewer, alongside the queued-for-close current period.
+
+  Returns the report_id (or None on failure) so the caller can print
+  the viewer URL.
+  """
+  # NOTE: ``LedgerClient.create_report`` discards the synchronous result
+  # (it returns only operation_id + status). The server runs create-report
+  # synchronously and inlines the report row in the envelope's ``result``,
+  # so we bypass the wrapper and call the generated API directly to get
+  # the report_id back. Drop this once the SDK helper is fixed to return
+  # the full envelope.
+  from robosystems_client.api.extensions_robo_ledger.op_create_report import (
+    sync_detailed as api_create_report,
+  )
+  from robosystems_client.models import CreateReportRequest
+
+  client = _get_ledger_client()
+
+  # Find the coa_mapping structure created during the taxonomy seed
+  structures = client.list_structures(graph_id, structure_type="coa_mapping")
+  if not structures:
+    print("  ERROR: No coa_mapping structure — was the CoA created?")
+    return None
+  mapping_id = structures[0]["id"]
+
+  # Find the FAC presentation taxonomy. This is where the proper
+  # income_statement / cash_flow_statement structures live (with
+  # associations to FAC elements). The bare ``fac v1`` reporting_standard
+  # only has a default placeholder structure with no associations, which
+  # is why the report would otherwise have zero rendered statements.
+  taxonomies = client.list_taxonomies(graph_id, taxonomy_type="mapping")
+  fac_pres = next(
+    (t for t in taxonomies if t.get("name", "").startswith("fac-presentation")),
+    None,
+  )
+  if not fac_pres:
+    print("  ERROR: No fac-presentation taxonomy seeded on this graph")
+    return None
+  taxonomy_id = fac_pres["id"]
+
+  body = CreateReportRequest(
+    name="FY 2025 Annual Report",
+    mapping_id=mapping_id,
+    taxonomy_id=taxonomy_id,
+    period_start=date(2025, 1, 1),
+    period_end=date(2025, 12, 31),
+    period_type="annual",
+    comparative=False,
+  )
+  response = api_create_report(graph_id=graph_id, body=body, client=client._get_client())
+  envelope = client._call_op("Create report", response)
+  payload = envelope.result if isinstance(envelope.result, dict) else {}
+  report_id = payload.get("id") or payload.get("report_id")
+  if not report_id:
+    print(f"  WARNING: No report_id in result: {payload}")
+    return None
+  print(f"  Generated:    {report_id}")
+
+  # Pull the package to confirm it rehydrates
+  package = client.get_report_package(graph_id, report_id)
+  if package:
+    items = package.get("items", []) or []
+    print(
+      f"  Package:      {len(items)} block(s) — {', '.join(i.get('block_type', '?') for i in items)}"
+    )
+
+  # File it — flips filing_status draft → filed
+  try:
+    client.file_report(graph_id, report_id)
+    print("  Filed:        ✓")
+  except Exception as e:
+    print(f"  WARNING: file_report failed: {e}")
+
+  return report_id
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -692,7 +779,7 @@ def main() -> None:
 
   # Validate data
   txns = get_all_transactions()
-  print(f"\n{COMPANY_NAME} — Close Demo Setup")
+  print(f"\n{COMPANY_NAME} — RoboLedger Demo Setup")
   print("=" * 60)
   print(f"  Accounts:     {len(ACCOUNTS)}")
   print(f"  Transactions: {len(txns)}")
@@ -776,6 +863,10 @@ def main() -> None:
   print("\nMaterializing to graph...")
   materialize_graph(graph_id)
 
+  # Generate + file FY 2025 annual report (Plan C capstone)
+  print("\nGenerating FY 2025 annual report...")
+  fy2025_report_id = generate_fy2025_report(graph_id)
+
   # Summary
   print("\n" + "=" * 60)
   print(f"  Graph ID: {graph_id}")
@@ -789,6 +880,9 @@ def main() -> None:
 
   print("\n  Ready for AI close workflow!")
   print(f"\n  Close target:  {close_target} ({close_label})")
+  if fy2025_report_id:
+    print(f"  FY 2025:       filed ({fy2025_report_id})")
+    print(f"  Viewer URL:    /reports/{fy2025_report_id}?graph={graph_id}")
   print("\n  Next steps:")
   print("    1. Open Claude Desktop (or MCP client)")
   print(f"    2. Switch to workspace: {graph_id}")
