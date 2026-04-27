@@ -566,13 +566,7 @@ class DuckDBTableManager:
           post_cols = list(column_names) + new_cols
 
           def _explicit_col_expr(table_col: str) -> str:
-            """Return the SELECT expression for a given table column.
-
-            Handles three special cases:
-            - file_id: injected as a literal (not present in parquet)
-            - src/dst: renamed from from/to in parquet (CREATE TABLE renames on first load)
-            - null_cols: columns the caller wants forced to NULL
-            """
+            # Maps table column → SELECT expr; handles file_id literal, src/dst rename, null_cols.
             if table_col == "file_id":
               if file_id_value:
                 return f"'{file_id_value}' AS file_id"
