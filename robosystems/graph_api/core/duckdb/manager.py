@@ -559,23 +559,32 @@ class DuckDBTableManager:
           # Intra-batch dedup is needed when multiple parquet files (e.g., from
           # different quarters) contain the same row (e.g., Taxonomy URIs).
 
-          # Build select expression, nulling out specified columns
-          def _col_expr(col: str, alias: str | None = None) -> str:
-            target = alias or col
-            if null_cols and col in null_cols:
-              return f'NULL AS "{target}"'
-            if alias:
-              return f'"{col}" AS {alias}'
-            return f't."{col}"'
+          # Compute the actual post-evolution column order for the table:
+          # pre-evolution columns (column_names) followed by newly added columns (new_cols).
+          # Using an explicit INSERT column list avoids positional mismatches when
+          # file_id sits between original and schema-evolved columns (Bug: DOUBLE[]→DOUBLE).
+          post_cols = list(column_names) + new_cols
 
-          if null_cols:
-            select_expr = ", ".join(_col_expr(c) for c in parquet_columns)
-          else:
-            select_expr = "t.*"
+          def _explicit_col_expr(table_col: str) -> str:
+            # Maps table column → SELECT expr; handles file_id literal, src/dst rename, null_cols.
+            if table_col == "file_id":
+              if file_id_value:
+                return f"'{file_id_value}' AS file_id"
+              return 'NULL AS "file_id"'
+            if table_col == "src" and parquet_has_from_to:
+              if null_cols and "from" in null_cols:
+                return 'NULL AS "src"'
+              return '"from" AS src'
+            if table_col == "dst" and parquet_has_from_to:
+              if null_cols and "to" in null_cols:
+                return 'NULL AS "dst"'
+              return '"to" AS dst'
+            if null_cols and table_col in null_cols:
+              return f'NULL AS "{table_col}"'
+            return f't."{table_col}"'
 
-          # Inject file_id for provenance tracking when file_id_map is provided
-          if file_id_value:
-            select_expr += f", '{file_id_value}' AS file_id"
+          select_expr = ", ".join(_explicit_col_expr(c) for c in post_cols)
+          insert_cols_clause = ", ".join(f'"{c}"' for c in post_cols)
 
           if has_identifier:
             intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "identifier") = 1'
@@ -585,13 +594,6 @@ class DuckDBTableManager:
             )
           elif has_src_dst:
             if parquet_has_from_to:
-              # Table has src/dst (from initial CREATE), parquet has from/to.
-              # Rename in SELECT and use parquet column names in dedup.
-              other_cols = [c for c in parquet_columns if c not in ("from", "to")]
-              select_parts = [_col_expr("from", "src"), _col_expr("to", "dst")] + [
-                _col_expr(c) for c in other_cols
-              ]
-              select_expr = ", ".join(select_parts)
               intra_dedup = 'QUALIFY ROW_NUMBER() OVER (PARTITION BY "from", "to") = 1'
               inter_dedup = (
                 f"WHERE NOT EXISTS (SELECT 1 FROM {quoted_table} a "
@@ -617,12 +619,15 @@ class DuckDBTableManager:
           # CTE deduplicates within incoming batch, outer query filters against existing rows
           if intra_dedup:
             sql = (
-              f"INSERT INTO {quoted_table} "
+              f"INSERT INTO {quoted_table} ({insert_cols_clause}) "
               f"WITH new_data AS (SELECT * FROM {parquet_read} {intra_dedup}) "
               f"SELECT {select_expr} FROM new_data t {inter_dedup}"
             )
           else:
-            sql = f"INSERT INTO {quoted_table} SELECT {select_expr} FROM {parquet_read} t {inter_dedup}"
+            sql = (
+              f"INSERT INTO {quoted_table} ({insert_cols_clause}) "
+              f"SELECT {select_expr} FROM {parquet_read} t {inter_dedup}"
+            )
         else:
           # Simple append — no dedup
           # Schema evolution: add any new parquet columns missing from the table

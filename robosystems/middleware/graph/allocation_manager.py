@@ -1326,7 +1326,7 @@ class LadybugAllocationManager:
         self.volume_table.update_item(
           Key={"volume_id": volume_id},
           UpdateExpression="SET databases = list_append(if_not_exists(databases, :empty), :new_db), last_updated = :timestamp",
-          ConditionExpression="NOT contains(if_not_exists(databases, :empty), :gid)",
+          ConditionExpression="attribute_not_exists(databases) OR NOT contains(databases, :gid)",
           ExpressionAttributeValues={
             ":empty": [],
             ":new_db": [graph_id],
