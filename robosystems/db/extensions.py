@@ -363,7 +363,23 @@ def provision_tenant_schema(graph_id: str) -> None:
     # after the triggers are attached, subsequent UPDATE/DELETE on those
     # rows raises from tenant scope.
     _widen_library_checks(conn, schema)
-    copy_library_into_tenant(conn, schema, pin)
+    # Library copy is the one-shot step. Once the immutability triggers
+    # are installed (below), re-running the copy raises from the
+    # ``raise_insert_into_library_structure`` trigger because tenant
+    # writes can't target library-seeded structure_ids — even though the
+    # rows being copied ARE the library content. Detect "already copied"
+    # via a sentinel query and skip; the trigger install + check widen
+    # are themselves idempotent (DROP IF EXISTS internally) so they can
+    # always run.
+    library_copied = conn.execute(
+      text(f"""
+        SELECT 1 FROM {schema}.structures
+        WHERE created_by = 'library-seeder'
+        LIMIT 1
+      """)
+    ).scalar()
+    if not library_copied:
+      copy_library_into_tenant(conn, schema, pin)
     _install_library_immutability_triggers(conn, schema)
 
     conn.commit()
