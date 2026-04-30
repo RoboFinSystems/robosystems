@@ -272,10 +272,16 @@ def _flatten_party(
   rows: list[dict[str, Any]] = []
   for raw in raw_list:
     data = raw.to_dict() if hasattr(raw, "to_dict") else raw
+    # QB Employees often have empty DisplayName/CompanyName but populated
+    # GivenName + FamilyName, so fall through to a synthesized name.
+    given = (data.get("GivenName") or "").strip()
+    family = (data.get("FamilyName") or "").strip()
+    full_name = f"{given} {family}".strip()
     name = (
       data.get(ref_keys.get("name", "DisplayName"))
       or data.get("CompanyName")
       or data.get("DisplayName")
+      or full_name
       or ""
     )
     legal = data.get("CompanyName") or name

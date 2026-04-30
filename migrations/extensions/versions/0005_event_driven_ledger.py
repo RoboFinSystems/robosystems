@@ -127,8 +127,8 @@ def _create_in_tenant(conn, schema: str) -> None:
   conn.execute(
     text(
       f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{schema}_agents_source_external "
-      f"ON {schema}.agents (source, external_id) "
-      f"WHERE external_id IS NOT NULL"
+      f"ON {schema}.agents (source, connection_id, external_id) "
+      f"WHERE external_id IS NOT NULL AND connection_id IS NOT NULL"
     )
   )
 
@@ -423,9 +423,9 @@ def upgrade() -> None:
   op.create_index(
     "idx_agents_source_external",
     "agents",
-    ["source", "external_id"],
+    ["source", "connection_id", "external_id"],
     unique=True,
-    postgresql_where="external_id IS NOT NULL",
+    postgresql_where="external_id IS NOT NULL AND connection_id IS NOT NULL",
   )
 
   # 2. events (agent_id FK declared inline)

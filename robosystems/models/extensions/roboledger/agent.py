@@ -28,9 +28,10 @@ class Agent(ExtensionsBase):
     Index(
       "idx_agents_source_external",
       "source",
+      "connection_id",
       "external_id",
       unique=True,
-      postgresql_where="external_id IS NOT NULL",
+      postgresql_where="external_id IS NOT NULL AND connection_id IS NOT NULL",
     ),
     CheckConstraint(
       "agent_type IN ('customer', 'vendor', 'employee', 'owner', "
