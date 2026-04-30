@@ -208,16 +208,59 @@ def create_event_block(
   return _to_envelope(event, body.dimension_ids)
 
 
+def _fire_handler_on_commit(
+  session: Session,
+  event: Event,
+  created_by: str,
+) -> None:
+  """Resolve and fire a Python handler against the captured event metadata.
+
+  Called when an event transitions to ``committed`` from a pre-handler
+  state (``captured`` or ``classified``). For events whose ``event_type``
+  has a registered Python handler, this validates the captured metadata
+  against the handler's schema and dispatches — producing the GL rows
+  the handler is responsible for. Events whose ``event_type`` has no
+  handler fall through silently (e.g., support events with no GL
+  impact, or future event types not yet wired).
+
+  Errors propagate to the caller so the surrounding transaction rolls
+  back — a bad approval cannot leave the event in ``committed`` with
+  no GL rows behind it.
+  """
+  python_handler = get_python_handler(event.event_type)
+  if python_handler is None:
+    return
+
+  raw_metadata = dict(event.metadata_ or {})
+  try:
+    typed_metadata = python_handler.metadata_schema.model_validate(raw_metadata)
+  except ValidationError as e:
+    raise HandlerMetadataValidationError(
+      f"Event {event.id} (type={event.event_type}): captured metadata fails "
+      f"handler validation — cannot commit. {e}"
+    )
+
+  python_handler.dispatch(session, event, typed_metadata, created_by)
+
+
 def update_event_block(
   session: Session,
   body: UpdateEventBlockRequest,
   created_by: str,
 ) -> EventBlockEnvelope:
-  """Apply a status transition and/or field corrections to an event block."""
+  """Apply a status transition and/or field corrections to an event block.
+
+  When the requested transition is ``captured → committed`` or
+  ``classified → committed``, the event's Python handler (if any) fires
+  against the captured metadata to produce the corresponding GL rows.
+  Handler errors roll back the entire update, including the status
+  change — a failed commit leaves the event in its pre-approval state.
+  """
   event = session.get(Event, body.event_id)
   if event is None:
     raise EventNotFoundError(f"Event not found: {body.event_id}")
 
+  fire_handler = False
   if body.transition_to is not None:
     allowed = _VALID_TRANSITIONS.get(event.status, frozenset())
     if body.transition_to not in allowed:
@@ -243,6 +286,11 @@ def update_event_block(
       event.replaced_by_event_id = successor.id
       successor.replaces_event_id = event.id
 
+    fire_handler = body.transition_to == "committed" and event.status in (
+      "captured",
+      "classified",
+    )
+
     event.status = body.transition_to
 
   if body.description is not None:
@@ -261,6 +309,11 @@ def update_event_block(
 
   if body.discharges_event_id is not None:
     event.discharges_event_id = body.discharges_event_id
+
+  if fire_handler:
+    # Handler runs after metadata patches so it sees the final shape.
+    # Errors propagate; the surrounding transaction rolls back.
+    _fire_handler_on_commit(session, event, created_by)
 
   session.commit()
   return _to_envelope(event, _load_dimension_ids(session, event.id))

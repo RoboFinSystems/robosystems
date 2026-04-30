@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from robosystems.models.api.event_block import UpdateEventBlockRequest
 from robosystems.operations.event_block.commands import (
   EventNotFoundError,
+  HandlerMetadataValidationError,
   InvalidEventTransitionError,
   update_event_block,
 )
@@ -187,3 +188,153 @@ class TestDualityLateBinding:
 
     assert schedule_entry.obligated_by_event_id == "evt_asset"
     assert envelope.obligated_by_event_id == "evt_asset"
+
+
+class TestApproveFiresHandler:
+  """captured → committed (and classified → committed) fires the
+  registered Python handler against the captured metadata. This is what
+  makes the inbox approve action actually post GL rows."""
+
+  def _journal_event(
+    self, *, event_id: str = "evt_qb_001", status: str = "captured"
+  ) -> SimpleNamespace:
+    """An event_type='journal_entry_recorded' event whose captured metadata
+    matches the handler's flat-shape schema. The dispatch mock stands in
+    for actual GL writes."""
+    e = _event(event_id, status=status)
+    e.event_type = "journal_entry_recorded"
+    e.event_category = "adjustment"
+    e.metadata_ = {
+      "posting_date": "2026-03-31",
+      "memo": "Sale",
+      "type": "standard",
+      "status": "draft",
+      "line_items": [
+        {"element_id": "elem_a", "debit_amount": 100, "credit_amount": 0},
+        {"element_id": "elem_b", "debit_amount": 0, "credit_amount": 100},
+      ],
+    }
+    return e
+
+  def test_captured_to_committed_fires_handler(self) -> None:
+    event = self._journal_event(status="captured")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="committed")
+    fake_handler = MagicMock()
+    fake_handler.metadata_schema.model_validate.return_value = "validated_metadata"
+
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=fake_handler,
+    ) as get_handler:
+      update_event_block(session, body, created_by="usr_test")
+
+    get_handler.assert_called_once_with("journal_entry_recorded")
+    fake_handler.dispatch.assert_called_once_with(
+      session, event, "validated_metadata", "usr_test"
+    )
+    assert event.status == "committed"
+    session.commit.assert_called_once()
+
+  def test_classified_to_committed_fires_handler(self) -> None:
+    event = self._journal_event(status="classified")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="committed")
+    fake_handler = MagicMock()
+    fake_handler.metadata_schema.model_validate.return_value = "ok"
+
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=fake_handler,
+    ):
+      update_event_block(session, body, created_by="usr_test")
+
+    fake_handler.dispatch.assert_called_once()
+
+  def test_committed_to_fulfilled_does_not_fire_handler(self) -> None:
+    """Handler fires only on the initial commit, not subsequent transitions."""
+    event = self._journal_event(status="committed")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="fulfilled")
+    fake_handler = MagicMock()
+
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=fake_handler,
+    ):
+      update_event_block(session, body, created_by="usr_test")
+
+    fake_handler.dispatch.assert_not_called()
+    assert event.status == "fulfilled"
+
+  def test_void_does_not_fire_handler(self) -> None:
+    """Rejecting a captured event must not write GL rows."""
+    event = self._journal_event(status="captured")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="voided")
+    fake_handler = MagicMock()
+
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=fake_handler,
+    ):
+      update_event_block(session, body, created_by="usr_test")
+
+    fake_handler.dispatch.assert_not_called()
+    assert event.status == "voided"
+
+  def test_no_handler_registered_falls_through(self) -> None:
+    """An event_type with no Python handler still transitions cleanly —
+    e.g., support events with no GL impact."""
+    event = self._journal_event(status="captured")
+    event.event_type = "audit_review_completed"  # no registered handler
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="committed")
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=None,
+    ):
+      update_event_block(session, body, created_by="usr_test")
+
+    assert event.status == "committed"
+    session.commit.assert_called_once()
+
+  def test_handler_validation_failure_raises_and_blocks_commit(self) -> None:
+    """Bad captured metadata fails validation; the wrapper exception lets
+    the caller surface a useful error. Status mutation happens before the
+    raise — caller is expected to roll back on exception."""
+    event = self._journal_event(status="captured")
+    session = _session_with_events(event)
+
+    body = UpdateEventBlockRequest(event_id="evt_qb_001", transition_to="committed")
+    fake_handler = MagicMock()
+    # Construct a real ValidationError via a Pydantic model
+    from pydantic import BaseModel
+    from pydantic import ValidationError as PydanticValidationError
+
+    class _Tiny(BaseModel):
+      x: int
+
+    try:
+      _Tiny(x="not_an_int")
+    except PydanticValidationError as e:
+      validation_err = e
+    fake_handler.metadata_schema.model_validate.side_effect = validation_err
+
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=fake_handler,
+    ):
+      with pytest.raises(HandlerMetadataValidationError) as exc:
+        update_event_block(session, body, created_by="usr_test")
+
+    assert "evt_qb_001" in str(exc.value)
+    assert "journal_entry_recorded" in str(exc.value)
+    fake_handler.dispatch.assert_not_called()
+    # Caller's transaction must roll back — we never reached commit.
+    session.commit.assert_not_called()

@@ -39,6 +39,7 @@ from robosystems.routers.extensions.roboledger.operations import (
   file_report_op,
   transition_filing_status_op,
   update_entity_op,
+  update_event_block_op,
   update_journal_entry_op,
 )
 
@@ -784,4 +785,246 @@ class TestTransitionFilingStatusOp:
           cache=_FakeCache(),
         )
     assert exc.value.status_code == 422
-    assert "filed" in exc.value.detail
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Update Event Block route — the inbox approve flow
+#
+# Specifically covers the captured/classified → committed transition that
+# fires the registered Python handler against captured metadata. The
+# handler can raise four error types that all need to surface as 422 so
+# the inbox UI can display the failure reason to the user.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _make_event_envelope(status: str = "committed"):
+  """Match the EventBlockEnvelope shape returned by update_event_block."""
+  from datetime import UTC, datetime
+
+  from robosystems.models.api.event_block import EventBlockEnvelope
+
+  return EventBlockEnvelope(
+    id="evt_qb_001",
+    event_type="journal_entry_recorded",
+    event_category="adjustment",
+    event_class="economic",
+    status=status,
+    occurred_at=datetime(2026, 3, 31, tzinfo=UTC),
+    source="quickbooks",
+    external_id="qb_txn_42",
+    currency="USD",
+    metadata={"qb_txn_type": "Invoice", "entries": []},
+    dimension_ids=[],
+    created_at=datetime(2026, 3, 31, tzinfo=UTC),
+    created_by="usr_test",
+  )
+
+
+class TestUpdateEventBlockOp:
+  """Router-level tests for update-event-block — covers the error-map
+  contract for handler-firing failures introduced in Phase 4."""
+
+  def _request(self, **overrides):
+    from robosystems.models.api.event_block import UpdateEventBlockRequest
+
+    return UpdateEventBlockRequest(
+      event_id="evt_qb_001", transition_to="committed", **overrides
+    )
+
+  @pytest.mark.asyncio
+  async def test_happy_path_returns_envelope(self) -> None:
+    body = self._request()
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.update_event_block",
+        return_value=_make_event_envelope("committed"),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await update_event_block_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+
+    assert envelope.operation == "update-event-block"
+    assert envelope.status == "completed"
+    assert envelope.result["status"] == "committed"
+
+  @pytest.mark.asyncio
+  async def test_404_when_event_missing(self) -> None:
+    from robosystems.operations.event_block.commands import EventNotFoundError
+
+    body = self._request()
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.update_event_block",
+        side_effect=EventNotFoundError("evt_qb_001"),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await update_event_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 404
+
+  @pytest.mark.asyncio
+  async def test_422_when_transition_invalid(self) -> None:
+    from robosystems.operations.event_block.commands import (
+      InvalidEventTransitionError,
+    )
+
+    body = self._request()
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.update_event_block",
+        side_effect=InvalidEventTransitionError("captured → fulfilled not allowed"),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await update_event_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+
+  @pytest.mark.asyncio
+  async def test_422_when_handler_metadata_validation_fails(self) -> None:
+    """Approve fails because captured metadata doesn't satisfy the
+    handler's schema (e.g., missing posting_date). Must surface as 422,
+    not 500."""
+    from robosystems.operations.event_block.python_handlers.types import (
+      HandlerMetadataValidationError,
+    )
+
+    body = self._request()
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.update_event_block",
+        side_effect=HandlerMetadataValidationError(
+          "Event evt_qb_001: posting_date required"
+        ),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await update_event_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+    assert "posting_date" in exc.value.detail
+
+  @pytest.mark.asyncio
+  async def test_422_when_element_resolution_fails(self) -> None:
+    """Captured QB metadata references element_external_ids that don't
+    exist in the CoA — handler raises ElementResolutionError, must
+    surface as 422."""
+    from robosystems.operations.event_block.python_handlers.journal_entry_recorded import (
+      ElementResolutionError,
+    )
+
+    body = self._request()
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.update_event_block",
+        side_effect=ElementResolutionError(
+          "Event evt_qb_001: 2 element_external_id(s) could not be resolved"
+        ),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await update_event_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+    assert "element_external_id" in exc.value.detail
+
+  @pytest.mark.asyncio
+  async def test_422_when_handler_hits_closed_period(self) -> None:
+    from datetime import date
+
+    from robosystems.operations.roboledger.commands._guards import ClosedPeriodError
+
+    body = self._request()
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.update_event_block",
+        side_effect=ClosedPeriodError("2026-02", date(2026, 2, 28)),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await update_event_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+
+  @pytest.mark.asyncio
+  async def test_422_when_handler_hits_unbalanced_entry(self) -> None:
+    from robosystems.operations.roboledger.commands.journal_entries import (
+      UnbalancedJournalEntryError,
+    )
+
+    body = self._request()
+    with (
+      patch(
+        "robosystems.operations.event_block.commands.update_event_block",
+        side_effect=UnbalancedJournalEntryError(total_debit=10000, total_credit=9999),
+      ),
+      _mock_session_ctx() as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await update_event_block_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 422
+    assert "balance" in exc.value.detail

@@ -56,6 +56,11 @@ class LoadResult:
   dimensions: int = 0
   events_captured: int = 0
   events_updated: int = 0
+  # Drop counters surface data-quality issues that the loader masks with
+  # defaults — visible in logs and dagster results so a sync that quietly
+  # eats half of QB's data doesn't pass unnoticed.
+  dropped_unbalanced_entries: int = 0
+  dropped_empty_transactions: int = 0
   errors: list[str] = field(default_factory=list)
 
   @property
@@ -69,6 +74,21 @@ class LoadResult:
       + self.events_captured
       + self.events_updated
     )
+
+
+@dataclass
+class _CaptureResult:
+  """Internal counters for ``_capture_transactions_as_events``.
+
+  Carried back to ``LoadResult`` so the sync log surfaces what the
+  loader hardening dropped — see ``LoadResult.dropped_unbalanced_entries``
+  / ``dropped_empty_transactions`` for the data-quality contract.
+  """
+
+  inserted: int = 0
+  updated: int = 0
+  dropped_unbalanced_entries: int = 0
+  dropped_empty_transactions: int = 0
 
 
 class OLTPLoader:
@@ -241,7 +261,7 @@ class OLTPLoader:
       # unique partial index already guards uniqueness; this method
       # reconciles in-application so re-syncing the same window doesn't
       # grow the row count or strand handler-approved committed events.
-      events_inserted, events_updated = self._capture_transactions_as_events(
+      capture_result = self._capture_transactions_as_events(
         session,
         dbt_data,
         source=source,
@@ -249,11 +269,18 @@ class OLTPLoader:
         created_by=created_by,
         now=now,
       )
-      result.events_captured = events_inserted
-      result.events_updated = events_updated
+      result.events_captured = capture_result.inserted
+      result.events_updated = capture_result.updated
+      result.dropped_unbalanced_entries = capture_result.dropped_unbalanced_entries
+      result.dropped_empty_transactions = capture_result.dropped_empty_transactions
       logger.info(
-        f"Captured {events_inserted} new event_blocks, "
-        f"updated {events_updated} existing (capture-only — no GL writes)"
+        "Captured %d new event_blocks, updated %d existing "
+        "(dropped %d unbalanced entries, %d empty transactions; "
+        "capture-only — no GL writes)",
+        capture_result.inserted,
+        capture_result.updated,
+        capture_result.dropped_unbalanced_entries,
+        capture_result.dropped_empty_transactions,
       )
 
       # --- INSERT dimensions ---
@@ -309,7 +336,7 @@ class OLTPLoader:
     connection_id: str,
     created_by: str,
     now: datetime,
-  ) -> tuple[int, int]:
+  ) -> _CaptureResult:
     """Capture each dbt-staged QB transaction as an event_block row.
 
     The dbt staging emits three flat tables — ``transactions``, ``entries``,
@@ -326,7 +353,21 @@ class OLTPLoader:
     (committed / fulfilled / voided / superseded) are left untouched —
     a re-sync of QB data can't undo a handler-approved entry.
 
-    Returns ``(inserted, updated)`` for the result counters.
+    Hardening: the captured metadata must satisfy the
+    ``journal_entry_recorded`` handler's nested-entries schema at
+    approve time. To make that contract enforceable on the producer
+    side, this method:
+
+    - fills `entries[].memo` from `qb_doc_number` → synthetic
+      `"QB {qb_txn_type} {ext_id}"` when QB returns no memo;
+    - fills `entries[].posting_date` from the transaction's
+      `occurred_at` date when missing;
+    - drops entries whose post-zero-filter line_items count drops below
+      2 (handler requires `min_length=2`);
+    - drops transactions whose surviving entries count drops to 0.
+
+    The two drop counters surface in ``LoadResult`` so a sync that
+    quietly eats half the QB data is visible.
     """
     from robosystems.models.extensions.roboledger import Event
 
@@ -367,7 +408,7 @@ class OLTPLoader:
       )
 
     if not txns_by_ext:
-      return 0, 0
+      return _CaptureResult()
 
     # 2) Look up existing events for the (source, external_id) pairs
     existing: dict[str, Event] = {
@@ -380,8 +421,7 @@ class OLTPLoader:
       .all()
     }
 
-    inserted = 0
-    updated = 0
+    out = _CaptureResult()
     new_events = []
 
     for ext_id, txn in txns_by_ext.items():
@@ -399,9 +439,60 @@ class OLTPLoader:
       if txn.get("due_date") and hasattr(txn["due_date"], "isoformat"):
         due_date_iso = txn["due_date"].isoformat()
 
+      qb_txn_type = str(txn.get("type")) if txn.get("type") else None
+      qb_doc_number = str(txn.get("number")) if txn.get("number") else None
+      occurred_date_iso = (
+        occurred_at.date().isoformat() if hasattr(occurred_at, "date") else None
+      )
+
+      # Build entries with handler-friendly defaults; drop unbalanced ones.
+      hardened_entries: list[dict] = []
+      for e in txn["entries"]:
+        line_items = e.get("line_items") or []
+        if len(line_items) < 2:
+          # min_length=2 on handler schema — a single-line entry can't
+          # balance. Drop with a counter so the sync log shows what was
+          # eaten.
+          out.dropped_unbalanced_entries += 1
+          continue
+
+        entry_ext_id = str(e["external_id"])
+        memo_raw = e.get("memo")
+        memo = (
+          str(memo_raw)
+          if memo_raw
+          else (qb_doc_number or f"QB {qb_txn_type or 'transaction'} {ext_id}")
+        )
+
+        posting_date_raw = e.get("posting_date")
+        if posting_date_raw and hasattr(posting_date_raw, "isoformat"):
+          posting_date_iso = posting_date_raw.isoformat()
+        else:
+          # Fallback to the transaction's occurred_at date — better than
+          # NULL for handler validation; QB always populates TxnDate at
+          # transaction level, so this is a real fallback.
+          posting_date_iso = occurred_date_iso
+
+        hardened_entries.append(
+          {
+            "external_id": entry_ext_id,
+            "type": str(e.get("type", "standard")),
+            "posting_date": posting_date_iso,
+            "number": str(e.get("number")) if e.get("number") else None,
+            "memo": memo,
+            "line_items": line_items,
+          }
+        )
+
+      if not hardened_entries:
+        # Every entry in this transaction was unbalanced. Skip the whole
+        # event — capturing it would just produce an unapprovable inbox row.
+        out.dropped_empty_transactions += 1
+        continue
+
       metadata_blob = {
-        "qb_txn_type": str(txn.get("type")) if txn.get("type") else None,
-        "qb_doc_number": str(txn.get("number")) if txn.get("number") else None,
+        "qb_txn_type": qb_txn_type,
+        "qb_doc_number": qb_doc_number,
         "qb_reference_number": str(txn.get("reference_number"))
         if txn.get("reference_number")
         else None,
@@ -411,19 +502,7 @@ class OLTPLoader:
         "qb_due_date": due_date_iso,
         "qb_category": str(txn.get("category")) if txn.get("category") else None,
         "connection_id": connection_id,
-        "entries": [
-          {
-            "external_id": str(e["external_id"]),
-            "type": str(e.get("type", "standard")),
-            "posting_date": e["posting_date"].isoformat()
-            if e.get("posting_date") and hasattr(e["posting_date"], "isoformat")
-            else None,
-            "number": str(e.get("number")) if e.get("number") else None,
-            "memo": str(e.get("memo")) if e.get("memo") else None,
-            "line_items": e["line_items"],
-          }
-          for e in txn["entries"]
-        ],
+        "entries": hardened_entries,
       }
 
       if ext_id in existing:
@@ -435,7 +514,7 @@ class OLTPLoader:
           evt.currency = txn.get("currency", "USD")
           evt.description = description
           evt.metadata_ = metadata_blob
-          updated += 1
+          out.updated += 1
         # else: leave it alone — handler already ran or user voided it
       else:
         new_events.append(
@@ -455,12 +534,12 @@ class OLTPLoader:
             created_by=created_by,
           )
         )
-        inserted += 1
+        out.inserted += 1
 
     if new_events:
       session.add_all(new_events)
     session.flush()
-    return inserted, updated
+    return out
 
   def _ensure_mapping_structure(
     self,

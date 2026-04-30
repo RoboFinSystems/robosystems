@@ -442,7 +442,7 @@ class TestCaptureTransactionsAsEvents:
     session.query.return_value.filter.return_value.all.return_value = []
 
     loader = OLTPLoader()
-    inserted, updated = loader._capture_transactions_as_events(
+    _capture_result = loader._capture_transactions_as_events(
       session,
       self._dbt_data(),
       source="quickbooks",
@@ -451,8 +451,8 @@ class TestCaptureTransactionsAsEvents:
       now=datetime.now(UTC),
     )
 
-    assert inserted == 1
-    assert updated == 0
+    assert _capture_result.inserted == 1
+    assert _capture_result.updated == 0
     # add_all called with one Event row
     add_all_calls = session.add_all.call_args_list
     assert len(add_all_calls) == 1
@@ -483,7 +483,7 @@ class TestCaptureTransactionsAsEvents:
     session.query.return_value.filter.return_value.all.return_value = [existing_event]
 
     loader = OLTPLoader()
-    inserted, updated = loader._capture_transactions_as_events(
+    _capture_result = loader._capture_transactions_as_events(
       session,
       self._dbt_data(),
       source="quickbooks",
@@ -492,8 +492,8 @@ class TestCaptureTransactionsAsEvents:
       now=datetime.now(UTC),
     )
 
-    assert inserted == 0
-    assert updated == 1
+    assert _capture_result.inserted == 0
+    assert _capture_result.updated == 1
     # The existing row was mutated, not replaced
     assert existing_event.amount == 5000
     assert existing_event.description == "Office supplies"
@@ -517,7 +517,7 @@ class TestCaptureTransactionsAsEvents:
     session.query.return_value.filter.return_value.all.return_value = [committed_event]
 
     loader = OLTPLoader()
-    inserted, updated = loader._capture_transactions_as_events(
+    _capture_result = loader._capture_transactions_as_events(
       session,
       self._dbt_data(),
       source="quickbooks",
@@ -527,8 +527,8 @@ class TestCaptureTransactionsAsEvents:
     )
 
     # Neither inserted nor counted as updated — the row is frozen.
-    assert inserted == 0
-    assert updated == 0
+    assert _capture_result.inserted == 0
+    assert _capture_result.updated == 0
     assert committed_event.metadata_ is original_metadata
     session.add_all.assert_not_called()
 
@@ -577,7 +577,7 @@ class TestCaptureTransactionsAsEvents:
     session.query.return_value.filter.return_value.all.return_value = []
 
     loader = OLTPLoader()
-    inserted, updated = loader._capture_transactions_as_events(
+    _capture_result = loader._capture_transactions_as_events(
       session,
       dbt,
       source="quickbooks",
@@ -586,8 +586,178 @@ class TestCaptureTransactionsAsEvents:
       now=datetime.now(UTC),
     )
 
-    assert inserted == 1  # the one valid transaction
-    assert updated == 0
-    # The captured event has no entries or line items (all orphans)
-    events_added = session.add_all.call_args_list[0][0][0]
-    assert events_added[0].metadata_["entries"] == []
+    # Hardening: a transaction whose entries all drop out is itself
+    # dropped — capturing it would just produce an unapprovable inbox row.
+    assert _capture_result.inserted == 0
+    assert _capture_result.updated == 0
+    assert _capture_result.dropped_empty_transactions == 1
+    session.add_all.assert_not_called()
+
+
+class TestCaptureHardening:
+  """Defaults + drop counters that keep handler validation passing on
+  real QB data (memo/posting_date can be None in the wild; zero-amount
+  filtering can leave entries with <2 lines)."""
+
+  def _txn(self, **txn_overrides) -> dict:
+    return {
+      "external_id": "JE_900",
+      "external_source": "quickbooks",
+      "number": "900",
+      "type": "Invoice",
+      "amount": 5000,
+      "currency": "USD",
+      "date": date(2026, 1, 15),
+      "source_id": "JE_900",
+      **txn_overrides,
+    }
+
+  def _entry(self, **overrides) -> dict:
+    return {
+      "external_id": "JE_900",
+      "external_transaction_id": "JE_900",
+      "external_source": "quickbooks",
+      "number": "900",
+      "type": "standard",
+      "posting_date": date(2026, 1, 15),
+      "memo": "Sale to Acme",
+      "status": "posted",
+      **overrides,
+    }
+
+  def _balanced_lines(self) -> list[dict]:
+    return [
+      {
+        "entry_external_id": "JE_900",
+        "element_external_id": "elem_ar",
+        "debit_amount": 5000,
+        "credit_amount": 0,
+        "line_order": 1,
+      },
+      {
+        "entry_external_id": "JE_900",
+        "element_external_id": "elem_revenue",
+        "debit_amount": 0,
+        "credit_amount": 5000,
+        "line_order": 2,
+      },
+    ]
+
+  def _run(self, dbt: dict):
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+    loader = OLTPLoader()
+    cap = loader._capture_transactions_as_events(
+      session,
+      dbt,
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+    return session, cap
+
+  def _captured_event(self, session) -> object:
+    return session.add_all.call_args_list[0][0][0][0]
+
+  def test_memo_falls_back_to_doc_number_when_qb_returns_none(self):
+    dbt = {
+      "transactions": [self._txn()],
+      "entries": [self._entry(memo=None)],  # ← QB sometimes omits memo
+      "line_items": self._balanced_lines(),
+    }
+    session, cap = self._run(dbt)
+    assert cap.inserted == 1
+    metadata_entries = self._captured_event(session).metadata_["entries"]
+    assert metadata_entries[0]["memo"] == "900"  # falls back to qb_doc_number
+
+  def test_memo_falls_back_to_synthetic_when_no_memo_or_doc_number(self):
+    dbt = {
+      "transactions": [self._txn(number=None)],
+      "entries": [self._entry(memo=None)],
+      "line_items": self._balanced_lines(),
+    }
+    session, cap = self._run(dbt)
+    assert cap.inserted == 1
+    metadata_entries = self._captured_event(session).metadata_["entries"]
+    assert metadata_entries[0]["memo"] == "QB Invoice JE_900"
+
+  def test_posting_date_falls_back_to_occurred_at(self):
+    dbt = {
+      "transactions": [self._txn()],
+      "entries": [self._entry(posting_date=None)],
+      "line_items": self._balanced_lines(),
+    }
+    session, cap = self._run(dbt)
+    assert cap.inserted == 1
+    metadata_entries = self._captured_event(session).metadata_["entries"]
+    # txn date is 2026-01-15; occurred_at fallback uses .date().isoformat()
+    assert metadata_entries[0]["posting_date"] == "2026-01-15"
+
+  def test_entry_with_one_line_after_zero_filter_is_dropped(self):
+    """QB sometimes emits a tax line + one zero-amount placeholder. After
+    zero-filter the entry has 1 line and can't balance — drop it."""
+    dbt = {
+      "transactions": [self._txn()],
+      "entries": [
+        self._entry(),
+        # Second entry has only one non-zero line
+        self._entry(external_id="JE_900_B"),
+      ],
+      "line_items": [
+        *self._balanced_lines(),
+        {
+          "entry_external_id": "JE_900_B",
+          "element_external_id": "elem_tax",
+          "debit_amount": 100,
+          "credit_amount": 0,
+          "line_order": 1,
+        },
+        # Zero-amount line gets filtered, leaving only one
+        {
+          "entry_external_id": "JE_900_B",
+          "element_external_id": "elem_tax_payable",
+          "debit_amount": 0,
+          "credit_amount": 0,
+          "line_order": 2,
+        },
+      ],
+    }
+    session, cap = self._run(dbt)
+    assert cap.inserted == 1  # Transaction still has one valid entry
+    assert cap.dropped_unbalanced_entries == 1
+    metadata_entries = self._captured_event(session).metadata_["entries"]
+    assert len(metadata_entries) == 1
+    assert metadata_entries[0]["external_id"] == "JE_900"
+
+  def test_transaction_with_all_unbalanced_entries_is_dropped(self):
+    """Edge: every entry filters down to <2 lines → drop the whole
+    transaction (otherwise we'd produce an unapprovable inbox row)."""
+    dbt = {
+      "transactions": [self._txn()],
+      "entries": [self._entry()],
+      "line_items": [
+        # Single line, one of which is zero-amount → filtered → only 1 line
+        {
+          "entry_external_id": "JE_900",
+          "element_external_id": "elem_x",
+          "debit_amount": 100,
+          "credit_amount": 0,
+          "line_order": 1,
+        },
+        {
+          "entry_external_id": "JE_900",
+          "element_external_id": "elem_y",
+          "debit_amount": 0,
+          "credit_amount": 0,
+          "line_order": 2,
+        },
+      ],
+    }
+    session, cap = self._run(dbt)
+    assert cap.inserted == 0
+    assert cap.dropped_unbalanced_entries == 1
+    assert cap.dropped_empty_transactions == 1
+    session.add_all.assert_not_called()

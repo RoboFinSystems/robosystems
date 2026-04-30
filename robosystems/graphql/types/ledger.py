@@ -27,6 +27,9 @@ from strawberry.scalars import JSON
 # the Pydantic decorator, which fails if the Strawberry wrapper isn't yet
 # known to the registry.
 from robosystems.graphql.types.common import PaginationInfo  # noqa: F401
+from robosystems.models.api.event_block import (
+  EventBlockEnvelope as PydanticEventBlockEnvelope,
+)
 from robosystems.models.api.extensions.account_rollups import (
   AccountRollupGroup as PydanticAccountRollupGroup,
 )
@@ -236,6 +239,74 @@ class Agent:
       is_1099_recipient=row.is_1099_recipient,
       created_at=row.created_at,
       updated_at=row.updated_at,
+      created_by=row.created_by,
+    )
+
+
+# ── Event blocks (inbox) ──────────────────────────────────────────────────
+
+
+@strawberry.type
+class EventBlock:
+  """An REA event in the ledger inbox.
+
+  Hand-written because `metadata: dict[str, Any]` needs the JSON scalar —
+  Strawberry's pydantic decorator cannot map an untyped dict field. The
+  envelope is the canonical "something happened" record (per
+  ``event-driven-ledger.md``); GL rows live downstream behind a handler.
+  """
+
+  id: str
+  event_type: str
+  event_category: str
+  event_class: str
+  status: str
+  occurred_at: datetime
+  effective_at: datetime | None
+  source: str
+  external_id: str | None
+  external_url: str | None
+  amount: int | None
+  currency: str
+  description: str | None
+  metadata: JSON
+  dimension_ids: list[str]
+  agent_id: str | None
+  resource_type: str | None
+  resource_element_id: str | None
+  replaced_by_event_id: str | None
+  replaces_event_id: str | None
+  obligated_by_event_id: str | None
+  discharges_event_id: str | None
+  created_at: datetime
+  created_by: str
+
+  @classmethod
+  def from_pydantic(cls, row: PydanticEventBlockEnvelope) -> EventBlock:
+    return cls(
+      id=row.id,
+      event_type=row.event_type,
+      event_category=row.event_category,
+      event_class=row.event_class,
+      status=row.status,
+      occurred_at=row.occurred_at,
+      effective_at=row.effective_at,
+      source=row.source,
+      external_id=row.external_id,
+      external_url=row.external_url,
+      amount=row.amount,
+      currency=row.currency,
+      description=row.description,
+      metadata=row.metadata,
+      dimension_ids=list(row.dimension_ids),
+      agent_id=row.agent_id,
+      resource_type=row.resource_type,
+      resource_element_id=row.resource_element_id,
+      replaced_by_event_id=row.replaced_by_event_id,
+      replaces_event_id=row.replaces_event_id,
+      obligated_by_event_id=row.obligated_by_event_id,
+      discharges_event_id=row.discharges_event_id,
+      created_at=row.created_at,
       created_by=row.created_by,
     )
 
