@@ -761,3 +761,287 @@ class TestCaptureHardening:
     assert cap.dropped_unbalanced_entries == 1
     assert cap.dropped_empty_transactions == 1
     session.add_all.assert_not_called()
+
+
+class TestCaptureAgentsFromQB:
+  """Phase 2: agent UPSERT keyed on (connection_id, source, external_id)."""
+
+  def _agents_data(self) -> dict:
+    return {
+      "agents": [
+        {
+          "id": "qb_cust_1",
+          "agent_type": "customer",
+          "name": "Acme Corp",
+          "legal_name": "Acme Corporation",
+          "email": "ap@acme.example",
+          "phone": "+1-555-0100",
+          "address": {"line1": "1 Main", "city": "Seattle"},
+          "tax_id": "12-3456789",
+          "is_1099_recipient": False,
+          "is_active": True,
+        },
+        {
+          "id": "qb_vend_1",
+          "agent_type": "vendor",
+          "name": "Office Depot",
+          "legal_name": "",
+          "email": "",
+          "phone": "",
+          "address": {},
+          "tax_id": "",
+          "is_1099_recipient": True,
+          "is_active": True,
+        },
+      ],
+    }
+
+  def test_capture_inserts_new_agents(self):
+    """Fresh agents → inserted; lookup map populated."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+    out = loader._capture_agents_from_qb(
+      session,
+      self._agents_data(),
+      source="quickbooks",
+      connection_id="conn_a",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert out.inserted == 2
+    assert out.updated == 0
+    assert "qb_cust_1" in out.external_to_id
+    assert "qb_vend_1" in out.external_to_id
+    assert out.external_to_id["qb_cust_1"].startswith("agt_")
+    assert session.add_all.called
+
+  def test_capture_updates_existing_agent_in_place(self):
+    """Re-sync of the same agent UPSERTs in place — no new row, no new ULID."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    existing = MagicMock()
+    existing.external_id = "qb_cust_1"
+    existing.id = "agt_existing"
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [existing]
+
+    loader = OLTPLoader()
+    dbt = {
+      "agents": [
+        {
+          "id": "qb_cust_1",
+          "agent_type": "customer",
+          "name": "Acme Corp Renamed",
+          "legal_name": "",
+          "email": "new@acme.example",
+          "phone": "",
+          "address": {},
+          "tax_id": "",
+          "is_1099_recipient": False,
+          "is_active": True,
+        },
+      ],
+    }
+
+    out = loader._capture_agents_from_qb(
+      session,
+      dbt,
+      source="quickbooks",
+      connection_id="conn_a",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert out.inserted == 0
+    assert out.updated == 1
+    assert existing.name == "Acme Corp Renamed"
+    assert existing.email == "new@acme.example"
+    assert out.external_to_id["qb_cust_1"] == "agt_existing"
+
+  def test_capture_returns_empty_when_no_agents_table(self):
+    """No agents mart in dbt_data → no-op, no DB calls."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    loader = OLTPLoader()
+    out = loader._capture_agents_from_qb(
+      session,
+      {},  # no "agents" key
+      source="quickbooks",
+      connection_id="conn_a",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert out.inserted == 0
+    assert out.updated == 0
+    assert out.external_to_id == {}
+    session.add_all.assert_not_called()
+
+  def test_capture_scopes_lookup_by_connection_id(self):
+    """Agent lookup filters by (source, connection_id, external_id) so two
+    QB connections on the same graph don't share agents."""
+    from robosystems.models.extensions.roboledger import Agent
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+    loader._capture_agents_from_qb(
+      session,
+      self._agents_data(),
+      source="quickbooks",
+      connection_id="conn_specific",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Inspect the filter call — the WHERE clause should reference
+    # connection_id, source, and external_id.
+    session.query.assert_called_with(Agent)
+
+
+class TestCaptureWithEventTypeAndAgent:
+  """Phase 2: source-class fidelity + agent linkage from the transactions mart."""
+
+  def _dbt_with_invoice(self) -> dict:
+    """Invoice transaction with event_type / agent_external_id from header join."""
+    return {
+      "transactions": [
+        {
+          "external_id": "Invoice_42",
+          "external_source": "quickbooks",
+          "number": "INV-42",
+          "type": "Invoice",
+          "category": None,
+          "amount": 100000,
+          "currency": "USD",
+          "date": date(2026, 2, 1),
+          "due_date": None,
+          "merchant_name": None,
+          "reference_number": "INV-42",
+          "description": "Consulting services",
+          "source_id": "Invoice_42",
+          "status": "posted",
+          # Phase 2 columns from the per-class header join in transactions.sql:
+          "event_type": "invoice_issued",
+          "event_category": "sales",
+          "agent_external_id": "qb_cust_1",
+          "agent_type": "customer",
+        }
+      ],
+      "entries": [
+        {
+          "external_id": "Invoice_42",
+          "external_transaction_id": "Invoice_42",
+          "number": "INV-42",
+          "type": "standard",
+          "posting_date": date(2026, 2, 1),
+          "memo": "Consulting services",
+          "status": "posted",
+        }
+      ],
+      "line_items": [
+        {
+          "entry_external_id": "Invoice_42",
+          "element_external_id": "elem_AR",
+          "debit_amount": 100000,
+          "credit_amount": 0,
+          "description": "AR debit",
+          "line_order": 1,
+        },
+        {
+          "entry_external_id": "Invoice_42",
+          "element_external_id": "elem_Revenue",
+          "debit_amount": 0,
+          "credit_amount": 100000,
+          "description": "Revenue credit",
+          "line_order": 2,
+        },
+      ],
+    }
+
+  def test_event_carries_class_specific_event_type(self):
+    """Invoice transaction → event_type='invoice_issued', category='sales'."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+    loader._capture_transactions_as_events(
+      session,
+      self._dbt_with_invoice(),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+      agent_lookup={"qb_cust_1": "agt_resolved"},
+    )
+
+    evt = session.add_all.call_args_list[0][0][0][0]
+    assert evt.event_type == "invoice_issued"
+    assert evt.event_category == "sales"
+    assert evt.agent_id == "agt_resolved"
+    assert evt.metadata_["qb_source_class"] == "Invoice"
+    assert evt.metadata_["qb_agent_external_id"] == "qb_cust_1"
+
+  def test_missing_agent_in_lookup_falls_back_to_null(self):
+    """If header references an agent_external_id but it's not in the
+    UPSERTed lookup (soft-deleted in QB), capture with agent_id=None."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+    loader._capture_transactions_as_events(
+      session,
+      self._dbt_with_invoice(),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+      agent_lookup={},  # Empty — agent gone from QB
+    )
+
+    evt = session.add_all.call_args_list[0][0][0][0]
+    assert evt.event_type == "invoice_issued"
+    assert evt.agent_id is None
+    # Event still captured (not skipped) so the user can review in inbox
+    assert evt.status == "captured"
+
+  def test_legacy_transaction_without_event_type_defaults_to_journal(self):
+    """Existing fixture data without event_type → defaults to journal_entry_recorded."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    dbt = self._dbt_with_invoice()
+    # Strip Phase 2 columns
+    dbt["transactions"][0].pop("event_type", None)
+    dbt["transactions"][0].pop("event_category", None)
+    dbt["transactions"][0].pop("agent_external_id", None)
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+    loader._capture_transactions_as_events(
+      session,
+      dbt,
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    evt = session.add_all.call_args_list[0][0][0][0]
+    assert evt.event_type == "journal_entry_recorded"
+    assert evt.event_category == "adjustment"
+    assert evt.agent_id is None

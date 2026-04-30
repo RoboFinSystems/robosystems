@@ -23,6 +23,39 @@ _PATCH_WORK_DIR = (
 )
 _PATCH_WRITE = "robosystems.adapters.quickbooks.pipeline.extract.write_extract_parquet"
 
+# Phase 2 party + transaction-header flatteners — patched so the mock client's
+# auto-generated Mock() return values for get_customers / get_vendors etc. don't
+# break iteration in the flatten functions.
+_PATCH_FLATTEN_CUSTOMERS = (
+  "robosystems.adapters.quickbooks.pipeline.extract.flatten_customers"
+)
+_PATCH_FLATTEN_VENDORS = (
+  "robosystems.adapters.quickbooks.pipeline.extract.flatten_vendors"
+)
+_PATCH_FLATTEN_EMPLOYEES = (
+  "robosystems.adapters.quickbooks.pipeline.extract.flatten_employees"
+)
+_PATCH_FLATTEN_INVOICES = (
+  "robosystems.adapters.quickbooks.pipeline.extract.flatten_invoice_headers"
+)
+_PATCH_FLATTEN_BILLS = (
+  "robosystems.adapters.quickbooks.pipeline.extract.flatten_bill_headers"
+)
+_PATCH_FLATTEN_PAYMENTS = (
+  "robosystems.adapters.quickbooks.pipeline.extract.flatten_payment_headers"
+)
+
+
+def _wire_phase2_client_methods(mock_client):
+  """Wire all Phase 2 client methods on a Mock so iteration doesn't break."""
+  mock_client.get_customers.return_value = []
+  mock_client.get_vendors.return_value = []
+  mock_client.get_employees.return_value = []
+  mock_client.get_invoices.return_value = []
+  mock_client.get_bills.return_value = []
+  mock_client.get_payments.return_value = []
+  return mock_client
+
 
 def _make_config(
   graph_id="kg_test123",
@@ -79,6 +112,7 @@ class TestQbExtractSuccess:
       {"Id": "1", "Name": "Cash", "AccountType": "Bank"}
     ]
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     company_info_flat = [{"Id": "1", "CompanyName": "Acme"}]
     journal_entries = [
@@ -120,6 +154,12 @@ class TestQbExtractSuccess:
       patch(_PATCH_QB_CLIENT, return_value=mock_client),
       patch(_PATCH_FLATTEN_CO, return_value=company_info_flat),
       patch(_PATCH_PARSE_JR, return_value=(journal_entries, journal_lines)),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE) as mock_write,
     ):
@@ -157,6 +197,7 @@ class TestQbExtractSuccess:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -167,6 +208,12 @@ class TestQbExtractSuccess:
       patch(_PATCH_QB_CLIENT, return_value=mock_client),
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -195,6 +242,7 @@ class TestQbExtractSuccess:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -205,6 +253,12 @@ class TestQbExtractSuccess:
       patch(_PATCH_QB_CLIENT, return_value=mock_client),
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -233,6 +287,7 @@ class TestQbExtractSuccess:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -243,6 +298,12 @@ class TestQbExtractSuccess:
       patch(_PATCH_QB_CLIENT, return_value=mock_client),
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -268,6 +329,7 @@ class TestQbExtractSuccess:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -278,6 +340,12 @@ class TestQbExtractSuccess:
       patch(_PATCH_QB_CLIENT, return_value=mock_client),
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -301,6 +369,7 @@ class TestQbExtractSuccess:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -311,6 +380,12 @@ class TestQbExtractSuccess:
       patch(_PATCH_QB_CLIENT, return_value=mock_client) as MockQBClient,
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -404,6 +479,7 @@ class TestQbExtractErrors:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -414,6 +490,12 @@ class TestQbExtractErrors:
       patch(_PATCH_QB_CLIENT, return_value=mock_client) as MockQBClient,
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -449,6 +531,7 @@ class TestQbExtractMetadata:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = [{"Id": "1"}, {"Id": "2"}]
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -459,6 +542,12 @@ class TestQbExtractMetadata:
       patch(_PATCH_QB_CLIENT, return_value=mock_client),
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -488,6 +577,7 @@ class TestQbExtractMetadata:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -498,6 +588,12 @@ class TestQbExtractMetadata:
       patch(_PATCH_QB_CLIENT, return_value=mock_client),
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -526,6 +622,7 @@ class TestQbExtractMetadata:
     mock_client.get_entity_info.return_value = []
     mock_client.get_accounts.return_value = []
     mock_client.get_transactions.return_value = {}
+    _wire_phase2_client_methods(mock_client)
 
     mock_session = _make_mock_session()
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
@@ -536,6 +633,12 @@ class TestQbExtractMetadata:
       patch(_PATCH_QB_CLIENT, return_value=mock_client),
       patch(_PATCH_FLATTEN_CO, return_value=[]),
       patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_FLATTEN_CUSTOMERS, return_value=[]),
+      patch(_PATCH_FLATTEN_VENDORS, return_value=[]),
+      patch(_PATCH_FLATTEN_EMPLOYEES, return_value=[]),
+      patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
+      patch(_PATCH_FLATTEN_BILLS, return_value=[]),
+      patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):

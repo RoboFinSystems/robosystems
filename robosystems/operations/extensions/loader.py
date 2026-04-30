@@ -56,6 +56,8 @@ class LoadResult:
   dimensions: int = 0
   events_captured: int = 0
   events_updated: int = 0
+  agents_inserted: int = 0
+  agents_updated: int = 0
   # Drop counters surface data-quality issues that the loader masks with
   # defaults — visible in logs and dagster results so a sync that quietly
   # eats half of QB's data doesn't pass unnoticed.
@@ -73,6 +75,8 @@ class LoadResult:
       + self.dimensions
       + self.events_captured
       + self.events_updated
+      + self.agents_inserted
+      + self.agents_updated
     )
 
 
@@ -89,6 +93,16 @@ class _CaptureResult:
   updated: int = 0
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
+
+
+@dataclass
+class _AgentCaptureResult:
+  """Result of agent UPSERT — counts plus the lookup map used to resolve
+  ``agent_external_id`` → ``Agent.id`` when capturing events."""
+
+  inserted: int = 0
+  updated: int = 0
+  external_to_id: dict[str, str] = field(default_factory=dict)
 
 
 class OLTPLoader:
@@ -142,7 +156,14 @@ class OLTPLoader:
     try:
       existing_tables = {row[0] for row in con.execute("SHOW TABLES").fetchall()}
       dbt_data: dict[str, list[dict]] = {}
-      for table in ["elements", "transactions", "entries", "line_items", "dimensions"]:
+      for table in [
+        "elements",
+        "agents",
+        "transactions",
+        "entries",
+        "line_items",
+        "dimensions",
+      ]:
         if table in existing_tables:
           result_set = con.execute(f"SELECT * FROM {table}")
           columns = [desc[0] for desc in result_set.description]
@@ -249,6 +270,29 @@ class OLTPLoader:
         result.elements = len(rows)
         logger.info(f"Inserted {result.elements} elements")
 
+      # --- UPSERT agents (Phase 2) ---
+      #
+      # Customers / vendors / employees pulled per-entity from the source
+      # system. UPSERT keyed on (connection_id, source, external_id) so
+      # two QB connections on the same graph don't share agents. Returns
+      # a lookup map external_id → Agent.id used by the event capture
+      # below to resolve agent_id from header data.
+      agent_capture = self._capture_agents_from_qb(
+        session,
+        dbt_data,
+        source=source,
+        connection_id=connection_id,
+        created_by=created_by,
+        now=now,
+      )
+      result.agents_inserted = agent_capture.inserted
+      result.agents_updated = agent_capture.updated
+      logger.info(
+        "Captured %d new agents, updated %d existing",
+        agent_capture.inserted,
+        agent_capture.updated,
+      )
+
       # --- CAPTURE transactions as event_blocks ---
       #
       # Per Phase 2 (see ``quickbooks-adapter.md``): each QB transaction
@@ -268,6 +312,7 @@ class OLTPLoader:
         connection_id=connection_id,
         created_by=created_by,
         now=now,
+        agent_lookup=agent_capture.external_to_id,
       )
       result.events_captured = capture_result.inserted
       result.events_updated = capture_result.updated
@@ -327,6 +372,104 @@ class OLTPLoader:
     )
     return result
 
+  def _capture_agents_from_qb(
+    self,
+    session,
+    dbt_data: dict,
+    *,
+    source: str,
+    connection_id: str,
+    created_by: str,
+    now: datetime,
+  ) -> _AgentCaptureResult:
+    """UPSERT agents from the dbt agents mart.
+
+    Keyed on ``(connection_id, source, external_id)`` so two connections
+    on the same graph don't share agents. Existing agents are updated in
+    place with the latest field values from QB. Returns a lookup map
+    used by event capture to resolve ``agent_external_id`` → ``Agent.id``.
+    """
+    from robosystems.models.extensions.roboledger import Agent
+    from robosystems.utils.ulid import generate_prefixed_ulid
+
+    out = _AgentCaptureResult()
+    rows = dbt_data.get("agents") or []
+    if not rows:
+      return out
+
+    # Look up existing agents for this connection scoped by external_id.
+    external_ids = [str(row["id"]) for row in rows if row.get("id")]
+    existing: dict[str, Agent] = {}
+    if external_ids:
+      query = session.query(Agent).filter(
+        Agent.source == source,
+        Agent.connection_id == connection_id,
+        Agent.external_id.in_(external_ids),
+      )
+      for agent in query.all():
+        existing[agent.external_id] = agent
+
+    new_agents: list[Agent] = []
+    for row in rows:
+      ext_id = str(row.get("id") or "")
+      if not ext_id:
+        continue
+
+      address = row.get("address")
+      if not isinstance(address, dict):
+        address = {}
+
+      name = str(row.get("name") or "")
+      legal_name = str(row.get("legal_name") or "") or None
+      email = str(row.get("email") or "") or None
+      phone = str(row.get("phone") or "") or None
+      tax_id = str(row.get("tax_id") or "") or None
+      agent_type = str(row.get("agent_type") or "other")
+      is_1099 = bool(row.get("is_1099_recipient", False))
+      is_active = bool(row.get("is_active", True))
+
+      if ext_id in existing:
+        agent = existing[ext_id]
+        agent.agent_type = agent_type
+        agent.name = name
+        agent.legal_name = legal_name
+        agent.email = email
+        agent.phone = phone
+        agent.address = address
+        agent.tax_id = tax_id
+        agent.is_1099_recipient = is_1099
+        agent.is_active = is_active
+        agent.updated_at = now
+        out.external_to_id[ext_id] = agent.id
+        out.updated += 1
+      else:
+        agent = Agent(
+          id=generate_prefixed_ulid("agt"),
+          agent_type=agent_type,
+          name=name,
+          legal_name=legal_name,
+          email=email,
+          phone=phone,
+          address=address,
+          tax_id=tax_id,
+          source=source,
+          external_id=ext_id,
+          connection_id=connection_id,
+          is_active=is_active,
+          is_1099_recipient=is_1099,
+          created_at=now,
+          updated_at=now,
+          created_by=created_by,
+        )
+        new_agents.append(agent)
+        out.external_to_id[ext_id] = agent.id
+        out.inserted += 1
+
+    if new_agents:
+      session.add_all(new_agents)
+    session.flush()
+    return out
+
   def _capture_transactions_as_events(
     self,
     session,
@@ -336,6 +479,7 @@ class OLTPLoader:
     connection_id: str,
     created_by: str,
     now: datetime,
+    agent_lookup: dict[str, str] | None = None,
   ) -> _CaptureResult:
     """Capture each dbt-staged QB transaction as an event_block row.
 
@@ -445,6 +589,27 @@ class OLTPLoader:
         occurred_at.date().isoformat() if hasattr(occurred_at, "date") else None
       )
 
+      # Phase 2: source-class fidelity + agent linkage.
+      # The transactions mart now carries event_type / event_category and
+      # the optional agent_external_id from the per-class header join.
+      event_type = str(txn.get("event_type") or "journal_entry_recorded")
+      event_category = str(txn.get("event_category") or "adjustment")
+      agent_ext_id_raw = txn.get("agent_external_id")
+      agent_ext_id = str(agent_ext_id_raw).strip() if agent_ext_id_raw else ""
+      agent_id: str | None = None
+      if agent_ext_id and agent_lookup:
+        agent_id = agent_lookup.get(agent_ext_id)
+        if agent_id is None:
+          # Agent referenced by a transaction header but not found in the
+          # agents UPSERT. Possible if the customer/vendor was soft-deleted
+          # in QB. Capture the event with agent_id=NULL — better than dropping.
+          logger.warning(
+            "QB event %s references agent %s but no Agent record was UPSERTed; "
+            "capturing event with agent_id=NULL",
+            ext_id,
+            agent_ext_id,
+          )
+
       # Build entries with handler-friendly defaults; drop unbalanced ones.
       hardened_entries: list[dict] = []
       for e in txn["entries"]:
@@ -501,6 +666,8 @@ class OLTPLoader:
         else None,
         "qb_due_date": due_date_iso,
         "qb_category": str(txn.get("category")) if txn.get("category") else None,
+        "qb_source_class": qb_txn_type,
+        "qb_agent_external_id": agent_ext_id or None,
         "connection_id": connection_id,
         "entries": hardened_entries,
       }
@@ -509,6 +676,9 @@ class OLTPLoader:
         evt = existing[ext_id]
         # Don't overwrite handler-approved or rejected events on re-sync.
         if evt.status in ("captured", "classified"):
+          evt.event_type = event_type
+          evt.event_category = event_category
+          evt.agent_id = agent_id
           evt.occurred_at = occurred_at
           evt.amount = amount
           evt.currency = txn.get("currency", "USD")
@@ -519,9 +689,10 @@ class OLTPLoader:
       else:
         new_events.append(
           Event(
-            event_type="journal_entry_recorded",
-            event_category="adjustment",
+            event_type=event_type,
+            event_category=event_category,
             event_class="economic",
+            agent_id=agent_id,
             occurred_at=occurred_at,
             status="captured",
             source=source,

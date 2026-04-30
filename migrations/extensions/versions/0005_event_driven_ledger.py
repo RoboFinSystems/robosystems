@@ -107,6 +107,7 @@ def _create_in_tenant(conn, schema: str) -> None:
         address JSONB,
         source VARCHAR NOT NULL DEFAULT 'native',
         external_id VARCHAR,
+        connection_id VARCHAR,
         is_active BOOLEAN NOT NULL DEFAULT true,
         is_1099_recipient BOOLEAN NOT NULL DEFAULT false,
         metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
@@ -397,6 +398,7 @@ def upgrade() -> None:
     sa.Column("address", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column("source", sa.String(), nullable=False, server_default="native"),
     sa.Column("external_id", sa.String(), nullable=True),
+    sa.Column("connection_id", sa.String(), nullable=True),
     sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
     sa.Column(
       "is_1099_recipient", sa.Boolean(), nullable=False, server_default="false"

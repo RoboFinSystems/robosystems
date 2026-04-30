@@ -1,0 +1,3 @@
+Id,agent_type,name,legal_name,email,phone,address,tax_id,is_1099_recipient,is_active
+qb_cust_1,customer,Acme Corp,Acme Corporation,ap@acme.example,+1-555-0100,{},12-3456789,false,true
+qb_cust_2,customer,Globex,Globex LLC,billing@globex.example,+1-555-0200,{},,false,true

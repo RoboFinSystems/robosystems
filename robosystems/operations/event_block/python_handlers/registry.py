@@ -25,6 +25,13 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   SCHEDULE_ENTRY_DUE_HANDLER.event_type: SCHEDULE_ENTRY_DUE_HANDLER,
   JOURNAL_ENTRY_RECORDED_HANDLER.event_type: JOURNAL_ENTRY_RECORDED_HANDLER,
   JOURNAL_ENTRY_REVERSED_HANDLER.event_type: JOURNAL_ENTRY_REVERSED_HANDLER,
+  # QB source-class events all dispatch through the journal handler — they post
+  # journal entries on approve and only differ in inbox display + filtering.
+  # Class-specific handlers (revenue recognition, payment-discharges-invoice)
+  # are post-Phase-2 work; see event-driven-ledger.md Phase 4b/4c.
+  "invoice_issued": JOURNAL_ENTRY_RECORDED_HANDLER,
+  "bill_received": JOURNAL_ENTRY_RECORDED_HANDLER,
+  "payment_received": JOURNAL_ENTRY_RECORDED_HANDLER,
 }
 
 

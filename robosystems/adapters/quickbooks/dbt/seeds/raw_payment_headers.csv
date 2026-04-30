@@ -1,0 +1,2 @@
+tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type
+Payment,99,Payment_99,2026-02-10,PMT-99,1000.00,USD,Receipt against INV-42,qb_cust_1,customer

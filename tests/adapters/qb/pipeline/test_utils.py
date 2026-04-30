@@ -453,7 +453,10 @@ class TestWriteExtractParquet:
         output_dir, accounts, journal_entries, journal_lines, company_info
       )
 
-    assert mock_parquet.call_count == 4
+    # Phase 2: 4 original files (accounts, journal_entries, journal_lines,
+    # company_info) + 6 new (customers, vendors, employees, invoice_headers,
+    # bill_headers, payment_headers) = 10 total.
+    assert mock_parquet.call_count == 10
     assert output_dir.exists()
 
   def test_creates_output_directory(self, tmp_path):

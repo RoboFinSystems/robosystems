@@ -75,6 +75,7 @@ def qb_load(
   # sync outputs (events captured/updated) and data-quality drop counters.
   context.log.info(
     f"Load complete: {result.elements} elements, {result.dimensions} dimensions, "
+    f"{result.agents_inserted} agents inserted, {result.agents_updated} agents updated, "
     f"{result.events_captured} events captured, {result.events_updated} events updated "
     f"({result.total_rows} total rows). "
     f"Dropped {result.dropped_unbalanced_entries} unbalanced entries, "
@@ -86,6 +87,8 @@ def qb_load(
       "graph_id": config.graph_id,
       "elements": result.elements,
       "dimensions": result.dimensions,
+      "agents_inserted": result.agents_inserted,
+      "agents_updated": result.agents_updated,
       "events_captured": result.events_captured,
       "events_updated": result.events_updated,
       "dropped_unbalanced_entries": result.dropped_unbalanced_entries,

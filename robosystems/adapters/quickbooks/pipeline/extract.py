@@ -8,7 +8,13 @@ from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
 from .utils import (
+  flatten_bill_headers,
   flatten_company_info,
+  flatten_customers,
+  flatten_employees,
+  flatten_invoice_headers,
+  flatten_payment_headers,
+  flatten_vendors,
   get_pipeline_work_dir,
   parse_journal_report,
   write_extract_parquet,
@@ -102,10 +108,40 @@ def qb_extract(
     f"Parsed: {len(journal_entries)} transactions, {len(journal_lines)} lines"
   )
 
+  # Phase 2: party entities (full snapshot, not date-filtered)
+  customers = flatten_customers(client.get_customers())
+  vendors = flatten_vendors(client.get_vendors())
+  employees = flatten_employees(client.get_employees())
+  context.log.info(
+    f"Fetched parties: {len(customers)} customers, {len(vendors)} vendors, "
+    f"{len(employees)} employees"
+  )
+
+  # Phase 2: transaction-class headers (date-filtered, same window as JournalReport).
+  # Headers carry agent refs that JournalReport flattens away — they enrich
+  # JournalReport-derived events with class-specific event_type + agent_id.
+  invoice_headers = flatten_invoice_headers(client.get_invoices(start_date, end_date))
+  bill_headers = flatten_bill_headers(client.get_bills(start_date, end_date))
+  payment_headers = flatten_payment_headers(client.get_payments(start_date, end_date))
+  context.log.info(
+    f"Fetched headers: {len(invoice_headers)} invoices, {len(bill_headers)} bills, "
+    f"{len(payment_headers)} payments"
+  )
+
   # Write parquet to shared pipeline directory
   extract_dir = get_pipeline_work_dir(config.graph_id) / "extract"
   write_extract_parquet(
-    extract_dir, accounts, journal_entries, journal_lines, company_info
+    extract_dir,
+    accounts,
+    journal_entries,
+    journal_lines,
+    company_info,
+    customers=customers,
+    vendors=vendors,
+    employees=employees,
+    invoice_headers=invoice_headers,
+    bill_headers=bill_headers,
+    payment_headers=payment_headers,
   )
 
   context.log.info(f"Extract complete → {extract_dir}")
@@ -118,6 +154,12 @@ def qb_extract(
       "accounts": len(accounts),
       "journal_entries": len(journal_entries),
       "journal_lines": len(journal_lines),
+      "customers": len(customers),
+      "vendors": len(vendors),
+      "employees": len(employees),
+      "invoice_headers": len(invoice_headers),
+      "bill_headers": len(bill_headers),
+      "payment_headers": len(payment_headers),
       "full_rebuild": config.full_rebuild,
     }
   )

@@ -68,3 +68,63 @@ models:
       - name: account_ref_id
         tests:
           - not_null
+
+  - name: stg_qb_customers
+    description: QuickBooks Customer entities — sales counterparties
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: agent_type
+        tests:
+          - accepted_values:
+              values: [customer]
+
+  - name: stg_qb_vendors
+    description: QuickBooks Vendor entities — purchase counterparties
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: agent_type
+        tests:
+          - accepted_values:
+              values: [vendor]
+
+  - name: stg_qb_employees
+    description: QuickBooks Employee entities
+    columns:
+      - name: id
+        tests:
+          - unique
+          - not_null
+      - name: agent_type
+        tests:
+          - accepted_values:
+              values: [employee]
+
+  - name: stg_qb_invoice_headers
+    description: QuickBooks Invoice headers (no line items — those still come from JournalReport)
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null
+
+  - name: stg_qb_bill_headers
+    description: QuickBooks Bill headers (no line items — those still come from JournalReport)
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null
+
+  - name: stg_qb_payment_headers
+    description: QuickBooks Payment headers (no line items — those still come from JournalReport)
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null

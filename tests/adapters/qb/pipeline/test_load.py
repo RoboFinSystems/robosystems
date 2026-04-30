@@ -41,6 +41,8 @@ def _make_load_result(
   dimensions=2,
   events_captured=10,
   events_updated=0,
+  agents_inserted=0,
+  agents_updated=0,
   dropped_unbalanced_entries=0,
   dropped_empty_transactions=0,
 ):
@@ -55,6 +57,8 @@ def _make_load_result(
     dimensions=dimensions,
     events_captured=events_captured,
     events_updated=events_updated,
+    agents_inserted=agents_inserted,
+    agents_updated=agents_updated,
     dropped_unbalanced_entries=dropped_unbalanced_entries,
     dropped_empty_transactions=dropped_empty_transactions,
   )
@@ -110,6 +114,8 @@ class TestQbLoadAsset:
       dimensions=1,
       events_captured=7,
       events_updated=2,
+      agents_inserted=4,
+      agents_updated=1,
       dropped_unbalanced_entries=1,
       dropped_empty_transactions=0,
     )
@@ -128,11 +134,14 @@ class TestQbLoadAsset:
     assert result.metadata["dimensions"] == 1
     assert result.metadata["events_captured"] == 7
     assert result.metadata["events_updated"] == 2
+    assert result.metadata["agents_inserted"] == 4
+    assert result.metadata["agents_updated"] == 1
     assert result.metadata["dropped_unbalanced_entries"] == 1
     assert result.metadata["dropped_empty_transactions"] == 0
     # total_rows = elements + dimensions + events_captured + events_updated
-    # (transactions/entries/line_items always 0 in Phase 2)
-    assert result.metadata["total_rows"] == 13
+    # + agents_inserted + agents_updated (= 3 + 1 + 7 + 2 + 4 + 1 = 18)
+    # transactions/entries/line_items always 0 in Phase 2
+    assert result.metadata["total_rows"] == 18
     assert "transactions" not in result.metadata
     assert "entries" not in result.metadata
     assert "line_items" not in result.metadata
