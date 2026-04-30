@@ -12,3 +12,4 @@ class QBSyncConfig(Config):
   realm_id: str = ""
   full_rebuild: bool = False
   lookback_days: int = 60
+  since_date: str = ""

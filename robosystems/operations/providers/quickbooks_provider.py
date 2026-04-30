@@ -148,6 +148,7 @@ async def sync_quickbooks_connection(
   user_id = connection.get("user_id", "")
   full_rebuild = options.get("full_rebuild", False)
   lookback_days = options.get("lookback_days", 60)
+  since_date = options.get("since_date", "") or ""
 
   if not realm_id:
     raise ValueError("QuickBooks realm_id not found in connection metadata")
@@ -160,6 +161,7 @@ async def sync_quickbooks_connection(
     "realm_id": realm_id,
     "full_rebuild": full_rebuild,
     "lookback_days": lookback_days,
+    "since_date": since_date,
   }
 
   run_config = {
@@ -183,7 +185,7 @@ async def sync_quickbooks_connection(
   logger.info(
     f"QuickBooks sync submitted for graph={graph_id}, "
     f"connection={connection_id}, run_id={run_id}, "
-    f"full_rebuild={full_rebuild}"
+    f"full_rebuild={full_rebuild}, since_date={since_date or '<lookback>'}"
   )
   return run_id
 

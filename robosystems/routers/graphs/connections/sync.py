@@ -136,10 +136,16 @@ async def sync_connection(
     # Validate provider is enabled before any sync operations
     provider_registry.get_provider(provider)
 
+    effective_options: dict[str, object] = dict(request.sync_options or {})
+    if request.full_rebuild:
+      effective_options["full_rebuild"] = True
+    if request.since_date is not None:
+      effective_options["since_date"] = request.since_date.isoformat()
+
     # Sync using provider registry with timeout coordination
     task_id = await asyncio.wait_for(
       provider_registry.sync_connection(
-        provider, connection, request.sync_options, graph_id
+        provider, connection, effective_options or None, graph_id
       ),
       timeout=operation_timeout,
     )

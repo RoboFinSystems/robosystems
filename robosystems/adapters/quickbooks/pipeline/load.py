@@ -26,14 +26,17 @@ def qb_load(
 ) -> MaterializeResult:
   """Load QB data from dbt DuckDB into extensions OLTP tables.
 
-  Uses the generic OLTPLoader which:
+  Phase 2 ingest:
   1. Provisions the tenant schema if needed
-  2. Deletes existing data for this source + connection
-  3. Inserts accounts, transactions, entries, line_items, dimensions
-  4. Resolves all foreign keys using external_id lookups
+  2. Inserts/updates structural rows (elements, dimensions)
+  3. Captures each QB transaction as an event_block row with
+     ``status='captured'`` — no GL writes happen here. Handlers fire
+     when the user approves the event in the inbox, which is when
+     transactions/entries/line_items rows actually get created.
 
   Returns:
-      MaterializeResult with load statistics
+      MaterializeResult with element/dimension/event counts and
+      data-quality drop counters.
   """
   from robosystems.operations.extensions.loader import OLTPLoader
 
@@ -67,20 +70,26 @@ def qb_load(
     for error in result.errors[:10]:
       context.log.warning(f"Load warning: {error}")
 
+  # Phase 2 ingest: transactions/entries/line_items are produced by handlers
+  # post-approval, not by sync — they're always 0 here. Surface the actual
+  # sync outputs (events captured/updated) and data-quality drop counters.
   context.log.info(
-    f"Load complete: {result.elements} elements, {result.transactions} transactions, "
-    f"{result.entries} entries, {result.line_items} line items, "
-    f"{result.dimensions} dimensions ({result.total_rows} total)"
+    f"Load complete: {result.elements} elements, {result.dimensions} dimensions, "
+    f"{result.events_captured} events captured, {result.events_updated} events updated "
+    f"({result.total_rows} total rows). "
+    f"Dropped {result.dropped_unbalanced_entries} unbalanced entries, "
+    f"{result.dropped_empty_transactions} empty transactions."
   )
 
   return MaterializeResult(
     metadata={
       "graph_id": config.graph_id,
       "elements": result.elements,
-      "transactions": result.transactions,
-      "entries": result.entries,
-      "line_items": result.line_items,
       "dimensions": result.dimensions,
+      "events_captured": result.events_captured,
+      "events_updated": result.events_updated,
+      "dropped_unbalanced_entries": result.dropped_unbalanced_entries,
+      "dropped_empty_transactions": result.dropped_empty_transactions,
       "total_rows": result.total_rows,
       "errors": len(result.errors),
     }

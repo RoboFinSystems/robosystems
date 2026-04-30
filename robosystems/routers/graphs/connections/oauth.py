@@ -219,11 +219,26 @@ async def oauth_callback(
         task_id = None
 
         if auto_sync:
+          # First sync after a fresh OAuth has no prior data to be
+          # incremental against — default to full_rebuild so the user
+          # sees their full history. Existing connections (already
+          # synced once) re-trigger with the default 60-day incremental
+          # window. Detected via ``last_sync`` being None.
+          # ``connection`` is the dict from ConnectionService.get_connection
+          # → Connection.to_dict(), which nests ``last_sync`` under
+          # ``metadata`` (alongside realm_id, item_id, etc.).
+          is_first_sync = (connection.get("metadata") or {}).get("last_sync") is None
+          sync_options = {"full_rebuild": True} if is_first_sync else None
+
           task_id = await provider_registry.sync_connection(
-            "quickbooks", connection, None, graph_id
+            "quickbooks", connection, sync_options, graph_id
           )
           logger.info(
-            f"Auto-sync initiated for QuickBooks connection: task_id={task_id}"
+            "Auto-sync initiated for QuickBooks connection: task_id=%s "
+            "(first_sync=%s, full_rebuild=%s)",
+            task_id,
+            is_first_sync,
+            is_first_sync,
           )
 
         return {

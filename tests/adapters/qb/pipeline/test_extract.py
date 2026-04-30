@@ -31,6 +31,7 @@ def _make_config(
   realm_id="123456789",
   full_rebuild=False,
   lookback_days=60,
+  since_date="",
 ):
   """Create a QBSyncConfig."""
   from robosystems.adapters.quickbooks.pipeline.configs import QBSyncConfig
@@ -42,6 +43,7 @@ def _make_config(
     realm_id=realm_id,
     full_rebuild=full_rebuild,
     lookback_days=lookback_days,
+    since_date=since_date,
   )
 
 
@@ -214,6 +216,76 @@ class TestQbExtractSuccess:
     start_date = call_kwargs[1]["start_date"]
     expected = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
     assert start_date == expected
+
+  def test_extract_since_date_overrides_lookback(self, tmp_path):
+    """since_date is used as start_date when full_rebuild=False."""
+    from robosystems.adapters.quickbooks.pipeline.extract import qb_extract
+
+    config = _make_config(full_rebuild=False, lookback_days=60, since_date="2024-01-15")
+
+    mock_creds = Mock()
+    mock_creds.get_credentials.return_value = {
+      "access_token": "t",
+      "refresh_token": "r",
+    }
+
+    mock_client = Mock()
+    mock_client.get_entity_info.return_value = []
+    mock_client.get_accounts.return_value = []
+    mock_client.get_transactions.return_value = {}
+
+    mock_session = _make_mock_session()
+    work_dir = tmp_path / "qb_pipeline" / config.graph_id
+
+    with (
+      patch(_PATCH_SESSION, return_value=mock_session),
+      patch(_PATCH_CREDS) as MockCreds,
+      patch(_PATCH_QB_CLIENT, return_value=mock_client),
+      patch(_PATCH_FLATTEN_CO, return_value=[]),
+      patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_WORK_DIR, return_value=work_dir),
+      patch(_PATCH_WRITE),
+    ):
+      MockCreds.get_by_connection_id.return_value = mock_creds
+      context = build_asset_context()
+      qb_extract(context, config)
+
+    assert mock_client.get_transactions.call_args[1]["start_date"] == "2024-01-15"
+
+  def test_extract_full_rebuild_beats_since_date(self, tmp_path):
+    """full_rebuild takes precedence over since_date when both are set."""
+    from robosystems.adapters.quickbooks.pipeline.extract import qb_extract
+
+    config = _make_config(full_rebuild=True, since_date="2024-01-15")
+
+    mock_creds = Mock()
+    mock_creds.get_credentials.return_value = {
+      "access_token": "t",
+      "refresh_token": "r",
+    }
+
+    mock_client = Mock()
+    mock_client.get_entity_info.return_value = []
+    mock_client.get_accounts.return_value = []
+    mock_client.get_transactions.return_value = {}
+
+    mock_session = _make_mock_session()
+    work_dir = tmp_path / "qb_pipeline" / config.graph_id
+
+    with (
+      patch(_PATCH_SESSION, return_value=mock_session),
+      patch(_PATCH_CREDS) as MockCreds,
+      patch(_PATCH_QB_CLIENT, return_value=mock_client),
+      patch(_PATCH_FLATTEN_CO, return_value=[]),
+      patch(_PATCH_PARSE_JR, return_value=([], [])),
+      patch(_PATCH_WORK_DIR, return_value=work_dir),
+      patch(_PATCH_WRITE),
+    ):
+      MockCreds.get_by_connection_id.return_value = mock_creds
+      context = build_asset_context()
+      qb_extract(context, config)
+
+    assert mock_client.get_transactions.call_args[1]["start_date"] == "2000-01-01"
 
   def test_extract_passes_credentials_to_qb_client(self, tmp_path):
     """Test that QBClient receives credentials from ConnectionCredentials."""

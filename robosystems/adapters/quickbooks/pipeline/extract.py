@@ -80,11 +80,15 @@ def qb_extract(
   context.log.info(f"Fetched {len(accounts)} accounts")
 
   # Fetch JournalReport (all transaction types in double-entry format)
-  # QB API requires explicit dates to return data
+  # QB API requires explicit dates to return data. Resolution order:
+  # full_rebuild → 2000-01-01, since_date if set → that, else lookback_days.
   end_date = datetime.now().strftime("%Y-%m-%d")
   if config.full_rebuild:
     start_date = "2000-01-01"  # Far enough back to catch all history
     context.log.info(f"Full rebuild: fetching transactions from {start_date}")
+  elif config.since_date:
+    start_date = config.since_date
+    context.log.info(f"Since-date sync: fetching transactions from {start_date}")
   else:
     start_date = (datetime.now() - timedelta(days=config.lookback_days)).strftime(
       "%Y-%m-%d"
