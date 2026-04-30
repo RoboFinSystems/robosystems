@@ -320,6 +320,11 @@ def upgrade() -> None:
     sa.Column("is_placeholder", sa.Boolean(), nullable=False),
     sa.Column("external_id", sa.String(), nullable=True),
     sa.Column("external_source", sa.String(), nullable=True),
+    # Logical reference to platform `Connection.id`. Cross-database, not
+    # an FK. Scopes deletes during re-sync so multi-connection graphs
+    # (e.g. parent + sub QB books) don't stomp each other's CoA.
+    # Library-origin elements have connection_id NULL.
+    sa.Column("connection_id", sa.String(), nullable=True),
     sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column("version", sa.Integer(), nullable=False),
     sa.Column("created_at", sa.DateTime(), nullable=False),
@@ -354,6 +359,15 @@ def upgrade() -> None:
   op.create_index("idx_elements_parent", "elements", ["parent_id"])
   op.create_index(
     "idx_elements_external", "elements", ["external_id", "external_source"]
+  )
+  # Used by OLTPLoader to scope deletes per (source, connection_id) tuple
+  # during a re-sync — without this index the delete is a seq scan over
+  # the elements table.
+  op.create_index(
+    "idx_elements_external_source_connection",
+    "elements",
+    ["external_source", "connection_id"],
+    postgresql_where=sa.text("connection_id IS NOT NULL"),
   )
   op.create_index(
     "idx_elements_active",

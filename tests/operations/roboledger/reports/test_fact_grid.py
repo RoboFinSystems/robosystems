@@ -14,7 +14,9 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _close_to_retained_earnings,
   _compute_prior_period,
   _facts_to_balance_dict,
+  _find_close_target,
   _HierarchyNode,
+  _infer_classification,
   _infer_period_type,
   _natural_sign,
 )
@@ -761,3 +763,168 @@ class TestClosePriorPeriodsToRetainedEarnings:
     )
 
     assert self._get_re_fact(facts).value == -26_000.0
+
+
+class TestInferClassification:
+  """Qname/balance_type fallback for elements without FASB traits.
+
+  Reference taxonomies (FAC, rs-gaap, type-subtype) often ship without
+  the elementsOfFinancialStatements trait wired. The close-to-RE
+  pipeline depends on classification to compute Net Income; this
+  fallback restores it from the qname + balance_type.
+  """
+
+  def test_revenue_inferred_from_qname_and_credit_balance(self):
+    assert _infer_classification("fac:Revenues", "credit") == "revenue"
+    assert _infer_classification("us-gaap:SalesRevenueNet", "credit") == "revenue"
+
+  def test_expense_inferred_from_debit_balance_and_token(self):
+    assert _infer_classification("fac:CostsAndExpenses", "debit") == "expense"
+    assert _infer_classification("us-gaap:DepreciationExpense", "debit") == "expense"
+    assert _infer_classification("us-gaap:LossOnDisposal", "debit") == "expense"
+
+  def test_equity_takes_precedence_over_liability_for_credit_capital(self):
+    assert _infer_classification("fac:Equity", "credit") == "equity"
+    assert (
+      _infer_classification("us-gaap:RetainedEarningsAccumulatedDeficit", "credit")
+      == "equity"
+    )
+
+  def test_asset_inferred_from_debit_balance_and_token(self):
+    assert _infer_classification("fac:CurrentAssets", "debit") == "asset"
+    assert _infer_classification("fac:FixedAssets", "debit") == "asset"
+
+  def test_liability_inferred_from_credit_balance_and_token(self):
+    assert _infer_classification("fac:CurrentLiabilities", "credit") == "liability"
+
+  def test_returns_none_for_unrecognized_qname(self):
+    assert _infer_classification("fac:Foo", "debit") is None
+    assert _infer_classification(None, "debit") is None
+    assert _infer_classification("", "credit") is None
+
+
+class TestFindCloseTarget:
+  """Resolution order: seed RE → us-gaap-shaped RE → any equity fact."""
+
+  P_START = date(2026, 1, 1)
+  P_END = date(2026, 12, 31)
+
+  def _equity_fact(self, *, qname: str, value: float, element_id: str) -> ReportFact:
+    return ReportFact(
+      element_id=element_id,
+      element_qname=qname,
+      element_name=qname,
+      classification="equity",
+      balance_type="credit",
+      value=value,
+      period_start=self.P_START,
+      period_end=self.P_END,
+      period_type="instant",
+    )
+
+  def test_prefers_seed_retained_earnings_id(self):
+    seed = self._equity_fact(
+      qname="us-gaap:RetainedEarnings",
+      value=100.0,
+      element_id="elem_gaap_retained_earnings",
+    )
+    other = self._equity_fact(
+      qname="fac:Equity", value=200.0, element_id="elem_fac_equity"
+    )
+    target = _find_close_target([other, seed], self.P_START, self.P_END)
+    assert target is seed
+
+  def test_prefers_retainedearnings_qname_when_seed_id_missing(self):
+    re = self._equity_fact(
+      qname="us-gaap:RetainedEarningsAccumulatedDeficit",
+      value=100.0,
+      element_id="elem_xyz",
+    )
+    eq = self._equity_fact(
+      qname="fac:Equity", value=200.0, element_id="elem_fac_equity"
+    )
+    target = _find_close_target([eq, re], self.P_START, self.P_END)
+    assert target is re
+
+  def test_falls_back_to_fac_equity(self):
+    eq = self._equity_fact(
+      qname="fac:Equity", value=49_800.0, element_id="elem_fac_equity"
+    )
+    target = _find_close_target([eq], self.P_START, self.P_END)
+    assert target is eq
+
+  def test_returns_none_when_no_equity_fact(self):
+    asset = ReportFact(
+      element_id="a",
+      element_qname="fac:CurrentAssets",
+      element_name="Current Assets",
+      classification="asset",
+      balance_type="debit",
+      value=100.0,
+      period_start=self.P_START,
+      period_end=self.P_END,
+      period_type="instant",
+    )
+    assert _find_close_target([asset], self.P_START, self.P_END) is None
+
+
+class TestCloseToRetainedEarningsFacEquity:
+  """End-to-end: close NI into fac:Equity (no us-gaap RE element)."""
+
+  P_START = date(2025, 1, 1)
+  P_END = date(2025, 12, 31)
+
+  def _fact(
+    self,
+    *,
+    qname: str,
+    classification: str,
+    balance_type: str,
+    value: float,
+    element_id: str,
+    period_type: str = "duration",
+  ) -> ReportFact:
+    return ReportFact(
+      element_id=element_id,
+      element_qname=qname,
+      element_name=qname,
+      classification=classification,
+      balance_type=balance_type,
+      value=value,
+      period_start=self.P_START,
+      period_end=self.P_END,
+      period_type=period_type,
+    )
+
+  def test_net_income_added_to_fac_equity(self):
+    facts = [
+      self._fact(
+        qname="fac:Revenues",
+        classification="revenue",
+        balance_type="credit",
+        value=192_500.0,
+        element_id="r",
+      ),
+      self._fact(
+        qname="fac:CostsAndExpenses",
+        classification="expense",
+        balance_type="debit",
+        value=157_950.0,
+        element_id="c",
+      ),
+      self._fact(
+        qname="fac:Equity",
+        classification="equity",
+        balance_type="credit",
+        value=49_800.0,
+        element_id="e",
+        period_type="instant",
+      ),
+    ]
+
+    _close_to_retained_earnings(facts, self.P_START, self.P_END)
+
+    equity = next(f for f in facts if f.element_qname == "fac:Equity")
+    assert equity.value == 49_800.0 + (192_500.0 - 157_950.0)
+    # No phantom us-gaap RE fact created.
+    assert not any(f.element_id == "elem_gaap_retained_earnings" for f in facts)

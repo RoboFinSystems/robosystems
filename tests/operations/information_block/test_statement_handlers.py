@@ -374,3 +374,82 @@ class TestBuildEnvelope:
     assert envelope.display_name == statement_handlers.STATEMENT_DISPLAY[block_type][0]
     assert envelope.category == "Reporting"
     assert envelope.artifact.mechanics.kind == "statement_renderer"
+
+
+class TestBuildHierarchyFromAtoms:
+  """Cover both presentation-tree root conventions in _build_hierarchy_from_atoms.
+
+  The seed.py taxonomy anchors presentation arcs at ``from_element_id ==
+  structure_id``; FAC / rs-gaap / type-subtype reference taxonomies anchor
+  at an abstract element (``fac:BalanceSheetAbstract``) and the structure
+  itself never appears in any presentation arc. Both must produce a
+  non-empty hierarchy or the rendering projection silently empties out.
+  """
+
+  @staticmethod
+  def _assoc(*, from_id: str, to_id: str, order: float = 0.0) -> MagicMock:
+    a = MagicMock()
+    a.association_type = "presentation"
+    a.from_element_id = from_id
+    a.to_element_id = to_id
+    a.order_value = order
+    return a
+
+  @staticmethod
+  def _elem(element_id: str) -> MagicMock:
+    e = MagicMock()
+    e.id = element_id
+    e.qname = f"qname:{element_id}"
+    e.name = element_id
+    e.balance_type = "debit"
+    e.is_abstract = False
+    return e
+
+  def test_seed_convention_structure_id_root(self) -> None:
+    """seed.py: presentation arcs anchor at from_element_id == structure_id."""
+    structure_id = "struct_balance_sheet"
+    elements_by_id = {eid: self._elem(eid) for eid in ("assets", "liabilities")}
+    associations = [
+      self._assoc(from_id=structure_id, to_id="assets"),
+      self._assoc(from_id=structure_id, to_id="liabilities"),
+    ]
+
+    hierarchy = statement_handlers._build_hierarchy_from_atoms(
+      structure_id, elements_by_id, {}, associations
+    )
+
+    assert len(hierarchy) == 2
+    assert {n.element_id for n in hierarchy} == {"assets", "liabilities"}
+
+  def test_fac_convention_abstract_element_root(self) -> None:
+    """FAC / rs-gaap: presentation arcs anchor at an abstract element.
+
+    The structure_id never appears in any arc; the root must be
+    auto-detected as ``from_set - to_set``.
+    """
+    structure_id = "fac_balance_sheet_classified"
+    abstract_root = "fac:BalanceSheetAbstract"
+    elements_by_id = {
+      eid: self._elem(eid) for eid in (abstract_root, "fac:Assets", "fac:CurrentAssets")
+    }
+    associations = [
+      self._assoc(from_id=abstract_root, to_id="fac:Assets"),
+      self._assoc(from_id="fac:Assets", to_id="fac:CurrentAssets"),
+    ]
+
+    hierarchy = statement_handlers._build_hierarchy_from_atoms(
+      structure_id, elements_by_id, {}, associations
+    )
+
+    assert len(hierarchy) == 1
+    assert hierarchy[0].element_id == abstract_root
+    assert len(hierarchy[0].children) == 1
+    assert hierarchy[0].children[0].element_id == "fac:Assets"
+    assert len(hierarchy[0].children[0].children) == 1
+    assert hierarchy[0].children[0].children[0].element_id == "fac:CurrentAssets"
+
+  def test_no_presentation_arcs_returns_empty_hierarchy(self) -> None:
+    hierarchy = statement_handlers._build_hierarchy_from_atoms(
+      "struct_balance_sheet", {}, {}, []
+    )
+    assert hierarchy == []

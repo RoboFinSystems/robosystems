@@ -546,15 +546,24 @@ def _extract_rules(graph: Graph) -> list[RuleSpec]:
   return rules
 
 
-def _extract_structures(graph: Graph) -> list[StructureSpec]:
+def _extract_structures(
+  graph: Graph, default_structure_type: str | None = None
+) -> list[StructureSpec]:
   """Extract extended link roles as structures.
 
-  The seed JSON-LD may carry an explicit ``structureType`` for each
-  extended-link role (the authoritative classification). When present,
-  it wins. Only roles missing that property fall through to the
-  name-based heuristic on the ``roleUri`` — and the heuristic must stay
-  permissive (it sees abbreviations like ``BS-classified`` /
-  ``IS-multistep`` in real-world taxonomies, not full English).
+  Resolution order for ``structure_type``:
+
+  1. Explicit ``structureType`` on the role node — authoritative;
+     used by presentation packages that carry per-structure types.
+  2. ``default_structure_type`` from the package — set by mapping /
+     rules / disclosure packages to override the role-uri name
+     heuristic that would otherwise mistake (e.g.) a fac-to-rs-gaap
+     crosswalk role for a balance_sheet just because the role URI
+     mentions BS.
+  3. Role-uri name heuristic — only fires for packages without a
+     default; matches abbreviations like ``BS-classified`` /
+     ``IS-multistep`` in real-world presentation taxonomies.
+  4. ``custom`` fallback.
   """
   structures: list[StructureSpec] = []
   role_pred = URIRef(f"{RS_NS}roleUri")
@@ -566,6 +575,8 @@ def _extract_structures(graph: Graph) -> list[StructureSpec]:
     explicit_types = list(graph.objects(subject, type_pred))
     if explicit_types:
       stype = str(explicit_types[0])
+    elif default_structure_type is not None:
+      stype = default_structure_type
     else:
       role_str = str(role_uri).lower()
       if "balancesheet" in role_str or "/bs-" in role_str or "/bs/" in role_str:
@@ -608,6 +619,7 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
   namespace_uri = doc.get("namespace_uri", "")
   description = doc.get("description")
   taxonomy_type = doc.get("taxonomy_type", "reporting_standard")
+  default_structure_type = doc.get("default_structure_type")
   name = f"{standard} {version}"
 
   # Parse with rdflib — it handles the @context expansion
@@ -637,7 +649,7 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
         elements.append(element)
 
   associations = _extract_associations(graph)
-  structures = _extract_structures(graph)
+  structures = _extract_structures(graph, default_structure_type=default_structure_type)
   trait_assignments = _extract_trait_assignments(graph)
   rules = _extract_rules(graph)
 
@@ -671,6 +683,7 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     trait_assignments=trait_assignments,
     rules=rules,
     taxonomy_type=taxonomy_type,
+    default_structure_type=default_structure_type,
     is_shared=True,
     description=description,
   )

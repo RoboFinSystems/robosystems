@@ -30,7 +30,21 @@ def _parse_metadata(raw) -> dict:
 
 @dataclass
 class LoadResult:
-  """Result of an OLTP load operation."""
+  """Result of an OLTP load operation.
+
+  Counts after Phase 2 (event-block ingest):
+
+  - ``elements`` / ``dimensions``: still inserted directly (structural).
+  - ``events_captured`` / ``events_updated``: per-transaction event_block
+    rows written by ``_capture_transactions_as_events`` with
+    ``status='captured'`` and ``apply_handlers=False``. The user later
+    approves these in the inbox, which fires the registered handler and
+    creates the actual GL rows.
+  - ``transactions`` / ``entries`` / ``line_items``: zero on a Phase 2 sync.
+    These rows are now produced by handlers (post-approval), not by the
+    sync. Kept on the dataclass for backward-compat with callers that
+    log result counts; ``total_rows`` includes the new event counts.
+  """
 
   graph_id: str
   source: str
@@ -40,6 +54,8 @@ class LoadResult:
   entries: int = 0
   line_items: int = 0
   dimensions: int = 0
+  events_captured: int = 0
+  events_updated: int = 0
   errors: list[str] = field(default_factory=list)
 
   @property
@@ -50,6 +66,8 @@ class LoadResult:
       + self.entries
       + self.line_items
       + self.dimensions
+      + self.events_captured
+      + self.events_updated
     )
 
 
@@ -89,9 +107,6 @@ class OLTPLoader:
     from robosystems.models.extensions import (
       Dimension,
       Element,
-      Entry,
-      LineItem,
-      Transaction,
     )
     from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -122,39 +137,26 @@ class OLTPLoader:
     now = datetime.now(UTC)
 
     with extensions_session(graph_id) as session:
-      # Delete existing data for this source + connection_id (reverse FK order)
-      session.query(LineItem).filter(
-        LineItem.entry_id.in_(
-          session.query(Entry.id).filter(
-            Entry.transaction_id.in_(
-              session.query(Transaction.id).filter(
-                Transaction.source == source,
-                Transaction.connection_id == connection_id,
-              )
-            )
-          )
-        )
-      ).delete(synchronize_session=False)
+      # ── Pre-sync deletes ───────────────────────────────────────────
+      #
+      # Transaction / Entry / LineItem are NOT deleted any more. Phase 2
+      # moved transactional ingestion to the event-block pattern: each
+      # QB transaction is captured as an Event row with
+      # ``status='captured'`` and ``apply_handlers=False``. GL rows
+      # (Transaction / Entry / LineItem) are produced post-approval by
+      # the registered handler. Deleting them here would destroy
+      # legitimate handler-approved entries on every re-sync.
+      #
+      # Element / Dimension paths stay direct (structural data, not
+      # transactional events).
 
-      session.query(Entry).filter(
-        Entry.transaction_id.in_(
-          session.query(Transaction.id).filter(
-            Transaction.source == source,
-            Transaction.connection_id == connection_id,
-          )
-        )
-      ).delete(synchronize_session=False)
-
-      session.query(Transaction).filter(
-        Transaction.source == source,
-        Transaction.connection_id == connection_id,
-      ).delete(synchronize_session=False)
-
-      # TODO: Element lacks connection_id column — if a graph has multiple
-      # connections of the same source type, this deletes elements from all of them.
-      # Add Element.connection_id in a future migration to scope correctly.
+      # Multi-connection-safe: scope element deletes by connection_id so a
+      # re-sync of one QB connection doesn't stomp another's CoA.
+      # Library-origin elements (rs-gaap / us-gaap / FAC) have
+      # connection_id NULL and are never touched by this delete.
       session.query(Element).filter(
         Element.external_source == source,
+        Element.connection_id == connection_id,
       ).delete(synchronize_session=False)
 
       session.query(Dimension).filter(
@@ -163,7 +165,8 @@ class OLTPLoader:
 
       session.flush()
       logger.info(
-        f"Deleted existing data for source={source}, connection_id={connection_id}"
+        f"Refreshed Element + Dimension rows for source={source}, "
+        f"connection_id={connection_id}"
       )
 
       # --- INSERT elements (from dbt "elements" table) ---
@@ -202,6 +205,7 @@ class OLTPLoader:
               is_monetary=True,
               external_id=ext_id,
               external_source=str(row["external_source"]),
+              connection_id=connection_id,
               metadata_=_parse_metadata(row.get("metadata")),
               version=1,
               created_at=now,
@@ -225,144 +229,32 @@ class OLTPLoader:
         result.elements = len(rows)
         logger.info(f"Inserted {result.elements} elements")
 
-      # --- INSERT transactions ---
-      transaction_lookup: dict[str, str] = {}  # external_id → oltp_id
-
-      if "transactions" in dbt_data:
-        rows = dbt_data["transactions"]
-        txn_objects = []
-        for row in rows:
-          oltp_id = generate_prefixed_ulid("txn")
-          ext_id = str(row["external_id"])
-          transaction_lookup[ext_id] = oltp_id
-
-          txn_objects.append(
-            Transaction(
-              id=oltp_id,
-              number=str(row["number"]) if row.get("number") else None,
-              idempotency_key=f"{source}:{connection_id}:{ext_id}",
-              type=str(row["type"]),
-              category=str(row["category"]) if row.get("category") else None,
-              amount=int(row["amount"]),
-              currency=str(row.get("currency", "USD")),
-              date=row["date"],
-              due_date=row.get("due_date"),
-              merchant_name=str(row["merchant_name"])
-              if row.get("merchant_name")
-              else None,
-              reference_number=str(row["reference_number"])
-              if row.get("reference_number")
-              else None,
-              description=str(row["description"]) if row.get("description") else None,
-              source=source,
-              source_id=str(row.get("source_id", ext_id)),
-              connection_id=connection_id,
-              status=str(row.get("status", "posted")),
-              posted_at=now,
-              metadata_={},
-              version=1,
-              created_at=now,
-              updated_at=now,
-              created_by=created_by,
-            )
-          )
-
-        session.add_all(txn_objects)
-        session.flush()
-        result.transactions = len(rows)
-        logger.info(f"Inserted {result.transactions} transactions")
-
-      # --- INSERT entries ---
-      entry_lookup: dict[str, str] = {}  # external_id → oltp_id
-
-      if "entries" in dbt_data:
-        rows = dbt_data["entries"]
-        entry_objects = []
-        for row in rows:
-          oltp_id = generate_prefixed_ulid("je")
-          ext_id = str(row["external_id"])
-          entry_lookup[ext_id] = oltp_id
-
-          # Resolve transaction FK
-          ext_txn_id = str(row.get("external_transaction_id", ext_id))
-          txn_oltp_id = transaction_lookup.get(ext_txn_id)
-
-          if not txn_oltp_id:
-            result.errors.append(f"Entry references unknown transaction: {ext_txn_id}")
-            continue
-
-          entry_objects.append(
-            Entry(
-              id=oltp_id,
-              number=str(row["number"]) if row.get("number") else None,
-              idempotency_key=f"{source}:{connection_id}:{ext_id}",
-              transaction_id=txn_oltp_id,
-              type=str(row.get("type", "standard")),
-              posting_date=row["posting_date"],
-              memo=str(row["memo"]) if row.get("memo") else None,
-              status=str(row.get("status", "posted")),
-              provenance="source_sync",
-              posted_at=now,
-              metadata_={},
-              version=1,
-              created_at=now,
-              updated_at=now,
-              created_by=created_by,
-            )
-          )
-
-        session.add_all(entry_objects)
-        session.flush()
-        result.entries = len(rows)
-        logger.info(f"Inserted {result.entries} entries")
-
-      # --- INSERT line_items ---
-      if "line_items" in dbt_data:
-        rows = dbt_data["line_items"]
-        li_objects = []
-        for row in rows:
-          oltp_id = generate_prefixed_ulid("li")
-
-          # Resolve FKs
-          entry_ext_id = str(row["entry_external_id"])
-          element_ext_id = str(row["element_external_id"])
-          entry_oltp_id = entry_lookup.get(entry_ext_id)
-          element_oltp_id = element_lookup.get(element_ext_id)
-
-          # Skip zero-amount lines (QB tax/memo lines)
-          debit = int(row["debit_amount"])
-          credit = int(row["credit_amount"])
-          if debit == 0 and credit == 0:
-            continue
-
-          if not entry_oltp_id:
-            result.errors.append(f"LineItem references unknown entry: {entry_ext_id}")
-            continue
-          if not element_oltp_id:
-            result.errors.append(
-              f"LineItem references unknown element: {element_ext_id}"
-            )
-            continue
-
-          li_objects.append(
-            LineItem(
-              id=oltp_id,
-              entry_id=entry_oltp_id,
-              element_id=element_oltp_id,
-              debit_amount=debit,
-              credit_amount=credit,
-              description=str(row["description"]) if row.get("description") else None,
-              line_order=int(row.get("line_order", 0)),
-              metadata_={},
-              created_at=now,
-              updated_at=now,
-            )
-          )
-
-        session.add_all(li_objects)
-        session.flush()
-        result.line_items = len(li_objects)
-        logger.info(f"Inserted {result.line_items} line items")
+      # --- CAPTURE transactions as event_blocks ---
+      #
+      # Per Phase 2 (see ``quickbooks-adapter.md``): each QB transaction
+      # becomes one Event row with ``status='captured'`` and
+      # ``apply_handlers=False``. GL rows (Transaction / Entry /
+      # LineItem) are produced after approval via the inbox flow
+      # (Phase 4) by the ``journal_entry_recorded`` handler.
+      #
+      # UPSERT semantics keyed on ``events(source, external_id)`` — the
+      # unique partial index already guards uniqueness; this method
+      # reconciles in-application so re-syncing the same window doesn't
+      # grow the row count or strand handler-approved committed events.
+      events_inserted, events_updated = self._capture_transactions_as_events(
+        session,
+        dbt_data,
+        source=source,
+        connection_id=connection_id,
+        created_by=created_by,
+        now=now,
+      )
+      result.events_captured = events_inserted
+      result.events_updated = events_updated
+      logger.info(
+        f"Captured {events_inserted} new event_blocks, "
+        f"updated {events_updated} existing (capture-only — no GL writes)"
+      )
 
       # --- INSERT dimensions ---
       # TODO: populate line_item_dimensions junction table to link
@@ -407,6 +299,168 @@ class OLTPLoader:
       f"{result.total_rows} total rows"
     )
     return result
+
+  def _capture_transactions_as_events(
+    self,
+    session,
+    dbt_data: dict,
+    *,
+    source: str,
+    connection_id: str,
+    created_by: str,
+    now: datetime,
+  ) -> tuple[int, int]:
+    """Capture each dbt-staged QB transaction as an event_block row.
+
+    The dbt staging emits three flat tables — ``transactions``, ``entries``,
+    ``line_items`` — joined by external IDs. This method groups them
+    transaction-first (an Event for each transaction, with its entries
+    and line_items packed into ``Event.metadata_``) and writes them as
+    Event rows with ``status='captured'``. Handler dispatch is deferred
+    to the inbox-approval flow (Phase 4); no GL rows are produced by
+    this sync.
+
+    Idempotent re-sync: looks up existing events by ``(source,
+    external_id)`` and updates them in place rather than inserting
+    duplicates. Events already in a non-captured terminal state
+    (committed / fulfilled / voided / superseded) are left untouched —
+    a re-sync of QB data can't undo a handler-approved entry.
+
+    Returns ``(inserted, updated)`` for the result counters.
+    """
+    from robosystems.models.extensions.roboledger import Event
+
+    # 1) Group dbt rows by transaction
+    txns_by_ext: dict[str, dict] = {}
+    for row in dbt_data.get("transactions", []) or []:
+      ext_id = str(row["external_id"])
+      txns_by_ext[ext_id] = {**row, "entries": []}
+
+    entries_by_ext: dict[str, dict] = {}
+    for row in dbt_data.get("entries", []) or []:
+      ent_ext_id = str(row["external_id"])
+      txn_ext_id = str(row.get("external_transaction_id", ent_ext_id))
+      if txn_ext_id not in txns_by_ext:
+        # Orphan entry — log and skip
+        continue
+      entry = {**row, "line_items": []}
+      txns_by_ext[txn_ext_id]["entries"].append(entry)
+      entries_by_ext[ent_ext_id] = entry
+
+    for row in dbt_data.get("line_items", []) or []:
+      entry_ext_id = str(row["entry_external_id"])
+      if entry_ext_id not in entries_by_ext:
+        continue
+      debit = int(row["debit_amount"])
+      credit = int(row["credit_amount"])
+      # Skip zero-amount lines (QB tax/memo placeholders)
+      if debit == 0 and credit == 0:
+        continue
+      entries_by_ext[entry_ext_id]["line_items"].append(
+        {
+          "element_external_id": str(row["element_external_id"]),
+          "debit_amount": debit,
+          "credit_amount": credit,
+          "description": str(row["description"]) if row.get("description") else None,
+          "line_order": int(row.get("line_order", 0)),
+        }
+      )
+
+    if not txns_by_ext:
+      return 0, 0
+
+    # 2) Look up existing events for the (source, external_id) pairs
+    existing: dict[str, Event] = {
+      e.external_id: e
+      for e in session.query(Event)
+      .filter(
+        Event.source == source,
+        Event.external_id.in_(list(txns_by_ext.keys())),
+      )
+      .all()
+    }
+
+    inserted = 0
+    updated = 0
+    new_events = []
+
+    for ext_id, txn in txns_by_ext.items():
+      occurred_at = txn.get("date") or now
+      # dbt sometimes returns dates rather than datetimes — normalize.
+      if hasattr(occurred_at, "isoformat") and not hasattr(occurred_at, "hour"):
+        occurred_at = datetime.combine(occurred_at, datetime.min.time(), tzinfo=UTC)
+
+      amount = int(txn["amount"]) if txn.get("amount") is not None else None
+      description = txn.get("description") or txn.get("memo")
+      if description is not None:
+        description = str(description)
+
+      due_date_iso = None
+      if txn.get("due_date") and hasattr(txn["due_date"], "isoformat"):
+        due_date_iso = txn["due_date"].isoformat()
+
+      metadata_blob = {
+        "qb_txn_type": str(txn.get("type")) if txn.get("type") else None,
+        "qb_doc_number": str(txn.get("number")) if txn.get("number") else None,
+        "qb_reference_number": str(txn.get("reference_number"))
+        if txn.get("reference_number")
+        else None,
+        "qb_merchant_name": str(txn.get("merchant_name"))
+        if txn.get("merchant_name")
+        else None,
+        "qb_due_date": due_date_iso,
+        "qb_category": str(txn.get("category")) if txn.get("category") else None,
+        "connection_id": connection_id,
+        "entries": [
+          {
+            "external_id": str(e["external_id"]),
+            "type": str(e.get("type", "standard")),
+            "posting_date": e["posting_date"].isoformat()
+            if e.get("posting_date") and hasattr(e["posting_date"], "isoformat")
+            else None,
+            "number": str(e.get("number")) if e.get("number") else None,
+            "memo": str(e.get("memo")) if e.get("memo") else None,
+            "line_items": e["line_items"],
+          }
+          for e in txn["entries"]
+        ],
+      }
+
+      if ext_id in existing:
+        evt = existing[ext_id]
+        # Don't overwrite handler-approved or rejected events on re-sync.
+        if evt.status in ("captured", "classified"):
+          evt.occurred_at = occurred_at
+          evt.amount = amount
+          evt.currency = txn.get("currency", "USD")
+          evt.description = description
+          evt.metadata_ = metadata_blob
+          updated += 1
+        # else: leave it alone — handler already ran or user voided it
+      else:
+        new_events.append(
+          Event(
+            event_type="journal_entry_recorded",
+            event_category="adjustment",
+            event_class="economic",
+            occurred_at=occurred_at,
+            status="captured",
+            source=source,
+            external_id=ext_id,
+            amount=amount,
+            currency=txn.get("currency", "USD"),
+            description=description,
+            metadata_=metadata_blob,
+            created_at=now,
+            created_by=created_by,
+          )
+        )
+        inserted += 1
+
+    if new_events:
+      session.add_all(new_events)
+    session.flush()
+    return inserted, updated
 
   def _ensure_mapping_structure(
     self,

@@ -120,6 +120,7 @@
   "standard": "fac-to-rs-gaap",
   "version": "v1",
   "taxonomy_type": "mapping",
+  "default_structure_type": "taxonomy_mapping",
   "namespace_uri": "https://robosystems.ai/taxonomy/fac-to-rs-gaap/v1/",
   "origin": "native",
   "created_at": "2026-04-20",
@@ -1896,19 +1897,6 @@
       "https://robosystems.ai/vocab/structureName": [
         {
           "@value": "FAC - 206.2-ISR2-Income Statement, Real Estate Investment Trust (REIT), Single Step, Equity income in taxes"
-        }
-      ]
-    },
-    {
-      "@id": "http://www.xbrlsite.com/fac/role/IncomeStatementSecuritiesBasedIncome3_CITI",
-      "https://robosystems.ai/vocab/roleUri": [
-        {
-          "@value": "http://www.xbrlsite.com/fac/role/IncomeStatementSecuritiesBasedIncome3_CITI"
-        }
-      ],
-      "https://robosystems.ai/vocab/structureName": [
-        {
-          "@value": "FAC - 205.4-IS91-Income Statement, Securities Based Income, CITI Group Specific"
         }
       ]
     },

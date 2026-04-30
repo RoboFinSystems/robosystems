@@ -33,9 +33,24 @@ class Structure(ExtensionsBase):
     Index("idx_structures_type", "structure_type"),
     CheckConstraint(
       "structure_type IN ("
-      "'chart_of_accounts', 'income_statement', 'balance_sheet', "
-      "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
-      "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric'"
+      # Renderable financial-statement presentations (the user-facing forms)
+      "'income_statement', 'balance_sheet', "
+      "'cash_flow_statement', 'equity_statement', "
+      # Domain-specific working-paper / schedule patterns
+      "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
+      # Chart-of-accounts and CoA→GAAP mapping
+      "'chart_of_accounts', 'coa_mapping', "
+      # Reference-taxonomy structure kinds (XBRL network roles distinct
+      # from presentation): formal calculation/business rules expressed
+      # as a network (FAC's "Assets = L + E"), named SEC/regulatory
+      # disclosures (type-subtype's 991xxx schedules), and crosswalks
+      # between taxonomies (fac-to-rs-gaap concordances). Filtered out
+      # of the report-package render path; surfaced through their own
+      # consumption paths (rule engine, disclosure registry, mapping
+      # resolver).
+      "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+      # Escape hatch for everything that doesn't fit the above
+      "'custom'"
       ")",
       name="check_structure_type",
     ),

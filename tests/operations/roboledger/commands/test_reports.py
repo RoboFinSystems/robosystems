@@ -9,6 +9,7 @@ from robosystems.operations.roboledger.commands.reports import (
   _build_structure_mapping,
   _create_report_fact_sets,
   _persist_report_facts,
+  _select_canonical_render_targets,
 )
 
 
@@ -36,12 +37,25 @@ class _FakeFacts:
 
 
 def test_build_structure_mapping_filters_report_eligible_types() -> None:
-  """The SQL query must restrict to statement/metric/custom types."""
+  """The SQL query must restrict to statement/metric types and route
+  facts to one canonical structure per block_type."""
   session = MagicMock()
   rows = [
-    MagicMock(structure_id="struct_is", element_id="elem_rev"),
-    MagicMock(structure_id="struct_is", element_id="elem_cogs"),
-    MagicMock(structure_id="struct_bs", element_id="elem_cash"),
+    MagicMock(
+      structure_id="struct_is",
+      structure_type="income_statement",
+      element_id="elem_rev",
+    ),
+    MagicMock(
+      structure_id="struct_is",
+      structure_type="income_statement",
+      element_id="elem_cogs",
+    ),
+    MagicMock(
+      structure_id="struct_bs",
+      structure_type="balance_sheet",
+      element_id="elem_cash",
+    ),
   ]
   session.execute.return_value.fetchall.return_value = rows
 
@@ -52,10 +66,9 @@ def test_build_structure_mapping_filters_report_eligible_types() -> None:
     "elem_cogs": "struct_is",
     "elem_cash": "struct_bs",
   }
-  # One ULID per distinct structure, not per row
+  # One ULID per canonical structure
   assert set(fs_map.keys()) == {"struct_is", "struct_bs"}
   assert all(v.startswith("fs_") for v in fs_map.values())
-  # Distinct ULIDs per structure
   assert fs_map["struct_is"] != fs_map["struct_bs"]
 
   # Verify the query restricts to the expected types
@@ -66,6 +79,198 @@ def test_build_structure_mapping_filters_report_eligible_types() -> None:
   assert "equity_statement" in call_sql
   assert "metric" in call_sql
   assert "schedule" not in call_sql
+
+
+def test_select_canonical_render_targets_picks_richest_when_no_mapping() -> None:
+  """Without a CoA mapping, falls back to the richest structure per type
+  (most elements). Deterministic id sort breaks remaining ties."""
+  rows = [
+    # IS Single-step — 2 elements
+    MagicMock(
+      structure_id="struct_is_single",
+      structure_type="income_statement",
+      element_id="elem_rev",
+    ),
+    MagicMock(
+      structure_id="struct_is_single",
+      structure_type="income_statement",
+      element_id="elem_costs",
+    ),
+    # IS Multi-step — 5 elements (richer)
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="elem_rev",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="elem_cogs",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="elem_gp",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="elem_opex",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="elem_oi",
+    ),
+  ]
+  session = MagicMock()
+  canonical = _select_canonical_render_targets(session, rows, mapping_id=None)
+  assert canonical == {"income_statement": "struct_is_multi"}
+
+
+def test_select_canonical_render_targets_picks_by_coa_coverage() -> None:
+  """When a CoA mapping is provided, the structure whose elements best
+  cover the mapping's targets wins — even if it has fewer total elements
+  than a richer alternative."""
+  rows = [
+    # Single-step has just Revenues + CostsAndExpenses (2 elements)
+    MagicMock(
+      structure_id="struct_is_single",
+      structure_type="income_statement",
+      element_id="fac:Revenues",
+    ),
+    MagicMock(
+      structure_id="struct_is_single",
+      structure_type="income_statement",
+      element_id="fac:CostsAndExpenses",
+    ),
+    # Multi-step has many MORE elements but doesn't include CostsAndExpenses
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="fac:Revenues",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="fac:CostOfRevenue",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="fac:GrossProfit",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="fac:OperatingExpenses",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="fac:OperatingIncome",
+    ),
+  ]
+
+  # Mapping points the user's CoA at fac:Revenues + fac:CostsAndExpenses —
+  # exactly what Single-step covers and Multi-step does not.
+  session = MagicMock()
+  mapping_targets = [
+    MagicMock(element_id="fac:Revenues"),
+    MagicMock(element_id="fac:CostsAndExpenses"),
+  ]
+  session.execute.return_value.fetchall.return_value = mapping_targets
+
+  canonical = _select_canonical_render_targets(session, rows, mapping_id="map_coa")
+  # Single-step wins despite having FEWER elements — coverage beats size.
+  assert canonical == {"income_statement": "struct_is_single"}
+
+
+def test_select_canonical_render_targets_one_per_block_type() -> None:
+  """A graph with multiple block_types gets exactly one canonical per type."""
+  rows = [
+    MagicMock(
+      structure_id="struct_bs", structure_type="balance_sheet", element_id="elem_assets"
+    ),
+    MagicMock(
+      structure_id="struct_is", structure_type="income_statement", element_id="elem_rev"
+    ),
+    MagicMock(
+      structure_id="struct_cf",
+      structure_type="cash_flow_statement",
+      element_id="elem_cash",
+    ),
+    MagicMock(
+      structure_id="struct_se", structure_type="equity_statement", element_id="elem_re"
+    ),
+  ]
+  session = MagicMock()
+  canonical = _select_canonical_render_targets(session, rows, mapping_id=None)
+  assert canonical == {
+    "balance_sheet": "struct_bs",
+    "income_statement": "struct_is",
+    "cash_flow_statement": "struct_cf",
+    "equity_statement": "struct_se",
+  }
+
+
+def test_build_structure_mapping_filters_to_canonical_only() -> None:
+  """When two IS variants both contain `fac:Revenues`, only the canonical
+  one ends up in the element→structure dict — no more dict-overwrite-wins."""
+  session = MagicMock()
+
+  # Use a side_effect to return different result objects per call:
+  # 1st call = the structure-and-elements query, 2nd = mapping-targets query.
+  rows = [
+    MagicMock(
+      structure_id="struct_is_single",
+      structure_type="income_statement",
+      element_id="fac:Revenues",
+    ),
+    MagicMock(
+      structure_id="struct_is_single",
+      structure_type="income_statement",
+      element_id="fac:CostsAndExpenses",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="fac:Revenues",
+    ),
+    MagicMock(
+      structure_id="struct_is_multi",
+      structure_type="income_statement",
+      element_id="fac:CostOfRevenue",
+    ),
+  ]
+  mapping_targets = [
+    MagicMock(element_id="fac:Revenues"),
+    MagicMock(element_id="fac:CostsAndExpenses"),
+  ]
+
+  call_idx = {"i": 0}
+
+  def execute_side(*_args, **_kwargs) -> MagicMock:
+    result = MagicMock()
+    if call_idx["i"] == 0:
+      result.fetchall.return_value = rows
+    else:
+      result.fetchall.return_value = mapping_targets
+    call_idx["i"] += 1
+    return result
+
+  session.execute.side_effect = execute_side
+
+  elem_map, fs_map = _build_structure_mapping(session, "tax_01", mapping_id="map_coa")
+
+  # Single-step wins on coverage; both fac:Revenues and fac:CostsAndExpenses
+  # route to it. fac:CostOfRevenue is dropped because Multi-step lost.
+  assert elem_map == {
+    "fac:Revenues": "struct_is_single",
+    "fac:CostsAndExpenses": "struct_is_single",
+  }
+  assert "fac:CostOfRevenue" not in elem_map
+  assert set(fs_map.keys()) == {"struct_is_single"}
 
 
 def test_persist_report_facts_stamps_structure_and_fact_set() -> None:

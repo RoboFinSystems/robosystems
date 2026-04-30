@@ -71,6 +71,14 @@ _RESOURCE_TYPE_CHECK = (
   "resource_type IN ('goods', 'services', 'money', 'right', "
   "'obligation', 'information', 'labor') OR resource_type IS NULL"
 )
+# Event source provenance — adapter-driven (quickbooks, xero, plaid) or
+# native (manual, schedule, system). Adding a new source means widening
+# this CHECK plus updating the adapter that emits the value. Must stay
+# in sync with the SQLAlchemy model in
+# ``models/extensions/roboledger/event.py``.
+_SOURCE_CHECK = (
+  "source IN ('manual', 'system', 'schedule', 'quickbooks', 'xero', 'plaid')"
+)
 _AGENT_TYPE_CHECK = (
   "agent_type IN ('customer', 'vendor', 'employee', 'owner', "
   "'supplier', 'government', 'lender', 'self', 'other')"
@@ -153,7 +161,8 @@ def _create_in_tenant(conn, schema: str) -> None:
         CONSTRAINT check_{schema}_event_status CHECK ({_STATUS_CHECK}),
         CONSTRAINT check_{schema}_event_category CHECK ({_CATEGORY_CHECK}),
         CONSTRAINT check_{schema}_event_class CHECK ({_EVENT_CLASS_CHECK}),
-        CONSTRAINT check_{schema}_event_resource_type CHECK ({_RESOURCE_TYPE_CHECK})
+        CONSTRAINT check_{schema}_event_resource_type CHECK ({_RESOURCE_TYPE_CHECK}),
+        CONSTRAINT check_{schema}_event_source CHECK ({_SOURCE_CHECK})
       )
     """)
   )
@@ -454,6 +463,7 @@ def upgrade() -> None:
     sa.CheckConstraint(_CATEGORY_CHECK, name="check_event_category"),
     sa.CheckConstraint(_EVENT_CLASS_CHECK, name="check_event_class"),
     sa.CheckConstraint(_RESOURCE_TYPE_CHECK, name="check_event_resource_type"),
+    sa.CheckConstraint(_SOURCE_CHECK, name="check_event_source"),
     sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], name="fk_events_agent_id"),
     sa.PrimaryKeyConstraint("id"),
   )

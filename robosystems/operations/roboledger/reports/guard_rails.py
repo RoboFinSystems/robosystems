@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .fact_grid import FactRow
+from .fact_grid import FactRow, _infer_classification
 
 # Rounding tolerance for balance checks (dollars)
 _TOLERANCE = 0.01
@@ -47,18 +47,55 @@ def _validate_income_statement(rows: list[FactRow]) -> ValidationResult:
   # Check: totals foot (subtotals equal sum of children)
   _check_totals_foot(rows, result)
 
-  # Semantic: check for standard line items
-  qnames = {r.element_qname for r in rows}
+  # Structural: Net Income = Revenue - Expenses (when all three are
+  # identifiable). Same top-most-subtotal-per-classification approach as
+  # BS — handles FAC's parallel subtotals at the same depth and falls
+  # back to qname inference when FASB element_traits aren't wired.
+  result.checks.append("net_income_equation")
 
-  result.checks.append("standard_line_items")
-  if not any("Revenue" in q for q in qnames):
-    result.warnings.append("No revenue line item found")
-  if not any("CostOfRevenue" in q for q in qnames):
-    result.warnings.append(
-      "No Cost of Revenue — confirm this is correct for your business"
+  revenue_row = _top_most_subtotal_for_classification(rows, "revenue")
+  expense_row = _top_most_subtotal_for_classification(rows, "expense")
+  net_income_row = _net_income_row(rows)
+
+  if revenue_row is None or expense_row is None:
+    # No silent pass — without revenue/expense rollups identifiable, the
+    # validator can't make any structural claim about Net Income.
+    missing: list[str] = []
+    if revenue_row is None:
+      missing.append("revenue")
+    if expense_row is None:
+      missing.append("expense")
+    result.failures.append(
+      "Income statement validation inconclusive: missing classification "
+      f"rollups for {missing}. Wire FASB elementsOfFinancialStatements "
+      "traits onto the structure's elements, or ensure at least one "
+      "subtotal row per classification is present."
     )
-  if not any("NetIncome" in q or "NetLoss" in q for q in qnames):
-    result.warnings.append("No Net Income line item found")
+    result.passed = False
+  else:
+    revenue = (revenue_row.values[0] or 0.0) if revenue_row.values else 0.0
+    expense = (expense_row.values[0] or 0.0) if expense_row.values else 0.0
+    implied_ni = revenue - expense
+
+    if net_income_row is not None:
+      reported_ni = (net_income_row.values[0] or 0.0) if net_income_row.values else 0.0
+      diff = abs(reported_ni - implied_ni)
+      if diff > _TOLERANCE:
+        result.failures.append(
+          f"Net Income mismatch: reported '{net_income_row.element_name}' "
+          f"({reported_ni:.2f}) ≠ Revenue ({revenue:.2f}) − "
+          f"Expenses ({expense:.2f}) = {implied_ni:.2f}, "
+          f"difference: {diff:.2f}"
+        )
+        result.passed = False
+    elif implied_ni != 0.0:
+      # Informational warning — not a failure. A missing NetIncome row
+      # is common in multi-step structures whose final line is
+      # "Income from Continuing Operations" or similar.
+      result.warnings.append(
+        f"No Net Income line found; implied NI = Revenue ({revenue:.2f}) "
+        f"− Expenses ({expense:.2f}) = {implied_ni:.2f}"
+      )
 
   # Semantic: check for zero-balance subtotals
   _check_zero_subtotals(rows, result)
@@ -69,38 +106,141 @@ def _validate_income_statement(rows: list[FactRow]) -> ValidationResult:
   return result
 
 
+def _top_most_subtotal_for_classification(
+  rows: list[FactRow], classification: str
+) -> FactRow | None:
+  """Pick the highest-priority row matching ``classification``.
+
+  Priority order:
+
+  1. Smallest depth wins — top of the rollup tree.
+  2. Among ties on depth, prefer the subtotal (Revenue rolled up across
+     subcategories) over the leaf (a single Revenue line).
+  3. Among ties on depth + subtotal-flag, prefer the larger absolute
+     value (zero-valued placeholder rows must not beat the real rollup —
+     see the FAC ``Temporary Equity`` tie scenario covered in
+     ``test_among_ties_at_same_depth_largest_value_wins``).
+
+  Combined L+E rollups are skipped via the qname check (won't classify
+  cleanly as either liability or equity).
+
+  Classification falls back to qname-based inference when ``row.classification``
+  is empty (FAC, rs-gaap, type-subtype reference taxonomies).
+
+  Single-step income statements often have ``Revenues`` as a leaf row
+  (no children to roll up). The validator must accept the leaf as the
+  revenue total in that case — earlier the ``is_subtotal`` requirement
+  filtered such rows out and the validator produced an "inconclusive
+  failure" against a perfectly-renderable single-step IS.
+  """
+  best: FactRow | None = None
+  for row in rows:
+    qname_lower = (row.element_qname or "").lower()
+    if "liabilit" in qname_lower and "equity" in qname_lower:
+      continue
+    row_class = row.classification or _infer_classification(
+      row.element_qname, row.balance_type
+    )
+    if row_class != classification:
+      continue
+    if best is None:
+      best = row
+      continue
+    row_val = abs((row.values[0] or 0.0) if row.values else 0.0)
+    best_val = abs((best.values[0] or 0.0) if best.values else 0.0)
+    if row.depth < best.depth:
+      best = row
+    elif row.depth == best.depth:
+      # Subtotal beats leaf at the same depth.
+      if (row.is_subtotal and not best.is_subtotal) or (
+        row.is_subtotal == best.is_subtotal and row_val > best_val
+      ):
+        best = row
+  return best
+
+
+def _net_income_row(rows: list[FactRow]) -> FactRow | None:
+  """Find the row that reports Net Income (or Net Loss).
+
+  Matches by qname token (case-insensitive). When multiple candidates
+  exist (e.g. FAC's ``fac:NetIncomeLoss`` plus a ``[Roll Up]`` parent),
+  prefers a subtotal at the smallest depth so the canonical "bottom
+  line" wins.
+  """
+  candidates = [
+    r
+    for r in rows
+    if "netincome" in (r.element_qname or "").lower()
+    or "netloss" in (r.element_qname or "").lower()
+  ]
+  if not candidates:
+    return None
+  candidates.sort(key=lambda r: (not r.is_subtotal, r.depth))
+  return candidates[0]
+
+
 def _validate_balance_sheet(rows: list[FactRow]) -> ValidationResult:
   result = ValidationResult()
 
   # Check: totals foot
   _check_totals_foot(rows, result)
 
-  # Structural: Assets = Liabilities + Equity
-  total_assets = 0.0
-  total_liabilities = 0.0
-  total_equity = 0.0
-
-  for row in rows:
-    if row.is_subtotal and row.depth == 0:
-      val = (row.values[0] or 0.0) if row.values else 0.0
-      if row.classification == "asset":
-        total_assets += val
-      elif row.classification == "liability":
-        total_liabilities += val
-      elif row.classification == "equity":
-        total_equity += val
-
+  # Structural: Assets = Liabilities + Equity.
+  #
+  # Resolution: pick the **top-most** subtotal per classification (smallest
+  # depth) so we use the rolled-up parent rather than summing every
+  # subtotal at every level (which would double-count). Combined "L+E"
+  # rollups (qname containing both "liabilit" and "equity") are skipped —
+  # they conflate two classifications and would inflate the equity total.
+  #
+  # Classification falls back to qname-based inference (FAC, rs-gaap,
+  # type-subtype reference taxonomies often lack FASB element_traits).
   result.checks.append("accounting_equation")
-  diff = abs(total_assets - (total_liabilities + total_equity))
-  if diff > _TOLERANCE and (
-    total_assets != 0 or total_liabilities != 0 or total_equity != 0
-  ):
+
+  # Reuses the IS validator's resolution chain (smallest depth → subtotal
+  # over leaf → larger value) so a single-step BS variant where, for
+  # example, ``Equity`` is a leaf rather than a roll-up still resolves
+  # cleanly. See :func:`_top_most_subtotal_for_classification`.
+  candidates: dict[str, FactRow] = {}
+  for cls in ("asset", "liability", "equity"):
+    pick = _top_most_subtotal_for_classification(rows, cls)
+    if pick is not None:
+      candidates[cls] = pick
+
+  required = {"asset", "liability", "equity"}
+  missing = required - candidates.keys()
+  if missing:
+    # No silent pass: if we couldn't identify totals for all three
+    # classifications the validator can't make any claim about the
+    # equation. Report explicitly so callers don't read a phantom green
+    # check as proof of correctness.
     result.failures.append(
-      f"Balance sheet does not balance: Assets ({total_assets:.2f}) "
-      f"≠ Liabilities ({total_liabilities:.2f}) + Equity ({total_equity:.2f}), "
-      f"difference: {diff:.2f}"
+      "Balance sheet validation inconclusive: missing classification "
+      f"rollups for {sorted(missing)}. Wire FASB elementsOfFinancialStatements "
+      "traits onto the structure's elements, or ensure at least one "
+      "subtotal row per classification is present."
     )
     result.passed = False
+  else:
+    total_assets = (
+      (candidates["asset"].values[0] or 0.0) if candidates["asset"].values else 0.0
+    )
+    total_liabilities = (
+      (candidates["liability"].values[0] or 0.0)
+      if candidates["liability"].values
+      else 0.0
+    )
+    total_equity = (
+      (candidates["equity"].values[0] or 0.0) if candidates["equity"].values else 0.0
+    )
+    diff = abs(total_assets - (total_liabilities + total_equity))
+    if diff > _TOLERANCE:
+      result.failures.append(
+        f"Balance sheet does not balance: Assets ({total_assets:.2f}) "
+        f"≠ Liabilities ({total_liabilities:.2f}) + Equity ({total_equity:.2f}), "
+        f"difference: {diff:.2f}"
+      )
+      result.passed = False
 
   # Semantic checks
   _check_zero_subtotals(rows, result)
