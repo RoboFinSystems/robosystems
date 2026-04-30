@@ -9,11 +9,13 @@ from dagster import AssetExecutionContext, MaterializeResult, asset
 from .configs import QBSyncConfig
 from .utils import (
   flatten_bill_headers,
+  flatten_bill_payment_headers,
   flatten_company_info,
   flatten_customers,
   flatten_employees,
   flatten_invoice_headers,
   flatten_payment_headers,
+  flatten_sales_receipt_headers,
   flatten_vendors,
   get_pipeline_work_dir,
   parse_journal_report,
@@ -123,9 +125,16 @@ def qb_extract(
   invoice_headers = flatten_invoice_headers(client.get_invoices(start_date, end_date))
   bill_headers = flatten_bill_headers(client.get_bills(start_date, end_date))
   payment_headers = flatten_payment_headers(client.get_payments(start_date, end_date))
+  bill_payment_headers = flatten_bill_payment_headers(
+    client.get_bill_payments(start_date, end_date)
+  )
+  sales_receipt_headers = flatten_sales_receipt_headers(
+    client.get_sales_receipts(start_date, end_date)
+  )
   context.log.info(
     f"Fetched headers: {len(invoice_headers)} invoices, {len(bill_headers)} bills, "
-    f"{len(payment_headers)} payments"
+    f"{len(payment_headers)} payments, {len(bill_payment_headers)} bill payments, "
+    f"{len(sales_receipt_headers)} sales receipts"
   )
 
   # Write parquet to shared pipeline directory
@@ -142,6 +151,8 @@ def qb_extract(
     invoice_headers=invoice_headers,
     bill_headers=bill_headers,
     payment_headers=payment_headers,
+    bill_payment_headers=bill_payment_headers,
+    sales_receipt_headers=sales_receipt_headers,
   )
 
   context.log.info(f"Extract complete → {extract_dir}")
@@ -160,6 +171,8 @@ def qb_extract(
       "invoice_headers": len(invoice_headers),
       "bill_headers": len(bill_headers),
       "payment_headers": len(payment_headers),
+      "bill_payment_headers": len(bill_payment_headers),
+      "sales_receipt_headers": len(sales_receipt_headers),
       "full_rebuild": config.full_rebuild,
     }
   )

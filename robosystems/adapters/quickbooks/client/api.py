@@ -238,6 +238,18 @@ class QBClient:
     where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
     return self._paginate(Payment, where_clause=where)
 
+  def get_bill_payments(self, start_date: str, end_date: str):
+    from quickbooks.objects.billpayment import BillPayment
+
+    where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+    return self._paginate(BillPayment, where_clause=where)
+
+  def get_sales_receipts(self, start_date: str, end_date: str):
+    from quickbooks.objects.salesreceipt import SalesReceipt
+
+    where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+    return self._paginate(SalesReceipt, where_clause=where)
+
   def get_journal_entries(
     self, start_date: str | None = None, end_date: str | None = None
   ):

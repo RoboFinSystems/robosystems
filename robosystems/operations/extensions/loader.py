@@ -415,8 +415,18 @@ class OLTPLoader:
       if not ext_id:
         continue
 
-      address = row.get("address")
-      if not isinstance(address, dict):
+      # address is JSON-stringified at the parquet layer (pyarrow can't infer
+      # struct schema for empty data) — decode back to a dict for JSONB.
+      raw_address = row.get("address")
+      if isinstance(raw_address, dict):
+        address = raw_address
+      elif isinstance(raw_address, str) and raw_address:
+        try:
+          parsed = json.loads(raw_address)
+          address = parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+          address = {}
+      else:
         address = {}
 
       name = str(row.get("name") or "")

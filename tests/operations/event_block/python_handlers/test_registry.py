@@ -45,12 +45,14 @@ def test_unknown_event_type_returns_none() -> None:
 
 
 def test_qb_source_class_event_types_share_journal_handler() -> None:
-  """Phase 2: invoice_issued / bill_received / payment_received all dispatch
-  through JOURNAL_ENTRY_RECORDED_HANDLER. They differ in inbox display only;
-  on approve they post journal entries via the same handler."""
+  """Phase 2: QB source-class events all dispatch through JOURNAL_ENTRY_RECORDED_HANDLER.
+  They differ in inbox display only; on approve they post journal entries via
+  the same handler."""
   assert get_python_handler("invoice_issued") is JOURNAL_ENTRY_RECORDED_HANDLER
   assert get_python_handler("bill_received") is JOURNAL_ENTRY_RECORDED_HANDLER
   assert get_python_handler("payment_received") is JOURNAL_ENTRY_RECORDED_HANDLER
+  assert get_python_handler("bill_paid") is JOURNAL_ENTRY_RECORDED_HANDLER
+  assert get_python_handler("sales_receipt_recorded") is JOURNAL_ENTRY_RECORDED_HANDLER
 
 
 def test_registry_value_is_frozen() -> None:
@@ -101,4 +103,6 @@ def test_registry_has_expected_handlers() -> None:
     "invoice_issued",
     "bill_received",
     "payment_received",
+    "bill_paid",
+    "sales_receipt_recorded",
   }

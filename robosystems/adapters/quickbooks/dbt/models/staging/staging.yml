@@ -128,3 +128,19 @@ models:
         tests:
           - unique
           - not_null
+
+  - name: stg_qb_bill_payment_headers
+    description: QuickBooks BillPayment headers (outbound vendor payments)
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null
+
+  - name: stg_qb_sales_receipt_headers
+    description: QuickBooks SalesReceipt headers (cash sales, no AR step)
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null

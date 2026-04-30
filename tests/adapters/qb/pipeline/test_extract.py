@@ -44,6 +44,12 @@ _PATCH_FLATTEN_BILLS = (
 _PATCH_FLATTEN_PAYMENTS = (
   "robosystems.adapters.quickbooks.pipeline.extract.flatten_payment_headers"
 )
+_PATCH_FLATTEN_BILL_PAYMENTS = (
+  "robosystems.adapters.quickbooks.pipeline.extract.flatten_bill_payment_headers"
+)
+_PATCH_FLATTEN_SALES_RECEIPTS = (
+  "robosystems.adapters.quickbooks.pipeline.extract.flatten_sales_receipt_headers"
+)
 
 
 def _wire_phase2_client_methods(mock_client):
@@ -54,6 +60,8 @@ def _wire_phase2_client_methods(mock_client):
   mock_client.get_invoices.return_value = []
   mock_client.get_bills.return_value = []
   mock_client.get_payments.return_value = []
+  mock_client.get_bill_payments.return_value = []
+  mock_client.get_sales_receipts.return_value = []
   return mock_client
 
 
@@ -160,6 +168,8 @@ class TestQbExtractSuccess:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE) as mock_write,
     ):
@@ -214,6 +224,8 @@ class TestQbExtractSuccess:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -259,6 +271,8 @@ class TestQbExtractSuccess:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -304,6 +318,8 @@ class TestQbExtractSuccess:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -346,6 +362,8 @@ class TestQbExtractSuccess:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -386,6 +404,8 @@ class TestQbExtractSuccess:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -496,6 +516,8 @@ class TestQbExtractErrors:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -548,6 +570,8 @@ class TestQbExtractMetadata:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -594,6 +618,8 @@ class TestQbExtractMetadata:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):
@@ -639,6 +665,8 @@ class TestQbExtractMetadata:
       patch(_PATCH_FLATTEN_INVOICES, return_value=[]),
       patch(_PATCH_FLATTEN_BILLS, return_value=[]),
       patch(_PATCH_FLATTEN_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_BILL_PAYMENTS, return_value=[]),
+      patch(_PATCH_FLATTEN_SALES_RECEIPTS, return_value=[]),
       patch(_PATCH_WORK_DIR, return_value=work_dir),
       patch(_PATCH_WRITE),
     ):

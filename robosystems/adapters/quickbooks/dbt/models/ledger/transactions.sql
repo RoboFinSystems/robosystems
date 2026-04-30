@@ -27,12 +27,24 @@ payment_headers as (
   select tx_type, tx_id, agent_external_id, agent_type
   from {{ ref('stg_qb_payment_headers') }}
 ),
+bill_payment_headers as (
+  select tx_type, tx_id, agent_external_id, agent_type
+  from {{ ref('stg_qb_bill_payment_headers') }}
+),
+sales_receipt_headers as (
+  select tx_type, tx_id, agent_external_id, agent_type
+  from {{ ref('stg_qb_sales_receipt_headers') }}
+),
 all_headers as (
   select * from invoice_headers
   union all
   select * from bill_headers
   union all
   select * from payment_headers
+  union all
+  select * from bill_payment_headers
+  union all
+  select * from sales_receipt_headers
 )
 
 select
@@ -52,17 +64,21 @@ select
     'posted'                                           as status,
     '{}'::json                                         as metadata,
     case
-      when e.tx_type = 'Invoice'      then 'invoice_issued'
-      when e.tx_type = 'Bill'         then 'bill_received'
-      when e.tx_type = 'Payment'      then 'payment_received'
-      when e.tx_type = 'JournalEntry' then 'journal_entry_recorded'
+      when e.tx_type = 'Invoice'       then 'invoice_issued'
+      when e.tx_type = 'Bill'          then 'bill_received'
+      when e.tx_type = 'Payment'       then 'payment_received'
+      when e.tx_type = 'BillPayment'   then 'bill_paid'
+      when e.tx_type = 'SalesReceipt'  then 'sales_receipt_recorded'
+      when e.tx_type = 'JournalEntry'  then 'journal_entry_recorded'
       else 'journal_entry_recorded'
     end                                                as event_type,
     case
-      when e.tx_type = 'Invoice'      then 'sales'
-      when e.tx_type = 'Bill'         then 'purchase'
-      when e.tx_type = 'Payment'      then 'sales'
-      when e.tx_type = 'JournalEntry' then 'adjustment'
+      when e.tx_type = 'Invoice'       then 'sales'
+      when e.tx_type = 'Bill'          then 'purchase'
+      when e.tx_type = 'Payment'       then 'sales'
+      when e.tx_type = 'BillPayment'   then 'purchase'
+      when e.tx_type = 'SalesReceipt'  then 'sales'
+      when e.tx_type = 'JournalEntry'  then 'adjustment'
       else 'adjustment'
     end                                                as event_category,
     h.agent_external_id                                as agent_external_id,

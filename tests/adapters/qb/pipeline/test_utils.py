@@ -390,6 +390,55 @@ class TestParseJournalReport:
     assert entries == []
     assert lines == []
 
+  def test_normalizes_multi_word_tx_types(self):
+    """JournalReport returns multi-word tx_type strings (e.g. 'Bill Payment
+    (Check)', 'Sales Receipt') that don't match python-quickbooks class names
+    in per-class header pulls. parse_journal_report normalizes them so the
+    JOIN key in transactions.sql is consistent on both sides."""
+    from robosystems.adapters.quickbooks.pipeline.utils import parse_journal_report
+
+    def _build_row(tx_type: str, tx_id: str) -> dict:
+      return {
+        "Rows": {
+          "Row": [
+            {
+              "ColData": [
+                {"value": "2026-02-15"},
+                {"value": tx_type, "id": tx_id},
+                {"value": "DOC-1"},
+                {"value": "Counterparty"},
+                {"value": "memo"},
+                {"value": "Account", "id": "1"},
+                {"value": "500.00"},
+                {"value": ""},
+              ]
+            },
+            {"Summary": True},
+          ]
+        }
+      }
+
+    cases = [
+      ("Bill Payment (Check)", "BillPayment_55"),
+      ("Bill Payment (CreditCard)", "BillPayment_55"),
+      ("Sales Receipt", "SalesReceipt_88"),
+      ("Credit Memo", "CreditMemo_10"),
+      ("Vendor Credit", "VendorCredit_20"),
+      ("Refund Receipt", "RefundReceipt_30"),
+      ("Journal Entry", "JournalEntry_99"),
+      # Pass-through for already-single-word types
+      ("Invoice", "Invoice_42"),
+      ("Bill", "Bill_77"),
+      ("Payment", "Payment_99"),
+    ]
+    for raw_type, expected_id in cases:
+      tx_id = expected_id.split("_")[1]
+      entries, _ = parse_journal_report(_build_row(raw_type, tx_id))
+      assert entries[0]["Id"] == expected_id, (
+        f"normalization failed for raw tx_type {raw_type!r}: "
+        f"got {entries[0]['Id']!r}, expected {expected_id!r}"
+      )
+
 
 @pytest.mark.unit
 class TestGetPipelineWorkDir:
@@ -454,9 +503,10 @@ class TestWriteExtractParquet:
       )
 
     # Phase 2: 4 original files (accounts, journal_entries, journal_lines,
-    # company_info) + 6 new (customers, vendors, employees, invoice_headers,
-    # bill_headers, payment_headers) = 10 total.
-    assert mock_parquet.call_count == 10
+    # company_info) + 6 first-batch (customers, vendors, employees, invoice_headers,
+    # bill_headers, payment_headers) + 2 second-batch (bill_payment_headers,
+    # sales_receipt_headers) = 12 total.
+    assert mock_parquet.call_count == 12
     assert output_dir.exists()
 
   def test_creates_output_directory(self, tmp_path):

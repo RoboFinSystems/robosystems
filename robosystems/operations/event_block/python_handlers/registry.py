@@ -32,6 +32,8 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   "invoice_issued": JOURNAL_ENTRY_RECORDED_HANDLER,
   "bill_received": JOURNAL_ENTRY_RECORDED_HANDLER,
   "payment_received": JOURNAL_ENTRY_RECORDED_HANDLER,
+  "bill_paid": JOURNAL_ENTRY_RECORDED_HANDLER,
+  "sales_receipt_recorded": JOURNAL_ENTRY_RECORDED_HANDLER,
 }
 
 
