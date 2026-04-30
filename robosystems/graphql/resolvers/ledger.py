@@ -36,6 +36,7 @@ from robosystems.graphql.types.ledger import (
   Agent,
   ClosingBookStructures,
   ElementList,
+  EventBlock,
   FiscalCalendar,
   LedgerEntity,
   LedgerSummary,
@@ -73,6 +74,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   entity as reads_entity,
+)
+from robosystems.operations.roboledger.reads import (
+  event_block as reads_event_block,
 )
 from robosystems.operations.roboledger.reads import (
   fiscal_calendar as reads_fiscal_calendar,
@@ -212,6 +216,60 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return [Agent.from_pydantic(r) for r in responses]
+
+  # ── Event blocks (inbox) ────────────────────────────────────────────────
+
+  @strawberry.field
+  def event_block(
+    self,
+    info: Info[GraphQLContext, None],
+    id: str,
+  ) -> EventBlock | None:
+    """Fetch a single event block by id."""
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_event_block.get_event_block(session, id)
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    if response is None:
+      return None
+    return EventBlock.from_pydantic(response)
+
+  @strawberry.field
+  def event_blocks(
+    self,
+    info: Info[GraphQLContext, None],
+    event_type: str | None = None,
+    event_category: str | None = None,
+    status: str | None = None,
+    agent_id: str | None = None,
+    source: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+  ) -> list[EventBlock]:
+    """List event blocks with optional filters.
+
+    Drives the close-workspace inbox: defaulting to recent events first
+    (``occurred_at DESC``) with filters for ``status`` (``captured`` for
+    inbox queue, ``committed`` for the audit-trail view), ``source``
+    (``quickbooks`` / ``schedule`` / ``manual``), and ``event_type``.
+    """
+    _validate_pagination(limit, offset)
+    try:
+      with _open_session(info, "roboledger") as session:
+        responses = reads_event_block.list_event_blocks(
+          session,
+          event_type=event_type,
+          event_category=event_category,
+          status=status,
+          agent_id=agent_id,
+          source=source,
+          limit=limit,
+          offset=offset,
+        )
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return [EventBlock.from_pydantic(r) for r in responses]
 
   # ── Summary ─────────────────────────────────────────────────────────────
 

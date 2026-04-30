@@ -129,9 +129,21 @@ _NARROW_ELEMENT_SOURCE_CHECK = (
 # ``local/docs/specs/information-block.md`` section 5.9, Phase g.1.
 _WIDENED_STRUCTURE_TYPE_CHECK = (
   "structure_type IN ("
-  "'chart_of_accounts', 'income_statement', 'balance_sheet', "
-  "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
-  "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric'"
+  # Renderable financial-statement presentations
+  "'income_statement', 'balance_sheet', "
+  "'cash_flow_statement', 'equity_statement', "
+  # Domain-specific working-paper / schedule patterns
+  "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
+  # CoA + CoA→GAAP mapping
+  "'chart_of_accounts', 'coa_mapping', "
+  # Reference-taxonomy structure kinds (XBRL network roles distinct from
+  # presentation): formal calculation/business rules, named SEC/regulatory
+  # disclosures, crosswalks between taxonomies. Filtered out of the
+  # report-package render path; surfaced through their own consumption
+  # paths (rule engine, disclosure registry, mapping resolver).
+  "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+  # Escape hatch
+  "'custom'"
   ")"
 )
 _NARROW_STRUCTURE_TYPE_CHECK = (

@@ -306,3 +306,15 @@ class TaxonomyPackage(BaseModel):
   )
   is_shared: bool = Field(True, description="Shared across tenants (library-origin)")
   description: str | None = Field(None)
+
+  default_structure_type: str | None = Field(
+    None,
+    description=(
+      "Package-level default for ``StructureSpec.structure_type`` when a "
+      "structure has no explicit ``structureType`` and no role-uri "
+      "heuristic match. Used by 'mapping' / 'rules' / 'disclosure' "
+      "packages to override the role-uri name heuristic that would "
+      "otherwise mistake (e.g.) a fac-to-rs-gaap crosswalk role for a "
+      "balance_sheet just because the role URI mentions BS."
+    ),
+  )

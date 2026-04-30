@@ -343,18 +343,16 @@ class TestQBClient:
     client = QBClient.__new__(QBClient)
     client.client = mock_qb_client
 
-    mock_journal_entry.count.return_value = 30
-
     # Mock journal entry objects
     mock_entry1 = Mock()
     mock_entry1.to_dict.return_value = {"id": "1", "amount": 100.00}
     mock_entry2 = Mock()
     mock_entry2.to_dict.return_value = {"id": "2", "amount": 200.00}
 
-    # Mock filter results
-    mock_journal_entry.filter.side_effect = [
-      [mock_entry1, mock_entry2],  # First batch
-      [],  # Second batch (empty)
+    # Phase 2: get_journal_entries paginates via Entity.all() (no count).
+    mock_journal_entry.all.side_effect = [
+      [mock_entry1, mock_entry2],  # First page
+      [],  # Empty page → stop
     ]
 
     # Execute
@@ -366,19 +364,19 @@ class TestQBClient:
 
   @patch("quickbooks.objects.journalentry.JournalEntry")
   def test_get_journal_entries_zero_count(self, mock_journal_entry, mock_qb_client):
-    """Test journal entries retrieval when count is zero."""
+    """Test journal entries retrieval when no entries exist."""
     # Setup mock client
     client = QBClient.__new__(QBClient)
     client.client = mock_qb_client
 
-    mock_journal_entry.count.return_value = 0
+    # Empty first page → no entries
+    mock_journal_entry.all.return_value = []
 
     # Execute
     result = client.get_journal_entries()
 
     # Verify
     assert result == []
-    mock_journal_entry.filter.assert_not_called()
 
   def test_get_transactions_with_dates(self, mock_qb_client):
     """Test transaction retrieval with date filters."""

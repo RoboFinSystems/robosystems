@@ -38,6 +38,14 @@ class Element(ExtensionsBase):
   __table_args__ = (
     Index("idx_elements_parent", "parent_id"),
     Index("idx_elements_external", "external_id", "external_source"),
+    # Scopes the OLTPLoader's per-connection delete during re-sync — without
+    # this the DELETE is a seq scan over the elements table.
+    Index(
+      "idx_elements_external_source_connection",
+      "external_source",
+      "connection_id",
+      postgresql_where="connection_id IS NOT NULL",
+    ),
     Index(
       "idx_elements_active",
       "is_active",
@@ -127,6 +135,13 @@ class Element(ExtensionsBase):
   # External mapping (QB, Xero, etc.)
   external_id = Column(String, nullable=True)
   external_source = Column(String, nullable=True)
+  # Connection scope. Multi-connection graphs (two QB books in one
+  # roboledger graph, e.g. parent + sub) need elements segregated per
+  # connection — without this, a re-sync of one connection's CoA would
+  # delete or stomp the other connection's elements. Library-origin
+  # elements (rs-gaap, us-gaap, FAC) and tenant-native elements have
+  # connection_id NULL.
+  connection_id = Column(String, nullable=True)
 
   # Cross-tenant canonical concept linkage via ``agent_id``: elements
   # pointing at the same canonical concept share the value. ``aliases``

@@ -56,12 +56,17 @@ def _make_connection_dict(
 
 
 def _make_sync_request(
-  full_sync: bool = False,
+  full_rebuild: bool = False,
+  since_date=None,
   sync_options: dict | None = None,
 ):
   from robosystems.models.api.graphs.connections import SyncConnectionRequest
 
-  return SyncConnectionRequest(full_sync=full_sync, sync_options=sync_options)
+  return SyncConnectionRequest(
+    full_rebuild=full_rebuild,
+    since_date=since_date,
+    sync_options=sync_options,
+  )
 
 
 def _make_robustness_components():
@@ -378,11 +383,17 @@ class TestSyncConnection:
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_sync_connection_passes_sync_options_to_registry(self):
-    """Sync options from request body are passed to provider_registry.sync_connection."""
+    """Top-level fields are merged into sync_options before being passed to the provider registry."""
+    from datetime import date
+
     mock_user = _make_mock_user()
     mock_db = MagicMock()
-    sync_options = {"lookback_days": 90, "full_refresh": True}
-    request = _make_sync_request(full_sync=True, sync_options=sync_options)
+    sync_options = {"lookback_days": 90, "form_types": ["10-K"]}
+    request = _make_sync_request(
+      full_rebuild=True,
+      since_date=date(2024, 1, 1),
+      sync_options=sync_options,
+    )
     connection_dict = _make_connection_dict(provider="quickbooks")
     components = _make_robustness_components()
 
@@ -415,11 +426,58 @@ class TestSyncConnection:
         cache=_make_mock_cache(),
       )
 
-    # sync_connection is called inside wait_for; check the call indirectly
-    # by verifying sync_mock was awaited with the right args
     sync_mock.assert_awaited_once_with(
-      "quickbooks", connection_dict, sync_options, GRAPH_ID
+      "quickbooks",
+      connection_dict,
+      {
+        "lookback_days": 90,
+        "form_types": ["10-K"],
+        "full_rebuild": True,
+        "since_date": "2024-01-01",
+      },
+      GRAPH_ID,
     )
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_sync_connection_passes_none_when_no_options(self):
+    """With no top-level fields and no sync_options, the registry receives None."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_sync_request()
+    connection_dict = _make_connection_dict(provider="quickbooks")
+    components = _make_robustness_components()
+
+    with (
+      patch(
+        f"{SYNC_MODULE}.create_robustness_components",
+        return_value=components,
+      ),
+      patch(f"{SYNC_MODULE}.record_operation_start"),
+      patch(f"{SYNC_MODULE}.record_operation_success"),
+      patch(
+        f"{SYNC_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(f"{SYNC_MODULE}.provider_registry") as mock_registry,
+    ):
+      mock_registry.get_provider = MagicMock(return_value=MagicMock())
+      sync_mock = AsyncMock(return_value="task_456")
+      mock_registry.sync_connection = sync_mock
+
+      await sync_connection(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+        idempotency_key=None,
+        cache=_make_mock_cache(),
+      )
+
+    sync_mock.assert_awaited_once_with("quickbooks", connection_dict, None, GRAPH_ID)
 
   @pytest.mark.unit
   @pytest.mark.asyncio

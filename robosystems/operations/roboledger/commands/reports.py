@@ -121,28 +121,48 @@ def _evaluate_report_structures(
 
 
 def _build_structure_mapping(
-  session: Session, taxonomy_id: str
+  session: Session, taxonomy_id: str, mapping_id: str | None = None
 ) -> tuple[dict[str, str], dict[str, str]]:
   """Return (element_id→structure_id, structure_id→fact_set_id) for a taxonomy.
 
   Queries associations to find which elements belong to which
-  report-eligible structure (statements + metric + custom), then
+  **render-target** structure (statements + metric), then
   pre-generates one fact_set_id ULID per structure.
 
-  Schedule/rollforward/reconciliation/policy/CoA structures are
-  excluded — facts for those come from ScheduleService, not reports.
+  When ``mapping_id`` is provided, picks **one canonical structure per
+  block_type** by scoring each candidate against the CoA mapping's
+  target elements (the elements the user's Chart of Accounts is mapped
+  to). The structure whose elements have the highest overlap with the
+  mapping wins — that's the variant that best fits the user's data.
+  Without scoring, multiple variants of the same block_type (FAC ships
+  7 IS variants alone) all received elements via dict-overwrite-wins,
+  splitting a coherent statement across multiple incoherent FactSets.
+
+  Excluded by design (block_type filter):
+
+  - **Schedule / rollforward / reconciliation / policy / CoA**: facts
+    for those come from ScheduleService, not reports.
+  - **validation_rules / disclosure / taxonomy_mapping**: XBRL networks
+    with non-rendering roles (formal calculation rules, SEC schedule
+    disclosures, taxonomy crosswalks). Surfaced through their own
+    consumption paths (rule engine, disclosure registry, mapping
+    resolver) — never report-package render targets.
+  - **custom**: too generic to be safe as a default render target.
   """
   rows = session.execute(
     text(
       """
-      SELECT DISTINCT s.id AS structure_id, a.to_element_id AS element_id
+      SELECT DISTINCT
+        s.id AS structure_id,
+        s.structure_type,
+        a.to_element_id AS element_id
       FROM structures s
       JOIN associations a ON a.structure_id = s.id
       WHERE s.taxonomy_id = :tid
         AND s.structure_type IN (
           'income_statement', 'balance_sheet',
           'cash_flow_statement', 'equity_statement',
-          'custom', 'metric'
+          'metric'
         )
         AND s.is_active = true
       """
@@ -150,14 +170,79 @@ def _build_structure_mapping(
     {"tid": taxonomy_id},
   ).fetchall()
 
+  if not rows:
+    return {}, {}
+
+  canonical_by_type = _select_canonical_render_targets(
+    session, rows, mapping_id=mapping_id
+  )
+  canonical_ids = set(canonical_by_type.values())
+
   element_to_structure: dict[str, str] = {
-    row.element_id: row.structure_id for row in rows
+    row.element_id: row.structure_id
+    for row in rows
+    if row.structure_id in canonical_ids
   }
   structure_to_factset: dict[str, str] = {
-    structure_id: generate_prefixed_ulid("fs")
-    for structure_id in {r.structure_id for r in rows}
+    structure_id: generate_prefixed_ulid("fs") for structure_id in canonical_ids
   }
   return element_to_structure, structure_to_factset
+
+
+def _select_canonical_render_targets(
+  session: Session, rows, *, mapping_id: str | None
+) -> dict[str, str]:
+  """Pick one canonical structure per block_type from the candidate rows.
+
+  When ``mapping_id`` is provided, scores each candidate by counting
+  elements that overlap with the CoA mapping's target element set
+  (associations of ``association_type='mapping'`` whose
+  ``structure_id == :mapping_id``). The candidate with the highest
+  overlap wins per block_type.
+
+  When ``mapping_id`` is null or returns no targets, falls back to the
+  candidate with the most elements per block_type (a reasonable proxy
+  for "richest variant"). Final tie-break is the lexicographically
+  smallest structure_id for determinism across runs.
+
+  Returns ``{block_type: structure_id}`` for every block_type that has
+  at least one candidate.
+  """
+  # Group element sets per (structure_type, structure_id)
+  per_struct_elems: dict[tuple[str, str], set[str]] = {}
+  for r in rows:
+    per_struct_elems.setdefault((r.structure_type, r.structure_id), set()).add(
+      r.element_id
+    )
+
+  mapping_targets: set[str] = set()
+  if mapping_id:
+    target_rows = session.execute(
+      text(
+        """
+        SELECT DISTINCT to_element_id AS element_id
+        FROM associations
+        WHERE structure_id = :mid AND association_type = 'mapping'
+        """
+      ),
+      {"mid": mapping_id},
+    ).fetchall()
+    mapping_targets = {r.element_id for r in target_rows}
+
+  # Per block_type, pick the structure with the highest score.
+  candidates_by_type: dict[str, list[tuple[int, int, str]]] = {}
+  for (block_type, structure_id), elems in per_struct_elems.items():
+    coverage = len(elems & mapping_targets) if mapping_targets else 0
+    size = len(elems)
+    # Sort key: highest coverage, then largest size, then earliest id.
+    candidates_by_type.setdefault(block_type, []).append((coverage, size, structure_id))
+
+  canonical: dict[str, str] = {}
+  for block_type, scored in candidates_by_type.items():
+    # Highest coverage first; ties broken by largest size, then by id (asc).
+    scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
+    canonical[block_type] = scored[0][2]
+  return canonical
 
 
 def _persist_report_facts(
@@ -291,7 +376,7 @@ def create_report(
 
   entity_id = _get_entity_id(session, graph_id)
   element_to_structure, structure_to_factset = _build_structure_mapping(
-    session, body.taxonomy_id
+    session, body.taxonomy_id, mapping_id=body.mapping_id
   )
   _persist_report_facts(
     session,
@@ -390,7 +475,7 @@ def regenerate_report(
 
   entity_id = _get_entity_id(session, graph_id)
   element_to_structure, structure_to_factset = _build_structure_mapping(
-    session, report_def.taxonomy_id
+    session, report_def.taxonomy_id, mapping_id=report_def.mapping_id
   )
   # Stale FactSet rows from the prior generation must be cleared before
   # new rows are inserted with freshly-minted ULIDs.

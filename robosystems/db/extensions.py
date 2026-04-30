@@ -239,11 +239,27 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'reporting_standard', 'reporting_extension', 'custom_ontology'"
     ")"
   )
+  # Must stay in sync with both the SQLAlchemy model
+  # (``models/extensions/structure.py``) and the platform migration
+  # (``migrations/extensions/versions/0002_taxonomy_library.py``).
+  # ``copy_library_into_tenant`` mirrors rows from ``public.structures``
+  # — a tenant-side CHECK narrower than public's silently fails graph
+  # creation when the library introduces a new structure_type value.
   widened_structure_type = (
     "structure_type IN ("
-    "'chart_of_accounts', 'income_statement', 'balance_sheet', "
-    "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', "
-    "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric'"
+    # Renderable financial-statement presentations
+    "'income_statement', 'balance_sheet', "
+    "'cash_flow_statement', 'equity_statement', "
+    # Domain-specific working-paper / schedule patterns
+    "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
+    # CoA + CoA→GAAP mapping
+    "'chart_of_accounts', 'coa_mapping', "
+    # Reference-taxonomy structure kinds (XBRL network roles distinct
+    # from presentation): formal calculation rules, named SEC/regulatory
+    # disclosures, crosswalks between taxonomies.
+    "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+    # Escape hatch
+    "'custom'"
     ")"
   )
   conn.execute(
@@ -347,7 +363,23 @@ def provision_tenant_schema(graph_id: str) -> None:
     # after the triggers are attached, subsequent UPDATE/DELETE on those
     # rows raises from tenant scope.
     _widen_library_checks(conn, schema)
-    copy_library_into_tenant(conn, schema, pin)
+    # Library copy is the one-shot step. Once the immutability triggers
+    # are installed (below), re-running the copy raises from the
+    # ``raise_insert_into_library_structure`` trigger because tenant
+    # writes can't target library-seeded structure_ids — even though the
+    # rows being copied ARE the library content. Detect "already copied"
+    # via a sentinel query and skip; the trigger install + check widen
+    # are themselves idempotent (DROP IF EXISTS internally) so they can
+    # always run.
+    library_copied = conn.execute(
+      text(f"""
+        SELECT 1 FROM {schema}.structures
+        WHERE created_by = 'library-seeder'
+        LIMIT 1
+      """)
+    ).scalar()
+    if not library_copied:
+      copy_library_into_tenant(conn, schema, pin)
     _install_library_immutability_triggers(conn, schema)
 
     conn.commit()

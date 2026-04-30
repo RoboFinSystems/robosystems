@@ -1,0 +1,3 @@
+Id,agent_type,name,legal_name,email,phone,address,tax_id,is_1099_recipient,is_active
+qb_vend_1,vendor,Office Depot,Office Depot Inc,,+1-555-0300,{},,false,true
+qb_vend_2,vendor,Independent Contractor,Jane Doe LLC,jane@example.com,+1-555-0400,{},98-7654321,true,true

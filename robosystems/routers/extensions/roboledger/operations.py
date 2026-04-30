@@ -171,6 +171,9 @@ from robosystems.operations.event_block.engine import (
 from robosystems.operations.event_block.python_handlers._disposal_plan import (
   ScheduleNotFoundError as DisposalScheduleNotFoundError,
 )
+from robosystems.operations.event_block.python_handlers.journal_entry_recorded import (
+  ElementResolutionError,
+)
 from robosystems.operations.event_block.python_handlers.types import (
   HandlerMetadataValidationError,
 )
@@ -1020,13 +1023,24 @@ update_event_block_op = _registrar.register(
     description=(
       "Apply a status transition (captured → committed | voided) and/or "
       "field corrections (description, effective_at, metadata_patch) to an "
-      "existing event block. Only supplied fields are updated."
+      "existing event block. Only supplied fields are updated. When the "
+      "transition is captured/classified → committed, the registered "
+      "Python handler fires against the captured metadata to produce the "
+      "GL rows; errors from the handler (validation, element resolution, "
+      "closed period, unbalanced lines) surface as 422 here so the inbox "
+      "UI can display the failure reason without retry."
     ),
     command=cmd_update_event_block,
     request_model=UpdateEventBlockRequest,
+    # Error map covers both update-only failures (top two) and the
+    # handler-firing path that runs on captured/classified → committed.
     error_map={
       EventNotFoundError: 404,
       InvalidEventTransitionError: 422,
+      HandlerMetadataValidationError: 422,
+      ElementResolutionError: 422,
+      ClosedPeriodError: 422,
+      UnbalancedJournalEntryError: 422,
     },
   )
 )

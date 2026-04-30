@@ -1,0 +1,2 @@
+tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type
+BillPayment,55,BillPayment_55,2026-02-15,CHK-1001,500.00,USD,Paid Bill_77,qb_vend_1,vendor

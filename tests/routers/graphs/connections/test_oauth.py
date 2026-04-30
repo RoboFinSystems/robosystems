@@ -31,6 +31,7 @@ def _make_connection_dict(
   provider: str = "quickbooks",
   entity_id: str = GRAPH_ID,
   status: str = "pending_oauth",
+  last_sync: str | None = None,
 ) -> dict:
   return {
     "connection_id": connection_id,
@@ -40,7 +41,7 @@ def _make_connection_dict(
     "created_at": datetime.now(UTC),
     "updated_at": datetime.now(UTC),
     "metadata": {
-      "last_sync": None,
+      "last_sync": last_sync,
       "realm_id": None,
     },
   }
@@ -673,7 +674,12 @@ class TestOAuthCallback:
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_oauth_callback_auto_sync_triggered(self):
-    """Auto-sync is triggered after successful OAuth and connection validation."""
+    """Auto-sync is triggered after successful OAuth and connection validation.
+
+    First sync (``last_sync=None``) requests a full rebuild — there's no
+    prior data to be incremental against, so a 60-day window would miss
+    most of the user's history.
+    """
     mock_user = _make_mock_user()
     mock_db = MagicMock()
     request = _make_oauth_callback_request()
@@ -733,8 +739,88 @@ class TestOAuthCallback:
         _rate_limit=None,
       )
 
-    sync_mock.assert_awaited_once_with("quickbooks", connection_dict, None, GRAPH_ID)
+    sync_mock.assert_awaited_once_with(
+      "quickbooks", connection_dict, {"full_rebuild": True}, GRAPH_ID
+    )
     assert result["auto_sync_task_id"] == "task_sync_999"
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_oauth_callback_subsequent_sync_uses_incremental_default(self):
+    """An OAuth re-flow on an existing connection (``last_sync`` already
+    populated) uses the incremental default — no `full_rebuild` override.
+
+    Use case: user re-authorizes after token expiry. The connection
+    already has months of synced data; a `full_rebuild` would re-pull
+    everything for no benefit. Pass ``None`` so the provider falls
+    through to ``lookback_days=60``.
+    """
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_oauth_callback_request()
+    # last_sync set → not a first sync.
+    connection_dict = _make_connection_dict(
+      provider="quickbooks",
+      last_sync="2026-04-15T10:00:00",
+    )
+
+    state_data = {
+      "user_id": USER_ID,
+      "connection_id": CONNECTION_ID,
+      "redirect_uri": "http://localhost:3001/connections/qb-callback",
+    }
+    tokens = {"access_token": "access_abc", "refresh_token": "refresh_xyz"}
+
+    mock_oauth_handler = MagicMock()
+    mock_oauth_handler.exchange_code_for_tokens = AsyncMock(return_value=tokens)
+    mock_oauth_handler.store_tokens = MagicMock()
+
+    mock_oauth_provider = MagicMock()
+    mock_oauth_provider.extract_provider_data = MagicMock(
+      return_value={"realm_id": "9341452700148642"}
+    )
+    mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
+
+    mock_provider_registry = MagicMock()
+    sync_mock = AsyncMock(return_value="task_sync_resync")
+    mock_provider_registry.sync_connection = sync_mock
+
+    with (
+      patch(
+        "robosystems.operations.providers.oauth_handler.OAuthState.validate",
+        return_value=state_data,
+      ),
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        return_value=connection_dict,
+      ),
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.update",
+        new_callable=AsyncMock,
+      ),
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
+        mock_oauth_handler,
+      ),
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
+        mock_oauth_provider,
+      ),
+      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+    ):
+      await oauth_callback(
+        provider="quickbooks",
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    # No `full_rebuild` override — subsequent syncs use the default
+    # incremental window.
+    sync_mock.assert_awaited_once_with("quickbooks", connection_dict, None, GRAPH_ID)
 
   @pytest.mark.unit
   @pytest.mark.asyncio

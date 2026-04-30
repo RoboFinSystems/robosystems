@@ -74,6 +74,15 @@ class Event(ExtensionsBase):
       "resource_type IN ('goods', 'services', 'money', 'right', 'obligation', 'information', 'labor') OR resource_type IS NULL",
       name="check_event_resource_type",
     ),
+    # source enumerates where the event came from. Adapter-driven sources
+    # (quickbooks, xero, plaid) emit events from incoming data; native
+    # sources (manual, schedule, system) emit events from inside the
+    # platform. Adding a new source means widening this CHECK and updating
+    # the adapter that emits it.
+    CheckConstraint(
+      "source IN ('manual', 'system', 'schedule', 'quickbooks', 'xero', 'plaid')",
+      name="check_event_source",
+    ),
   )
 
   # Identity

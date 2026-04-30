@@ -355,10 +355,21 @@ def _build_hierarchy_from_atoms(
   off the associations + elements that ``load_base_envelope_atoms``
   already loaded, no extra queries.
 
-  Roots are presentation associations whose ``from_element_id`` equals
-  the ``structure_id`` (the root-anchor convention seeded by
-  :mod:`robosystems.taxonomy.seed`). Children are walked depth-first
-  via the parent → child mapping, sorted by ``order_value``.
+  Two root-anchor conventions are supported:
+
+  - **structure_id-rooted** (seed.py convention): presentation arcs with
+    ``from_element_id == structure_id`` mark the top of the tree; the
+    structure itself is the implicit root and its children become the
+    rendered top-level rows.
+  - **abstract-element-rooted** (XBRL standard, used by FAC / rs-gaap /
+    type-subtype reference taxonomies): an abstract element (e.g.
+    ``fac:BalanceSheetAbstract``) is the top of the tree; the structure
+    itself doesn't appear in any presentation arc. Detected by
+    ``from_set - to_set`` — elements that appear as ``from_element_id``
+    but never as ``to_element_id``.
+
+  Children are walked depth-first via the parent → child mapping,
+  sorted by ``order_value``.
   """
   # Presentation children grouped by parent_id (preserving order_value).
   children_by_parent: dict[str, list[tuple[float, str]]] = {}
@@ -375,8 +386,17 @@ def _build_hierarchy_from_atoms(
   for parent_id in children_by_parent:
     children_by_parent[parent_id].sort(key=lambda pair: pair[0])
 
-  # Roots = children of the structure_id anchor (sorted).
+  # Roots = children of the structure_id anchor (seed.py convention).
   root_ids = [child_id for _, child_id in children_by_parent.get(structure_id, [])]
+
+  # Fallback: structures from FAC / rs-gaap / type-subtype reference
+  # taxonomies anchor at an abstract element instead of the structure_id.
+  # Detect roots via the standard XBRL convention — elements that appear
+  # as ``from_element_id`` but never as ``to_element_id``.
+  if not root_ids:
+    from_ids = set(children_by_parent.keys())
+    to_ids = {c for children in children_by_parent.values() for _, c in children}
+    root_ids = sorted(from_ids - to_ids)
 
   def _make_node(element_id: str, depth: int) -> _HierarchyNode:
     elem = elements_by_id.get(element_id)

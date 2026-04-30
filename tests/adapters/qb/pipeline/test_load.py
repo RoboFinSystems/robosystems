@@ -38,10 +38,13 @@ def _make_load_result(
   source="quickbooks",
   connection_id="conn_abc",
   elements=5,
-  transactions=10,
-  entries=10,
-  line_items=25,
   dimensions=2,
+  events_captured=10,
+  events_updated=0,
+  agents_inserted=0,
+  agents_updated=0,
+  dropped_unbalanced_entries=0,
+  dropped_empty_transactions=0,
 ):
   """Create a LoadResult for tests."""
   from robosystems.operations.extensions.loader import LoadResult
@@ -51,10 +54,13 @@ def _make_load_result(
     source=source,
     connection_id=connection_id,
     elements=elements,
-    transactions=transactions,
-    entries=entries,
-    line_items=line_items,
     dimensions=dimensions,
+    events_captured=events_captured,
+    events_updated=events_updated,
+    agents_inserted=agents_inserted,
+    agents_updated=agents_updated,
+    dropped_unbalanced_entries=dropped_unbalanced_entries,
+    dropped_empty_transactions=dropped_empty_transactions,
   )
 
 
@@ -95,7 +101,7 @@ class TestQbLoadAsset:
     )
 
   def test_load_returns_row_counts_in_metadata(self, tmp_path):
-    """Test that metadata includes per-table row counts."""
+    """Phase 2 metadata: elements/dimensions structural + event counters."""
     from robosystems.adapters.quickbooks.pipeline.load import qb_load
 
     config = _make_config()
@@ -104,7 +110,14 @@ class TestQbLoadAsset:
 
     mock_loader = MagicMock()
     mock_loader.load.return_value = _make_load_result(
-      elements=3, transactions=7, entries=7, line_items=15, dimensions=1
+      elements=3,
+      dimensions=1,
+      events_captured=7,
+      events_updated=2,
+      agents_inserted=4,
+      agents_updated=1,
+      dropped_unbalanced_entries=1,
+      dropped_empty_transactions=0,
     )
 
     with (
@@ -118,11 +131,20 @@ class TestQbLoadAsset:
       result = qb_load(context, config)
 
     assert result.metadata["elements"] == 3
-    assert result.metadata["transactions"] == 7
-    assert result.metadata["entries"] == 7
-    assert result.metadata["line_items"] == 15
     assert result.metadata["dimensions"] == 1
-    assert result.metadata["total_rows"] == 33
+    assert result.metadata["events_captured"] == 7
+    assert result.metadata["events_updated"] == 2
+    assert result.metadata["agents_inserted"] == 4
+    assert result.metadata["agents_updated"] == 1
+    assert result.metadata["dropped_unbalanced_entries"] == 1
+    assert result.metadata["dropped_empty_transactions"] == 0
+    # total_rows = elements + dimensions + events_captured + events_updated
+    # + agents_inserted + agents_updated (= 3 + 1 + 7 + 2 + 4 + 1 = 18)
+    # transactions/entries/line_items always 0 in Phase 2
+    assert result.metadata["total_rows"] == 18
+    assert "transactions" not in result.metadata
+    assert "entries" not in result.metadata
+    assert "line_items" not in result.metadata
 
   def test_load_updates_last_sync(self, tmp_path):
     """Test that _update_last_sync is called after loading."""
@@ -155,7 +177,7 @@ class TestQbLoadAsset:
     work_dir = tmp_path / "qb_pipeline" / config.graph_id
     work_dir.mkdir(parents=True)
 
-    load_result = _make_load_result(line_items=8)
+    load_result = _make_load_result(events_captured=8)
     load_result.errors = ["unknown entry: X", "unknown account: Y"]
 
     mock_loader = MagicMock()

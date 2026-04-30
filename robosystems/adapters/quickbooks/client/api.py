@@ -171,25 +171,101 @@ class QBClient:
 
     return Account.filter(Name=account_name, qb=self.client)[0].to_dict()
 
-  def get_journal_entries(self):
+  def _paginate(self, entity_class, where_clause: str | None = None):
+    """Paginate over a QB entity, returning a list of dicts.
+
+    Used by per-class methods. Date-filtering callers pass a `where_clause`
+    matching QBO's SQL syntax (e.g., "TxnDate >= '2024-01-01'") — the
+    quickbooks lib's .where() method handles the WHERE prefix.
+    """
+    page_size = 100
+    page = 0
+    all_rows: list[dict] = []
+    while True:
+      start_position = page * page_size + 1
+      if where_clause:
+        results = entity_class.where(
+          where_clause,
+          max_results=str(page_size),
+          start_position=str(start_position),
+          qb=self.client,
+        )
+      else:
+        results = entity_class.all(
+          max_results=page_size,
+          start_position=str(start_position),
+          qb=self.client,
+        )
+      if not results:
+        break
+      for row in results:
+        all_rows.append(row.to_dict())
+      if len(results) < page_size:
+        break
+      page += 1
+    return all_rows
+
+  def get_customers(self):
+    from quickbooks.objects.customer import Customer
+
+    return self._paginate(Customer)
+
+  def get_vendors(self):
+    from quickbooks.objects.vendor import Vendor
+
+    return self._paginate(Vendor)
+
+  def get_employees(self):
+    from quickbooks.objects.employee import Employee
+
+    return self._paginate(Employee)
+
+  def get_invoices(self, start_date: str, end_date: str):
+    from quickbooks.objects.invoice import Invoice
+
+    where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+    return self._paginate(Invoice, where_clause=where)
+
+  def get_bills(self, start_date: str, end_date: str):
+    from quickbooks.objects.bill import Bill
+
+    where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+    return self._paginate(Bill, where_clause=where)
+
+  def get_payments(self, start_date: str, end_date: str):
+    from quickbooks.objects.payment import Payment
+
+    where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+    return self._paginate(Payment, where_clause=where)
+
+  def get_bill_payments(self, start_date: str, end_date: str):
+    from quickbooks.objects.billpayment import BillPayment
+
+    where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+    return self._paginate(BillPayment, where_clause=where)
+
+  def get_sales_receipts(self, start_date: str, end_date: str):
+    from quickbooks.objects.salesreceipt import SalesReceipt
+
+    where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+    return self._paginate(SalesReceipt, where_clause=where)
+
+  def get_journal_entries(
+    self, start_date: str | None = None, end_date: str | None = None
+  ):
     from quickbooks.objects.journalentry import JournalEntry
 
-    count = JournalEntry.count(qb=self.client) or 0
-    all_entries = []
-
-    # If count is 0, return empty list without making API calls
-    if count == 0:
-      return all_entries
-
-    for i in range(0, count, 25):
-      entries = JournalEntry.filter(
-        max_results="25", start_position=str(i), qb=self.client
-      )
-      for entry in entries:
-        all_entries.append(entry.to_dict())
-    return all_entries
+    if start_date and end_date:
+      where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+      return self._paginate(JournalEntry, where_clause=where)
+    return self._paginate(JournalEntry)
 
   def get_transactions(self, start_date=None, end_date=None):
+    """Fetch JournalReport — retired in Phase 2 as the transactional source.
+
+    Kept for backward compat with any external callers; the QB pipeline now
+    pulls Invoice / Bill / Payment / JournalEntry per-entity instead.
+    """
     params = {}
     if start_date:
       params["start_date"] = start_date

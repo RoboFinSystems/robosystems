@@ -28,9 +28,10 @@ class Agent(ExtensionsBase):
     Index(
       "idx_agents_source_external",
       "source",
+      "connection_id",
       "external_id",
       unique=True,
-      postgresql_where="external_id IS NOT NULL",
+      postgresql_where="external_id IS NOT NULL AND connection_id IS NOT NULL",
     ),
     CheckConstraint(
       "agent_type IN ('customer', 'vendor', 'employee', 'owner', "
@@ -63,6 +64,9 @@ class Agent(ExtensionsBase):
   # Source system linkage — (source, external_id) is the dedup key
   source = Column(String, nullable=False, default="native")
   external_id = Column(String, nullable=True)
+  # Scopes agents to a connection so two QB connections on one graph don't share agents.
+  # Nullable for native / library-origin agents that don't come from a connector.
+  connection_id = Column(String, nullable=True)
 
   # State
   is_active = Column(Boolean, nullable=False, default=True)

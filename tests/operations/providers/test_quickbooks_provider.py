@@ -338,6 +338,33 @@ class TestSyncQuickbooksConnection:
     run_config = mock_submit.call_args.kwargs["run_config"]
     assert run_config["ops"]["qb_extract"]["config"]["full_rebuild"] is False
     assert run_config["ops"]["qb_extract"]["config"]["lookback_days"] == 60
+    assert run_config["ops"]["qb_extract"]["config"]["since_date"] == ""
+
+  @pytest.mark.asyncio
+  async def test_passes_since_date_through(self):
+    from robosystems.operations.providers.quickbooks_provider import (
+      sync_quickbooks_connection,
+    )
+
+    connection = {
+      "connection_id": "conn_1",
+      "user_id": "usr_1",
+      "metadata": {"realm_id": "realm123"},
+    }
+
+    with patch(
+      "robosystems.middleware.sse.dagster_monitor.submit_dagster_job_sync",
+      return_value="run_def",
+    ) as mock_submit:
+      await sync_quickbooks_connection(
+        connection=connection,
+        sync_options={"since_date": "2024-06-01"},
+        graph_id="kg_test",
+      )
+
+    run_config = mock_submit.call_args.kwargs["run_config"]
+    assert run_config["ops"]["qb_extract"]["config"]["since_date"] == "2024-06-01"
+    assert run_config["ops"]["qb_extract"]["config"]["full_rebuild"] is False
 
   @pytest.mark.asyncio
   async def test_missing_realm_id_raises(self):

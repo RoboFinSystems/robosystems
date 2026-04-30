@@ -266,6 +266,70 @@ def _facts_to_balance_dict(
   return balances
 
 
+def _infer_classification(qname: str | None, balance_type: str | None) -> str | None:
+  """Best-effort classification fallback for elements lacking FASB traits.
+
+  Reference taxonomies (FAC, rs-gaap, type-subtype) and freshly-loaded
+  custom taxonomies often have no ``element_traits`` rows pointing at
+  ``classifications.category='elementsOfFinancialStatements'``. Without
+  classification, ``_close_to_retained_earnings`` can't compute Net
+  Income (revenue/expense facts never match) and the BS doesn't balance.
+
+  This heuristic restores classification from the qname + balance_type
+  pair using conventional naming. It returns one of
+  ``asset/liability/equity/revenue/expense`` or ``None`` when nothing
+  matches confidently. Real ``element_traits`` always win — this only
+  fires when the SQL join returned NULL.
+  """
+  if not qname:
+    return None
+  qn = qname.lower()
+  bt = (balance_type or "").lower()
+
+  # Revenue: credit balance + revenue/sales/income token (excluding
+  # liability-shaped "income tax payable" — keyed on balance_type).
+  if bt == "credit" and any(t in qn for t in ("revenue", "sales")):
+    return "revenue"
+  # Expense: debit balance + expense/cost/loss/depreciation token.
+  if bt == "debit" and any(
+    t in qn for t in ("expense", "cost", "loss", "depreciation", "amortization")
+  ):
+    return "expense"
+  # Equity must be tested before liability — "stockholdersequity" contains
+  # "equity" and is a credit, but a liability check would also match
+  # "stockholders" tokens in some pathological qnames.
+  if bt == "credit" and any(
+    t in qn for t in ("equity", "capital", "retainedearnings", "stockholder")
+  ):
+    return "equity"
+  if bt == "debit" and "asset" in qn:
+    return "asset"
+  if bt == "credit" and "liabilit" in qn:
+    return "liability"
+
+  # Weak fallback: abstract / rollup container elements often have a
+  # ``balance_type`` that doesn't match the classification of what they
+  # aggregate (e.g. FAC's ``fac:LiabilitiesRollUp`` has balance_type
+  # ``debit`` even though it rolls up credit-balance liabilities). For
+  # these qname-only is the only signal. Order matters — check equity
+  # before liability so combined "LiabilitiesAndEquity" rollups don't
+  # misclassify as equity (the validator skips combined rollups
+  # explicitly via the qname check).
+  if "liabilit" in qn and ("equity" in qn or "stockholder" in qn or "capital" in qn):
+    return None  # combined L+E rollup — not a pure classification
+  if any(t in qn for t in ("equity", "capital", "retainedearnings", "stockholder")):
+    return "equity"
+  if "liabilit" in qn:
+    return "liability"
+  if "asset" in qn:
+    return "asset"
+  if any(t in qn for t in ("revenue", "sales")):
+    return "revenue"
+  if any(t in qn for t in ("expense", "cost", "loss")):
+    return "expense"
+  return None
+
+
 def _read_mapped_balances(
   session: Session,
   mapping_id: str,
@@ -280,6 +344,11 @@ def _read_mapped_balances(
   liability / equity) are stock concepts and must be loaded
   cumulatively; IS / SCF items are flows and constrain by
   ``posting_date >= :start_date``.
+
+  When the trait join returns ``NULL`` (reference taxonomies whose
+  elements aren't wired to FASB traits), :func:`_infer_classification`
+  fills in best-effort classification from qname + balance_type. Real
+  trait data always wins; the fallback only fires for null rows.
   """
   result = session.execute(
     text("""
@@ -326,11 +395,14 @@ def _read_mapped_balances(
   for row in result:
     debits = cents_to_dollars(row.total_debits)
     credits = cents_to_dollars(row.total_credits)
+    classification = row.classification or _infer_classification(
+      row.qname, row.balance_type
+    )
     balances[row.reporting_element_id] = _Balance(
       element_id=row.reporting_element_id,
       qname=row.qname,
       name=row.reporting_name,
-      classification=row.classification,
+      classification=classification,
       balance_type=row.balance_type,
       total_debits=debits,
       total_credits=credits,
@@ -373,6 +445,69 @@ def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, d
   return prior_start, prior_end
 
 
+# Deterministic ID from robosystems/taxonomy/seed.py: _elem("retained_earnings", ...)
+# Preferred close target when the seed.py us-gaap taxonomy is in use.
+_SEED_RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
+
+
+def _find_close_target(
+  facts: list[ReportFact],
+  period_start: date,
+  period_end: date,
+) -> ReportFact | None:
+  """Find the equity element to receive a closing entry for this period.
+
+  Resolution order — falls back through three conventions so the close
+  works against seed.py us-gaap, FAC, rs-gaap, and arbitrary mapped
+  equity elements:
+
+  1. The seed.py-deterministic ``elem_gaap_retained_earnings`` element.
+  2. An equity-classified fact whose qname matches ``*RetainedEarnings*``
+     or ``*RetainedDeficit*`` (us-gaap-shaped taxonomies that diverge
+     from the seed ID).
+  3. Any equity-classified fact already populated for this period (FAC
+     ``fac:Equity``, single-line equity taxonomies). When multiple
+     candidates exist, prefer the one with qname matching ``*Equity*``
+     and the largest absolute value — usually the rolled-up equity line
+     rather than a sub-component.
+
+  Returns ``None`` when no equity fact exists; caller falls back to
+  appending a fresh us-gaap RE fact (preserves seed.py behaviour for
+  empty graphs).
+  """
+  seed_re_fact: ReportFact | None = None
+  retained_earnings_match: ReportFact | None = None
+  equity_candidates: list[ReportFact] = []
+
+  for fact in facts:
+    if fact.period_start != period_start or fact.period_end != period_end:
+      continue
+    if fact.element_id == _SEED_RETAINED_EARNINGS_ID:
+      seed_re_fact = fact
+      continue
+    if fact.classification != "equity":
+      continue
+    qname_lower = (fact.element_qname or "").lower()
+    if "retainedearnings" in qname_lower or "retaineddeficit" in qname_lower:
+      retained_earnings_match = fact
+      continue
+    equity_candidates.append(fact)
+
+  if seed_re_fact is not None:
+    return seed_re_fact
+  if retained_earnings_match is not None:
+    return retained_earnings_match
+  if not equity_candidates:
+    return None
+  equity_candidates.sort(
+    key=lambda f: (
+      0 if "equity" in (f.element_qname or "").lower() else 1,
+      -abs(f.value),
+    )
+  )
+  return equity_candidates[0]
+
+
 def _close_to_retained_earnings(
   facts: list[ReportFact],
   period_start: date,
@@ -384,14 +519,16 @@ def _close_to_retained_earnings(
   given period and adds it to the retained earnings fact. This is the
   standard period-end closing entry that ensures the balance sheet balances.
 
+  Falls through three close-target conventions (see :func:`_find_close_target`)
+  so seed.py us-gaap, FAC, rs-gaap, and other equity-element shapes all
+  receive the closing amount instead of stranding it on a phantom
+  ``elem_gaap_retained_earnings`` fact that no rendering taxonomy
+  references.
+
   Mutates the facts list in place.
   """
-  # Deterministic ID from robosystems/taxonomy/seed.py: _elem("retained_earnings", ...)
-  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
-
   total_revenue = 0.0
   total_expenses = 0.0
-  retained_earnings_fact: ReportFact | None = None
 
   for fact in facts:
     if fact.period_start != period_start or fact.period_end != period_end:
@@ -400,28 +537,32 @@ def _close_to_retained_earnings(
       total_revenue += fact.value
     elif fact.classification == "expense":
       total_expenses += fact.value
-    if fact.element_id == RETAINED_EARNINGS_ID:
-      retained_earnings_fact = fact
 
   net_income = total_revenue - total_expenses
+  if net_income == 0.0:
+    return
 
-  if retained_earnings_fact is not None:
-    retained_earnings_fact.value += net_income
-  elif net_income != 0.0:
-    # No retained earnings fact yet — create one
-    facts.append(
-      ReportFact(
-        element_id=RETAINED_EARNINGS_ID,
-        element_qname="us-gaap:RetainedEarningsAccumulatedDeficit",
-        element_name="Retained Earnings",
-        classification="equity",
-        balance_type="credit",
-        value=net_income,
-        period_start=period_start,
-        period_end=period_end,
-        period_type="instant",
-      )
+  target = _find_close_target(facts, period_start, period_end)
+  if target is not None:
+    target.value += net_income
+    return
+
+  # No equity fact in scope — append a fresh us-gaap RE fact so the
+  # number is preserved even on graphs whose ledger has no equity
+  # accounts mapped yet (seed.py-only setups).
+  facts.append(
+    ReportFact(
+      element_id=_SEED_RETAINED_EARNINGS_ID,
+      element_qname="us-gaap:RetainedEarningsAccumulatedDeficit",
+      element_name="Retained Earnings",
+      classification="equity",
+      balance_type="credit",
+      value=net_income,
+      period_start=period_start,
+      period_end=period_end,
+      period_type="instant",
     )
+  )
 
 
 def _close_prior_periods_to_retained_earnings(
@@ -454,16 +595,23 @@ def _close_prior_periods_to_retained_earnings(
   portion of P&L activity. Adding that to whatever RE the ledger already
   carries (real closed amount + any manual adjustments) always produces
   the right total on the balance sheet. There is no double-count risk.
-  """
-  RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
 
+  Falls through three close-target conventions (see :func:`_find_close_target`)
+  so seed.py us-gaap, FAC, rs-gaap, and other equity-element shapes all
+  receive the prior-period closing amount.
+  """
   # Cumulative net income from inception through period_end.
   # Classification is resolved via element_traits → classifications
-  # (FASB elementsOfFinancialStatements trait axis).
+  # (FASB elementsOfFinancialStatements trait axis); rows whose target
+  # element lacks a primary trait fall back to qname-based inference
+  # (see :func:`_infer_classification`) so reference taxonomies (FAC,
+  # rs-gaap) without wired traits don't get a phantom $0 cumulative
+  # that would undo the current-period close.
   result = session.execute(
     text("""
       SELECT
         tcls.identifier AS classification,
+        target.qname,
         target.balance_type,
         COALESCE(SUM(li.debit_amount), 0) AS total_debits,
         COALESCE(SUM(li.credit_amount), 0) AS total_credits
@@ -482,8 +630,7 @@ def _close_prior_periods_to_retained_earnings(
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
         AND e.posting_date <= :end_date
-        AND tcls.identifier IN ('revenue', 'expense')
-      GROUP BY tcls.identifier, target.balance_type
+      GROUP BY tcls.identifier, target.qname, target.balance_type
     """),
     {
       "mapping_id": mapping_id,
@@ -494,19 +641,27 @@ def _close_prior_periods_to_retained_earnings(
   cumulative_revenue = 0.0
   cumulative_expenses = 0.0
   for row in result:
+    classification = row.classification or _infer_classification(
+      row.qname, row.balance_type
+    )
+    if classification not in ("revenue", "expense"):
+      continue
     net = cents_to_dollars(row.total_debits - row.total_credits)
     natural = _natural_sign(net, row.balance_type)
-    if row.classification == "revenue":
+    if classification == "revenue":
       cumulative_revenue += natural
     else:
       cumulative_expenses += natural
 
   cumulative_net_income = cumulative_revenue - cumulative_expenses
 
-  # Current period net income was already closed — compute it from facts
+  # Current period net income was already closed — compute it from facts.
+  # The closed amount is now sitting on whichever element
+  # ``_find_close_target`` selected (seed.py RE, us-gaap-shaped RE, or
+  # a single-line equity element like ``fac:Equity``); we don't need to
+  # locate that fact here, only to compute the prior-period delta.
   current_revenue = 0.0
   current_expenses = 0.0
-  retained_earnings_fact: ReportFact | None = None
   for fact in facts:
     if fact.period_start != period_start or fact.period_end != period_end:
       continue
@@ -514,8 +669,6 @@ def _close_prior_periods_to_retained_earnings(
       current_revenue += fact.value
     elif fact.classification == "expense":
       current_expenses += fact.value
-    if fact.element_id == RETAINED_EARNINGS_ID:
-      retained_earnings_fact = fact
 
   current_net_income = current_revenue - current_expenses
   prior_periods_net_income = cumulative_net_income - current_net_income
@@ -523,12 +676,13 @@ def _close_prior_periods_to_retained_earnings(
   if prior_periods_net_income == 0.0:
     return
 
-  if retained_earnings_fact is not None:
-    retained_earnings_fact.value += prior_periods_net_income
+  target = _find_close_target(facts, period_start, period_end)
+  if target is not None:
+    target.value += prior_periods_net_income
   else:
     facts.append(
       ReportFact(
-        element_id=RETAINED_EARNINGS_ID,
+        element_id=_SEED_RETAINED_EARNINGS_ID,
         element_qname="us-gaap:RetainedEarningsAccumulatedDeficit",
         element_name="Retained Earnings",
         classification="equity",

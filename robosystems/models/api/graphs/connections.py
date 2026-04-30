@@ -1,6 +1,6 @@
 """Shared connection models for all providers."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -115,9 +115,17 @@ class ConnectionResponse(BaseModel):
 class SyncConnectionRequest(BaseModel):
   """Request to sync a connection."""
 
-  full_sync: bool = Field(False, description="Perform full sync vs incremental")
+  full_rebuild: bool = Field(
+    False,
+    description="Pull complete history from the provider, ignoring lookback window. Takes precedence over since_date.",
+  )
+  since_date: date | None = Field(
+    None,
+    description="Sync data from this date forward (ISO 8601). Ignored if full_rebuild=True. If neither set, provider default applies (e.g., QuickBooks: 60 days).",
+  )
   sync_options: dict[str, object] | None = Field(
-    None, description="Provider-specific sync options"
+    None,
+    description="Provider-specific sync options (escape hatch for fields not exposed at the top level).",
   )
 
 

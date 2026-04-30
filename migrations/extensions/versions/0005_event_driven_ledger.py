@@ -71,6 +71,14 @@ _RESOURCE_TYPE_CHECK = (
   "resource_type IN ('goods', 'services', 'money', 'right', "
   "'obligation', 'information', 'labor') OR resource_type IS NULL"
 )
+# Event source provenance — adapter-driven (quickbooks, xero, plaid) or
+# native (manual, schedule, system). Adding a new source means widening
+# this CHECK plus updating the adapter that emits the value. Must stay
+# in sync with the SQLAlchemy model in
+# ``models/extensions/roboledger/event.py``.
+_SOURCE_CHECK = (
+  "source IN ('manual', 'system', 'schedule', 'quickbooks', 'xero', 'plaid')"
+)
 _AGENT_TYPE_CHECK = (
   "agent_type IN ('customer', 'vendor', 'employee', 'owner', "
   "'supplier', 'government', 'lender', 'self', 'other')"
@@ -99,6 +107,7 @@ def _create_in_tenant(conn, schema: str) -> None:
         address JSONB,
         source VARCHAR NOT NULL DEFAULT 'native',
         external_id VARCHAR,
+        connection_id VARCHAR,
         is_active BOOLEAN NOT NULL DEFAULT true,
         is_1099_recipient BOOLEAN NOT NULL DEFAULT false,
         metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
@@ -118,8 +127,8 @@ def _create_in_tenant(conn, schema: str) -> None:
   conn.execute(
     text(
       f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{schema}_agents_source_external "
-      f"ON {schema}.agents (source, external_id) "
-      f"WHERE external_id IS NOT NULL"
+      f"ON {schema}.agents (source, connection_id, external_id) "
+      f"WHERE external_id IS NOT NULL AND connection_id IS NOT NULL"
     )
   )
 
@@ -153,7 +162,8 @@ def _create_in_tenant(conn, schema: str) -> None:
         CONSTRAINT check_{schema}_event_status CHECK ({_STATUS_CHECK}),
         CONSTRAINT check_{schema}_event_category CHECK ({_CATEGORY_CHECK}),
         CONSTRAINT check_{schema}_event_class CHECK ({_EVENT_CLASS_CHECK}),
-        CONSTRAINT check_{schema}_event_resource_type CHECK ({_RESOURCE_TYPE_CHECK})
+        CONSTRAINT check_{schema}_event_resource_type CHECK ({_RESOURCE_TYPE_CHECK}),
+        CONSTRAINT check_{schema}_event_source CHECK ({_SOURCE_CHECK})
       )
     """)
   )
@@ -388,6 +398,7 @@ def upgrade() -> None:
     sa.Column("address", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column("source", sa.String(), nullable=False, server_default="native"),
     sa.Column("external_id", sa.String(), nullable=True),
+    sa.Column("connection_id", sa.String(), nullable=True),
     sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
     sa.Column(
       "is_1099_recipient", sa.Boolean(), nullable=False, server_default="false"
@@ -412,9 +423,9 @@ def upgrade() -> None:
   op.create_index(
     "idx_agents_source_external",
     "agents",
-    ["source", "external_id"],
+    ["source", "connection_id", "external_id"],
     unique=True,
-    postgresql_where="external_id IS NOT NULL",
+    postgresql_where="external_id IS NOT NULL AND connection_id IS NOT NULL",
   )
 
   # 2. events (agent_id FK declared inline)
@@ -454,6 +465,7 @@ def upgrade() -> None:
     sa.CheckConstraint(_CATEGORY_CHECK, name="check_event_category"),
     sa.CheckConstraint(_EVENT_CLASS_CHECK, name="check_event_class"),
     sa.CheckConstraint(_RESOURCE_TYPE_CHECK, name="check_event_resource_type"),
+    sa.CheckConstraint(_SOURCE_CHECK, name="check_event_source"),
     sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], name="fk_events_agent_id"),
     sa.PrimaryKeyConstraint("id"),
   )

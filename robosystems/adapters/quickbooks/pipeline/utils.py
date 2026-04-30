@@ -1,5 +1,6 @@
 """QuickBooks pipeline utilities."""
 
+import json
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,8 +25,42 @@ def get_pipeline_work_dir(graph_id: str) -> Path:
   return base
 
 
-# Ledger output tables from dbt (dependency order for FK resolution)
-QB_LEDGER_TABLES = ["elements", "transactions", "entries", "line_items", "dimensions"]
+# Ledger output tables from dbt (dependency order for FK resolution).
+# `agents` is Phase 2: UPSERTed before transactions/events so event_blocks
+# can resolve agent_id from the row's agent_external_id.
+QB_LEDGER_TABLES = [
+  "elements",
+  "agents",
+  "transactions",
+  "entries",
+  "line_items",
+  "dimensions",
+]
+
+
+# JournalReport returns multi-word tx_type strings (e.g., "Bill Payment (Check)",
+# "Sales Receipt") while the per-class header pulls produce single-word class
+# names matching the python-quickbooks entity (e.g., "BillPayment",
+# "SalesReceipt"). Normalize at parse time so the JOIN key is consistent on
+# both sides of the dbt mart. Anything not in the map passes through unchanged.
+_TX_TYPE_NORMALIZATION = {
+  "Bill Payment (Check)": "BillPayment",
+  "Bill Payment (CreditCard)": "BillPayment",
+  "Bill Pmt -Check": "BillPayment",
+  "Bill Pmt CC": "BillPayment",
+  "Bill Pmt-Check": "BillPayment",
+  "Sales Receipt": "SalesReceipt",
+  "Credit Memo": "CreditMemo",
+  "Vendor Credit": "VendorCredit",
+  "Refund Receipt": "RefundReceipt",
+  "Journal Entry": "JournalEntry",
+}
+
+
+def _normalize_tx_type(raw_tx_type: str) -> str:
+  """Map JournalReport tx_type strings to python-quickbooks class names."""
+  return _TX_TYPE_NORMALIZATION.get(raw_tx_type, raw_tx_type)
+
 
 # dbt project location (relative to repo root)
 DBT_PROJECT_DIR = Path(__file__).resolve().parents[1] / "dbt"
@@ -87,7 +122,7 @@ def parse_journal_report(
       tx_date = row_date
     row_type = col_data[1].get("value", "")
     if row_type and not tx_type:
-      tx_type = row_type
+      tx_type = _normalize_tx_type(row_type)
     row_id = col_data[1].get("id", "")
     if row_id and not tx_id:
       tx_id = row_id
@@ -211,6 +246,143 @@ def flatten_journal_lines(
   return lines
 
 
+def _flatten_address(addr: dict[str, Any] | None) -> dict[str, Any]:
+  """Normalize a QB Address dict into the JSONB shape Agent.address expects."""
+  if not addr:
+    return {}
+  return {
+    "line1": addr.get("Line1", "") or "",
+    "line2": addr.get("Line2", "") or "",
+    "city": addr.get("City", "") or "",
+    "state": addr.get("CountrySubDivisionCode", "") or "",
+    "postal_code": addr.get("PostalCode", "") or "",
+    "country": addr.get("Country", "") or "",
+  }
+
+
+def _flatten_party(
+  raw_list: list[Any], agent_type: str, ref_keys: dict[str, str]
+) -> list[dict[str, Any]]:
+  """Shared flattener for Customer / Vendor / Employee.
+
+  Each QB party has: Id, DisplayName/CompanyName, GivenName/FamilyName,
+  PrimaryEmailAddr.Address, PrimaryPhone.FreeFormNumber, BillAddr,
+  TaxIdentifier (sometimes called TaxIdentifier or PrimaryTaxIdentifier).
+  """
+  rows: list[dict[str, Any]] = []
+  for raw in raw_list:
+    data = raw.to_dict() if hasattr(raw, "to_dict") else raw
+    # QB Employees often have empty DisplayName/CompanyName but populated
+    # GivenName + FamilyName, so fall through to a synthesized name.
+    given = (data.get("GivenName") or "").strip()
+    family = (data.get("FamilyName") or "").strip()
+    full_name = f"{given} {family}".strip()
+    name = (
+      data.get(ref_keys.get("name", "DisplayName"))
+      or data.get("CompanyName")
+      or data.get("DisplayName")
+      or full_name
+      or ""
+    )
+    legal = data.get("CompanyName") or name
+    email = (data.get("PrimaryEmailAddr") or {}).get("Address", "") or ""
+    phone = (data.get("PrimaryPhone") or {}).get("FreeFormNumber", "") or ""
+    addr = _flatten_address(data.get("BillAddr") or data.get("PrimaryAddr"))
+    tax_id = (
+      data.get("TaxIdentifier")
+      or data.get("PrimaryTaxIdentifier")
+      or data.get("SSN")
+      or ""
+    )
+    rows.append(
+      {
+        "Id": str(data.get("Id", "")),
+        "agent_type": agent_type,
+        "name": name,
+        "legal_name": legal,
+        "email": email,
+        "phone": phone,
+        # JSON-stringify so parquet sees a plain str column. pyarrow can't
+        "address": json.dumps(addr) if addr else "{}",
+        "tax_id": str(tax_id) if tax_id else "",
+        "is_1099_recipient": bool(data.get("Vendor1099", False)),
+        "is_active": bool(data.get("Active", True)),
+      }
+    )
+  return rows
+
+
+def flatten_customers(raw: list[Any]) -> list[dict[str, Any]]:
+  return _flatten_party(raw, "customer", {})
+
+
+def flatten_vendors(raw: list[Any]) -> list[dict[str, Any]]:
+  return _flatten_party(raw, "vendor", {})
+
+
+def flatten_employees(raw: list[Any]) -> list[dict[str, Any]]:
+  return _flatten_party(raw, "employee", {})
+
+
+def _flatten_txn_header(
+  raw_list: list[Any], qb_class: str, agent_ref_field: str, agent_type: str
+) -> list[dict[str, Any]]:
+  """Shared flattener for Invoice / Bill / Payment headers.
+
+  Produces one row per QB transaction with the agent reference resolved.
+  Line items are NOT extracted here — JournalReport remains the GL
+  posting source. These headers are used to enrich JournalReport-derived
+  events with `event_type`, `event_category`, and `agent_external_id`.
+
+  ``qb_class`` matches the prefix used by ``parse_journal_report`` to build
+  composite tx ids (e.g. ``Invoice_123``).
+
+  Per-class field notes:
+  - ``DocNumber`` exists on Invoice and Bill but NOT on Payment (per Intuit
+    API docs); ``.get(..., "")`` returns "" for Payment, which is correct.
+  """
+  rows: list[dict[str, Any]] = []
+  for raw in raw_list:
+    data = raw.to_dict() if hasattr(raw, "to_dict") else raw
+    tx_id = str(data.get("Id", ""))
+    agent_ref = data.get(agent_ref_field) or {}
+    rows.append(
+      {
+        "tx_type": qb_class,
+        "tx_id": tx_id,
+        "external_id": f"{qb_class}_{tx_id}",
+        "txn_date": data.get("TxnDate", ""),
+        "doc_number": data.get("DocNumber", ""),
+        "total_amount": float(data.get("TotalAmt", 0) or 0),
+        "currency": (data.get("CurrencyRef") or {}).get("value", "USD"),
+        "memo": data.get("PrivateNote", "") or "",
+        "agent_external_id": str(agent_ref.get("value", "")) if agent_ref else "",
+        "agent_type": agent_type,
+      }
+    )
+  return rows
+
+
+def flatten_invoice_headers(raw: list[Any]) -> list[dict[str, Any]]:
+  return _flatten_txn_header(raw, "Invoice", "CustomerRef", "customer")
+
+
+def flatten_bill_headers(raw: list[Any]) -> list[dict[str, Any]]:
+  return _flatten_txn_header(raw, "Bill", "VendorRef", "vendor")
+
+
+def flatten_payment_headers(raw: list[Any]) -> list[dict[str, Any]]:
+  return _flatten_txn_header(raw, "Payment", "CustomerRef", "customer")
+
+
+def flatten_bill_payment_headers(raw: list[Any]) -> list[dict[str, Any]]:
+  return _flatten_txn_header(raw, "BillPayment", "VendorRef", "vendor")
+
+
+def flatten_sales_receipt_headers(raw: list[Any]) -> list[dict[str, Any]]:
+  return _flatten_txn_header(raw, "SalesReceipt", "CustomerRef", "customer")
+
+
 def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
   """Flatten CompanyInfo objects into rows matching raw_company_info schema.
 
@@ -312,6 +484,30 @@ _JOURNAL_LINES_SCHEMA = {
   "LocationRef_value": "str",
   "LocationRef_name": "str",
 }
+_PARTY_SCHEMA = {
+  "Id": "str",
+  "agent_type": "str",
+  "name": "str",
+  "legal_name": "str",
+  "email": "str",
+  "phone": "str",
+  "address": "str",
+  "tax_id": "str",
+  "is_1099_recipient": "bool",
+  "is_active": "bool",
+}
+_TXN_HEADER_SCHEMA = {
+  "tx_type": "str",
+  "tx_id": "str",
+  "external_id": "str",
+  "txn_date": "str",
+  "doc_number": "str",
+  "total_amount": "float64",
+  "currency": "str",
+  "memo": "str",
+  "agent_external_id": "str",
+  "agent_type": "str",
+}
 
 
 def _to_dataframe(
@@ -331,18 +527,22 @@ def write_extract_parquet(
   journal_entries: list[dict[str, Any]],
   journal_lines: list[dict[str, Any]],
   company_info: list[dict[str, Any]],
+  customers: list[dict[str, Any]] | None = None,
+  vendors: list[dict[str, Any]] | None = None,
+  employees: list[dict[str, Any]] | None = None,
+  invoice_headers: list[dict[str, Any]] | None = None,
+  bill_headers: list[dict[str, Any]] | None = None,
+  payment_headers: list[dict[str, Any]] | None = None,
+  bill_payment_headers: list[dict[str, Any]] | None = None,
+  sales_receipt_headers: list[dict[str, Any]] | None = None,
 ) -> None:
   """Write extracted QB data as parquet files.
 
   Empty datasets are written with the expected schema so DuckDB
   can read them (parquet files with 0 columns are invalid).
 
-  Args:
-      output_dir: Directory to write parquet files
-      accounts: Account list from QBClient.get_accounts()
-      journal_entries: Flattened journal entry headers
-      journal_lines: Flattened journal entry lines
-      company_info: Flattened company info
+  Phase 2 adds party + transaction-header parquet files. Line items still
+  come from JournalReport via raw_journal_lines.
   """
   output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -357,7 +557,37 @@ def write_extract_parquet(
     output_dir / "raw_company_info.parquet", index=False
   )
 
+  _to_dataframe(customers or [], _PARTY_SCHEMA).to_parquet(
+    output_dir / "raw_customers.parquet", index=False
+  )
+  _to_dataframe(vendors or [], _PARTY_SCHEMA).to_parquet(
+    output_dir / "raw_vendors.parquet", index=False
+  )
+  _to_dataframe(employees or [], _PARTY_SCHEMA).to_parquet(
+    output_dir / "raw_employees.parquet", index=False
+  )
+  _to_dataframe(invoice_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
+    output_dir / "raw_invoice_headers.parquet", index=False
+  )
+  _to_dataframe(bill_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
+    output_dir / "raw_bill_headers.parquet", index=False
+  )
+  _to_dataframe(payment_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
+    output_dir / "raw_payment_headers.parquet", index=False
+  )
+  _to_dataframe(bill_payment_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
+    output_dir / "raw_bill_payment_headers.parquet", index=False
+  )
+  _to_dataframe(sales_receipt_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
+    output_dir / "raw_sales_receipt_headers.parquet", index=False
+  )
+
   logger.info(
     f"Wrote extract parquet: {len(accounts)} accounts, "
-    f"{len(journal_entries)} entries, {len(journal_lines)} lines"
+    f"{len(journal_entries)} entries, {len(journal_lines)} lines, "
+    f"{len(customers or [])} customers, {len(vendors or [])} vendors, "
+    f"{len(employees or [])} employees, {len(invoice_headers or [])} invoices, "
+    f"{len(bill_headers or [])} bills, {len(payment_headers or [])} payments, "
+    f"{len(bill_payment_headers or [])} bill payments, "
+    f"{len(sales_receipt_headers or [])} sales receipts"
   )

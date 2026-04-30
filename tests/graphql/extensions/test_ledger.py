@@ -15,11 +15,13 @@ tests cover:
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy.exc import ProgrammingError
 
 from robosystems.graphql.schema import schema
+from robosystems.models.api.event_block import EventBlockEnvelope
 from robosystems.models.api.extensions.accounts import (
   AccountTreeNode as PydAccountTreeNode,
 )
@@ -347,6 +349,172 @@ class TestAgentResolvers:
     ):
       result = schema.execute_sync(
         "query { agents { id } }",
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+
+class TestEventBlockResolvers:
+  """Inbox surface — event_block(id) + event_blocks(filters)."""
+
+  def _event(
+    self,
+    *,
+    id: str = "evt_01",
+    status: str = "captured",
+    source: str = "quickbooks",
+    metadata: dict | None = None,
+  ) -> EventBlockEnvelope:
+    return EventBlockEnvelope(
+      id=id,
+      event_type="journal_entry_recorded",
+      event_category="adjustment",
+      event_class="economic",
+      status=status,
+      occurred_at=datetime(2026, 4, 15, 12, tzinfo=UTC),
+      effective_at=None,
+      source=source,
+      external_id="qb_txn_42",
+      external_url=None,
+      amount=12345,
+      currency="USD",
+      description="Sale of widgets",
+      metadata=metadata or {"qb_txn_type": "Invoice", "lines": []},
+      dimension_ids=["dim_class_a"],
+      agent_id="agt_customer_1",
+      resource_type=None,
+      resource_element_id=None,
+      replaced_by_event_id=None,
+      replaces_event_id=None,
+      obligated_by_event_id=None,
+      discharges_event_id=None,
+      created_at=datetime(2026, 4, 16, 9, tzinfo=UTC),
+      created_by="system",
+    )
+
+  def test_returns_event_when_found(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.get_event_block",
+        return_value=self._event(),
+      ),
+    ):
+      result = schema.execute_sync(
+        """
+        query {
+          eventBlock(id: "evt_01") {
+            id
+            eventType
+            eventCategory
+            eventClass
+            status
+            source
+            externalId
+            amount
+            currency
+            metadata
+            dimensionIds
+            agentId
+          }
+        }
+        """,
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data is not None
+    block = result.data["eventBlock"]
+    assert block["id"] == "evt_01"
+    assert block["eventType"] == "journal_entry_recorded"
+    assert block["status"] == "captured"
+    assert block["source"] == "quickbooks"
+    assert block["externalId"] == "qb_txn_42"
+    assert block["amount"] == 12345
+    assert block["currency"] == "USD"
+    # JSON scalar — passes the dict through verbatim.
+    assert block["metadata"] == {"qb_txn_type": "Invoice", "lines": []}
+    assert block["dimensionIds"] == ["dim_class_a"]
+    assert block["agentId"] == "agt_customer_1"
+
+  def test_returns_null_when_event_missing(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.get_event_block",
+        return_value=None,
+      ),
+    ):
+      result = schema.execute_sync(
+        'query { eventBlock(id: "evt_missing") { id } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data == {"eventBlock": None}
+
+  def test_event_blocks_lists_with_filters(self) -> None:
+    events = [self._event(id=f"evt_{i:02d}", status="captured") for i in range(3)]
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.list_event_blocks",
+        return_value=events,
+      ) as list_mock,
+    ):
+      result = schema.execute_sync(
+        """
+        query {
+          eventBlocks(status: "captured", source: "quickbooks", limit: 10) {
+            id
+            status
+            source
+          }
+        }
+        """,
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data is not None
+    assert len(result.data["eventBlocks"]) == 3
+    assert result.data["eventBlocks"][0]["id"] == "evt_00"
+    # Filter args are forwarded to the ops layer.
+    list_mock.assert_called_once()
+    kwargs = list_mock.call_args.kwargs
+    assert kwargs["status"] == "captured"
+    assert kwargs["source"] == "quickbooks"
+    assert kwargs["limit"] == 10
+    assert kwargs["offset"] == 0
+
+  def test_event_block_raises_typed_error_when_schema_not_initialized(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.get_event_block",
+        side_effect=ProgrammingError("stmt", {}, Exception("schema missing")),
+      ),
+    ):
+      result = schema.execute_sync(
+        'query { eventBlock(id: "evt_01") { id } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    assert result.errors[0].extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+  def test_event_blocks_raises_typed_error_when_schema_not_initialized(self) -> None:
+    with (
+      _patch_session(),
+      patch(
+        "robosystems.operations.roboledger.reads.event_block.list_event_blocks",
+        side_effect=ValueError("bad graph_id"),
+      ),
+    ):
+      result = schema.execute_sync(
+        "query { eventBlocks { id } }",
         context_value=_ctx(),
       )
 
