@@ -74,10 +74,18 @@ class TestUserModel:
 
   def test_get_by_id(self, db_session):
     """Test getting user by ID."""
-    # Create a test user
+    # Use unique identifiers because db_session shares a session-scoped
+    # Postgres with the rest of the suite (notably test_auth.py registers
+    # users with the literal address ``test@example.com``).
+    import uuid
+
+    unique_id = str(uuid.uuid4())[:8]
+    user_id = f"user_test_{unique_id}"
+    email = f"test_{unique_id}@example.com"
+
     user = User(
-      id="user_test123",
-      email="test@example.com",
+      id=user_id,
+      email=email,
       name="Test User",
       password_hash="hashed_password",
     )
@@ -85,10 +93,10 @@ class TestUserModel:
     db_session.commit()
 
     # Test get_by_id
-    found_user = User.get_by_id("user_test123", db_session)
+    found_user = User.get_by_id(user_id, db_session)
     assert found_user is not None
-    assert found_user.id == "user_test123"
-    assert found_user.email == "test@example.com"
+    assert found_user.id == user_id
+    assert found_user.email == email
 
     # Test with non-existent ID
     not_found = User.get_by_id("user_nonexistent", db_session)
@@ -148,9 +156,19 @@ class TestUserModel:
 
   def test_create_user_duplicate_email(self, db_session):
     """Test that creating user with duplicate email fails."""
+    # Use a unique email — db_session is session-scoped and shared with
+    # tests/routers/auth/test_auth.py::test_register_duplicate_email,
+    # which already inserts ``duplicate@example.com``. The conftest
+    # cleanup fixture has known holes (e.g. it doesn't delete OrgLimits,
+    # which blocks Org deletion via FK and rolls back the User delete),
+    # so we can't rely on the email being absent.
+    import uuid
+
+    unique_email = f"duplicate_{uuid.uuid4().hex[:8]}@example.com"
+
     # Create first user
     User.create(
-      email="duplicate@example.com",
+      email=unique_email,
       name="First User",
       password_hash="hashed_password",
       session=db_session,
@@ -159,7 +177,7 @@ class TestUserModel:
     # Try to create second user with same email
     with pytest.raises(SQLAlchemyError):
       User.create(
-        email="duplicate@example.com",
+        email=unique_email,
         name="Second User",
         password_hash="hashed_password",
         session=db_session,
@@ -551,3 +569,110 @@ class TestUserModel:
       user.activate(mock_session)
 
     mock_session.rollback.assert_called_once()
+
+
+class TestInvalidateAuthCache:
+  """Regression tests for ``User._invalidate_auth_cache``.
+
+  These cover the retry/critical-log behavior when the underlying Redis
+  invalidation methods report failure via their bool return contract.
+  Without these, a regression to "fire-and-forget" invalidation (e.g. if
+  the cache methods went back to swallowing exceptions and returning
+  None) would silently re-introduce the post-password-reset stale-token
+  window.
+  """
+
+  def _make_user(self) -> User:
+    return User(
+      id="user_invalidate",
+      email="invalidate@example.com",
+      name="Invalidate Test",
+      password_hash="hashed",
+      is_active=True,
+      session_version=1,
+    )
+
+  @patch("robosystems.models.core.user.user.logger")
+  def test_first_attempt_succeeds_no_critical_log(self, mock_logger):
+    """If both cache calls return True on the first attempt, no retry,
+    no error log."""
+    cache_module = MagicMock()
+    cache_module.api_key_cache.invalidate_jwt_user_data.return_value = True
+    cache_module.api_key_cache.invalidate_user_jwt_graph_access.return_value = True
+
+    with patch("importlib.import_module", return_value=cache_module):
+      self._make_user()._invalidate_auth_cache()
+
+    assert cache_module.api_key_cache.invalidate_jwt_user_data.call_count == 1, (
+      "should not retry when first attempt succeeds"
+    )
+    mock_logger.error.assert_not_called()
+
+  @patch("robosystems.models.core.user.user.time.sleep")
+  @patch("robosystems.models.core.user.user.logger")
+  def test_first_attempt_fails_second_succeeds_no_critical_log(
+    self, mock_logger, mock_sleep
+  ):
+    """Transient Redis failure on attempt 1, success on retry → no
+    critical log. We assert the retry sleep happened so the contract
+    (one backoff between attempts) doesn't silently disappear."""
+    cache_module = MagicMock()
+    cache_module.api_key_cache.invalidate_jwt_user_data.side_effect = [False, True]
+    cache_module.api_key_cache.invalidate_user_jwt_graph_access.return_value = True
+
+    with patch("importlib.import_module", return_value=cache_module):
+      self._make_user()._invalidate_auth_cache()
+
+    assert cache_module.api_key_cache.invalidate_jwt_user_data.call_count == 2
+    mock_sleep.assert_called_once()
+    # No CRITICAL: ... line should fire.
+    for call in mock_logger.error.call_args_list:
+      assert "CRITICAL" not in str(call), (
+        f"unexpected critical log on successful retry: {call}"
+      )
+
+  @patch("robosystems.models.core.user.user.time.sleep")
+  @patch("robosystems.models.core.user.user.logger")
+  def test_both_attempts_fail_emits_critical_log(self, mock_logger, mock_sleep):
+    """Hard Redis failure on both attempts → CRITICAL: error log so
+    monitoring can alert. Verifies the fail-open window is at least
+    surfaced rather than silenced."""
+    cache_module = MagicMock()
+    cache_module.api_key_cache.invalidate_jwt_user_data.return_value = False
+    cache_module.api_key_cache.invalidate_user_jwt_graph_access.return_value = False
+
+    with patch("importlib.import_module", return_value=cache_module):
+      self._make_user()._invalidate_auth_cache()
+
+    assert cache_module.api_key_cache.invalidate_jwt_user_data.call_count == 2
+    mock_sleep.assert_called_once()
+
+    critical_logs = [
+      call for call in mock_logger.error.call_args_list if "CRITICAL" in str(call)
+    ]
+    assert len(critical_logs) == 1, (
+      f"expected exactly one CRITICAL log on dual failure, got: "
+      f"{mock_logger.error.call_args_list}"
+    )
+    # The user_id must appear in the log so the alerting context is useful.
+    assert "user_invalidate" in str(critical_logs[0])
+
+  @patch("robosystems.models.core.user.user.time.sleep")
+  @patch("robosystems.models.core.user.user.logger")
+  def test_graph_cache_failure_alone_triggers_retry(self, mock_logger, mock_sleep):
+    """Both caches must succeed for the attempt to count as success.
+    If only the graph cache invalidation fails, we still retry."""
+    cache_module = MagicMock()
+    cache_module.api_key_cache.invalidate_jwt_user_data.return_value = True
+    cache_module.api_key_cache.invalidate_user_jwt_graph_access.side_effect = [
+      False,
+      True,
+    ]
+
+    with patch("importlib.import_module", return_value=cache_module):
+      self._make_user()._invalidate_auth_cache()
+
+    assert (
+      cache_module.api_key_cache.invalidate_user_jwt_graph_access.call_count == 2
+    ), "graph-cache failure must trigger a retry"
+    mock_sleep.assert_called_once()

@@ -48,7 +48,9 @@ class TestGraphAccessControlDependency:
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
     with (
-      patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
+      patch(
+        "robosystems.middleware.auth.dependencies.verify_jwt_claims"
+      ) as mock_verify,
       patch(
         "robosystems.middleware.auth.dependencies._db_get_user_by_id"
       ) as mock_get_user,
@@ -56,7 +58,7 @@ class TestGraphAccessControlDependency:
         "robosystems.middleware.auth.dependencies._db_check_graph_access"
       ) as mock_access,
     ):
-      mock_verify.return_value = test_user.id
+      mock_verify.return_value = (test_user.id, 0)
       mock_get_user.return_value = test_user
       mock_access.return_value = True
 
@@ -75,7 +77,9 @@ class TestGraphAccessControlDependency:
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
     with (
-      patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
+      patch(
+        "robosystems.middleware.auth.dependencies.verify_jwt_claims"
+      ) as mock_verify,
       patch(
         "robosystems.middleware.auth.dependencies._db_get_user_by_id"
       ) as mock_get_user,
@@ -83,7 +87,7 @@ class TestGraphAccessControlDependency:
         "robosystems.middleware.auth.dependencies._db_check_graph_access"
       ) as mock_access,
     ):
-      mock_verify.return_value = test_user.id
+      mock_verify.return_value = (test_user.id, 0)
       mock_get_user.return_value = test_user
       mock_access.return_value = False
 

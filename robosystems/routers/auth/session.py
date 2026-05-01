@@ -11,14 +11,14 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from ...config import env
 from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES
 from ...database import get_async_db_session
 from ...logger import logger
-from ...middleware.auth.cache import api_key_cache
 from ...middleware.auth.jwt import (
   create_jwt_token,
   revoke_jwt_token,
-  verify_jwt_token,
+  verify_jwt_claims,
 )
 from ...middleware.rate_limits import (
   auth_status_rate_limit_dependency,
@@ -62,13 +62,14 @@ async def get_me(
     device_fingerprint = extract_device_fingerprint(fastapi_request)
 
     # Verify JWT token with device binding
-    user_id = verify_jwt_token(jwt_token, device_fingerprint)
-    if not user_id:
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
+    if not verify_result:
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
       )
+    user_id, token_session_version = verify_result
 
     # Get user from database
     user = User.get_by_id(user_id, session)
@@ -83,6 +84,13 @@ async def get_me(
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="User account is deactivated",
+      )
+
+    if int(user.session_version or 0) != int(token_session_version):
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token session has been invalidated",
+        headers={"WWW-Authenticate": "Bearer"},
       )
 
     return {
@@ -141,14 +149,20 @@ async def refresh_session(
     device_fingerprint = extract_device_fingerprint(fastapi_request)
 
     # Verify current JWT token - allow recently expired tokens for refresh
-    user_id = verify_jwt_token(jwt_token, device_fingerprint)
-    if not user_id:
+    user_id: str | None = None
+    token_session_version: int = 0
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
+    if verify_result:
+      user_id, token_session_version = verify_result
+    else:
       # For refresh endpoint, try to verify recently expired tokens
       try:
         payload = jwt.decode(
           jwt_token,
           JWTConfig.get_jwt_secret(),
           algorithms=["HS256"],
+          issuer=env.JWT_ISSUER,
+          audience=env.JWT_AUDIENCE,
           options={"verify_exp": False},  # Allow expired tokens for grace period
         )
 
@@ -208,6 +222,14 @@ async def refresh_session(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
           )
 
+        try:
+          token_session_version = int(payload.get("session_version", 0))
+        except (TypeError, ValueError):
+          raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token session",
+          )
+
         logger.info(f"Accepted expired token within grace period for user {user_id}")
 
       except jwt.InvalidTokenError:
@@ -222,6 +244,12 @@ async def refresh_session(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive"
       )
 
+    if int(user.session_version or 0) != int(token_session_version):
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token session has been invalidated",
+      )
+
     # Revoke the old token before issuing a new one
     revoke_success = revoke_jwt_token(jwt_token, reason="session_refresh")
     if revoke_success:
@@ -231,11 +259,8 @@ async def refresh_session(
         f"Failed to revoke old JWT token during session refresh for user {user_id}"
       )
 
-    # Also invalidate old token cache
-    api_key_cache.invalidate_jwt_token(jwt_token)
-
     # Create new JWT token with fresh expiry and device binding
-    new_jwt_token = create_jwt_token(user.id, device_fingerprint)
+    new_jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
     # Log successful refresh for security monitoring
     from ...security import SecurityAuditLogger, SecurityEventType

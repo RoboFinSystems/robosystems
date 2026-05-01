@@ -3,16 +3,35 @@
 from datetime import UTC
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.middleware.auth.jwt import (
   create_jwt_token,
   is_jwt_token_revoked,
   revoke_jwt_token,
-  verify_jwt_token,
+  verify_jwt_claims,
 )
 
 
 class TestJWTRevocation:
   """Test JWT token revocation system."""
+
+  @pytest.fixture(autouse=True)
+  def _stub_session_version(self):
+    """These tests use synthetic user IDs that don't exist in the DB.
+
+    ``create_jwt_token`` reads ``User.session_version`` to embed in the JWT
+    claim; with no User row that read returns None and falls through to 0,
+    but it still hits the DB. Stubbing avoids the DB call and makes the
+    test independent of the session-scoped ``test_db`` state. (Note:
+    ``verify_jwt_claims`` itself does NOT touch the DB anymore — the
+    session_version vs DB comparison is the caller's responsibility, done
+    in ``_get_user_for_verified_jwt`` or explicit router checks.)
+    """
+    with patch(
+      "robosystems.middleware.auth.jwt._get_user_session_version", return_value=0
+    ):
+      yield
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
   def test_jwt_token_has_jti_claim(self, mock_redis):
@@ -50,9 +69,9 @@ class TestJWTRevocation:
 
     # Create and verify token (no device fingerprint needed for this test)
     token = create_jwt_token("test-user-123")
-    user_id = verify_jwt_token(token)
+    result = verify_jwt_claims(token)
 
-    assert user_id == "test-user-123"
+    assert result == ("test-user-123", 0)
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
   def test_token_revocation_flow(self, mock_redis):
@@ -97,7 +116,7 @@ class TestJWTRevocation:
     token = create_jwt_token("test-user-123")
 
     # Verification should fail due to revocation (no device fingerprint needed)
-    user_id = verify_jwt_token(token)
+    user_id = verify_jwt_claims(token)
     assert user_id is None
 
   def test_token_revocation_without_jti(self):
@@ -138,7 +157,7 @@ class TestJWTRevocation:
     assert is_jwt_token_revoked(token)
 
     # Token verification should fail when Redis is down (fail closed, no device fingerprint needed)
-    user_id = verify_jwt_token(token)
+    user_id = verify_jwt_claims(token)
     assert user_id is None
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
@@ -160,7 +179,7 @@ class TestJWTRevocation:
     assert is_jwt_token_revoked(token)
 
     # Token verification should fail when Redis connection is down (no device fingerprint needed)
-    user_id = verify_jwt_token(token)
+    user_id = verify_jwt_claims(token)
     assert user_id is None
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
@@ -218,8 +237,8 @@ class TestJWTRevocation:
     assert not is_jwt_token_revoked(token)
 
     # Token verification should succeed
-    user_id = verify_jwt_token(token)
-    assert user_id == "test-user-123"
+    user_id = verify_jwt_claims(token)
+    assert user_id == ("test-user-123", 0)
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
   def test_session_refresh_grace_period_expired(self, mock_redis):
@@ -245,7 +264,7 @@ class TestJWTRevocation:
     assert is_jwt_token_revoked(token)
 
     # Token verification should fail
-    user_id = verify_jwt_token(token)
+    user_id = verify_jwt_claims(token)
     assert user_id is None
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
@@ -272,5 +291,5 @@ class TestJWTRevocation:
     assert is_jwt_token_revoked(token)
 
     # Token verification should fail
-    user_id = verify_jwt_token(token)
+    user_id = verify_jwt_claims(token)
     assert user_id is None

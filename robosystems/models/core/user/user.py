@@ -1,14 +1,16 @@
 """User authentication model."""
 
+import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
 from robosystems.database import Model
+from robosystems.logger import logger
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
@@ -23,6 +25,9 @@ class User(Model):
   password_hash = Column(String, nullable=False)
   is_active = Column(Boolean, default=True, nullable=False)
   email_verified = Column(Boolean, default=False, nullable=False)
+  # Bumped on password reset / logout-everywhere; embedded in JWT payload and
+  # checked on every auth so prior tokens (incl. refresh chain) stop working.
+  session_version = Column(Integer, default=0, nullable=False, server_default="0")
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -128,12 +133,21 @@ class User(Model):
       raise
 
   def deactivate(self, session: Session) -> None:
-    """Deactivate the user."""
+    """Deactivate the user.
+
+    Bumps ``session_version``, which invalidates every JWT issued for this
+    user. If the user is reactivated later, they must re-authenticate —
+    prior tokens cannot resume. This is intentional: a deactivated account
+    is a security boundary, and we don't want suspended/banned/restored
+    accounts to be revivable just by replaying an old token.
+    """
     self.is_active = False
+    self.session_version = (self.session_version or 0) + 1
     self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)
+      self._invalidate_auth_cache()
     except SQLAlchemyError:
       session.rollback()
       raise
@@ -145,6 +159,76 @@ class User(Model):
     try:
       session.commit()
       session.refresh(self)
+      self._invalidate_auth_cache()
     except SQLAlchemyError:
       session.rollback()
       raise
+
+  def invalidate_sessions(self, session: Session) -> None:
+    """Bump session_version, invalidating all existing JWTs for this user."""
+    self.session_version = (self.session_version or 0) + 1
+    self.updated_at = datetime.now(UTC)
+    try:
+      session.commit()
+      session.refresh(self)
+      self._invalidate_auth_cache()
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+  def _invalidate_auth_cache(self) -> None:
+    """Invalidate auth caches derived from this user.
+
+    Always DELETE rather than rewrite: the cached entry's session_version
+    is what gates the cache hit, so an old entry left in place defeats the
+    DB session_version bump. Letting the cache repopulate lazily on the
+    next legitimate request is one extra DB hit per invalidation event
+    (password reset / deactivate / logout-everywhere) — cheap.
+
+    Tradeoff: if BOTH retries against Redis fail, the prior cache entry
+    persists until its TTL expires (~30 min). The DB session_version is
+    the source of truth, but the cache hit path doesn't re-read the DB,
+    so during this window an attacker holding a token with the prior
+    session_version would continue to authenticate. This is bounded by
+    JWT TTL (30 min) and Redis recovery time, and is the standard
+    cache-invalidation tradeoff. For stronger guarantees, move the
+    version-of-record into a no-TTL Redis key (or back to per-request DB).
+    """
+    import importlib
+
+    try:
+      cache_module = importlib.import_module("robosystems.middleware.auth.cache")
+      api_key_cache = cache_module.api_key_cache
+    except Exception as e:
+      logger.error(f"Auth cache module unavailable for user {self.id}: {e}")
+      return
+
+    user_id = str(self.id)
+
+    def _try_invalidate() -> bool:
+      # Both methods return True on success, False on Redis failure.
+      # We require BOTH to succeed: a stale entry in either cache could
+      # let an old token continue to authenticate.
+      try:
+        user_ok = api_key_cache.invalidate_jwt_user_data(user_id)
+        graph_ok = api_key_cache.invalidate_user_jwt_graph_access(user_id)
+        return bool(user_ok) and bool(graph_ok)
+      except Exception as e:
+        logger.warning(f"Auth cache invalidation attempt failed for {user_id}: {e}")
+        return False
+
+    # One retry with a short backoff handles transient Redis blips
+    # (connection reset, single-node failover) without going to extremes.
+    if _try_invalidate():
+      return
+    time.sleep(0.05)
+    if _try_invalidate():
+      return
+
+    # Both attempts failed. Log loudly — this is the fail-open window.
+    # Surface as an error so it's monitorable; downstream alerting should
+    # treat repeated occurrences as a Redis-availability incident.
+    logger.error(
+      f"CRITICAL: auth cache invalidation failed twice for user {user_id}; "
+      f"prior session may remain valid for up to JWT/cache TTL"
+    )

@@ -7,16 +7,21 @@ Security Note:
 - Never log full request URLs; always use request.url.path for logging
 """
 
+from typing import Any
+
 from fastapi import Header, HTTPException, Query, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from ...logger import logger
 from ...models.core import User
 from ...security import SecurityAuditLogger, SecurityEventType
+from ...security.device_fingerprinting import extract_device_fingerprint
 from .cache import api_key_cache
 
-# Import JWT verification from local jwt module to avoid circular imports
-from .jwt import verify_jwt_token as verify_jwt_token_from_auth
+# Import JWT helpers from local jwt module to avoid circular imports
+from .jwt import (
+  verify_jwt_claims as verify_jwt_claims_from_auth,
+)
 from .utils import (
   validate_api_key,
   validate_api_key_with_graph,
@@ -60,6 +65,7 @@ def _create_user_from_cache(user_data: dict) -> User | None:
       email=user_data.get("email"),
       name=user_data.get("name"),
       is_active=user_data.get("is_active", True),
+      session_version=user_data.get("session_version", 0),
     )
     return user
   except (TypeError, ValueError) as e:
@@ -108,38 +114,71 @@ def _db_check_graph_access(user_id: str, graph_id: str) -> bool:
     sess.close()
 
 
+def _serialize_user_for_jwt_cache(user: User) -> dict[str, Any]:
+  """Serialize the stable user fields needed by JWT auth dependencies."""
+  return {
+    "id": str(user.id),
+    "email": user.email,
+    "name": user.name,
+    "is_active": bool(user.is_active),
+    "session_version": _safe_user_session_version(user),
+  }
+
+
+def _safe_user_session_version(user: User) -> int:
+  """Read session_version defensively for real users and lightweight test mocks."""
+  try:
+    return int(getattr(user, "session_version", 0) or 0)
+  except (TypeError, ValueError):
+    return 0
+
+
+def _get_user_for_verified_jwt(user_id: str, token_session_version: int) -> User | None:
+  """Get user data after strict JWT verification has succeeded.
+
+  Uses the user-id keyed cache only when its session_version matches the token.
+  On cache miss, confirms the DB session_version still matches before caching.
+  """
+  cached_data = api_key_cache.get_cached_jwt_user_data(user_id, token_session_version)
+  if isinstance(cached_data, dict):
+    user_data = cached_data.get("user_data", {})
+    user = _create_user_from_cache(user_data)
+    if user:
+      return user
+
+  user = _db_get_user_by_id(user_id)
+  if not user or not bool(user.is_active):
+    return None
+
+  current_session_version = _safe_user_session_version(user)
+  if current_session_version != int(token_session_version):
+    logger.info(
+      f"JWT user DB lookup rejected session_version mismatch for {user_id} "
+      f"(token={token_session_version}, current={current_session_version})"
+    )
+    return None
+
+  api_key_cache.cache_jwt_user_data(
+    user_id, _serialize_user_for_jwt_cache(user), current_session_version
+  )
+  return user
+
+
 # Define API key header
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-def verify_jwt_token(token: str) -> str | None:
-  """Verify a JWT token and return the user_id if valid.
+def verify_jwt_claims(
+  token: str, device_fingerprint: dict[str, Any] | None = None
+) -> tuple[str, int] | None:
+  """Verify a JWT token's claims and return (user_id, session_version) if valid.
 
-  This includes caching for performance.
+  See ``robosystems.middleware.auth.jwt.verify_jwt_claims`` for full semantics.
+  Notably, this does NOT compare session_version against the User row; the
+  caller must do that (the dependency wrappers in this module use
+  ``_get_user_for_verified_jwt`` which handles it via the user-data cache).
   """
-  # Try to get from cache first
-  cached_data = api_key_cache.get_cached_jwt_validation(token)
-  if cached_data:
-    user_data = cached_data.get("user_data", {})
-    return user_data.get("id")
-
-  # Cache miss - use the auth verification
-  user_id = verify_jwt_token_from_auth(token)
-
-  if user_id:
-    # Get user data and cache it
-    user = _db_get_user_by_id(user_id)
-    if user and bool(user.is_active):
-      user_data = {
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "is_active": user.is_active,
-      }
-      api_key_cache.cache_jwt_validation(token, user_data)
-      return user_id
-
-  return None
+  return verify_jwt_claims_from_auth(token, device_fingerprint)
 
 
 async def get_optional_user(
@@ -164,22 +203,13 @@ async def get_optional_user(
 
   # Try JWT token authentication first (takes precedence)
   if jwt_token:
-    user_id = verify_jwt_token(jwt_token)
-    if user_id:
-      # Try to get user data from cache first
-      cached_data = api_key_cache.get_cached_jwt_validation(jwt_token)
-      if cached_data:
-        user_data = cached_data.get("user_data", {})
-        # Safely create User object from validated cached data
-        user = _create_user_from_cache(user_data)
-        if user:
-          return user
-        # If validation failed, fall through to database query
-      else:
-        # Fallback to database query
-        user = _db_get_user_by_id(user_id)
-        if user and bool(user.is_active):
-          return user
+    device_fingerprint = extract_device_fingerprint(request)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
+    if verify_result:
+      user_id, token_session_version = verify_result
+      user = _get_user_for_verified_jwt(user_id, token_session_version)
+      if user:
+        return user
 
   # Fall back to API key authentication
   if api_key:
@@ -218,34 +248,19 @@ async def get_current_user(
 
   # Try JWT token authentication first (takes precedence)
   if jwt_token:
-    user_id = verify_jwt_token(jwt_token)
-    if user_id:
-      # Try to get user data from cache first
-      cached_data = api_key_cache.get_cached_jwt_validation(jwt_token)
-      if cached_data:
-        user_data = cached_data.get("user_data", {})
-        # Safely create User object from validated cached data
-        user = _create_user_from_cache(user_data)
-        if user:
-          SecurityAuditLogger.log_auth_success(
-            user_id=str(user_id),
-            ip_address=client_ip,
-            user_agent=user_agent,
-            auth_method="jwt_token",
-          )
-          return user
-        # If validation failed, fall through to database query
-      else:
-        # Fallback to database query
-        user = _db_get_user_by_id(user_id)
-        if user and bool(user.is_active):
-          SecurityAuditLogger.log_auth_success(
-            user_id=str(user_id),
-            ip_address=client_ip,
-            user_agent=user_agent,
-            auth_method="jwt_token",
-          )
-          return user
+    device_fingerprint = extract_device_fingerprint(request)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
+    if verify_result:
+      user_id, token_session_version = verify_result
+      user = _get_user_for_verified_jwt(user_id, token_session_version)
+      if user:
+        SecurityAuditLogger.log_auth_success(
+          user_id=str(user_id),
+          ip_address=client_ip,
+          user_agent=user_agent,
+          auth_method="jwt_token",
+        )
+        return user
 
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_TOKEN_INVALID,
@@ -332,22 +347,13 @@ async def get_current_user_with_graph(
 
   # Try JWT token authentication first (takes precedence)
   if jwt_token:
-    user_id = verify_jwt_token(jwt_token)
-    if user_id:
-      # Try to get user data from cache first
-      cached_data = api_key_cache.get_cached_jwt_validation(jwt_token)
-      user = None
-
-      if cached_data:
-        user_data = cached_data.get("user_data", {})
-        # Create User object from cached data with validation (avoid database query)
-        user = _create_user_from_cache(user_data)
-        if not user:
-          # Validation failed - fallback to database query
-          user = _db_get_user_by_id(user_id)
-      else:
-        # Fallback to database query
-        user = _db_get_user_by_id(user_id)
+    device_fingerprint = extract_device_fingerprint(request)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
+    user = None
+    user_id = None
+    if verify_result:
+      user_id, token_session_version = verify_result
+      user = _get_user_for_verified_jwt(user_id, token_session_version)
 
       if user and bool(user.is_active):
         # Check if user has access to the graph (try cache first)
@@ -554,34 +560,19 @@ async def get_current_user_sse(
 
   # Try JWT token authentication first (takes precedence)
   if jwt_token:
-    user_id = verify_jwt_token(jwt_token)
-    if user_id:
-      # Try to get user data from cache first
-      cached_data = api_key_cache.get_cached_jwt_validation(jwt_token)
-      if cached_data:
-        user_data = cached_data.get("user_data", {})
-        # Safely create User object from validated cached data
-        user = _create_user_from_cache(user_data)
-        if user:
-          SecurityAuditLogger.log_auth_success(
-            user_id=str(user_id),
-            ip_address=client_ip,
-            user_agent=user_agent,
-            auth_method="jwt_token",
-          )
-          return user
-        # If validation failed, fall through to database query
-      else:
-        # Fallback to database query
-        user = _db_get_user_by_id(user_id)
-        if user and bool(user.is_active):
-          SecurityAuditLogger.log_auth_success(
-            user_id=str(user_id),
-            ip_address=client_ip,
-            user_agent=user_agent,
-            auth_method="jwt_token",
-          )
-          return user
+    device_fingerprint = extract_device_fingerprint(request)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
+    if verify_result:
+      user_id, token_session_version = verify_result
+      user = _get_user_for_verified_jwt(user_id, token_session_version)
+      if user:
+        SecurityAuditLogger.log_auth_success(
+          user_id=str(user_id),
+          ip_address=client_ip,
+          user_agent=user_agent,
+          auth_method="jwt_token",
+        )
+        return user
 
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.AUTH_TOKEN_INVALID,

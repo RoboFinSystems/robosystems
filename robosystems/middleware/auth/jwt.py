@@ -124,17 +124,54 @@ def is_jwt_token_revoked(token: str) -> bool:
     return True
 
 
-def verify_jwt_token(
+def _get_user_session_version(user_id: str, session: Any = None) -> int | None:
+  """Look up a user's current session_version.
+
+  If ``session`` is provided, queries on it without closing — caller owns the
+  lifecycle. Otherwise opens a short-lived session.
+
+  Returns None if the user does not exist (caller treats this as auth failure).
+  """
+  from ...models.core import User
+
+  if session is not None:
+    user = session.query(User).filter(User.id == user_id).first()
+    if not user:
+      return None
+    return int(user.session_version or 0)
+
+  from ...database import SessionFactory
+
+  sess = SessionFactory()
+  try:
+    user = sess.query(User).filter(User.id == user_id).first()
+    if not user:
+      return None
+    return int(user.session_version or 0)
+  finally:
+    sess.close()
+
+
+def verify_jwt_claims(
   token: str, device_fingerprint: dict[str, Any] | None = None
-) -> str | None:
-  """Verify a JWT token and return the user_id if valid.
+) -> tuple[str, int] | None:
+  """Verify a JWT token's claims and return (user_id, session_version) if valid.
+
+  Validates: signature, expiry, issuer, audience, jti revocation, and
+  optional device fingerprint binding.
+
+  Does NOT compare session_version against the User row — that requires DB
+  access and is the caller's responsibility. Caller must compare the returned
+  session_version against ``User.session_version`` before treating the token
+  as authenticated. The auth dependency layer handles this via
+  ``_get_user_for_verified_jwt``; direct callers must do it explicitly.
 
   Args:
     token: The JWT token to verify
     device_fingerprint: Optional device fingerprint to validate against token
 
   Returns:
-    The user_id if token is valid, None otherwise
+    (user_id, session_version) if signature-level validation passed, else None
   """
   try:
     # First check if token is revoked
@@ -164,7 +201,17 @@ def verify_jwt_token(
         )
         return None
 
-    return payload.get("user_id")
+    user_id = payload.get("user_id")
+    if not user_id:
+      return None
+
+    try:
+      token_session_version = int(payload.get("session_version", 0))
+    except (TypeError, ValueError):
+      logger.info("JWT token verification failed: invalid session_version claim")
+      return None
+
+    return user_id, token_session_version
 
   except jwt.ExpiredSignatureError:
     logger.info("JWT token verification failed: token expired")
@@ -178,13 +225,18 @@ def verify_jwt_token(
 
 
 def create_jwt_token(
-  user_id: str, device_fingerprint: dict[str, Any] | None = None
+  user_id: str,
+  device_fingerprint: dict[str, Any] | None = None,
+  session: Any = None,
 ) -> str:
   """Create a JWT token for authentication with optional device binding.
 
   Args:
     user_id: The user ID to encode in the token
     device_fingerprint: Optional device fingerprint for token binding
+    session: Optional DB session to read session_version from. If provided,
+      the caller owns the lifecycle (no close). Otherwise a short-lived
+      session is opened.
 
   Returns:
     The encoded JWT token
@@ -197,6 +249,7 @@ def create_jwt_token(
   payload = {
     "user_id": user_id,
     "jti": jti,  # JWT ID for revocation tracking
+    "session_version": _get_user_session_version(user_id, session=session) or 0,
     "exp": datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS),
     "iat": datetime.now(UTC),
     "iss": env.JWT_ISSUER,
@@ -209,7 +262,7 @@ def create_jwt_token(
   return jwt.encode(payload, secret_key, algorithm="HS256")
 
 
-def create_sso_token(user_id: str) -> tuple[str, str]:
+def create_sso_token(user_id: str, session: Any = None) -> tuple[str, str]:
   """Create a temporary SSO token for cross-app authentication.
 
   Args:
@@ -227,6 +280,7 @@ def create_sso_token(user_id: str) -> tuple[str, str]:
     "user_id": user_id,
     "sso": True,
     "token_id": token_id,
+    "session_version": _get_user_session_version(user_id, session=session) or 0,
     "exp": datetime.now(UTC) + timedelta(seconds=300),  # 5 minutes for better UX
     "iat": datetime.now(UTC),
     "iss": env.JWT_ISSUER,  # Issuer claim - must match env for all environments
