@@ -71,7 +71,7 @@ dependencies = [
     # External API Integrations
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
-    "stripe>=11.1.0,<12.0",
+    "stripe>=15.1.0,<16.0",
     # Observability
     "opentelemetry-api>=1.41.0,<2.0",
     "opentelemetry-exporter-otlp>=1.41.0,<2.0",
