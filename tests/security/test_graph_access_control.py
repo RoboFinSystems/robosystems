@@ -56,7 +56,7 @@ class TestGraphAccessControlDependency:
         "robosystems.middleware.auth.dependencies._db_check_graph_access"
       ) as mock_access,
     ):
-      mock_verify.return_value = test_user.id
+      mock_verify.return_value = (test_user.id, 0)
       mock_get_user.return_value = test_user
       mock_access.return_value = True
 
@@ -83,7 +83,7 @@ class TestGraphAccessControlDependency:
         "robosystems.middleware.auth.dependencies._db_check_graph_access"
       ) as mock_access,
     ):
-      mock_verify.return_value = test_user.id
+      mock_verify.return_value = (test_user.id, 0)
       mock_get_user.return_value = test_user
       mock_access.return_value = False
 
