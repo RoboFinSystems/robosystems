@@ -20,7 +20,7 @@ from .cache import api_key_cache
 
 # Import JWT helpers from local jwt module to avoid circular imports
 from .jwt import (
-  verify_jwt_token as verify_jwt_token_from_auth,
+  verify_jwt_claims as verify_jwt_claims_from_auth,
 )
 from .utils import (
   validate_api_key,
@@ -168,17 +168,17 @@ def _get_user_for_verified_jwt(user_id: str, token_session_version: int) -> User
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-def verify_jwt_token(
+def verify_jwt_claims(
   token: str, device_fingerprint: dict[str, Any] | None = None
 ) -> tuple[str, int] | None:
   """Verify a JWT token's claims and return (user_id, session_version) if valid.
 
-  See ``robosystems.middleware.auth.jwt.verify_jwt_token`` for full semantics.
+  See ``robosystems.middleware.auth.jwt.verify_jwt_claims`` for full semantics.
   Notably, this does NOT compare session_version against the User row; the
   caller must do that (the dependency wrappers in this module use
   ``_get_user_for_verified_jwt`` which handles it via the user-data cache).
   """
-  return verify_jwt_token_from_auth(token, device_fingerprint)
+  return verify_jwt_claims_from_auth(token, device_fingerprint)
 
 
 async def get_optional_user(
@@ -204,7 +204,7 @@ async def get_optional_user(
   # Try JWT token authentication first (takes precedence)
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
-    verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if verify_result:
       user_id, token_session_version = verify_result
       user = _get_user_for_verified_jwt(user_id, token_session_version)
@@ -249,7 +249,7 @@ async def get_current_user(
   # Try JWT token authentication first (takes precedence)
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
-    verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if verify_result:
       user_id, token_session_version = verify_result
       user = _get_user_for_verified_jwt(user_id, token_session_version)
@@ -348,7 +348,7 @@ async def get_current_user_with_graph(
   # Try JWT token authentication first (takes precedence)
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
-    verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     user = None
     user_id = None
     if verify_result:
@@ -561,7 +561,7 @@ async def get_current_user_sse(
   # Try JWT token authentication first (takes precedence)
   if jwt_token:
     device_fingerprint = extract_device_fingerprint(request)
-    verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if verify_result:
       user_id, token_session_version = verify_result
       user = _get_user_for_verified_jwt(user_id, token_session_version)

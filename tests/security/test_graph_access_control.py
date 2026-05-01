@@ -48,7 +48,9 @@ class TestGraphAccessControlDependency:
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
     with (
-      patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
+      patch(
+        "robosystems.middleware.auth.dependencies.verify_jwt_claims"
+      ) as mock_verify,
       patch(
         "robosystems.middleware.auth.dependencies._db_get_user_by_id"
       ) as mock_get_user,
@@ -75,7 +77,9 @@ class TestGraphAccessControlDependency:
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
     with (
-      patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
+      patch(
+        "robosystems.middleware.auth.dependencies.verify_jwt_claims"
+      ) as mock_verify,
       patch(
         "robosystems.middleware.auth.dependencies._db_get_user_by_id"
       ) as mock_get_user,

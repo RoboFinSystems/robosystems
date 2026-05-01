@@ -43,7 +43,7 @@ def mock_inactive_user():
 class TestGetMe:
   """Test the /me endpoint."""
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_get_me_with_cookie_token(
     self, mock_get_by_id, mock_verify_jwt, mock_user
@@ -89,7 +89,7 @@ class TestGetMe:
     assert "user_agent" in args[1]  # Device fingerprint dict
     mock_get_by_id.assert_called_once_with("user_123", mock_session)
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_get_me_with_authorization_header(
     self, mock_get_by_id, mock_verify_jwt, mock_user
@@ -172,7 +172,7 @@ class TestGetMe:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "Not authenticated"
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   async def test_get_me_invalid_token(self, mock_verify_jwt):
     """Test getting current user with invalid token."""
     mock_verify_jwt.return_value = None  # Invalid token
@@ -194,7 +194,7 @@ class TestGetMe:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "Invalid or expired token"
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_get_me_user_not_found(self, mock_get_by_id, mock_verify_jwt):
     """Test getting current user when user not found."""
@@ -218,7 +218,7 @@ class TestGetMe:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "User not found"
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_get_me_inactive_user(
     self, mock_get_by_id, mock_verify_jwt, mock_inactive_user
@@ -244,7 +244,7 @@ class TestGetMe:
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
     assert exc_info.value.detail == "User account is deactivated"
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.logger")
   async def test_get_me_database_error(
@@ -278,7 +278,7 @@ class TestGetMe:
 class TestRefreshSession:
   """Test the /refresh endpoint."""
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
@@ -357,7 +357,7 @@ class TestRefreshSession:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "Not authenticated"
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   async def test_refresh_session_invalid_token(self, mock_verify_jwt):
     """Test session refresh with invalid token."""
     mock_verify_jwt.return_value = None  # Invalid token
@@ -380,7 +380,7 @@ class TestRefreshSession:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "Invalid or expired token"
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_refresh_session_user_not_found(self, mock_get_by_id, mock_verify_jwt):
     """Test session refresh when user not found."""
@@ -405,7 +405,7 @@ class TestRefreshSession:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "User not found or inactive"
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_refresh_session_inactive_user(
     self, mock_get_by_id, mock_verify_jwt, mock_inactive_user
@@ -432,7 +432,7 @@ class TestRefreshSession:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "User not found or inactive"
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
@@ -486,7 +486,7 @@ class TestRefreshSession:
     warning_call = mock_logger.warning.call_args[0][0]
     assert "Failed to revoke old JWT token" in warning_call
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
@@ -530,7 +530,7 @@ class TestRefreshSession:
     assert "Old JWT token revoked during session refresh" in info_call
     assert "user_123" in info_call
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.logger")
   async def test_refresh_session_database_error(
@@ -561,7 +561,7 @@ class TestRefreshSession:
     # Verify error was logged
     mock_logger.error.assert_called_once()
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
@@ -604,7 +604,7 @@ class TestRefreshSession:
 class TestCookieSettings:
   """Test cookie configuration in session refresh."""
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
@@ -643,7 +643,7 @@ class TestCookieSettings:
     # JWT tokens are returned in response body, not set as cookies
     # No cookie assertion needed
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
@@ -683,7 +683,7 @@ class TestCookieSettings:
 class TestIntegrationScenarios:
   """Test integration scenarios and edge cases."""
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_get_me_with_bearer_token_variations(
     self, mock_get_by_id, mock_verify_jwt, mock_user
@@ -734,7 +734,7 @@ class TestIntegrationScenarios:
         _rate_limit=None,
       )
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
+  @patch("robosystems.routers.auth.session.verify_jwt_claims")
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")

@@ -19,7 +19,7 @@ from ...middleware.auth.cache import api_key_cache
 from ...middleware.auth.jwt import (
   create_jwt_token,
   revoke_jwt_token,
-  verify_jwt_token,
+  verify_jwt_claims,
 )
 from ...middleware.rate_limits import (
   auth_status_rate_limit_dependency,
@@ -63,7 +63,7 @@ async def get_me(
     device_fingerprint = extract_device_fingerprint(fastapi_request)
 
     # Verify JWT token with device binding
-    verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if not verify_result:
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -152,7 +152,7 @@ async def refresh_session(
     # Verify current JWT token - allow recently expired tokens for refresh
     user_id: str | None = None
     token_session_version: int = 0
-    verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if verify_result:
       user_id, token_session_version = verify_result
     else:

@@ -32,6 +32,13 @@ class UserAPIKey(Model):
   # validate_api_key so that deactivate/delete can invalidate the same entry.
   # Nullable for rows created before this column existed; backfilled on the
   # next successful validation since plaintext is available there.
+  #
+  # DEPLOY NOTE: Existing pre-deploy keys cannot be precisely cache-invalidated
+  # until they're validated once post-deploy (which backfills the column).
+  # If a key is revoked before its first post-deploy use, ``_invalidate_cache``
+  # logs a warning and returns — the positive cache entry (if any) will
+  # persist for the cache TTL. Mitigations: (a) flush the API-key Redis
+  # namespace at deploy time as a one-shot, or (b) accept the bounded window.
   key_fingerprint = Column(String(64), nullable=True, unique=True, index=True)
   prefix = Column(
     String, nullable=False, index=True

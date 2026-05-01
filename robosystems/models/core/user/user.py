@@ -1,5 +1,6 @@
 """User authentication model."""
 
+import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Optional
@@ -169,38 +170,58 @@ class User(Model):
       raise
 
   def _invalidate_auth_cache(self) -> None:
-    """Best-effort invalidation/refresh of auth caches derived from this user.
+    """Invalidate auth caches derived from this user.
 
-    Tradeoff: if the Redis write/DEL fails (network blip, eviction, etc.) the
-    pre-bump cache entry persists with the prior session_version. A token
-    still holding that prior version would continue to satisfy the cache
-    lookup until the entry expires on its TTL (~30 min). The DB
-    session_version is the source of truth, but the cache hit path doesn't
-    re-read the DB. Bounded staleness is acceptable for password-reset
-    semantics; for stronger guarantees, harden with retries or move the
-    version-of-record into a separate Redis key without TTL.
+    Always DELETE rather than rewrite: the cached entry's session_version
+    is what gates the cache hit, so an old entry left in place defeats the
+    DB session_version bump. Letting the cache repopulate lazily on the
+    next legitimate request is one extra DB hit per invalidation event
+    (password reset / deactivate / logout-everywhere) — cheap.
+
+    Tradeoff: if BOTH retries against Redis fail, the prior cache entry
+    persists until its TTL expires (~30 min). The DB session_version is
+    the source of truth, but the cache hit path doesn't re-read the DB,
+    so during this window an attacker holding a token with the prior
+    session_version would continue to authenticate. This is bounded by
+    JWT TTL (30 min) and Redis recovery time, and is the standard
+    cache-invalidation tradeoff. For stronger guarantees, move the
+    version-of-record into a no-TTL Redis key (or back to per-request DB).
     """
-    try:
-      import importlib
+    import importlib
 
+    try:
       cache_module = importlib.import_module("robosystems.middleware.auth.cache")
       api_key_cache = cache_module.api_key_cache
-      user_id = str(self.id)
-      if self.is_active:
-        session_version = int(self.session_version or 0)
-        api_key_cache.cache_jwt_user_data(
-          user_id,
-          {
-            "id": user_id,
-            "email": self.email,
-            "name": self.name,
-            "is_active": True,
-            "session_version": session_version,
-          },
-          session_version,
-        )
-      else:
-        api_key_cache.invalidate_jwt_user_data(user_id)
-      api_key_cache.invalidate_user_jwt_graph_access(str(self.id))
     except Exception as e:
-      logger.error(f"Failed to invalidate auth cache for user {self.id}: {e}")
+      logger.error(f"Auth cache module unavailable for user {self.id}: {e}")
+      return
+
+    user_id = str(self.id)
+
+    def _try_invalidate() -> bool:
+      # Both methods return True on success, False on Redis failure.
+      # We require BOTH to succeed: a stale entry in either cache could
+      # let an old token continue to authenticate.
+      try:
+        user_ok = api_key_cache.invalidate_jwt_user_data(user_id)
+        graph_ok = api_key_cache.invalidate_user_jwt_graph_access(user_id)
+        return bool(user_ok) and bool(graph_ok)
+      except Exception as e:
+        logger.warning(f"Auth cache invalidation attempt failed for {user_id}: {e}")
+        return False
+
+    # One retry with a short backoff handles transient Redis blips
+    # (connection reset, single-node failover) without going to extremes.
+    if _try_invalidate():
+      return
+    time.sleep(0.05)
+    if _try_invalidate():
+      return
+
+    # Both attempts failed. Log loudly — this is the fail-open window.
+    # Surface as an error so it's monitorable; downstream alerting should
+    # treat repeated occurrences as a Redis-availability incident.
+    logger.error(
+      f"CRITICAL: auth cache invalidation failed twice for user {user_id}; "
+      f"prior session may remain valid for up to JWT/cache TTL"
+    )

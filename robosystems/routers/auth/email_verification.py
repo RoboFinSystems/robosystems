@@ -15,7 +15,7 @@ from ...config.constants import (
 )
 from ...database import get_async_db_session
 from ...logger import logger
-from ...middleware.auth.jwt import create_jwt_token, verify_jwt_token
+from ...middleware.auth.jwt import create_jwt_token, verify_jwt_claims
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import AuthResponse, EmailVerificationRequest
 from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
@@ -60,7 +60,7 @@ async def get_current_user_for_email_verification(
   jwt_token = authorization[7:]  # Remove "Bearer " prefix
 
   device_fingerprint = extract_device_fingerprint(request)
-  verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+  verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
 
   if not verify_result:
     raise HTTPException(

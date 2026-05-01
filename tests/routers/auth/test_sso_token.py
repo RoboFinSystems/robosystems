@@ -27,7 +27,7 @@ def mock_user():
 class TestGenerateSSOToken:
   """Test the /sso-token endpoint."""
 
-  @patch("robosystems.routers.auth.sso.verify_jwt_token")
+  @patch("robosystems.routers.auth.sso.verify_jwt_claims")
   @patch("robosystems.routers.auth.sso.User.get_by_id")
   @patch("robosystems.routers.auth.sso.create_sso_token")
   @patch("robosystems.routers.auth.sso.get_async_redis_client")
@@ -81,7 +81,7 @@ class TestGenerateSSOToken:
     mock_get_by_id.assert_called_once_with("user_123", mock_session)
     mock_create_sso.assert_called_once_with("user_123", session=mock_session)
 
-  @patch("robosystems.routers.auth.sso.verify_jwt_token")
+  @patch("robosystems.routers.auth.sso.verify_jwt_claims")
   @patch("robosystems.routers.auth.sso.User.get_by_id")
   @patch("robosystems.routers.auth.sso.create_sso_token")
   @patch("robosystems.routers.auth.sso.get_async_redis_client")
@@ -170,7 +170,7 @@ class TestGenerateSSOToken:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "Not authenticated"
 
-  @patch("robosystems.routers.auth.sso.verify_jwt_token")
+  @patch("robosystems.routers.auth.sso.verify_jwt_claims")
   async def test_generate_sso_token_invalid_jwt(self, mock_verify_jwt):
     """Test SSO token generation with invalid JWT."""
     mock_verify_jwt.return_value = None  # Invalid token
@@ -191,7 +191,7 @@ class TestGenerateSSOToken:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "Invalid or expired token"
 
-  @patch("robosystems.routers.auth.sso.verify_jwt_token")
+  @patch("robosystems.routers.auth.sso.verify_jwt_claims")
   @patch("robosystems.routers.auth.sso.User.get_by_id")
   async def test_generate_sso_token_user_not_found(
     self, mock_get_by_id, mock_verify_jwt
@@ -216,7 +216,7 @@ class TestGenerateSSOToken:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "User not found or inactive"
 
-  @patch("robosystems.routers.auth.sso.verify_jwt_token")
+  @patch("robosystems.routers.auth.sso.verify_jwt_claims")
   @patch("robosystems.routers.auth.sso.User.get_by_id")
   async def test_generate_sso_token_inactive_user(
     self, mock_get_by_id, mock_verify_jwt
@@ -248,7 +248,7 @@ class TestGenerateSSOToken:
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert exc_info.value.detail == "User not found or inactive"
 
-  @patch("robosystems.routers.auth.sso.verify_jwt_token")
+  @patch("robosystems.routers.auth.sso.verify_jwt_claims")
   @patch("robosystems.routers.auth.sso.User.get_by_id")
   @patch("robosystems.routers.auth.sso.create_sso_token")
   @patch("robosystems.routers.auth.sso.get_async_redis_client")

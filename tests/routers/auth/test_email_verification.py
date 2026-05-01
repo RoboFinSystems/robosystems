@@ -14,7 +14,7 @@ class TestEmailVerificationEndpoints:
   @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
   @patch("robosystems.routers.auth.email_verification.build_email_job_config")
   @patch.object(UserToken, "create_token")
-  @patch("robosystems.routers.auth.email_verification.verify_jwt_token")
+  @patch("robosystems.routers.auth.email_verification.verify_jwt_claims")
   async def test_resend_verification_email_success(
     self,
     mock_verify_jwt,
@@ -71,7 +71,7 @@ class TestEmailVerificationEndpoints:
     assert config_args.kwargs["token"] == "verification_token_123"
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.email_verification.verify_jwt_token")
+  @patch("robosystems.routers.auth.email_verification.verify_jwt_claims")
   async def test_resend_verification_already_verified(
     self, mock_verify_jwt, client, test_user, test_db
   ):
@@ -254,7 +254,7 @@ class TestEmailVerificationEndpoints:
   @patch("robosystems.routers.auth.email_verification.build_email_job_config")
   @patch("robosystems.routers.auth.email_verification.detect_app_source")
   @patch.object(UserToken, "create_token")
-  @patch("robosystems.routers.auth.email_verification.verify_jwt_token")
+  @patch("robosystems.routers.auth.email_verification.verify_jwt_claims")
   async def test_resend_verification_app_detection(
     self,
     mock_verify_jwt,
@@ -352,7 +352,7 @@ class TestEmailVerificationEndpoints:
   @patch("robosystems.routers.auth.email_verification.run_and_monitor_dagster_job")
   @patch("robosystems.routers.auth.email_verification.build_email_job_config")
   @patch.object(UserToken, "create_token")
-  @patch("robosystems.routers.auth.email_verification.verify_jwt_token")
+  @patch("robosystems.routers.auth.email_verification.verify_jwt_claims")
   async def test_resend_verification_rate_limiting(
     self,
     mock_verify_jwt,

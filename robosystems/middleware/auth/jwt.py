@@ -152,7 +152,7 @@ def _get_user_session_version(user_id: str, session: Any = None) -> int | None:
     sess.close()
 
 
-def verify_jwt_token(
+def verify_jwt_claims(
   token: str, device_fingerprint: dict[str, Any] | None = None
 ) -> tuple[str, int] | None:
   """Verify a JWT token's claims and return (user_id, session_version) if valid.

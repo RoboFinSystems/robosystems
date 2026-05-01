@@ -880,15 +880,23 @@ class APIKeyCache:
         pass
       return None
 
-  def invalidate_jwt_user_data(self, user_id: str) -> None:
-    """Invalidate JWT user-data cache for a user."""
+  def invalidate_jwt_user_data(self, user_id: str) -> bool:
+    """Invalidate JWT user-data cache for a user.
+
+    Returns True on success, False on Redis failure. Callers
+    (notably ``User._invalidate_auth_cache``) use this to drive retries
+    and surface critical failures — do NOT swallow exceptions silently
+    here, the bool is the contract.
+    """
     try:
       cache_key = self._get_user_cache_key(user_id)
       signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
       self.redis.delete(cache_key, signature_key)
       logger.info(f"Invalidated JWT user data cache for user {user_id}")
+      return True
     except Exception as e:
       logger.error(f"Failed to invalidate JWT user data cache for {user_id}: {e}")
+      return False
 
   def invalidate_api_key(self, api_key_hash: str) -> None:
     """
@@ -1253,9 +1261,12 @@ class APIKeyCache:
 
   def invalidate_user_jwt_graph_access(
     self, user_id: str, graph_id: str | None = None
-  ) -> None:
+  ) -> bool:
     """
     Invalidate cached JWT graph access for a user.
+
+    Returns True on success, False on Redis failure. The bool is the
+    contract for callers driving retries — see ``invalidate_jwt_user_data``.
 
     Args:
         user_id: User ID
@@ -1276,9 +1287,11 @@ class APIKeyCache:
       logger.info(
         f"Invalidated JWT graph access cache for user {user_id}, graph: {graph_id or 'all'}"
       )
+      return True
 
     except Exception as e:
       logger.error(f"Failed to invalidate JWT graph access cache: {e}")
+      return False
 
   def invalidate_user_graph_access(
     self, user_id: str, graph_id: str | None = None

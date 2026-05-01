@@ -27,7 +27,7 @@ from ...middleware.auth.jwt import (
   create_jwt_token,
   create_sso_token,
   get_async_redis_client,
-  verify_jwt_token,
+  verify_jwt_claims,
 )
 from ...middleware.rate_limits import sso_rate_limit_dependency
 from ...models.api.auth import (
@@ -84,7 +84,7 @@ async def generate_sso_token(
 
     # Verify current JWT token (with device fingerprint binding)
     device_fingerprint = extract_device_fingerprint(request)
-    verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+    verify_result = verify_jwt_claims(jwt_token, device_fingerprint)
     if not verify_result:
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
