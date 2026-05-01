@@ -43,7 +43,7 @@ dependencies = [
     # OLAP Staging/Vector/Graph Databases
     "duckdb==1.4.4",
     "lancedb>=0.30.0,<1.0",
-    "real-ladybug==0.13.1",
+    "real-ladybug==0.15.3",
     # OLTP Database (Postgres)
     "alembic>=1.18.0,<2.0",
     "psycopg2-binary>=2.9.0,<3.0",
