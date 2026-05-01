@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from robosystems.logger import logger
-from robosystems.operations.event_block.commands import _fire_handler_on_commit
+from robosystems.operations.event_block.commands import fire_handler_on_commit
 
 # Per-source default for whether captured events should auto-commit on
 # sync (handler fires immediately, event lands ``status='committed'``)
@@ -29,10 +29,14 @@ from robosystems.operations.event_block.commands import _fire_handler_on_commit
 # (``roadmap.md`` Decision 5 / Phase 5). When that column lands, this
 # map becomes the fallback default for connections that haven't set
 # their policy explicitly.
+#
+# Only flip a source to ``True`` once its adapter has been tested
+# end-to-end with auto-commit — otherwise every event for that source
+# auto-commits silently on first sync, with no inbox review. Future
+# adapters (xero, netsuite, ...) start at ``False`` and graduate
+# explicitly when their handler dispatch is verified against real data.
 _SOURCE_AUTO_COMMITS: dict[str, bool] = {
   "quickbooks": True,
-  "xero": True,
-  "netsuite": True,
 }
 
 
@@ -100,10 +104,13 @@ class LoadResult:
     handler fires immediately so the event lands ``status='committed'``
     with backing Transaction / Entry / LineItem rows. Native-mode events
     (manual / schedule / AI) still capture-then-approve via the inbox.
-  - ``events_auto_committed`` / ``events_dispatch_failed``: how many of
-    the captured events successfully fired their handler vs. fell back
+  - ``events_handler_dispatched`` / ``events_dispatch_failed``: how many
+    of the captured events successfully fired their handler vs. fell back
     to ``captured`` because dispatch raised (e.g., element_external_id
-    not yet mapped).
+    not yet mapped). "Dispatched" is intentionally broader than
+    "committed" — the handler may set the event's terminal status to
+    ``fulfilled`` (historical-posted data) instead of ``committed``;
+    both count as a successful dispatch.
   - ``transactions`` / ``entries`` / ``line_items``: produced by handler
     dispatch, not direct insert. Kept on the dataclass for backward-compat
     with callers that log result counts.
@@ -119,7 +126,7 @@ class LoadResult:
   dimensions: int = 0
   events_captured: int = 0
   events_updated: int = 0
-  events_auto_committed: int = 0
+  events_handler_dispatched: int = 0
   events_dispatch_failed: int = 0
   agents_inserted: int = 0
   agents_updated: int = 0
@@ -156,7 +163,7 @@ class _CaptureResult:
 
   inserted: int = 0
   updated: int = 0
-  auto_committed: int = 0
+  handler_dispatched: int = 0
   dispatch_failed: int = 0
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
@@ -272,6 +279,11 @@ class OLTPLoader:
       # mirror. Native-mode sources (manual / schedule / AI) skip this
       # cascade — their GL rows are user-curated and must not be lost
       # to a re-sync.
+      # Local imports: hoisting these to module top would pull the
+      # roboledger model package eagerly, which in turn drags Strawberry
+      # GraphQL types and the entire extensions schema graph into every
+      # process that imports the loader (Dagster jobs, lambda warmups).
+      # Imported lazily so the loader stays cheap to import.
       from robosystems.models.extensions.element_trait import ElementTrait
       from robosystems.models.extensions.roboledger.entry import Entry
       from robosystems.models.extensions.roboledger.event import Event
@@ -294,9 +306,14 @@ class OLTPLoader:
           Transaction.source == source,
           Transaction.connection_id == connection_id,
         ).delete(synchronize_session=False)
-        session.query(Event).filter(Event.source == source).delete(
-          synchronize_session=False
-        )
+        # Event has no top-level connection_id column — the value lives in
+        # metadata_["connection_id"] (set by _capture_transactions_as_events).
+        # Filter on the JSONB path so a re-sync of one QB connection doesn't
+        # wipe events from a sibling connection on the same graph.
+        session.query(Event).filter(
+          Event.source == source,
+          Event.metadata_["connection_id"].astext == connection_id,
+        ).delete(synchronize_session=False)
         session.flush()
 
       # Drop element_traits before elements — the FK has no
@@ -453,7 +470,7 @@ class OLTPLoader:
       )
       result.events_captured = capture_result.inserted
       result.events_updated = capture_result.updated
-      result.events_auto_committed = capture_result.auto_committed
+      result.events_handler_dispatched = capture_result.handler_dispatched
       result.events_dispatch_failed = capture_result.dispatch_failed
       result.dropped_unbalanced_entries = capture_result.dropped_unbalanced_entries
       result.dropped_empty_transactions = capture_result.dropped_empty_transactions
@@ -613,6 +630,10 @@ class OLTPLoader:
     # so re-syncs (which delete + re-insert elements) and concurrent
     # runs don't blow up. The element-delete pre-pass already cascades
     # through element_traits via the FK; this is belt-and-suspenders.
+    #
+    # Postgres-only: ``ON CONFLICT DO NOTHING`` is a Postgres dialect
+    # extension. Acceptable because the extensions DB is RDS Postgres
+    # by definition (schema-per-graph tenancy lives nowhere else).
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     stmt = (
@@ -949,6 +970,14 @@ class OLTPLoader:
       # QB-synced data would silently disappear from the read side.
       jeh_status = "posted" if _SOURCE_AUTO_COMMITS.get(source, False) else "draft"
 
+      # ``metadata_blob["status"]`` is the JOURNAL-ENTRY status consumed
+      # by the journal_entry_recorded handler's metadata_schema (see
+      # python_handlers/journal_entry_recorded.py: ``status: Literal['draft',
+      # 'posted']``). It is *not* the Event.status field — the Event row's
+      # own ``status`` column lives on the Event ORM object and uses a
+      # different domain (captured / classified / committed / voided /
+      # fulfilled). The two field names overlap because both are coupled
+      # to the handler's wire contract.
       metadata_blob = {
         "status": jeh_status,
         "qb_txn_type": qb_txn_type,
@@ -1027,22 +1056,24 @@ class OLTPLoader:
       # Re-include updated captured events — covers two cases:
       # (1) old captured events left over from before auto-commit was
       # enabled and (2) a re-sync that updated metadata of an event that
-      # previously failed dispatch.
+      # previously failed dispatch. ``existing.values()`` and ``new_events``
+      # are guaranteed disjoint by construction (existing rows are mutated
+      # in place, never appended to ``new_events``), so no dedup needed.
       for evt in existing.values():
-        if evt.status == "captured" and evt not in new_events:
+        if evt.status == "captured":
           events_to_commit.append(evt)
 
       for evt in events_to_commit:
         try:
           with session.begin_nested():
             prev_status = evt.status
-            _fire_handler_on_commit(session, evt, created_by)
+            fire_handler_on_commit(session, evt, created_by)
             # If the handler bumped status to a terminal state ('fulfilled'
             # for historical-posted data), respect that. Only stamp
             # 'committed' when the handler left status unchanged.
             if evt.status == prev_status:
               evt.status = "committed"
-          out.auto_committed += 1
+          out.handler_dispatched += 1
         except Exception as e:
           logger.warning(
             "Auto-commit failed for event %s (type=%s, ext_id=%s): %s — "

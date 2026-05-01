@@ -642,9 +642,9 @@ class TestCaptureAutoCommit:
       ],
     }
 
-  def test_qb_source_auto_commits_on_successful_dispatch(self):
+  def test_qb_source_dispatches_handler_on_capture(self):
     """QB-sourced events whose handler dispatches cleanly land
-    status='committed' and increment auto_committed."""
+    status='committed' and increment handler_dispatched."""
     from unittest.mock import patch
 
     from robosystems.operations.extensions.loader import OLTPLoader
@@ -655,7 +655,7 @@ class TestCaptureAutoCommit:
     loader = OLTPLoader()
 
     with patch(
-      "robosystems.operations.extensions.loader._fire_handler_on_commit"
+      "robosystems.operations.extensions.loader.fire_handler_on_commit"
     ) as fire:
       result = loader._capture_transactions_as_events(
         session,
@@ -668,11 +668,47 @@ class TestCaptureAutoCommit:
 
     fire.assert_called_once()
     assert result.inserted == 1
-    assert result.auto_committed == 1
+    assert result.handler_dispatched == 1
     assert result.dispatch_failed == 0
     # The event added to the session has status flipped to 'committed'
     evt = session.add_all.call_args.args[0][0]
     assert evt.status == "committed"
+
+  def test_handler_dispatched_counts_fulfilled_terminal_status(self):
+    """When the handler sets event.status to 'fulfilled' (historical-posted
+    data), handler_dispatched still increments — the counter measures
+    successful dispatch, not the specific terminal status."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    def fire_sets_fulfilled(_session, evt, _created_by):
+      # Mimics the journal_entry_recorded handler when metadata.status='posted'.
+      evt.status = "fulfilled"
+
+    loader = OLTPLoader()
+
+    with patch(
+      "robosystems.operations.extensions.loader.fire_handler_on_commit",
+      side_effect=fire_sets_fulfilled,
+    ):
+      result = loader._capture_transactions_as_events(
+        session,
+        self._dbt_data(),
+        source="quickbooks",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    assert result.handler_dispatched == 1
+    assert result.dispatch_failed == 0
+    evt = session.add_all.call_args.args[0][0]
+    # Handler-set terminal status preserved — loader does NOT overwrite to 'committed'.
+    assert evt.status == "fulfilled"
 
   def test_qb_source_falls_back_to_captured_on_dispatch_failure(self):
     """If the handler raises (e.g., element_external_id unmapped), the
@@ -687,7 +723,7 @@ class TestCaptureAutoCommit:
     loader = OLTPLoader()
 
     with patch(
-      "robosystems.operations.extensions.loader._fire_handler_on_commit",
+      "robosystems.operations.extensions.loader.fire_handler_on_commit",
       side_effect=RuntimeError("element_external_id not resolved"),
     ):
       result = loader._capture_transactions_as_events(
@@ -700,7 +736,7 @@ class TestCaptureAutoCommit:
       )
 
     assert result.inserted == 1
-    assert result.auto_committed == 0
+    assert result.handler_dispatched == 0
     assert result.dispatch_failed == 1
     evt = session.add_all.call_args.args[0][0]
     assert evt.status == "captured"
@@ -722,7 +758,7 @@ class TestCaptureAutoCommit:
     dbt["entries"][0]["external_source"] = "manual"
 
     with patch(
-      "robosystems.operations.extensions.loader._fire_handler_on_commit"
+      "robosystems.operations.extensions.loader.fire_handler_on_commit"
     ) as fire:
       result = loader._capture_transactions_as_events(
         session,
@@ -735,10 +771,219 @@ class TestCaptureAutoCommit:
 
     fire.assert_not_called()
     assert result.inserted == 1
-    assert result.auto_committed == 0
+    assert result.handler_dispatched == 0
     assert result.dispatch_failed == 0
     evt = session.add_all.call_args.args[0][0]
     assert evt.status == "captured"
+
+  def test_resync_retries_previously_failed_dispatch(self):
+    """A re-sync where an existing event is still ``status='captured'``
+    (because a prior sync's dispatch failed — e.g., element not yet
+    mapped) re-fires the handler and dispatches it. Covers the
+    ``existing.values()`` branch of ``events_to_commit``."""
+    from unittest.mock import MagicMock, patch
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    # Existing event already in the DB, still captured from a failed run.
+    existing_event = MagicMock()
+    existing_event.id = "evt_existing"
+    existing_event.external_id = "JE_100"
+    existing_event.status = "captured"
+    existing_event.event_type = "journal_entry_recorded"
+    session.query.return_value.filter.return_value.all.return_value = [existing_event]
+
+    loader = OLTPLoader()
+
+    with patch(
+      "robosystems.operations.extensions.loader.fire_handler_on_commit"
+    ) as fire:
+      result = loader._capture_transactions_as_events(
+        session,
+        self._dbt_data(),
+        source="quickbooks",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    # Existing event was matched + updated; not a fresh insert.
+    assert result.inserted == 0
+    assert result.updated == 1
+    # Re-sync re-fires the handler against the existing captured event.
+    fire.assert_called_once()
+    assert result.handler_dispatched == 1
+    assert existing_event.status == "committed"
+
+  def test_source_auto_commits_locks_quickbooks_key(self):
+    """Locks down the source-key contract: if ``quickbooks`` is renamed
+    in the source enum or the map, this test fails before the silent
+    runtime breakage where QB events stop auto-committing."""
+    from robosystems.operations.extensions.loader import _SOURCE_AUTO_COMMITS
+
+    assert _SOURCE_AUTO_COMMITS.get("quickbooks") is True
+    # Future adapters must graduate explicitly — they don't auto-commit
+    # by default just because the source key exists.
+    assert _SOURCE_AUTO_COMMITS.get("xero") is None
+    assert _SOURCE_AUTO_COMMITS.get("netsuite") is None
+    assert _SOURCE_AUTO_COMMITS.get("manual") is None
+
+
+class TestApplySourceElementTraits:
+  """QB ``AccountType`` → FASB EFS trait translation. Without this,
+  QB-imported elements have ``trait IS NULL`` and the auto-map agent
+  silently skips them at rollup time."""
+
+  def _make_loader_session(self, elements_by_id, traits):
+    """Wire a MagicMock session that returns the given elements when
+    Element rows are queried, and the given traits when Trait rows are
+    queried. The loader uses two distinct queries — match on filter args
+    isn't possible with bare MagicMock, so we use ``side_effect`` on
+    ``session.query`` to dispatch by the model class."""
+    from robosystems.models.extensions import Element
+    from robosystems.models.extensions.trait import Trait
+
+    session = MagicMock()
+
+    def query_dispatcher(model):
+      result = MagicMock()
+      if model is Element:
+        result.filter.return_value.all.return_value = list(elements_by_id.values())
+      elif model is Trait:
+        result.filter.return_value.__iter__ = lambda self: iter(traits)
+      return result
+
+    session.query.side_effect = query_dispatcher
+    return session
+
+  def _trait(self, identifier: str, trait_id: str):
+    t = MagicMock()
+    t.identifier = identifier
+    t.id = trait_id
+    return t
+
+  def test_qb_account_type_translates_to_efs_trait(self):
+    """Each QB AccountType maps to its FASB EFS trait identifier."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    elem_bank = MagicMock(id="elem_1", metadata_={"account_type": "Bank"})
+    elem_ap = MagicMock(id="elem_2", metadata_={"account_type": "Accounts Payable"})
+    elem_inc = MagicMock(id="elem_3", metadata_={"account_type": "Income"})
+
+    traits = [
+      self._trait("asset", "trt_asset"),
+      self._trait("liability", "trt_liab"),
+      self._trait("revenue", "trt_rev"),
+    ]
+    session = self._make_loader_session(
+      {"elem_1": elem_bank, "elem_2": elem_ap, "elem_3": elem_inc}, traits
+    )
+
+    loader = OLTPLoader()
+    inserted = loader._apply_source_element_traits(
+      session,
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert inserted == 3
+    session.execute.assert_called_once()
+
+  def test_unknown_account_type_logs_warning_and_skips(self):
+    """An AccountType not in the QB→EFS map is logged and skipped — the
+    element is silently untraited, but the sync log surfaces it."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    elem_unknown = MagicMock(id="elem_x", metadata_={"account_type": "MysteryType"})
+    traits = [self._trait("asset", "trt_asset")]
+    session = self._make_loader_session({"elem_x": elem_unknown}, traits)
+
+    loader = OLTPLoader()
+
+    with patch("robosystems.operations.extensions.loader.logger") as mock_logger:
+      inserted = loader._apply_source_element_traits(
+        session,
+        source="quickbooks",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    assert inserted == 0
+    # The unknown-type warning was emitted.
+    mock_logger.warning.assert_called_once()
+    args = mock_logger.warning.call_args.args
+    assert "MysteryType" in str(args)
+
+  def test_element_without_account_type_is_skipped(self):
+    """Elements whose metadata_ has no ``account_type`` key are silently
+    skipped (no warning — they may be library-seeded or pre-classified)."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    elem_bare = MagicMock(id="elem_y", metadata_={})
+    elem_none = MagicMock(id="elem_z", metadata_=None)
+    traits = [self._trait("asset", "trt_asset")]
+    session = self._make_loader_session(
+      {"elem_y": elem_bare, "elem_z": elem_none}, traits
+    )
+
+    loader = OLTPLoader()
+    inserted = loader._apply_source_element_traits(
+      session,
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert inserted == 0
+    session.execute.assert_not_called()
+
+  def test_non_quickbooks_source_returns_zero(self):
+    """Sources without a translation map (xero, netsuite, manual) return
+    early without touching the session."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    loader = OLTPLoader()
+
+    inserted = loader._apply_source_element_traits(
+      session,
+      source="xero",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert inserted == 0
+    session.query.assert_not_called()
+
+  def test_missing_traits_in_graph_logs_warning_and_returns_zero(self):
+    """If the graph has no elementsOfFinancialStatements traits seeded
+    yet, the method warns and returns 0 instead of inserting orphan
+    rows."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    elem_bank = MagicMock(id="elem_1", metadata_={"account_type": "Bank"})
+    # Empty traits list — graph hasn't seeded EFS yet.
+    session = self._make_loader_session({"elem_1": elem_bank}, [])
+
+    loader = OLTPLoader()
+
+    with patch("robosystems.operations.extensions.loader.logger") as mock_logger:
+      inserted = loader._apply_source_element_traits(
+        session,
+        source="quickbooks",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    assert inserted == 0
+    mock_logger.warning.assert_called_once()
 
 
 class TestCaptureHardening:

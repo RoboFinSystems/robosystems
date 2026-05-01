@@ -208,7 +208,7 @@ def create_event_block(
   return _to_envelope(event, body.dimension_ids)
 
 
-def _fire_handler_on_commit(
+def fire_handler_on_commit(
   session: Session,
   event: Event,
   created_by: str,
@@ -226,6 +226,9 @@ def _fire_handler_on_commit(
   Errors propagate to the caller so the surrounding transaction rolls
   back — a bad approval cannot leave the event in ``committed`` with
   no GL rows behind it.
+
+  Public (no underscore) because the loader's auto-commit path also
+  calls this from outside this module.
   """
   python_handler = get_python_handler(event.event_type)
   if python_handler is None:
@@ -313,7 +316,7 @@ def update_event_block(
   if fire_handler:
     # Handler runs after metadata patches so it sees the final shape.
     # Errors propagate; the surrounding transaction rolls back.
-    _fire_handler_on_commit(session, event, created_by)
+    fire_handler_on_commit(session, event, created_by)
 
   session.commit()
   return _to_envelope(event, _load_dimension_ids(session, event.id))
