@@ -847,6 +847,19 @@ class APIKeyCache:
           f"JWT user cache session_version mismatch for {user_id}: "
           f"cache={cached_version}, token={session_version}"
         )
+        # Proactively evict the stale entry. Under normal operation
+        # ``_invalidate_auth_cache`` already deleted this on the
+        # version bump; reaching this branch usually means that
+        # delete failed (the documented fail-open window). Removing
+        # it here halves the DB overhead for the rest of the cache
+        # TTL by preventing every subsequent request from also
+        # taking the cache→DB fallthrough.
+        try:
+          self.redis.delete(cache_key, signature_key)
+        except Exception as evict_err:
+          logger.debug(
+            f"Failed to evict stale JWT user cache for {user_id}: {evict_err}"
+          )
         return None
 
       user_data = cache_data.get("user_data", {})
@@ -876,8 +889,13 @@ class APIKeyCache:
         cache_key = self._get_user_cache_key(user_id)
         signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
         self.redis.delete(cache_key, signature_key)
-      except Exception:
-        pass
+      except Exception as cleanup_err:
+        # Best-effort cleanup; failure here is non-fatal (the outer return
+        # is already None) but worth a debug breadcrumb for diagnosis.
+        logger.debug(
+          f"Cleanup of corrupted JWT user cache for {user_id} also failed: "
+          f"{cleanup_err}"
+        )
       return None
 
   def invalidate_jwt_user_data(self, user_id: str) -> bool:

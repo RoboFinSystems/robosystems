@@ -133,7 +133,14 @@ class User(Model):
       raise
 
   def deactivate(self, session: Session) -> None:
-    """Deactivate the user."""
+    """Deactivate the user.
+
+    Bumps ``session_version``, which invalidates every JWT issued for this
+    user. If the user is reactivated later, they must re-authenticate —
+    prior tokens cannot resume. This is intentional: a deactivated account
+    is a security boundary, and we don't want suspended/banned/restored
+    accounts to be revivable just by replaying an old token.
+    """
     self.is_active = False
     self.session_version = (self.session_version or 0) + 1
     self.updated_at = datetime.now(UTC)

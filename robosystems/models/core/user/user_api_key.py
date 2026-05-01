@@ -306,8 +306,17 @@ class UserAPIKey(Model):
 
     Used as the cache key in `validate_api_key`. Stored on the row so
     `_invalidate_cache` can clear the same entry without needing the plaintext.
+
+    NOT credential storage: the API key itself is stored as bcrypt in
+    ``key_hash`` (see ``_hash_api_key`` below). This SHA-256 is solely a
+    deterministic lookup fingerprint so the cache key derived from the
+    plaintext (``sha256(plain_key)``) matches what ``_invalidate_cache``
+    reads off the row. CodeQL's "weak hash on sensitive data" rule is a
+    false positive here — silenced via lgtm[py/weak-sensitive-data-hashing].
     """
-    return hashlib.sha256(plain_key.encode("utf-8")).hexdigest()
+    return hashlib.sha256(  # lgtm[py/weak-sensitive-data-hashing]
+      plain_key.encode("utf-8")
+    ).hexdigest()
 
   @staticmethod
   def _hash_api_key(plain_key: str) -> str:
