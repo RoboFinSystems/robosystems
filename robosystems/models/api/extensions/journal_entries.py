@@ -88,6 +88,13 @@ class CreateJournalEntryRequest(BaseModel):
   type: Literal["standard", "adjusting", "closing", "reversing"] = "standard"
   status: Literal["draft", "posted"] = "draft"
   transaction_id: str | None = None
+  # Source-system provenance for the resulting Transaction row. Defaults
+  # to ``native`` (manually-created entries). Source-of-truth adapters
+  # (QuickBooks, Xero, ...) propagate their own source + connection_id
+  # so re-syncs can scope deletes correctly and reports can attribute
+  # entries to their originating system.
+  source: str | None = None
+  connection_id: str | None = None
 
 
 # ── Update ────────────────────────────────────────────────────────────────

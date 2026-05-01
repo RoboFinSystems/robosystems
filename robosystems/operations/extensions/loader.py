@@ -13,6 +13,69 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from robosystems.logger import logger
+from robosystems.operations.event_block.commands import fire_handler_on_commit
+
+# Per-source default for whether captured events should auto-commit on
+# sync (handler fires immediately, event lands ``status='committed'``)
+# vs. land in the inbox for human approval. Keyed by the ``source``
+# string written to ``Event.source``.
+#
+# QuickBooks is qb_authoritative by default — anything that landed in
+# QB has already been booked there, so a sync replicates approved
+# entries rather than queueing them for re-approval. Native (manual /
+# schedule / system / AI) entries always go through the inbox.
+#
+# This is a placeholder for the per-connection ``write_policy`` column
+# (``roadmap.md`` Decision 5 / Phase 5). When that column lands, this
+# map becomes the fallback default for connections that haven't set
+# their policy explicitly.
+#
+# Only flip a source to ``True`` once its adapter has been tested
+# end-to-end with auto-commit — otherwise every event for that source
+# auto-commits silently on first sync, with no inbox review. Future
+# adapters (xero, netsuite, ...) start at ``False`` and graduate
+# explicitly when their handler dispatch is verified against real data.
+_SOURCE_AUTO_COMMITS: dict[str, bool] = {
+  "quickbooks": True,
+}
+
+
+# QuickBooks AccountType → FASB elementsOfFinancialStatements trait
+# identifier. QB classifies every account into one of ~14 types;
+# every type maps cleanly to one of the 5 EFS traits the rest of the
+# rollup machinery expects (asset / liability / equity / revenue /
+# expense). Without this translation, QB-imported elements have
+# ``trait IS NULL`` and the auto-map agent skips them entirely
+# (see operations/agents/implementations/mapping/agent.py).
+#
+# QB's "Cost of Goods Sold" rolls into expense for FASB EFS purposes —
+# the IS sub-classification (operating-expense vs. COGS) is captured
+# separately under ``activityType`` and isn't load-bearing here.
+#
+# When we layer in Xero / NetSuite, each gets its own dict keyed off
+# its native classification taxonomy and the same target identifiers.
+_QB_ACCOUNT_TYPE_TO_TRAIT: dict[str, str] = {
+  # Assets
+  "Bank": "asset",
+  "Accounts Receivable": "asset",
+  "Other Current Asset": "asset",
+  "Fixed Asset": "asset",
+  "Other Asset": "asset",
+  # Liabilities
+  "Accounts Payable": "liability",
+  "Credit Card": "liability",
+  "Other Current Liability": "liability",
+  "Long Term Liability": "liability",
+  # Equity
+  "Equity": "equity",
+  # Revenue
+  "Income": "revenue",
+  "Other Income": "revenue",
+  # Expenses
+  "Expense": "expense",
+  "Cost of Goods Sold": "expense",
+  "Other Expense": "expense",
+}
 
 
 def _parse_metadata(raw) -> dict:
@@ -36,14 +99,21 @@ class LoadResult:
 
   - ``elements`` / ``dimensions``: still inserted directly (structural).
   - ``events_captured`` / ``events_updated``: per-transaction event_block
-    rows written by ``_capture_transactions_as_events`` with
-    ``status='captured'`` and ``apply_handlers=False``. The user later
-    approves these in the inbox, which fires the registered handler and
-    creates the actual GL rows.
-  - ``transactions`` / ``entries`` / ``line_items``: zero on a Phase 2 sync.
-    These rows are now produced by handlers (post-approval), not by the
-    sync. Kept on the dataclass for backward-compat with callers that
-    log result counts; ``total_rows`` includes the new event counts.
+    rows written by ``_capture_transactions_as_events``. Source-of-truth
+    sources (currently QuickBooks) auto-commit on sync — the registered
+    handler fires immediately so the event lands ``status='committed'``
+    with backing Transaction / Entry / LineItem rows. Native-mode events
+    (manual / schedule / AI) still capture-then-approve via the inbox.
+  - ``events_handler_dispatched`` / ``events_dispatch_failed``: how many
+    of the captured events successfully fired their handler vs. fell back
+    to ``captured`` because dispatch raised (e.g., element_external_id
+    not yet mapped). "Dispatched" is intentionally broader than
+    "committed" — the handler may set the event's terminal status to
+    ``fulfilled`` (historical-posted data) instead of ``committed``;
+    both count as a successful dispatch.
+  - ``transactions`` / ``entries`` / ``line_items``: produced by handler
+    dispatch, not direct insert. Kept on the dataclass for backward-compat
+    with callers that log result counts.
   """
 
   graph_id: str
@@ -56,6 +126,8 @@ class LoadResult:
   dimensions: int = 0
   events_captured: int = 0
   events_updated: int = 0
+  events_handler_dispatched: int = 0
+  events_dispatch_failed: int = 0
   agents_inserted: int = 0
   agents_updated: int = 0
   # Drop counters surface data-quality issues that the loader masks with
@@ -91,6 +163,8 @@ class _CaptureResult:
 
   inserted: int = 0
   updated: int = 0
+  handler_dispatched: int = 0
+  dispatch_failed: int = 0
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
 
@@ -195,6 +269,66 @@ class OLTPLoader:
       # re-sync of one QB connection doesn't stomp another's CoA.
       # Library-origin elements (rs-gaap / us-gaap / FAC) have
       # connection_id NULL and are never touched by this delete.
+      #
+      # For auto-commit sources (QB-authoritative), the previous sync
+      # produced GL rows (Transaction / Entry / LineItem) via the
+      # handler. These reference the elements we're about to delete,
+      # so we have to wipe them first (FKs have no ON DELETE CASCADE).
+      # This is consistent with the qb-authoritative model: QB is the
+      # source of truth, our GL is a mirror, full re-sync replaces the
+      # mirror. Native-mode sources (manual / schedule / AI) skip this
+      # cascade — their GL rows are user-curated and must not be lost
+      # to a re-sync.
+      # Local imports: hoisting these to module top would pull the
+      # roboledger model package eagerly, which in turn drags Strawberry
+      # GraphQL types and the entire extensions schema graph into every
+      # process that imports the loader (Dagster jobs, lambda warmups).
+      # Imported lazily so the loader stays cheap to import.
+      from robosystems.models.extensions.element_trait import ElementTrait
+      from robosystems.models.extensions.roboledger.entry import Entry
+      from robosystems.models.extensions.roboledger.event import Event
+      from robosystems.models.extensions.roboledger.line_item import LineItem
+      from robosystems.models.extensions.roboledger.transaction import Transaction
+
+      if _SOURCE_AUTO_COMMITS.get(source, False):
+        txn_subq = session.query(Transaction.id).filter(
+          Transaction.source == source,
+          Transaction.connection_id == connection_id,
+        )
+        entry_subq = session.query(Entry.id).filter(Entry.transaction_id.in_(txn_subq))
+        session.query(LineItem).filter(LineItem.entry_id.in_(entry_subq)).delete(
+          synchronize_session=False
+        )
+        session.query(Entry).filter(Entry.transaction_id.in_(txn_subq)).delete(
+          synchronize_session=False
+        )
+        session.query(Transaction).filter(
+          Transaction.source == source,
+          Transaction.connection_id == connection_id,
+        ).delete(synchronize_session=False)
+        # Event has no top-level connection_id column — the value lives in
+        # metadata_["connection_id"] (set by _capture_transactions_as_events).
+        # Filter on the JSONB path so a re-sync of one QB connection doesn't
+        # wipe events from a sibling connection on the same graph.
+        session.query(Event).filter(
+          Event.source == source,
+          Event.metadata_["connection_id"].astext == connection_id,
+        ).delete(synchronize_session=False)
+        session.flush()
+
+      # Drop element_traits before elements — the FK has no
+      # ON DELETE CASCADE, and re-syncs that previously wrote traits
+      # would otherwise hit a FK violation. Library-seeded traits are
+      # protected by the immutability trigger; the only rows touched
+      # here are adapter-derived (created_by != 'library-seeder').
+      element_subq = session.query(Element.id).filter(
+        Element.external_source == source,
+        Element.connection_id == connection_id,
+      )
+      session.query(ElementTrait).filter(
+        ElementTrait.element_id.in_(element_subq)
+      ).delete(synchronize_session=False)
+
       session.query(Element).filter(
         Element.external_source == source,
         Element.connection_id == connection_id,
@@ -270,6 +404,26 @@ class OLTPLoader:
         result.elements = len(rows)
         logger.info(f"Inserted {result.elements} elements")
 
+        # --- Apply trait classifications from source-system metadata ---
+        #
+        # QB returns an AccountType per account; translate to the FASB
+        # elementsOfFinancialStatements trait so the auto-map agent (and
+        # any other reader that filters by trait) can group elements
+        # without an AI roundtrip. Without this, QB elements land with
+        # trait=NULL and rollup workflows silently skip them.
+        traits_applied = self._apply_source_element_traits(
+          session,
+          source=source,
+          connection_id=connection_id,
+          created_by=created_by,
+          now=now,
+        )
+        if traits_applied:
+          logger.info(
+            f"Applied {traits_applied} element_trait rows from {source} "
+            f"AccountType metadata"
+          )
+
       # --- UPSERT agents (Phase 2) ---
       #
       # Customers / vendors / employees pulled per-entity from the source
@@ -316,6 +470,8 @@ class OLTPLoader:
       )
       result.events_captured = capture_result.inserted
       result.events_updated = capture_result.updated
+      result.events_handler_dispatched = capture_result.handler_dispatched
+      result.events_dispatch_failed = capture_result.dispatch_failed
       result.dropped_unbalanced_entries = capture_result.dropped_unbalanced_entries
       result.dropped_empty_transactions = capture_result.dropped_empty_transactions
       logger.info(
@@ -371,6 +527,137 @@ class OLTPLoader:
       f"{result.total_rows} total rows"
     )
     return result
+
+  def _apply_source_element_traits(
+    self,
+    session,
+    *,
+    source: str,
+    connection_id: str,
+    created_by: str,
+    now: datetime,
+  ) -> int:
+    """Translate source-system account classifications into FASB EFS
+    traits on the freshly-inserted elements.
+
+    For each element scoped to ``(source, connection_id)`` whose
+    ``metadata.account_type`` matches a known source-system type,
+    insert an ``ElementTrait`` row pointing at the corresponding
+    ``elementsOfFinancialStatements`` trait. Returns the number of
+    rows actually inserted.
+
+    Idempotent: skips elements that already carry an EFS trait (could
+    happen if a downstream classifier ran first), and uses an INSERT
+    with ON CONFLICT DO NOTHING to handle re-syncs cleanly.
+
+    Currently only QuickBooks is wired. Xero / NetSuite layer in by
+    adding their classification dict + a source check. The cross-source
+    pattern is the same: the source's native account taxonomy is the
+    seed, FASB EFS is the canonical target.
+    """
+    type_to_trait_id = _QB_ACCOUNT_TYPE_TO_TRAIT if source == "quickbooks" else None
+    if type_to_trait_id is None:
+      return 0
+
+    from robosystems.models.extensions import Element
+    from robosystems.models.extensions.element_trait import ElementTrait
+    from robosystems.models.extensions.trait import Trait
+
+    # Resolve trait identifiers → trait_ids once.
+    trait_id_by_identifier: dict[str, str] = {
+      t.identifier: t.id
+      for t in session.query(Trait).filter(
+        Trait.category == "elementsOfFinancialStatements",
+        Trait.identifier.in_(set(type_to_trait_id.values())),
+      )
+    }
+    if not trait_id_by_identifier:
+      logger.warning(
+        "No elementsOfFinancialStatements traits found in graph — "
+        "skipping %s trait translation",
+        source,
+      )
+      return 0
+
+    # Fetch the source's elements with their metadata.
+    elements = (
+      session.query(Element)
+      .filter(
+        Element.external_source == source,
+        Element.connection_id == connection_id,
+      )
+      .all()
+    )
+
+    rows: list[ElementTrait] = []
+    for elem in elements:
+      meta = elem.metadata_ or {}
+      acct_type = meta.get("account_type")
+      if not acct_type:
+        continue
+      trait_identifier = type_to_trait_id.get(acct_type)
+      if trait_identifier is None:
+        # Unknown source-system AccountType — log so unmapped types
+        # surface in sync logs rather than silently producing
+        # untraited elements.
+        logger.warning(
+          "Unknown %s account_type %r on element %s — skipping trait",
+          source,
+          acct_type,
+          elem.id,
+        )
+        continue
+      trait_id = trait_id_by_identifier.get(trait_identifier)
+      if trait_id is None:
+        continue
+      rows.append(
+        ElementTrait(
+          element_id=elem.id,
+          trait_id=trait_id,
+          is_primary=True,
+          confidence=1.0,
+          source=source,
+          created_at=now,
+          updated_at=now,
+          created_by=created_by,
+        )
+      )
+
+    if not rows:
+      return 0
+
+    # Bulk insert; ignore conflicts on the (element_id, trait_id) PK
+    # so re-syncs (which delete + re-insert elements) and concurrent
+    # runs don't blow up. The element-delete pre-pass already cascades
+    # through element_traits via the FK; this is belt-and-suspenders.
+    #
+    # Postgres-only: ``ON CONFLICT DO NOTHING`` is a Postgres dialect
+    # extension. Acceptable because the extensions DB is RDS Postgres
+    # by definition (schema-per-graph tenancy lives nowhere else).
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = (
+      pg_insert(ElementTrait.__table__)
+      .values(
+        [
+          {
+            "element_id": r.element_id,
+            "trait_id": r.trait_id,
+            "is_primary": r.is_primary,
+            "confidence": r.confidence,
+            "source": r.source,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at,
+            "created_by": r.created_by,
+          }
+          for r in rows
+        ]
+      )
+      .on_conflict_do_nothing(index_elements=["element_id", "trait_id"])
+    )
+    session.execute(stmt)
+    session.flush()
+    return len(rows)
 
   def _capture_agents_from_qb(
     self,
@@ -496,10 +783,20 @@ class OLTPLoader:
     The dbt staging emits three flat tables — ``transactions``, ``entries``,
     ``line_items`` — joined by external IDs. This method groups them
     transaction-first (an Event for each transaction, with its entries
-    and line_items packed into ``Event.metadata_``) and writes them as
-    Event rows with ``status='captured'``. Handler dispatch is deferred
-    to the inbox-approval flow (Phase 4); no GL rows are produced by
-    this sync.
+    and line_items packed into ``Event.metadata_``).
+
+    Source-of-truth auto-commit: for sources where the originating system
+    has already approved the entry (currently ``quickbooks`` — anything
+    in QB has been booked there), the event's handler fires immediately
+    and the event lands ``status='committed'`` with backing GL rows. The
+    inbox is reserved for events that genuinely need human review — AI
+    suggestions, manual journal entries, scheduled accruals. This
+    matches ``roadmap.md`` Decision 5: connections eventually carry a
+    ``write_policy`` (native | qb_authoritative | hybrid); until that
+    column lands, QB hardcodes to qb_authoritative behavior. Events
+    whose handler dispatch fails (e.g., element_external_id not yet
+    mapped) fall back to ``status='captured'`` so the user can fix the
+    underlying issue and re-approve from the inbox.
 
     Idempotent re-sync: looks up existing events by ``(source,
     external_id)`` and updates them in place rather than inserting
@@ -665,7 +962,24 @@ class OLTPLoader:
         out.dropped_empty_transactions += 1
         continue
 
+      # Auto-committing sources are by definition source-of-truth — the
+      # transaction was already posted in the upstream system. Stamp
+      # ``status='posted'`` so the journal_entry_recorded handler creates
+      # Entry rows with ``status='posted'`` (vs. the default 'draft').
+      # Trial balance / reports filter on posted entries; without this,
+      # QB-synced data would silently disappear from the read side.
+      jeh_status = "posted" if _SOURCE_AUTO_COMMITS.get(source, False) else "draft"
+
+      # ``metadata_blob["status"]`` is the JOURNAL-ENTRY status consumed
+      # by the journal_entry_recorded handler's metadata_schema (see
+      # python_handlers/journal_entry_recorded.py: ``status: Literal['draft',
+      # 'posted']``). It is *not* the Event.status field — the Event row's
+      # own ``status`` column lives on the Event ORM object and uses a
+      # different domain (captured / classified / committed / voided /
+      # fulfilled). The two field names overlap because both are coupled
+      # to the handler's wire contract.
       metadata_blob = {
+        "status": jeh_status,
         "qb_txn_type": qb_txn_type,
         "qb_doc_number": qb_doc_number,
         "qb_reference_number": str(txn.get("reference_number"))
@@ -720,6 +1034,59 @@ class OLTPLoader:
     if new_events:
       session.add_all(new_events)
     session.flush()
+
+    # Auto-commit pass for source-of-truth sources.
+    #
+    # On a fresh sync of QB data, every captured event has already been
+    # approved in QB — making the user click "approve" again on the inbox
+    # would be busywork. Fire each event's registered Python handler now;
+    # successful dispatch transitions the event to ``committed`` with the
+    # GL rows the handler creates. Each event is dispatched in its own
+    # SAVEPOINT so a single bad event (e.g., references an element_id
+    # the loader hasn't seen yet) doesn't roll back the rest.
+    #
+    # Events that fail dispatch stay at ``status='captured'`` and surface
+    # in the inbox — the user fixes the underlying issue (CoA mapping,
+    # closed period, etc.) and re-approves from there. Re-syncs covered
+    # under the existing idempotency rule: only ``captured`` /
+    # ``classified`` events are touched, so previously-committed events
+    # don't get re-fired.
+    if _SOURCE_AUTO_COMMITS.get(source, False):
+      events_to_commit: list[Event] = list(new_events)
+      # Re-include updated captured events — covers two cases:
+      # (1) old captured events left over from before auto-commit was
+      # enabled and (2) a re-sync that updated metadata of an event that
+      # previously failed dispatch. ``existing.values()`` and ``new_events``
+      # are guaranteed disjoint by construction (existing rows are mutated
+      # in place, never appended to ``new_events``), so no dedup needed.
+      for evt in existing.values():
+        if evt.status == "captured":
+          events_to_commit.append(evt)
+
+      for evt in events_to_commit:
+        try:
+          with session.begin_nested():
+            prev_status = evt.status
+            fire_handler_on_commit(session, evt, created_by)
+            # If the handler bumped status to a terminal state ('fulfilled'
+            # for historical-posted data), respect that. Only stamp
+            # 'committed' when the handler left status unchanged.
+            if evt.status == prev_status:
+              evt.status = "committed"
+          out.handler_dispatched += 1
+        except Exception as e:
+          logger.warning(
+            "Auto-commit failed for event %s (type=%s, ext_id=%s): %s — "
+            "event left at status='captured' for inbox review",
+            evt.id,
+            evt.event_type,
+            evt.external_id,
+            e,
+          )
+          out.dispatch_failed += 1
+
+      session.flush()
+
     return out
 
   def _ensure_mapping_structure(

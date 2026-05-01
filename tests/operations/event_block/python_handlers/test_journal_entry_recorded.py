@@ -25,6 +25,7 @@ def _make_event():
   event = MagicMock()
   event.id = "evt_test"
   event.status = "classified"
+  event.source = "manual"
   event.occurred_at = datetime(2026, 3, 31, tzinfo=UTC)
   return event
 
