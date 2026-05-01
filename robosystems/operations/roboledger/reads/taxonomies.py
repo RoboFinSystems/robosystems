@@ -323,6 +323,11 @@ def expand_to_rs_gaap_candidates(
   ).fetchone()
   fac_qname = fac_row.qname if fac_row else fac_element_id
 
+  # Lazy import to avoid pulling agent constants into every read path.
+  from robosystems.operations.agents.implementations.mapping.constants import (
+    RS_GAAP_SUBTOTAL_DENYLIST,
+  )
+
   equiv_rows = session.execute(
     text("""
       SELECT e.id, e.qname, e.name
@@ -337,6 +342,17 @@ def expand_to_rs_gaap_candidates(
     """),
     {"fac_id": fac_element_id},
   ).fetchall()
+
+  if not equiv_rows:
+    return None
+
+  # Drop denylisted rollup concepts from the equivalent set BEFORE the
+  # narrow/wide branch decision. A CoA arc to a statement-level rollup
+  # like rs-gaap:Assets would land a leaf fact on a calculated total
+  # and double-count when the renderer sums children. The narrow-case
+  # parent fallback (max-children selection) and the wide-case
+  # candidate list both flow from this filtered set.
+  equiv_rows = [r for r in equiv_rows if r.qname not in RS_GAAP_SUBTOTAL_DENYLIST]
 
   if not equiv_rows:
     return None
@@ -394,10 +410,14 @@ def expand_to_rs_gaap_candidates(
     if r.id not in candidate_ids:
       candidate_ids.add(r.id)
       candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
+  # Type-subtype children may themselves be rollups (e.g. some
+  # AssetsCurrent subtypes are themselves grouping concepts). Filter
+  # the same denylist so the AI never sees a rollup as a candidate.
   for r in child_rows:
-    if r.id not in candidate_ids:
-      candidate_ids.add(r.id)
-      candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
+    if r.id in candidate_ids or r.qname in RS_GAAP_SUBTOTAL_DENYLIST:
+      continue
+    candidate_ids.add(r.id)
+    candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
 
   return {
     "fac_qname": fac_qname,

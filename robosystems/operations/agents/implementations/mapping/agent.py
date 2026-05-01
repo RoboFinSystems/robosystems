@@ -30,6 +30,11 @@ from robosystems.operations.agents.base import (
   ExecutionProfile,
   GraphScope,
 )
+from robosystems.operations.agents.implementations.mapping.constants import (
+  FAC_TO_RS_GAAP_FALLBACK,
+  FALLBACK_CONFIDENCE,
+  RS_GAAP_SUBTOTAL_DENYLIST,
+)
 from robosystems.operations.agents.implementations.mapping.prompt import (
   MAPPING_SYSTEM_PROMPT,
   RS_GAAP_REFINEMENT_SYSTEM_PROMPT,
@@ -312,7 +317,13 @@ class MappingAgent(Agent):
           # Use a lower threshold here — the FAC pass already confirmed the
           # semantic bucket; the refinement is just picking the specific tag.
           if (
-            result and result.get("rs_gaap_id") and result.get("confidence", 0) >= 0.50
+            result
+            and result.get("rs_gaap_id")
+            and result.get("confidence", 0) >= 0.50
+            # Belt-and-suspenders: even if the prompt instructed
+            # "no rollups", filter the AI's pick against the denylist
+            # in case it ignored the instruction.
+            and result.get("rs_gaap_qname") not in RS_GAAP_SUBTOTAL_DENYLIST
           ):
             rs_gaap_id = result["rs_gaap_id"]
             rs_gaap_conf = result["confidence"]
@@ -320,11 +331,34 @@ class MappingAgent(Agent):
         except Exception as e:
           logger.warning(f"rs-gaap refinement failed for {coa_elem['id']}: {e}")
 
-        # Fall back to the rs-gaap parent when the AI returned nothing useful
-        # (only possible in the narrow case where a parent exists).
+        # Fallback chain when the AI returned nothing usable:
+        #   1. The narrow-case parent equivalent (if not denylisted).
+        #      Already filtered upstream in expand_to_rs_gaap_candidates,
+        #      but the explicit guard here is belt-and-suspenders for
+        #      callers that bypass the filter.
+        #   2. The per-FAC "Other" bucket (FAC_TO_RS_GAAP_FALLBACK) at
+        #      a low ``FALLBACK_CONFIDENCE`` so the user sees it as a
+        #      placeholder mapping in the CoA UI and can correct it.
         if not rs_gaap_id and rs_gaap_parent:
-          rs_gaap_id = rs_gaap_parent["id"]
-          rs_gaap_conf = 0.60
+          parent_qname = rs_gaap_parent.get("qname", "")
+          if parent_qname not in RS_GAAP_SUBTOTAL_DENYLIST:
+            rs_gaap_id = rs_gaap_parent["id"]
+            rs_gaap_conf = 0.60
+
+        if not rs_gaap_id:
+          fallback_qname = FAC_TO_RS_GAAP_FALLBACK.get(fac_qname)
+          if fallback_qname:
+            fallback_id = await self._resolve_qname_to_id(ctx, fallback_qname)
+            if fallback_id:
+              rs_gaap_id = fallback_id
+              rs_gaap_conf = FALLBACK_CONFIDENCE
+              logger.info(
+                "rs-gaap fallback for %s (FAC=%s): %s @ confidence=%.2f",
+                coa_elem.get("qname", coa_elem["id"]),
+                fac_qname,
+                fallback_qname,
+                FALLBACK_CONFIDENCE,
+              )
 
         if rs_gaap_id:
           try:
@@ -339,6 +373,40 @@ class MappingAgent(Agent):
             )
           except Exception as e:
             logger.warning(f"rs-gaap create failed for {coa_elem['id']}: {e}")
+
+  async def _resolve_qname_to_id(self, ctx: AgentContext, qname: str) -> str | None:
+    """Resolve an rs-gaap qname → element_id within the agent's tenant
+    schema.
+
+    Cached on the agent instance for the duration of a single ``run()``
+    call so the fallback path doesn't re-query for every CoA element
+    that lands on the same Other bucket. Returns ``None`` when the
+    qname isn't seeded — surfaces missing taxonomy data instead of
+    silently falling through.
+    """
+    if not hasattr(self, "_qname_cache"):
+      self._qname_cache: dict[str, str | None] = {}
+    if qname in self._qname_cache:
+      return self._qname_cache[qname]
+
+    from sqlalchemy import text
+
+    from robosystems.db.extensions import extensions_session
+
+    with extensions_session(ctx.graph_id) as session:
+      row = session.execute(
+        text("SELECT id FROM elements WHERE qname = :qname LIMIT 1"),
+        {"qname": qname},
+      ).fetchone()
+    elem_id = row.id if row else None
+    self._qname_cache[qname] = elem_id
+    if elem_id is None:
+      logger.warning(
+        "rs-gaap fallback target %r not found in graph %s — fallback skipped",
+        qname,
+        ctx.graph_id,
+      )
+    return elem_id
 
   def _parse_rs_gaap_response(self, content: str) -> dict | None:
     """Parse the single-object JSON from the rs-gaap refinement pass."""

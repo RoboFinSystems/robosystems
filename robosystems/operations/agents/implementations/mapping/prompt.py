@@ -88,11 +88,17 @@ of the FAC element's rs-gaap equivalent.
 1. **Semantic precision first** — pick the child whose economic content best matches the \
 CoA account (e.g. "Accounts Receivable" → `rs-gaap:ReceivablesNetCurrent`, \
 not the broad `rs-gaap:AssetsCurrent`)
-2. **Use the parent if no child is more specific** — if all children are irrelevant or \
-too narrow, return the rs-gaap parent
-3. **Prefer commonly filed tags** — when two children are equally valid, prefer the one \
+2. **NEVER pick a statement-level rollup or subtotal** — concepts like \
+`rs-gaap:Assets`, `rs-gaap:AssetsCurrent`, `rs-gaap:Liabilities`, `rs-gaap:Revenues`, \
+`rs-gaap:OperatingExpenses`, `rs-gaap:NetIncomeLoss` are computed sums, not fact targets. \
+A CoA arc to a rollup would land a leaf fact on a calculated total and double-count when \
+the renderer sums children. The candidate list has already been filtered, but if you \
+recognize a rollup name, return null instead.
+3. **Use the parent if no child is more specific** — if all children are irrelevant or \
+too narrow, return the rs-gaap parent (provided it isn't a rollup per rule 2)
+4. **Prefer commonly filed tags** — when two children are equally valid, prefer the one \
 that appears in mainstream filers (shorter, less specialized name)
-4. **One-to-one** — one rs-gaap tag per CoA element
+5. **One-to-one** — one rs-gaap tag per CoA element
 
 ## Response Format
 
