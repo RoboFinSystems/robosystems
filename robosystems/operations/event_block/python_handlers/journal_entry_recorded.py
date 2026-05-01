@@ -305,6 +305,8 @@ def _dispatch_flat(
     type=metadata.type,
     status=metadata.status,
     transaction_id=metadata.transaction_id,
+    source=event.source,
+    connection_id=metadata.connection_id,
   )
   response = create_journal_entry(session, body, created_by)
 
@@ -362,6 +364,10 @@ def _dispatch_nested(
       type=entry_spec.type,
       status=metadata.status,
       transaction_id=shared_txn_id,
+      # Stamp the originating system on the Transaction so re-syncs
+      # can scope deletes and reports can attribute provenance.
+      source=event.source,
+      connection_id=metadata.connection_id,
     )
     response = create_journal_entry(session, body, created_by)
     if shared_txn_id is None:

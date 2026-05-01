@@ -321,6 +321,14 @@ def update_event_block(
 
 def _python_preview_to_response(preview) -> PreviewEventBlockResponse:
   """Map a Python HandlerPreview to the public PreviewEventBlockResponse shape."""
+
+  def _line_element_ref(li: dict) -> str:
+    # The metadata schema requires exactly one of element_id or
+    # element_external_id per line. QB-captured lines carry only
+    # element_external_id; manual/native lines may carry element_id
+    # already. Either is human-meaningful for preview display.
+    return li.get("element_id") or li.get("element_external_id") or ""
+
   planned: list[TransactionPreview] = []
   for entry_idx, entry in enumerate(preview.planned_entries):
     line_items = entry.get("line_items", [])
@@ -339,8 +347,8 @@ def _python_preview_to_response(preview) -> PreviewEventBlockResponse:
       planned.append(
         TransactionPreview(
           entry_index=entry_idx,
-          debit_element_id=first_debit.get("element_id", ""),
-          credit_element_id=first_credit.get("element_id", ""),
+          debit_element_id=_line_element_ref(first_debit),
+          credit_element_id=_line_element_ref(first_credit),
           amount_cents=debit_amount,
           interpolated_debit_amount=str(debit_amount),
           interpolated_credit_amount=str(credit_amount),

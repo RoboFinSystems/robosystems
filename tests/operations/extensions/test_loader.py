@@ -594,6 +594,153 @@ class TestCaptureTransactionsAsEvents:
     session.add_all.assert_not_called()
 
 
+class TestCaptureAutoCommit:
+  """Source-of-truth auto-commit behavior — QB-sourced events fire the
+  handler immediately and land ``status='committed'``; native sources
+  stay ``captured`` for human approval."""
+
+  def _dbt_data(self) -> dict:
+    """Reuse TestCaptureTransactionsAsEvents._dbt_data shape inline."""
+    return {
+      "transactions": [
+        {
+          "external_id": "JE_100",
+          "external_source": "quickbooks",
+          "number": "100",
+          "type": "JournalEntry",
+          "amount": 5000,
+          "currency": "USD",
+          "date": date(2026, 1, 15),
+          "source_id": "JE_100",
+        }
+      ],
+      "entries": [
+        {
+          "external_id": "JE_100",
+          "external_transaction_id": "JE_100",
+          "external_source": "quickbooks",
+          "type": "standard",
+          "posting_date": date(2026, 1, 15),
+          "memo": "Office supplies",
+        }
+      ],
+      "line_items": [
+        {
+          "entry_external_id": "JE_100",
+          "element_external_id": "elem_5000",
+          "debit_amount": 5000,
+          "credit_amount": 0,
+          "line_order": 1,
+        },
+        {
+          "entry_external_id": "JE_100",
+          "element_external_id": "elem_1000",
+          "debit_amount": 0,
+          "credit_amount": 5000,
+          "line_order": 2,
+        },
+      ],
+    }
+
+  def test_qb_source_auto_commits_on_successful_dispatch(self):
+    """QB-sourced events whose handler dispatches cleanly land
+    status='committed' and increment auto_committed."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+
+    with patch(
+      "robosystems.operations.extensions.loader._fire_handler_on_commit"
+    ) as fire:
+      result = loader._capture_transactions_as_events(
+        session,
+        self._dbt_data(),
+        source="quickbooks",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    fire.assert_called_once()
+    assert result.inserted == 1
+    assert result.auto_committed == 1
+    assert result.dispatch_failed == 0
+    # The event added to the session has status flipped to 'committed'
+    evt = session.add_all.call_args.args[0][0]
+    assert evt.status == "committed"
+
+  def test_qb_source_falls_back_to_captured_on_dispatch_failure(self):
+    """If the handler raises (e.g., element_external_id unmapped), the
+    event is left at status='captured' and dispatch_failed is incremented."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+
+    with patch(
+      "robosystems.operations.extensions.loader._fire_handler_on_commit",
+      side_effect=RuntimeError("element_external_id not resolved"),
+    ):
+      result = loader._capture_transactions_as_events(
+        session,
+        self._dbt_data(),
+        source="quickbooks",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    assert result.inserted == 1
+    assert result.auto_committed == 0
+    assert result.dispatch_failed == 1
+    evt = session.add_all.call_args.args[0][0]
+    assert evt.status == "captured"
+
+  def test_native_source_does_not_auto_commit(self):
+    """Manual / schedule / system / AI sources go through the inbox —
+    handler dispatch is NOT fired on capture, regardless of mapping."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+    dbt = self._dbt_data()
+    # Switch the source on the data + the call.
+    dbt["transactions"][0]["external_source"] = "manual"
+    dbt["entries"][0]["external_source"] = "manual"
+
+    with patch(
+      "robosystems.operations.extensions.loader._fire_handler_on_commit"
+    ) as fire:
+      result = loader._capture_transactions_as_events(
+        session,
+        dbt,
+        source="manual",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    fire.assert_not_called()
+    assert result.inserted == 1
+    assert result.auto_committed == 0
+    assert result.dispatch_failed == 0
+    evt = session.add_all.call_args.args[0][0]
+    assert evt.status == "captured"
+
+
 class TestCaptureHardening:
   """Defaults + drop counters that keep handler validation passing on
   real QB data (memo/posting_date can be None in the wild; zero-amount

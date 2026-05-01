@@ -169,6 +169,52 @@ class TestPreviewEventBlockPythonHandlerPath:
     assert resp.planned_transactions[0].debit_element_id == "elem_accum_dep"
     assert resp.planned_transactions[0].credit_element_id == "elem_asset"
 
+  def test_preview_handles_external_id_only_lines(self) -> None:
+    """QB-captured lines carry element_external_id (element_id=None);
+    preview must surface the external id, not blow up Pydantic."""
+    session = MagicMock()
+    body = _make_body()
+
+    python_handler = MagicMock()
+    python_handler.metadata_schema.model_validate.return_value = MagicMock()
+    python_handler.dispatch_preview.return_value = HandlerPreview(
+      would_succeed=True,
+      planned_entries=[
+        {
+          "posting_date": "2026-02-25",
+          "memo": "Invoice_9",
+          "entry_type": "standard",
+          "line_items": [
+            {
+              "element_id": None,
+              "element_external_id": "84",
+              "debit_amount": 10800,
+              "credit_amount": 0,
+            },
+            {
+              "element_id": None,
+              "element_external_id": "45",
+              "debit_amount": 0,
+              "credit_amount": 10000,
+            },
+          ],
+        }
+      ],
+      computed_values={},
+      validation_errors=[],
+    )
+
+    with patch(
+      "robosystems.operations.event_block.commands.get_python_handler",
+      return_value=python_handler,
+    ):
+      resp = preview_event_block(session, body, created_by="usr_test")
+
+    assert resp.would_succeed is True
+    assert len(resp.planned_transactions) == 1
+    assert resp.planned_transactions[0].debit_element_id == "84"
+    assert resp.planned_transactions[0].credit_element_id == "45"
+
   def test_preview_surfaces_validation_errors(self) -> None:
     session = MagicMock()
     body = _make_body()

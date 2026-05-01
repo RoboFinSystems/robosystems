@@ -481,13 +481,14 @@ async def sso_token_exchange(
   responses={**COMMON_ERROR_RESPONSES},
 )
 async def sso_complete(
-  request: SSOCompleteRequest,
+  request: Request,
+  body: SSOCompleteRequest,
   response: Response,
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> AuthResponse:
   try:
-    session_id = request.session_id
+    session_id = body.session_id
 
     # Retrieve and validate session with distributed locking
     try:
