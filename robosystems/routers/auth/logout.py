@@ -8,7 +8,6 @@ from fastapi import (
 )
 
 from ...logger import logger
-from ...middleware.auth.cache import api_key_cache
 from ...middleware.auth.jwt import revoke_jwt_token
 from ...middleware.rate_limits import logout_rate_limit_dependency
 from ...models.api.common import COMMON_ERROR_RESPONSES
@@ -45,9 +44,6 @@ async def logout(
           logger.info("JWT token successfully revoked on logout")
         else:
           logger.warning("Failed to revoke JWT token on logout")
-
-        # Also invalidate any cached JWT validation data
-        api_key_cache.invalidate_jwt_token(jwt_token)
 
       except Exception as e:
         logger.warning(f"Failed to revoke JWT token during logout: {e}")

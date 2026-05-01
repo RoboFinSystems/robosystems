@@ -200,8 +200,8 @@ class TestConcurrentAccessEdgeCases:
       "sub": "user_123",
     }
 
-    # Perform cache set operation (use JWT cache as example)
-    cache.cache_jwt_validation("test_jwt_token", test_user_data)
+    # Perform cache set operation (use the user-id-keyed JWT cache)
+    cache.cache_jwt_user_data("user_123", test_user_data, session_version=0)
 
     # Verify Redis was used (setex for cache storage)
     assert mock_redis_client.setex.called
@@ -248,7 +248,7 @@ class TestMemoryLeakPrevention:
     with patch.object(cache, "_decrypt_cache_data", return_value={"test": "data"}):
       # Trigger successful decryption
       mock_redis_client.get.return_value = "encrypted_data"
-      cache.get_cached_jwt_validation("jwt_789")
+      cache.get_cached_jwt_user_data("user_789", session_version=0)
 
     # Counter should be reset after successful operation
     assert cache._validation_failures < cache.VALIDATION_FAILURE_THRESHOLD
@@ -271,12 +271,12 @@ class TestRedisConnectionFailures:
     cache = APIKeyCache()
 
     # Operations should fail gracefully without crashing
-    result = cache.get_cached_jwt_validation("jwt_fail")
+    result = cache.get_cached_jwt_user_data("user_fail", session_version=0)
     assert result is None
 
     # Set operations should handle failure (cache operations don't raise, they log)
-    cache.cache_jwt_validation(
-      "jwt_fail",
+    cache.cache_jwt_user_data(
+      "user_fail",
       {
         "id": "user_fail",
         "email": "test@example.com",
@@ -284,6 +284,7 @@ class TestRedisConnectionFailures:
         "data": "test",
         "exp": 1234567890,
       },
+      session_version=0,
     )
     # Should complete without raising
 
@@ -302,8 +303,8 @@ class TestRedisConnectionFailures:
       cache, "_encrypt_cache_data", side_effect=Exception("Encryption error")
     ):
       # Cache operations log errors but don't raise
-      cache.cache_jwt_validation(
-        "jwt_sec",
+      cache.cache_jwt_user_data(
+        "user_sec",
         {
           "id": "user_sec",
           "email": "sec@example.com",
@@ -311,6 +312,7 @@ class TestRedisConnectionFailures:
           "data": "sensitive",
           "exp": 1234567890,
         },
+        session_version=0,
       )
 
     # Verify security event was logged

@@ -282,10 +282,8 @@ class TestRefreshSession:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
-  @patch("robosystems.routers.auth.session.api_key_cache")
   async def test_refresh_session_success(
     self,
-    mock_api_key_cache,
     mock_create_jwt,
     mock_revoke_jwt,
     mock_get_by_id,
@@ -330,7 +328,6 @@ class TestRefreshSession:
     assert "user_agent" in args[1]  # Device fingerprint dict
     mock_get_by_id.assert_called_once_with("user_123", mock_session)
     mock_revoke_jwt.assert_called_once_with("old_jwt_token", reason="session_refresh")
-    mock_api_key_cache.invalidate_jwt_token.assert_called_once_with("old_jwt_token")
     # create_jwt_token now also gets device fingerprint
     create_args, create_kwargs = mock_create_jwt.call_args
     assert create_args[0] == "user_123"
@@ -436,12 +433,10 @@ class TestRefreshSession:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
-  @patch("robosystems.routers.auth.session.api_key_cache")
   @patch("robosystems.routers.auth.session.logger")
   async def test_refresh_session_revoke_failure(
     self,
     mock_logger,
-    mock_api_key_cache,
     mock_create_jwt,
     mock_revoke_jwt,
     mock_get_by_id,
@@ -490,12 +485,10 @@ class TestRefreshSession:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
-  @patch("robosystems.routers.auth.session.api_key_cache")
   @patch("robosystems.routers.auth.session.logger")
   async def test_refresh_session_revoke_success_logging(
     self,
     mock_logger,
-    mock_api_key_cache,
     mock_create_jwt,
     mock_revoke_jwt,
     mock_get_by_id,
@@ -565,10 +558,8 @@ class TestRefreshSession:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
-  @patch("robosystems.routers.auth.session.api_key_cache")
   async def test_refresh_session_create_token_error(
     self,
-    mock_api_key_cache,
     mock_create_jwt,
     mock_revoke_jwt,
     mock_get_by_id,
@@ -608,10 +599,8 @@ class TestCookieSettings:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
-  @patch("robosystems.routers.auth.session.api_key_cache")
   async def test_cookie_security_settings(
     self,
-    mock_api_key_cache,
     mock_create_jwt,
     mock_revoke_jwt,
     mock_get_by_id,
@@ -647,10 +636,8 @@ class TestCookieSettings:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
-  @patch("robosystems.routers.auth.session.api_key_cache")
   async def test_session_refresh_with_jwt_token(
     self,
-    mock_api_key_cache,
     mock_create_jwt,
     mock_revoke_jwt,
     mock_get_by_id,
@@ -738,10 +725,8 @@ class TestIntegrationScenarios:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   @patch("robosystems.routers.auth.session.revoke_jwt_token")
   @patch("robosystems.routers.auth.session.create_jwt_token")
-  @patch("robosystems.routers.auth.session.api_key_cache")
   async def test_cache_invalidation_order(
     self,
-    mock_api_key_cache,
     mock_create_jwt,
     mock_revoke_jwt,
     mock_get_by_id,
@@ -772,7 +757,6 @@ class TestIntegrationScenarios:
 
     # Verify both old and new cache operations
     mock_revoke_jwt.assert_called_once_with("old_jwt_token", reason="session_refresh")
-    mock_api_key_cache.invalidate_jwt_token.assert_called_once_with("old_jwt_token")
 
   async def test_empty_authorization_header(self):
     """Test with empty Authorization header."""

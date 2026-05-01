@@ -408,6 +408,45 @@ class TestGetUserForVerifiedJWT:
     assert user is None
     mock_cache.cache_jwt_user_data.assert_not_called()
 
+  @patch("robosystems.middleware.auth.dependencies.api_key_cache")
+  @patch("robosystems.middleware.auth.dependencies._db_get_user_by_id")
+  def test_cache_version_mismatch_falls_through_to_db(self, mock_db, mock_cache):
+    """When the user-id cache holds an entry with a different session_version
+    than the token claim, ``get_cached_jwt_user_data`` returns None (it
+    enforces version match internally). The dependency must fall through to
+    the DB and re-validate against the User row.
+
+    This covers the race window after ``_invalidate_auth_cache`` failed (or
+    has not yet completed) and an old token is still being presented: the
+    cache must NOT be a fast-path for a stale claim.
+    """
+    from robosystems.middleware.auth.dependencies import _get_user_for_verified_jwt
+
+    # Simulate a cache miss: get_cached_jwt_user_data is documented to return
+    # None when ``cached_version != requested_version``, regardless of
+    # whether an entry exists. The contract here is "cache hit only when
+    # versions match" — if the underlying cache stores version=2 but the
+    # token claim is version=1, this returns None.
+    mock_cache.get_cached_jwt_user_data.return_value = None
+
+    db_user = Mock(spec=User)
+    db_user.id = "user_race"
+    db_user.email = "race@example.com"
+    db_user.name = "Race User"
+    db_user.is_active = True
+    db_user.session_version = 2  # bumped, but cache may still have old entry
+    mock_db.return_value = db_user
+
+    # Old token claim: version=1. Should be rejected via DB comparison.
+    user = _get_user_for_verified_jwt("user_race", 1)
+
+    assert user is None
+    # Must have actually consulted both the cache and the DB.
+    mock_cache.get_cached_jwt_user_data.assert_called_once_with("user_race", 1)
+    mock_db.assert_called_once_with("user_race")
+    # Stale-version DB result must NOT repopulate the cache.
+    mock_cache.cache_jwt_user_data.assert_not_called()
+
 
 class TestGetOptionalUser:
   """Test optional user authentication dependency."""

@@ -15,7 +15,6 @@ from ...config import env
 from ...config.constants import JWT_EXPIRY_HOURS, TOKEN_GRACE_PERIOD_MINUTES
 from ...database import get_async_db_session
 from ...logger import logger
-from ...middleware.auth.cache import api_key_cache
 from ...middleware.auth.jwt import (
   create_jwt_token,
   revoke_jwt_token,
@@ -259,9 +258,6 @@ async def refresh_session(
       logger.warning(
         f"Failed to revoke old JWT token during session refresh for user {user_id}"
       )
-
-    # Also invalidate old token cache
-    api_key_cache.invalidate_jwt_token(jwt_token)
 
     # Create new JWT token with fresh expiry and device binding
     new_jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
