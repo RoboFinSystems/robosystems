@@ -81,7 +81,10 @@ LABEL_ROLE_FROM_PREDICATE: dict[URIRef, str] = {
 # Reverse of arcrole → association_type, but keyed by the RDF predicate
 ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
   # predicate_iri: (association_type, arcrole)
-  f"{RS_NS}parent": ("presentation", "http://www.xbrl.org/2003/arcrole/parent-child"),
+  f"{RS_NS}hasChild": (
+    "presentation",
+    "http://www.xbrl.org/2003/arcrole/parent-child",
+  ),
   f"{RS_NS}summationOf": (
     "calculation",
     "http://www.xbrl.org/2003/arcrole/summation-item",
@@ -236,9 +239,14 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
   if sg_vals and isinstance(sg_vals[0], URIRef):
     sub_group = _iri_to_qname(str(sg_vals[0]), CANONICAL_CONTEXT)
 
-  # Parent (optional)
+  # Parent (optional). Element-level tree-parent declarations.
+  # No active seeds use this today; kept for back-compat with seed
+  # packages that emit ``rs:childOf`` (RDF "subject is a child of X")
+  # or ``rs:parent`` on individual element definitions.
   parent_qname: str | None = None
-  parent_vals = list(graph.objects(subject, URIRef(f"{RS_NS}parent")))
+  parent_vals = list(graph.objects(subject, URIRef(f"{RS_NS}childOf"))) or list(
+    graph.objects(subject, URIRef(f"{RS_NS}parent"))
+  )
   if parent_vals and isinstance(parent_vals[0], URIRef):
     parent_qname = _iri_to_qname(str(parent_vals[0]), CANONICAL_CONTEXT)
 
@@ -370,6 +378,12 @@ def _extract_associations(graph: Graph) -> list[AssociationSpec]:
      ``link:presentationArc`` in XBRL linkbases.
   """
   associations: list[AssociationSpec] = []
+
+  # All flat arc predicates declare arcs in XBRL parent-child / general-
+  # special / summation-item direction (subject is the parent / general
+  # / summation, object is the child / special / operand). The loader
+  # extracts ``from=subject, to=object`` directly — same direction the
+  # renderer expects. No per-predicate swapping needed.
 
   # 1. Flat arc predicates
   for pred_iri, (assoc_type, arcrole) in ARC_PREDICATE_TO_ASSOC_TYPE.items():

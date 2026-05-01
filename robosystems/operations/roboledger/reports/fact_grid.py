@@ -87,6 +87,29 @@ class FactGrid:
 # ── Stage 1: Generate facts (structure-agnostic) ─────────────────────────
 
 
+def _arc_type_for_taxonomy(session: Session, taxonomy_id: str) -> str:
+  """Pick which CoA→target arc-type to walk for fact generation based on
+  the report's render-target taxonomy.
+
+  - rs-gaap-presentation / rs-gaap → ``equivalence`` (CoA → rs-gaap arcs
+    written by the auto-mapper's refinement pass; the rs-gaap concepts
+    have full presentation depth and proper rollup discipline).
+  - Everything else (fac-presentation, legacy us-gaap, custom) →
+    ``mapping`` (CoA → FAC arcs; FAC is the categorization layer).
+
+  Each CoA element has both arc-types written by the auto-mapper, so
+  reports can target either taxonomy without re-running mapping.
+  """
+  row = session.execute(
+    text("SELECT standard FROM taxonomies WHERE id = :tid LIMIT 1"),
+    {"tid": taxonomy_id},
+  ).fetchone()
+  standard = (row.standard if row else "") or ""
+  if standard.startswith("rs-gaap"):
+    return "equivalence"
+  return "mapping"
+
+
 def generate_report_facts(
   session: Session,
   taxonomy_id: str,
@@ -107,10 +130,13 @@ def generate_report_facts(
   Returns:
       ReportFacts with all generated facts and metadata.
   """
+  arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
 
   for period in periods:
-    balances = _read_mapped_balances(session, mapping_id, period.start, period.end)
+    balances = _read_mapped_balances(
+      session, mapping_id, period.start, period.end, arc_type=arc_type
+    )
     for balance in balances.values():
       facts.append(
         ReportFact(
@@ -138,10 +164,10 @@ def generate_report_facts(
     # returns only the still-unclosed portion. Adding that to whatever
     # RE balance the ledger already carries is always correct.
     _close_prior_periods_to_retained_earnings(
-      session, mapping_id, facts, period.start, period.end
+      session, mapping_id, facts, period.start, period.end, arc_type=arc_type
     )
 
-  unmapped_count = _count_unmapped(session, mapping_id)
+  unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
 
   return ReportFacts(
     facts=facts,
@@ -335,8 +361,13 @@ def _read_mapped_balances(
   mapping_id: str,
   period_start: date,
   period_end: date,
+  arc_type: str = "mapping",
 ) -> dict[str, _Balance]:
   """Read mapped trial balance — same join as the /trial-balance/mapped endpoint.
+
+  ``arc_type`` selects which CoA→target arc-type to follow:
+  ``'mapping'`` (CoA→FAC, default for fac-presentation reports) or
+  ``'equivalence'`` (CoA→rs-gaap, for rs-gaap-presentation reports).
 
   ``classification`` is resolved via ``element_traits`` →
   ``classifications`` with ``category='elementsOfFinancialStatements'``
@@ -349,6 +380,10 @@ def _read_mapped_balances(
   elements aren't wired to FASB traits), :func:`_infer_classification`
   fills in best-effort classification from qname + balance_type. Real
   trait data always wins; the fallback only fires for null rows.
+
+  Belt-and-suspenders ``element_type='concept'`` filter on the target
+  ensures facts never land on abstracts, hypercubes, axes, or members
+  even if a future bad mapping arc points there.
   """
   result = session.execute(
     text("""
@@ -365,7 +400,7 @@ def _read_mapped_balances(
       JOIN entries e ON e.id = li.entry_id
       JOIN associations mapping
         ON mapping.from_element_id = source_elem.id
-        AND mapping.association_type = 'mapping'
+        AND mapping.association_type = :arc_type
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
       LEFT JOIN element_traits tet
@@ -374,6 +409,8 @@ def _read_mapped_balances(
         ON tcls.id = tet.trait_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
+        AND target.element_type = 'concept'
+        AND target.is_abstract = false
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
         AND (
           tcls.identifier IN ('asset', 'liability', 'equity')
@@ -386,6 +423,7 @@ def _read_mapped_balances(
     """),
     {
       "mapping_id": mapping_id,
+      "arc_type": arc_type,
       "start_date": period_start,
       "end_date": period_end,
     },
@@ -412,8 +450,10 @@ def _read_mapped_balances(
   return balances
 
 
-def _count_unmapped(session: Session, mapping_id: str) -> int:
-  """Count CoA elements that have no mapping association."""
+def _count_unmapped(
+  session: Session, mapping_id: str, arc_type: str = "mapping"
+) -> int:
+  """Count CoA elements that have no association of the given arc-type."""
   from robosystems.models.extensions.roboledger import COA_SOURCES
 
   # Build a safe SQL IN clause from the constant
@@ -427,11 +467,11 @@ def _count_unmapped(session: Session, mapping_id: str) -> int:
         AND NOT EXISTS (
           SELECT 1 FROM associations ea
           WHERE ea.from_element_id = e.id
-            AND ea.association_type = 'mapping'
+            AND ea.association_type = :arc_type
             AND ea.structure_id = :mapping_id
         )
     """),
-    {"mapping_id": mapping_id},
+    {"mapping_id": mapping_id, "arc_type": arc_type},
   )
   row = result.fetchone()
   return row.cnt if row else 0
@@ -571,6 +611,7 @@ def _close_prior_periods_to_retained_earnings(
   facts: list[ReportFact],
   period_start: date,
   period_end: date,
+  arc_type: str = "mapping",
 ) -> None:
   """Close un-closed cumulative net income into retained earnings.
 
@@ -620,7 +661,7 @@ def _close_prior_periods_to_retained_earnings(
       JOIN entries e ON e.id = li.entry_id
       JOIN associations mapping
         ON mapping.from_element_id = source_elem.id
-        AND mapping.association_type = 'mapping'
+        AND mapping.association_type = :arc_type
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
       LEFT JOIN element_traits tet
@@ -629,11 +670,14 @@ def _close_prior_periods_to_retained_earnings(
         ON tcls.id = tet.trait_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
+        AND target.element_type = 'concept'
+        AND target.is_abstract = false
         AND e.posting_date <= :end_date
       GROUP BY tcls.identifier, target.qname, target.balance_type
     """),
     {
       "mapping_id": mapping_id,
+      "arc_type": arc_type,
       "end_date": period_end,
     },
   )

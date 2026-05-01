@@ -27,15 +27,23 @@ def _row(**kwargs):
   return m
 
 
-def _make_session(fac_qname: str, equiv_rows, child_rows=None):
+def _make_session(fac_qname: str, equiv_rows, child_rows=None, presentation_ids=None):
   """Build a session that returns ``fac_qname`` for the FAC lookup,
+  ``presentation_ids`` for the rs-gaap-presentation set query (defaults
+  to "no filter" — empty set means caller treats as unfiltered),
   ``equiv_rows`` for the fac-to-rs-gaap query, and ``child_rows`` for
   the type-subtype query."""
   child_rows = child_rows or []
+  presentation_ids = presentation_ids or []
   session = MagicMock()
 
   fac_lookup = MagicMock()
   fac_lookup.fetchone.return_value = _row(qname=fac_qname)
+
+  presentation_query = MagicMock()
+  presentation_query.fetchall.return_value = [
+    _row(element_id=eid) for eid in presentation_ids
+  ]
 
   equiv_query = MagicMock()
   equiv_query.fetchall.return_value = equiv_rows
@@ -43,7 +51,12 @@ def _make_session(fac_qname: str, equiv_rows, child_rows=None):
   child_query = MagicMock()
   child_query.fetchall.return_value = child_rows
 
-  session.execute.side_effect = [fac_lookup, equiv_query, child_query]
+  session.execute.side_effect = [
+    fac_lookup,
+    presentation_query,
+    equiv_query,
+    child_query,
+  ]
   return session
 
 
@@ -138,6 +151,43 @@ def test_filters_denylisted_type_subtype_children():
   assert "rs-gaap:AssetsCurrent" not in qnames
   assert "rs-gaap:AccountsReceivableNetCurrent" in qnames
   assert "rs-gaap:ReceivablesNetCurrent" in qnames
+
+
+def test_filters_out_of_presentation_concepts():
+  """When a presentation set is loaded, candidates not in it are dropped.
+  Auto-mapper restricts targets to renderable concepts."""
+  equiv_rows = [
+    _row(id="elem_in_pres", qname="rs-gaap:CashCashEquivalents", name="Cash"),
+    _row(id="elem_orphan", qname="rs-gaap:UtilitiesOperatingExpense", name="Util"),
+  ]
+  session = _make_session(
+    "fac:Assets",
+    equiv_rows,
+    presentation_ids=["elem_in_pres"],  # only one is in presentation
+  )
+
+  result = expand_to_rs_gaap_candidates(session, "fac_assets_id")
+
+  assert result is not None
+  qnames = {c["qname"] for c in result["candidates"]}
+  assert "rs-gaap:CashCashEquivalents" in qnames
+  assert "rs-gaap:UtilitiesOperatingExpense" not in qnames
+
+
+def test_empty_presentation_set_is_unfiltered():
+  """When presentation set is empty (taxonomy not seeded), the filter
+  is bypassed — partial deployments still function."""
+  equiv_rows = [
+    _row(id="elem_a", qname="rs-gaap:SomeConcept", name="Some"),
+    _row(id="elem_b", qname="rs-gaap:OtherConcept", name="Other"),
+  ]
+  session = _make_session("fac:Assets", equiv_rows, presentation_ids=[])
+
+  result = expand_to_rs_gaap_candidates(session, "fac_assets_id")
+
+  assert result is not None
+  qnames = {c["qname"] for c in result["candidates"]}
+  assert qnames == {"rs-gaap:SomeConcept", "rs-gaap:OtherConcept"}
 
 
 def test_denylist_locks_canonical_rollups():

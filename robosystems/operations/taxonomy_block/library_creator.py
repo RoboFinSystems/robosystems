@@ -338,6 +338,83 @@ def _bulk_resolve_element_ids(session: Session, qnames: set[str]) -> dict[str, s
   return {row[0]: row[1] for row in rows}
 
 
+def _bulk_resolve_element_period_types(
+  session: Session, qnames: set[str]
+) -> dict[str, str]:
+  """Resolve qname → period_type ('instant' | 'duration') for routing
+  arcs by the parent element's period type. Returns {} when ``qnames``
+  is empty.
+  """
+  if not qnames:
+    return {}
+  rows = session.execute(
+    select(Element.qname, Element.period_type).where(Element.qname.in_(qnames))
+  ).all()
+  return {row[0]: row[1] for row in rows if row[1] is not None}
+
+
+# rs-gaap qname prefixes that identify cash-flow-statement concepts.
+# Used to disambiguate duration concepts (IS vs CF) when a presentation
+# package declares both structure_types but no per-arc role.
+_CF_QNAME_PATTERNS: tuple[str, ...] = (
+  "CashAndCashEquivalents",
+  "NetCashProvided",
+  "NetCashUsed",
+  "PaymentsFor",
+  "PaymentsTo",
+  "PaymentsOf",
+  "ProceedsFrom",
+  "IncreaseDecreaseIn",
+  "RepaymentsOf",
+  "AdjustmentsToReconcile",
+)
+
+
+def _build_arc_router(
+  structure_type_to_id: dict[str, str],
+):
+  """Return a callable that routes a parent arc to a structure_id by
+  the parent element's period_type + qname when the source seed lacks
+  per-arc role qualifiers.
+
+  Routing rule (only applies when the package declares both BS and IS
+  structure types):
+
+  - ``period_type='instant'`` → balance_sheet
+  - ``period_type='duration'`` + qname matches a known CF prefix
+    → cash_flow_statement (when present)
+  - ``period_type='duration'`` (else) → income_statement
+
+  Returns ``None`` when the package's structure set doesn't fit the
+  BS/IS/CF shape — caller falls back to the default structure.
+
+  This is needed for ``rs-gaap-presentation``, whose seed file uses
+  flat ``rs:parent`` triples and declares 3 statement structures
+  without per-arc role qualifiers. Without this routing, all 1890
+  parent relationships land on the catchall "default structure" and
+  the BS/IS/CF structures stay empty.
+  """
+  if "balance_sheet" not in structure_type_to_id:
+    return None
+  if "income_statement" not in structure_type_to_id:
+    return None
+
+  bs_id = structure_type_to_id["balance_sheet"]
+  is_id = structure_type_to_id["income_statement"]
+  cf_id = structure_type_to_id.get("cash_flow_statement")
+
+  def _route(parent_qname: str, parent_period_type: str | None) -> str | None:
+    if parent_period_type == "instant":
+      return bs_id
+    if parent_period_type == "duration":
+      if cf_id and any(p in parent_qname for p in _CF_QNAME_PATTERNS):
+        return cf_id
+      return is_id
+    return None
+
+  return _route
+
+
 def _resolve_trait_id(session: Session, category: str, identifier: str) -> str | None:
   row = session.execute(
     select(Trait.id)
@@ -371,11 +448,27 @@ def create_library_arcs(
 
   default_struct_id = _structure_id(_default_role_uri(package))
 
+  # Build {structure_type → struct_id} so the per-arc router can land
+  # each association on the right declared structure when the seed
+  # lacks per-arc role qualifiers (see ``_build_arc_router``).
+  structure_type_to_id: dict[str, str] = {}
+  for spec in package.structures:
+    sid = _structure_id(spec.role_uri)
+    structure_type_to_id.setdefault(spec.structure_type, sid)
+  arc_router = _build_arc_router(structure_type_to_id)
+
   # Bulk-resolve all qnames needed by associations and trait assignments
   # in one query to avoid O(N) round trips for large packages.
   all_qnames = {q for a in package.associations for q in (a.from_qname, a.to_qname)}
   all_qnames |= {asn.element_qname for asn in package.trait_assignments}
   element_id_map = _bulk_resolve_element_ids(session, all_qnames)
+
+  # Bulk-resolve period_types only when a router is active — saves a
+  # second query for packages that don't need structural routing.
+  parent_period_types: dict[str, str] = {}
+  if arc_router is not None:
+    parent_qnames = {a.from_qname for a in package.associations if not a.role}
+    parent_period_types = _bulk_resolve_element_period_types(session, parent_qnames)
 
   unresolved: list[tuple[str, str, str]] = []
   for assoc in package.associations:
@@ -384,7 +477,13 @@ def create_library_arcs(
     if from_id is None or to_id is None:
       unresolved.append((assoc.from_qname, assoc.to_qname, assoc.association_type))
       continue
-    struct_id = _structure_id(assoc.role) if assoc.role else default_struct_id
+    if assoc.role:
+      struct_id = _structure_id(assoc.role)
+    elif arc_router is not None:
+      routed = arc_router(assoc.from_qname, parent_period_types.get(assoc.from_qname))
+      struct_id = routed if routed is not None else default_struct_id
+    else:
+      struct_id = default_struct_id
     assoc_id = _association_id(struct_id, from_id, to_id, assoc.association_type)
     session.execute(
       pg_insert(Association.__table__)

@@ -50,10 +50,6 @@
     "source": {
       "@id": "https://robosystems.ai/vocab/source"
     },
-    "parent": {
-      "@id": "https://robosystems.ai/vocab/parent",
-      "@type": "@id"
-    },
     "equivalent": {
       "@id": "owl:equivalentClass",
       "@type": "@id"

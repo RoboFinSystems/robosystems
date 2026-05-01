@@ -289,6 +289,34 @@ def list_unmapped_elements(
   ]
 
 
+def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
+  """Return the set of element_ids that appear in any
+  ``rs-gaap-presentation`` structure (as either parent or child).
+
+  Used by ``expand_to_rs_gaap_candidates`` to restrict auto-mapper
+  targets to concepts that will render on the standard BS/IS/CF
+  reports. Returns an empty set if the presentation taxonomy isn't
+  seeded — caller treats empty as "no filter" so partial deployments
+  still function.
+  """
+  rows = session.execute(
+    text("""
+      SELECT DISTINCT a.from_element_id AS element_id
+      FROM associations a
+      JOIN structures s ON s.id = a.structure_id
+      JOIN taxonomies t ON t.id = s.taxonomy_id
+      WHERE t.standard = 'rs-gaap-presentation'
+      UNION
+      SELECT DISTINCT a.to_element_id AS element_id
+      FROM associations a
+      JOIN structures s ON s.id = a.structure_id
+      JOIN taxonomies t ON t.id = s.taxonomy_id
+      WHERE t.standard = 'rs-gaap-presentation'
+    """),
+  ).fetchall()
+  return {r.element_id for r in rows}
+
+
 def expand_to_rs_gaap_candidates(
   session: Session,
   fac_element_id: str,
@@ -328,6 +356,14 @@ def expand_to_rs_gaap_candidates(
     RS_GAAP_SUBTOTAL_DENYLIST,
   )
 
+  # Pre-load the set of rs-gaap element_ids that appear in any
+  # rs-gaap-presentation structure. The auto-mapper restricts candidates
+  # to this set so any picked target is guaranteed to render on the
+  # standard BS/IS/CF reports. Manual mappings can still target the
+  # wider rs-gaap concept set; the renderer's ancestor-rollup will
+  # walk up to an in-presentation ancestor at render time.
+  presentation_set = _load_rs_gaap_presentation_set(session)
+
   equiv_rows = session.execute(
     text("""
       SELECT e.id, e.qname, e.name
@@ -346,13 +382,18 @@ def expand_to_rs_gaap_candidates(
   if not equiv_rows:
     return None
 
-  # Drop denylisted rollup concepts from the equivalent set BEFORE the
-  # narrow/wide branch decision. A CoA arc to a statement-level rollup
-  # like rs-gaap:Assets would land a leaf fact on a calculated total
-  # and double-count when the renderer sums children. The narrow-case
-  # parent fallback (max-children selection) and the wide-case
-  # candidate list both flow from this filtered set.
-  equiv_rows = [r for r in equiv_rows if r.qname not in RS_GAAP_SUBTOTAL_DENYLIST]
+  # Drop denylisted rollup concepts AND concepts not in the presentation
+  # set. A CoA arc to a statement-level rollup like rs-gaap:Assets would
+  # land a leaf fact on a calculated total and double-count; an arc to
+  # an out-of-presentation concept lands a fact that no structure walk
+  # will surface. Both filters fire BEFORE the narrow/wide branch
+  # decision so the candidate count reflects the filtered universe.
+  equiv_rows = [
+    r
+    for r in equiv_rows
+    if r.qname not in RS_GAAP_SUBTOTAL_DENYLIST
+    and (not presentation_set or r.id in presentation_set)
+  ]
 
   if not equiv_rows:
     return None
@@ -411,10 +452,15 @@ def expand_to_rs_gaap_candidates(
       candidate_ids.add(r.id)
       candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
   # Type-subtype children may themselves be rollups (e.g. some
-  # AssetsCurrent subtypes are themselves grouping concepts). Filter
-  # the same denylist so the AI never sees a rollup as a candidate.
+  # AssetsCurrent subtypes are themselves grouping concepts) or fall
+  # outside the presentation set. Filter both — the AI must only see
+  # candidates that will actually render.
   for r in child_rows:
-    if r.id in candidate_ids or r.qname in RS_GAAP_SUBTOTAL_DENYLIST:
+    if (
+      r.id in candidate_ids
+      or r.qname in RS_GAAP_SUBTOTAL_DENYLIST
+      or (presentation_set and r.id not in presentation_set)
+    ):
       continue
     candidate_ids.add(r.id)
     candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
