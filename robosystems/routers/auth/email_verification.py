@@ -21,6 +21,7 @@ from ...models.api.auth import AuthResponse, EmailVerificationRequest
 from ...models.api.common import COMMON_ERROR_RESPONSES, ErrorResponse
 from ...models.core import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
+from ...security.device_fingerprinting import extract_device_fingerprint
 from .utils import detect_app_source
 
 # Create router for email verification endpoints
@@ -57,20 +58,30 @@ async def get_current_user_for_email_verification(
     )
 
   jwt_token = authorization[7:]  # Remove "Bearer " prefix
-  user_id = verify_jwt_token(jwt_token)
 
-  if not user_id:
+  device_fingerprint = extract_device_fingerprint(request)
+  verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+
+  if not verify_result:
     raise HTTPException(
       status_code=status.HTTP_401_UNAUTHORIZED,
       detail="Invalid or expired token",
       headers={"WWW-Authenticate": "Bearer"},
     )
+  user_id, token_session_version = verify_result
 
   user = User.get_by_id(user_id, session)
   if not user or not user.is_active:
     raise HTTPException(
       status_code=status.HTTP_401_UNAUTHORIZED,
       detail="User not found or inactive",
+    )
+
+  if int(user.session_version or 0) != int(token_session_version):
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="Token session has been invalidated",
+      headers={"WWW-Authenticate": "Bearer"},
     )
 
   # Log successful authentication
@@ -232,8 +243,9 @@ async def verify_email(
     risk_level="low",
   )
 
-  # Generate JWT token for auto-login
-  jwt_token = create_jwt_token(user.id)
+  # Generate JWT token for auto-login with device binding
+  device_fingerprint = extract_device_fingerprint(fastapi_request)
+  jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
   logger.info(f"Email verified for user {user.email}")
 

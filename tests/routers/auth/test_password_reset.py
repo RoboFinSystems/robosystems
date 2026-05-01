@@ -203,7 +203,7 @@ class TestPasswordResetEndpoints:
     self, mock_hash_password, mock_get_user, mock_verify_token, client, test_db
   ):
     """Test successful password reset."""
-    mock_verify_token.return_value = "user_reset_123"
+    mock_verify_token.return_value = ("user_reset_123", 0)
 
     mock_user = Mock(spec=User)
     mock_user.id = "user_reset_123"
@@ -271,7 +271,7 @@ class TestPasswordResetEndpoints:
     self, mock_get_user, mock_verify_token, client, test_db
   ):
     """Test password reset when user no longer exists."""
-    mock_verify_token.return_value = "deleted_user"
+    mock_verify_token.return_value = ("deleted_user", 0)
     mock_get_user.return_value = None
 
     response = client.post(
@@ -396,7 +396,7 @@ class TestPasswordResetEndpoints:
     self, mock_get_user, mock_verify_token, mock_audit_logger, client, test_db
   ):
     """Test that successful password resets are logged."""
-    mock_verify_token.return_value = "user_complete"
+    mock_verify_token.return_value = ("user_complete", 0)
 
     mock_user = Mock(spec=User)
     mock_user.id = "user_complete"

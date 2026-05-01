@@ -23,6 +23,7 @@ def mock_user():
   user.email = "test@example.com"
   user.is_active = True
   user.email_verified = True
+  user.session_version = 0
   return user
 
 
@@ -35,6 +36,7 @@ def mock_inactive_user():
   user.email = "inactive@example.com"
   user.is_active = False
   user.email_verified = False
+  user.session_version = 0
   return user
 
 
@@ -48,7 +50,7 @@ class TestGetMe:
   ):
     """Test getting current user with cookie token."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_session = Mock()
 
@@ -94,7 +96,7 @@ class TestGetMe:
   ):
     """Test getting current user with Authorization header."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_session = Mock()
 
@@ -196,7 +198,7 @@ class TestGetMe:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_get_me_user_not_found(self, mock_get_by_id, mock_verify_jwt):
     """Test getting current user when user not found."""
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = None  # User not found
     mock_session = Mock()
 
@@ -222,7 +224,7 @@ class TestGetMe:
     self, mock_get_by_id, mock_verify_jwt, mock_inactive_user
   ):
     """Test getting current user when user is inactive."""
-    mock_verify_jwt.return_value = "user_456"
+    mock_verify_jwt.return_value = ("user_456", 0)
     mock_get_by_id.return_value = mock_inactive_user
     mock_session = Mock()
 
@@ -249,7 +251,7 @@ class TestGetMe:
     self, mock_logger, mock_get_by_id, mock_verify_jwt
   ):
     """Test getting current user with database error."""
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.side_effect = Exception("Database connection failed")
     mock_session = Mock()
 
@@ -292,7 +294,7 @@ class TestRefreshSession:
   ):
     """Test successful session refresh."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_revoke_jwt.return_value = True
     mock_create_jwt.return_value = "new_jwt_token"
@@ -382,7 +384,7 @@ class TestRefreshSession:
   @patch("robosystems.routers.auth.session.User.get_by_id")
   async def test_refresh_session_user_not_found(self, mock_get_by_id, mock_verify_jwt):
     """Test session refresh when user not found."""
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = None  # User not found
     Mock()
     mock_session = Mock()
@@ -409,7 +411,7 @@ class TestRefreshSession:
     self, mock_get_by_id, mock_verify_jwt, mock_inactive_user
   ):
     """Test session refresh with inactive user."""
-    mock_verify_jwt.return_value = "user_456"
+    mock_verify_jwt.return_value = ("user_456", 0)
     mock_get_by_id.return_value = mock_inactive_user
     Mock()
     mock_session = Mock()
@@ -448,7 +450,7 @@ class TestRefreshSession:
   ):
     """Test session refresh when token revocation fails."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_revoke_jwt.return_value = False  # Revocation failed
     mock_create_jwt.return_value = "new_jwt_token"
@@ -502,7 +504,7 @@ class TestRefreshSession:
   ):
     """Test session refresh logs success when token revocation succeeds."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_revoke_jwt.return_value = True  # Revocation succeeded
     mock_create_jwt.return_value = "new_jwt_token"
@@ -535,7 +537,7 @@ class TestRefreshSession:
     self, mock_logger, mock_get_by_id, mock_verify_jwt
   ):
     """Test session refresh with database error."""
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.side_effect = Exception("Database connection failed")
     Mock()
     mock_session = Mock()
@@ -575,7 +577,7 @@ class TestRefreshSession:
   ):
     """Test session refresh when creating new token fails."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_revoke_jwt.return_value = True
     mock_create_jwt.side_effect = Exception("Token creation failed")
@@ -618,7 +620,7 @@ class TestCookieSettings:
   ):
     """Test that cookies are set with proper security settings."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_revoke_jwt.return_value = True
     mock_create_jwt.return_value = "new_jwt_token"
@@ -657,7 +659,7 @@ class TestCookieSettings:
   ):
     """Test session refresh with JWT token returns new token."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_revoke_jwt.return_value = True
     mock_create_jwt.return_value = "new_jwt_token"
@@ -687,7 +689,7 @@ class TestIntegrationScenarios:
     self, mock_get_by_id, mock_verify_jwt, mock_user
   ):
     """Test /me endpoint with various Bearer token formats."""
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_session = Mock()
 
@@ -748,7 +750,7 @@ class TestIntegrationScenarios:
   ):
     """Test that cache invalidation happens in correct order."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_revoke_jwt.return_value = True
     mock_create_jwt.return_value = "new_jwt_token"

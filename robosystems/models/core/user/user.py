@@ -4,11 +4,12 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
 from robosystems.database import Model
+from robosystems.logger import logger
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
@@ -23,6 +24,9 @@ class User(Model):
   password_hash = Column(String, nullable=False)
   is_active = Column(Boolean, default=True, nullable=False)
   email_verified = Column(Boolean, default=False, nullable=False)
+  # Bumped on password reset / logout-everywhere; embedded in JWT payload and
+  # checked on every auth so prior tokens (incl. refresh chain) stop working.
+  session_version = Column(Integer, default=0, nullable=False, server_default="0")
   created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
@@ -130,10 +134,12 @@ class User(Model):
   def deactivate(self, session: Session) -> None:
     """Deactivate the user."""
     self.is_active = False
+    self.session_version = (self.session_version or 0) + 1
     self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)
+      self._invalidate_auth_cache()
     except SQLAlchemyError:
       session.rollback()
       raise
@@ -145,6 +151,56 @@ class User(Model):
     try:
       session.commit()
       session.refresh(self)
+      self._invalidate_auth_cache()
     except SQLAlchemyError:
       session.rollback()
       raise
+
+  def invalidate_sessions(self, session: Session) -> None:
+    """Bump session_version, invalidating all existing JWTs for this user."""
+    self.session_version = (self.session_version or 0) + 1
+    self.updated_at = datetime.now(UTC)
+    try:
+      session.commit()
+      session.refresh(self)
+      self._invalidate_auth_cache()
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+  def _invalidate_auth_cache(self) -> None:
+    """Best-effort invalidation/refresh of auth caches derived from this user.
+
+    Tradeoff: if the Redis write/DEL fails (network blip, eviction, etc.) the
+    pre-bump cache entry persists with the prior session_version. A token
+    still holding that prior version would continue to satisfy the cache
+    lookup until the entry expires on its TTL (~30 min). The DB
+    session_version is the source of truth, but the cache hit path doesn't
+    re-read the DB. Bounded staleness is acceptable for password-reset
+    semantics; for stronger guarantees, harden with retries or move the
+    version-of-record into a separate Redis key without TTL.
+    """
+    try:
+      import importlib
+
+      cache_module = importlib.import_module("robosystems.middleware.auth.cache")
+      api_key_cache = cache_module.api_key_cache
+      user_id = str(self.id)
+      if self.is_active:
+        session_version = int(self.session_version or 0)
+        api_key_cache.cache_jwt_user_data(
+          user_id,
+          {
+            "id": user_id,
+            "email": self.email,
+            "name": self.name,
+            "is_active": True,
+            "session_version": session_version,
+          },
+          session_version,
+        )
+      else:
+        api_key_cache.invalidate_jwt_user_data(user_id)
+      api_key_cache.invalidate_user_jwt_graph_access(str(self.id))
+    except Exception as e:
+      logger.error(f"Failed to invalidate auth cache for user {self.id}: {e}")

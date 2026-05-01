@@ -515,14 +515,18 @@ class TestUserAPIKeyModel:
       user_id="user_test",
       name="Test Key",
       key_hash="test_hash",
+      key_fingerprint="test_fingerprint_sha256",
       prefix="rfs12345",
     )
 
     # Call invalidate cache
     api_key._invalidate_cache()
 
-    # Verify cache invalidation was called
-    mock_api_key_cache.invalidate_api_key.assert_called_once_with("test_hash")
+    # Verify cache invalidation was called with the fingerprint (matches the
+    # cache key used by validate_api_key), not the bcrypt key_hash.
+    mock_api_key_cache.invalidate_api_key.assert_called_once_with(
+      "test_fingerprint_sha256"
+    )
 
     # Verify security audit logging
     mock_audit_logger.log_security_event.assert_called_once()

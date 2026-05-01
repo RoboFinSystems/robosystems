@@ -40,6 +40,7 @@ from ...models.api.auth import (
 from ...models.api.common import COMMON_ERROR_RESPONSES
 from ...models.core import User
 from ...security import SecurityAuditLogger, SecurityEventType
+from ...security.device_fingerprinting import extract_device_fingerprint
 from .utils import (
   AVAILABLE_APPS,
   SSO_SESSION_EXPIRY_SECONDS,
@@ -81,14 +82,16 @@ async def generate_sso_token(
         headers={"WWW-Authenticate": "Bearer"},
       )
 
-    # Verify current JWT token
-    user_id = verify_jwt_token(jwt_token)
-    if not user_id:
+    # Verify current JWT token (with device fingerprint binding)
+    device_fingerprint = extract_device_fingerprint(request)
+    verify_result = verify_jwt_token(jwt_token, device_fingerprint)
+    if not verify_result:
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
       )
+    user_id, token_session_version = verify_result
 
     # Get user
     user = User.get_by_id(user_id, session)
@@ -97,8 +100,15 @@ async def generate_sso_token(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive"
       )
 
+    if int(user.session_version or 0) != int(token_session_version):
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token session has been invalidated",
+        headers={"WWW-Authenticate": "Bearer"},
+      )
+
     # Create temporary SSO token
-    sso_token, token_id = create_sso_token(user.id)
+    sso_token, token_id = create_sso_token(user.id, session=session)
     expires_at = datetime.now(UTC) + timedelta(seconds=SSO_TOKEN_EXPIRY_SECONDS)
 
     # Store token ID in Valkey for single-use tracking with distributed locking
@@ -338,6 +348,24 @@ async def sso_token_exchange(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive"
       )
 
+    try:
+      token_session_version = int(payload.get("session_version", 0))
+    except (TypeError, ValueError):
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid SSO token"
+      )
+
+    try:
+      current_session_version = int(getattr(user, "session_version", 0) or 0)
+    except (TypeError, ValueError):
+      current_session_version = 0
+
+    if token_session_version != current_session_version:
+      raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="SSO token session has been invalidated",
+      )
+
     # Create temporary session ID for secure handoff
     session_id = str(uuid.uuid4())
     expires_at = datetime.now(UTC) + timedelta(
@@ -563,8 +591,9 @@ async def sso_complete(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive"
       )
 
-    # Create new JWT token for this session
-    jwt_token = create_jwt_token(user.id)
+    # Create new JWT token for this session with device binding
+    device_fingerprint = extract_device_fingerprint(request)
+    jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
     # No longer setting auth cookies - using Bearer token authentication
     # Token is returned in the response body for the frontend to store

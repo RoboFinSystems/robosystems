@@ -74,10 +74,18 @@ class TestUserModel:
 
   def test_get_by_id(self, db_session):
     """Test getting user by ID."""
-    # Create a test user
+    # Use unique identifiers because db_session shares a session-scoped
+    # Postgres with the rest of the suite (notably test_auth.py registers
+    # users with the literal address ``test@example.com``).
+    import uuid
+
+    unique_id = str(uuid.uuid4())[:8]
+    user_id = f"user_test_{unique_id}"
+    email = f"test_{unique_id}@example.com"
+
     user = User(
-      id="user_test123",
-      email="test@example.com",
+      id=user_id,
+      email=email,
       name="Test User",
       password_hash="hashed_password",
     )
@@ -85,10 +93,10 @@ class TestUserModel:
     db_session.commit()
 
     # Test get_by_id
-    found_user = User.get_by_id("user_test123", db_session)
+    found_user = User.get_by_id(user_id, db_session)
     assert found_user is not None
-    assert found_user.id == "user_test123"
-    assert found_user.email == "test@example.com"
+    assert found_user.id == user_id
+    assert found_user.email == email
 
     # Test with non-existent ID
     not_found = User.get_by_id("user_nonexistent", db_session)
@@ -148,9 +156,19 @@ class TestUserModel:
 
   def test_create_user_duplicate_email(self, db_session):
     """Test that creating user with duplicate email fails."""
+    # Use a unique email — db_session is session-scoped and shared with
+    # tests/routers/auth/test_auth.py::test_register_duplicate_email,
+    # which already inserts ``duplicate@example.com``. The conftest
+    # cleanup fixture has known holes (e.g. it doesn't delete OrgLimits,
+    # which blocks Org deletion via FK and rolls back the User delete),
+    # so we can't rely on the email being absent.
+    import uuid
+
+    unique_email = f"duplicate_{uuid.uuid4().hex[:8]}@example.com"
+
     # Create first user
     User.create(
-      email="duplicate@example.com",
+      email=unique_email,
       name="First User",
       password_hash="hashed_password",
       session=db_session,
@@ -159,7 +177,7 @@ class TestUserModel:
     # Try to create second user with same email
     with pytest.raises(SQLAlchemyError):
       User.create(
-        email="duplicate@example.com",
+        email=unique_email,
         name="Second User",
         password_hash="hashed_password",
         session=db_session,

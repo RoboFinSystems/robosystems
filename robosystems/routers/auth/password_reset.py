@@ -23,7 +23,7 @@ from ...config.constants import (
 )
 from ...database import get_async_db_session
 from ...logger import logger
-from ...middleware.auth.jwt import create_jwt_token, revoke_jwt_token
+from ...middleware.auth.jwt import create_jwt_token
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import (
   AuthResponse,
@@ -34,6 +34,7 @@ from ...models.api.auth import (
 from ...models.api.common import COMMON_ERROR_RESPONSES
 from ...models.core import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
+from ...security.device_fingerprinting import extract_device_fingerprint
 from ...security.input_validation import (
   sanitize_string,
   validate_email,
@@ -232,16 +233,15 @@ async def reset_password(
   # Update user's password
   user.update(session, password_hash=password_hash)
 
-  # Revoke all existing JWT tokens for this user
+  # Invalidate every existing JWT (including refresh chain) by bumping the
+  # user's session_version. The claim is checked on every auth, so prior
+  # tokens stop working on their next request. The previous implementation
+  # iterated UserToken records (email/reset tokens) and called revoke on
+  # them, which never matched any actual JWT.
   try:
-    # Get all active tokens for this user
-    # This implementation assumes you have a method to fetch active user tokens
-    active_tokens = UserToken.get_active_tokens_for_user(user.id, session)
-
-    for token in active_tokens:
-      revoke_jwt_token(token.token, reason="password_reset")
-  except Exception as revoke_err:
-    logger.error(f"Error revoking tokens during password reset: {revoke_err}")
+    user.invalidate_sessions(session)
+  except Exception as invalidate_err:
+    logger.error(f"Error invalidating sessions during password reset: {invalidate_err}")
     # Log the error but continue with the password reset
 
   # Get client details for security logging
@@ -259,8 +259,10 @@ async def reset_password(
     risk_level="high",
   )
 
-  # Generate new JWT token for auto-login
-  jwt_token = create_jwt_token(user.id)
+  # Generate new JWT token for auto-login with device binding.
+  # This picks up the just-bumped session_version.
+  device_fingerprint = extract_device_fingerprint(fastapi_request)
+  jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
   logger.info(f"Password reset completed for user {user.email}")
 

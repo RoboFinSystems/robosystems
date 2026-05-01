@@ -173,7 +173,7 @@ async def login(
   device_fingerprint = extract_device_fingerprint(fastapi_request)
 
   # Create JWT token with device binding
-  jwt_token = create_jwt_token(str(user.id), device_fingerprint)
+  jwt_token = create_jwt_token(str(user.id), device_fingerprint, session=session)
 
   # No longer setting auth cookies - using Bearer token authentication instead
   # This enables proper cross-domain authentication for all three domains

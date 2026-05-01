@@ -20,6 +20,7 @@ def mock_user():
   user.name = "Test User"
   user.email = "test@example.com"
   user.is_active = True
+  user.session_version = 0
   return user
 
 
@@ -42,7 +43,7 @@ class TestGenerateSSOToken:
   ):
     """Test SSO token generation with Bearer token authentication."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_create_sso.return_value = ("sso_token_value", "token_id_123")
 
@@ -75,9 +76,10 @@ class TestGenerateSSOToken:
     assert result.apps == ["roboledger", "roboinvestor", "robosystems"]
 
     # Verify mocks were called correctly
-    mock_verify_jwt.assert_called_once_with("valid_jwt_token")
+    assert mock_verify_jwt.call_count == 1
+    assert mock_verify_jwt.call_args.args[0] == "valid_jwt_token"
     mock_get_by_id.assert_called_once_with("user_123", mock_session)
-    mock_create_sso.assert_called_once_with("user_123")
+    mock_create_sso.assert_called_once_with("user_123", session=mock_session)
 
   @patch("robosystems.routers.auth.sso.verify_jwt_token")
   @patch("robosystems.routers.auth.sso.User.get_by_id")
@@ -95,7 +97,7 @@ class TestGenerateSSOToken:
   ):
     """Test SSO token generation with cookie fallback (backward compatibility)."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_create_sso.return_value = ("sso_token_value", "token_id_123")
 
@@ -126,7 +128,8 @@ class TestGenerateSSOToken:
     assert result.token == "sso_token_value"
 
     # Verify cookie token was used
-    mock_verify_jwt.assert_called_once_with("cookie_jwt_token")
+    assert mock_verify_jwt.call_count == 1
+    assert mock_verify_jwt.call_args.args[0] == "cookie_jwt_token"
 
   async def test_generate_sso_token_no_auth(self):
     """Test SSO token generation with no authentication."""
@@ -194,7 +197,7 @@ class TestGenerateSSOToken:
     self, mock_get_by_id, mock_verify_jwt
   ):
     """Test SSO token generation when user not found."""
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = None  # User not found
     mock_session = Mock()
 
@@ -219,12 +222,13 @@ class TestGenerateSSOToken:
     self, mock_get_by_id, mock_verify_jwt
   ):
     """Test SSO token generation with inactive user."""
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
 
     # Create inactive user
     inactive_user = Mock(spec=User)
     inactive_user.id = "user_123"
     inactive_user.is_active = False
+    inactive_user.session_version = 0
     mock_get_by_id.return_value = inactive_user
 
     mock_session = Mock()
@@ -260,7 +264,7 @@ class TestGenerateSSOToken:
   ):
     """Test that Bearer token takes precedence over cookie when both provided."""
     # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
+    mock_verify_jwt.return_value = ("user_123", 0)
     mock_get_by_id.return_value = mock_user
     mock_create_sso.return_value = ("sso_token_value", "token_id_123")
 
@@ -288,5 +292,6 @@ class TestGenerateSSOToken:
     )
 
     # Verify Bearer token was used, not cookie
-    mock_verify_jwt.assert_called_once_with("bearer_jwt_token")
+    assert mock_verify_jwt.call_count == 1
+    assert mock_verify_jwt.call_args.args[0] == "bearer_jwt_token"
     assert result.token == "sso_token_value"

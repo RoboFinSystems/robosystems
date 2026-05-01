@@ -3,6 +3,8 @@
 from datetime import UTC
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.middleware.auth.jwt import (
   create_jwt_token,
   is_jwt_token_revoked,
@@ -13,6 +15,19 @@ from robosystems.middleware.auth.jwt import (
 
 class TestJWTRevocation:
   """Test JWT token revocation system."""
+
+  @pytest.fixture(autouse=True)
+  def _stub_session_version(self):
+    """These tests use synthetic user IDs that don't exist in the DB.
+
+    verify_jwt_token now checks session_version against the User row, which
+    would always fail for synthetic users. Stub the lookup to return 0 so
+    the tokens (which embed session_version=0) verify successfully.
+    """
+    with patch(
+      "robosystems.middleware.auth.jwt._get_user_session_version", return_value=0
+    ):
+      yield
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
   def test_jwt_token_has_jti_claim(self, mock_redis):
@@ -50,9 +65,9 @@ class TestJWTRevocation:
 
     # Create and verify token (no device fingerprint needed for this test)
     token = create_jwt_token("test-user-123")
-    user_id = verify_jwt_token(token)
+    result = verify_jwt_token(token)
 
-    assert user_id == "test-user-123"
+    assert result == ("test-user-123", 0)
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
   def test_token_revocation_flow(self, mock_redis):
@@ -219,7 +234,7 @@ class TestJWTRevocation:
 
     # Token verification should succeed
     user_id = verify_jwt_token(token)
-    assert user_id == "test-user-123"
+    assert user_id == ("test-user-123", 0)
 
   @patch("robosystems.middleware.auth.jwt.get_redis_client")
   def test_session_refresh_grace_period_expired(self, mock_redis):

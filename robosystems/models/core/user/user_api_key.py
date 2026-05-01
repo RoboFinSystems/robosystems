@@ -1,5 +1,6 @@
 """User API Key model for programmatic access."""
 
+import hashlib
 import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -27,6 +28,11 @@ class UserAPIKey(Model):
   key_hash = Column(
     String, nullable=False, unique=True, index=True
   )  # bcrypt hashed API key
+  # Deterministic SHA-256 of the plaintext key. Used as the cache key for
+  # validate_api_key so that deactivate/delete can invalidate the same entry.
+  # Nullable for rows created before this column existed; backfilled on the
+  # next successful validation since plaintext is available there.
+  key_fingerprint = Column(String(64), nullable=True, unique=True, index=True)
   prefix = Column(
     String, nullable=False, index=True
   )  # First few chars for identification
@@ -77,6 +83,9 @@ class UserAPIKey(Model):
     # Hash the key using bcrypt with high work factor
     key_hash = cls._hash_api_key(plain_key)
 
+    # Deterministic fingerprint for cache lookup/invalidation
+    key_fingerprint = cls._fingerprint_api_key(plain_key)
+
     # Store prefix for identification (first 8 chars)
     prefix = plain_key[:8]
 
@@ -86,6 +95,7 @@ class UserAPIKey(Model):
       description=description,
       expires_at=expires_at,
       key_hash=key_hash,
+      key_fingerprint=key_fingerprint,
       prefix=prefix,
     )
 
@@ -146,6 +156,11 @@ class UserAPIKey(Model):
     for api_key in potential_keys:
       try:
         if cls._verify_api_key(plain_key, str(api_key.key_hash)):
+          # Backfill key_fingerprint for rows created before the column existed.
+          # Plaintext is only available here, so this is the right place.
+          if not api_key.key_fingerprint:
+            api_key.key_fingerprint = cls._fingerprint_api_key(plain_key)
+
           # Check if API key is expired
           if api_key.expires_at and datetime.now(UTC) > api_key.expires_at:
             logger.warning(f"API key {api_key.id} is expired")
@@ -279,6 +294,15 @@ class UserAPIKey(Model):
       raise
 
   @staticmethod
+  def _fingerprint_api_key(plain_key: str) -> str:
+    """Deterministic SHA-256 fingerprint of a plaintext API key.
+
+    Used as the cache key in `validate_api_key`. Stored on the row so
+    `_invalidate_cache` can clear the same entry without needing the plaintext.
+    """
+    return hashlib.sha256(plain_key.encode("utf-8")).hexdigest()
+
+  @staticmethod
   def _hash_api_key(plain_key: str) -> str:
     """
     Hash an API key using bcrypt with high work factor.
@@ -319,7 +343,13 @@ class UserAPIKey(Model):
       return False
 
   def _invalidate_cache(self) -> None:
-    """Invalidate cached data for this API key."""
+    """Invalidate cached data for this API key.
+
+    Uses ``key_fingerprint`` (sha256 of plaintext) which matches the cache key
+    used by ``validate_api_key``. Pre-migration rows may have a NULL
+    fingerprint until they get backfilled on next validation; for those we
+    can't invalidate by fingerprint and the cache will expire on its TTL.
+    """
     try:
       # Dynamically import only when needed to avoid circular dependency
       import importlib
@@ -327,7 +357,15 @@ class UserAPIKey(Model):
       cache_module = importlib.import_module("robosystems.middleware.auth.cache")
       api_key_cache = cache_module.api_key_cache
 
-      api_key_cache.invalidate_api_key(self.key_hash)
+      fingerprint = self.key_fingerprint
+      if not fingerprint:
+        logger.warning(
+          f"API key {self.id} has no key_fingerprint; cache cannot be "
+          f"invalidated until the key is validated once after deploy."
+        )
+        return
+
+      api_key_cache.invalidate_api_key(fingerprint)
 
       # Log cache invalidation
       SecurityAuditLogger.log_security_event(

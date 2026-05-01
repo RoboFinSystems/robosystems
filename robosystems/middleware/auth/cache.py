@@ -280,6 +280,7 @@ class APIKeyCache:
       # Get all cache keys
       cache_patterns = [
         f"{self.CACHE_KEY_PREFIX}*",
+        f"{self.USER_DATA_PREFIX}*",
         f"{self.JWT_CACHE_KEY_PREFIX}*",
         f"{self.GRAPH_CACHE_KEY_PREFIX}*",
         f"{self.JWT_GRAPH_CACHE_KEY_PREFIX}*",
@@ -769,6 +770,126 @@ class APIKeyCache:
       logger.error(f"Failed to get cached graph access: {e}")
       return None
 
+  def cache_jwt_user_data(
+    self, user_id: str, user_data: dict[str, Any], session_version: int
+  ) -> None:
+    """Cache JWT-authenticated user data by user ID and session version.
+
+    This cache is keyed by user, not token. A cached entry is only reusable
+    when the JWT's session_version claim matches the cached session_version.
+    """
+    try:
+      if not self._validate_user_data_integrity(user_data):
+        logger.error("Refusing to cache invalid JWT user data")
+        return
+
+      if str(user_data.get("id")) != str(user_id):
+        logger.error("Refusing to cache JWT user data for mismatched user_id")
+        return
+
+      cache_key = self._get_user_cache_key(user_id)
+      cache_data = {
+        "user_data": user_data,
+        "session_version": int(session_version),
+        "cached_at": datetime.now(UTC).isoformat(),
+        "cache_version": self.CACHE_VERSION,
+      }
+      signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
+      signature = self._create_cache_signature(cache_key, cache_data)
+      encrypted_data = self._encrypt_cache_data(cache_data)
+
+      pipe = self.redis.pipeline()
+      pipe.setex(cache_key, self.jwt_ttl, encrypted_data)
+      pipe.setex(signature_key, self.jwt_ttl, signature)
+      pipe.execute()
+
+      logger.debug(f"Cached JWT user data: {user_id}")
+
+    except Exception as e:
+      logger.error(f"Failed to cache JWT user data for {user_id}: {e}")
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+        details={"action": "jwt_user_cache_write_failed", "error": str(e)},
+        risk_level="medium",
+      )
+
+  def get_cached_jwt_user_data(
+    self, user_id: str, session_version: int
+  ) -> dict[str, Any] | None:
+    """Get cached JWT user data when session_version matches the token."""
+    try:
+      cache_key = self._get_user_cache_key(user_id)
+      signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
+
+      pipe = self.redis.pipeline()
+      pipe.get(cache_key)
+      pipe.get(signature_key)
+      encrypted_data, stored_signature = pipe.execute()
+
+      if not encrypted_data or not stored_signature:
+        logger.debug(f"JWT user cache miss: {user_id}")
+        return None
+
+      cache_data = self._decrypt_cache_data(encrypted_data)
+      if not cache_data:
+        logger.warning(f"Failed to decrypt cached JWT user data: {user_id}")
+        self.redis.delete(cache_key, signature_key)
+        return None
+
+      if not self._verify_cache_signature(cache_key, cache_data, stored_signature):
+        logger.error(f"JWT user cache signature verification failed: {user_id}")
+        self.redis.delete(cache_key, signature_key)
+        return None
+
+      cached_version = int(cache_data.get("session_version", -1))
+      if cached_version != int(session_version):
+        logger.debug(
+          f"JWT user cache session_version mismatch for {user_id}: "
+          f"cache={cached_version}, token={session_version}"
+        )
+        return None
+
+      user_data = cache_data.get("user_data", {})
+      if str(user_data.get("id")) != str(user_id):
+        logger.error(f"JWT user cache user_id mismatch: {user_id}")
+        self.redis.delete(cache_key, signature_key)
+        return None
+
+      if not self._validate_user_data_integrity(user_data):
+        logger.error(f"Cached JWT user data failed integrity check: {user_id}")
+        self.redis.delete(cache_key, signature_key)
+        return None
+
+      cached_at = datetime.fromisoformat(cache_data["cached_at"].replace("Z", "+00:00"))
+      age_seconds = (datetime.now(UTC) - cached_at).total_seconds()
+      if age_seconds > self.MAX_CACHE_AGE_SECONDS:
+        logger.debug(f"JWT user cache entry too old: {age_seconds}s")
+        self.redis.delete(cache_key, signature_key)
+        return None
+
+      logger.debug(f"JWT user cache hit: {user_id}")
+      return cache_data
+
+    except Exception as e:
+      logger.error(f"Failed to get cached JWT user data for {user_id}: {e}")
+      try:
+        cache_key = self._get_user_cache_key(user_id)
+        signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
+        self.redis.delete(cache_key, signature_key)
+      except Exception:
+        pass
+      return None
+
+  def invalidate_jwt_user_data(self, user_id: str) -> None:
+    """Invalidate JWT user-data cache for a user."""
+    try:
+      cache_key = self._get_user_cache_key(user_id)
+      signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
+      self.redis.delete(cache_key, signature_key)
+      logger.info(f"Invalidated JWT user data cache for user {user_id}")
+    except Exception as e:
+      logger.error(f"Failed to invalidate JWT user data cache for {user_id}: {e}")
+
   def invalidate_api_key(self, api_key_hash: str) -> None:
     """
     Securely invalidate all cached data for an API key.
@@ -1201,6 +1322,12 @@ class APIKeyCache:
     """
     try:
       invalidated_count = 0
+
+      # Invalidate the user-id keyed JWT user data cache.
+      user_cache_key = self._get_user_cache_key(user_id)
+      user_signature_key = f"{self.CACHE_SIGNATURE_PREFIX}user:{user_id}"
+      self.redis.delete(user_cache_key, user_signature_key)
+      invalidated_count += 1
 
       # Invalidate all API key caches (contains user_data that might be stale)
       # We need to scan all API key cache entries to find ones containing this user

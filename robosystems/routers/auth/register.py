@@ -325,7 +325,7 @@ async def register(
   device_fingerprint = extract_device_fingerprint(fastapi_request)
 
   # Create JWT token with device binding
-  jwt_token = create_jwt_token(user.id, device_fingerprint)
+  jwt_token = create_jwt_token(user.id, device_fingerprint, session=session)
 
   # No longer setting auth cookies - using Bearer token authentication
   # Token is returned in the response body for the frontend to store
