@@ -407,19 +407,26 @@ def get_statement(
     )
 
   # Classification (FASB elementsOfFinancialStatements trait) is resolved via
-  # the element_traits junction table.
+  # the element_traits junction table. The trait join is wrapped in a
+  # subquery to prevent fact-row duplication when an element has
+  # multiple ``is_primary=TRUE`` traits across different categories
+  # (e.g. an asset element marked primary in both EFS and liquidity
+  # axes). Without the subquery, a single fact would emit one row per
+  # primary trait and double-count downstream.
   fact_rows = session.execute(
     text("""
       SELECT rf.element_id, rf.value, rf.period_start, rf.period_end,
              rf.period_type, e.qname, e.name,
-             t.identifier AS trait, e.balance_type
+             trait_info.identifier AS trait, e.balance_type
       FROM facts rf
       JOIN elements e ON e.id = rf.element_id
-      LEFT JOIN element_traits et
-        ON et.element_id = e.id AND et.is_primary = TRUE
-      LEFT JOIN traits t
-        ON t.id = et.trait_id
-        AND t.category = 'elementsOfFinancialStatements'
+      LEFT JOIN (
+        SELECT et.element_id, t.identifier
+        FROM element_traits et
+        JOIN traits t ON t.id = et.trait_id
+        WHERE et.is_primary = TRUE
+          AND t.category = 'elementsOfFinancialStatements'
+      ) trait_info ON trait_info.element_id = e.id
       WHERE rf.report_id = :report_id
     """),
     {"report_id": report_id},
