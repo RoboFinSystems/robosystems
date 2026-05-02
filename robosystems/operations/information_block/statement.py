@@ -396,9 +396,36 @@ def _build_hierarchy_from_atoms(
   if not root_ids:
     from_ids = set(children_by_parent.keys())
     to_ids = {c for children in children_by_parent.values() for _, c in children}
-    root_ids = sorted(from_ids - to_ids)
+    root_ids = list(from_ids - to_ids)
 
-  def _make_node(element_id: str, depth: int) -> _HierarchyNode:
+  # Sort roots by qname so the visible order is deterministic and
+  # alphabetic — this puts ``rs-gaap:Assets`` before
+  # ``rs-gaap:LiabilitiesAndStockholdersEquity`` on the BS, matching
+  # standard financial-statement convention. Element IDs are random
+  # UUIDs and would otherwise sort by hash.
+  root_ids.sort(
+    key=lambda rid: (
+      elements_by_id[rid].qname
+      if rid in elements_by_id and elements_by_id[rid].qname
+      else rid
+    )
+  )
+
+  # Render each element at most once globally per structure walk. The
+  # rs-gaap-presentation hierarchy is a DAG (a concept may have
+  # multiple parents — e.g. "Cash" rolls up under both Current Assets
+  # and the Cash Flow reconciliation). Without global dedup the walk
+  # would expand a shared subtree under each parent, producing
+  # exponential row counts and double-counting facts at render time.
+  # The first parent that reaches a node owns it; subsequent parents
+  # treat the node as already-rendered. Mirrors the same fix in
+  # ``fact_grid._build_tree``.
+  emitted: set[str] = set()
+
+  def _make_node(element_id: str, depth: int) -> _HierarchyNode | None:
+    if element_id in emitted:
+      return None
+    emitted.add(element_id)
     elem = elements_by_id.get(element_id)
     node = _HierarchyNode(
       element_id=element_id,
@@ -413,10 +440,17 @@ def _build_hierarchy_from_atoms(
       # Skip self-references (defensive — root anchors live above).
       if child_id == element_id:
         continue
-      node.children.append(_make_node(child_id, depth + 1))
+      child_node = _make_node(child_id, depth + 1)
+      if child_node is not None:
+        node.children.append(child_node)
     return node
 
-  return [_make_node(rid, 0) for rid in root_ids]
+  roots: list[_HierarchyNode] = []
+  for rid in root_ids:
+    root_node = _make_node(rid, 0)
+    if root_node is not None:
+      roots.append(root_node)
+  return roots
 
 
 def _calculations_from_associations(

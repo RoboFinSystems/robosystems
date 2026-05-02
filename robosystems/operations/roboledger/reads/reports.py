@@ -120,6 +120,7 @@ def generate_adhoc_private_statement(
     facts=facts.facts,
     structure_type=statement_type,
     periods=periods,
+    taxonomy_id=taxonomy_id,
   )
 
   return grid, facts.unmapped_count
@@ -453,6 +454,7 @@ def get_statement(
     facts=facts,
     structure_type=structure_type,
     periods=periods,
+    taxonomy_id=report_def.taxonomy_id,
   )
 
   if not grid.structure_id:

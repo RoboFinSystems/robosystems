@@ -282,54 +282,69 @@ class MappingAgent(Agent):
     for coa_elem, fac_id in confirmed_fac:
       by_fac[fac_id].append(coa_elem)
 
+    # Pre-fetch FAC qnames so the fallback path can route each CoA to
+    # its per-FAC Other bucket even when ``expand_to_rs_gaap_candidates``
+    # returns an error (e.g. the FAC concept's wide equivalence set was
+    # entirely filtered out by the presentation-set + denylist filters).
+    # Without this, every CoA in such a group silently misses its
+    # rs-gaap mapping.
+    fac_qnames = await self._fetch_fac_qnames(ctx, list(by_fac.keys()))
+
     for fac_id, coa_elements in by_fac.items():
       if await ctx.progress.is_cancelled():
         break
 
       # Expand FAC → rs-gaap parent + type-subtype children
       expand_result = await expand_tool.execute({"fac_element_id": fac_id})
-      if "error" in expand_result:
+      expand_failed = "error" in expand_result
+      if expand_failed:
         logger.debug(f"No rs-gaap expansion for {fac_id}: {expand_result['error']}")
-        continue
+        rs_gaap_parent = None
+        candidates: list[dict] = []
+        fac_qname = fac_qnames.get(fac_id, fac_id)
+      else:
+        rs_gaap_parent = expand_result["rs_gaap_parent"]
+        candidates = expand_result["candidates"]
+        fac_qname = expand_result.get("fac_qname", fac_id)
 
-      rs_gaap_parent = expand_result["rs_gaap_parent"]
-      candidates = expand_result["candidates"]
-      fac_qname = expand_result.get("fac_qname", fac_id)
-
-      # One AI call per CoA element in this FAC group.
+      # One AI call per CoA element in this FAC group. Skip the AI
+      # entirely when no candidates exist (expand failed) — the
+      # fallback path below routes the CoA to its per-FAC Other bucket
+      # without burning a Bedrock call.
       for coa_elem in coa_elements:
         rs_gaap_id: str | None = None
         rs_gaap_conf: float = 0.0
-        try:
-          prompt = build_rs_gaap_refinement_prompt(
-            coa_elem, fac_qname, rs_gaap_parent, candidates
-          )
-          response = await ctx.ai.create_message(
-            messages=[AIMessage(role="user", content=prompt)],
-            system=RS_GAAP_REFINEMENT_SYSTEM_PROMPT,
-            max_tokens=500,
-            temperature=0.2,
-            agent_type="mapping",
-            operation_description="CoA to rs-gaap refinement",
-          )
+        if candidates:
+          try:
+            prompt = build_rs_gaap_refinement_prompt(
+              coa_elem, fac_qname, rs_gaap_parent, candidates
+            )
+            response = await ctx.ai.create_message(
+              messages=[AIMessage(role="user", content=prompt)],
+              system=RS_GAAP_REFINEMENT_SYSTEM_PROMPT,
+              max_tokens=500,
+              temperature=0.2,
+              agent_type="mapping",
+              operation_description="CoA to rs-gaap refinement",
+            )
 
-          result = self._parse_rs_gaap_response(response.content)
-          # Use a lower threshold here — the FAC pass already confirmed the
-          # semantic bucket; the refinement is just picking the specific tag.
-          if (
-            result
-            and result.get("rs_gaap_id")
-            and result.get("confidence", 0) >= 0.50
-            # Belt-and-suspenders: even if the prompt instructed
-            # "no rollups", filter the AI's pick against the denylist
-            # in case it ignored the instruction.
-            and result.get("rs_gaap_qname") not in RS_GAAP_SUBTOTAL_DENYLIST
-          ):
-            rs_gaap_id = result["rs_gaap_id"]
-            rs_gaap_conf = result["confidence"]
+            result = self._parse_rs_gaap_response(response.content)
+            # Use a lower threshold here — the FAC pass already confirmed the
+            # semantic bucket; the refinement is just picking the specific tag.
+            if (
+              result
+              and result.get("rs_gaap_id")
+              and result.get("confidence", 0) >= 0.50
+              # Belt-and-suspenders: even if the prompt instructed
+              # "no rollups", filter the AI's pick against the denylist
+              # in case it ignored the instruction.
+              and result.get("rs_gaap_qname") not in RS_GAAP_SUBTOTAL_DENYLIST
+            ):
+              rs_gaap_id = result["rs_gaap_id"]
+              rs_gaap_conf = result["confidence"]
 
-        except Exception as e:
-          logger.warning(f"rs-gaap refinement failed for {coa_elem['id']}: {e}")
+          except Exception as e:
+            logger.warning(f"rs-gaap refinement failed for {coa_elem['id']}: {e}")
 
         # Fallback chain when the AI returned nothing usable:
         #   1. The narrow-case parent equivalent (if not denylisted).
@@ -373,6 +388,30 @@ class MappingAgent(Agent):
             )
           except Exception as e:
             logger.warning(f"rs-gaap create failed for {coa_elem['id']}: {e}")
+
+  async def _fetch_fac_qnames(
+    self, ctx: AgentContext, fac_ids: list[str]
+  ) -> dict[str, str]:
+    """Bulk-resolve a list of FAC element ids → qnames in one query.
+
+    Used by ``_refine_to_rs_gaap`` so the per-FAC fallback (look up
+    ``FAC_TO_RS_GAAP_FALLBACK[fac_qname]``) works even when
+    ``expand_to_rs_gaap_candidates`` returns an error and we don't have
+    a ``fac_qname`` from the expand result.
+    """
+    if not fac_ids:
+      return {}
+
+    from sqlalchemy import text
+
+    from robosystems.db.extensions import extensions_session
+
+    with extensions_session(ctx.graph_id) as session:
+      rows = session.execute(
+        text("SELECT id, qname FROM elements WHERE id = ANY(:ids)"),
+        {"ids": fac_ids},
+      ).fetchall()
+    return {r.id: r.qname for r in rows}
 
   async def _resolve_qname_to_id(self, ctx: AgentContext, qname: str) -> str | None:
     """Resolve an rs-gaap qname → element_id within the agent's tenant

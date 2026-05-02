@@ -186,6 +186,7 @@ def render_structure_view(
   facts: list[ReportFact],
   structure_type: str,
   periods: list[PeriodSpec],
+  taxonomy_id: str | None = None,
 ) -> FactGrid:
   """Apply a structure's hierarchy to raw facts to produce a rendered view.
 
@@ -203,13 +204,18 @@ def render_structure_view(
       facts: Pre-generated ReportFact objects (from generate_report_facts).
       structure_type: Structure type to render (income_statement, balance_sheet, etc.).
       periods: Ordered list of period specifications for columns.
+      taxonomy_id: When set, restricts structure selection to this taxonomy.
+          Multiple taxonomies (FAC, rs-gaap-presentation, etc.) declare the
+          same structure_type; without this filter ``_load_reporting_structure``
+          picks ambiguously. Saved Reports always pass their taxonomy_id;
+          live-statement readers may omit it (legacy behaviour).
 
   Returns:
       FactGrid with rows ordered per the structure's hierarchy.
   """
   # Load structure hierarchy
   structure_id, structure_name, hierarchy = _load_reporting_structure(
-    session, structure_type
+    session, structure_type, taxonomy_id=taxonomy_id
   )
 
   if not hierarchy:
@@ -899,20 +905,40 @@ def _infer_period_type(classification: str) -> str:
 def _load_reporting_structure(
   session: Session,
   report_type: str,
+  taxonomy_id: str | None = None,
 ) -> tuple[str, str, list[_HierarchyNode]]:
   """Load the reporting structure hierarchy for the given report type.
 
+  When ``taxonomy_id`` is provided, restricts structure selection to
+  that taxonomy — necessary when multiple taxonomies (FAC vs
+  rs-gaap-presentation) declare the same ``structure_type``. Without
+  the filter the query returns whichever row the planner happens to
+  pick first.
+
   Returns (structure_id, structure_name, root_nodes).
   """
-  # Find the structure for this report type
-  struct_result = session.execute(
-    text("""
-      SELECT id, name FROM structures
-      WHERE structure_type = :report_type
-      LIMIT 1
-    """),
-    {"report_type": report_type},
-  )
+  if taxonomy_id is not None:
+    struct_result = session.execute(
+      text("""
+        SELECT id, name FROM structures
+        WHERE structure_type = :report_type
+          AND taxonomy_id = :taxonomy_id
+        LIMIT 1
+      """),
+      {"report_type": report_type, "taxonomy_id": taxonomy_id},
+    )
+  else:
+    # Legacy callers (live-financial-statement) without an explicit
+    # taxonomy. Picks any matching structure — caller assumes there's
+    # only one or doesn't care which.
+    struct_result = session.execute(
+      text("""
+        SELECT id, name FROM structures
+        WHERE structure_type = :report_type
+        LIMIT 1
+      """),
+      {"report_type": report_type},
+    )
   struct_row = struct_result.fetchone()
   if not struct_row:
     return "", "", []
@@ -1004,7 +1030,20 @@ def _load_reporting_structure(
         "depth": row.depth or 0,
       }
 
-  def _build_tree(element_id: str, depth: int) -> _HierarchyNode:
+  # Render each element at most once globally per structure walk. The
+  # rs-gaap-presentation hierarchy is a DAG (a concept may have
+  # multiple parents — e.g. "Cash" rolls up under both Current Assets
+  # and the Cash Flow reconciliation). Without global dedup the walk
+  # would expand a shared subtree under each parent, producing
+  # exponential row counts and double-counting facts at render time.
+  # The first parent that reaches a node owns it; subsequent parents
+  # treat the node as already-rendered.
+  emitted: set[str] = set()
+
+  def _build_tree(element_id: str, depth: int) -> _HierarchyNode | None:
+    if element_id in emitted:
+      return None
+    emitted.add(element_id)
     info = element_info.get(element_id, {})
     node = _HierarchyNode(
       element_id=element_id,
@@ -1017,7 +1056,8 @@ def _load_reporting_structure(
     )
     for child_data in children_map.get(element_id, []):
       child_node = _build_tree(child_data["element_id"], depth + 1)
-      node.children.append(child_node)
+      if child_node is not None:
+        node.children.append(child_node)
     return node
 
   # Build trees from roots, ordered by the root-ordering associations
@@ -1025,12 +1065,14 @@ def _load_reporting_structure(
   # Roots that have an explicit order_value sort by that; others sort last.
   root_order = _load_root_order(session, structure_id)
 
-  roots = []
+  roots: list[_HierarchyNode] = []
   for root_id in sorted(
     root_parent_ids,
     key=lambda rid: root_order.get(rid, float("inf")),
   ):
-    roots.append(_build_tree(root_id, 0))
+    root_node = _build_tree(root_id, 0)
+    if root_node is not None:
+      roots.append(root_node)
 
   return structure_id, structure_name, roots
 
@@ -1156,10 +1198,18 @@ def _build_rows(
         computed_per_period[i].get(src_id, 0.0) * weight for src_id, weight in sources
       )
 
-  # Pass 2: build rows in presentation order
+  # Pass 2: build rows in financial-statement order — children first,
+  # then their parent subtotal (post-order). This matches the convention
+  # readers expect: revenues / expenses listed before Gross Profit;
+  # current / non-current sections before Total Assets; everything
+  # before Net Income (which lands at the bottom of the IS). Pre-order
+  # would put rollups at the top with details below, which reads as
+  # an outline rather than a financial statement.
   rows: list[FactRow] = []
 
   def _emit(node: _HierarchyNode) -> None:
+    for child in node.children or []:
+      _emit(child)
     # Both subtotal (has children) and leaf rows read the precomputed
     # value from `computed_per_period`. Pass 1 populated it with the
     # rolled-up sum of all descendants for parent nodes, so subtotal
@@ -1177,11 +1227,17 @@ def _build_rows(
         depth=node.depth,
       )
     )
-    for child in node.children or []:
-      _emit(child)
 
   for root in hierarchy:
     _emit(root)
+
+  # Drop rows whose every period value is zero / null. The full
+  # rs-gaap presentation tree includes every concept the seed knows
+  # about; for any given filer only a fraction carry data. Suppressing
+  # the empty rows turns ~600-row trees into the dozen or two lines
+  # that actually populate the statement, which is what readers expect
+  # to see.
+  rows = [r for r in rows if any(v not in (None, 0, 0.0) for v in r.values)]
 
   return rows
 
