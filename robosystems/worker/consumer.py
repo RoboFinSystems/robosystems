@@ -19,6 +19,8 @@ import socket
 import time
 from typing import Any
 
+import redis.exceptions
+
 from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
 from robosystems.middleware.otel.setup import get_tracer
 from robosystems.middleware.sse.operation_manager import (
@@ -52,15 +54,30 @@ async def run() -> None:
   depth_reporter = QueueDepthReporter(queue, worker_id)
   logger.info(f"Worker started: {worker_id}")
 
+  shutdown_wait = asyncio.create_task(shutdown.wait())
   try:
     while not shutdown.is_set():
       await depth_reporter.maybe_publish()
 
       # BLMOVE atomically pops from main queue and pushes to inflight list.
       # If the worker crashes, the task stays in inflight for the reaper.
-      task_json = await queue.blmove(
-        "worker:tasks", inflight_key, timeout=5, src="LEFT", dest="LEFT"
+      # Race against shutdown so SIGTERM exits without waiting for BLMOVE timeout.
+      blmove_task = asyncio.create_task(
+        queue.blmove("worker:tasks", inflight_key, timeout=5, src="LEFT", dest="LEFT")
       )
+      await asyncio.wait(
+        {blmove_task, shutdown_wait}, return_when=asyncio.FIRST_COMPLETED
+      )
+      if shutdown.is_set():
+        blmove_task.cancel()
+        break
+
+      try:
+        task_json = blmove_task.result()
+      except redis.exceptions.ConnectionError as e:
+        logger.warning(f"Valkey connection lost, retrying: {e}")
+        await asyncio.sleep(1)
+        continue
       if task_json is None:
         continue
 
@@ -74,7 +91,12 @@ async def run() -> None:
       await _process_task(task_data, task_json, queue, inflight_key, manager, worker_id)
   finally:
     logger.info(f"Worker shutting down: {worker_id}")
-    await queue.aclose()
+    shutdown_wait.cancel()
+    try:
+      await queue.aclose()
+    except redis.exceptions.ConnectionError:
+      pass
+    logger.info(f"Worker terminated: {worker_id}")
 
 
 async def _process_task(
