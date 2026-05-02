@@ -191,6 +191,13 @@ def render_structure_view(
 
   This is the "lens" — same facts, different structure = different view.
 
+  Facts whose ``element_id`` isn't in the structure's hierarchy are
+  resolved upward via type-subtype ``general-special`` arcs to the
+  nearest in-structure ancestor (see ``_resolve_renderable_ancestor``)
+  and aggregated there. Facts with no in-structure ancestor are dropped
+  from the rendered view — they're persisted in ``facts`` for audit
+  but invisible to the standard report.
+
   Args:
       session: Extensions database session.
       facts: Pre-generated ReportFact objects (from generate_report_facts).
@@ -213,8 +220,13 @@ def render_structure_view(
       periods=periods,
     )
 
-  # Build balance dicts per period (keyed by element_id)
-  period_balances = [_facts_to_balance_dict(facts, p.start, p.end) for p in periods]
+  # Resolve out-of-structure facts to their nearest in-structure ancestor.
+  in_structure = _collect_hierarchy_element_ids(hierarchy)
+  rolled_up = _roll_up_facts_to_structure(session, facts, in_structure)
+
+  # Build balance dicts per period (keyed by element_id, summing across
+  # facts that resolved to the same ancestor).
+  period_balances = [_facts_to_balance_dict(rolled_up, p.start, p.end) for p in periods]
 
   # Load calculation associations for computed elements (Total Assets, Net Income, etc.)
   calculations = _load_calculations(session, structure_id)
@@ -230,6 +242,131 @@ def render_structure_view(
     periods=periods,
     rows=rows,
   )
+
+
+# ── Ancestor rollup ────────────────────────────────────────────────────────
+
+
+def _collect_hierarchy_element_ids(hierarchy: list[_HierarchyNode]) -> set[str]:
+  """Walk a hierarchy tree and return every element_id reachable.
+
+  Used by ``render_structure_view`` to identify in-structure elements
+  so out-of-structure facts can be resolved to a renderable ancestor.
+  """
+  ids: set[str] = set()
+
+  def _walk(node: _HierarchyNode) -> None:
+    ids.add(node.element_id)
+    for child in node.children:
+      _walk(child)
+
+  for root in hierarchy:
+    _walk(root)
+  return ids
+
+
+def _resolve_renderable_ancestor(
+  session: Session,
+  element_id: str,
+  in_structure: set[str],
+  cache: dict[str, str | None],
+) -> str | None:
+  """Walk ``general-special`` arcs upward from ``element_id`` until
+  reaching an element in ``in_structure``. Returns the ancestor's
+  element_id, or ``None`` if no ancestor is reachable.
+
+  Walks all ``general-special`` arcs regardless of taxonomy
+  (``type-subtype``, ``rs-gaap-hierarchy``, etc.) — the arc semantics
+  are the same. BFS by depth so the **nearest** ancestor wins when
+  multiple paths exist (semantic 'a' from Option C planning —
+  deterministic, mirrors XBRL renderer convention). The cache
+  memoizes per call so multiple facts on the same out-of-structure
+  element only walk once.
+  """
+  if element_id in cache:
+    return cache[element_id]
+  if element_id in in_structure:
+    cache[element_id] = element_id
+    return element_id
+
+  visited: set[str] = {element_id}
+  frontier: list[str] = [element_id]
+
+  while frontier:
+    parent_rows = session.execute(
+      text(
+        """
+        SELECT DISTINCT a.from_element_id AS parent_id
+        FROM associations a
+        WHERE a.association_type = 'general-special'
+          AND a.to_element_id = ANY(:children)
+        """
+      ),
+      {"children": frontier},
+    ).fetchall()
+
+    next_frontier: list[str] = []
+    for r in parent_rows:
+      pid = r.parent_id
+      if pid in visited:
+        continue
+      visited.add(pid)
+      if pid in in_structure:
+        cache[element_id] = pid
+        return pid
+      next_frontier.append(pid)
+    frontier = next_frontier
+
+  cache[element_id] = None
+  return None
+
+
+def _roll_up_facts_to_structure(
+  session: Session,
+  facts: list[ReportFact],
+  in_structure: set[str],
+) -> list[ReportFact]:
+  """For each fact whose element isn't in the rendered structure,
+  resolve to the nearest in-structure ancestor and emit a rewritten
+  ReportFact pointing at that ancestor.
+
+  Facts with no in-structure ancestor are dropped (they're audit-only
+  data — invisible to the standard report). Facts whose element is
+  already in-structure pass through unchanged.
+
+  ``_facts_to_balance_dict`` sums multiple facts on the same
+  element_id, so this function doesn't aggregate — it just rewrites
+  the element pointers.
+  """
+  if not facts:
+    return facts
+
+  cache: dict[str, str | None] = {}
+  rolled: list[ReportFact] = []
+  for fact in facts:
+    if fact.element_id in in_structure:
+      rolled.append(fact)
+      continue
+    ancestor = _resolve_renderable_ancestor(
+      session, fact.element_id, in_structure, cache
+    )
+    if ancestor is None:
+      continue
+    # Reuse fact metadata; only the element_id pointer changes.
+    rolled.append(
+      ReportFact(
+        element_id=ancestor,
+        element_qname=fact.element_qname,
+        element_name=fact.element_name,
+        classification=fact.classification,
+        balance_type=fact.balance_type,
+        value=fact.value,
+        period_start=fact.period_start,
+        period_end=fact.period_end,
+        period_type=fact.period_type,
+      )
+    )
+  return rolled
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────
@@ -275,10 +412,17 @@ def _facts_to_balance_dict(
   _natural_sign(balance.net_balance, node.balance_type), so we set
   balance_type to "debit" to pass through the value unchanged (since
   natural sign was already applied during fact generation).
+
+  Multiple facts on the same ``element_id`` for the same period sum —
+  needed for the ancestor-rollup path where many out-of-structure
+  facts can resolve to a single in-structure ancestor.
   """
   balances: dict[str, _Balance] = {}
   for fact in facts:
-    if fact.period_start == period_start and fact.period_end == period_end:
+    if fact.period_start != period_start or fact.period_end != period_end:
+      continue
+    existing = balances.get(fact.element_id)
+    if existing is None:
       balances[fact.element_id] = _Balance(
         element_id=fact.element_id,
         qname=fact.element_qname,
@@ -289,6 +433,8 @@ def _facts_to_balance_dict(
         total_credits=0.0,
         net_balance=fact.value,  # already natural-sign
       )
+    else:
+      existing.net_balance += fact.value
   return balances
 
 
