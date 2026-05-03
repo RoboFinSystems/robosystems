@@ -103,9 +103,10 @@ def test_filters_denylisted_rollup_from_wide_equivalents():
   assert "rs-gaap:OtherSalesRevenueNet" in qnames
 
 
-def test_returns_none_when_all_equivalents_are_rollups():
-  """If every equivalent is a rollup, the filter empties the set —
-  caller treats this as 'no expansion available'."""
+def test_returns_none_when_all_equivalents_are_rollups_and_no_children():
+  """If every equivalent is a rollup AND no traversable type-subtype
+  children exist, there's nothing to land on — return None so the
+  caller's per-FAC fallback fires."""
   equiv_rows = [
     _row(id="elem_a", qname="rs-gaap:Assets", name="Assets"),
     _row(id="elem_b", qname="rs-gaap:AssetsCurrent", name="Current Assets"),
@@ -115,6 +116,52 @@ def test_returns_none_when_all_equivalents_are_rollups():
   result = expand_to_rs_gaap_candidates(session, "fac_assets_id")
 
   assert result is None
+
+
+def test_traverses_through_denylisted_rollup_to_reach_children():
+  """The denylist blocks rollups as TARGETS, but we still traverse
+  type-subtype children of denylisted equivalents. fac:CurrentLiabilities
+  is the canonical case: its only fac-to-rs-gaap equivalent is
+  rs-gaap:LiabilitiesCurrent (denylisted rollup), but its real children
+  (AccountsPayable, DebtCurrent, …) are exactly what CoA accounts must
+  land on. Earlier behavior dropped the rollup equivalent up front and
+  returned None, forcing every BS current-liability CoA to the per-FAC
+  Other bucket."""
+  equiv_rows = [
+    _row(
+      id="elem_liab_curr",
+      qname="rs-gaap:LiabilitiesCurrent",  # denylisted rollup
+      name="Liabilities, Current",
+    ),
+  ]
+  child_rows = [
+    _row(
+      id="elem_ap",
+      qname="rs-gaap:AccountsPayableCurrent",
+      name="Accounts Payable",
+      parent_id="elem_liab_curr",
+    ),
+    _row(
+      id="elem_debt",
+      qname="rs-gaap:DebtCurrent",
+      name="Debt, Current",
+      parent_id="elem_liab_curr",
+    ),
+  ]
+  session = _make_session("fac:CurrentLiabilities", equiv_rows, child_rows)
+
+  result = expand_to_rs_gaap_candidates(session, "fac_current_liabilities_id")
+
+  assert result is not None
+  qnames = {c["qname"] for c in result["candidates"]}
+  # Children landed; rollup equivalent itself is NOT in the candidate set.
+  assert "rs-gaap:AccountsPayableCurrent" in qnames
+  assert "rs-gaap:DebtCurrent" in qnames
+  assert "rs-gaap:LiabilitiesCurrent" not in qnames
+  # No emittable equivalents → parent is None → refinement-pass fallback
+  # falls through to FAC_TO_RS_GAAP_FALLBACK rather than landing on the
+  # rollup as the "narrow parent".
+  assert result["rs_gaap_parent"] is None
 
 
 def test_filters_denylisted_type_subtype_children():

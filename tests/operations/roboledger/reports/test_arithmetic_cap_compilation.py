@@ -207,36 +207,46 @@ def test_load_calculations_picks_arrangement_whose_summands_are_in_hierarchy() -
   assert result["opincome"] == [("gp", 1.0), ("opex", -1.0)]
 
 
-def test_load_calculations_prefers_fewest_summands_when_both_arrangements_qualify() -> (
-  None
-):
+def test_load_calculations_prefers_decomposition_over_identity_check() -> None:
   """Tiebreaker when both arrangements have all summands in the
-  hierarchy: the most parsimonious arrangement wins. For IS this picks
-  IS2 (2 summands) over IS11 (3 summands) on multistep disclosures
-  that happen to also carry IS11's inputs."""
+  hierarchy: prefer the DECOMPOSITION (most summands) over the IDENTITY
+  (fewest summands). The 1-summand variant is almost always a
+  validation tautology — fac-calculations BS2 says
+  ``Assets = LiabilitiesAndEquity``, which is the cross-check, not the
+  way Assets is computed from leaves. The decomposition (BS3:
+  ``Assets = Current + Noncurrent``) is what actually walks to leaf
+  data. Picking the identity strands the parent at zero because its
+  summand is itself a rollup that has nothing flowing into it directly.
+  """
   session = MagicMock()
-  short_a = MagicMock(
-    structure_id="b_short", from_element_id="t", to_element_id="x", weight=1.0
+  identity_summand = MagicMock(
+    structure_id="bs2_identity",
+    from_element_id="assets",
+    to_element_id="liab_and_equity",
+    weight=1.0,
   )
-  short_b = MagicMock(
-    structure_id="b_short", from_element_id="t", to_element_id="y", weight=-1.0
+  decomp_a = MagicMock(
+    structure_id="bs3_decomp",
+    from_element_id="assets",
+    to_element_id="current",
+    weight=1.0,
   )
-  long_a = MagicMock(
-    structure_id="a_long", from_element_id="t", to_element_id="x", weight=1.0
-  )
-  long_b = MagicMock(
-    structure_id="a_long", from_element_id="t", to_element_id="y", weight=-1.0
-  )
-  long_c = MagicMock(
-    structure_id="a_long", from_element_id="t", to_element_id="z", weight=1.0
+  decomp_b = MagicMock(
+    structure_id="bs3_decomp",
+    from_element_id="assets",
+    to_element_id="noncurrent",
+    weight=1.0,
   )
   result_mock = MagicMock()
-  result_mock.__iter__ = lambda self: iter([short_a, short_b, long_a, long_b, long_c])
+  result_mock.__iter__ = lambda self: iter([identity_summand, decomp_a, decomp_b])
   session.execute.return_value = result_mock
 
-  result = _load_calculations(session, element_ids={"t", "x", "y", "z"})
+  result = _load_calculations(
+    session,
+    element_ids={"assets", "liab_and_equity", "current", "noncurrent"},
+  )
 
-  assert result["t"] == [("x", 1.0), ("y", -1.0)]
+  assert result["assets"] == [("current", 1.0), ("noncurrent", 1.0)]
 
 
 def test_load_calculations_defaults_missing_weight_to_one() -> None:

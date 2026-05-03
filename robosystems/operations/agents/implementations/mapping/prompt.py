@@ -64,19 +64,24 @@ always target concrete ones
 
 ## Response Format
 
-Respond with a SINGLE JSON array containing one object per input element. \
-Do NOT emit one object per line, do NOT emit multiple arrays, and do NOT add \
-explanatory prose before, between, or after the array. The complete response \
-must parse cleanly with `json.loads(content)` as a list.
+Respond with a SINGLE JSON array. The array MUST contain EXACTLY ONE \
+object per input `element_id` — no skipping, no omitting, even when no \
+candidate seems right (return `target_id: null` and `confidence: 0` for \
+those, do NOT drop the element from the array). Length of the response \
+array must equal the number of CoA elements in the prompt.
+
+Do NOT emit one object per line, do NOT emit multiple arrays, and do NOT \
+add explanatory prose before, between, or after the array. The complete \
+response must parse cleanly with `json.loads(content)` as a list.
 
 Item shape:
 ```json
 {
-  "element_id": "the source element ID",
+  "element_id": "the source element ID — MUST appear in the input list",
   "target_id": "the target FAC element ID (or null if confidence < 0.70)",
   "target_qname": "fac:ConceptName (or null)",
   "confidence": 0.XX,
-  "reasoning": "brief explanation of why this mapping was chosen"
+  "reasoning": "brief explanation of why this mapping was chosen (or why no candidate fits)"
 }
 ```
 

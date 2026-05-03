@@ -490,7 +490,7 @@ def _infer_classification(qname: str | None, balance_type: str | None) -> str | 
 
   Reference taxonomies (FAC, rs-gaap, type-subtype) and freshly-loaded
   custom taxonomies often have no ``element_traits`` rows pointing at
-  ``classifications.category='elementsOfFinancialStatements'``. Without
+  ``traits.category='elementsOfFinancialStatements'``. Without
   classification, ``_close_to_retained_earnings`` can't compute Net
   Income (revenue/expense facts never match) and the BS doesn't balance.
 
@@ -598,7 +598,7 @@ def _read_mapped_balances(
       JOIN elements target ON target.id = mapping.to_element_id
       LEFT JOIN element_traits tet
         ON tet.element_id = target.id AND tet.is_primary = TRUE
-      LEFT JOIN classifications tcls
+      LEFT JOIN traits tcls
         ON tcls.id = tet.trait_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
@@ -859,7 +859,7 @@ def _close_prior_periods_to_retained_earnings(
       JOIN elements target ON target.id = mapping.to_element_id
       LEFT JOIN element_traits tet
         ON tet.element_id = target.id AND tet.is_primary = TRUE
-      LEFT JOIN classifications tcls
+      LEFT JOIN traits tcls
         ON tcls.id = tet.trait_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
@@ -1020,7 +1020,7 @@ def _load_reporting_structure(
       JOIN elements e ON e.id = ea.to_element_id
       LEFT JOIN element_traits et
         ON et.element_id = e.id AND et.is_primary = TRUE
-      LEFT JOIN classifications cls
+      LEFT JOIN traits cls
         ON cls.id = et.trait_id
         AND cls.category = 'elementsOfFinancialStatements'
       WHERE ea.structure_id = :structure_id
@@ -1066,7 +1066,7 @@ def _load_reporting_structure(
         FROM elements e
         LEFT JOIN element_traits et
           ON et.element_id = e.id AND et.is_primary = TRUE
-        LEFT JOIN classifications cls
+        LEFT JOIN traits cls
           ON cls.id = et.trait_id
           AND cls.category = 'elementsOfFinancialStatements'
         WHERE e.id IN ({placeholders})
@@ -1240,10 +1240,18 @@ def _load_calculations(
     candidates_per_target.setdefault(target, []).append((sid, sources))
 
   for target, candidates in candidates_per_target.items():
-    # Prefer the most parsimonious arrangement (fewest summands), tie-
-    # broken by structure_id for determinism. For IS-multistep this
-    # picks IS2 over IS11; for BS-classified it picks BS3 over BS2.
-    candidates.sort(key=lambda c: (len(c[1]), c[0]))
+    # When multiple calc structures target the same element AND each
+    # one's summands are all carried by the disclosure, pick the
+    # decomposition with the MOST summands. The fewest-summands variant
+    # is almost always an identity check — fac-calculations BS2 says
+    # `Assets = LiabilitiesAndEquity`, which is meant for VALIDATION,
+    # not COMPUTATION (Assets's value comes from summing real
+    # current/noncurrent leaves, not from a tautology pointing at
+    # another rollup). The decomposition (BS3: `Assets = Current +
+    # Noncurrent`) is the calc that walks down to leaf data. For IS the
+    # tie is moot — every variant has the same summand count after the
+    # hierarchy filter — so structure_id breaks it deterministically.
+    candidates.sort(key=lambda c: (-len(c[1]), c[0]))
     calculations[target] = candidates[0][1]
   return calculations
 

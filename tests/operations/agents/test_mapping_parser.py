@@ -94,6 +94,28 @@ def test_prose_between_objects_is_skipped():
   assert [m["element_id"] for m in out] == ["a", "b"]
 
 
+def test_max_tokens_truncation_recovers_complete_objects():
+  """Bedrock can hit ``max_tokens`` mid-string. The previous parser
+  raised ``json.JSONDecodeError: Unterminated string`` and dropped
+  the whole batch — that's how Notes Payable lost its mapping in the
+  liability batch and stranded $25k of QB-balanced credit on a CoA
+  account with no GAAP target. The parser now recovers every complete
+  object up to the truncation."""
+  # Three complete objects, then a fourth cut off mid-string.
+  content = (
+    '[{"element_id": "a", "target_id": "fac1", "target_qname": "fac:A", '
+    '"confidence": 0.95, "reasoning": "x"},'
+    '{"element_id": "b", "target_id": "fac2", "target_qname": "fac:B", '
+    '"confidence": 0.85, "reasoning": "y"},'
+    '{"element_id": "c", "target_id": "fac3", "target_qname": "fac:C", '
+    '"confidence": 0.80, "reasoning": "z"},'
+    '{"element_id": "d", "target_id": "fac4", "target_qname": "fac:D", '
+    '"confidence": 0.75, "reasoning": "this reasoning was cut off mid-strin'
+  )
+  out = _agent()._parse_response(content, _elements("a", "b", "c", "d"))
+  assert [m["element_id"] for m in out] == ["a", "b", "c"]
+
+
 def test_completely_unparseable_response_returns_skip_records():
   out = _agent()._parse_response("not json at all", _elements("a", "b"))
   # One skip record per input element so the orchestrator can count

@@ -167,7 +167,40 @@ class MappingAgent(Agent):
         try:
           mappings = await self._map_batch(ctx, batch, candidates)
 
+          # Dedupe by element_id — keep the highest-confidence pick per
+          # element. Claude occasionally returns the same element_id
+          # twice within a batch (or in a duplicated wrapping array
+          # that the tolerant parser correctly recovers). Without this,
+          # ``confirmed_fac`` would carry duplicates that re-fire the
+          # rs-gaap refinement AI call N times for the same CoA → same
+          # equivalence-arc insert → an N-fold loop of duplicate-key
+          # warnings until the worker timeout fires.
+          seen_in_batch: dict[str, dict] = {}
           for m in mappings:
+            eid = m.get("element_id")
+            if not eid:
+              continue
+            existing = seen_in_batch.get(eid)
+            if existing is None or m.get("confidence", 0) > existing.get(
+              "confidence", 0
+            ):
+              seen_in_batch[eid] = m
+
+          # Account for elements Bedrock dropped from the response
+          # entirely. Without this they disappear from the counters and
+          # the user sees no signal that an element needs attention —
+          # this was how Notes Payable silently went unmapped on the
+          # demo graph and stranded $25k of QB-balanced credit.
+          batch_ids = {e["id"] for e in batch}
+          for missing_id in batch_ids - seen_in_batch.keys():
+            logger.warning(
+              "Bedrock omitted element %s from %s mapping batch — counting as skipped",
+              missing_id,
+              cls,
+            )
+            skipped += 1
+
+          for m in seen_in_batch.values():
             fac_target = m.get("target_id")
             confidence = m["confidence"]
             if fac_target and confidence >= CONFIDENCE_AUTO_APPROVE:
@@ -246,10 +279,16 @@ class MappingAgent(Agent):
     """
     prompt = build_mapping_prompt(elements, candidates)
 
+    # 8000 tokens accommodates a full BATCH_SIZE=10 response with verbose
+    # `reasoning` fields. The previous 4000 ceiling truncated liability
+    # batches mid-string ("Unterminated string starting at: line 241")
+    # so the JSON parser raised and the entire batch was dropped — every
+    # liability CoA fell to "skipped" and the BS imbalance traced back
+    # to Notes Payable being unmapped (carrying a $25k QB credit).
     response = await ctx.ai.create_message(
       messages=[AIMessage(role="user", content=prompt)],
       system=MAPPING_SYSTEM_PROMPT,
-      max_tokens=4000,
+      max_tokens=8000,
       temperature=0.3,
       agent_type="mapping",
       operation_description="CoA to FAC mapping",
@@ -277,10 +316,18 @@ class MappingAgent(Agent):
     Groups confirmed mappings by FAC element ID so one expand_tool call
     (and one AI call) serves all CoA accounts that share the same FAC parent.
     """
-    # Group CoA elements by their FAC target
-    by_fac: dict[str, list[dict]] = defaultdict(list)
+    # Group CoA elements by their FAC target — deduped on (coa_id,
+    # fac_id) so even if an upstream caller passes the same pair
+    # twice, the refinement runs once per element. The agent's own
+    # FAC pass dedupes too; this is belt-and-suspenders against the
+    # 5-minute insert loop we hit when Claude returned a duplicated
+    # batch and pre-dedupe ``confirmed_fac`` carried each pair N times.
+    by_fac: dict[str, dict[str, dict]] = defaultdict(dict)
     for coa_elem, fac_id in confirmed_fac:
-      by_fac[fac_id].append(coa_elem)
+      by_fac[fac_id].setdefault(coa_elem["id"], coa_elem)
+    by_fac_list: dict[str, list[dict]] = {
+      fid: list(elems.values()) for fid, elems in by_fac.items()
+    }
 
     # Pre-fetch FAC qnames so the fallback path can route each CoA to
     # its per-FAC Other bucket even when ``expand_to_rs_gaap_candidates``
@@ -288,9 +335,9 @@ class MappingAgent(Agent):
     # entirely filtered out by the presentation-set + denylist filters).
     # Without this, every CoA in such a group silently misses its
     # rs-gaap mapping.
-    fac_qnames = await self._fetch_fac_qnames(ctx, list(by_fac.keys()))
+    fac_qnames = await self._fetch_fac_qnames(ctx, list(by_fac_list.keys()))
 
-    for fac_id, coa_elements in by_fac.items():
+    for fac_id, coa_elements in by_fac_list.items():
       if await ctx.progress.is_cancelled():
         break
 
@@ -342,6 +389,13 @@ class MappingAgent(Agent):
             ):
               rs_gaap_id = result["rs_gaap_id"]
               rs_gaap_conf = result["confidence"]
+            else:
+              logger.info(
+                "rs-gaap refinement REJECTED for %s (FAC=%s): result=%s — falling back",
+                coa_elem.get("name", coa_elem["id"]),
+                fac_qname,
+                result,
+              )
 
           except Exception as e:
             logger.warning(f"rs-gaap refinement failed for {coa_elem['id']}: {e}")
@@ -538,6 +592,20 @@ class MappingAgent(Agent):
     ``[{...}, {...}]\\n{...}`` or ``{...}\\n{...}\\n{...}``
     yields all of the contained objects rather than failing the whole
     parse on the first leftover byte.
+
+    When raw_decode raises mid-stream (truncated array, unterminated
+    string from a max_tokens cutoff, malformed trailing object), we
+    keep whatever objects we already extracted instead of dropping
+    the whole batch. Partial recovery is the right behavior here: a
+    Bedrock truncation that yields 6 of 7 mappings is still better
+    than 0, and the orchestrator's per-element loop tolerates a
+    short result list (missing element_ids fall through to "skipped"
+    rather than corrupt the rest).
+
+    A list value parses fine but its trailing `]` may be missing on
+    truncation; in that case we attempt an inner-element scan over
+    its body so the partial array still contributes whatever complete
+    objects it has.
     """
     decoder = json.JSONDecoder()
     out: list = []
@@ -548,7 +616,29 @@ class MappingAgent(Agent):
         i += 1
       if i >= n:
         break
-      value, end = decoder.raw_decode(text, i)
+      try:
+        value, end = decoder.raw_decode(text, i)
+      except json.JSONDecodeError:
+        # Truncated value at this position. If we're inside a `[...]`
+        # whose contents are object literals, scan forward and
+        # recover each complete `{...}` we can find — typical
+        # max_tokens cutoff shape. Otherwise stop here with whatever
+        # we've accumulated.
+        if text[i] == "[":
+          inner = i + 1
+          while inner < n:
+            while inner < n and text[inner] != "{":
+              inner += 1
+            if inner >= n:
+              break
+            try:
+              obj, obj_end = decoder.raw_decode(text, inner)
+            except json.JSONDecodeError:
+              break
+            if isinstance(obj, dict):
+              out.append(obj)
+            inner = obj_end
+        break
       if isinstance(value, list):
         out.extend(value)
       else:
