@@ -147,26 +147,104 @@ def test_load_calculations_with_neither_arg_returns_empty_no_query() -> None:
 
 
 def test_load_calculations_groups_arcs_by_subtotal_target() -> None:
-  """Each subtotal collects all its summand arcs into one list."""
+  """Each subtotal collects all its summand arcs into one list. Cross-
+  structure mode requires summands to be present in ``element_ids``,
+  otherwise the calc structure is rejected — caller's hierarchy doesn't
+  carry the inputs."""
   session = MagicMock()
-  row1 = MagicMock(from_element_id="t1", to_element_id="s1", weight=1.0)
-  row2 = MagicMock(from_element_id="t1", to_element_id="s2", weight=-1.0)
-  row3 = MagicMock(from_element_id="t2", to_element_id="s3", weight=1.0)
+  row1 = MagicMock(
+    structure_id="struct_a", from_element_id="t1", to_element_id="s1", weight=1.0
+  )
+  row2 = MagicMock(
+    structure_id="struct_a", from_element_id="t1", to_element_id="s2", weight=-1.0
+  )
+  row3 = MagicMock(
+    structure_id="struct_b", from_element_id="t2", to_element_id="s3", weight=1.0
+  )
   result_mock = MagicMock()
   result_mock.__iter__ = lambda self: iter([row1, row2, row3])
   session.execute.return_value = result_mock
 
-  result = _load_calculations(session, element_ids={"t1", "t2"})
+  result = _load_calculations(session, element_ids={"t1", "t2", "s1", "s2", "s3"})
 
   assert set(result.keys()) == {"t1", "t2"}
   assert result["t1"] == [("s1", 1.0), ("s2", -1.0)]
   assert result["t2"] == [("s3", 1.0)]
 
 
+def test_load_calculations_picks_arrangement_whose_summands_are_in_hierarchy() -> None:
+  """When two calc structures target the same element with different
+  arrangements (FAC IS2 multistep vs IS11 single-step both compute
+  fac:OperatingIncomeLoss), pick the one whose summands all live in the
+  disclosure's element set. The arrangement matching the disclosure's
+  shape is the one to use; the other belongs to a different variant."""
+  session = MagicMock()
+  # IS2 multistep: OpIncome = GrossProfit - OpEx (both in hierarchy)
+  is2_row1 = MagicMock(
+    structure_id="is2", from_element_id="opincome", to_element_id="gp", weight=1.0
+  )
+  is2_row2 = MagicMock(
+    structure_id="is2", from_element_id="opincome", to_element_id="opex", weight=-1.0
+  )
+  # IS11 singlestep: OpIncome = Revenues - CostsAndExpenses (CostsAndExpenses NOT in hierarchy)
+  is11_row1 = MagicMock(
+    structure_id="is11", from_element_id="opincome", to_element_id="rev", weight=1.0
+  )
+  is11_row2 = MagicMock(
+    structure_id="is11",
+    from_element_id="opincome",
+    to_element_id="costs_and_expenses",
+    weight=-1.0,
+  )
+  result_mock = MagicMock()
+  result_mock.__iter__ = lambda self: iter([is2_row1, is2_row2, is11_row1, is11_row2])
+  session.execute.return_value = result_mock
+
+  # Hierarchy contains GrossProfit and OpEx but not CostsAndExpenses
+  result = _load_calculations(session, element_ids={"opincome", "gp", "opex", "rev"})
+
+  assert "opincome" in result
+  assert result["opincome"] == [("gp", 1.0), ("opex", -1.0)]
+
+
+def test_load_calculations_prefers_fewest_summands_when_both_arrangements_qualify() -> (
+  None
+):
+  """Tiebreaker when both arrangements have all summands in the
+  hierarchy: the most parsimonious arrangement wins. For IS this picks
+  IS2 (2 summands) over IS11 (3 summands) on multistep disclosures
+  that happen to also carry IS11's inputs."""
+  session = MagicMock()
+  short_a = MagicMock(
+    structure_id="b_short", from_element_id="t", to_element_id="x", weight=1.0
+  )
+  short_b = MagicMock(
+    structure_id="b_short", from_element_id="t", to_element_id="y", weight=-1.0
+  )
+  long_a = MagicMock(
+    structure_id="a_long", from_element_id="t", to_element_id="x", weight=1.0
+  )
+  long_b = MagicMock(
+    structure_id="a_long", from_element_id="t", to_element_id="y", weight=-1.0
+  )
+  long_c = MagicMock(
+    structure_id="a_long", from_element_id="t", to_element_id="z", weight=1.0
+  )
+  result_mock = MagicMock()
+  result_mock.__iter__ = lambda self: iter([short_a, short_b, long_a, long_b, long_c])
+  session.execute.return_value = result_mock
+
+  result = _load_calculations(session, element_ids={"t", "x", "y", "z"})
+
+  assert result["t"] == [("x", 1.0), ("y", -1.0)]
+
+
 def test_load_calculations_defaults_missing_weight_to_one() -> None:
   """Calc arcs with NULL weight default to 1.0 (additive)."""
   session = MagicMock()
-  row = MagicMock(from_element_id="t1", to_element_id="s1", weight=None)
+  row = MagicMock(
+    structure_id="struct_x", from_element_id="t1", to_element_id="s1", weight=None
+  )
   result_mock = MagicMock()
   result_mock.__iter__ = lambda self: iter([row])
   session.execute.return_value = result_mock

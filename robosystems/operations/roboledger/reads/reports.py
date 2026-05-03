@@ -87,7 +87,7 @@ def generate_adhoc_private_statement(
   *,
   statement_type: str,
   periods: list[FactPeriodSpec],
-  taxonomy_id: str = "tax_usgaap_reporting",
+  taxonomy_id: str | None = None,
 ):
   """Generate an ad-hoc private-company statement directly from OLTP data.
 
@@ -95,6 +95,11 @@ def generate_adhoc_private_statement(
   helper builds a one-shot statement from the current ledger using the
   active CoA→GAAP mapping. Used by the `live-financial-statement`
   operation (both REST and MCP) — no saved Report needed.
+
+  When ``taxonomy_id`` is None, resolves to the rs-gaap-presentation
+  taxonomy (default tenant pin) — gives the renderer a stable target
+  with full Disclosure structures. Callers that want fac-presentation
+  or another taxonomy can pass the id explicitly.
 
   Returns the rendered structure grid plus an `unmapped_count` counter.
   Raises `CoaMappingNotFoundError` if the tenant hasn't completed the
@@ -108,9 +113,20 @@ def generate_adhoc_private_statement(
       "No CoA→GAAP mapping found. Run the mapping workflow first."
     )
 
+  resolved_taxonomy_id = taxonomy_id
+  if resolved_taxonomy_id is None:
+    row = session.execute(
+      text(
+        "SELECT id FROM taxonomies WHERE standard = 'rs-gaap-presentation' "
+        "ORDER BY version DESC LIMIT 1"
+      )
+    ).fetchone()
+    if row is not None:
+      resolved_taxonomy_id = row.id
+
   facts = generate_report_facts(
     session=session,
-    taxonomy_id=taxonomy_id,
+    taxonomy_id=resolved_taxonomy_id or "",
     mapping_id=mapping.id,
     periods=periods,
   )
@@ -120,7 +136,7 @@ def generate_adhoc_private_statement(
     facts=facts.facts,
     structure_type=statement_type,
     periods=periods,
-    taxonomy_id=taxonomy_id,
+    taxonomy_id=resolved_taxonomy_id,
   )
 
   return grid, facts.unmapped_count
@@ -605,8 +621,21 @@ def get_live_financial_statement(
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:
-    if row.is_subtotal:
+    # Drop XBRL `is_abstract` rows (`*Abstract`, `*Table`, `*LineItems`,
+    # `*RollUp`). They're presentation scaffolding — section headers and
+    # calc-cluster wrappers — that carry the rolled-up value of their
+    # children in the disclosure DAG but aren't themselves reportable
+    # concepts. Their value is duplicated by the concrete subtotal
+    # underneath them (e.g., `fac:CostRevenueRollUp` mirrors
+    # `fac:CostOfRevenue`).
+    if row.is_abstract:
       continue
+    # Show every concrete row that carries a value, including subtotals.
+    # FAC anchor rows (fac:GrossProfit, fac:OperatingIncomeLoss, …) are
+    # `is_subtotal=True` because they have child summands in the
+    # Disclosure DAG, but their value is the calc-DAG result the reader
+    # most wants to see. The UI distinguishes them via the `is_subtotal`
+    # flag on the response.
     if not any(v != 0.0 for v in row.values):
       continue
     facts.append(

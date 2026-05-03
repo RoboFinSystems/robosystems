@@ -64,7 +64,12 @@ always target concrete ones
 
 ## Response Format
 
-For each element, respond with a JSON array. Each item:
+Respond with a SINGLE JSON array containing one object per input element. \
+Do NOT emit one object per line, do NOT emit multiple arrays, and do NOT add \
+explanatory prose before, between, or after the array. The complete response \
+must parse cleanly with `json.loads(content)` as a list.
+
+Item shape:
 ```json
 {
   "element_id": "the source element ID",

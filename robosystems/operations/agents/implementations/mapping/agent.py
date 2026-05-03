@@ -462,21 +462,32 @@ class MappingAgent(Agent):
       return None
 
   def _parse_response(self, content: str, elements: list[dict]) -> list[dict]:
-    """Parse Bedrock JSON response into mapping results."""
-    try:
-      text = content.strip()
-      if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-          text = text[:-3]
-        text = text.strip()
+    """Parse Bedrock JSON response into mapping results.
 
-      mappings = json.loads(text)
-      if not isinstance(mappings, list):
-        mappings = [mappings]
+    Tolerant of three failure modes Claude exhibits in the wild:
+
+    1. Markdown fences (```json … ```) — stripped before parsing.
+    2. Multiple JSON values back-to-back (one array per element, or an
+       array followed by a trailing object). We scan with
+       ``json.JSONDecoder.raw_decode`` and accumulate every top-level
+       value, flattening lists and unwrapping single objects. This is
+       why ``json.loads`` was failing with "Extra data" on the asset
+       and liability batches — Claude was emitting one mapping object
+       per line instead of a single wrapping array.
+    3. Lines of explanatory prose between values — skipped by advancing
+       past whitespace and any non-`{`/`[` prefix between values.
+    """
+    try:
+      text = self._strip_markdown_fences(content.strip())
+      mappings = self._parse_concatenated_json(text)
+
+      if not mappings:
+        raise json.JSONDecodeError("no JSON values found in response", text, 0)
 
       valid = []
       for m in mappings:
+        if not isinstance(m, dict):
+          continue
         valid.append(
           {
             "element_id": m.get("element_id", ""),
@@ -488,7 +499,7 @@ class MappingAgent(Agent):
         )
       return valid
 
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
       logger.warning(f"Failed to parse Bedrock response: {e}")
       return [
         {
@@ -500,3 +511,47 @@ class MappingAgent(Agent):
         }
         for elem in elements
       ]
+
+  @staticmethod
+  def _strip_markdown_fences(text: str) -> str:
+    """Strip a single ```json … ``` (or bare ```) wrapper if present.
+
+    Claude follows the prompt's "Respond ONLY with the JSON" rule
+    inconsistently — sometimes the response arrives wrapped in a
+    fenced code block, sometimes not, and very occasionally the
+    fences land mid-stream after a leading explanation. We only
+    strip when fences bracket the entire payload.
+    """
+    if not text.startswith("```"):
+      return text
+    after_open = text.split("\n", 1)[1] if "\n" in text else text[3:]
+    if after_open.endswith("```"):
+      after_open = after_open[:-3]
+    return after_open.strip()
+
+  @staticmethod
+  def _parse_concatenated_json(text: str) -> list:
+    """Decode every top-level JSON value in ``text`` and flatten lists.
+
+    Uses ``json.JSONDecoder().raw_decode`` to walk the buffer one
+    value at a time so a response like
+    ``[{...}, {...}]\\n{...}`` or ``{...}\\n{...}\\n{...}``
+    yields all of the contained objects rather than failing the whole
+    parse on the first leftover byte.
+    """
+    decoder = json.JSONDecoder()
+    out: list = []
+    i = 0
+    n = len(text)
+    while i < n:
+      while i < n and text[i] not in "[{":
+        i += 1
+      if i >= n:
+        break
+      value, end = decoder.raw_decode(text, i)
+      if isinstance(value, list):
+        out.extend(value)
+      else:
+        out.append(value)
+      i = end
+    return out

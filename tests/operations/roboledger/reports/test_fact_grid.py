@@ -83,7 +83,9 @@ class TestBuildRows:
     }
 
   def test_simple_hierarchy(self):
-    """Revenue parent with two children — header has no value."""
+    """Revenue parent with two children. Post-order emit: leaves first,
+    then the parent subtotal — matches financial-statement reading
+    convention (line items above their total)."""
     hierarchy = [
       _HierarchyNode(
         element_id="root",
@@ -120,16 +122,17 @@ class TestBuildRows:
     rows = _build_rows(hierarchy, [balances], {})
 
     assert len(rows) == 3
-    # First row: section header now rolls up its children (500.0),
-    # not zero. Abstract/parent rows show the sum of their descendants.
-    assert rows[0].is_subtotal is True
-    assert rows[0].element_name == "Revenues"
-    assert rows[0].values == [500.0]
-    # Children
-    assert rows[1].element_name == "Product Revenue"
-    assert rows[1].values == [300.0]
-    assert rows[2].element_name == "Service Revenue"
-    assert rows[2].values == [200.0]
+    # Post-order: children first, then their parent subtotal.
+    assert rows[0].element_name == "Product Revenue"
+    assert rows[0].values == [300.0]
+    assert rows[0].is_subtotal is False
+    assert rows[1].element_name == "Service Revenue"
+    assert rows[1].values == [200.0]
+    assert rows[1].is_subtotal is False
+    # Parent rolls up to 500.0; flagged as subtotal because it has children.
+    assert rows[2].element_name == "Revenues"
+    assert rows[2].values == [500.0]
+    assert rows[2].is_subtotal is True
 
   def test_nested_hierarchy(self):
     """Two-level nesting: root → abstract parent → leaves."""
@@ -187,22 +190,27 @@ class TestBuildRows:
     rows = _build_rows(hierarchy, [balances], {})
 
     assert len(rows) == 4
-    # Root expenses header now rolls up (85k + 120k = 205k)
-    assert rows[0].element_name == "Expenses"
-    assert rows[0].values == [205000.0]
-    assert rows[0].depth == 0
-    # Operating expenses header rolls up its descendants too
-    assert rows[1].element_name == "Operating Expenses"
-    assert rows[1].values == [205000.0]
-    assert rows[1].depth == 1
-    # Leaves
-    assert rows[2].element_name == "R&D"
-    assert rows[2].values == [85000.0]
-    assert rows[3].element_name == "SG&A"
-    assert rows[3].values == [120000.0]
+    # Post-order: deepest leaves first, then ascending parent subtotals.
+    assert rows[0].element_name == "R&D"
+    assert rows[0].values == [85000.0]
+    assert rows[0].depth == 2
+    assert rows[1].element_name == "SG&A"
+    assert rows[1].values == [120000.0]
+    assert rows[1].depth == 2
+    # Operating expenses rolls up its leaves
+    assert rows[2].element_name == "Operating Expenses"
+    assert rows[2].values == [205000.0]
+    assert rows[2].depth == 1
+    # Root rolls up everything below (same value here — only one branch)
+    assert rows[3].element_name == "Expenses"
+    assert rows[3].values == [205000.0]
+    assert rows[3].depth == 0
 
   def test_empty_balances(self):
-    """No mapped balances → all zeros."""
+    """No mapped balances → every row is zero, and the renderer
+    suppresses zero-value rows so the grid comes back empty. Readers
+    should never see a wall of $0.00 lines for a structure no facts
+    populate."""
     hierarchy = [
       _HierarchyNode(
         element_id="root",
@@ -227,9 +235,7 @@ class TestBuildRows:
     ]
 
     rows = _build_rows(hierarchy, [{}], {})
-    assert len(rows) == 2
-    assert rows[0].values == [0.0]
-    assert rows[1].values == [0.0]
+    assert rows == []
 
   def test_multi_period(self):
     """Multiple period columns should produce values list per row."""
@@ -328,11 +334,20 @@ class TestBuildRows:
     rows = _build_rows(hierarchy, [current], calculations)
 
     assert len(rows) == 4
-    assert rows[0].is_subtotal is True  # header
-    assert rows[1].values == [1000.0]  # Revenue
-    assert rows[2].values == [400.0]  # COGS
-    assert rows[3].element_name == "Gross Profit"
-    assert rows[3].values == [600.0]  # 1000 - 400
+    # Post-order: leaves first, then parent.
+    assert rows[0].element_name == "Revenue"
+    assert rows[0].values == [1000.0]
+    assert rows[1].element_name == "Cost of Revenue"
+    assert rows[1].values == [400.0]
+    # Gross Profit is a calc-DAG target — flagged as subtotal even though
+    # its summands (Revenue, COGS) are siblings, not children.
+    assert rows[2].element_name == "Gross Profit"
+    assert rows[2].values == [600.0]
+    assert rows[2].is_subtotal is True
+    # Root parent rolls up its concrete-fact children (Revenue + COGS),
+    # NOT Gross Profit (which would double-count).
+    assert rows[3].element_name == "Revenues"
+    assert rows[3].is_subtotal is True
 
   def test_chained_calculations(self):
     """Calculations can reference other calculated elements."""

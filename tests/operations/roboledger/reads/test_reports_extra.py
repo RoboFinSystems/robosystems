@@ -130,10 +130,10 @@ class TestBuildCurrentAndPriorPeriods:
 
 class TestGetLiveFinancialStatement:
   @pytest.mark.unit
-  def test_happy_path_filters_subtotals_and_zeros(self):
+  def test_happy_path_filters_abstracts_and_zeros_and_keeps_subtotals(self):
     session = MagicMock()
 
-    def _row(name, values, is_subtotal=False):
+    def _row(name, values, is_subtotal=False, is_abstract=False):
       r = MagicMock()
       r.element_qname = f"us-gaap:{name}"
       r.element_name = name
@@ -141,13 +141,20 @@ class TestGetLiveFinancialStatement:
       r.values = values
       r.depth = 0
       r.is_subtotal = is_subtotal
+      r.is_abstract = is_abstract
       return r
 
     mock_grid = MagicMock()
     mock_grid.rows = [
       _row("Assets", [100.0, 90.0]),
-      _row("TotalAssets", [100.0, 90.0], is_subtotal=True),  # filtered
-      _row("Cash", [0.0, 0.0]),  # filtered (all zero)
+      # Subtotal with value: KEPT — FAC anchors / calc targets like
+      # GrossProfit are subtotals the reader most wants to see.
+      _row("TotalAssets", [100.0, 90.0], is_subtotal=True),
+      # Abstract container: dropped — XBRL `*Abstract`/`*Table`/
+      # `*RollUp` rows are presentation scaffolding, never reportable.
+      _row("AssetsAbstract", [100.0, 90.0], is_abstract=True),
+      # All-zero: dropped.
+      _row("Cash", [0.0, 0.0]),
       _row("Revenue", [50.0, None]),
     ]
 
@@ -167,10 +174,10 @@ class TestGetLiveFinancialStatement:
     assert resp.graph_id == "kg_test"
     assert resp.statement_type == "income_statement"
     assert resp.unmapped_count == 3
-    assert resp.fact_count == 2
+    assert resp.fact_count == 3
     assert resp.truncated is False
     names = [f.name for f in resp.facts]
-    assert names == ["Assets", "Revenue"]
+    assert names == ["Assets", "TotalAssets", "Revenue"]
 
   @pytest.mark.unit
   def test_limit_truncates(self):
@@ -184,6 +191,7 @@ class TestGetLiveFinancialStatement:
       r.values = [float(i + 1)]
       r.depth = 0
       r.is_subtotal = False
+      r.is_abstract = False
       rows.append(r)
     mock_grid = MagicMock()
     mock_grid.rows = rows
