@@ -792,6 +792,7 @@ SEED_FILES = [
   # Cross-taxonomy mapping + calculation + presentation arc packs
   SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-calculations" / "v1" / "taxonomy.jsonld",
+  SEEDS_DIR / "rs-gaap-calculations" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "fac-presentation" / "v1" / "taxonomy.jsonld",
   SEEDS_DIR / "type-subtype" / "v1" / "taxonomy.jsonld",
   # Phase d.2 — verification rules (Seattle Method). Last because rules
@@ -1278,12 +1279,19 @@ def upgrade() -> None:
   # the tenant copy picks up populated values rather than NULL. See
   # ``local/docs/specs/information-block.md`` section 5.9 block inventory
   # for the arrangement defaults.
+  #
+  # ``concept_arrangement`` and ``member_arrangement`` are only set when
+  # NULL — the seed loader (``jsonld_loader._extract_structures``) already
+  # writes Charlie's Concept Arrangement Pattern (``arithmetic`` /
+  # ``roll_forward`` / etc.) explicitly per Disclosure Structure when the
+  # seed declares ``conceptArrangementPattern``. This backfill is the
+  # legacy default for pre-Stage-2 seeds that don't declare a CAP.
   conn.execute(
     text(
       """
       UPDATE public.structures
-      SET concept_arrangement = 'roll_up',
-          member_arrangement = 'aggregation',
+      SET concept_arrangement = COALESCE(concept_arrangement, 'roll_up'),
+          member_arrangement = COALESCE(member_arrangement, 'aggregation'),
           artifact_mechanics = jsonb_build_object(
             'kind', 'statement_renderer'
           )

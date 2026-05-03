@@ -14,6 +14,32 @@
     "hasChild": {
       "@id": "https://robosystems.ai/vocab/hasChild",
       "@type": "@id"
+    },
+    "fac": "http://www.xbrlsite.com/fac#",
+    "arcFrom": {
+      "@id": "https://robosystems.ai/vocab/arcFrom",
+      "@type": "@id"
+    },
+    "arcTo": {
+      "@id": "https://robosystems.ai/vocab/arcTo",
+      "@type": "@id"
+    },
+    "arcAssociationType": {
+      "@id": "https://robosystems.ai/vocab/arcAssociationType"
+    },
+    "arcRoleUri": {
+      "@id": "https://robosystems.ai/vocab/arcRoleUri"
+    },
+    "arcOrder": {
+      "@id": "https://robosystems.ai/vocab/arcOrder",
+      "@type": "http://www.w3.org/2001/XMLSchema#decimal"
+    },
+    "arcWeight": {
+      "@id": "https://robosystems.ai/vocab/arcWeight",
+      "@type": "http://www.w3.org/2001/XMLSchema#decimal"
+    },
+    "conceptArrangementPattern": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
     }
   },
   "standard": "rs-gaap-presentation",
@@ -27,19 +53,19 @@
     {
       "@id": "_:rs-gaap-pres-bs",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/rs-gaap-presentation/rs-gaap-pres-bs",
-      "structureName": "rs-gaap \u2014 Balance Sheet presentation",
+      "structureName": "rs-gaap — Balance Sheet presentation",
       "structureType": "balance_sheet"
     },
     {
       "@id": "_:rs-gaap-pres-is",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/rs-gaap-presentation/rs-gaap-pres-is",
-      "structureName": "rs-gaap \u2014 Income Statement presentation",
+      "structureName": "rs-gaap — Income Statement presentation",
       "structureType": "income_statement"
     },
     {
       "@id": "_:rs-gaap-pres-cf",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/rs-gaap-presentation/rs-gaap-pres-cf",
-      "structureName": "rs-gaap \u2014 Cash Flow Statement presentation",
+      "structureName": "rs-gaap — Cash Flow Statement presentation",
       "structureType": "cash_flow_statement"
     },
     {
@@ -7696,6 +7722,457 @@
           "@id": "rs-gaap:UnusualOrInfrequentItemLossGross"
         }
       ]
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "structureName": "rs-gaap — Income Statement — Multi-step",
+      "structureType": "income_statement",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-1",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementAbstract"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeStatementMultiStepTable"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10000.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-2",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementMultiStepTable"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeStatementLineItems"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-3",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementLineItems"
+      },
+      "arcTo": {
+        "@id": "fac:RevenuesRollUp"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-4",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementLineItems"
+      },
+      "arcTo": {
+        "@id": "fac:CostRevenueRollUp"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-5",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementLineItems"
+      },
+      "arcTo": {
+        "@id": "fac:GrossProfitRollUp"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-6",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementLineItems"
+      },
+      "arcTo": {
+        "@id": "fac:OperatingIncomeLossRollUp"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-7",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementLineItems"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10600.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-8",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementLineItems"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10700.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-9",
+      "arcFrom": {
+        "@id": "fac:IncomeStatementLineItems"
+      },
+      "arcTo": {
+        "@id": "fac:NetIncomeLossRollUp"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10800.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-10",
+      "arcFrom": {
+        "@id": "fac:RevenuesRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:Revenues"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10900.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-11",
+      "arcFrom": {
+        "@id": "fac:Revenues"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:SalesRevenueNet"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11000.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-12",
+      "arcFrom": {
+        "@id": "fac:Revenues"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-13",
+      "arcFrom": {
+        "@id": "fac:CostRevenueRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:CostOfRevenue"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-14",
+      "arcFrom": {
+        "@id": "fac:CostOfRevenue"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:CostOfGoodsSold"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-15",
+      "arcFrom": {
+        "@id": "fac:CostOfRevenue"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-16",
+      "arcFrom": {
+        "@id": "fac:GrossProfitRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:GrossProfit"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-17",
+      "arcFrom": {
+        "@id": "fac:GrossProfitRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:Revenues"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11600.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-18",
+      "arcFrom": {
+        "@id": "fac:GrossProfitRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:CostOfRevenue"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11700.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-19",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLossRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11800.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-20",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLossRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:GrossProfit"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11900.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-21",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLossRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:OperatingExpenses"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12000.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-22",
+      "arcFrom": {
+        "@id": "fac:OperatingIncomeLossRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:OtherOperatingIncomeExpenses"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-23",
+      "arcFrom": {
+        "@id": "fac:OperatingExpenses"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-24",
+      "arcFrom": {
+        "@id": "fac:OperatingExpenses"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:ResearchAndDevelopmentExpense"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-25",
+      "arcFrom": {
+        "@id": "fac:OperatingExpenses"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:DepreciationDepletionAndAmortization"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-26",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-27",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:OperatingIncomeLoss"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12600.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-28",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:NonoperatingIncomeLoss"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12700.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-29",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:InterestAndDebtExpense"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12800.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-30",
+      "arcFrom": {
+        "@id": "fac:NonoperatingIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:OtherNonoperatingIncomeExpense"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 12900.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-31",
+      "arcFrom": {
+        "@id": "fac:InterestAndDebtExpense"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:InterestExpense"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 13000.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-32",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTax"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 13100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-33",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 13200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-34",
+      "arcFrom": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeTaxExpenseBenefit"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 13300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-35",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLossRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:NetIncomeLoss"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 13400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-36",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLossRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromContinuingOperationsAfterTax"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 13500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-37",
+      "arcFrom": {
+        "@id": "fac:NetIncomeLossRollUp"
+      },
+      "arcTo": {
+        "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax"
+      },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 13600.0
     }
   ]
 }

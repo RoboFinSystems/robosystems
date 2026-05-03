@@ -583,6 +583,7 @@ def _extract_structures(
   role_pred = URIRef(f"{RS_NS}roleUri")
   name_pred = URIRef(f"{RS_NS}structureName")
   type_pred = URIRef(f"{RS_NS}structureType")
+  cap_pred = URIRef(f"{RS_NS}conceptArrangementPattern")
   for subject, role_uri in graph.subject_objects(role_pred):
     names = list(graph.objects(subject, name_pred))
     name = str(names[0]) if names else str(role_uri).rsplit("/", 1)[-1]
@@ -608,10 +609,36 @@ def _extract_structures(
         stype = "equity_statement"
       else:
         stype = "custom"
+
+    # Concept Arrangement Pattern: explicit field wins; otherwise default
+    # by structure_type.
+    explicit_caps = list(graph.objects(subject, cap_pred))
+    if explicit_caps:
+      cap: str | None = str(explicit_caps[0])
+    else:
+      cap = _default_concept_arrangement(stype)
+
     structures.append(
-      StructureSpec(name=name, role_uri=str(role_uri), structure_type=stype)
+      StructureSpec(
+        name=name,
+        role_uri=str(role_uri),
+        structure_type=stype,
+        concept_arrangement=cap,
+      )
     )
   return structures
+
+
+def _default_concept_arrangement(structure_type: str) -> str | None:
+  """Default Concept Arrangement Pattern per structure_type when seed
+  doesn't declare one explicitly. Charlie's vocabulary."""
+  return {
+    "income_statement": "arithmetic",
+    "balance_sheet": "arithmetic",
+    "cash_flow_statement": "arithmetic",
+    "equity_statement": "roll_forward",
+    "validation_rules": "arithmetic",
+  }.get(structure_type)
 
 
 def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:

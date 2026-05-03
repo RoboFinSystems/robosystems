@@ -265,6 +265,7 @@ def create_library_taxonomy_elements(
         name=structure.name,
         description=None,
         structure_type=structure.structure_type,
+        concept_arrangement=structure.concept_arrangement,
         taxonomy_id=taxonomy_id,
         is_active=True,
         metadata={"role_uri": structure.role_uri},

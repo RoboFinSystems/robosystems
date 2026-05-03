@@ -1,0 +1,202 @@
+{
+  "@context": {
+    "rs": "https://robosystems.ai/vocab/",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "fac": "http://www.xbrlsite.com/fac#",
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "structureType": {
+      "@id": "https://robosystems.ai/vocab/structureType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    },
+    "conceptArrangementPattern": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
+    },
+    "arcFrom": {
+      "@id": "https://robosystems.ai/vocab/arcFrom",
+      "@type": "@id"
+    },
+    "arcTo": {
+      "@id": "https://robosystems.ai/vocab/arcTo",
+      "@type": "@id"
+    },
+    "arcAssociationType": {
+      "@id": "https://robosystems.ai/vocab/arcAssociationType"
+    },
+    "arcRoleUri": {
+      "@id": "https://robosystems.ai/vocab/arcRoleUri"
+    },
+    "arcOrder": {
+      "@id": "https://robosystems.ai/vocab/arcOrder",
+      "@type": "http://www.w3.org/2001/XMLSchema#decimal"
+    },
+    "arcWeight": {
+      "@id": "https://robosystems.ai/vocab/arcWeight",
+      "@type": "http://www.w3.org/2001/XMLSchema#decimal"
+    }
+  },
+  "standard": "rs-gaap-calculations",
+  "version": "v1",
+  "taxonomy_type": "mapping",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/calculations/",
+  "origin": "native",
+  "created_at": "2026-05-02",
+  "description": "RoboSystems calculation arcs for rs-gaap concepts: leaf-to-FAC summation equations + any rs-gaap-only subtotals not declared in fac-calculations. Composes with fac-calculations at runtime — the renderer builds a single calc DAG from both seeds and topo-sorts it to drive Arithmetic CAP compilation.",
+  "@graph": [
+    {
+      "@id": "_:rs-gaap-calc-is-rev",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
+      "structureName": "rs-gaap calc IS-Rev — fac:Revenues = Σ rs-gaap revenue leaves",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-rev-arc-1",
+      "arcFrom": {
+        "@id": "fac:Revenues"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:SalesRevenueNet"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-rev-arc-2",
+      "arcFrom": {
+        "@id": "fac:Revenues"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
+      "arcWeight": 1.0,
+      "arcOrder": 200.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-cor",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "structureName": "rs-gaap calc IS-COR — fac:CostOfRevenue = Σ rs-gaap COGS leaves",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-cor-arc-1",
+      "arcFrom": {
+        "@id": "fac:CostOfRevenue"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:CostOfGoodsSold"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-cor-arc-2",
+      "arcFrom": {
+        "@id": "fac:CostOfRevenue"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "arcWeight": 1.0,
+      "arcOrder": 200.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-opex",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "structureName": "rs-gaap calc IS-OpEx — fac:OperatingExpenses = Σ rs-gaap OpEx leaves",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-opex-arc-1",
+      "arcFrom": {
+        "@id": "fac:OperatingExpenses"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-opex-arc-2",
+      "arcFrom": {
+        "@id": "fac:OperatingExpenses"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:ResearchAndDevelopmentExpense"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "arcWeight": 1.0,
+      "arcOrder": 200.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-opex-arc-3",
+      "arcFrom": {
+        "@id": "fac:OperatingExpenses"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:DepreciationDepletionAndAmortization"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "arcWeight": 1.0,
+      "arcOrder": 300.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-nonop",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "structureName": "rs-gaap calc IS-NonOp — fac:NonoperatingIncomeLoss = Σ rs-gaap nonop leaves",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-nonop-arc-1",
+      "arcFrom": {
+        "@id": "fac:NonoperatingIncomeLoss"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:OtherNonoperatingIncomeExpense"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-intdebt",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-IntDebt",
+      "structureName": "rs-gaap calc IS-IntDebt — fac:InterestAndDebtExpense = Σ rs-gaap interest expense leaves",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-intdebt-arc-1",
+      "arcFrom": {
+        "@id": "fac:InterestAndDebtExpense"
+      },
+      "arcTo": {
+        "@id": "rs-gaap:InterestExpense"
+      },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-IntDebt",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    }
+  ]
+}

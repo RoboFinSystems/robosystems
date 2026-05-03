@@ -115,6 +115,7 @@ def list_taxonomy_arcs(
   session: Session,
   taxonomy_id: str,
   association_type: str | None = None,
+  structure_id: str | None = None,
   limit: int = 200,
   offset: int = 0,
 ) -> list[LibraryAssociationResponse]:
@@ -124,6 +125,11 @@ def list_taxonomy_arcs(
   is the whole point — the taxonomy's value is in its arcs, not in any
   concepts it owns. Joins from → element and to → element so the response
   carries qnames + names for UI display without a second round-trip.
+
+  Pass ``structure_id`` to scope the result to a single structure (one
+  presentation/calculation hierarchy). The Structures view in /library uses
+  this to render arcs for one role at a time without paging through every
+  arc the taxonomy contributes.
   """
   from_elem = aliased(Element, name="from_elem")
   to_elem = aliased(Element, name="to_elem")
@@ -144,6 +150,8 @@ def list_taxonomy_arcs(
   )
   if association_type is not None:
     query = query.where(Association.association_type == association_type)
+  if structure_id is not None:
+    query = query.where(Association.structure_id == structure_id)
   query = (
     query.order_by(
       from_elem.qname.asc().nulls_last(),
@@ -174,13 +182,20 @@ def list_taxonomy_arcs(
   ]
 
 
-def count_taxonomy_arcs(session: Session, taxonomy_id: str) -> int:
+def count_taxonomy_arcs(
+  session: Session,
+  taxonomy_id: str,
+  association_type: str | None = None,
+  structure_id: str | None = None,
+) -> int:
   """Count every arc contributed by a taxonomy."""
-  return int(
-    session.execute(
-      select(func.count(Association.id))
-      .join(Structure, Association.structure_id == Structure.id)
-      .where(Structure.taxonomy_id == taxonomy_id)
-    ).scalar()
-    or 0
+  query = (
+    select(func.count(Association.id))
+    .join(Structure, Association.structure_id == Structure.id)
+    .where(Structure.taxonomy_id == taxonomy_id)
   )
+  if association_type is not None:
+    query = query.where(Association.association_type == association_type)
+  if structure_id is not None:
+    query = query.where(Association.structure_id == structure_id)
+  return int(session.execute(query).scalar() or 0)

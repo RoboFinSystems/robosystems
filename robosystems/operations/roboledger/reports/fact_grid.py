@@ -213,10 +213,13 @@ def render_structure_view(
   Returns:
       FactGrid with rows ordered per the structure's hierarchy.
   """
-  # Load structure hierarchy
-  structure_id, structure_name, hierarchy = _load_reporting_structure(
-    session, structure_type, taxonomy_id=taxonomy_id
-  )
+  # Load Disclosure structure + Concept Arrangement Pattern
+  (
+    structure_id,
+    structure_name,
+    concept_arrangement,
+    hierarchy,
+  ) = _load_reporting_structure(session, structure_type, taxonomy_id=taxonomy_id)
 
   if not hierarchy:
     return FactGrid(
@@ -234,8 +237,15 @@ def render_structure_view(
   # facts that resolved to the same ancestor).
   period_balances = [_facts_to_balance_dict(rolled_up, p.start, p.end) for p in periods]
 
-  # Load calculation associations for computed elements (Total Assets, Net Income, etc.)
-  calculations = _load_calculations(session, structure_id)
+  # Load calculation arcs. For ``arithmetic`` Disclosures we compose
+  # calcs across taxonomies (fac-calculations + rs-gaap-calculations +
+  # any others) — load all calcs whose subtotal target appears in the
+  # Disclosure's element set. Other CAPs use the legacy single-structure
+  # behavior so existing rendering paths don't change.
+  if concept_arrangement == "arithmetic":
+    calculations = _load_calculations(session, element_ids=in_structure)
+  else:
+    calculations = _load_calculations(session, structure_id=structure_id)
 
   # Walk hierarchy depth-first
   # Facts from the facts table are already natural-signed, so skip sign conversion
@@ -906,7 +916,7 @@ def _load_reporting_structure(
   session: Session,
   report_type: str,
   taxonomy_id: str | None = None,
-) -> tuple[str, str, list[_HierarchyNode]]:
+) -> tuple[str, str, str | None, list[_HierarchyNode]]:
   """Load the reporting structure hierarchy for the given report type.
 
   When ``taxonomy_id`` is provided, restricts structure selection to
@@ -915,12 +925,15 @@ def _load_reporting_structure(
   the filter the query returns whichever row the planner happens to
   pick first.
 
-  Returns (structure_id, structure_name, root_nodes).
+  Returns (structure_id, structure_name, concept_arrangement, root_nodes).
+  ``concept_arrangement`` is Charlie's CAP declared on the Disclosure
+  (``arithmetic`` / ``roll_up`` / ``roll_forward`` / ``hierarchy``);
+  the renderer uses it to pick a compilation strategy.
   """
   if taxonomy_id is not None:
     struct_result = session.execute(
       text("""
-        SELECT id, name FROM structures
+        SELECT id, name, concept_arrangement FROM structures
         WHERE structure_type = :report_type
           AND taxonomy_id = :taxonomy_id
         LIMIT 1
@@ -933,7 +946,7 @@ def _load_reporting_structure(
     # only one or doesn't care which.
     struct_result = session.execute(
       text("""
-        SELECT id, name FROM structures
+        SELECT id, name, concept_arrangement FROM structures
         WHERE structure_type = :report_type
         LIMIT 1
       """),
@@ -941,10 +954,11 @@ def _load_reporting_structure(
     )
   struct_row = struct_result.fetchone()
   if not struct_row:
-    return "", "", []
+    return "", "", None, []
 
   structure_id = struct_row.id
   structure_name = struct_row.name
+  concept_arrangement = struct_row.concept_arrangement
 
   # Load all elements and associations for this structure.
   # Classification is resolved via element_traits → classifications
@@ -1074,7 +1088,7 @@ def _load_reporting_structure(
     if root_node is not None:
       roots.append(root_node)
 
-  return structure_id, structure_name, roots
+  return structure_id, structure_name, concept_arrangement, roots
 
 
 def _load_root_order(
@@ -1102,29 +1116,104 @@ def _load_root_order(
 
 def _load_calculations(
   session: Session,
-  structure_id: str,
+  structure_id: str | None = None,
+  element_ids: set[str] | None = None,
 ) -> dict[str, list[tuple[str, float]]]:
-  """Load calculation associations for a structure.
+  """Load calculation associations.
 
-  Returns a dict mapping computed element ID → list of (source_element_id, weight).
+  Two modes:
+
+  1. **Single-structure (legacy)** — pass ``structure_id``. Returns calcs
+     authored INSIDE that structure (the older convention where presentation +
+     calculation arcs lived in the same structure).
+  2. **Cross-structure (Stage 2 disclosure rebuild)** — pass ``element_ids``
+     (the set of element ids reachable in the Disclosure hierarchy). Returns
+     calcs from ANY structure whose subtotal target (``from_element_id``) is
+     in the hierarchy. This composes ``fac-calculations`` (FAC's 18 canonical
+     equations) + ``rs-gaap-calculations`` (rs-gaap leaf→FAC summations) +
+     any other calc structures into a single calc DAG for the renderer.
+
+  Returns a dict mapping subtotal element_id → list of (summand element_id, weight).
   For example, Total Assets might map to [(Current Assets, 1.0), (Non-Current Assets, 1.0)].
   """
-  result = session.execute(
-    text("""
-      SELECT from_element_id, to_element_id, weight
-      FROM associations
-      WHERE structure_id = :structure_id
-        AND association_type = 'calculation'
-      ORDER BY order_value
-    """),
-    {"structure_id": structure_id},
-  )
+  if structure_id is not None:
+    result = session.execute(
+      text("""
+        SELECT from_element_id, to_element_id, weight
+        FROM associations
+        WHERE structure_id = :structure_id
+          AND association_type = 'calculation'
+        ORDER BY order_value
+      """),
+      {"structure_id": structure_id},
+    )
+  elif element_ids:
+    # Cross-structure load. Filter to calcs whose subtotal target lives
+    # in the Disclosure — that's the set the renderer can actually
+    # position. Calcs whose target is outside the hierarchy are
+    # irrelevant for this rendering pass.
+    placeholders = ", ".join(f":e{i}" for i in range(len(element_ids)))
+    params = {f"e{i}": eid for i, eid in enumerate(element_ids)}
+    result = session.execute(
+      text(f"""
+        SELECT from_element_id, to_element_id, weight
+        FROM associations
+        WHERE association_type = 'calculation'
+          AND from_element_id IN ({placeholders})
+        ORDER BY order_value
+      """),
+      params,
+    )
+  else:
+    return {}
 
   calculations: dict[str, list[tuple[str, float]]] = {}
   for row in result:
     weight = row.weight if row.weight is not None else 1.0
     calculations.setdefault(row.from_element_id, []).append((row.to_element_id, weight))
   return calculations
+
+
+def _topo_sort_calculations(
+  calculations: dict[str, list[tuple[str, float]]],
+) -> list[str]:
+  """Return calc subtotal targets in topological dependency order.
+
+  When calcs chain (e.g., GrossProfit = Rev - COGS, then OperatingIncome =
+  GrossProfit - OpEx, then NetIncome = OperatingIncome - Tax), the renderer
+  must compute them in order so each depends on the resolved values of the
+  prior ones. Returns target ids in the order they should be computed.
+  Targets with no internal dependencies come first.
+  """
+  targets = set(calculations.keys())
+  # Edge: target → target it depends on (when its summand is itself a
+  # calc target). Inputs that are leaves (not calc targets) don't create
+  # edges.
+  deps: dict[str, set[str]] = {t: set() for t in targets}
+  for target, sources in calculations.items():
+    for src_id, _ in sources:
+      if src_id in targets:
+        deps[target].add(src_id)
+
+  # Kahn's algorithm: emit nodes with no remaining deps; remove from graph.
+  ready = [t for t, d in deps.items() if not d]
+  ordered: list[str] = []
+  while ready:
+    n = ready.pop(0)
+    ordered.append(n)
+    for other, other_deps in deps.items():
+      if n in other_deps:
+        other_deps.discard(n)
+        if not other_deps and other not in ordered and other not in ready:
+          ready.append(other)
+  # Any remaining targets indicate a cycle in the calc DAG — emit them
+  # last in arbitrary order. The renderer's existing behavior is to use
+  # whatever values are present, so a cycle just means one iteration of
+  # stale values rather than a crash.
+  for t in targets:
+    if t not in ordered:
+      ordered.append(t)
+  return ordered
 
 
 def _balance_value(
@@ -1190,9 +1279,12 @@ def _build_rows(
     _collect(root)
 
   # Resolve calculations (may chain: Gross Profit → Operating Income → Net Income).
-  # Iterate in definition order; each resolved value is stored so
-  # downstream calculations can reference it.
-  for elem_id, sources in calculations.items():
+  # Topologically sort by dependency so each subtotal is computed AFTER
+  # the subtotals it depends on. Without this, a calc whose summand is
+  # itself a calc target gets a stale value (or zero) when iterated in
+  # dict insertion order.
+  for elem_id in _topo_sort_calculations(calculations):
+    sources = calculations[elem_id]
     for i in range(n_periods):
       computed_per_period[i][elem_id] = sum(
         computed_per_period[i].get(src_id, 0.0) * weight for src_id, weight in sources

@@ -164,6 +164,17 @@ class StructureSpec(BaseModel):
       "equity_statement | chart_of_accounts | coa_mapping | schedule | custom"
     ),
   )
+  concept_arrangement: str | None = Field(
+    None,
+    description=(
+      "Charlie's Concept Arrangement Pattern declared on this Disclosure: "
+      "arithmetic | roll_up | roll_forward | variance | adjustment | set | "
+      "textblock. Drives the renderer's compilation strategy. When None, the "
+      "renderer falls back to a per-structure_type default (income_statement "
+      "/ balance_sheet / cash_flow_statement → arithmetic; equity_statement "
+      "→ roll_forward; validation_rules → arithmetic)."
+    ),
+  )
 
 
 class RuleTargetSpec(BaseModel):
