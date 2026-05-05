@@ -121,7 +121,7 @@ dev = [
 
     # AWS development tools
     "awscli-local>=0.22.0,<1.0",
-    "cfn-lint>=1.37.0,<2.0",
+    "cfn-lint>=1.50.1,<2.0",
     "moto[s3]>=5.1.6,<6.0",
 
     # Development utilities
