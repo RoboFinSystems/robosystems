@@ -54,7 +54,7 @@ dependencies = [
     "opensearch-py>=2.8.0,<3.0",
     # Data Orchestration (Dagster)
     "dagster>=1.13.1,<2.0",
-    "dagster-webserver>=1.13.0,<2.0",
+    "dagster-webserver>=1.13.3,<2.0",
     "dagster-postgres>=0.29.0,<1.0",
     "dagster-aws>=0.29.0,<1.0",
     # Data Transformation (dbt)
@@ -121,7 +121,7 @@ dev = [
 
     # AWS development tools
     "awscli-local>=0.22.0,<1.0",
-    "cfn-lint>=1.37.0,<2.0",
+    "cfn-lint>=1.50.1,<2.0",
     "moto[s3]>=5.1.6,<6.0",
 
     # Development utilities
