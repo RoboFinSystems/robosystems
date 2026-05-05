@@ -55,12 +55,18 @@ VALID_STRUCTURE_TYPES = {
   "custom",
 }
 
-# Statement types accepted by the live (OLTP) path — cash_flow_statement is
-# not yet supported on OLTP (no generator). Shared across REST router and
-# MCP tool so they stay in sync.
+# Statement types accepted by the live (OLTP) path. cash_flow_statement
+# is supported via the rs-gaap-presentation CashFlow-indirect Disclosure;
+# the renderer compiles it like any other arithmetic CAP, but for OLTP
+# data without explicit operating/investing/financing tagging, leaf rows
+# typically render zero (filtered out as empty) — the structure is in
+# place for sources that DO post directly to those leaves (e.g. SEC
+# filings, manual close adjustments). Shared across REST router and MCP
+# tool so they stay in sync.
 LIVE_STATEMENT_TYPES: tuple[str, ...] = (
   "income_statement",
   "balance_sheet",
+  "cash_flow_statement",
   "equity_statement",
 )
 

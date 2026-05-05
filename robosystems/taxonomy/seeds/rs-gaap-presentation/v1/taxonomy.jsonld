@@ -8564,6 +8564,141 @@
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
       "arcOrder": 24700.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "structureName": "rs-gaap — Cash Flow Statement — Indirect",
+      "structureType": "cash_flow_statement",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-1",
+      "arcFrom": { "@id": "fac:CashFlowStatementAbstract" },
+      "arcTo": { "@id": "fac:CashFlowStatementTable" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30000.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-2",
+      "arcFrom": { "@id": "fac:CashFlowStatementTable" },
+      "arcTo": { "@id": "fac:CashFlowStatementLineItems" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-3",
+      "arcFrom": { "@id": "fac:CashFlowStatementLineItems" },
+      "arcTo": { "@id": "fac:NetCashFlowRollUp" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-4",
+      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
+      "arcTo": { "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-5",
+      "arcFrom": { "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp" },
+      "arcTo": { "@id": "fac:NetCashFlowFromOperatingActivities" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-6",
+      "arcFrom": { "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp" },
+      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-7",
+      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
+      "arcTo": { "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30600.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-8",
+      "arcFrom": { "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp" },
+      "arcTo": { "@id": "fac:NetCashFlowFromInvestingActivities" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30700.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-9",
+      "arcFrom": { "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp" },
+      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30800.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-10",
+      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
+      "arcTo": { "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30900.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-11",
+      "arcFrom": { "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp" },
+      "arcTo": { "@id": "fac:NetCashFlowFromFinancingActivities" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 31000.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-12",
+      "arcFrom": { "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp" },
+      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 31100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-13",
+      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
+      "arcTo": { "@id": "fac:NetCashFlow" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 31200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-14",
+      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
+      "arcTo": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 31300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-15",
+      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
+      "arcTo": { "@id": "fac:ExchangeGainsLosses" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 31400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-16",
+      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
+      "arcTo": { "@id": "rs-gaap:EffectOfExchangeRateOnCash" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 31500.0
     }
   ]
 }
