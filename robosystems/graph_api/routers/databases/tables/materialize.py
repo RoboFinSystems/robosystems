@@ -580,6 +580,28 @@ async def fork_from_parent_duckdb(
       detail="Fork not allowed on read-only nodes",
     )
 
+  # Mark this instance busy so GHA pre-refresh workflows don't cycle the
+  # container mid-fork. Same rationale as materialize_table — fork is a
+  # multi-table COPY across DuckDB → LadybugDB, equally destructive.
+  async with instance_busy(env.INSTANCE_ID, OP_KIND_MATERIALIZATION):
+    return await _fork_from_parent_duckdb_impl(
+      parent_graph_id=parent_graph_id,
+      subgraph_id=subgraph_id,
+      request=request,
+      ladybug_service=ladybug_service,
+      start_time=start_time,
+    )
+
+
+async def _fork_from_parent_duckdb_impl(
+  parent_graph_id: str,
+  subgraph_id: str,
+  request: ForkFromParentRequest,
+  ladybug_service,
+  start_time: float,
+) -> ForkFromParentResponse:
+  import time
+
   try:
     parent_duck_path = f"{env.DUCKDB_STAGING_PATH}/{parent_graph_id}.duckdb"
 

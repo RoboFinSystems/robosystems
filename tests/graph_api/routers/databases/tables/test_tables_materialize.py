@@ -76,17 +76,61 @@ def test_materialize_endpoint_publishes_busy_counter(monkeypatch, app_client):
   # Increment on entry, decrement on exit.
   assert counter_mock.await_count == 2
   deltas = [
-    call.kwargs.get("delta", call.args[1]) for call in counter_mock.await_args_list
+    call.kwargs.get("delta", call.args[1] if len(call.args) > 1 else None)
+    for call in counter_mock.await_args_list
   ]
   assert deltas == [1, -1]
   # All increments tagged with the materialization op_kind.
   kinds = [
-    call.kwargs.get("op_kind", call.args[2]) for call in counter_mock.await_args_list
+    call.kwargs.get("op_kind", call.args[2] if len(call.args) > 2 else None)
+    for call in counter_mock.await_args_list
   ]
   assert kinds == [
     materialize.OP_KIND_MATERIALIZATION,
     materialize.OP_KIND_MATERIALIZATION,
   ]
+
+
+def test_fork_endpoint_publishes_busy_counter(monkeypatch, app_client):
+  """fork_from_parent_duckdb runs the same multi-table COPY workflow as
+  materialize_table and must mark the instance busy for the same reason —
+  otherwise GHA service-refresh can kill a fork mid-run.
+  """
+  cluster_service = SimpleNamespace(read_only=False)
+  app_client.dependency_overrides[get_ladybug_service] = lambda: cluster_service
+
+  async def fake_impl(**kwargs):
+    return materialize.ForkFromParentResponse(
+      status="success",
+      parent_graph_id=kwargs["parent_graph_id"],
+      subgraph_id=kwargs["subgraph_id"],
+      tables_copied=[],
+      total_rows=0,
+      execution_time_ms=0.0,
+    )
+
+  counter_mock = AsyncMock()
+
+  with (
+    patch.object(materialize, "_fork_from_parent_duckdb_impl", side_effect=fake_impl),
+    patch(
+      "robosystems.middleware.graph.instance_busy._update_counter_async",
+      counter_mock,
+    ),
+  ):
+    client = TestClient(app_client)
+    response = client.post(
+      "/databases/sub-1/tables/sub-1/fork-from/parent-1",
+      json={"ignore_errors": True},
+    )
+
+  assert response.status_code == 200, response.text
+  assert counter_mock.await_count == 2
+  deltas = [
+    call.kwargs.get("delta", call.args[1] if len(call.args) > 1 else None)
+    for call in counter_mock.await_args_list
+  ]
+  assert deltas == [1, -1]
 
 
 def test_materialize_endpoint_decrements_counter_on_failure(monkeypatch, app_client):
