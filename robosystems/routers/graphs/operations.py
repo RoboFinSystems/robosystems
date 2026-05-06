@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
+from robosystems.logger import get_logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
@@ -36,12 +37,15 @@ from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.graphs.backups import BackupCreateRequest
 from robosystems.models.api.graphs.operations import (
   ChangeTierOp,
+  DeleteGraphOp,
   DeleteSubgraphOp,
   MaterializeOp,
   RestoreBackupOp,
 )
 from robosystems.models.api.graphs.subgraphs import CreateSubgraphRequest
 from robosystems.models.core import User
+
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["Graph Operations"])
 
@@ -262,6 +266,243 @@ async def delete_subgraph_op(
       "graph_id": subgraph_id,
       "status": "deleted",
       "backup_location": backup_location,
+    }
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# delete-graph
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/delete-graph",
+  response_model=OperationEnvelope,
+  status_code=status.HTTP_202_ACCEPTED,
+  operation_id="opDeleteGraph",
+  summary="Delete Graph",
+  description=(
+    "Permanently destroys a user graph and cancels its subscription. Two "
+    "modes via the `at_period_end` body flag: omit it (or pass `false`) to "
+    "tear down immediately (~10 min); pass `true` to keep the graph usable "
+    "through the current billing period and tear it down at the period "
+    "boundary via the existing suspend → deprovision pipeline. Requires "
+    "`confirm` to equal the URL `graph_id`. Caller must be both org owner "
+    "(billing authority) and admin on the graph (operational authority). "
+    "Not allowed on shared repositories."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/delete-graph",
+  method="POST",
+  business_event_type="graph_delete_graph",
+)
+async def delete_graph_op(
+  body: DeleteGraphOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  db: Session = Depends(get_async_db_session),
+) -> OperationEnvelope:
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+  from robosystems.models.core import OrgRole, OrgUser
+  from robosystems.models.core.billing import (
+    BillingAuditLog,
+    BillingEventType,
+    BillingSubscription,
+    SubscriptionStatus,
+  )
+  from robosystems.models.core.graph.graph_user import GraphUser
+  from robosystems.operations.providers.payment_provider import get_payment_provider
+  from robosystems.security import SecurityAuditLogger, SecurityEventType
+
+  # Shared repos run on platform-managed infrastructure with no
+  # user-cancelable subscription. Reject up-front with a clear error.
+  if is_shared_repository_or_subgraph(graph_id):
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail=f"Deleting a shared repository '{graph_id}' is not allowed.",
+    )
+
+  if body.confirm != graph_id:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=(
+        "`confirm` must equal the graph_id in the URL to authorize permanent deletion."
+      ),
+    )
+
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="delete-graph",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    user_graph = (
+      db.query(GraphUser)
+      .filter(GraphUser.user_id == user.id, GraphUser.graph_id == graph_id)
+      .first()
+    )
+    if not user_graph or user_graph.role != "admin":
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin access to the graph required to delete it.",
+      )
+
+    subscription = BillingSubscription.get_by_resource(
+      resource_type="graph", resource_id=graph_id, session=db
+    )
+    if not subscription:
+      raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"No active subscription found for graph {graph_id}.",
+      )
+
+    # Deletion is a billing event — match the authorization on every other
+    # cancel path (billing/subscriptions, repo cancel) by also requiring the
+    # caller to be org owner. Graph admin alone is operational authority and
+    # not enough to authorize a billing-side action.
+    org_user = OrgUser.get_by_org_and_user(subscription.org_id, user.id, db)
+    if not org_user or org_user.role != OrgRole.OWNER:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only organization owners can delete a graph.",
+      )
+
+    if subscription.status in ("canceled", "canceling"):
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Subscription is already canceled — graph teardown is in progress.",
+      )
+
+    if subscription.status == "upgrading":
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+          "Cannot delete graph during tier upgrade. Wait for upgrade to "
+          "complete and retry."
+        ),
+      )
+
+    # `at_period_end` only makes sense for active subscriptions: a pending /
+    # provisioning / paused sub may not have `current_period_end` set, which
+    # would leave `ends_at = None` and let the deprovision sensor skip it
+    # forever. Force callers to use immediate teardown in that case.
+    if body.at_period_end and subscription.status != SubscriptionStatus.ACTIVE.value:
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+          f"Cannot defer teardown to period end: subscription is "
+          f"'{subscription.status}', not 'active'. Retry without "
+          "`at_period_end=true` to delete immediately."
+        ),
+      )
+
+    immediate = not body.at_period_end
+
+    # Stripe-side cancel: full cancel for immediate, period-end for deferred.
+    # Stripe's default cancel does NOT prorate or refund; period-end uses
+    # the standard Subscription.modify(cancel_at_period_end=True) path.
+    if subscription.stripe_subscription_id:
+      try:
+        provider = get_payment_provider("stripe")
+        if immediate:
+          provider.cancel_subscription(subscription.stripe_subscription_id)
+        else:
+          provider.stripe.Subscription.modify(
+            subscription.stripe_subscription_id,
+            cancel_at_period_end=True,
+          )
+      except Exception as exc:
+        # Stripe side is best-effort; the local subscription state is the
+        # source of truth for the deprovision pipeline. Log to the standard
+        # logger (so it shows up in normal app logs / alerting) AND to the
+        # security audit trail so a reconciliation job can replay later.
+        logger.error(
+          f"Failed to cancel Stripe subscription "
+          f"{subscription.stripe_subscription_id} during delete-graph "
+          f"for {graph_id}: {exc}",
+          extra={
+            "graph_id": graph_id,
+            "subscription_id": subscription.id,
+            "at_period_end": body.at_period_end,
+          },
+          exc_info=True,
+        )
+        SecurityAuditLogger.log_security_event(
+          event_type=SecurityEventType.OPERATION_FAILED,
+          details={
+            "action": "stripe_cancel_failed_during_delete_graph",
+            "graph_id": graph_id,
+            "subscription_id": subscription.id,
+            "at_period_end": body.at_period_end,
+            "error": str(exc),
+          },
+          risk_level="low",
+        )
+
+    subscription.cancel(db, immediate=immediate)
+
+    mode = "immediate" if immediate else "period_end"
+    BillingAuditLog.log_event(
+      session=db,
+      event_type=BillingEventType.SUBSCRIPTION_CANCELED,
+      description=(
+        f"Subscription {subscription.id} canceled via delete-graph op "
+        f"for {graph_id} ({mode})"
+      ),
+      actor_type="user",
+      actor_user_id=str(user.id),
+      org_id=subscription.org_id,
+      subscription_id=subscription.id,
+      event_data={
+        "immediate": immediate,
+        "via": "graph_ops.delete_graph",
+        "resource_type": "graph",
+        "resource_id": graph_id,
+      },
+    )
+
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.GRAPH_DELETED,
+      details={
+        "action": "graph_delete_requested",
+        "graph_id": graph_id,
+        "user_id": str(user.id),
+        "subscription_id": subscription.id,
+        "at_period_end": body.at_period_end,
+      },
+      risk_level="medium",
+    )
+
+    if immediate:
+      return {
+        "graph_id": graph_id,
+        "subscription_id": subscription.id,
+        "status": "deprovisioning_queued",
+        "message": (
+          "Subscription canceled. Deprovisioning is queued and typically "
+          "completes within ~10 minutes. Poll graph status to verify."
+        ),
+      }
+
+    return {
+      "graph_id": graph_id,
+      "subscription_id": subscription.id,
+      "status": "scheduled_for_deprovision",
+      "ends_at": subscription.ends_at.isoformat() if subscription.ends_at else None,
+      "message": (
+        "Subscription canceled at period end. Graph remains usable until "
+        "the period closes, then transitions through suspend → deprovision."
+      ),
     }
 
   return await _dispatch(ctx, _runner, cache)

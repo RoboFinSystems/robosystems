@@ -3,7 +3,12 @@
 from .audit_log import BillingAuditLog, BillingEventType
 from .customer import BillingCustomer
 from .invoice import BillingInvoice, BillingInvoiceLineItem, InvoiceStatus
-from .subscription import BillingInterval, BillingSubscription, SubscriptionStatus
+from .subscription import (
+  BillingInterval,
+  BillingSubscription,
+  CancellationType,
+  SubscriptionStatus,
+)
 
 __all__ = [
   "BillingAuditLog",
@@ -13,6 +18,7 @@ __all__ = [
   "BillingInvoice",
   "BillingInvoiceLineItem",
   "BillingSubscription",
+  "CancellationType",
   "InvoiceStatus",
   "SubscriptionStatus",
 ]

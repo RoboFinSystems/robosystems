@@ -47,6 +47,8 @@ class SecurityEventType(Enum):
   # Subgraph events
   SUBGRAPH_CREATED = "subgraph_created"
   SUBGRAPH_DELETED = "subgraph_deleted"
+  # Graph lifecycle events
+  GRAPH_DELETED = "graph_deleted"
 
 
 class SecurityAuditLogger:

@@ -52,6 +52,40 @@ class ChangeTierOp(BaseModel):
   )
 
 
+class DeleteGraphOp(BaseModel):
+  """Body for the delete-graph operation.
+
+  Permanently destroys the graph and cancels its subscription. Two modes:
+
+  - **Immediate** (default): subscription canceled now (`ends_at = now`) and
+    fast-path deprovisioning fires within ~10 minutes. Use when you want
+    the data gone and the slot freed right away.
+  - **At period end** (`at_period_end=true`): subscription canceled but
+    `ends_at = current_period_end` so the graph stays usable through the
+    paid period. The existing suspend → deprovision sensor pipeline tears
+    it down after the retention window once the period closes.
+
+  Requires `confirm` to equal the URL `graph_id` as a guard against
+  accidental destructive calls.
+  """
+
+  confirm: str = Field(
+    ...,
+    description=(
+      "Must equal the graph_id in the URL — confirms the caller intends to "
+      "destroy this specific graph."
+    ),
+  )
+  at_period_end: bool = Field(
+    default=False,
+    description=(
+      "If true, defer cancellation and teardown to the end of the current "
+      "billing period (graph stays usable until then). If false (default), "
+      "cancel and tear down immediately."
+    ),
+  )
+
+
 class MaterializeOp(BaseModel):
   """Body for the materialize operation."""
 
