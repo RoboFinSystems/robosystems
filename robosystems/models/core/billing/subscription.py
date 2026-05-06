@@ -37,6 +37,13 @@ class BillingInterval(str, Enum):
   USAGE_BASED = "usage_based"
 
 
+class CancellationType(str, Enum):
+  """How a subscription was canceled."""
+
+  PERIOD_END = "period_end"
+  IMMEDIATE = "immediate"
+
+
 class BillingSubscription(Base):
   """Generic subscription model for any billable resource.
 
@@ -73,6 +80,7 @@ class BillingSubscription(Base):
   )
 
   status = Column(String, default="pending", nullable=False)
+  cancellation_type = Column(String, nullable=True)
 
   started_at = Column(DateTime, nullable=True)
   current_period_start = Column(DateTime, nullable=True)
@@ -94,6 +102,7 @@ class BillingSubscription(Base):
     Index("idx_billing_sub_status", "status"),
     Index("idx_billing_sub_stripe", "stripe_subscription_id"),
     Index("idx_billing_sub_provider", "provider_subscription_id"),
+    Index("idx_billing_sub_cancellation_type", "cancellation_type"),
   )
 
   def __repr__(self) -> str:
@@ -286,15 +295,35 @@ class BillingSubscription(Base):
     logger.info(f"Paused subscription {self.id}")
 
   def cancel(self, session: Session, immediate: bool = False) -> None:
-    """Cancel the subscription."""
+    """Cancel the subscription.
+
+    Sets `cancellation_type` to "immediate" or "period_end" so downstream
+    sensors (e.g. deprovisioning) can branch on the user's intent without
+    re-deriving it from timestamps.
+
+    Raises ValueError if `immediate=False` is requested on a subscription
+    whose `current_period_end` is None — without an `ends_at` value the
+    deprovision sensor's `ends_at.isnot(None)` filter would silently skip
+    the sub forever, leaking infrastructure.
+    """
     now = datetime.now(UTC)
+
+    if not immediate and self.current_period_end is None:
+      raise ValueError(
+        f"Cannot cancel subscription {self.id} at period end: "
+        "current_period_end is None (subscription was never activated). "
+        "Use immediate=True instead."
+      )
+
     self.status = SubscriptionStatus.CANCELED.value
     self.canceled_at = now
 
     if immediate:
       self.ends_at = now
+      self.cancellation_type = CancellationType.IMMEDIATE.value
     else:
       self.ends_at = self.current_period_end
+      self.cancellation_type = CancellationType.PERIOD_END.value
 
     self.updated_at = now
 
@@ -302,7 +331,10 @@ class BillingSubscription(Base):
     session.refresh(self)
     self._invalidate_access_cache()
 
-    logger.info(f"Canceled subscription {self.id} (ends: {self.ends_at})")
+    logger.info(
+      f"Canceled subscription {self.id} "
+      f"(type={self.cancellation_type}, ends={self.ends_at})"
+    )
 
   def update_plan(
     self, new_plan_name: str, new_price_cents: int, session: Session

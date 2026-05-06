@@ -1,16 +1,23 @@
 """Billing subscriptions endpoints for managing user subscriptions."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import billing_rate_limit_dependency
-from ...models.api.billing.subscription import GraphSubscriptionResponse
+from ...models.api.billing.subscription import (
+  CancelSubscriptionRequest,
+  GraphSubscriptionResponse,
+)
 from ...models.api.common import RESOURCE_ERROR_RESPONSES
 from ...models.core import User
-from ...models.core.billing import BillingSubscription
+from ...models.core.billing import (
+  BillingAuditLog,
+  BillingEventType,
+  BillingSubscription,
+)
 from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
@@ -19,23 +26,10 @@ router = APIRouter(prefix="/billing/subscriptions", tags=["Billing"])
 
 
 def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
-  """Resolve a plan's internal name to its human-readable display name.
-
-  For graphs: "ladybug-standard" -> "LadybugDB Standard"
-  For repos:  "sec-advanced"     -> "SEC EDGAR Filings - Pro"
-  """
+  """Backwards-compat thin wrapper — prefer BillingConfig.get_plan_display_name."""
   from ...config.billing import BillingConfig
 
-  if resource_type == "graph":
-    plan = BillingConfig.get_subscription_plan(plan_name)
-    if plan:
-      return plan.get("display_name", plan_name)
-  elif resource_type == "repository":
-    plan = BillingConfig.get_repository_plan(resource_id, plan_name)
-    if plan:
-      return plan.get("display_name", plan_name)
-
-  return plan_name
+  return BillingConfig.get_plan_display_name(plan_name, resource_type, resource_id)
 
 
 @router.get(
@@ -198,13 +192,20 @@ async def get_subscription(
   "/{org_id}/subscription/{subscription_id}/cancel",
   response_model=GraphSubscriptionResponse,
   summary="Cancel Organization Subscription",
-  description="Cancels at period end — subscription remains active through the current billing cycle. Requires org owner role.",
+  description=(
+    "Cancels a subscription. Default behavior cancels at period end "
+    "(subscription stays active through the current cycle). Pass "
+    "`immediate=true` with `confirm=<resource_id>` to terminate now and "
+    "trigger fast-path deprovisioning of the underlying resource. Requires "
+    "org owner role."
+  ),
   operation_id="cancelOrgSubscription",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def cancel_subscription(
   org_id: str,
   subscription_id: str,
+  body: CancelSubscriptionRequest = Body(default_factory=CancelSubscriptionRequest),
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(billing_rate_limit_dependency),
@@ -247,18 +248,67 @@ async def cancel_subscription(
         detail="Cannot cancel during tier upgrade. Please wait for upgrade to complete.",
       )
 
-    # Cancel in Stripe if there's a linked Stripe subscription
+    # Resource-scoped cancellation lives where the resource lives:
+    #   - User graphs  → POST /v1/graphs/{g}/operations/delete-graph
+    #   - Repositories → POST /v1/graphs/{repo_id}/subscription/cancel
+    # That keeps "one canonical cancel path per resource type" and avoids
+    # the two-paths drift we cleaned up in the graph case. The billing
+    # cancel endpoint is reserved for future non-resource-scoped subs
+    # (e.g. platform-level add-ons not tied to a graph_id).
+    if subscription.resource_type == "graph":
+      raise HTTPException(
+        status_code=400,
+        detail=(
+          "Cancellation of a graph subscription must go through "
+          f"POST /v1/graphs/{subscription.resource_id}/operations/delete-graph "
+          "(supports both immediate and `at_period_end=true` modes)."
+        ),
+      )
+
+    if subscription.resource_type == "repository":
+      raise HTTPException(
+        status_code=400,
+        detail=(
+          "Cancellation of a repository subscription must go through "
+          f"POST /v1/graphs/{subscription.resource_id}/subscriptions/cancel "
+          "(supports both period-end and `immediate=true` modes)."
+        ),
+      )
+
+    if body.immediate:
+      if not body.confirm or body.confirm != (subscription.resource_id or ""):
+        raise HTTPException(
+          status_code=400,
+          detail=(
+            "Immediate cancellation requires `confirm` to match the "
+            "subscription's resource_id."
+          ),
+        )
+
+    # Cancel in Stripe if there's a linked Stripe subscription. For period-end
+    # we mark the Stripe sub to cancel at period end; for immediate we cancel
+    # outright. Stripe.Subscription.cancel() does NOT prorate or refund by
+    # default — credit-on-account is a Phase 2 concern handled separately.
     if subscription.stripe_subscription_id:
       try:
         provider = get_payment_provider("stripe")
-        provider.stripe.Subscription.modify(
-          subscription.stripe_subscription_id,
-          cancel_at_period_end=True,
-        )
-        logger.info(
-          f"Canceled Stripe subscription {subscription.stripe_subscription_id}",
-          extra={"subscription_id": subscription_id},
-        )
+        if body.immediate:
+          provider.cancel_subscription(subscription.stripe_subscription_id)
+          logger.info(
+            f"Immediately canceled Stripe subscription "
+            f"{subscription.stripe_subscription_id}",
+            extra={"subscription_id": subscription_id},
+          )
+        else:
+          provider.stripe.Subscription.modify(
+            subscription.stripe_subscription_id,
+            cancel_at_period_end=True,
+          )
+          logger.info(
+            f"Canceled Stripe subscription "
+            f"{subscription.stripe_subscription_id} at period end",
+            extra={"subscription_id": subscription_id},
+          )
       except Exception as e:
         logger.error(
           f"Failed to cancel Stripe subscription: {e}",
@@ -266,14 +316,34 @@ async def cancel_subscription(
           exc_info=True,
         )
 
-    subscription.cancel(db, immediate=False)
+    subscription.cancel(db, immediate=body.immediate)
+
+    BillingAuditLog.log_event(
+      session=db,
+      event_type=BillingEventType.SUBSCRIPTION_CANCELED,
+      description=(
+        f"Subscription {subscription_id} canceled "
+        f"({'immediate' if body.immediate else 'period_end'})"
+      ),
+      actor_type="user",
+      actor_user_id=current_user.id,
+      org_id=org_id,
+      subscription_id=subscription_id,
+      event_data={
+        "immediate": body.immediate,
+        "resource_type": subscription.resource_type,
+        "resource_id": subscription.resource_id,
+      },
+    )
 
     logger.info(
-      f"Canceled subscription {subscription_id} for org {org_id}",
+      f"Canceled subscription {subscription_id} for org {org_id} "
+      f"(immediate={body.immediate})",
       extra={
         "org_id": org_id,
         "user_id": current_user.id,
         "subscription_id": subscription_id,
+        "immediate": body.immediate,
       },
     )
 

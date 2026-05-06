@@ -96,13 +96,20 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
   Query: Graph where:
   - status = "suspended"
   - deleted_at IS NULL (not already deprovisioned)
-  - BillingSubscription.ends_at < (now - retention_days)
+  - BillingSubscription.ends_at < (now - retention_days), OR
+  - BillingSubscription.cancellation_type == "immediate" (retention bypassed
+    when the user explicitly requested immediate teardown)
   """
   from datetime import UTC, datetime, timedelta
 
+  from sqlalchemy import or_
+
   from robosystems.config.deprovisioning import get_deprovisioning_config
   from robosystems.database import session as db_session_factory
-  from robosystems.models.core.billing.subscription import BillingSubscription
+  from robosystems.models.core.billing.subscription import (
+    BillingSubscription,
+    CancellationType,
+  )
   from robosystems.models.core.graph import Graph, GraphStatus
 
   config = get_deprovisioning_config()
@@ -111,7 +118,9 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
     now = datetime.now(UTC)
     cutoff = now - timedelta(days=config.retention_days)
 
-    # Find suspended user graphs past the retention period.
+    # Find suspended user graphs past the retention period, OR any suspended
+    # graph whose subscription was canceled immediately (user explicitly
+    # asked for fast teardown — retention window doesn't apply).
     # Shared repositories (is_repository=True) are platform-managed and
     # must never be auto-deprovisioned.
     ready_subs = (
@@ -121,7 +130,10 @@ def suspended_graph_deprovisioning_sensor(context: SensorEvaluationContext):
         BillingSubscription.resource_type == "graph",
         BillingSubscription.status == "canceled",
         BillingSubscription.ends_at.isnot(None),
-        BillingSubscription.ends_at < cutoff,
+        or_(
+          BillingSubscription.ends_at < cutoff,
+          BillingSubscription.cancellation_type == CancellationType.IMMEDIATE.value,
+        ),
         Graph.status == GraphStatus.SUSPENDED.value,
         Graph.deleted_at.is_(None),
         Graph.is_repository.is_(False),

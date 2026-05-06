@@ -198,6 +198,28 @@ class BillingConfig:
     }
 
   @classmethod
+  def get_plan_display_name(
+    cls, plan_name: str, resource_type: str, resource_id: str
+  ) -> str:
+    """Resolve a plan's internal name to its human-readable display name.
+
+    For graphs: "ladybug-standard" -> "LadybugDB Standard"
+    For repos:  "sec-advanced"     -> "SEC EDGAR Filings - Pro"
+
+    Falls back to the raw plan name when no display mapping is found.
+    """
+    if resource_type == "graph":
+      plan = cls.get_subscription_plan(plan_name)
+      if plan:
+        return plan.get("display_name", plan_name)
+    elif resource_type == "repository":
+      plan = cls.get_repository_plan(resource_id, plan_name)
+      if plan:
+        return plan.get("display_name", plan_name)
+
+    return plan_name
+
+  @classmethod
   def validate_configuration(cls) -> dict[str, Any]:
     """
     Validate that all billing configuration is consistent.

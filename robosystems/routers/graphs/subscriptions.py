@@ -1,8 +1,6 @@
 """Unified subscription management endpoints for graphs and repositories."""
 
-import logging
-
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from ...config import BillingConfig, env
@@ -13,10 +11,12 @@ from ...config.shared_repositories import (
   resolve_shared_repository_parent,
 )
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from ...middleware.rate_limits import subscription_aware_rate_limit_dependency
 from ...models.api.billing.subscription import (
+  CancelSubscriptionRequest,
   CreateRepositorySubscriptionRequest,
   GraphSubscriptionResponse,
   UpgradeSubscriptionRequest,
@@ -26,7 +26,7 @@ from ...models.core import User
 from ...models.core.billing import BillingAuditLog, BillingCustomer, BillingSubscription
 from ...models.core.billing.audit_log import BillingEventType
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(
   tags=["Subscriptions"],
@@ -39,15 +39,8 @@ def is_shared_repository(graph_id: str) -> bool:
 
 
 def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
-  if resource_type == "graph":
-    plan = BillingConfig.get_subscription_plan(plan_name)
-    if plan:
-      return plan.get("display_name", plan_name)
-  elif resource_type == "repository":
-    plan = BillingConfig.get_repository_plan(resource_id, plan_name)
-    if plan:
-      return plan.get("display_name", plan_name)
-  return plan_name
+  """Backwards-compat thin wrapper — prefer BillingConfig.get_plan_display_name."""
+  return BillingConfig.get_plan_display_name(plan_name, resource_type, resource_id)
 
 
 def subscription_to_response(
@@ -561,6 +554,142 @@ async def _change_repository_plan(
       "repository_id": graph_id,
       "old_plan": old_plan,
       "new_plan": new_plan_tier,
+    },
+  )
+
+  return subscription_to_response(subscription)
+
+
+@router.post(
+  "/cancel",
+  response_model=GraphSubscriptionResponse,
+  summary="Cancel Repository Subscription",
+  description=(
+    "Cancel a shared repository subscription. Two modes via the `immediate` "
+    "flag: omit it (default `false`) to cancel at period end (access stays "
+    "until the period closes); pass `true` with `confirm=<repo_id>` to stop "
+    "access right away. For user graphs, use "
+    "`POST /v1/graphs/{graph_id}/operations/delete-graph` — this endpoint "
+    "rejects user graphs. Requires org owner role."
+  ),
+  operation_id="cancelRepositorySubscription",
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
+async def cancel_repository_subscription(
+  graph_id: str = Path(
+    ...,
+    description="Repository name (e.g., 'sec', 'industry')",
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
+  ),
+  body: CancelSubscriptionRequest = Body(default_factory=CancelSubscriptionRequest),
+  current_user: User = Depends(get_current_user),
+  db: Session = Depends(get_db_session),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> GraphSubscriptionResponse:
+  from ...models.core import OrgRole, OrgUser
+  from ...operations.providers.payment_provider import get_payment_provider
+
+  if not is_shared_repository(graph_id):
+    raise HTTPException(
+      status_code=400,
+      detail=(
+        "Cancellation of a user graph subscription must go through "
+        f"POST /v1/graphs/{graph_id}/operations/delete-graph "
+        "(supports both immediate and `at_period_end=true` modes)."
+      ),
+    )
+
+  parent_repo_id = resolve_shared_repository_parent(graph_id)
+
+  user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+  if not user_orgs:
+    raise HTTPException(
+      status_code=403, detail="You are not a member of any organization"
+    )
+  if user_orgs[0].role != OrgRole.OWNER:
+    raise HTTPException(
+      status_code=403,
+      detail="Only organization owners can cancel subscriptions",
+    )
+
+  subscription = BillingSubscription.get_by_resource_and_user(
+    resource_type="repository",
+    resource_id=parent_repo_id,
+    user_id=current_user.id,
+    session=db,
+  )
+  if not subscription:
+    raise HTTPException(
+      status_code=404,
+      detail=f"No subscription found for {graph_id}",
+    )
+
+  if subscription.status in ("canceled", "canceling"):
+    raise HTTPException(status_code=400, detail="Subscription is already canceled")
+
+  if subscription.status == "upgrading":
+    raise HTTPException(
+      status_code=400,
+      detail="Cannot cancel during plan change. Please wait for it to complete.",
+    )
+
+  if body.immediate:
+    if not body.confirm or body.confirm != parent_repo_id:
+      raise HTTPException(
+        status_code=400,
+        detail=(
+          "Immediate cancellation requires `confirm` to match the "
+          "repository name in the URL."
+        ),
+      )
+
+  # Stripe-side: full cancel for immediate, period-end via Subscription.modify.
+  # Default cancel does NOT prorate or refund.
+  if subscription.stripe_subscription_id:
+    try:
+      provider = get_payment_provider("stripe")
+      if body.immediate:
+        provider.cancel_subscription(subscription.stripe_subscription_id)
+      else:
+        provider.stripe.Subscription.modify(
+          subscription.stripe_subscription_id,
+          cancel_at_period_end=True,
+        )
+    except Exception as e:
+      logger.error(
+        f"Failed to cancel Stripe subscription for {graph_id}: {e}",
+        extra={"subscription_id": subscription.id},
+        exc_info=True,
+      )
+
+  subscription.cancel(db, immediate=body.immediate)
+
+  BillingAuditLog.log_event(
+    session=db,
+    event_type=BillingEventType.SUBSCRIPTION_CANCELED,
+    description=(
+      f"Repository subscription {subscription.id} canceled for {graph_id} "
+      f"({'immediate' if body.immediate else 'period_end'})"
+    ),
+    actor_type="user",
+    actor_user_id=current_user.id,
+    org_id=user_orgs[0].org_id,
+    subscription_id=subscription.id,
+    event_data={
+      "immediate": body.immediate,
+      "via": "graph_scoped.subscription_cancel",
+      "resource_type": "repository",
+      "resource_id": parent_repo_id,
+    },
+  )
+
+  logger.info(
+    f"Canceled repository subscription for {graph_id} (immediate={body.immediate})",
+    extra={
+      "user_id": current_user.id,
+      "repository_id": graph_id,
+      "subscription_id": subscription.id,
+      "immediate": body.immediate,
     },
   )
 

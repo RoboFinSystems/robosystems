@@ -218,3 +218,29 @@ class UpgradeSubscriptionRequest(BaseModel):
   new_plan_name: str = Field(
     ..., description="New plan name to change to", examples=["advanced"]
   )
+
+
+class CancelSubscriptionRequest(BaseModel):
+  """Request to cancel a subscription.
+
+  Default behavior cancels at period end (soft cancel). Pass `immediate=True`
+  to terminate the subscription right away — this requires `confirm` to equal
+  the subscription's `resource_id` (e.g. the graph_id) as a guard against
+  accidental destructive calls.
+  """
+
+  immediate: bool = Field(
+    False,
+    description=(
+      "If true, cancel immediately and trigger fast-path deprovisioning of "
+      "the underlying resource (within ~10 minutes). If false (default), "
+      "cancel at the end of the current billing period."
+    ),
+  )
+  confirm: str | None = Field(
+    None,
+    description=(
+      "Required when immediate=True. Must equal the subscription's "
+      "resource_id (e.g. graph_id) to confirm intent."
+    ),
+  )
