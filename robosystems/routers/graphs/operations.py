@@ -280,12 +280,13 @@ async def delete_subgraph_op(
   operation_id="opDeleteGraph",
   summary="Delete Graph",
   description=(
-    "Permanently destroys a user graph: cancels its subscription immediately "
-    "and queues fast-path deprovisioning (LadybugDB database removed, "
-    "DynamoDB slot freed, PG records cleaned). Requires `confirm` to equal "
-    "the URL `graph_id`. Caller must be admin on the graph. Not allowed on "
-    "shared repositories. Deprovisioning typically completes within ~10 "
-    "minutes; poll the graph status to verify."
+    "Permanently destroys a user graph and cancels its subscription. Two "
+    "modes via the `at_period_end` body flag: omit it (or pass `false`) to "
+    "tear down immediately (~10 min); pass `true` to keep the graph usable "
+    "through the current billing period and tear it down at the period "
+    "boundary via the existing suspend → deprovision pipeline. Requires "
+    "`confirm` to equal the URL `graph_id`. Caller must be admin on the "
+    "graph. Not allowed on shared repositories."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -374,13 +375,21 @@ async def delete_graph_op(
         ),
       )
 
-    # Cancel Stripe subscription outright (no proration, no auto-refund).
-    # Phase 2 will issue an account credit for the unused portion via
-    # Stripe customer balance — handled separately on the cancel path.
+    immediate = not body.at_period_end
+
+    # Stripe-side cancel: full cancel for immediate, period-end for deferred.
+    # Stripe's default cancel does NOT prorate or refund; period-end uses
+    # the standard Subscription.modify(cancel_at_period_end=True) path.
     if subscription.stripe_subscription_id:
       try:
         provider = get_payment_provider("stripe")
-        provider.cancel_subscription(subscription.stripe_subscription_id)
+        if immediate:
+          provider.cancel_subscription(subscription.stripe_subscription_id)
+        else:
+          provider.stripe.Subscription.modify(
+            subscription.stripe_subscription_id,
+            cancel_at_period_end=True,
+          )
       except Exception as exc:
         # Stripe side is best-effort; the local subscription state is the
         # source of truth for the deprovision pipeline. Log and continue.
@@ -390,25 +399,28 @@ async def delete_graph_op(
             "action": "stripe_cancel_failed_during_delete_graph",
             "graph_id": graph_id,
             "subscription_id": subscription.id,
+            "at_period_end": body.at_period_end,
             "error": str(exc),
           },
           risk_level="low",
         )
 
-    subscription.cancel(db, immediate=True)
+    subscription.cancel(db, immediate=immediate)
 
+    mode = "immediate" if immediate else "period_end"
     BillingAuditLog.log_event(
       session=db,
       event_type=BillingEventType.SUBSCRIPTION_CANCELED,
       description=(
-        f"Subscription {subscription.id} canceled via delete-graph op for {graph_id}"
+        f"Subscription {subscription.id} canceled via delete-graph op "
+        f"for {graph_id} ({mode})"
       ),
       actor_type="user",
       actor_user_id=str(user.id),
       org_id=subscription.org_id,
       subscription_id=subscription.id,
       event_data={
-        "immediate": True,
+        "immediate": immediate,
         "via": "graph_ops.delete_graph",
         "resource_type": "graph",
         "resource_id": graph_id,
@@ -422,17 +434,30 @@ async def delete_graph_op(
         "graph_id": graph_id,
         "user_id": str(user.id),
         "subscription_id": subscription.id,
+        "at_period_end": body.at_period_end,
       },
       risk_level="medium",
     )
 
+    if immediate:
+      return {
+        "graph_id": graph_id,
+        "subscription_id": subscription.id,
+        "status": "deprovisioning_queued",
+        "message": (
+          "Subscription canceled. Deprovisioning is queued and typically "
+          "completes within ~10 minutes. Poll graph status to verify."
+        ),
+      }
+
     return {
       "graph_id": graph_id,
       "subscription_id": subscription.id,
-      "status": "deprovisioning_queued",
+      "status": "scheduled_for_deprovision",
+      "ends_at": subscription.ends_at.isoformat() if subscription.ends_at else None,
       "message": (
-        "Subscription canceled. Deprovisioning is queued and typically "
-        "completes within ~10 minutes. Poll graph status to verify."
+        "Subscription canceled at period end. Graph remains usable until "
+        "the period closes, then transitions through suspend → deprovision."
       ),
     }
 

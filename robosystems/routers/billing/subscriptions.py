@@ -261,23 +261,34 @@ async def cancel_subscription(
         detail="Cannot cancel during tier upgrade. Please wait for upgrade to complete.",
       )
 
-    if body.immediate:
-      # Graph deletion is a lifecycle action, not a billing action — route
-      # it through the graph ops CQRS surface so we have one canonical
-      # destructive path per resource (matches change-tier, delete-subgraph,
-      # etc.). The billing cancel endpoint stays useful for non-graph subs
-      # (repository, future add-ons) where immediate cancel is purely a
-      # billing concern with no resource to destroy.
-      if subscription.resource_type == "graph":
-        raise HTTPException(
-          status_code=400,
-          detail=(
-            "Immediate cancellation of a graph subscription must go through "
-            f"POST /v1/graphs/{subscription.resource_id}/operations/delete-graph. "
-            "Pass `immediate=false` (or omit it) here to cancel at period end."
-          ),
-        )
+    # Resource-scoped cancellation lives where the resource lives:
+    #   - User graphs  → POST /v1/graphs/{g}/operations/delete-graph
+    #   - Repositories → POST /v1/graphs/{repo_id}/subscription/cancel
+    # That keeps "one canonical cancel path per resource type" and avoids
+    # the two-paths drift we cleaned up in the graph case. The billing
+    # cancel endpoint is reserved for future non-resource-scoped subs
+    # (e.g. platform-level add-ons not tied to a graph_id).
+    if subscription.resource_type == "graph":
+      raise HTTPException(
+        status_code=400,
+        detail=(
+          "Cancellation of a graph subscription must go through "
+          f"POST /v1/graphs/{subscription.resource_id}/operations/delete-graph "
+          "(supports both immediate and `at_period_end=true` modes)."
+        ),
+      )
 
+    if subscription.resource_type == "repository":
+      raise HTTPException(
+        status_code=400,
+        detail=(
+          "Cancellation of a repository subscription must go through "
+          f"POST /v1/graphs/{subscription.resource_id}/subscriptions/cancel "
+          "(supports both period-end and `immediate=true` modes)."
+        ),
+      )
+
+    if body.immediate:
       if not body.confirm or body.confirm != (subscription.resource_id or ""):
         raise HTTPException(
           status_code=400,

@@ -309,39 +309,11 @@ class TestCancelSubscription:
   @pytest.mark.asyncio
   @patch("robosystems.routers.billing.subscriptions.BillingAuditLog")
   @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
-  async def test_cancel_subscription_success(
+  async def test_cancel_subscription_period_end_repository_rejected(
     self, mock_get_org_user, _mock_audit, mock_user, mock_db
   ):
-    """Period-end cancel (default) succeeds."""
-    from robosystems.models.core import OrgRole
-
-    mock_org_user = Mock()
-    mock_org_user.role = OrgRole.OWNER
-    mock_get_org_user.return_value = mock_org_user
-
-    subscription = self._build_active_subscription()
-    mock_db.query.return_value.filter.return_value.first.return_value = subscription
-
-    result = await cancel_subscription(
-      org_id="org_123",
-      subscription_id="sub_123",
-      body=CancelSubscriptionRequest(),
-      current_user=mock_user,
-      db=mock_db,
-      _rate_limit=None,
-    )
-
-    subscription.cancel.assert_called_once_with(mock_db, immediate=False)
-    assert result.id == "sub_123"
-
-  @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingAuditLog")
-  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
-  async def test_cancel_subscription_immediate_repository_success(
-    self, mock_get_org_user, _mock_audit, mock_user, mock_db
-  ):
-    """Immediate cancel of a repository sub (no resource destruction) is
-    allowed via the billing endpoint when confirm matches."""
+    """Period-end cancel of a repository sub is rejected — repo cancellation
+    lives in the graph-scoped subscription router."""
     from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
@@ -353,17 +325,86 @@ class TestCancelSubscription:
     )
     mock_db.query.return_value.filter.return_value.first.return_value = subscription
 
-    result = await cancel_subscription(
-      org_id="org_123",
-      subscription_id="sub_123",
-      body=CancelSubscriptionRequest(immediate=True, confirm="sec"),
-      current_user=mock_user,
-      db=mock_db,
-      _rate_limit=None,
-    )
+    with pytest.raises(HTTPException) as exc:
+      await cancel_subscription(
+        org_id="org_123",
+        subscription_id="sub_123",
+        body=CancelSubscriptionRequest(),
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
 
-    subscription.cancel.assert_called_once_with(mock_db, immediate=True)
-    assert result.id == "sub_123"
+    assert exc.value.status_code == 400
+    assert "/v1/graphs/sec/subscriptions/cancel" in exc.value.detail
+    subscription.cancel.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.routers.billing.subscriptions.BillingAuditLog")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
+  async def test_cancel_subscription_period_end_graph_rejected(
+    self, mock_get_org_user, _mock_audit, mock_user, mock_db
+  ):
+    """Period-end cancel of a graph sub is rejected — graph cancellation
+    (immediate or period-end) lives in graph ops, not billing."""
+    from robosystems.models.core import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
+    subscription = self._build_active_subscription(
+      resource_type="graph", resource_id="kg_456"
+    )
+    mock_db.query.return_value.filter.return_value.first.return_value = subscription
+
+    with pytest.raises(HTTPException) as exc:
+      await cancel_subscription(
+        org_id="org_123",
+        subscription_id="sub_123",
+        body=CancelSubscriptionRequest(),  # period-end (default)
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert exc.value.status_code == 400
+    assert "delete-graph" in exc.value.detail
+    assert "kg_456" in exc.value.detail
+    subscription.cancel.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.routers.billing.subscriptions.BillingAuditLog")
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
+  async def test_cancel_subscription_immediate_repository_rejected(
+    self, mock_get_org_user, _mock_audit, mock_user, mock_db
+  ):
+    """Immediate cancel of a repository sub is rejected — repo cancellation
+    (immediate or period-end) lives in the graph-scoped subscription router."""
+    from robosystems.models.core import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
+    subscription = self._build_active_subscription(
+      resource_type="repository", resource_id="sec"
+    )
+    mock_db.query.return_value.filter.return_value.first.return_value = subscription
+
+    with pytest.raises(HTTPException) as exc:
+      await cancel_subscription(
+        org_id="org_123",
+        subscription_id="sub_123",
+        body=CancelSubscriptionRequest(immediate=True, confirm="sec"),
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert exc.value.status_code == 400
+    assert "/v1/graphs/sec/subscriptions/cancel" in exc.value.detail
+    subscription.cancel.assert_not_called()
 
   @pytest.mark.asyncio
   @patch("robosystems.routers.billing.subscriptions.BillingAuditLog")
@@ -371,8 +412,8 @@ class TestCancelSubscription:
   async def test_cancel_subscription_immediate_graph_rejected(
     self, mock_get_org_user, _mock_audit, mock_user, mock_db
   ):
-    """Immediate cancel of a graph sub is rejected with a redirect to the
-    graph ops delete-graph endpoint."""
+    """Immediate cancel of a graph sub is rejected — same redirect as the
+    period-end path; graph cancellation belongs in graph ops."""
     from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
@@ -405,7 +446,11 @@ class TestCancelSubscription:
   async def test_cancel_subscription_immediate_missing_confirm(
     self, mock_get_org_user, _mock_audit, mock_user, mock_db
   ):
-    """Immediate cancel of a non-graph sub without confirm token returns 400."""
+    """Immediate cancel of a non-resource-scoped sub without confirm → 400.
+
+    Uses resource_type='addon' as a stand-in for future non-graph,
+    non-repository subscription types (e.g. platform-level add-ons).
+    """
     from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
@@ -413,7 +458,7 @@ class TestCancelSubscription:
     mock_get_org_user.return_value = mock_org_user
 
     subscription = self._build_active_subscription(
-      resource_type="repository", resource_id="sec"
+      resource_type="addon", resource_id="platform_pro"
     )
     mock_db.query.return_value.filter.return_value.first.return_value = subscription
 
@@ -437,7 +482,8 @@ class TestCancelSubscription:
   async def test_cancel_subscription_immediate_wrong_confirm(
     self, mock_get_org_user, _mock_audit, mock_user, mock_db
   ):
-    """Immediate cancel of a non-graph sub with mismatched confirm returns 400."""
+    """Immediate cancel of a non-resource-scoped sub with mismatched confirm
+    → 400."""
     from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
@@ -445,7 +491,7 @@ class TestCancelSubscription:
     mock_get_org_user.return_value = mock_org_user
 
     subscription = self._build_active_subscription(
-      resource_type="repository", resource_id="sec"
+      resource_type="addon", resource_id="platform_pro"
     )
     mock_db.query.return_value.filter.return_value.first.return_value = subscription
 
@@ -453,7 +499,7 @@ class TestCancelSubscription:
       await cancel_subscription(
         org_id="org_123",
         subscription_id="sub_123",
-        body=CancelSubscriptionRequest(immediate=True, confirm="wrong_repo"),
+        body=CancelSubscriptionRequest(immediate=True, confirm="wrong"),
         current_user=mock_user,
         db=mock_db,
         _rate_limit=None,
@@ -467,7 +513,7 @@ class TestCancelSubscription:
   @patch("robosystems.routers.billing.subscriptions.get_payment_provider")
   @patch("robosystems.routers.billing.subscriptions.BillingAuditLog")
   @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
-  async def test_cancel_subscription_immediate_repo_calls_stripe_full_cancel(
+  async def test_cancel_subscription_immediate_non_resource_scoped_success(
     self,
     mock_get_org_user,
     _mock_audit,
@@ -475,8 +521,8 @@ class TestCancelSubscription:
     mock_user,
     mock_db,
   ):
-    """Immediate cancel of a Stripe-linked repo sub calls
-    provider.cancel_subscription (not the period-end Subscription.modify path)."""
+    """Immediate cancel of a hypothetical non-graph, non-repository sub still
+    works (this is what the billing endpoint is reserved for going forward)."""
     from robosystems.models.core import OrgRole
 
     mock_org_user = Mock()
@@ -484,7 +530,7 @@ class TestCancelSubscription:
     mock_get_org_user.return_value = mock_org_user
 
     subscription = self._build_active_subscription(
-      resource_type="repository", resource_id="sec"
+      resource_type="addon", resource_id="platform_pro"
     )
     subscription.stripe_subscription_id = "sub_stripe_abc"
     mock_db.query.return_value.filter.return_value.first.return_value = subscription
@@ -495,7 +541,7 @@ class TestCancelSubscription:
     await cancel_subscription(
       org_id="org_123",
       subscription_id="sub_123",
-      body=CancelSubscriptionRequest(immediate=True, confirm="sec"),
+      body=CancelSubscriptionRequest(immediate=True, confirm="platform_pro"),
       current_user=mock_user,
       db=mock_db,
       _rate_limit=None,

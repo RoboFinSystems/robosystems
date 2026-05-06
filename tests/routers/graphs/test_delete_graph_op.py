@@ -173,7 +173,7 @@ class TestDeleteGraphRunner:
   @patch("robosystems.security.SecurityAuditLogger")
   @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
   @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
-  async def test_happy_path_cancels_subscription_immediately(
+  async def test_happy_path_immediate_default_cancels_subscription(
     self,
     mock_get_sub: MagicMock,
     mock_log_event: MagicMock,
@@ -189,7 +189,7 @@ class TestDeleteGraphRunner:
     sub.stripe_subscription_id = None
     mock_get_sub.return_value = sub
 
-    body = DeleteGraphOp(confirm="kg_x")
+    body = DeleteGraphOp(confirm="kg_x")  # at_period_end defaults to False
     envelope = await delete_graph_op(
       body=body,
       graph_id="kg_x",
@@ -211,10 +211,51 @@ class TestDeleteGraphRunner:
 
   @pytest.mark.asyncio
   @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_happy_path_at_period_end_defers_cancellation(
+    self,
+    mock_get_sub: MagicMock,
+    mock_log_event: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    """`at_period_end=True` calls subscription.cancel(immediate=False) so the
+    graph stays usable until period_end, then suspend→deprovision picks up."""
+    from datetime import UTC, datetime
+
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "active"
+    sub.org_id = "org_1"
+    sub.stripe_subscription_id = None
+    sub.ends_at = datetime(2026, 6, 1, tzinfo=UTC)
+    mock_get_sub.return_value = sub
+
+    body = DeleteGraphOp(confirm="kg_x", at_period_end=True)
+    envelope = await delete_graph_op(
+      body=body,
+      graph_id="kg_x",
+      user=_user(user_id="usr_admin"),
+      idempotency_key=None,
+      cache=_FakeCache(),
+      db=db,
+    )
+
+    sub.cancel.assert_called_once_with(db, immediate=False)
+    assert envelope.result["status"] == "scheduled_for_deprovision"
+    assert envelope.result["ends_at"] == "2026-06-01T00:00:00+00:00"
+    audit_kwargs = mock_log_event.call_args.kwargs
+    assert audit_kwargs["event_data"]["immediate"] is False
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
   @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
   @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
   @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
-  async def test_happy_path_cancels_stripe_subscription_outright(
+  async def test_happy_path_immediate_cancels_stripe_outright(
     self,
     mock_get_sub: MagicMock,
     _mock_log_event: MagicMock,
@@ -245,4 +286,51 @@ class TestDeleteGraphRunner:
     )
 
     provider.cancel_subscription.assert_called_once_with("sub_stripe_xyz")
+    provider.stripe.Subscription.modify.assert_not_called()
     sub.cancel.assert_called_once_with(db, immediate=True)
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.SecurityAuditLogger")
+  @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
+  @patch("robosystems.models.core.billing.BillingAuditLog.log_event")
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_happy_path_at_period_end_uses_stripe_modify(
+    self,
+    mock_get_sub: MagicMock,
+    _mock_log_event: MagicMock,
+    mock_get_provider: MagicMock,
+    _mock_security: MagicMock,
+  ) -> None:
+    """`at_period_end=True` on a Stripe-linked sub uses Stripe.Subscription.modify
+    with cancel_at_period_end=True (NOT the immediate Subscription.cancel path)."""
+    from datetime import UTC, datetime
+
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "active"
+    sub.org_id = "org_1"
+    sub.stripe_subscription_id = "sub_stripe_xyz"
+    sub.ends_at = datetime(2026, 6, 1, tzinfo=UTC)
+    mock_get_sub.return_value = sub
+
+    provider = MagicMock()
+    mock_get_provider.return_value = provider
+
+    body = DeleteGraphOp(confirm="kg_x", at_period_end=True)
+    await delete_graph_op(
+      body=body,
+      graph_id="kg_x",
+      user=_user(),
+      idempotency_key=None,
+      cache=_FakeCache(),
+      db=db,
+    )
+
+    provider.stripe.Subscription.modify.assert_called_once_with(
+      "sub_stripe_xyz", cancel_at_period_end=True
+    )
+    provider.cancel_subscription.assert_not_called()
+    sub.cancel.assert_called_once_with(db, immediate=False)
