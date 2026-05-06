@@ -1,6 +1,7 @@
 """Tests for graph API table materialization endpoint."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -35,6 +36,92 @@ def test_materialize_rejects_read_only(monkeypatch, app_client):
 
   assert response.status_code == 403
   assert "not allowed" in response.json()["detail"]
+
+
+def test_materialize_endpoint_publishes_busy_counter(monkeypatch, app_client):
+  """Endpoint must increment + decrement the busy counter so GHA pre-refresh
+  workflows don't cycle the container mid-materialization. Regression: SEC
+  prod ran a 60-min materialization without ever flipping
+  active_destructive_ops, so a service-refresh fired and killed the run.
+  """
+  cluster_service = SimpleNamespace(read_only=False)
+  app_client.dependency_overrides[get_ladybug_service] = lambda: cluster_service
+
+  # Stub out the real materialization body — we only care about the counter.
+  async def fake_impl(**kwargs):
+    return materialize.TableMaterializationResponse(
+      status="success",
+      graph_id=kwargs["graph_id"],
+      table_name=kwargs["table_name"],
+      rows_ingested=0,
+      execution_time_ms=0.0,
+    )
+
+  counter_mock = AsyncMock()
+
+  with (
+    patch.object(materialize, "_materialize_table_impl", side_effect=fake_impl),
+    patch(
+      "robosystems.middleware.graph.instance_busy._update_counter_async",
+      counter_mock,
+    ),
+  ):
+    client = TestClient(app_client)
+    response = client.post(
+      "/databases/graph-123/tables/Entity/materialize",
+      json={"ignore_errors": True},
+    )
+
+  assert response.status_code == 200, response.text
+  # Increment on entry, decrement on exit.
+  assert counter_mock.await_count == 2
+  deltas = [
+    call.kwargs.get("delta", call.args[1]) for call in counter_mock.await_args_list
+  ]
+  assert deltas == [1, -1]
+  # All increments tagged with the materialization op_kind.
+  kinds = [
+    call.kwargs.get("op_kind", call.args[2]) for call in counter_mock.await_args_list
+  ]
+  assert kinds == [
+    materialize.OP_KIND_MATERIALIZATION,
+    materialize.OP_KIND_MATERIALIZATION,
+  ]
+
+
+def test_materialize_endpoint_decrements_counter_on_failure(monkeypatch, app_client):
+  """instance_busy is a context manager: counter must decrement even when
+  the body raises. Otherwise a single failed materialization would pin the
+  counter >0 and block all future refreshes until staleness expires.
+  """
+  cluster_service = SimpleNamespace(read_only=False)
+  app_client.dependency_overrides[get_ladybug_service] = lambda: cluster_service
+
+  async def boom(**kwargs):
+    raise RuntimeError("simulated COPY failure")
+
+  counter_mock = AsyncMock()
+
+  with (
+    patch.object(materialize, "_materialize_table_impl", side_effect=boom),
+    patch(
+      "robosystems.middleware.graph.instance_busy._update_counter_async",
+      counter_mock,
+    ),
+  ):
+    client = TestClient(app_client)
+    with pytest.raises(RuntimeError, match="simulated COPY failure"):
+      client.post(
+        "/databases/graph-123/tables/Entity/materialize",
+        json={"ignore_errors": True},
+      )
+
+  assert counter_mock.await_count == 2
+  deltas = [
+    call.kwargs.get("delta", call.args[1] if len(call.args) > 1 else None)
+    for call in counter_mock.await_args_list
+  ]
+  assert deltas == [1, -1]
 
 
 # ---------------------------------------------------------------------------

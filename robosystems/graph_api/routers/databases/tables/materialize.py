@@ -12,6 +12,10 @@ from robosystems.graph_api.models.tables import (
   TableMaterializationResponse,
 )
 from robosystems.logger import logger
+from robosystems.middleware.graph.instance_busy import (
+  OP_KIND_MATERIALIZATION,
+  instance_busy,
+)
 
 # Type mapping from LadybugDB types to DuckDB-compatible cast types
 _LBUG_TO_DUCK_TYPE = {
@@ -188,6 +192,29 @@ async def materialize_table(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Materialization not allowed on read-only nodes",
     )
+
+  # Mark this instance busy so GHA pre-refresh workflows don't cycle the
+  # container mid-materialization. The bulk_table_create / bulk_table_insert
+  # endpoints already do this; materialize was the missing piece. Wraps the
+  # full body so the counter decrements on exception too.
+  async with instance_busy(env.INSTANCE_ID, OP_KIND_MATERIALIZATION):
+    return await _materialize_table_impl(
+      graph_id=graph_id,
+      table_name=table_name,
+      request=request,
+      ladybug_service=ladybug_service,
+      start_time=start_time,
+    )
+
+
+async def _materialize_table_impl(
+  graph_id: str,
+  table_name: str,
+  request: TableMaterializationRequest,
+  ladybug_service,
+  start_time: float,
+) -> TableMaterializationResponse:
+  import time
 
   try:
     # Blue-green: read DuckDB from source graph if specified, otherwise from target

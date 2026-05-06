@@ -71,13 +71,29 @@ def sec_graph_materialized(
     context.log.info(msg)
 
   async def run_materialization():
-    result = await processor.materialize_from_duckdb(
-      rebuild=config.rebuild_graph,
-      batch_materialization=config.batch_materialization,
-      batch_size=config.materialization_batch_size,
-      progress_callback=dagster_progress,
+    # Publish the busy counter against the shared-tier master that runs
+    # the LadybugDB COPY, so GHA pre-refresh waits before cycling it.
+    # Mirrors the wrapping in stage.py. Lazy imports keep boto3 /
+    # GraphClientFactory out of every SEC module's import chain.
+    from robosystems.middleware.graph.instance_busy import (
+      OP_KIND_DAGSTER_MATERIALIZATION,
+      begin_destructive_op,
+      end_destructive_op,
+      resolve_instance_id_for_graph,
     )
-    return result
+
+    busy_instance_id = await resolve_instance_id_for_graph(config.graph_id)
+    await begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+    try:
+      result = await processor.materialize_from_duckdb(
+        rebuild=config.rebuild_graph,
+        batch_materialization=config.batch_materialization,
+        batch_size=config.materialization_batch_size,
+        progress_callback=dagster_progress,
+      )
+      return result
+    finally:
+      await end_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
 
   result = asyncio.run(run_materialization())
 
@@ -209,13 +225,28 @@ def sec_historical_materialized(
     )
     context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
 
-    result = await processor.materialize_from_duckdb(
-      rebuild=config.rebuild_graph,
-      batch_materialization=config.batch_materialization,
-      batch_size=config.materialization_batch_size,
-      progress_callback=dagster_progress,
+    # Publish the busy counter against the shared-tier master that runs
+    # the LadybugDB COPY, so GHA pre-refresh waits before cycling it.
+    # Mirrors the wrapping in stage.py.
+    from robosystems.middleware.graph.instance_busy import (
+      OP_KIND_DAGSTER_MATERIALIZATION,
+      begin_destructive_op,
+      end_destructive_op,
+      resolve_instance_id_for_graph,
     )
-    return result
+
+    busy_instance_id = await resolve_instance_id_for_graph(graph_id)
+    await begin_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
+    try:
+      result = await processor.materialize_from_duckdb(
+        rebuild=config.rebuild_graph,
+        batch_materialization=config.batch_materialization,
+        batch_size=config.materialization_batch_size,
+        progress_callback=dagster_progress,
+      )
+      return result
+    finally:
+      await end_destructive_op(busy_instance_id, OP_KIND_DAGSTER_MATERIALIZATION)
 
   result = asyncio.run(run_materialization())
 
