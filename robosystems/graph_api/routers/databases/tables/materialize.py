@@ -12,6 +12,10 @@ from robosystems.graph_api.models.tables import (
   TableMaterializationResponse,
 )
 from robosystems.logger import logger
+from robosystems.middleware.graph.instance_busy import (
+  OP_KIND_MATERIALIZATION,
+  instance_busy,
+)
 
 # Type mapping from LadybugDB types to DuckDB-compatible cast types
 _LBUG_TO_DUCK_TYPE = {
@@ -60,6 +64,31 @@ def _get_target_columns(
   except Exception as exc:
     logger.debug(f"Could not get target columns for {table_name}: {exc}")
     return None
+
+
+_RECONCILE_IGNORE_COLS = frozenset({"file_id", "from", "to", "src", "dst"})
+
+
+def _needs_reconciliation(
+  target_columns: list[tuple[str, str]] | None,
+  source_column_names: list[str],
+) -> bool:
+  """Return True when source columns don't match target columns by name AND order.
+
+  LadybugDB COPY is positional, so a source table whose column names match the
+  target's but in a different order will silently misalign data into the wrong
+  columns. This commonly happens when a new property is added in the middle of
+  an existing node schema and the DuckDB staging table evolves via
+  `ALTER TABLE ADD COLUMN` (which appends at the end). A pure set comparison
+  misses this; we compare ordered lists.
+
+  `from`/`to`/`src`/`dst`/`file_id` are excluded — they're implicit/synthetic.
+  """
+  if not target_columns:
+    return False
+  target_order = [c[0] for c in target_columns if c[0] not in _RECONCILE_IGNORE_COLS]
+  source_order = [c for c in source_column_names if c not in _RECONCILE_IGNORE_COLS]
+  return target_order != source_order
 
 
 def _build_reconciled_select(
@@ -164,6 +193,29 @@ async def materialize_table(
       detail="Materialization not allowed on read-only nodes",
     )
 
+  # Mark this instance busy so GHA pre-refresh workflows don't cycle the
+  # container mid-materialization. The bulk_table_create / bulk_table_insert
+  # endpoints already do this; materialize was the missing piece. Wraps the
+  # full body so the counter decrements on exception too.
+  async with instance_busy(env.INSTANCE_ID, OP_KIND_MATERIALIZATION):
+    return await _materialize_table_impl(
+      graph_id=graph_id,
+      table_name=table_name,
+      request=request,
+      ladybug_service=ladybug_service,
+      start_time=start_time,
+    )
+
+
+async def _materialize_table_impl(
+  graph_id: str,
+  table_name: str,
+  request: TableMaterializationRequest,
+  ladybug_service,
+  start_time: float,
+) -> TableMaterializationResponse:
+  import time
+
   try:
     # Blue-green: read DuckDB from source graph if specified, otherwise from target
     duckdb_graph_id = request.source_graph_id or graph_id
@@ -223,14 +275,7 @@ async def materialize_table(
         column_names = [col[0] for col in columns_result]
         has_file_id = "file_id" in column_names
 
-        # Check if column reconciliation is needed (missing or extra columns)
-        # Exclude from/to (implicit in rel tables) and file_id from comparison
-        needs_reconciliation = False
-        _ignore_cols = {"file_id", "from", "to", "src", "dst"}
-        if target_columns:
-          target_names = {c[0] for c in target_columns} - _ignore_cols
-          source_names = set(column_names) - _ignore_cols
-          needs_reconciliation = target_names != source_names
+        needs_reconciliation = _needs_reconciliation(target_columns, column_names)
 
         # Columns to NULL out (keep column for schema match, but skip data).
         # Embeddings stay in DuckDB staging for LanceDB vector search; materializing
@@ -534,6 +579,28 @@ async def fork_from_parent_duckdb(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Fork not allowed on read-only nodes",
     )
+
+  # Mark this instance busy so GHA pre-refresh workflows don't cycle the
+  # container mid-fork. Same rationale as materialize_table — fork is a
+  # multi-table COPY across DuckDB → LadybugDB, equally destructive.
+  async with instance_busy(env.INSTANCE_ID, OP_KIND_MATERIALIZATION):
+    return await _fork_from_parent_duckdb_impl(
+      parent_graph_id=parent_graph_id,
+      subgraph_id=subgraph_id,
+      request=request,
+      ladybug_service=ladybug_service,
+      start_time=start_time,
+    )
+
+
+async def _fork_from_parent_duckdb_impl(
+  parent_graph_id: str,
+  subgraph_id: str,
+  request: ForkFromParentRequest,
+  ladybug_service,
+  start_time: float,
+) -> ForkFromParentResponse:
+  import time
 
   try:
     parent_duck_path = f"{env.DUCKDB_STAGING_PATH}/{parent_graph_id}.duckdb"
