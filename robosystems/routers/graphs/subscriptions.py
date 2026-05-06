@@ -1,8 +1,6 @@
 """Unified subscription management endpoints for graphs and repositories."""
 
-import logging
-
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from ...config import BillingConfig, env
@@ -13,6 +11,7 @@ from ...config.shared_repositories import (
   resolve_shared_repository_parent,
 )
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from ...middleware.rate_limits import subscription_aware_rate_limit_dependency
@@ -27,7 +26,7 @@ from ...models.core import User
 from ...models.core.billing import BillingAuditLog, BillingCustomer, BillingSubscription
 from ...models.core.billing.audit_log import BillingEventType
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(
   tags=["Subscriptions"],
@@ -40,15 +39,8 @@ def is_shared_repository(graph_id: str) -> bool:
 
 
 def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
-  if resource_type == "graph":
-    plan = BillingConfig.get_subscription_plan(plan_name)
-    if plan:
-      return plan.get("display_name", plan_name)
-  elif resource_type == "repository":
-    plan = BillingConfig.get_repository_plan(resource_id, plan_name)
-    if plan:
-      return plan.get("display_name", plan_name)
-  return plan_name
+  """Backwards-compat thin wrapper — prefer BillingConfig.get_plan_display_name."""
+  return BillingConfig.get_plan_display_name(plan_name, resource_type, resource_id)
 
 
 def subscription_to_response(
@@ -589,7 +581,7 @@ async def cancel_repository_subscription(
     description="Repository name (e.g., 'sec', 'industry')",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  body: CancelSubscriptionRequest = ...,
+  body: CancelSubscriptionRequest = Body(default_factory=CancelSubscriptionRequest),
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),

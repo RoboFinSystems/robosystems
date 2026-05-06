@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
+from robosystems.logger import get_logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
@@ -43,6 +44,8 @@ from robosystems.models.api.graphs.operations import (
 )
 from robosystems.models.api.graphs.subgraphs import CreateSubgraphRequest
 from robosystems.models.core import User
+
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["Graph Operations"])
 
@@ -285,8 +288,9 @@ async def delete_subgraph_op(
     "tear down immediately (~10 min); pass `true` to keep the graph usable "
     "through the current billing period and tear it down at the period "
     "boundary via the existing suspend → deprovision pipeline. Requires "
-    "`confirm` to equal the URL `graph_id`. Caller must be admin on the "
-    "graph. Not allowed on shared repositories."
+    "`confirm` to equal the URL `graph_id`. Caller must be both org owner "
+    "(billing authority) and admin on the graph (operational authority). "
+    "Not allowed on shared repositories."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -306,10 +310,12 @@ async def delete_graph_op(
   db: Session = Depends(get_async_db_session),
 ) -> OperationEnvelope:
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+  from robosystems.models.core import OrgRole, OrgUser
   from robosystems.models.core.billing import (
     BillingAuditLog,
     BillingEventType,
     BillingSubscription,
+    SubscriptionStatus,
   )
   from robosystems.models.core.graph.graph_user import GraphUser
   from robosystems.operations.providers.payment_provider import get_payment_provider
@@ -360,6 +366,17 @@ async def delete_graph_op(
         detail=f"No active subscription found for graph {graph_id}.",
       )
 
+    # Deletion is a billing event — match the authorization on every other
+    # cancel path (billing/subscriptions, repo cancel) by also requiring the
+    # caller to be org owner. Graph admin alone is operational authority and
+    # not enough to authorize a billing-side action.
+    org_user = OrgUser.get_by_org_and_user(subscription.org_id, user.id, db)
+    if not org_user or org_user.role != OrgRole.OWNER:
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only organization owners can delete a graph.",
+      )
+
     if subscription.status in ("canceled", "canceling"):
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -372,6 +389,20 @@ async def delete_graph_op(
         detail=(
           "Cannot delete graph during tier upgrade. Wait for upgrade to "
           "complete and retry."
+        ),
+      )
+
+    # `at_period_end` only makes sense for active subscriptions: a pending /
+    # provisioning / paused sub may not have `current_period_end` set, which
+    # would leave `ends_at = None` and let the deprovision sensor skip it
+    # forever. Force callers to use immediate teardown in that case.
+    if body.at_period_end and subscription.status != SubscriptionStatus.ACTIVE.value:
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+          f"Cannot defer teardown to period end: subscription is "
+          f"'{subscription.status}', not 'active'. Retry without "
+          "`at_period_end=true` to delete immediately."
         ),
       )
 
@@ -392,9 +423,22 @@ async def delete_graph_op(
           )
       except Exception as exc:
         # Stripe side is best-effort; the local subscription state is the
-        # source of truth for the deprovision pipeline. Log and continue.
+        # source of truth for the deprovision pipeline. Log to the standard
+        # logger (so it shows up in normal app logs / alerting) AND to the
+        # security audit trail so a reconciliation job can replay later.
+        logger.error(
+          f"Failed to cancel Stripe subscription "
+          f"{subscription.stripe_subscription_id} during delete-graph "
+          f"for {graph_id}: {exc}",
+          extra={
+            "graph_id": graph_id,
+            "subscription_id": subscription.id,
+            "at_period_end": body.at_period_end,
+          },
+          exc_info=True,
+        )
         SecurityAuditLogger.log_security_event(
-          event_type=SecurityEventType.AUTH_TOKEN_INVALID,
+          event_type=SecurityEventType.OPERATION_FAILED,
           details={
             "action": "stripe_cancel_failed_during_delete_graph",
             "graph_id": graph_id,

@@ -300,8 +300,21 @@ class BillingSubscription(Base):
     Sets `cancellation_type` to "immediate" or "period_end" so downstream
     sensors (e.g. deprovisioning) can branch on the user's intent without
     re-deriving it from timestamps.
+
+    Raises ValueError if `immediate=False` is requested on a subscription
+    whose `current_period_end` is None — without an `ends_at` value the
+    deprovision sensor's `ends_at.isnot(None)` filter would silently skip
+    the sub forever, leaking infrastructure.
     """
     now = datetime.now(UTC)
+
+    if not immediate and self.current_period_end is None:
+      raise ValueError(
+        f"Cannot cancel subscription {self.id} at period end: "
+        "current_period_end is None (subscription was never activated). "
+        "Use immediate=True instead."
+      )
+
     self.status = SubscriptionStatus.CANCELED.value
     self.canceled_at = now
 

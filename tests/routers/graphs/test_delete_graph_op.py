@@ -103,6 +103,23 @@ class TestDeleteGraphRunner:
     db.query.return_value.filter.return_value.first.return_value = membership
     return membership
 
+  @staticmethod
+  def _patch_org_owner(role: str | None = "OWNER"):
+    """Context-manager helper: patches `OrgUser.get_by_org_and_user` to
+    return a membership with the requested role. Pass `role=None` to
+    simulate "user is not in this org"."""
+    from robosystems.models.core import OrgRole
+
+    org_role_map = {"OWNER": OrgRole.OWNER, "ADMIN": OrgRole.ADMIN}
+    org_user = None
+    if role is not None:
+      org_user = MagicMock()
+      org_user.role = org_role_map.get(role, role)
+    return patch(
+      "robosystems.models.core.OrgUser.get_by_org_and_user",
+      return_value=org_user,
+    )
+
   @pytest.mark.asyncio
   @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
   async def test_rejects_non_admin(self, mock_get_sub: MagicMock) -> None:
@@ -153,20 +170,85 @@ class TestDeleteGraphRunner:
 
     sub = MagicMock()
     sub.status = "canceled"
+    sub.org_id = "org_1"
     mock_get_sub.return_value = sub
 
     body = DeleteGraphOp(confirm="kg_x")
-    with pytest.raises(HTTPException) as exc:
-      await delete_graph_op(
-        body=body,
-        graph_id="kg_x",
-        user=_user(),
-        idempotency_key=None,
-        cache=_FakeCache(),
-        db=db,
-      )
+    with self._patch_org_owner("OWNER"):
+      with pytest.raises(HTTPException) as exc:
+        await delete_graph_op(
+          body=body,
+          graph_id="kg_x",
+          user=_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+          db=db,
+        )
     assert exc.value.status_code == 400
     assert "already canceled" in exc.value.detail.lower()
+    sub.cancel.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_rejects_non_org_owner(self, mock_get_sub: MagicMock) -> None:
+    """Graph admin alone is not enough — org owner is required since this
+    triggers a billing event. Mirrors repo cancel + prior billing cancel."""
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "active"
+    sub.org_id = "org_1"
+    mock_get_sub.return_value = sub
+
+    body = DeleteGraphOp(confirm="kg_x")
+    with self._patch_org_owner("ADMIN"):  # not OWNER
+      with pytest.raises(HTTPException) as exc:
+        await delete_graph_op(
+          body=body,
+          graph_id="kg_x",
+          user=_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+          db=db,
+        )
+    assert exc.value.status_code == 403
+    assert "owner" in exc.value.detail.lower()
+    sub.cancel.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.billing.BillingSubscription.get_by_resource")
+  async def test_rejects_at_period_end_for_non_active_subscription(
+    self, mock_get_sub: MagicMock
+  ) -> None:
+    """`at_period_end=True` on a `pending` (or paused etc) sub must be
+    rejected — its `current_period_end` may be None, and the cancel()
+    guard would raise ValueError. Better to fail fast with a clear
+    message and route the user to immediate teardown."""
+    db = MagicMock()
+    self._setup_admin_membership(db, role="admin")
+
+    sub = MagicMock()
+    sub.id = "sub_abc"
+    sub.status = "pending"
+    sub.org_id = "org_1"
+    mock_get_sub.return_value = sub
+
+    body = DeleteGraphOp(confirm="kg_x", at_period_end=True)
+    with self._patch_org_owner("OWNER"):
+      with pytest.raises(HTTPException) as exc:
+        await delete_graph_op(
+          body=body,
+          graph_id="kg_x",
+          user=_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+          db=db,
+        )
+    assert exc.value.status_code == 400
+    assert "period end" in exc.value.detail.lower()
+    assert "pending" in exc.value.detail.lower()
     sub.cancel.assert_not_called()
 
   @pytest.mark.asyncio
@@ -190,14 +272,15 @@ class TestDeleteGraphRunner:
     mock_get_sub.return_value = sub
 
     body = DeleteGraphOp(confirm="kg_x")  # at_period_end defaults to False
-    envelope = await delete_graph_op(
-      body=body,
-      graph_id="kg_x",
-      user=_user(user_id="usr_admin"),
-      idempotency_key=None,
-      cache=_FakeCache(),
-      db=db,
-    )
+    with self._patch_org_owner("OWNER"):
+      envelope = await delete_graph_op(
+        body=body,
+        graph_id="kg_x",
+        user=_user(user_id="usr_admin"),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
 
     sub.cancel.assert_called_once_with(db, immediate=True)
     assert envelope.status == "completed"
@@ -235,14 +318,15 @@ class TestDeleteGraphRunner:
     mock_get_sub.return_value = sub
 
     body = DeleteGraphOp(confirm="kg_x", at_period_end=True)
-    envelope = await delete_graph_op(
-      body=body,
-      graph_id="kg_x",
-      user=_user(user_id="usr_admin"),
-      idempotency_key=None,
-      cache=_FakeCache(),
-      db=db,
-    )
+    with self._patch_org_owner("OWNER"):
+      envelope = await delete_graph_op(
+        body=body,
+        graph_id="kg_x",
+        user=_user(user_id="usr_admin"),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
 
     sub.cancel.assert_called_once_with(db, immediate=False)
     assert envelope.result["status"] == "scheduled_for_deprovision"
@@ -276,14 +360,15 @@ class TestDeleteGraphRunner:
     mock_get_provider.return_value = provider
 
     body = DeleteGraphOp(confirm="kg_x")
-    await delete_graph_op(
-      body=body,
-      graph_id="kg_x",
-      user=_user(),
-      idempotency_key=None,
-      cache=_FakeCache(),
-      db=db,
-    )
+    with self._patch_org_owner("OWNER"):
+      await delete_graph_op(
+        body=body,
+        graph_id="kg_x",
+        user=_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
 
     provider.cancel_subscription.assert_called_once_with("sub_stripe_xyz")
     provider.stripe.Subscription.modify.assert_not_called()
@@ -320,14 +405,15 @@ class TestDeleteGraphRunner:
     mock_get_provider.return_value = provider
 
     body = DeleteGraphOp(confirm="kg_x", at_period_end=True)
-    await delete_graph_op(
-      body=body,
-      graph_id="kg_x",
-      user=_user(),
-      idempotency_key=None,
-      cache=_FakeCache(),
-      db=db,
-    )
+    with self._patch_org_owner("OWNER"):
+      await delete_graph_op(
+        body=body,
+        graph_id="kg_x",
+        user=_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+        db=db,
+      )
 
     provider.stripe.Subscription.modify.assert_called_once_with(
       "sub_stripe_xyz", cancel_at_period_end=True

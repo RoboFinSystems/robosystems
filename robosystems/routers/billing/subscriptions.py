@@ -26,23 +26,10 @@ router = APIRouter(prefix="/billing/subscriptions", tags=["Billing"])
 
 
 def _get_plan_display_name(plan_name: str, resource_type: str, resource_id: str) -> str:
-  """Resolve a plan's internal name to its human-readable display name.
-
-  For graphs: "ladybug-standard" -> "LadybugDB Standard"
-  For repos:  "sec-advanced"     -> "SEC EDGAR Filings - Pro"
-  """
+  """Backwards-compat thin wrapper — prefer BillingConfig.get_plan_display_name."""
   from ...config.billing import BillingConfig
 
-  if resource_type == "graph":
-    plan = BillingConfig.get_subscription_plan(plan_name)
-    if plan:
-      return plan.get("display_name", plan_name)
-  elif resource_type == "repository":
-    plan = BillingConfig.get_repository_plan(resource_id, plan_name)
-    if plan:
-      return plan.get("display_name", plan_name)
-
-  return plan_name
+  return BillingConfig.get_plan_display_name(plan_name, resource_type, resource_id)
 
 
 @router.get(

@@ -330,6 +330,52 @@ class TestBillingSubscriptionLifecycle:
     assert subscription.ends_at == subscription.current_period_end
     assert subscription.cancellation_type == "period_end"
 
+  def test_cancel_period_end_rejected_when_never_activated(
+    self, db_session: Session, test_user, test_org
+  ):
+    """`cancel(immediate=False)` on a sub that was never activated must
+    raise — without `current_period_end` we'd silently set `ends_at=None`,
+    and the deprovision sensor would skip it forever (infrastructure leak).
+    """
+    subscription = BillingSubscription.create_subscription(
+      org_id=test_org.id,
+      resource_type="graph",
+      resource_id="kg123abc",
+      plan_name="standard",
+      base_price_cents=2999,
+      session=db_session,
+    )
+    # Note: no .activate() — current_period_end is None.
+    assert subscription.current_period_end is None
+
+    with pytest.raises(ValueError, match="current_period_end is None"):
+      subscription.cancel(db_session, immediate=False)
+
+    # Status untouched after rejection.
+    assert subscription.status != SubscriptionStatus.CANCELED.value
+    assert subscription.cancellation_type is None
+
+  def test_cancel_immediate_works_when_never_activated(
+    self, db_session: Session, test_user, test_org
+  ):
+    """The immediate path doesn't read `current_period_end` so it must
+    still work on a sub that was never activated."""
+    subscription = BillingSubscription.create_subscription(
+      org_id=test_org.id,
+      resource_type="graph",
+      resource_id="kg123abc",
+      plan_name="standard",
+      base_price_cents=2999,
+      session=db_session,
+    )
+    assert subscription.current_period_end is None
+
+    subscription.cancel(db_session, immediate=True)
+
+    assert subscription.status == SubscriptionStatus.CANCELED.value
+    assert subscription.ends_at is not None
+    assert subscription.cancellation_type == "immediate"
+
 
 class TestBillingSubscriptionUpdates:
   """Tests for subscription update methods."""
