@@ -306,6 +306,7 @@ class TestBillingSubscriptionLifecycle:
     assert subscription.canceled_at is not None
     assert subscription.ends_at is not None
     assert subscription.ends_at == subscription.canceled_at
+    assert subscription.cancellation_type == "immediate"
     assert subscription.is_active() is False
 
   def test_cancel_subscription_end_of_period(
@@ -327,6 +328,7 @@ class TestBillingSubscriptionLifecycle:
     assert subscription.status == SubscriptionStatus.CANCELED.value
     assert subscription.canceled_at is not None
     assert subscription.ends_at == subscription.current_period_end
+    assert subscription.cancellation_type == "period_end"
 
 
 class TestBillingSubscriptionUpdates:

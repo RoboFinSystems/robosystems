@@ -52,6 +52,24 @@ class ChangeTierOp(BaseModel):
   )
 
 
+class DeleteGraphOp(BaseModel):
+  """Body for the delete-graph operation.
+
+  Permanently destroys the graph: cancels its subscription immediately, then
+  triggers fast-path deprovisioning (LadybugDB database removed, DynamoDB slot
+  freed, PG records cleaned). Requires `confirm` to equal the URL `graph_id`
+  as a guard against accidental destructive calls.
+  """
+
+  confirm: str = Field(
+    ...,
+    description=(
+      "Must equal the graph_id in the URL — confirms the caller intends to "
+      "destroy this specific graph."
+    ),
+  )
+
+
 class MaterializeOp(BaseModel):
   """Body for the materialize operation."""
 
