@@ -728,8 +728,8 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     name="FY 2025 Annual Report",
     mapping_id=mapping_id,
     taxonomy_id=taxonomy_id,
-    period_start="2025-01-01",
-    period_end="2025-12-31",
+    period_start=date(2025, 1, 1),
+    period_end=date(2025, 12, 31),
     period_type="annual",
     comparative=False,
   )

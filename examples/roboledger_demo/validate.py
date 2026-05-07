@@ -135,7 +135,10 @@ class _Validator:
     for b in data.get("informationBlocks", []):
       try:
         payload = client.evaluate_rules(self.graph_id, structure_id=b["id"])
-        summary = payload.summary
+        # ``summary`` is the SDK's ``EvaluateRulesResponseSummary`` attrs
+        # class — its keys land in ``additional_properties`` since the
+        # server's schema declares it as an open ``dict[str, int]``.
+        summary = payload.summary.to_dict() if payload.summary else {}
         # Empty dict means no rules were evaluated — treat as a failure so we
         # catch cases where the SumEquals rule wasn't created or wasn't found.
         if not summary:
@@ -240,7 +243,7 @@ class _Validator:
         preview.would_succeed is True,
         f"errors={preview.validation_errors}",
       )
-      computed = preview.handler_metadata or {}
+      computed = preview.handler_metadata.to_dict() if preview.handler_metadata else {}
       nbv_preview = computed.get("nbv_cents", -1)
       gain_loss_preview = computed.get("gain_loss_cents")
       self._check("preview NBV > 0", nbv_preview > 0, f"{nbv_preview} cents")
@@ -375,7 +378,7 @@ class _Validator:
 
     try:
       payload = client.evaluate_rules(self.graph_id, structure_id=sid)
-      summary = payload.summary
+      summary = payload.summary.to_dict() if payload.summary else {}
       if not summary:
         self._check(
           "evaluate-rules all-pass", False, "summary=empty (no rules evaluated)"
