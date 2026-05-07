@@ -99,3 +99,52 @@ class TestStatementRegistration:
     # All four statement block types surface on the library sentinel
     # because their Structures live in public.structures.
     assert entry.surfaces_in_library is True
+
+
+def _arm_block_types(union_alias) -> set[str]:
+  """Return every ``block_type`` Literal value reachable through a
+  discriminated-union alias.
+
+  ``Annotated[A | B, Discriminator(...)]`` exposes the union arms via
+  ``__args__`` on the inner ``Union``. Each arm's ``block_type`` field
+  is a ``Literal[...]`` whose options live in ``Field.annotation.__args__``.
+  We unpack both layers and union the resulting strings.
+  """
+  from typing import get_args
+
+  inner_union, _discriminator = get_args(union_alias)
+  arms = get_args(inner_union)
+  block_types: set[str] = set()
+  for arm in arms:
+    field_annotation = arm.model_fields["block_type"].annotation
+    block_types.update(get_args(field_annotation))
+  return block_types
+
+
+class TestRequestUnionRegistryDrift:
+  """The discriminated-union request models must cover every registered
+  block type. When a new entry is added to ``REGISTRY`` without a
+  matching union arm, callers see a generic ``ValidationError`` from
+  the API layer instead of the registry's intended dispatch — these
+  tests fail loudly to make the omission obvious."""
+
+  def test_create_arm_union_covers_registry(self) -> None:
+    from robosystems.models.api.information_block import (
+      _CreateInformationBlockArms,
+    )
+
+    assert _arm_block_types(_CreateInformationBlockArms) == set(REGISTRY.keys())
+
+  def test_update_arm_union_covers_registry(self) -> None:
+    from robosystems.models.api.information_block import (
+      _UpdateInformationBlockArms,
+    )
+
+    assert _arm_block_types(_UpdateInformationBlockArms) == set(REGISTRY.keys())
+
+  def test_delete_arm_union_covers_registry(self) -> None:
+    from robosystems.models.api.information_block import (
+      _DeleteInformationBlockArms,
+    )
+
+    assert _arm_block_types(_DeleteInformationBlockArms) == set(REGISTRY.keys())

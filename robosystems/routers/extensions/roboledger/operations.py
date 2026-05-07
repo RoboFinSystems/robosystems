@@ -101,6 +101,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
+  EventBlockEnvelope,
   UpdateEventBlockRequest,
 )
 from robosystems.models.api.event_handler import (
@@ -143,7 +144,9 @@ from robosystems.models.api.extensions.taxonomies import (
 from robosystems.models.api.information_block import (
   CreateInformationBlockRequest,
   DeleteInformationBlockRequest,
+  DeleteInformationBlockResponse,
   EvaluateRulesRequest,
+  InformationBlockEnvelope,
   UpdateInformationBlockRequest,
 )
 from robosystems.models.api.taxonomy_block import (
@@ -870,6 +873,7 @@ create_information_block_op = _registrar.register(
     ),
     command=cmd_create_information_block,
     request_model=CreateInformationBlockRequest,
+    result_type=InformationBlockEnvelope,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -890,6 +894,7 @@ update_information_block_op = _registrar.register(
     ),
     command=cmd_update_information_block,
     request_model=UpdateInformationBlockRequest,
+    result_type=InformationBlockEnvelope,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -911,6 +916,7 @@ delete_information_block_op = _registrar.register(
     ),
     command=cmd_delete_information_block,
     request_model=DeleteInformationBlockRequest,
+    result_type=DeleteInformationBlockResponse,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -1000,6 +1006,7 @@ create_event_block_op = _registrar.register(
     ),
     command=cmd_create_event_block,
     request_model=CreateEventBlockRequest,
+    result_type=EventBlockEnvelope,
     error_map={
       HandlerNotFoundError: 404,
       HandlerAmbiguousError: 409,
@@ -1032,6 +1039,7 @@ update_event_block_op = _registrar.register(
     ),
     command=cmd_update_event_block,
     request_model=UpdateEventBlockRequest,
+    result_type=EventBlockEnvelope,
     # Error map covers both update-only failures (top two) and the
     # handler-firing path that runs on captured/classified → committed.
     error_map={

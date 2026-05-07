@@ -116,6 +116,11 @@ class OperationSpec:
       `mark_graph_stale(graph_id, mark_stale_reason)` on fresh success.
       Mutually exclusive with `on_fresh_success` (if both are set,
       `on_fresh_success` wins).
+    result_type: Pydantic model the command returns. When set, the
+      registrar uses `OperationEnvelope[result_type]` as the response
+      model so the typed result shape surfaces in OpenAPI (and the SDKs
+      see `result: <Model>` instead of `result: any`). Leave unset for
+      ops that return raw dicts/lists or have no result.
   """
 
   name: str
@@ -130,6 +135,7 @@ class OperationSpec:
   pre_validate: Callable[[BaseModel], None] | None = None
   on_fresh_success: Callable | None = None
   mark_stale_reason: str | None = None
+  result_type: type[BaseModel] | None = None
 
   @property
   def resolved_path(self) -> str:
@@ -346,9 +352,17 @@ class OperationRegistrar:
       method="POST",
       business_event_type=spec.resolve_business_event_type(self.domain),
     )(handler)
+    # When `result_type` is set, parameterize the envelope so the typed
+    # result shape lands in OpenAPI; otherwise keep the default
+    # `OperationEnvelope` (i.e. `OperationEnvelope[Any]`).
+    response_model = (
+      OperationEnvelope[spec.result_type]
+      if spec.result_type is not None
+      else OperationEnvelope
+    )
     self.router.post(
       spec.resolved_path,
-      response_model=OperationEnvelope,
+      response_model=response_model,
       operation_id=spec.openapi_operation_id,
       summary=spec.summary,
       description=spec.description,

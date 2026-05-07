@@ -40,7 +40,11 @@ from robosystems.models.api.extensions.investor import (
   CreatePortfolioBlockRequest,
   CreateSecurityRequest,
   DeletePortfolioBlockOperation,
+  DeletePortfolioBlockResponse,
+  DeleteResult,
   DeleteSecurityOperation,
+  PortfolioBlockEnvelope,
+  SecurityResponse,
   UpdatePortfolioBlockOperation,
   UpdateSecurityOperation,
 )
@@ -150,6 +154,7 @@ create_portfolio_block_op = _registrar.register(
     ),
     command=cmd_create_portfolio_block,
     request_model=CreatePortfolioBlockRequest,
+    result_type=PortfolioBlockEnvelope,
     error_map={
       SecurityNotFoundError: (404, lambda e: f"Security not found: {e}"),
       DuplicateActivePositionError: (409, str),
@@ -167,6 +172,7 @@ update_portfolio_block_op = _registrar.register(
     ),
     command=cmd_update_portfolio_block,
     request_model=UpdatePortfolioBlockOperation,
+    result_type=PortfolioBlockEnvelope,
     error_map={
       PortfolioNotFoundError: (404, lambda _e: "Portfolio not found."),
       PositionNotFoundError: (404, lambda e: f"Position not found: {e}"),
@@ -190,6 +196,7 @@ delete_portfolio_block_op = _registrar.register(
     ),
     command=cmd_delete_portfolio_block,
     request_model=DeletePortfolioBlockOperation,
+    result_type=DeletePortfolioBlockResponse,
     error_map={
       PortfolioNotFoundError: (404, lambda _e: "Portfolio not found."),
       ActivePositionsRequireConfirmationError: (
@@ -220,6 +227,7 @@ create_security_op = _registrar.register(
     ),
     command=cmd_create_security,
     request_model=CreateSecurityRequest,
+    result_type=SecurityResponse,
     error_map={EntityNotFoundError: (404, lambda _e: "Entity not found.")},
   )
 )
@@ -234,6 +242,7 @@ update_security_op = _registrar.register(
     ),
     command=cmd_update_security,
     request_model=UpdateSecurityOperation,
+    result_type=SecurityResponse,
     error_map={SecurityMasterNotFoundError: (404, lambda _e: "Security not found.")},
     requires_created_by=False,
   )
@@ -249,6 +258,7 @@ delete_security_op = _registrar.register(
     ),
     command=cmd_soft_delete_security,
     request_model=DeleteSecurityOperation,
+    result_type=DeleteResult,
     error_map={SecurityMasterNotFoundError: (404, lambda _e: "Security not found.")},
     requires_created_by=False,
   )

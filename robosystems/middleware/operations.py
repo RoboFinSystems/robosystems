@@ -24,7 +24,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +35,11 @@ from robosystems.config.valkey_registry import (
 )
 from robosystems.logger import logger
 from robosystems.utils.ulid import generate_prefixed_ulid
+
+# `default=Any` (PEP 696) lets unparameterized usage of OperationEnvelope keep
+# the current loose shape — `result: Any | None` — while parameterized usage
+# (`OperationEnvelope[PortfolioBlockEnvelope]`) tightens it to a typed payload.
+TResult = TypeVar("TResult", default=Any)
 
 OperationStatus = Literal["completed", "pending", "failed"]
 
@@ -77,7 +82,7 @@ def _result_to_payload(
   )
 
 
-class OperationEnvelope(BaseModel):
+class OperationEnvelope(BaseModel, Generic[TResult]):
   """Uniform response shape for every operation endpoint.
 
   Every dispatch through an operation surface returns an envelope carrying
@@ -90,6 +95,11 @@ class OperationEnvelope(BaseModel):
   endpoint until completion.  Failed dispatches still mint an
   ``operation_id`` so the audit log and any partial SSE events stay
   correlatable.
+
+  ``TResult`` parameterizes the ``result`` field so per-op response shapes
+  surface in OpenAPI. Operations that pin ``OperationSpec.result_type`` get
+  ``OperationEnvelope[YourEnvelope]`` as their response model; ops that
+  don't keep the default ``Any`` shape (`result: any | null` on the wire).
 
   Fields:
   - ``operation``: kebab-case command name (e.g. ``close-period``)
@@ -115,7 +125,7 @@ class OperationEnvelope(BaseModel):
     description="op_-prefixed ULID for audit and SSE correlation",
   )
   status: OperationStatus = Field(description="Operation lifecycle state")
-  result: dict[str, Any] | list[Any] | None = Field(
+  result: TResult | None = Field(
     default=None, description="Command-specific result payload"
   )
   at: str = Field(description="ISO-8601 UTC timestamp")

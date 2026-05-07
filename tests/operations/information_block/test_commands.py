@@ -111,23 +111,25 @@ class TestCreateInformationBlock:
     assert args[2] == "usr_1"
     mock_build.assert_called_once_with(session, "struct_new")
 
-  def test_unknown_block_type_raises_value_error(self) -> None:
-    """Unknown block_type should surface as ValueError (→ 422 via error_map)."""
-    session = MagicMock()
-    body = CreateInformationBlockRequest(block_type="nonsense", payload={})
-    with pytest.raises(ValueError, match="Unknown block_type"):
-      create_information_block(session, body, created_by="usr_1")
-
-  def test_malformed_payload_raises_validation_error(self) -> None:
-    """A payload that fails the type-specific schema surfaces as
-    Pydantic ValidationError (→ 422 at the FastAPI boundary)."""
-    session = MagicMock()
-    # Missing required fields — element_ids, period_start, etc.
-    body = CreateInformationBlockRequest(
-      block_type="schedule", payload={"name": "Broken"}
-    )
+  def test_unknown_block_type_rejected_at_construction(self) -> None:
+    """Unknown block_type fails the discriminated-union validation at the
+    API boundary (→ 422 via FastAPI's default ValidationError handling)
+    instead of bubbling up from the dispatcher. This is strictly earlier
+    than the prior dispatch-time ValueError; the wire-level 422 contract
+    is preserved."""
     with pytest.raises(ValidationError):
-      create_information_block(session, body, created_by="usr_1")
+      CreateInformationBlockRequest(block_type="nonsense", payload={})
+
+  def test_malformed_schedule_payload_rejected_at_construction(self) -> None:
+    """A schedule payload that fails the typed-arm schema is rejected at
+    request construction (→ 422 at the FastAPI boundary). With the
+    discriminated-union request model, the schedule arm carries a typed
+    ``CreateScheduleRequest`` payload, so missing required fields fail
+    fast with field-path errors instead of bubbling up from the
+    dispatch handler."""
+    with pytest.raises(ValidationError):
+      # Missing required fields — element_ids, period_start, etc.
+      CreateInformationBlockRequest(block_type="schedule", payload={"name": "Broken"})
 
   def test_handler_returning_none_envelope_raises_runtime_error(self) -> None:
     """dispatch_build_envelope returning None for a freshly-created block
@@ -189,11 +191,12 @@ class TestUpdateInformationBlock:
     assert args[2] == "usr_1"
     mock_build.assert_called_once_with(session, "struct_existing")
 
-  def test_unknown_block_type_raises_value_error(self) -> None:
-    session = MagicMock()
-    body = UpdateInformationBlockRequest(block_type="nonsense", payload={})
-    with pytest.raises(ValueError, match="Unknown block_type"):
-      update_information_block(session, body, created_by="usr_1")
+  def test_unknown_block_type_rejected_at_construction(self) -> None:
+    """Same fast-fail as create — see
+    `TestCreateInformationBlock.test_unknown_block_type_rejected_at_construction`.
+    """
+    with pytest.raises(ValidationError):
+      UpdateInformationBlockRequest(block_type="nonsense", payload={})
 
   @pytest.mark.parametrize(
     "block_type",
@@ -249,11 +252,12 @@ class TestDeleteInformationBlock:
       with pytest.raises(ScheduleNotFoundError):
         delete_information_block(session, body, created_by="usr_1")
 
-  def test_unknown_block_type_raises_value_error(self) -> None:
-    session = MagicMock()
-    body = DeleteInformationBlockRequest(block_type="nonsense", payload={})
-    with pytest.raises(ValueError, match="Unknown block_type"):
-      delete_information_block(session, body, created_by="usr_1")
+  def test_unknown_block_type_rejected_at_construction(self) -> None:
+    """Same fast-fail as create — see
+    `TestCreateInformationBlock.test_unknown_block_type_rejected_at_construction`.
+    """
+    with pytest.raises(ValidationError):
+      DeleteInformationBlockRequest(block_type="nonsense", payload={})
 
   @pytest.mark.parametrize(
     "block_type",

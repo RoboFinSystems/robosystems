@@ -15,11 +15,14 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, RootModel
 
 from robosystems.models.api.extensions.schedules import (
+  CreateScheduleRequest,
+  DeleteScheduleRequest,
   EntryTemplateRequest,
   ScheduleMetadataRequest,
+  UpdateScheduleRequest,
 )
 
 # ── Atom "Lite" projections ────────────────────────────────────────────────
@@ -659,77 +662,290 @@ class InformationBlockEnvelope(BaseModel):
 # ── Request models ─────────────────────────────────────────────────────────
 
 
-class CreateInformationBlockRequest(BaseModel):
-  """Generic create request — discriminator + typed-at-dispatch payload.
+class _CreateScheduleArm(BaseModel):
+  """Create-information-block body for `block_type="schedule"`.
 
-  ``block_type`` selects the registry entry. ``payload`` is validated
-  against ``BlockTypeRegistryEntry.create_request_model`` (e.g.
-  :class:`CreateScheduleRequest` for ``block_type='schedule'``) by the
-  command dispatcher. Chosen over a Pydantic discriminated union on the
-  top-level request so adding a block type is one registry line, not a
-  union-arm edit at the request-model layer.
+  Carries a typed schedule payload — full schedule shape is exposed
+  inline in the OpenAPI schema so SDK callers see every required field.
   """
 
-  block_type: str = Field(
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "5-year straight-line depreciation",
+          "description": (
+            "Monthly depreciation schedule for a $50,000 asset "
+            "amortized over 60 months. Each in-scope period produces "
+            "a draft closing entry via `entry_template`."
+          ),
+          "value": {
+            "block_type": "schedule",
+            "payload": {
+              "name": "Office Building Depreciation",
+              "element_ids": [
+                "us-gaap:Depreciation",
+                "us-gaap:AccumulatedDepreciation",
+              ],
+              "period_start": "2026-01-01",
+              "period_end": "2030-12-31",
+              "monthly_amount": 83333,
+              "entry_template": {
+                "debit_element_id": "us-gaap:Depreciation",
+                "credit_element_id": "us-gaap:AccumulatedDepreciation",
+              },
+            },
+          },
+        }
+      ]
+    }
+  )
+
+  block_type: Literal["schedule"] = Field(
+    ...,
+    description="Discriminator value selecting this arm.",
+  )
+  payload: CreateScheduleRequest = Field(
+    ...,
+    description="Schedule creation payload.",
+  )
+
+
+# Block types whose construction handler still raises 501 — surfaced in
+# the union so the OpenAPI schema is honest about which discriminator
+# values the registry accepts. To promote a value to its own typed arm:
+# (1) add a `_Create<Block>Arm` modeled on `_CreateScheduleArm`,
+# (2) drop the value from `_LEGACY_BLOCK_TYPES`,
+# (3) add the new arm to `_CreateInformationBlockArms`.
+# The `test_create_arm_union_covers_registry` drift test enforces that
+# every registry entry remains covered.
+_LEGACY_BLOCK_TYPES = Literal[
+  "balance_sheet",
+  "income_statement",
+  "cash_flow_statement",
+  "equity_statement",
+  "metric",
+]
+
+
+class _CreateLegacyArm(BaseModel):
+  """Create-information-block body for block types that don't yet have
+  a typed construction path at the API boundary.
+
+  Statement-family blocks (balance_sheet, income_statement,
+  cash_flow_statement, equity_statement) are constructed via
+  `create-report`, not this endpoint. Metric blocks are recognized
+  but their evaluator has not shipped. Calling this endpoint with one
+  of these block types returns HTTP 501 with a hint pointing to the
+  correct construction path.
+  """
+
+  block_type: _LEGACY_BLOCK_TYPES = Field(
     ...,
     description=(
-      "Block type discriminator. Must match a registered entry in "
-      "robosystems.operations.information_block.registry.REGISTRY."
+      "Statement-family or metric block type. The endpoint returns "
+      "501 for these values — statements are constructed via "
+      "`create-report`; metric construction is pending."
     ),
   )
   payload: dict[str, Any] = Field(
     default_factory=dict,
     description=(
-      "Block-type-specific creation payload. Shape-validated against the "
-      "registry entry's `create_request_model` at dispatch time; the "
-      "validation error surfaces as a 422 at the API boundary."
+      "Untyped payload — typed-arm validation is skipped because the "
+      "dispatch handler raises 501 before the payload is consumed."
     ),
   )
 
 
-class UpdateInformationBlockRequest(BaseModel):
-  """Generic update request — mirrors :class:`CreateInformationBlockRequest`.
+_CreateInformationBlockArms = Annotated[
+  _CreateScheduleArm | _CreateLegacyArm,
+  Discriminator("block_type"),
+]
 
-  Validated against the registry entry's ``update_request_model``.
-  Block types that don't support updates (e.g. the statement family,
-  whose Structures are library-seeded) surface ``NotImplementedError``
-  from their dispatch handler, which the registrar maps to HTTP 501.
+
+class CreateInformationBlockRequest(RootModel[_CreateInformationBlockArms]):
+  """Create an Information Block. The body is a discriminated union on
+  `block_type`: pick the arm matching the block type you want to
+  create. The schedule arm carries a fully typed payload; statement
+  and metric arms accept an untyped payload but currently return HTTP
+  501 (statements are constructed via `create-report`; metric
+  construction is pending)."""
+
+  @property
+  def block_type(self) -> str:
+    """Discriminator value of the resolved arm."""
+    return self.root.block_type
+
+  @property
+  def payload(self) -> CreateScheduleRequest | dict[str, Any]:
+    """Payload of the resolved arm. Typed for the schedule arm; a raw
+    dict for the legacy arms (the dispatch handler validates it at
+    runtime against the registry entry's request model)."""
+    return self.root.payload
+
+
+class _UpdateScheduleArm(BaseModel):
+  """Update-information-block body for `block_type="schedule"`.
+
+  Carries a typed schedule update payload — full editable shape is
+  exposed inline.
   """
 
-  block_type: str = Field(
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "Rename a schedule",
+          "value": {
+            "block_type": "schedule",
+            "payload": {
+              "structure_id": "struct_depr_office_2026",
+              "name": "Office Building Depreciation (Renamed)",
+            },
+          },
+        }
+      ]
+    }
+  )
+
+  block_type: Literal["schedule"] = Field(
     ...,
-    description="Block type discriminator. Must match a registered entry.",
+    description="Discriminator value selecting this arm.",
+  )
+  payload: UpdateScheduleRequest = Field(
+    ...,
+    description="Schedule update payload.",
+  )
+
+
+class _UpdateLegacyArm(BaseModel):
+  """Update-information-block body for block types that don't yet have
+  a typed update path at the API boundary.
+
+  Statement-family blocks are library-seeded and immutable. Metric
+  block updates are not yet implemented. Calling this endpoint with
+  one of these block types returns HTTP 501.
+  """
+
+  block_type: _LEGACY_BLOCK_TYPES = Field(
+    ...,
+    description=(
+      "Statement-family or metric block type. Updates return 501 — "
+      "statement Structures are library-seeded; metric updates are "
+      "pending."
+    ),
   )
   payload: dict[str, Any] = Field(
     default_factory=dict,
     description=(
-      "Block-type-specific update payload. Typically carries the "
-      "structure_id plus whichever fields are editable for this block "
-      "type. Shape-validated against the registry entry's "
-      "`update_request_model` at dispatch time."
+      "Untyped payload — typed-arm validation is skipped because the "
+      "dispatch handler raises 501 before the payload is consumed."
     ),
   )
 
 
-class DeleteInformationBlockRequest(BaseModel):
-  """Generic delete request — mirrors :class:`CreateInformationBlockRequest`.
+_UpdateInformationBlockArms = Annotated[
+  _UpdateScheduleArm | _UpdateLegacyArm,
+  Discriminator("block_type"),
+]
 
-  Validated against the registry entry's ``delete_request_model``.
-  Block types that don't support deletion raise ``NotImplementedError``.
+
+class UpdateInformationBlockRequest(RootModel[_UpdateInformationBlockArms]):
+  """Update an Information Block. The body is a discriminated union on
+  `block_type` mirroring `CreateInformationBlockRequest`. The schedule
+  arm carries a fully typed update payload; statement and metric arms
+  return HTTP 501 (statements are library-seeded; metric updates are
+  pending)."""
+
+  @property
+  def block_type(self) -> str:
+    return self.root.block_type
+
+  @property
+  def payload(self) -> UpdateScheduleRequest | dict[str, Any]:
+    return self.root.payload
+
+
+class _DeleteScheduleArm(BaseModel):
+  """Delete-information-block body for `block_type="schedule"`.
+
+  Carries a typed schedule delete payload — just the `structure_id`.
   """
 
-  block_type: str = Field(
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "Hard-delete a schedule",
+          "description": (
+            "Cascades through facts and associations. To end a "
+            "schedule early without removing history, fire "
+            "`create-event-block(event_type='asset_disposed')` instead."
+          ),
+          "value": {
+            "block_type": "schedule",
+            "payload": {"structure_id": "struct_depr_office_2026"},
+          },
+        }
+      ]
+    }
+  )
+
+  block_type: Literal["schedule"] = Field(
     ...,
-    description="Block type discriminator. Must match a registered entry.",
+    description="Discriminator value selecting this arm.",
+  )
+  payload: DeleteScheduleRequest = Field(
+    ...,
+    description="Schedule delete payload.",
+  )
+
+
+class _DeleteLegacyArm(BaseModel):
+  """Delete-information-block body for block types that don't yet have
+  a typed delete path at the API boundary.
+
+  Statement-family blocks cannot be deleted per tenant (the underlying
+  Report should be archived via the report APIs instead). Metric
+  deletion is not yet implemented. Calls return HTTP 501.
+  """
+
+  block_type: _LEGACY_BLOCK_TYPES = Field(
+    ...,
+    description=(
+      "Statement-family or metric block type. Deletion returns 501 — "
+      "statements are library-seeded (archive the underlying Report "
+      "instead); metric deletion is pending."
+    ),
   )
   payload: dict[str, Any] = Field(
     default_factory=dict,
     description=(
-      "Block-type-specific delete payload. Typically carries just the "
-      "structure_id. Shape-validated against the registry entry's "
-      "`delete_request_model` at dispatch time."
+      "Untyped payload — typed-arm validation is skipped because the "
+      "dispatch handler raises 501 before the payload is consumed."
     ),
   )
+
+
+_DeleteInformationBlockArms = Annotated[
+  _DeleteScheduleArm | _DeleteLegacyArm,
+  Discriminator("block_type"),
+]
+
+
+class DeleteInformationBlockRequest(RootModel[_DeleteInformationBlockArms]):
+  """Delete an Information Block. The body is a discriminated union on
+  `block_type` mirroring `CreateInformationBlockRequest`. The schedule
+  arm carries a fully typed delete payload; statement and metric arms
+  return HTTP 501."""
+
+  @property
+  def block_type(self) -> str:
+    return self.root.block_type
+
+  @property
+  def payload(self) -> DeleteScheduleRequest | dict[str, Any]:
+    return self.root.payload
 
 
 class DeleteInformationBlockResponse(BaseModel):
