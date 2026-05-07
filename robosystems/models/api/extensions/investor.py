@@ -6,7 +6,9 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from robosystems.models.api.common import PaginationInfo
+from robosystems.models.api.common import DeleteResult, PaginationInfo
+
+__all__ = ["DeleteResult"]  # re-exported for back-compat with existing imports
 
 # ── Portfolio ──────────────────────────────────────────────────────────────
 
@@ -359,21 +361,6 @@ class SecurityListResponse(BaseModel):
 
 
 # ── Position ───────────────────────────────────────────────────────────────
-
-
-class DeleteResult(BaseModel):
-  """Shared response shape for soft-delete operations (e.g.,
-  `delete-security`). `deleted=true` means a row was flipped; 404 is
-  raised by the handler when no row existed."""
-
-  deleted: bool = Field(
-    ...,
-    description=(
-      "`true` when the row was soft-deleted in this call. Always "
-      "`true` on a 200 response; the 404 path is taken instead when "
-      "the row didn't exist."
-    ),
-  )
 
 
 class PositionResponse(BaseModel):

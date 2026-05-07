@@ -98,7 +98,7 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
+from robosystems.models.api.common import OPERATION_ERROR_RESPONSES, DeleteResult
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
   EventBlockEnvelope,
@@ -658,12 +658,6 @@ class RemovePublishListMemberOperation(BaseModel):
       ]
     },
   )
-
-
-class DeleteResult(BaseModel):
-  """Return shape for delete operations."""
-
-  deleted: bool
 
 
 # ═══════════════════════════════════════════════════════════════════════════

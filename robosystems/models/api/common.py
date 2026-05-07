@@ -113,6 +113,29 @@ class HealthStatus(BaseModel):
   )
 
 
+class DeleteResult(BaseModel):
+  """Shared response shape for delete / soft-delete operations.
+
+  ``deleted=True`` means the operation succeeded (a row was deleted or
+  flipped). The handler returns 404 instead when the row didn't exist
+  to begin with — the response shape is never used to communicate "not
+  found".
+
+  Defined once here to avoid OpenAPI components key collisions
+  between roboledger and roboinvestor (both surfaces produced
+  separate ``DeleteResult`` classes before consolidation).
+  """
+
+  deleted: bool = Field(
+    ...,
+    description=(
+      "`true` when the row was deleted in this call. Always `true` "
+      "today — 404 covers the not-found case at the HTTP layer rather "
+      "than via this field."
+    ),
+  )
+
+
 class CreditCostInfo(BaseModel):
   """Information about credit costs for an operation."""
 
