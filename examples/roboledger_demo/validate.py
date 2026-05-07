@@ -220,7 +220,8 @@ class _Validator:
     disposal_body = {
       "event_type": "asset_disposed",
       "event_category": "adjustment",
-      "source": "native",
+      "event_class": "economic",
+      "source": "manual",
       "occurred_at": "2026-03-31T00:00:00Z",
       "metadata": {
         "schedule_id": sid,
@@ -252,17 +253,12 @@ class _Validator:
       self._check("preview-event-block call", False, str(exc))
       return
 
-    # Execute the disposal via dispose_schedule (event-block under the hood)
+    # Execute the disposal via create-event-block directly to keep the
+    # validation aligned with the demo's pedagogy of going through the
+    # event-block primitive (the SDK's `dispose_schedule` helper wraps
+    # the same call).
     try:
-      payload = client.dispose_schedule(
-        self.graph_id,
-        structure_id=sid,
-        disposal_date="2026-03-31",
-        memo="Validation disposal",
-        reason="e2e test",
-        sale_proceeds=0,
-        gain_loss_element_id=dr_id,
-      )
+      payload = client.create_event_block(self.graph_id, disposal_body)
 
       self._check(
         "event status = fulfilled",

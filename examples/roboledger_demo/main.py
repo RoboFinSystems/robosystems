@@ -300,11 +300,13 @@ def create_journal_entries(
   """Create historical journal entries via the event-driven ledger.
 
   Each transaction becomes one journal entry with balanced line items,
-  created with status='posted' (historical data). Routes through
-  ``LedgerClient.create_journal_entry()`` which posts to
-  ``create-event-block(event_type='journal_entry_recorded')`` — the Python
-  handler registry forwards the metadata into the underlying journal
-  entry command.
+  created with status='posted' (historical data). Posts directly to
+  ``create-event-block(event_type='journal_entry_recorded')`` to make
+  the event-driven flow explicit — the Python handler registry forwards
+  the metadata into the underlying journal entry command. The SDK's
+  ``LedgerClient.create_journal_entry()`` helper is a thin wrapper over
+  this same call; using ``create_event_block`` here keeps the demo's
+  storytelling aligned with the architectural primitive.
   """
   client = _get_ledger_client()
 
@@ -332,15 +334,23 @@ def create_journal_entries(
       continue
 
     memo = description or f"{txn_type} on {txn_date}"
+    body = {
+      "event_type": "journal_entry_recorded",
+      "event_category": "adjustment",
+      "event_class": "economic",
+      "source": "manual",
+      "occurred_at": f"{txn_date.isoformat()}T00:00:00+00:00",
+      "apply_handlers": True,
+      "metadata": {
+        "posting_date": txn_date.isoformat(),
+        "memo": memo,
+        "line_items": li_list,
+        "type": "standard",
+        "status": "posted",
+      },
+    }
     try:
-      client.create_journal_entry(
-        graph_id,
-        posting_date=txn_date.isoformat(),
-        memo=memo,
-        line_items=li_list,
-        type="standard",
-        status="posted",
-      )
+      client.create_event_block(graph_id, body)
     except Exception as e:
       print(f"  WARNING: create-journal-entry failed for {txn_date} — {e}")
       skipped += 1
