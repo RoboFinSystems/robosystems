@@ -135,11 +135,11 @@ class _Validator:
     for b in data.get("informationBlocks", []):
       try:
         payload = client.evaluate_rules(self.graph_id, structure_id=b["id"])
-        summary = payload.get("summary")
-        # None means no rules were evaluated — treat as a failure so we catch
-        # cases where the SumEquals rule wasn't created or wasn't found.
-        if summary is None:
-          self._check(b["name"], False, "summary=null (no rules evaluated)")
+        summary = payload.summary
+        # Empty dict means no rules were evaluated — treat as a failure so we
+        # catch cases where the SumEquals rule wasn't created or wasn't found.
+        if not summary:
+          self._check(b["name"], False, "summary=empty (no rules evaluated)")
           continue
         fails = summary.get("fail", 0) + summary.get("error", 0)
         self._check(b["name"], fails == 0, f"summary={summary}")
@@ -207,7 +207,7 @@ class _Validator:
         useful_life_months=2,
         asset_element_id=cr_id,
       )
-      sid = sched.get("id", "")
+      sid = sched.id or ""
       self._check("throwaway schedule created", bool(sid), f"id={sid}")
       if sid:
         self._cleanup.append((self.graph_id, sid))
@@ -236,10 +236,10 @@ class _Validator:
       preview = client.preview_event_block(self.graph_id, disposal_body)
       self._check(
         "preview would_succeed",
-        preview.get("would_succeed") is True,
-        f"errors={preview.get('validation_errors')}",
+        preview.would_succeed is True,
+        f"errors={preview.validation_errors}",
       )
-      computed = preview.get("handler_metadata") or {}
+      computed = preview.handler_metadata or {}
       nbv_preview = computed.get("nbv_cents", -1)
       gain_loss_preview = computed.get("gain_loss_cents")
       self._check("preview NBV > 0", nbv_preview > 0, f"{nbv_preview} cents")
@@ -266,10 +266,10 @@ class _Validator:
 
       self._check(
         "event status = fulfilled",
-        payload.get("status") == "fulfilled",
-        f"status={payload.get('status')}",
+        payload.status == "fulfilled",
+        f"status={payload.status}",
       )
-      self._check("event id returned", bool(payload.get("id")), payload.get("id", ""))
+      self._check("event id returned", bool(payload.id), payload.id or "")
     except Exception as exc:
       self._check("dispose_schedule call", False, str(exc))
       return
@@ -325,7 +325,7 @@ class _Validator:
         original_amount=30_000,
         useful_life_months=3,
       )
-      sid = sched.get("id", "")
+      sid = sched.id or ""
       self._check("rollforward schedule created", bool(sid), f"id={sid}")
       if sid:
         self._cleanup.append((self.graph_id, sid))
@@ -379,10 +379,10 @@ class _Validator:
 
     try:
       payload = client.evaluate_rules(self.graph_id, structure_id=sid)
-      summary = payload.get("summary")
-      if summary is None:
+      summary = payload.summary
+      if not summary:
         self._check(
-          "evaluate-rules all-pass", False, "summary=null (no rules evaluated)"
+          "evaluate-rules all-pass", False, "summary=empty (no rules evaluated)"
         )
       else:
         fails = summary.get("fail", 0) + summary.get("error", 0)

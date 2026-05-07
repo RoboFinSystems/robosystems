@@ -278,12 +278,12 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
       "rules": [],
     },
   )
-  coa_taxonomy_id = envelope["id"]
+  coa_taxonomy_id = envelope.id
 
   element_lookup: dict[str, str] = {
-    (e.get("qname") or "").split(":", 1)[-1]: e["id"]
-    for e in envelope.get("elements", [])
-    if e.get("qname")
+    (e.qname or "").split(":", 1)[-1]: e.id
+    for e in (envelope.elements or [])
+    if e.qname
   }
 
   return element_lookup, coa_taxonomy_id, len(ACCOUNTS)
@@ -510,12 +510,12 @@ def initialize_fiscal_calendar(graph_id: str) -> str:
     note="roboledger_demo initialization",
   )
 
-  fc = result.get("fiscal_calendar", {})
-  close_target = fc.get("close_target_period", last_completed)
+  fc = result.fiscal_calendar
+  close_target = fc.close_target or last_completed
 
   print(f"  closed_through: {closed_through}")
   print(f"  close_target:   {close_target}")
-  print(f"  periods seeded: {result.get('periods_created', 0)}")
+  print(f"  periods seeded: {result.periods_created}")
   return close_target
 
 
@@ -576,7 +576,7 @@ def create_schedules(graph_id: str, element_lookup: dict[str, str]) -> int:
         "description": "Container for the demo's recurring closing schedules.",
       },
     )
-    taxonomy_id = result["id"]
+    taxonomy_id = result.id
 
   created = 0
   for (
@@ -689,17 +689,6 @@ def generate_fy2025_report(graph_id: str) -> str | None:
   Returns the report_id (or None on failure) so the caller can print
   the viewer URL.
   """
-  # NOTE: ``LedgerClient.create_report`` discards the synchronous result
-  # (it returns only operation_id + status). The server runs create-report
-  # synchronously and inlines the report row in the envelope's ``result``,
-  # so we bypass the wrapper and call the generated API directly to get
-  # the report_id back. Drop this once the SDK helper is fixed to return
-  # the full envelope.
-  from robosystems_client.api.extensions_robo_ledger.op_create_report import (
-    sync_detailed as api_create_report,
-  )
-  from robosystems_client.models import CreateReportRequest
-
   client = _get_ledger_client()
 
   # Find the coa_mapping structure created during the taxonomy seed
@@ -724,22 +713,17 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     return None
   taxonomy_id = fac_pres["id"]
 
-  body = CreateReportRequest(
+  report = client.create_report(
+    graph_id,
     name="FY 2025 Annual Report",
     mapping_id=mapping_id,
     taxonomy_id=taxonomy_id,
-    period_start=date(2025, 1, 1),
-    period_end=date(2025, 12, 31),
+    period_start="2025-01-01",
+    period_end="2025-12-31",
     period_type="annual",
     comparative=False,
   )
-  response = api_create_report(graph_id=graph_id, body=body, client=client._get_client())
-  envelope = client._call_op("Create report", response)
-  payload = envelope.result if isinstance(envelope.result, dict) else {}
-  report_id = payload.get("id") or payload.get("report_id")
-  if not report_id:
-    print(f"  WARNING: No report_id in result: {payload}")
-    return None
+  report_id = report.id
   print(f"  Generated:    {report_id}")
 
   # Pull the package to confirm it rehydrates
