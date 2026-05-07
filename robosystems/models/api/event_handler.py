@@ -74,15 +74,53 @@ class TransactionTemplate(BaseModel):
 
 
 class CreateEventHandlerRequest(BaseModel):
-  name: str
-  description: str | None = None
+  """Register a new event-type → transaction-template rule.
+
+  When ``create-event-block`` runs with ``apply_handlers=True``, the
+  registry resolves the *highest-priority active* handler whose match
+  criteria all match the event, then evaluates the
+  ``transaction_template`` to produce GL rows. Match precedence: among
+  active handlers for the same ``event_type``, the one with the most
+  specific match (more match fields satisfied) wins; ties broken by
+  ``priority`` desc, then ``created_at`` asc.
+
+  All match fields except ``event_type`` are optional — leaving them
+  unset matches anything. Use ``match_metadata_expression`` for
+  fine-grained discrimination (e.g. only payroll categories).
+  """
+
+  name: str = Field(..., description="Human-readable handler name (unique per graph).")
+  description: str | None = Field(
+    None, description="Free-form description shown in admin UIs."
+  )
 
   # Match criteria
-  event_type: str
-  event_category: str | None = None
-  match_source: str | None = None
-  match_agent_type: str | None = None
-  match_resource_type: str | None = None
+  event_type: str = Field(
+    ...,
+    description=(
+      "Event type to match. Matches the `event_type` field on incoming "
+      "events from `create-event-block`."
+    ),
+  )
+  event_category: str | None = Field(
+    None,
+    description="Optional category filter (e.g. 'expense', 'revenue').",
+  )
+  match_source: str | None = Field(
+    None,
+    description=(
+      "Match the event's `source` field (e.g. 'quickbooks', 'plaid'). "
+      "Useful when the same event_type comes from multiple integrations."
+    ),
+  )
+  match_agent_type: str | None = Field(
+    None,
+    description="Match agent-emitted events by agent_type.",
+  )
+  match_resource_type: str | None = Field(
+    None,
+    description="Match resource-bound events by resource_type.",
+  )
   match_metadata_expression: dict | None = Field(
     None,
     description=(
@@ -92,21 +130,116 @@ class CreateEventHandlerRequest(BaseModel):
   )
 
   # Template
-  transaction_template: TransactionTemplate
+  transaction_template: TransactionTemplate = Field(
+    ...,
+    description=(
+      "The DSL spec for the GL rows this handler produces. See "
+      "`TransactionTemplate` for the shape."
+    ),
+  )
 
   # Priority + lifecycle
-  priority: int = 0
-  is_active: bool = True
-  origin: Literal["hub", "tenant"] = "tenant"
+  priority: int = Field(
+    0,
+    description=(
+      "Tiebreaker when multiple equally-specific handlers match. Higher = wins."
+    ),
+  )
+  is_active: bool = Field(
+    True, description="Inactive handlers are ignored at match time."
+  )
+  origin: Literal["hub", "tenant"] = Field(
+    "tenant",
+    description=(
+      "Provenance of the handler. `tenant` = author by graph owner; "
+      "`hub` = platform-shipped template (immutable for tenants)."
+    ),
+  )
 
-  metadata: dict = Field(default_factory=dict)
+  metadata: dict = Field(
+    default_factory=dict,
+    description="Free-form metadata stored alongside the handler.",
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "name": "QB Vendor Bill — Default Expense Posting",
+          "event_type": "vendor_bill_received",
+          "match_source": "quickbooks",
+          "transaction_template": {
+            "transactions": [
+              {
+                "entry_template": {
+                  "debit": {
+                    "element_id": "elem_coa_office_supplies",
+                    "amount": "{{ event.amount }}",
+                  },
+                  "credit": {
+                    "element_id": "elem_coa_accounts_payable",
+                    "amount": "{{ event.amount }}",
+                  },
+                }
+              }
+            ]
+          },
+          "priority": 0,
+        },
+        {
+          "name": "Payroll Run — Wages + Tax Liability",
+          "event_type": "payroll_run_completed",
+          "event_category": "expense",
+          "match_metadata_expression": {"category": "payroll"},
+          "transaction_template": {
+            "transactions": [
+              {
+                "entry_template": {
+                  "debit": {
+                    "element_id": "elem_coa_wages_expense",
+                    "amount": "{{ event.amount }}",
+                  },
+                  "credit": {
+                    "element_id": "elem_coa_wages_payable",
+                    "amount": "{{ event.amount }}",
+                  },
+                }
+              },
+              {
+                "entry_template": {
+                  "debit": {
+                    "element_id": "elem_coa_payroll_tax_expense",
+                    "amount": "{{ event.metadata.tax_cents }}",
+                  },
+                  "credit": {
+                    "element_id": "elem_coa_payroll_tax_liability",
+                    "amount": "{{ event.metadata.tax_cents }}",
+                  },
+                }
+              },
+            ]
+          },
+          "priority": 10,
+        },
+      ]
+    }
+  )
 
 
 class UpdateEventHandlerRequest(BaseModel):
-  event_handler_id: str
+  """Update an existing event handler. All fields except
+  ``event_handler_id`` are optional — pass only what changes.
 
-  name: str | None = None
-  description: str | None = None
+  ``transaction_template`` is **fully replaced** when supplied (no
+  partial template patches). ``metadata_patch`` does deep-merge into
+  the existing metadata. ``approve=true`` sets ``approved_by`` and
+  ``approved_at``; ``approve=false`` clears them.
+  """
+
+  event_handler_id: str = Field(..., description="The handler to update.")
+
+  name: str | None = Field(None, description="New name. Omit to leave unchanged.")
+  description: str | None = Field(None, description="New description.")
 
   # Match criteria patches
   event_category: str | None = None
@@ -116,15 +249,55 @@ class UpdateEventHandlerRequest(BaseModel):
   match_metadata_expression: dict | None = None
 
   # Template replacement (full replace, not patch)
-  transaction_template: TransactionTemplate | None = None
+  transaction_template: TransactionTemplate | None = Field(
+    None,
+    description=(
+      "Replacement template. Whole-template replace — no partial patch. "
+      "Omit to leave unchanged."
+    ),
+  )
 
   priority: int | None = None
-  is_active: bool | None = None
+  is_active: bool | None = Field(
+    None,
+    description=(
+      "Toggle activation. False removes the handler from match-time "
+      "consideration without deleting it."
+    ),
+  )
 
   # Approval shortcut — True sets approved_by + approved_at; False clears them
-  approve: bool | None = None
+  approve: bool | None = Field(
+    None,
+    description=(
+      "Approval shortcut: True stamps approved_by/approved_at to the "
+      "current user; False clears both."
+    ),
+  )
 
-  metadata_patch: dict = Field(default_factory=dict)
+  metadata_patch: dict = Field(
+    default_factory=dict,
+    description=(
+      "Deep-merged into the existing handler.metadata. Pass `{}` to "
+      "leave metadata unchanged."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "event_handler_id": "evh_01HVF8T0M2YTAY3BBNRH0V0",
+          "is_active": False,
+        },
+        {
+          "event_handler_id": "evh_01HVF8T0M2YTAY3BBNRH0V0",
+          "approve": True,
+          "priority": 100,
+        },
+      ]
+    }
+  )
 
 
 class EventHandlerResponse(BaseModel):

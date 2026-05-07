@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from robosystems.models.api.common import PaginationInfo
 
@@ -108,25 +108,95 @@ class AssociationResponse(BaseModel):
 
 
 class CreateAssociationRequest(BaseModel):
-  from_element_id: str
-  to_element_id: str
-  association_type: Literal["presentation", "calculation", "mapping", "equivalence"] = (
-    "mapping"
+  """Create an edge between two elements within a structure.
+
+  Used by all structure types — presentation, calculation, mapping,
+  equivalence. The mapping operation (`create-mapping-association`)
+  is the user-facing path; raw associations on other structure types
+  are not exposed publicly.
+  """
+
+  from_element_id: str = Field(
+    ..., description="Source element (typically a CoA element)."
   )
-  order_value: float | None = None
-  weight: float | None = None
-  confidence: float | None = None
-  suggested_by: str | None = None
+  to_element_id: str = Field(
+    ...,
+    description="Target element (typically a US GAAP reporting concept).",
+  )
+  association_type: Literal["presentation", "calculation", "mapping", "equivalence"] = (
+    Field(
+      "mapping",
+      description=(
+        "Edge semantics. `mapping` rolls up CoA elements into reporting "
+        "concepts; `presentation` orders concepts in a structure; "
+        "`calculation` carries debit/credit weights; `equivalence` is a "
+        "synonym link."
+      ),
+    )
+  )
+  order_value: float | None = Field(
+    None, description="Display order within the structure (lower = earlier)."
+  )
+  weight: float | None = Field(
+    None,
+    description=(
+      "Calculation weight (typically +1.0 or -1.0). Used by calculation "
+      "linkbases to express signed roll-ups."
+    ),
+  )
+  confidence: float | None = Field(
+    None,
+    ge=0.0,
+    le=1.0,
+    description=(
+      "Confidence score (0–1). For AI-suggested mappings: ≥0.90 "
+      "auto-approved, 0.70–0.89 flagged for review, <0.70 skipped."
+    ),
+  )
+  suggested_by: str | None = Field(
+    None,
+    description=(
+      "Source of the suggestion (e.g., 'mapping_agent', 'user'). "
+      "Captured for audit; not used by the runtime."
+    ),
+  )
 
 
 class CreateMappingAssociationOperation(CreateAssociationRequest):
-  """CQRS-shaped body for `POST /operations/create-mapping-association`.
+  """Create one CoA → reporting-concept mapping edge.
 
-  Bundles the target mapping structure's `mapping_id` with the association
-  payload so REST + MCP share a single body type via the registrar.
+  This is the iterative, AI-assisted craft path. Each call adds a single
+  association to the target mapping structure. Use `auto-map-elements`
+  to create many at once via the MappingAgent. Reject duplicates: if
+  the (from, to, type) tuple already exists, the call returns 409.
   """
 
   mapping_id: str = Field(..., description="Target mapping structure ID.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "mapping_id": "map_01HVF8T0M2YTAY3BBNRH0V0",
+          "from_element_id": "elem_coa_revenue_product",
+          "to_element_id": "elem_usgaap_Revenues",
+          "association_type": "mapping",
+          "weight": 1.0,
+          "confidence": 0.95,
+          "suggested_by": "user",
+        },
+        {
+          "mapping_id": "map_01HVF8T0M2YTAY3BBNRH0V0",
+          "from_element_id": "elem_coa_returns_allowances",
+          "to_element_id": "elem_usgaap_Revenues",
+          "association_type": "mapping",
+          "weight": -1.0,
+          "confidence": 0.92,
+          "suggested_by": "mapping_agent",
+        },
+      ]
+    },
+  )
 
 
 # ── Mapping ───────────────────────────────────────────────────────────────
