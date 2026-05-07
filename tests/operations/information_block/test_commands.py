@@ -205,7 +205,9 @@ class TestUpdateInformationBlock:
   def test_statement_block_type_raises_not_implemented(self, block_type: str) -> None:
     session = MagicMock()
     body = UpdateInformationBlockRequest(block_type=block_type, payload={})
-    with pytest.raises(NotImplementedError, match="library-seeded"):
+    # The update message points callers at create-report / regenerate-report
+    # — that's the actionable workaround until standalone update ships.
+    with pytest.raises(NotImplementedError, match="regenerate-report"):
       update_information_block(session, body, created_by="usr_1")
 
 

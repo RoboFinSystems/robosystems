@@ -23,6 +23,8 @@ from datetime import datetime
 import strawberry
 from strawberry.scalars import JSON
 
+from robosystems.graphql.types._pydantic import pydantic_type
+
 # Register PaginationInfo first — many list-returning types reference it via
 # the Pydantic decorator, which fails if the Strawberry wrapper isn't yet
 # known to the registry.
@@ -49,7 +51,7 @@ from robosystems.models.api.extensions.accounts import (
   AccountTreeNode as PydanticAccountTreeNode,
 )
 from robosystems.models.api.extensions.agent import (
-  AgentResponse as PydanticAgentResponse,
+  LedgerAgentResponse as PydanticAgentResponse,
 )
 from robosystems.models.api.extensions.closing_book import (
   ClosingBookCategory as PydanticClosingBookCategory,
@@ -184,7 +186,7 @@ from robosystems.models.api.extensions.trial_balance import (
 # ── Entity ────────────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticLedgerEntity, all_fields=True)
+@pydantic_type(model=PydanticLedgerEntity, all_fields=True)
 class LedgerEntity:
   """The top-level ledger entity (company/organization) for a graph."""
 
@@ -314,9 +316,7 @@ class EventBlock:
 # ── Summary ───────────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLedgerSummaryResponse, all_fields=True
-)
+@pydantic_type(model=PydanticLedgerSummaryResponse, all_fields=True)
 class LedgerSummary:
   """Counts + date range + connection metadata for a ledger graph."""
 
@@ -324,14 +324,12 @@ class LedgerSummary:
 # ── Accounts ──────────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticAccountResponse, all_fields=True)
+@pydantic_type(model=PydanticAccountResponse, all_fields=True)
 class Account:
   """A single Chart of Accounts element."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticAccountListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticAccountListResponse, all_fields=True)
 class AccountList:
   """Paginated list of Chart of Accounts elements."""
 
@@ -383,21 +381,17 @@ class AccountTree:
 # ── Account rollups ───────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticAccountRollupRow, all_fields=True)
+@pydantic_type(model=PydanticAccountRollupRow, all_fields=True)
 class AccountRollupRow:
   """Single CoA account row within an account rollup group."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticAccountRollupGroup, all_fields=True
-)
+@pydantic_type(model=PydanticAccountRollupGroup, all_fields=True)
 class AccountRollupGroup:
   """Reporting-element-keyed group of CoA accounts rolled into it."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticAccountRollupsResponse, all_fields=True
-)
+@pydantic_type(model=PydanticAccountRollupsResponse, all_fields=True)
 class AccountRollups:
   """Account rollups — CoA accounts grouped by reporting element with balances."""
 
@@ -405,14 +399,12 @@ class AccountRollups:
 # ── Trial balance ─────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticTrialBalanceRow, all_fields=True)
+@pydantic_type(model=PydanticTrialBalanceRow, all_fields=True)
 class TrialBalanceRow:
   """Single row of the trial balance (one per account)."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticTrialBalanceResponse, all_fields=True
-)
+@pydantic_type(model=PydanticTrialBalanceResponse, all_fields=True)
 class TrialBalance:
   """Trial balance for posted entries in a date range."""
 
@@ -420,37 +412,27 @@ class TrialBalance:
 # ── Transactions ──────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLedgerTransactionSummaryResponse, all_fields=True
-)
+@pydantic_type(model=PydanticLedgerTransactionSummaryResponse, all_fields=True)
 class LedgerTransactionSummary:
   """Transaction header — used in list views."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLedgerTransactionListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticLedgerTransactionListResponse, all_fields=True)
 class LedgerTransactionList:
   """Paginated list of transactions."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLedgerLineItemResponse, all_fields=True
-)
+@pydantic_type(model=PydanticLedgerLineItemResponse, all_fields=True)
 class LedgerLineItem:
   """Single debit/credit line item within an entry."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLedgerEntryResponse, all_fields=True
-)
+@pydantic_type(model=PydanticLedgerEntryResponse, all_fields=True)
 class LedgerEntry:
   """A single journal entry with all line items."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLedgerTransactionDetailResponse, all_fields=True
-)
+@pydantic_type(model=PydanticLedgerTransactionDetailResponse, all_fields=True)
 class LedgerTransactionDetail:
   """Transaction with all entries and line items fully expanded."""
 
@@ -458,71 +440,57 @@ class LedgerTransactionDetail:
 # ── Taxonomies / elements / structures / mappings ────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticTaxonomyResponse, all_fields=True)
+@pydantic_type(model=PydanticTaxonomyResponse, all_fields=True)
 class Taxonomy:
   """A taxonomy definition (CoA, reporting, mapping, or schedule)."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticTaxonomyListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticTaxonomyListResponse, all_fields=True)
 class TaxonomyList:
   """List of taxonomies."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticElementResponse, all_fields=True)
+@pydantic_type(model=PydanticElementResponse, all_fields=True)
 class Element:
   """Element with taxonomy context."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticElementListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticElementListResponse, all_fields=True)
 class ElementList:
   """Paginated list of elements."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticSuggestedTarget, all_fields=True)
+@pydantic_type(model=PydanticSuggestedTarget, all_fields=True)
 class SuggestedTarget:
   """A suggested mapping target from the reporting taxonomy."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticUnmappedElementResponse, all_fields=True
-)
+@pydantic_type(model=PydanticUnmappedElementResponse, all_fields=True)
 class UnmappedElement:
   """An element not yet mapped to the reporting taxonomy."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticStructureResponse, all_fields=True)
+@pydantic_type(model=PydanticStructureResponse, all_fields=True)
 class Structure:
   """A structure (statement, mapping, schedule, etc.)."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticStructureListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticStructureListResponse, all_fields=True)
 class StructureList:
   """List of structures."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticAssociationResponse, all_fields=True
-)
+@pydantic_type(model=PydanticAssociationResponse, all_fields=True)
 class Association:
   """A single element-to-element association within a mapping."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticMappingDetailResponse, all_fields=True
-)
+@pydantic_type(model=PydanticMappingDetailResponse, all_fields=True)
 class MappingDetail:
   """A mapping structure with all its associations expanded."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticMappingCoverageResponse, all_fields=True
-)
+@pydantic_type(model=PydanticMappingCoverageResponse, all_fields=True)
 class MappingCoverage:
   """Coverage stats for a mapping (mapped / unmapped / confidence bands)."""
 
@@ -530,16 +498,12 @@ class MappingCoverage:
 # ── Fiscal calendar ───────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticFiscalPeriodSummary, all_fields=True
-)
+@pydantic_type(model=PydanticFiscalPeriodSummary, all_fields=True)
 class FiscalPeriodSummary:
   """Single fiscal period row."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticFiscalCalendarResponse, all_fields=True
-)
+@pydantic_type(model=PydanticFiscalCalendarResponse, all_fields=True)
 class FiscalCalendar:
   """Current fiscal calendar state for a graph — pointers, gap, closeable."""
 
@@ -547,21 +511,17 @@ class FiscalCalendar:
 # ── Period drafts (close review) ──────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticDraftLineItem, all_fields=True)
+@pydantic_type(model=PydanticDraftLineItem, all_fields=True)
 class DraftLineItem:
   """Single line item within a draft entry."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticDraftEntryResponse, all_fields=True
-)
+@pydantic_type(model=PydanticDraftEntryResponse, all_fields=True)
 class DraftEntry:
   """A draft entry awaiting review before period close."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPeriodDraftsResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPeriodDraftsResponse, all_fields=True)
 class PeriodDrafts:
   """All draft entries for a fiscal period."""
 
@@ -569,16 +529,12 @@ class PeriodDrafts:
 # ── Schedules ─────────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPeriodCloseItemResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPeriodCloseItemResponse, all_fields=True)
 class PeriodCloseItem:
   """Single schedule's close state within a fiscal period."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPeriodCloseStatusResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPeriodCloseStatusResponse, all_fields=True)
 class PeriodCloseStatus:
   """Close status for all schedules in a fiscal period."""
 
@@ -586,21 +542,17 @@ class PeriodCloseStatus:
 # ── Closing book ──────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticClosingBookItem, all_fields=True)
+@pydantic_type(model=PydanticClosingBookItem, all_fields=True)
 class ClosingBookItem:
   """Single sidebar item in the closing book viewer."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticClosingBookCategory, all_fields=True
-)
+@pydantic_type(model=PydanticClosingBookCategory, all_fields=True)
 class ClosingBookCategory:
   """Sidebar category grouping multiple closing book items."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticClosingBookStructuresResponse, all_fields=True
-)
+@pydantic_type(model=PydanticClosingBookStructuresResponse, all_fields=True)
 class ClosingBookStructures:
   """Closing book sidebar navigation — categories + items."""
 
@@ -608,17 +560,17 @@ class ClosingBookStructures:
 # ── Reports ───────────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticPeriodSpec, all_fields=True)
+@pydantic_type(model=PydanticPeriodSpec, all_fields=True)
 class PeriodSpec:
   """A single reporting period column."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticStructureSummary, all_fields=True)
+@pydantic_type(model=PydanticStructureSummary, all_fields=True)
 class StructureSummary:
   """Structure available within a report's taxonomy."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticReportResponse, all_fields=True)
+@pydantic_type(model=PydanticReportResponse, all_fields=True)
 class Report:
   """Report definition summary — structures + entity + sharing provenance."""
 
@@ -628,26 +580,22 @@ class Report:
   rule_summary: strawberry.scalars.JSON | None
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticReportListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticReportListResponse, all_fields=True)
 class ReportList:
   """List of reports for a graph."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticFactRowResponse, all_fields=True)
+@pydantic_type(model=PydanticFactRowResponse, all_fields=True)
 class FactRow:
   """Single row in a rendered financial statement."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticValidationCheckResponse, all_fields=True
-)
+@pydantic_type(model=PydanticValidationCheckResponse, all_fields=True)
 class ValidationCheck:
   """Validation result for a rendered statement."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticStatementResponse, all_fields=True)
+@pydantic_type(model=PydanticStatementResponse, all_fields=True)
 class Statement:
   """Rendered financial statement — facts viewed through a structure."""
 
@@ -655,30 +603,22 @@ class Statement:
 # ── Publish lists ─────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPublishListMemberResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPublishListMemberResponse, all_fields=True)
 class PublishListMember:
   """Target graph membership in a publish list."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPublishListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPublishListResponse, all_fields=True)
 class PublishList:
   """Publish list summary (without full member details)."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPublishListDetailResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPublishListDetailResponse, all_fields=True)
 class PublishListDetail:
   """Full publish list with enriched members."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPublishListListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPublishListListResponse, all_fields=True)
 class PublishListList:
   """Paginated list of publish lists."""
 
@@ -686,15 +626,11 @@ class PublishListList:
 # ── Mapped trial balance ──────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticMappedTrialBalanceRow, all_fields=True
-)
+@pydantic_type(model=PydanticMappedTrialBalanceRow, all_fields=True)
 class MappedTrialBalanceRow:
   """Single reporting-concept row in the mapped trial balance."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticMappedTrialBalanceResponse, all_fields=True
-)
+@pydantic_type(model=PydanticMappedTrialBalanceResponse, all_fields=True)
 class MappedTrialBalance:
   """Trial balance rolled up to reporting concepts via mapping associations."""

@@ -975,7 +975,14 @@ class EvaluateRulesRequest(BaseModel):
   for each element regardless of period.
   """
 
-  structure_id: str
+  structure_id: str = Field(
+    ...,
+    description=(
+      "Structure to evaluate rules for. Resolves all rules scoped to "
+      "this structure plus rules attached to its elements and "
+      "associations."
+    ),
+  )
   fact_set_id: str | None = Field(
     None,
     description=(
@@ -991,6 +998,25 @@ class EvaluateRulesRequest(BaseModel):
   period_end: date | None = Field(
     None,
     description="Upper bound on the fact period window (inclusive).",
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"structure_id": "str_balance_sheet"},
+        {
+          "structure_id": "str_income_statement",
+          "period_start": "2026-01-01",
+          "period_end": "2026-03-31",
+        },
+        {
+          "structure_id": "str_balance_sheet",
+          "fact_set_id": "fs_01HVF8T0M2YTAY3BBNRH0V0",
+          "period_start": "2026-01-01",
+          "period_end": "2026-03-31",
+        },
+      ]
+    }
   )
 
 

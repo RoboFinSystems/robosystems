@@ -99,7 +99,9 @@ class TestUpdate:
     entry = REGISTRY["balance_sheet"]
     with pytest.raises(NotImplementedError) as exc:
       entry.dispatch_update(MagicMock(), MagicMock(), "usr_test")
-    assert "library-seeded" in str(exc.value)
+    # Message points callers at the actionable workaround — regenerate the
+    # underlying Report — until standalone update ships.
+    assert "regenerate-report" in str(exc.value)
 
   @pytest.mark.parametrize(
     "block_type",

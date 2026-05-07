@@ -138,21 +138,28 @@ def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
     construction_mode="compositional",
     dispatch_create=make_not_implemented_handler(
       f"create-{block_type}-block",
-      "Statements are generated via create-report, not "
-      "create-information-block. Create a report with the relevant "
-      "taxonomy; the statement envelope becomes queryable via "
-      "informationBlocks(blockType=...) after the report is published.",
+      f"Direct construction of {display_name} blocks is not yet "
+      "available — they are produced today by `create-report`, which "
+      "generates the facts and the envelope becomes queryable via "
+      "`informationBlocks(blockType=...)` after the report publishes. "
+      "Standalone construction is a planned follow-up: the same "
+      "primitive that builds a Schedule block today will extend to "
+      "the statement family. Until then, call `create-report` against "
+      "the appropriate taxonomy.",
     ),
     dispatch_update=make_not_implemented_handler(
       f"update-{block_type}-block",
-      "Statement blocks are library-seeded and immutable. Use "
-      "create-report to produce new facts; the envelope surfaces the "
-      "most recent report's facts automatically.",
+      f"Direct in-place updates of {display_name} blocks are not yet "
+      "available. The envelope re-surfaces the most recent Report's "
+      "facts automatically — call `create-report` (or "
+      "`regenerate-report`) to produce new facts. Standalone update "
+      "lands when standalone construction does.",
     ),
     dispatch_delete=make_not_implemented_handler(
       f"delete-{block_type}-block",
-      "Statement blocks are library-seeded and cannot be deleted per "
-      "tenant. Archive the underlying Report via the report APIs instead.",
+      f"{display_name} blocks are library-seeded and cannot be deleted "
+      "per tenant. To remove the underlying facts, archive the "
+      "originating Report via the report APIs (`delete-report`).",
     ),
     dispatch_build_envelope=build_envelope,
     # Statement Structures live in public.structures (library-immutable)
@@ -191,17 +198,23 @@ METRIC_BLOCK = BlockTypeRegistryEntry(
   construction_mode="derivative",
   dispatch_create=make_not_implemented_handler(
     "create-metric-block",
-    "create-metric-block is not implemented yet. The typed "
-    "MetricMechanics arm ships today; the derivation evaluator + create "
-    "path land once the rule engine stabilizes.",
+    "Metric block construction is not yet available — the typed "
+    "`MetricMechanics` arm ships today (so callers can already query "
+    'metric envelopes via `informationBlocks(blockType="metric")`), '
+    "but the derivation evaluator that computes facts from source-block "
+    "FactSets lands after the rule engine stabilizes. Track progress on "
+    "the metric-block roadmap entry; no caller-side workaround is "
+    "available today.",
   ),
   dispatch_update=make_not_implemented_handler(
     "update-metric-block",
-    "update-metric-block is not implemented yet.",
+    "Metric block updates are not yet available — pending the "
+    "derivation evaluator. See `create-metric-block` for context.",
   ),
   dispatch_delete=make_not_implemented_handler(
     "delete-metric-block",
-    "delete-metric-block is not implemented yet.",
+    "Metric block deletion is not yet available — pending the "
+    "derivation evaluator. See `create-metric-block` for context.",
   ),
   dispatch_build_envelope=metric_handlers.build_envelope,
   surfaces_in_library=False,

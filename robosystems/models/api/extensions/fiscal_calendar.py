@@ -171,6 +171,13 @@ class ReopenPeriodRequest(BaseModel):
 
 
 class FiscalPeriodSummary(BaseModel):
+  """One fiscal period row — header view used in calendar listings.
+
+  Status lifecycle: ``open`` → ``closing`` → ``closed``. ``closing``
+  is the transient state during a close run; ``closed_at`` stamps when
+  the lock landed.
+  """
+
   name: str = Field(..., description="Period name (YYYY-MM)")
   start_date: date
   end_date: date

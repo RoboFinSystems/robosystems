@@ -143,6 +143,13 @@ class CreateClosingEntryOperation(CreateClosingEntryRequest):
 
 
 class PeriodCloseItemResponse(BaseModel):
+  """One schedule's contribution to a period close — drafted closing
+  entry plus its reversal (when ``auto_reverse=True``).
+
+  ``status`` is the closing entry's draft/posted lifecycle. The
+  reversal mirrors the same shape with ``reversal_*`` fields.
+  """
+
   structure_id: str
   structure_name: str
   amount: float
@@ -153,6 +160,14 @@ class PeriodCloseItemResponse(BaseModel):
 
 
 class PeriodCloseStatusResponse(BaseModel):
+  """Period-close dashboard view — every schedule in scope for the
+  period plus drafted/posted entry totals.
+
+  Use to drive the close-period UI: schedules with ``status='draft'``
+  are pending close; ``period_status`` reflects the calendar's lock
+  state for the period.
+  """
+
   fiscal_period_start: date
   fiscal_period_end: date
   period_status: str

@@ -112,9 +112,13 @@ from robosystems.models.api.event_handler import (
 )
 from robosystems.models.api.extensions.agent import (
   CreateAgentRequest,
+  LedgerAgentResponse,
   UpdateAgentRequest,
 )
-from robosystems.models.api.extensions.entity import UpdateEntityRequest
+from robosystems.models.api.extensions.entity import (
+  LedgerEntityResponse,
+  UpdateEntityRequest,
+)
 from robosystems.models.api.extensions.fiscal_calendar import (
   ClosePeriodRequest,
   ClosePeriodResponse,
@@ -126,6 +130,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
 )
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
+  JournalEntryResponse,
   UpdateJournalEntryRequest,
 )
 from robosystems.models.api.extensions.publish_lists import (
@@ -149,6 +154,7 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   CreateMappingAssociationOperation,
+  EntityTaxonomyResponse,
   LinkEntityTaxonomyRequest,
 )
 from robosystems.models.api.information_block import (
@@ -156,12 +162,15 @@ from robosystems.models.api.information_block import (
   DeleteInformationBlockRequest,
   DeleteInformationBlockResponse,
   EvaluateRulesRequest,
+  EvaluateRulesResponse,
   InformationBlockEnvelope,
   UpdateInformationBlockRequest,
 )
 from robosystems.models.api.taxonomy_block import (
   CreateTaxonomyBlockRequest,
   DeleteTaxonomyBlockRequest,
+  DeleteTaxonomyBlockResponse,
+  TaxonomyBlockEnvelope,
   UpdateTaxonomyBlockRequest,
 )
 from robosystems.models.core import User
@@ -720,10 +729,14 @@ async def initialize_op(
 
 @router.post(
   "/update-entity",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[LedgerEntityResponse],
   operation_id="opUpdateEntity",
   summary="Update Entity",
-  description="Only provided (non-null) fields are updated.",
+  description=(
+    "Update the graph's primary entity. Only provided (non-null) fields "
+    "are updated. The graph is implicit in the URL — the operation "
+    "always targets the graph's primary entity."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -788,6 +801,7 @@ create_taxonomy_block_op = _registrar.register(
     ),
     command=cmd_create_taxonomy_block,
     request_model=CreateTaxonomyBlockRequest,
+    result_type=TaxonomyBlockEnvelope,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -808,6 +822,7 @@ update_taxonomy_block_op = _registrar.register(
     ),
     command=cmd_update_taxonomy_block,
     request_model=UpdateTaxonomyBlockRequest,
+    result_type=TaxonomyBlockEnvelope,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -828,6 +843,7 @@ delete_taxonomy_block_op = _registrar.register(
     ),
     command=cmd_delete_taxonomy_block,
     request_model=DeleteTaxonomyBlockRequest,
+    result_type=DeleteTaxonomyBlockResponse,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -848,6 +864,7 @@ link_entity_taxonomy_op = _registrar.register(
     ),
     command=cmd_link_entity_taxonomy,
     request_model=LinkEntityTaxonomyRequest,
+    result_type=EntityTaxonomyResponse,
     error_map={
       EntityNotFoundError: 404,
       TaxonomyMissingError: 404,
@@ -1125,6 +1142,7 @@ evaluate_rules_op = _registrar.register(
     ),
     command=cmd_evaluate_rules,
     request_model=EvaluateRulesRequest,
+    result_type=EvaluateRulesResponse,
     error_map={ValueError: 422},
     requires_created_by=True,
   )
@@ -1149,6 +1167,7 @@ create_agent_op = _registrar.register(
     ),
     command=cmd_create_agent,
     request_model=CreateAgentRequest,
+    result_type=LedgerAgentResponse,
     error_map={DuplicateExternalIdError: 409, ValueError: 422},
   )
 )
@@ -1164,6 +1183,7 @@ update_agent_op = _registrar.register(
     ),
     command=cmd_update_agent,
     request_model=UpdateAgentRequest,
+    result_type=LedgerAgentResponse,
     error_map={AgentNotFoundError: 404, ValueError: 422},
   )
 )
@@ -1325,6 +1345,7 @@ update_journal_entry_op = _registrar.register(
     ),
     command=cmd_update_journal_entry,
     request_model=UpdateJournalEntryRequest,
+    result_type=JournalEntryResponse,
     error_map={
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
@@ -1346,6 +1367,7 @@ delete_journal_entry_op = _registrar.register(
     ),
     command=cmd_delete_journal_entry,
     request_model=DeleteJournalEntryRequest,
+    result_type=DeleteResult,
     error_map={
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
