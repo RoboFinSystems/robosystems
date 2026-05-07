@@ -7,10 +7,12 @@ from importlib.metadata import version as pkg_version
 from pathlib import Path
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from robosystems.config import env
 from robosystems.config.logging import get_logger
@@ -331,6 +333,58 @@ def create_app() -> FastAPI:
     response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
 
     return response
+
+  # 422 / RequestValidationError handler — normalize FastAPI's default
+  # pydantic-validation error shape (`{"detail": [{"loc": ..., "msg": ..., "type": ...}]}`)
+  # into our standard `ErrorResponse` shape (`{"detail": str, "code": str, ...}`).
+  # Without this, the OpenAPI spec advertises 422 = HTTPValidationError,
+  # but our manual `HTTPException(status_code=422, detail="...")` raises
+  # produce a string-detail response. Two shapes for one status code
+  # break SDK response parsers (e.g., openapi-python-client). This handler
+  # makes 422 consistently use the `ErrorResponse` shape.
+  @app.exception_handler(RequestValidationError)
+  async def request_validation_handler(
+    request: Request, exc: RequestValidationError
+  ) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None)
+    # Compress the pydantic error list into a readable summary string.
+    parts = []
+    for err in exc.errors():
+      loc = ".".join(str(p) for p in err.get("loc", []) if p != "body")
+      msg = err.get("msg", "validation error")
+      parts.append(f"{loc}: {msg}" if loc else msg)
+    detail = "; ".join(parts) or "Request validation failed"
+    return JSONResponse(
+      status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+      content={
+        "detail": detail,
+        "code": "VALIDATION_ERROR",
+        "request_id": request_id,
+      },
+    )
+
+  # 4xx HTTPException pass-through — Starlette's default already returns
+  # `{"detail": <whatever-was-passed>}`. We re-implement to add `request_id`
+  # for correlation and to ensure the shape stays a flat object (some
+  # callers raise with `detail=dict(...)` which we preserve as-is).
+  @app.exception_handler(StarletteHTTPException)
+  async def http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+  ) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None)
+    detail = exc.detail
+    # Detail may be a string (most common) or a dict (used by close-period
+    # for blockers). Both shapes are valid OpenAPI; preserve the dict
+    # case verbatim, wrap the string case in our ErrorResponse shape.
+    if isinstance(detail, dict):
+      content: dict = {**detail, "request_id": request_id}
+    else:
+      content = {"detail": detail, "request_id": request_id}
+    return JSONResponse(
+      status_code=exc.status_code,
+      content=content,
+      headers=getattr(exc, "headers", None),
+    )
 
   # Exception handler for application-wide error handling
   @app.exception_handler(Exception)

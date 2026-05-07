@@ -240,6 +240,14 @@ OPERATION_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     "model": ErrorResponse,
     "description": "Idempotency-Key conflict — key reused with different body",
   },
+  # FastAPI's default 422 schema is `HTTPValidationError` (request-body
+  # pydantic validation), but our routes also raise
+  # `HTTPException(422, "...")` for business-validation failures with a
+  # plain string detail. The runtime `RequestValidationError` handler in
+  # ``main.py`` normalizes both shapes into the `ErrorResponse` shape;
+  # this declaration aligns the OpenAPI spec so SDK generators get the
+  # correct response model.
+  422: {"model": ErrorResponse, "description": "Validation error"},
 }
 
 

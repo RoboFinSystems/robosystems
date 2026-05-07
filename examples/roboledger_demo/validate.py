@@ -191,15 +191,36 @@ class _Validator:
 
     client = self._client()
 
-    # 2-month schedule, $200 total → dispose at Mar 31 → NBV $100, loss $100
-    # Uses open periods (closed_through = Feb, close_target = Mar).
+    # Dispose the asset on the last day of the demo's `close_target`
+    # period (the next period to be closed — always open by definition).
+    # Schedule spans `close_target` + the following month so we have
+    # exactly two periods of depreciation, with NBV = monthly_amount on
+    # the disposal date. Computing periods dynamically — using fixed
+    # dates breaks whenever `current_month_period()` advances past them.
+    from robosystems.operations.roboledger.fiscal_calendar import (
+      current_month_period,
+      next_period,
+      period_date_range,
+      previous_period,
+    )
+
+    # close_target = previous_period(current_month_period()) per
+    # `initialize_fiscal_calendar` in main.py. Schedule starts in
+    # close_target, runs two months, disposed on the last day of
+    # close_target. Both periods are open.
+    close_target = previous_period(current_month_period())
+    schedule_start, _ = period_date_range(close_target)
+    _, disposal_date = period_date_range(close_target)
+    _, schedule_end = period_date_range(next_period(close_target))
+
+    # 2-month schedule, $200 total → dispose at end of period 1 → NBV $100, loss $100
     try:
       sched = client.create_schedule(
         self.graph_id,
         name="[VALIDATE] Dispose Smoke Test",
         element_ids=[dr_id, cr_id],
-        period_start="2026-03-01",
-        period_end="2026-04-30",
+        period_start=schedule_start.isoformat(),
+        period_end=schedule_end.isoformat(),
         monthly_amount=10_000,
         debit_element_id=dr_id,
         credit_element_id=cr_id,
@@ -225,7 +246,7 @@ class _Validator:
       "event_category": "adjustment",
       "event_class": "economic",
       "source": "manual",
-      "occurred_at": "2026-03-31T00:00:00Z",
+      "occurred_at": f"{disposal_date.isoformat()}T00:00:00Z",
       "metadata": {
         "schedule_id": sid,
         "proceeds": 0,
@@ -308,13 +329,29 @@ class _Validator:
 
     client = self._client()
 
+    # Use 3 open periods starting at `close_target` so the schedule
+    # spans only un-closed months. Computing dynamically keeps the test
+    # stable as `current_month_period()` advances.
+    from robosystems.operations.roboledger.fiscal_calendar import (
+      current_month_period,
+      next_period,
+      period_date_range,
+      previous_period,
+    )
+
+    p1 = previous_period(current_month_period())  # close_target
+    p2 = next_period(p1)
+    p3 = next_period(p2)
+    rf_start, _ = period_date_range(p1)
+    _, rf_end = period_date_range(p3)
+
     try:
       sched = client.create_schedule(
         self.graph_id,
         name="[VALIDATE] Prepaid Rollforward",
         element_ids=[dr_id, cr_id],
-        period_start="2026-03-01",
-        period_end="2026-05-31",
+        period_start=rf_start.isoformat(),
+        period_end=rf_end.isoformat(),
         monthly_amount=10_000,
         debit_element_id=dr_id,
         credit_element_id=cr_id,
@@ -356,8 +393,9 @@ class _Validator:
     )
     if fs:
       self._check(
-        "FactSet spans Mar–May 2026",
-        fs.get("periodStart") == "2026-03-01" and fs.get("periodEnd") == "2026-05-31",
+        f"FactSet spans {p1} to {p3}",
+        fs.get("periodStart") == rf_start.isoformat()
+        and fs.get("periodEnd") == rf_end.isoformat(),
         f"{fs['periodStart']} → {fs['periodEnd']}",
       )
 

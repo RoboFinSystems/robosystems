@@ -45,6 +45,7 @@ from robosystems.middleware.operations import (
   get_idempotency_cache,
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.core import Graph
 from robosystems.operations.extensions.staleness import mark_graph_stale
 
@@ -368,6 +369,7 @@ class OperationRegistrar:
       description=spec.description,
       tags=[self.tag],
       dependencies=[self.rate_limit_dep],
+      responses={**OPERATION_ERROR_RESPONSES},
     )(metrics_wrapped)
     self._registered.append(spec)
     return metrics_wrapped
