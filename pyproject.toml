@@ -100,7 +100,6 @@ dependencies = [
     "requests>=2.32.0,<3.0",
     "retrying>=1.4.0,<2.0",
     "uuid6>=2025.0.0",
-    "robosystems-client>=0.3.14",
 ]
 
 [project.optional-dependencies]
