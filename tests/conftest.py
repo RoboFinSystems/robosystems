@@ -537,27 +537,50 @@ def setup_database(test_db):
   test_db.rollback()
   # Also clean any committed data by truncating tables
   from robosystems.models.core import (
+    BillingAuditLog,
+    BillingCustomer,
+    BillingInvoice,
+    BillingInvoiceLineItem,
+    BillingSubscription,
     ConnectionCredentials,
     Document,
     Graph,
+    GraphBackup,
     GraphCredits,
     GraphUser,
     Org,
+    OrgLimits,
     OrgUser,
     User,
     UserAPIKey,
+    UserRepository,
+    UserRepositoryCredits,
+    UserRepositoryCreditTransaction,
   )
   from robosystems.models.core.connection.connection import Connection
 
   try:
-    # Delete in reverse dependency order to avoid foreign key constraints
+    # Delete in reverse dependency order to avoid foreign key constraints.
+    # UserRepository → Graph FK is ondelete=RESTRICT, so user_repository*
+    # rows must be cleared before graphs. Billing tables reference orgs,
+    # so they must be cleared before orgs.
     test_db.query(Document).delete()
     test_db.query(ConnectionCredentials).delete()
     test_db.query(Connection).delete()
     test_db.query(UserAPIKey).delete()
+    test_db.query(UserRepositoryCreditTransaction).delete()
+    test_db.query(UserRepositoryCredits).delete()
+    test_db.query(UserRepository).delete()
     test_db.query(GraphCredits).delete()
     test_db.query(GraphUser).delete()
+    test_db.query(GraphBackup).delete()
     test_db.query(Graph).delete()  # Delete graphs before orgs
+    test_db.query(BillingAuditLog).delete()  # references BillingSubscription
+    test_db.query(BillingInvoiceLineItem).delete()
+    test_db.query(BillingInvoice).delete()
+    test_db.query(BillingSubscription).delete()
+    test_db.query(BillingCustomer).delete()
+    test_db.query(OrgLimits).delete()
     test_db.query(OrgUser).delete()  # Delete org memberships before users/orgs
     test_db.query(User).delete()
     test_db.query(Org).delete()

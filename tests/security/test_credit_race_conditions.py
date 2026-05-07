@@ -260,6 +260,15 @@ class TestSecurityAuditLogging:
 
   def test_credit_consumption_audit_log(self, db_session, test_user, caplog):
     """Test that credit consumption is audit logged."""
+    from robosystems.models.core import Graph
+
+    Graph.find_or_create_repository(
+      graph_id="sec",
+      graph_name="SEC Public Filings",
+      repository_type="sec",
+      session=db_session,
+    )
+
     # Create access with credits
     access = UserRepository.create_access(
       user_id=test_user.id,

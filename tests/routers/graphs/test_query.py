@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
 from robosystems.middleware.auth.jwt import create_jwt_token
-from robosystems.models.core import GraphUser, User
+from robosystems.models.core import Graph, GraphUser, User
 
 
 @pytest.fixture
@@ -384,6 +384,13 @@ async def test_cypher_query_sec_repository_no_access(
   async_client: AsyncClient, test_user: User, db_session: Session
 ):
   """Test querying SEC repository without access."""
+  Graph.find_or_create_repository(
+    graph_id="sec",
+    graph_name="SEC Public Filings",
+    repository_type="sec",
+    session=db_session,
+  )
+
   token = create_jwt_token(test_user.id)
   headers = {"Authorization": f"Bearer {token}"}
 

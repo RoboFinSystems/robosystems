@@ -70,7 +70,7 @@ Same async semantics, same SSE stream URL for progress.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -135,7 +135,9 @@ from robosystems.models.api.extensions.report_package import (
 from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
   RegenerateReportRequest,
+  ReportResponse,
   ShareReportRequest,
+  ShareReportResponse,
 )
 from robosystems.models.api.extensions.taxonomies import (
   CreateMappingAssociationOperation,
@@ -463,15 +465,56 @@ class DeleteMappingAssociationOperation(BaseModel):
 
 
 class RegenerateReportOperation(RegenerateReportRequest):
-  report_id: str
+  """Regenerate facts for an existing Report. Carries `report_id` from
+  the path-style RPC body; period overrides are inherited from
+  :class:`RegenerateReportRequest`.
+  """
+
+  report_id: str = Field(..., description="The Report to regenerate.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0"},
+        {
+          "report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0",
+          "period_start": "2026-04-01",
+          "period_end": "2026-06-30",
+        },
+      ]
+    },
+  )
 
 
 class DeleteReportOperation(BaseModel):
-  report_id: str
+  """Delete a Report definition and all its facts."""
+
+  report_id: str = Field(..., description="The Report to delete.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0"},
+      ]
+    },
+  )
 
 
 class ShareReportOperation(ShareReportRequest):
-  report_id: str
+  """Share a published Report to every member of a publish list."""
+
+  report_id: str = Field(..., description="The published Report to share.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0",
+          "publish_list_id": "pl_01HVF8T0M2YTAY3BBNRH0V0",
+        },
+      ]
+    },
+  )
 
 
 class UpdatePublishListOperation(UpdatePublishListRequest):
@@ -1401,7 +1444,7 @@ async def reopen_period_op(
 
 @router.post(
   "/create-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ReportResponse],
   operation_id="opCreateReport",
   summary="Create Report",
   description="Generates report facts from the ledger and marks the report as published.",
@@ -1457,9 +1500,14 @@ async def create_report_op(
 
 @router.post(
   "/regenerate-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ReportResponse],
   operation_id="opRegenerateReport",
   summary="Regenerate Report",
+  description=(
+    "Re-runs fact generation for an existing Report against the latest "
+    "ledger state. Pass `period_start`/`period_end`/`periods` only if "
+    "you want to change the reporting window."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1515,7 +1563,7 @@ async def regenerate_report_op(
 
 @router.post(
   "/delete-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[DeleteResult],
   operation_id="opDeleteReport",
   summary="Delete Report",
   description="Deletes the report definition and all generated facts.",
@@ -1568,10 +1616,17 @@ async def delete_report_op(
 
 @router.post(
   "/share-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ShareReportResponse],
   operation_id="opShareReport",
   summary="Share Report",
-  description="Only published reports can be shared. Sends the report to all members of the target publish list.",
+  description=(
+    "Pushes a published report to every member of the target publish "
+    "list. Each share is an independent copy: the report row + all its "
+    "facts are cloned into the recipient's tenant schema with "
+    "`source_graph_id` / `source_report_id` provenance fields populated. "
+    "Per-target outcomes (success or error) surface in the response — "
+    "share does not fail-fast across targets."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1626,7 +1681,7 @@ async def share_report_op(
 
 @router.post(
   "/file-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ReportResponse],
   operation_id="opFileReport",
   summary="File Report",
   description=(
@@ -1677,7 +1732,7 @@ async def file_report_op(
 
 @router.post(
   "/transition-filing-status",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ReportResponse],
   operation_id="opTransitionFilingStatus",
   summary="Transition Filing Status",
   description=(
