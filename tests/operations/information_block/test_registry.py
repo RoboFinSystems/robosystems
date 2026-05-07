@@ -241,3 +241,76 @@ class TestRequestUnionPayloadAlignment:
     )
 
     self._check_alignment(_DeleteInformationBlockArms, "delete")
+
+
+class TestLegacyTypedArmDisjoint:
+  """Block types listed in ``_LEGACY_BLOCK_TYPES`` must not also appear in
+  any typed arm.
+
+  When a block type gets promoted to its own typed arm, the promotion
+  checklist (in ``information_block.py``) requires removing the literal
+  from ``_LEGACY_BLOCK_TYPES``. If that step is skipped, Pydantic's
+  discriminated-union evaluation has two arms claiming the same
+  discriminator value — schema build raises at app startup, but only
+  then. This test surfaces the gap during normal CI instead.
+  """
+
+  def _typed_arm_block_types(self, union_alias) -> set[str]:
+    """Return block types covered by *typed* arms (excluding the
+    catch-all legacy arm)."""
+    from typing import get_args
+
+    from robosystems.models.api.information_block import _LEGACY_BLOCK_TYPES
+
+    legacy_values = set(get_args(_LEGACY_BLOCK_TYPES))
+    return _arm_block_types(union_alias) - legacy_values
+
+  def test_create_arms_disjoint_from_legacy(self) -> None:
+    from typing import get_args
+
+    from robosystems.models.api.information_block import (
+      _LEGACY_BLOCK_TYPES,
+      _CreateInformationBlockArms,
+    )
+
+    legacy = set(get_args(_LEGACY_BLOCK_TYPES))
+    typed = self._typed_arm_block_types(_CreateInformationBlockArms)
+    overlap = legacy & typed
+    assert not overlap, (
+      f"Block types appear in both `_LEGACY_BLOCK_TYPES` and a typed "
+      f"create arm: {sorted(overlap)}. Promote the typed arm by also "
+      "removing the literal from `_LEGACY_BLOCK_TYPES` (see the "
+      "promotion checklist in information_block.py)."
+    )
+
+  def test_update_arms_disjoint_from_legacy(self) -> None:
+    from typing import get_args
+
+    from robosystems.models.api.information_block import (
+      _LEGACY_BLOCK_TYPES,
+      _UpdateInformationBlockArms,
+    )
+
+    legacy = set(get_args(_LEGACY_BLOCK_TYPES))
+    typed = self._typed_arm_block_types(_UpdateInformationBlockArms)
+    overlap = legacy & typed
+    assert not overlap, (
+      f"Block types appear in both `_LEGACY_BLOCK_TYPES` and a typed "
+      f"update arm: {sorted(overlap)}."
+    )
+
+  def test_delete_arms_disjoint_from_legacy(self) -> None:
+    from typing import get_args
+
+    from robosystems.models.api.information_block import (
+      _LEGACY_BLOCK_TYPES,
+      _DeleteInformationBlockArms,
+    )
+
+    legacy = set(get_args(_LEGACY_BLOCK_TYPES))
+    typed = self._typed_arm_block_types(_DeleteInformationBlockArms)
+    overlap = legacy & typed
+    assert not overlap, (
+      f"Block types appear in both `_LEGACY_BLOCK_TYPES` and a typed "
+      f"delete arm: {sorted(overlap)}."
+    )

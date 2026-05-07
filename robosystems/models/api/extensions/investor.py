@@ -6,9 +6,10 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from robosystems.models.api.common import DeleteResult, PaginationInfo
-
-__all__ = ["DeleteResult"]  # re-exported for back-compat with existing imports
+from robosystems.models.api.common import (  # noqa: F401  DeleteResult re-exported
+  DeleteResult,
+  PaginationInfo,
+)
 
 # ── Portfolio ──────────────────────────────────────────────────────────────
 
