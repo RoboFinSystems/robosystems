@@ -211,7 +211,19 @@ def dispatch_preview(
   body: CreateEventBlockRequest,
   metadata: AssetDisposedMetadata,
 ) -> HandlerPreview:
-  """Read + compute without writing. Returns the plan the handler would execute."""
+  """Read + compute without writing. Returns the plan the handler would execute.
+
+  Mirrors every validation gate ``dispatch`` runs so previews surface the
+  same blockers callers will hit on real execution. Without this, a
+  preview claiming ``would_succeed=True`` could still 422 at dispatch
+  time on closed-period or balance violations — the call sites trusted
+  the preview and got surprised.
+  """
+  from robosystems.operations.roboledger.commands._guards import (
+    ClosedPeriodError,
+    assert_period_not_closed,
+  )
+
   try:
     plan = compute_disposal_plan(
       session,
@@ -221,7 +233,11 @@ def dispatch_preview(
       proceeds_element_id=metadata.proceeds_element_id,
       gain_loss_element_id=metadata.gain_loss_element_id,
     )
-  except (ValueError, ScheduleNotFoundError) as e:
+    # The disposal posts a manual closing entry whose `posting_date` is
+    # the disposal date. ``dispatch`` will refuse the post if that period
+    # is closed; surface the same blocker here.
+    assert_period_not_closed(session, body.occurred_at.date())
+  except (ValueError, ClosedPeriodError, ScheduleNotFoundError) as e:
     return HandlerPreview(
       would_succeed=False,
       planned_entries=[],

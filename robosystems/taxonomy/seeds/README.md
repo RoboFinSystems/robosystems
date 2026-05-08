@@ -62,21 +62,9 @@ seeds/
 
 ## Editing seeds
 
-The JSON-LD is the source of truth. Edit it directly.
-
-For structural, non-trivial edits, the recommended path is to:
-
-1. Write a small script under `robosystems/scripts/` that computes the
-   desired change from the current seed (and any referenced seeds).
-2. Run it once; verify the diff; commit both the script and the updated
-   seed.
-
-Examples of scripts that follow this pattern:
-
-- `robosystems/scripts/curate_fac_axes.py`
-- `robosystems/scripts/build_fac_calculations_seed.py`
-- `robosystems/scripts/build_fac_presentation_seed.py`
-- `robosystems/scripts/build_rs_gaap_seed.py`
+The JSON-LD is the source of truth. Edit it directly. We're past the
+bootstrap phase — seeds are now curated and crafted by hand, not
+regenerated from canned scripts.
 
 After editing, re-run the migration against a fresh extensions database
 to confirm the seeds still load cleanly:
@@ -85,19 +73,6 @@ to confirm the seeds still load cleanly:
 just migrate-down extensions -1    # rewind the taxonomy-library migration
 just migrate-up extensions         # re-apply; reloads all seeds
 ```
-
-## Re-bootstrapping from upstream
-
-If you ever genuinely need to re-derive a forked seed from its upstream
-XBRL source (to audit drift, compare against a newer upstream, or adopt
-an intentional upgrade), use the archaeological one-shot:
-
-```bash
-uv run python -m robosystems.scripts.import_upstream_seeds --only fac
-```
-
-This will overwrite the target seed in place. Do it on a branch, diff
-against `main`, and decide element-by-element what to carry forward.
 
 ## Adding a new taxonomy
 

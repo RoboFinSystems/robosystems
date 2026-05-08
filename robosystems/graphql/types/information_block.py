@@ -1,7 +1,7 @@
 """Strawberry types for the Information Block GraphQL surface.
 
 Leaf types wrap Pydantic response models via
-``@strawberry.experimental.pydantic.type(model=..., all_fields=True)``
+``@pydantic_type(model=..., all_fields=True)``
 — same pattern as :mod:`robosystems.graphql.types.library`. The
 top-level :class:`InformationBlock` is hand-written because its
 ``artifact.mechanics`` field is a discriminated union on ``kind`` and
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import strawberry
 
+from robosystems.graphql.types._pydantic import pydantic_type
 from robosystems.models.api.information_block import (
   ArtifactResponse as PydanticArtifact,
 )
@@ -74,17 +75,17 @@ from robosystems.models.api.information_block import (
 # ── Leaf types — auto-derived from Pydantic ────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticElement, all_fields=True)
+@pydantic_type(model=PydanticElement, all_fields=True)
 class InformationBlockElement:
   """An element bundled inside an Information Block envelope."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticClassification, all_fields=True)
+@pydantic_type(model=PydanticClassification, all_fields=True)
 class InformationBlockClassification:
   """An association-level classification bundled inside the envelope."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticConnection, all_fields=True)
+@pydantic_type(model=PydanticConnection, all_fields=True)
 class InformationBlockConnection:
   """A connection (association) bundled inside the envelope.
 
@@ -93,64 +94,62 @@ class InformationBlockConnection:
   """
 
 
-@strawberry.experimental.pydantic.type(model=PydanticFact, all_fields=True)
+@pydantic_type(model=PydanticFact, all_fields=True)
 class InformationBlockFact:
   """A fact bundled inside the envelope (period-scoped value)."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticFactSet, all_fields=True)
+@pydantic_type(model=PydanticFactSet, all_fields=True)
 class InformationBlockFactSet:
   """Period-specific instantiation of the Structure."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticInformationModel, all_fields=True)
+@pydantic_type(model=PydanticInformationModel, all_fields=True)
 class InformationModel:
   """Intrinsic shape of the block — concept + member arrangement patterns."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticRuleTarget, all_fields=True)
+@pydantic_type(model=PydanticRuleTarget, all_fields=True)
 class InformationBlockRuleTarget:
   """Polymorphic pointer to the structure/element/association a rule targets."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticRuleVariable, all_fields=True)
+@pydantic_type(model=PydanticRuleVariable, all_fields=True)
 class InformationBlockRuleVariable:
   """A `$Variable` binding inside a rule expression — name and qname."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticRule, all_fields=True)
+@pydantic_type(model=PydanticRule, all_fields=True)
 class InformationBlockRule:
   """A verification rule bundled inside the envelope."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticVerificationResult, all_fields=True
-)
+@pydantic_type(model=PydanticVerificationResult, all_fields=True)
 class InformationBlockVerificationResult:
   """Persisted outcome of a rule evaluation."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticRenderingRow, all_fields=True)
+@pydantic_type(model=PydanticRenderingRow, all_fields=True)
 class InformationBlockRenderingRow:
   """One row of a server-side rendered statement."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticRenderingPeriod, all_fields=True)
+@pydantic_type(model=PydanticRenderingPeriod, all_fields=True)
 class InformationBlockRenderingPeriod:
   """One period column in a rendered statement."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticValidation, all_fields=True)
+@pydantic_type(model=PydanticValidation, all_fields=True)
 class InformationBlockValidation:
   """Outcome of guard-rail validation on a rendered statement."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticRendering, all_fields=True)
+@pydantic_type(model=PydanticRendering, all_fields=True)
 class InformationBlockRendering:
   """Pre-computed rendering projection — rows + periods + validation."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticViewProjections, all_fields=True)
+@pydantic_type(model=PydanticViewProjections, all_fields=True)
 class InformationBlockViewProjections:
   """Charlie's six type-of View arms surfaced in the envelope."""
 

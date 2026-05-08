@@ -8,6 +8,15 @@ from robosystems.models.api.common import PaginationInfo
 
 
 class AccountResponse(BaseModel):
+  """One CoA account (Element) — the basic chart-of-accounts row.
+
+  ``trait`` carries the FASB classification (asset/liability/equity/
+  revenue/expense/etc.); ``balance_type`` is the natural side
+  ('debit' or 'credit'). ``account_type`` is a free-form sub-grouping
+  (e.g. 'cash', 'inventory') used by some integrations. Hierarchy is
+  expressed via ``parent_id`` + ``depth``.
+  """
+
   id: str
   code: str | None = None
   name: str
@@ -26,6 +35,9 @@ class AccountResponse(BaseModel):
 
 
 class AccountListResponse(BaseModel):
+  """Paginated chart-of-accounts listing — flat (use the tree endpoint
+  for parent/child structure)."""
+
   accounts: list[AccountResponse]
   pagination: PaginationInfo
 

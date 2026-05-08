@@ -135,11 +135,14 @@ class _Validator:
     for b in data.get("informationBlocks", []):
       try:
         payload = client.evaluate_rules(self.graph_id, structure_id=b["id"])
-        summary = payload.get("summary")
-        # None means no rules were evaluated — treat as a failure so we catch
-        # cases where the SumEquals rule wasn't created or wasn't found.
-        if summary is None:
-          self._check(b["name"], False, "summary=null (no rules evaluated)")
+        # ``summary`` is the SDK's ``EvaluateRulesResponseSummary`` attrs
+        # class — its keys land in ``additional_properties`` since the
+        # server's schema declares it as an open ``dict[str, int]``.
+        summary = payload.summary.to_dict() if payload.summary else {}
+        # Empty dict means no rules were evaluated — treat as a failure so we
+        # catch cases where the SumEquals rule wasn't created or wasn't found.
+        if not summary:
+          self._check(b["name"], False, "summary=empty (no rules evaluated)")
           continue
         fails = summary.get("fail", 0) + summary.get("error", 0)
         self._check(b["name"], fails == 0, f"summary={summary}")
@@ -188,15 +191,36 @@ class _Validator:
 
     client = self._client()
 
-    # 2-month schedule, $200 total → dispose at Mar 31 → NBV $100, loss $100
-    # Uses open periods (closed_through = Feb, close_target = Mar).
+    # Dispose the asset on the last day of the demo's `close_target`
+    # period (the next period to be closed — always open by definition).
+    # Schedule spans `close_target` + the following month so we have
+    # exactly two periods of depreciation, with NBV = monthly_amount on
+    # the disposal date. Computing periods dynamically — using fixed
+    # dates breaks whenever `current_month_period()` advances past them.
+    from robosystems.operations.roboledger.fiscal_calendar import (
+      current_month_period,
+      next_period,
+      period_date_range,
+      previous_period,
+    )
+
+    # close_target = previous_period(current_month_period()) per
+    # `initialize_fiscal_calendar` in main.py. Schedule starts in
+    # close_target, runs two months, disposed on the last day of
+    # close_target. Both periods are open.
+    close_target = previous_period(current_month_period())
+    schedule_start, _ = period_date_range(close_target)
+    _, disposal_date = period_date_range(close_target)
+    _, schedule_end = period_date_range(next_period(close_target))
+
+    # 2-month schedule, $200 total → dispose at end of period 1 → NBV $100, loss $100
     try:
       sched = client.create_schedule(
         self.graph_id,
         name="[VALIDATE] Dispose Smoke Test",
         element_ids=[dr_id, cr_id],
-        period_start="2026-03-01",
-        period_end="2026-04-30",
+        period_start=schedule_start.isoformat(),
+        period_end=schedule_end.isoformat(),
         monthly_amount=10_000,
         debit_element_id=dr_id,
         credit_element_id=cr_id,
@@ -207,7 +231,7 @@ class _Validator:
         useful_life_months=2,
         asset_element_id=cr_id,
       )
-      sid = sched.get("id", "")
+      sid = sched.id or ""
       self._check("throwaway schedule created", bool(sid), f"id={sid}")
       if sid:
         self._cleanup.append((self.graph_id, sid))
@@ -220,8 +244,9 @@ class _Validator:
     disposal_body = {
       "event_type": "asset_disposed",
       "event_category": "adjustment",
-      "source": "native",
-      "occurred_at": "2026-03-31T00:00:00Z",
+      "event_class": "economic",
+      "source": "manual",
+      "occurred_at": f"{disposal_date.isoformat()}T00:00:00Z",
       "metadata": {
         "schedule_id": sid,
         "proceeds": 0,
@@ -236,10 +261,10 @@ class _Validator:
       preview = client.preview_event_block(self.graph_id, disposal_body)
       self._check(
         "preview would_succeed",
-        preview.get("would_succeed") is True,
-        f"errors={preview.get('validation_errors')}",
+        preview.would_succeed is True,
+        f"errors={preview.validation_errors}",
       )
-      computed = preview.get("handler_metadata") or {}
+      computed = preview.handler_metadata.to_dict() if preview.handler_metadata else {}
       nbv_preview = computed.get("nbv_cents", -1)
       gain_loss_preview = computed.get("gain_loss_cents")
       self._check("preview NBV > 0", nbv_preview > 0, f"{nbv_preview} cents")
@@ -252,24 +277,19 @@ class _Validator:
       self._check("preview-event-block call", False, str(exc))
       return
 
-    # Execute the disposal via dispose_schedule (event-block under the hood)
+    # Execute the disposal via create-event-block directly to keep the
+    # validation aligned with the demo's pedagogy of going through the
+    # event-block primitive (the SDK's `dispose_schedule` helper wraps
+    # the same call).
     try:
-      payload = client.dispose_schedule(
-        self.graph_id,
-        structure_id=sid,
-        disposal_date="2026-03-31",
-        memo="Validation disposal",
-        reason="e2e test",
-        sale_proceeds=0,
-        gain_loss_element_id=dr_id,
-      )
+      payload = client.create_event_block(self.graph_id, disposal_body)
 
       self._check(
         "event status = fulfilled",
-        payload.get("status") == "fulfilled",
-        f"status={payload.get('status')}",
+        payload.status == "fulfilled",
+        f"status={payload.status}",
       )
-      self._check("event id returned", bool(payload.get("id")), payload.get("id", ""))
+      self._check("event id returned", bool(payload.id), payload.id or "")
     except Exception as exc:
       self._check("dispose_schedule call", False, str(exc))
       return
@@ -309,13 +329,29 @@ class _Validator:
 
     client = self._client()
 
+    # Use 3 open periods starting at `close_target` so the schedule
+    # spans only un-closed months. Computing dynamically keeps the test
+    # stable as `current_month_period()` advances.
+    from robosystems.operations.roboledger.fiscal_calendar import (
+      current_month_period,
+      next_period,
+      period_date_range,
+      previous_period,
+    )
+
+    p1 = previous_period(current_month_period())  # close_target
+    p2 = next_period(p1)
+    p3 = next_period(p2)
+    rf_start, _ = period_date_range(p1)
+    _, rf_end = period_date_range(p3)
+
     try:
       sched = client.create_schedule(
         self.graph_id,
         name="[VALIDATE] Prepaid Rollforward",
         element_ids=[dr_id, cr_id],
-        period_start="2026-03-01",
-        period_end="2026-05-31",
+        period_start=rf_start.isoformat(),
+        period_end=rf_end.isoformat(),
         monthly_amount=10_000,
         debit_element_id=dr_id,
         credit_element_id=cr_id,
@@ -325,7 +361,7 @@ class _Validator:
         original_amount=30_000,
         useful_life_months=3,
       )
-      sid = sched.get("id", "")
+      sid = sched.id or ""
       self._check("rollforward schedule created", bool(sid), f"id={sid}")
       if sid:
         self._cleanup.append((self.graph_id, sid))
@@ -357,8 +393,9 @@ class _Validator:
     )
     if fs:
       self._check(
-        "FactSet spans Mar–May 2026",
-        fs.get("periodStart") == "2026-03-01" and fs.get("periodEnd") == "2026-05-31",
+        f"FactSet spans {p1} to {p3}",
+        fs.get("periodStart") == rf_start.isoformat()
+        and fs.get("periodEnd") == rf_end.isoformat(),
         f"{fs['periodStart']} → {fs['periodEnd']}",
       )
 
@@ -379,10 +416,10 @@ class _Validator:
 
     try:
       payload = client.evaluate_rules(self.graph_id, structure_id=sid)
-      summary = payload.get("summary")
-      if summary is None:
+      summary = payload.summary.to_dict() if payload.summary else {}
+      if not summary:
         self._check(
-          "evaluate-rules all-pass", False, "summary=null (no rules evaluated)"
+          "evaluate-rules all-pass", False, "summary=empty (no rules evaluated)"
         )
       else:
         fails = summary.get("fail", 0) + summary.get("error", 0)

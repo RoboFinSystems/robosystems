@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import strawberry
 
+from robosystems.graphql.types._pydantic import pydantic_type
 from robosystems.models.api.library import (
   LibraryAssociationResponse as PydanticLibraryAssociation,
 )
@@ -46,34 +47,32 @@ from robosystems.models.api.library import (
 )
 
 
-@strawberry.experimental.pydantic.type(model=PydanticLibraryLabel, all_fields=True)
+@pydantic_type(model=PydanticLibraryLabel, all_fields=True)
 class LibraryLabel:
   """A label on a library element (XBRL label linkbase entry)."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticLibraryReference, all_fields=True)
+@pydantic_type(model=PydanticLibraryReference, all_fields=True)
 class LibraryReference:
   """A cross-reference on a library element (FASB ASC, SEC, etc)."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticLibraryElement, all_fields=True)
+@pydantic_type(model=PydanticLibraryElement, all_fields=True)
 class LibraryElement:
   """A single library concept (from fac, us-gaap, rs-gaap, …)."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticLibraryTaxonomy, all_fields=True)
+@pydantic_type(model=PydanticLibraryTaxonomy, all_fields=True)
 class LibraryTaxonomy:
   """A curated library taxonomy (fac, us-gaap version, rs-gaap)."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticLibraryStructure, all_fields=True)
+@pydantic_type(model=PydanticLibraryStructure, all_fields=True)
 class LibraryStructure:
   """A named structure within a library taxonomy (extended link role)."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLibraryElementClassification, all_fields=True
-)
+@pydantic_type(model=PydanticLibraryElementClassification, all_fields=True)
 class LibraryElementClassification:
   """A trait assigned to a library element.
 
@@ -83,9 +82,7 @@ class LibraryElementClassification:
   """
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLibraryAssociation, all_fields=True
-)
+@pydantic_type(model=PydanticLibraryAssociation, all_fields=True)
 class LibraryAssociation:
   """An arc between two library elements (parent-child, equivalence, …)."""
 
@@ -114,14 +111,12 @@ class LibraryElementTreeNode:
     )
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticLibraryEquivalence, all_fields=True
-)
+@pydantic_type(model=PydanticLibraryEquivalence, all_fields=True)
 class LibraryEquivalence:
   """An element and all its equivalence peers (FAC ↔ us-gaap collapse)."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticLibraryElementArc, all_fields=True)
+@pydantic_type(model=PydanticLibraryElementArc, all_fields=True)
 class LibraryElementArc:
   """A single mapping arc oriented from an element's perspective.
 

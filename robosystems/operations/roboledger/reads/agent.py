@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.agent import (
   AgentActivityResponse,
-  AgentResponse,
+  LedgerAgentResponse,
   TransactionSummary,
 )
 from robosystems.models.extensions.roboledger.agent import Agent
@@ -15,8 +15,8 @@ from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.transaction import Transaction
 
 
-def agent_to_response(agent: Agent) -> AgentResponse:
-  return AgentResponse(
+def agent_to_response(agent: Agent) -> LedgerAgentResponse:
+  return LedgerAgentResponse(
     id=agent.id,
     agent_type=agent.agent_type,
     name=agent.name,
@@ -38,7 +38,7 @@ def agent_to_response(agent: Agent) -> AgentResponse:
   )
 
 
-def get_agent(session: Session, agent_id: str) -> AgentResponse | None:
+def get_agent(session: Session, agent_id: str) -> LedgerAgentResponse | None:
   agent = session.get(Agent, agent_id)
   if agent is None:
     return None
@@ -53,7 +53,7 @@ def list_agents(
   is_active: bool | None = True,
   limit: int = 50,
   offset: int = 0,
-) -> list[AgentResponse]:
+) -> list[LedgerAgentResponse]:
   query = select(Agent)
   if agent_type is not None:
     query = query.where(Agent.agent_type == agent_type)

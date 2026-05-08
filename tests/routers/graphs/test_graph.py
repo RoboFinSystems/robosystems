@@ -327,8 +327,8 @@ class TestGraphCreationEndpoint:
 
     assert response.status_code == 422
     data = response.json()
-    # Check for pattern matching error message
-    assert any("pattern" in str(error).lower() for error in data["detail"])
+    # 422s are normalized to ErrorResponse: detail is a compressed string.
+    assert "pattern" in data["detail"].lower()
 
   async def test_create_graph_missing_metadata(self, async_client: AsyncClient):
     """Test graph creation without required metadata."""
@@ -344,7 +344,7 @@ class TestGraphCreationEndpoint:
 
     assert response.status_code == 422
     data = response.json()
-    assert any("metadata" in str(error).lower() for error in data["detail"])
+    assert "metadata" in data["detail"].lower()
 
   async def test_create_graph_too_many_tags(self, async_client: AsyncClient):
     """Test graph creation with too many tags."""
@@ -365,7 +365,7 @@ class TestGraphCreationEndpoint:
 
     assert response.status_code == 422
     data = response.json()
-    assert any("tags" in str(error).lower() for error in data["detail"])
+    assert "tags" in data["detail"].lower()
 
   async def test_create_graph_task_failure(
     self, async_client: AsyncClient, sample_graph_request, mock_user_limits

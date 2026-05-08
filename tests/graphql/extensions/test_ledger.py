@@ -28,7 +28,7 @@ from robosystems.models.api.extensions.accounts import (
 from robosystems.models.api.extensions.accounts import (
   AccountTreeResponse,
 )
-from robosystems.models.api.extensions.agent import AgentResponse
+from robosystems.models.api.extensions.agent import LedgerAgentResponse
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
 
 GRAPH_ID = "kg01234567890abcdef"
@@ -288,8 +288,8 @@ class TestEntitiesResolver:
 
 
 class TestAgentResolvers:
-  def _agent(self) -> AgentResponse:
-    return AgentResponse(
+  def _agent(self) -> LedgerAgentResponse:
+    return LedgerAgentResponse(
       id="agt_01",
       agent_type="vendor",
       name="Vendor Co",

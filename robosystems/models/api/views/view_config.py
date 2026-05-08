@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ViewAxisConfig(BaseModel):
@@ -62,6 +62,107 @@ class ViewConfig(BaseModel):
 
 
 class CreateViewRequest(BaseModel):
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "SEC: NVDA 10-K assets across 3 fiscal years",
+          "description": (
+            "Query the SEC shared repository for one element across "
+            "annual filings. No `view_config` → returns the default "
+            "long-form fact list."
+          ),
+          "value": {
+            "elements": ["us-gaap:Assets"],
+            "entities": ["NVDA"],
+            "form": "10-K",
+            "period_type": "annual",
+          },
+        },
+        {
+          "summary": "Pivot: revenue × period for two companies",
+          "description": (
+            "Pivot canonical revenue concept (matches all mapped "
+            "qnames) with entities on rows and fiscal periods on "
+            "columns. Custom period labels rename axis members."
+          ),
+          "value": {
+            "canonical_concepts": ["revenue"],
+            "entities": ["NVDA", "AMD"],
+            "form": "10-K",
+            "fiscal_period": "FY",
+            "view_config": {
+              "rows": [{"type": "entity"}],
+              "columns": [
+                {
+                  "type": "period",
+                  "selected_members": [
+                    "2022-12-31",
+                    "2023-12-31",
+                    "2024-12-31",
+                  ],
+                  "member_labels": {
+                    "2022-12-31": "FY22",
+                    "2023-12-31": "FY23",
+                    "2024-12-31": "FY24",
+                  },
+                }
+              ],
+              "values": "numeric_value",
+              "aggregation_function": "sum",
+            },
+          },
+        },
+        {
+          "summary": "Tenant graph: balance-sheet rollup with summary",
+          "description": (
+            "Query a tenant graph for several balance-sheet elements "
+            "as of one period end, with per-element summary statistics "
+            "(min/max/avg) included."
+          ),
+          "value": {
+            "elements": [
+              "us-gaap:Assets",
+              "us-gaap:Liabilities",
+              "us-gaap:StockholdersEquity",
+            ],
+            "periods": ["2026-03-31"],
+            "period_type": "instant",
+            "include_summary": True,
+          },
+        },
+        {
+          "summary": "Pivot with dimension axis",
+          "description": (
+            "Pivot revenue across the segment dimension; rows are "
+            "elements, columns are dimension members. "
+            "`include_null_dimension=true` keeps facts whose segment "
+            "is unset (typically the consolidated total)."
+          ),
+          "value": {
+            "canonical_concepts": ["revenue"],
+            "entity": "NVDA",
+            "fiscal_year": 2024,
+            "fiscal_period": "FY",
+            "view_config": {
+              "rows": [{"type": "element"}],
+              "columns": [
+                {
+                  "type": "dimension",
+                  "dimension_axis": "us-gaap:StatementBusinessSegmentsAxis",
+                  "include_null_dimension": True,
+                }
+              ],
+              "values": "numeric_value",
+              "aggregation_function": "sum",
+              "fill_value": 0.0,
+            },
+          },
+        },
+      ]
+    }
+  )
+
   elements: list[str] = Field(
     default_factory=list,
     description="Element qnames (e.g., 'us-gaap:Assets'). Can combine with canonical_concepts.",

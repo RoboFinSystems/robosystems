@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import strawberry
-
+from robosystems.graphql.types._pydantic import pydantic_type
 from robosystems.models.api.common import PaginationInfo as PydanticPaginationInfo
 
 
-@strawberry.experimental.pydantic.type(model=PydanticPaginationInfo, all_fields=True)
+@pydantic_type(model=PydanticPaginationInfo, all_fields=True)
 class PaginationInfo:
   """Standard pagination envelope used by every list-returning query."""

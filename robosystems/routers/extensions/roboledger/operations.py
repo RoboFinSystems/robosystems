@@ -70,7 +70,7 @@ Same async semantics, same SSE stream URL for progress.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -98,33 +98,46 @@ from robosystems.middleware.operations import (
 )
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
+from robosystems.models.api.common import OPERATION_ERROR_RESPONSES, DeleteResult
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
+  EventBlockEnvelope,
   UpdateEventBlockRequest,
 )
 from robosystems.models.api.event_handler import (
   CreateEventHandlerRequest,
+  EventHandlerResponse,
+  PreviewEventBlockResponse,
   UpdateEventHandlerRequest,
 )
 from robosystems.models.api.extensions.agent import (
   CreateAgentRequest,
+  LedgerAgentResponse,
   UpdateAgentRequest,
 )
-from robosystems.models.api.extensions.entity import UpdateEntityRequest
+from robosystems.models.api.extensions.entity import (
+  LedgerEntityResponse,
+  UpdateEntityRequest,
+)
 from robosystems.models.api.extensions.fiscal_calendar import (
   ClosePeriodRequest,
+  ClosePeriodResponse,
+  FiscalCalendarResponse,
   InitializeLedgerRequest,
+  InitializeLedgerResponse,
   ReopenPeriodRequest,
   SetCloseTargetRequest,
 )
 from robosystems.models.api.extensions.journal_entries import (
   DeleteJournalEntryRequest,
+  JournalEntryResponse,
   UpdateJournalEntryRequest,
 )
 from robosystems.models.api.extensions.publish_lists import (
   AddMembersRequest,
   CreatePublishListRequest,
+  PublishListMemberResponse,
+  PublishListResponse,
   UpdatePublishListRequest,
 )
 from robosystems.models.api.extensions.report_package import (
@@ -134,21 +147,30 @@ from robosystems.models.api.extensions.report_package import (
 from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
   RegenerateReportRequest,
+  ReportResponse,
   ShareReportRequest,
+  ShareReportResponse,
 )
 from robosystems.models.api.extensions.taxonomies import (
+  AssociationResponse,
   CreateMappingAssociationOperation,
+  EntityTaxonomyResponse,
   LinkEntityTaxonomyRequest,
 )
 from robosystems.models.api.information_block import (
   CreateInformationBlockRequest,
   DeleteInformationBlockRequest,
+  DeleteInformationBlockResponse,
   EvaluateRulesRequest,
+  EvaluateRulesResponse,
+  InformationBlockEnvelope,
   UpdateInformationBlockRequest,
 )
 from robosystems.models.api.taxonomy_block import (
   CreateTaxonomyBlockRequest,
   DeleteTaxonomyBlockRequest,
+  DeleteTaxonomyBlockResponse,
+  TaxonomyBlockEnvelope,
   UpdateTaxonomyBlockRequest,
 )
 from robosystems.models.core import User
@@ -447,51 +469,195 @@ class SetCloseTargetOperation(SetCloseTargetRequest):
 
 
 class ClosePeriodOperation(ClosePeriodRequest):
-  period: str
+  """Close a single fiscal period. Carries the YYYY-MM `period` in the
+  request body alongside the close-time options inherited from
+  :class:`ClosePeriodRequest`.
+  """
+
+  period: str = Field(
+    ...,
+    pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+    description=(
+      "Period to close, in YYYY-MM. Must be exactly `closed_through + 1` "
+      "— close runs sequentially."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"period": "2026-03"},
+        {
+          "period": "2026-03",
+          "allow_stale_sync": True,
+          "note": "QB sync down; data manually verified.",
+        },
+      ]
+    },
+  )
 
 
 class ReopenPeriodOperation(ReopenPeriodRequest):
-  period: str
+  """Reopen the most recently closed fiscal period."""
+
+  period: str = Field(
+    ...,
+    pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+    description=(
+      "Period to reopen, in YYYY-MM. Must equal current `closed_through` "
+      "— only the most recent close can be undone."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "period": "2026-03",
+          "reason": "Discovered late vendor invoice — needs to land in March.",
+        },
+      ]
+    },
+  )
 
 
 class DeleteMappingAssociationOperation(BaseModel):
-  mapping_id: str
-  association_id: str
+  """Delete a single CoA → reporting-concept mapping edge."""
+
+  mapping_id: str = Field(
+    ..., description="The mapping structure containing the association."
+  )
+  association_id: str = Field(..., description="The association edge to delete.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "mapping_id": "map_01HVF8T0M2YTAY3BBNRH0V0",
+          "association_id": "assn_01HVF8T0M2YTAY3BBNRH0V0",
+        },
+      ]
+    },
+  )
 
 
 class RegenerateReportOperation(RegenerateReportRequest):
-  report_id: str
+  """Regenerate facts for an existing Report. Carries `report_id` from
+  the path-style RPC body; period overrides are inherited from
+  :class:`RegenerateReportRequest`.
+  """
+
+  report_id: str = Field(..., description="The Report to regenerate.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0"},
+        {
+          "report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0",
+          "period_start": "2026-04-01",
+          "period_end": "2026-06-30",
+        },
+      ]
+    },
+  )
 
 
 class DeleteReportOperation(BaseModel):
-  report_id: str
+  """Delete a Report definition and all its facts."""
+
+  report_id: str = Field(..., description="The Report to delete.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0"},
+      ]
+    },
+  )
 
 
 class ShareReportOperation(ShareReportRequest):
-  report_id: str
+  """Share a published Report to every member of a publish list."""
+
+  report_id: str = Field(..., description="The published Report to share.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0",
+          "publish_list_id": "pl_01HVF8T0M2YTAY3BBNRH0V0",
+        },
+      ]
+    },
+  )
 
 
 class UpdatePublishListOperation(UpdatePublishListRequest):
-  list_id: str
+  """Update a publish list's metadata. Carries `list_id`."""
+
+  list_id: str = Field(..., description="The publish list to update.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"list_id": "pl_01HVF8T0M2YTAY3BBNRH0V0", "name": "Senior Lenders"},
+      ]
+    },
+  )
 
 
 class DeletePublishListOperation(BaseModel):
-  list_id: str
+  """Delete a publish list. All membership rows are removed; reports
+  previously shared via this list are not affected (each share is an
+  independent copy in the recipient's graph).
+  """
+
+  list_id: str = Field(..., description="The publish list to delete.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"list_id": "pl_01HVF8T0M2YTAY3BBNRH0V0"},
+      ]
+    },
+  )
 
 
 class AddPublishListMembersOperation(AddMembersRequest):
-  list_id: str
+  """Add recipient graphs to a publish list."""
+
+  list_id: str = Field(..., description="The publish list to add members to.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "list_id": "pl_01HVF8T0M2YTAY3BBNRH0V0",
+          "target_graph_ids": ["kg_abc12345", "kg_def67890"],
+        },
+      ]
+    },
+  )
 
 
 class RemovePublishListMemberOperation(BaseModel):
-  list_id: str
-  member_id: str
+  """Remove a single recipient from a publish list."""
 
+  list_id: str = Field(..., description="The publish list.")
+  member_id: str = Field(..., description="The membership row to remove.")
 
-class DeleteResult(BaseModel):
-  """Return shape for delete operations."""
-
-  deleted: bool
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "list_id": "pl_01HVF8T0M2YTAY3BBNRH0V0",
+          "member_id": "plm_01HVF8T0M2YTAY3BBNRH0V0",
+        },
+      ]
+    },
+  )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -501,7 +667,7 @@ class DeleteResult(BaseModel):
 
 @router.post(
   "/initialize",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[InitializeLedgerResponse],
   operation_id="opInitializeLedger",
   summary="Initialize Ledger",
   description="One-time setup: creates the fiscal calendar and seeds periods. Returns 409 if already initialized.",
@@ -557,10 +723,14 @@ async def initialize_op(
 
 @router.post(
   "/update-entity",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[LedgerEntityResponse],
   operation_id="opUpdateEntity",
   summary="Update Entity",
-  description="Only provided (non-null) fields are updated.",
+  description=(
+    "Update the graph's primary entity. Only provided (non-null) fields "
+    "are updated. The graph is implicit in the URL — the operation "
+    "always targets the graph's primary entity."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -625,6 +795,7 @@ create_taxonomy_block_op = _registrar.register(
     ),
     command=cmd_create_taxonomy_block,
     request_model=CreateTaxonomyBlockRequest,
+    result_type=TaxonomyBlockEnvelope,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -645,6 +816,7 @@ update_taxonomy_block_op = _registrar.register(
     ),
     command=cmd_update_taxonomy_block,
     request_model=UpdateTaxonomyBlockRequest,
+    result_type=TaxonomyBlockEnvelope,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -665,6 +837,7 @@ delete_taxonomy_block_op = _registrar.register(
     ),
     command=cmd_delete_taxonomy_block,
     request_model=DeleteTaxonomyBlockRequest,
+    result_type=DeleteTaxonomyBlockResponse,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -685,6 +858,7 @@ link_entity_taxonomy_op = _registrar.register(
     ),
     command=cmd_link_entity_taxonomy,
     request_model=LinkEntityTaxonomyRequest,
+    result_type=EntityTaxonomyResponse,
     error_map={
       EntityNotFoundError: 404,
       TaxonomyMissingError: 404,
@@ -706,9 +880,14 @@ create_mapping_association_op = _registrar.register(
   OperationSpec(
     name="create-mapping-association",
     summary="Create Mapping Association",
-    description=("Link a chart-of-accounts element to a US GAAP reporting concept."),
+    description=(
+      "Link a chart-of-accounts element to a US GAAP reporting concept. "
+      "One mapping edge per call — use `auto-map-elements` for bulk "
+      "AI-assisted mapping. Duplicate (from, to, type) tuples return 409."
+    ),
     command=cmd_create_mapping_association,
     request_model=CreateMappingAssociationOperation,
+    result_type=AssociationResponse,
     error_map={
       MappingStructureNotFoundError: (404, lambda _e: "Mapping not found"),
       LibraryImmutableError: 403,
@@ -723,9 +902,13 @@ create_mapping_association_op = _registrar.register(
 
 @router.post(
   "/delete-mapping-association",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[DeleteResult],
   operation_id="opDeleteMappingAssociation",
   summary="Delete Mapping Association",
+  description=(
+    "Remove a single CoA → reporting-concept mapping edge. The mapping "
+    "structure itself remains; only the association row is dropped."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -767,9 +950,25 @@ async def delete_mapping_association_op(
 
 
 class AutoMapElementsOperation(BaseModel):
-  """Request body for the auto-map-elements async operation."""
+  """Run the MappingAgent over a mapping structure (async).
 
-  mapping_id: str
+  The MappingAgent walks every unmapped CoA element and proposes
+  associations to reporting concepts. Confidence thresholds: ≥0.90
+  auto-approved (association created), 0.70-0.89 flagged for review
+  (created with `confidence` set; surface it in your UI), <0.70 skipped.
+  Returns a `pending` envelope immediately; subscribe to the SSE stream
+  for progress.
+  """
+
+  mapping_id: str = Field(..., description="The mapping structure to populate.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"mapping_id": "map_01HVF8T0M2YTAY3BBNRH0V0"},
+      ]
+    },
+  )
 
 
 @router.post(
@@ -870,6 +1069,7 @@ create_information_block_op = _registrar.register(
     ),
     command=cmd_create_information_block,
     request_model=CreateInformationBlockRequest,
+    result_type=InformationBlockEnvelope,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -890,6 +1090,7 @@ update_information_block_op = _registrar.register(
     ),
     command=cmd_update_information_block,
     request_model=UpdateInformationBlockRequest,
+    result_type=InformationBlockEnvelope,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -911,6 +1112,7 @@ delete_information_block_op = _registrar.register(
     ),
     command=cmd_delete_information_block,
     request_model=DeleteInformationBlockRequest,
+    result_type=DeleteInformationBlockResponse,
     error_map={
       ValueError: 422,
       NotImplementedError: 501,
@@ -934,6 +1136,7 @@ evaluate_rules_op = _registrar.register(
     ),
     command=cmd_evaluate_rules,
     request_model=EvaluateRulesRequest,
+    result_type=EvaluateRulesResponse,
     error_map={ValueError: 422},
     requires_created_by=True,
   )
@@ -958,6 +1161,7 @@ create_agent_op = _registrar.register(
     ),
     command=cmd_create_agent,
     request_model=CreateAgentRequest,
+    result_type=LedgerAgentResponse,
     error_map={DuplicateExternalIdError: 409, ValueError: 422},
   )
 )
@@ -973,6 +1177,7 @@ update_agent_op = _registrar.register(
     ),
     command=cmd_update_agent,
     request_model=UpdateAgentRequest,
+    result_type=LedgerAgentResponse,
     error_map={AgentNotFoundError: 404, ValueError: 422},
   )
 )
@@ -1000,6 +1205,7 @@ create_event_block_op = _registrar.register(
     ),
     command=cmd_create_event_block,
     request_model=CreateEventBlockRequest,
+    result_type=EventBlockEnvelope,
     error_map={
       HandlerNotFoundError: 404,
       HandlerAmbiguousError: 409,
@@ -1032,6 +1238,7 @@ update_event_block_op = _registrar.register(
     ),
     command=cmd_update_event_block,
     request_model=UpdateEventBlockRequest,
+    result_type=EventBlockEnvelope,
     # Error map covers both update-only failures (top two) and the
     # handler-firing path that runs on captured/classified → committed.
     error_map={
@@ -1066,6 +1273,7 @@ create_event_handler_op = _registrar.register(
     ),
     command=cmd_create_event_handler,
     request_model=CreateEventHandlerRequest,
+    result_type=EventHandlerResponse,
     error_map={TemplateValidationError: 422, ValueError: 422},
   )
 )
@@ -1081,6 +1289,7 @@ update_event_handler_op = _registrar.register(
     ),
     command=cmd_update_event_handler,
     request_model=UpdateEventHandlerRequest,
+    result_type=EventHandlerResponse,
     error_map={
       EventHandlerNotFoundError: 404,
       TemplateValidationError: 422,
@@ -1101,6 +1310,7 @@ preview_event_block_op = _registrar.register(
     ),
     command=cmd_preview_event_block,
     request_model=CreateEventBlockRequest,
+    result_type=PreviewEventBlockResponse,
     error_map={ValueError: 422},
   )
 )
@@ -1129,6 +1339,7 @@ update_journal_entry_op = _registrar.register(
     ),
     command=cmd_update_journal_entry,
     request_model=UpdateJournalEntryRequest,
+    result_type=JournalEntryResponse,
     error_map={
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
@@ -1150,6 +1361,7 @@ delete_journal_entry_op = _registrar.register(
     ),
     command=cmd_delete_journal_entry,
     request_model=DeleteJournalEntryRequest,
+    result_type=DeleteResult,
     error_map={
       JournalEntryNotFoundError: 404,
       JournalEntryNotDraftError: 422,
@@ -1168,10 +1380,17 @@ delete_journal_entry_op = _registrar.register(
 
 @router.post(
   "/set-close-target",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[FiscalCalendarResponse],
   operation_id="opSetCloseTarget",
   summary="Set Close Target",
-  description="Period format: YYYY-MM. The close target is the user-controlled goal date, distinct from `closed_through` (what's actually closed).",
+  description=(
+    "Set the user-controlled goal period for closing (`close_target`). "
+    "Format: YYYY-MM. Distinct from `closed_through` (what's actually "
+    "locked) — setting a target doesn't close anything; call "
+    "`close-period` for that. The catch-up sequence between "
+    "`closed_through` and this target appears on the response's "
+    "`fiscal_calendar.catch_up_sequence`."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1235,9 +1454,19 @@ async def set_close_target_op(
 
 @router.post(
   "/close-period",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ClosePeriodResponse],
   operation_id="opClosePeriod",
   summary="Close Fiscal Period",
+  description=(
+    "Lock a single fiscal period. Posts draft entries, runs the "
+    "balance-sheet equation check, advances `closed_through` by one, "
+    "and auto-advances `close_target` if this close caught up to it. "
+    "Period must be exactly `closed_through + 1` — sequence violations "
+    "return 422 with structured `blockers`. Common blockers: "
+    "`sync_stale` (override with `allow_stale_sync=true` after manual "
+    "verification), `period_incomplete` (draft entries unbalanced), "
+    "`sequence_violation` (out-of-order)."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1322,10 +1551,16 @@ async def close_period_op(
 
 @router.post(
   "/reopen-period",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[FiscalCalendarResponse],
   operation_id="opReopenPeriod",
   summary="Reopen Fiscal Period",
-  description="Decrements `closed_through` by one — only the most recently closed period can be reopened.",
+  description=(
+    "Decrement `closed_through` by one. Only the most recently closed "
+    "period can be reopened (no reach-back). The required `reason` is "
+    "captured in the audit log. Use sparingly — reopen invalidates "
+    "downstream artifacts that trusted the closed state (reports, "
+    "shared filings)."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1393,7 +1628,7 @@ async def reopen_period_op(
 
 @router.post(
   "/create-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ReportResponse],
   operation_id="opCreateReport",
   summary="Create Report",
   description="Generates report facts from the ledger and marks the report as published.",
@@ -1449,9 +1684,14 @@ async def create_report_op(
 
 @router.post(
   "/regenerate-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ReportResponse],
   operation_id="opRegenerateReport",
   summary="Regenerate Report",
+  description=(
+    "Re-runs fact generation for an existing Report against the latest "
+    "ledger state. Pass `period_start`/`period_end`/`periods` only if "
+    "you want to change the reporting window."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1507,7 +1747,7 @@ async def regenerate_report_op(
 
 @router.post(
   "/delete-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[DeleteResult],
   operation_id="opDeleteReport",
   summary="Delete Report",
   description="Deletes the report definition and all generated facts.",
@@ -1560,10 +1800,17 @@ async def delete_report_op(
 
 @router.post(
   "/share-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ShareReportResponse],
   operation_id="opShareReport",
   summary="Share Report",
-  description="Only published reports can be shared. Sends the report to all members of the target publish list.",
+  description=(
+    "Pushes a published report to every member of the target publish "
+    "list. Each share is an independent copy: the report row + all its "
+    "facts are cloned into the recipient's tenant schema with "
+    "`source_graph_id` / `source_report_id` provenance fields populated. "
+    "Per-target outcomes (success or error) surface in the response — "
+    "share does not fail-fast across targets."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1618,7 +1865,7 @@ async def share_report_op(
 
 @router.post(
   "/file-report",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ReportResponse],
   operation_id="opFileReport",
   summary="File Report",
   description=(
@@ -1669,7 +1916,7 @@ async def file_report_op(
 
 @router.post(
   "/transition-filing-status",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ReportResponse],
   operation_id="opTransitionFilingStatus",
   summary="Transition Filing Status",
   description=(
@@ -1728,9 +1975,13 @@ async def transition_filing_status_op(
 
 @router.post(
   "/create-publish-list",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[PublishListResponse],
   operation_id="opCreatePublishList",
   summary="Create Publish List",
+  description=(
+    "Create a publish list (a saved set of recipient graphs). Members "
+    "are managed separately via add/remove-member operations."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1771,7 +2022,7 @@ async def create_publish_list_op(
 
 @router.post(
   "/update-publish-list",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[PublishListResponse],
   operation_id="opUpdatePublishList",
   summary="Update Publish List",
   description="Updates the publish list's `name` and/or `description`. Membership is managed via add/remove-member operations.",
@@ -1821,9 +2072,14 @@ async def update_publish_list_op(
 
 @router.post(
   "/delete-publish-list",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[DeleteResult],
   operation_id="opDeletePublishList",
   summary="Delete Publish List",
+  description=(
+    "Delete a publish list and its membership rows. Reports previously "
+    "shared via this list are not affected — each share is an independent "
+    "copy in the recipient's graph."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1867,9 +2123,14 @@ async def delete_publish_list_op(
 
 @router.post(
   "/add-publish-list-members",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[list[PublishListMemberResponse]],
   operation_id="opAddPublishListMembers",
   summary="Add Members to Publish List",
+  description=(
+    "Add one or more recipient graphs to a publish list. Targets must "
+    "exist and have the same extension enabled (e.g. roboledger). "
+    "Self-graph rejected (422); already-member rejected (409)."
+  ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
@@ -1926,9 +2187,10 @@ async def add_publish_list_members_op(
 
 @router.post(
   "/remove-publish-list-member",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[DeleteResult],
   operation_id="opRemovePublishListMember",
   summary="Remove Member from Publish List",
+  description="Remove a single recipient from a publish list.",
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},

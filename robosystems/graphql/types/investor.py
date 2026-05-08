@@ -14,6 +14,7 @@ from datetime import datetime
 import strawberry
 from strawberry.scalars import JSON
 
+from robosystems.graphql.types._pydantic import pydantic_type
 from robosystems.graphql.types.common import PaginationInfo
 from robosystems.models.api.extensions.investor import (
   EntityLite as PydanticEntityLite,
@@ -58,14 +59,12 @@ from robosystems.models.api.extensions.investor import (
 # ── Portfolios ────────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticPortfolioResponse, all_fields=True)
+@pydantic_type(model=PydanticPortfolioResponse, all_fields=True)
 class Portfolio:
   """An investment portfolio."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPortfolioListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPortfolioListResponse, all_fields=True)
 class PortfolioList:
   """Paginated list of portfolios."""
 
@@ -132,14 +131,12 @@ class SecurityList:
 # ── Positions ─────────────────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticPositionResponse, all_fields=True)
+@pydantic_type(model=PydanticPositionResponse, all_fields=True)
 class Position:
   """An individual holding — portfolio + security combination."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPositionListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticPositionListResponse, all_fields=True)
 class PositionList:
   """Paginated list of positions."""
 
@@ -147,21 +144,17 @@ class PositionList:
 # ── Holdings (aggregated) ─────────────────────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticHoldingSecuritySummary, all_fields=True
-)
+@pydantic_type(model=PydanticHoldingSecuritySummary, all_fields=True)
 class HoldingSecuritySummary:
   """Per-security line within a holding group."""
 
 
-@strawberry.experimental.pydantic.type(model=PydanticHoldingResponse, all_fields=True)
+@pydantic_type(model=PydanticHoldingResponse, all_fields=True)
 class Holding:
   """Positions grouped by entity."""
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticHoldingsListResponse, all_fields=True
-)
+@pydantic_type(model=PydanticHoldingsListResponse, all_fields=True)
 class HoldingsList:
   """Full holdings view for a portfolio."""
 
@@ -169,30 +162,28 @@ class HoldingsList:
 # ── Portfolio Block (molecule envelope) ───────────────────────────────────
 
 
-@strawberry.experimental.pydantic.type(model=PydanticEntityLite, all_fields=True)
+@pydantic_type(model=PydanticEntityLite, all_fields=True)
 class EntityLite:
   """Lightweight entity reference."""
 
   id: strawberry.ID
 
 
-@strawberry.experimental.pydantic.type(model=PydanticSecurityLite, all_fields=True)
+@pydantic_type(model=PydanticSecurityLite, all_fields=True)
 class SecurityLite:
   """Lightweight security with issuer and cross-graph reference."""
 
   id: strawberry.ID
 
 
-@strawberry.experimental.pydantic.type(model=PydanticPositionBlock, all_fields=True)
+@pydantic_type(model=PydanticPositionBlock, all_fields=True)
 class PositionBlock:
   """A position with its embedded security."""
 
   id: strawberry.ID
 
 
-@strawberry.experimental.pydantic.type(
-  model=PydanticPortfolioBlockEnvelope, all_fields=True
-)
+@pydantic_type(model=PydanticPortfolioBlockEnvelope, all_fields=True)
 class PortfolioBlock:
   """Portfolio-centric molecule envelope — portfolio + positions + securities + entities."""
 
