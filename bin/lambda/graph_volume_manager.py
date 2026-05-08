@@ -587,8 +587,8 @@ def detach_volume(event: dict[str, Any]) -> dict[str, Any]:
   force = event.get("force", False)
 
   # Load registry metadata so we can decide whether to snapshot.
-  item = table.get_item(Key={"volume_id": volume_id}).get("Item", {}) or {}
-  databases = item.get("databases", []) or []
+  item = table.get_item(Key={"volume_id": volume_id}).get("Item", {})
+  databases = item.get("databases") or []
   node_type = item.get("node_type", "")
   tier = item.get("tier", "")
 
@@ -637,13 +637,17 @@ def _maybe_snapshot_pre_detach(
     logger.info(f"Skipping pre-detach snapshot for {volume_id}: no databases")
     return
 
+  # AWS snapshot Description is capped at 255 chars; keep it concise.
+  # The full graph list lives in the Databases tag (JSON-encoded) below — the
+  # description just needs to be human-identifiable at a glance.
+  description = (
+    f"Pre-detach {volume_id} node_type={node_type} tier={tier} dbs={len(databases)}"
+  )[:255]
+
   try:
     snap = ec2.create_snapshot(
       VolumeId=volume_id,
-      Description=(
-        f"Pre-detach snapshot of {volume_id} "
-        f"(node_type={node_type}, tier={tier}, databases={databases})"
-      ),
+      Description=description,
       TagSpecifications=[
         {
           "ResourceType": "snapshot",
@@ -837,17 +841,30 @@ def cleanup_old_snapshots(event: dict[str, Any]) -> dict[str, Any]:
   """
   now = datetime.now(UTC)
 
-  # Find snapshots to delete
-  response = ec2.describe_snapshots(
-    OwnerIds=["self"],
-    Filters=[
-      {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
-      {"Name": "tag:AutoDelete", "Values": ["true"]},
-    ],
-  )
+  # Find snapshots to delete. describe_snapshots returns up to 1000 per page;
+  # paginate via NextToken so we don't silently miss snapshots at scale (which
+  # would leak past the retention window). Pre-detach snapshots add per-detach
+  # snapshot churn so this matters more than it did pre-PR-664.
+  all_snapshots = []
+  next_token = None
+  while True:
+    kwargs: dict[str, Any] = {
+      "OwnerIds": ["self"],
+      "Filters": [
+        {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
+        {"Name": "tag:AutoDelete", "Values": ["true"]},
+      ],
+    }
+    if next_token:
+      kwargs["NextToken"] = next_token
+    response = ec2.describe_snapshots(**kwargs)
+    all_snapshots.extend(response.get("Snapshots", []))
+    next_token = response.get("NextToken")
+    if not next_token:
+      break
 
   deleted = []
-  for snapshot in response["Snapshots"]:
+  for snapshot in all_snapshots:
     tags = {tag["Key"]: tag["Value"] for tag in snapshot.get("Tags", [])}
     try:
       retention_days = int(tags.get("RetentionDays", RETENTION_DAYS))

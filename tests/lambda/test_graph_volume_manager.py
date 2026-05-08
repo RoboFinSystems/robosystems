@@ -438,6 +438,7 @@ def test_detach_proceeds_when_snapshot_creation_fails(gvm):
     patch.object(
       gvm.ec2, "create_snapshot", side_effect=RuntimeError("snapshot api down")
     ),
+    patch.object(gvm.sns, "publish") as mock_publish,
     _moto_safe_detach_volume(gvm),
   ):
     result = gvm.detach_volume({"volume_id": volume_id})
@@ -449,6 +450,11 @@ def test_detach_proceeds_when_snapshot_creation_fails(gvm):
     "Item"
   ]
   assert item["status"] == "available"
+  # And the SNS alert must have fired — that's the only signal that a snapshot
+  # failed, so without this we'd lose snapshots silently for high-graph writers.
+  assert mock_publish.called, "send_alert(SNS publish) must fire on snapshot failure"
+  alert_subject = mock_publish.call_args.kwargs.get("Subject", "")
+  assert "Snapshot Failed" in alert_subject
 
 
 def test_cleanup_snapshots_honors_retention_days_tag(gvm):
