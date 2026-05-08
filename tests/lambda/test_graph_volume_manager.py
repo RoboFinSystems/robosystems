@@ -9,6 +9,7 @@ Covers the four robustness fixes from the 2026-05-08 incident:
      replacement instances reroute previously-allocated graphs automatically.
 """
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import boto3
@@ -50,18 +51,24 @@ def _create_test_volume(size: int = 50) -> str:
 
 
 def _seed_registry(
-  table_name: str, volume_id: str, databases: list[str], status: str = "available"
+  table_name: str,
+  volume_id: str,
+  databases: list[str],
+  status: str = "available",
+  node_type: str = "writer",
+  tier: str = "ladybug-standard",
+  instance_id: str = "unattached",
 ) -> None:
   ddb = boto3.resource("dynamodb", region_name="us-east-1")
   ddb.Table(table_name).put_item(
     Item={
       "volume_id": volume_id,
-      "instance_id": "unattached",
+      "instance_id": instance_id,
       "availability_zone": "us-east-1c",
-      "tier": "ladybug-standard",
+      "tier": tier,
       "status": status,
       "databases": databases,
-      "node_type": "writer",
+      "node_type": node_type,
     }
   )
 
@@ -267,3 +274,211 @@ def test_attach_reroutes_graph_registry_using_preserved_databases(gvm):
     "graph-registry should now point at the new instance even though caller "
     "passed databases=[]"
   )
+
+
+# ---------------------------------------------------------------------------
+# Pre-detach snapshot behaviour
+# ---------------------------------------------------------------------------
+
+
+def _attach(volume_id: str, instance_id: str) -> None:
+  boto3.client("ec2", region_name="us-east-1").attach_volume(
+    VolumeId=volume_id, InstanceId=instance_id, Device="/dev/xvdf"
+  )
+
+
+def _describe_pre_detach_snapshots(volume_id: str) -> list[dict]:
+  ec2 = boto3.client("ec2", region_name="us-east-1")
+  resp = ec2.describe_snapshots(
+    OwnerIds=["self"],
+    Filters=[
+      {"Name": "tag:Type", "Values": ["pre_detach"]},
+      {"Name": "tag:VolumeId", "Values": [volume_id]},
+    ],
+  )
+  return resp["Snapshots"]
+
+
+def test_detach_creates_snapshot_for_writer_with_data(gvm):
+  """Writer volume holding a graph must get a pre-detach snapshot."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _attach(volume_id, instance_id)
+  _seed_registry(
+    "test-volume-registry",
+    volume_id,
+    ["kgcustomer1234567"],
+    status="attached",
+    node_type="writer",
+    tier="ladybug-standard",
+    instance_id=instance_id,
+  )
+
+  gvm.detach_volume({"volume_id": volume_id})
+
+  snaps = _describe_pre_detach_snapshots(volume_id)
+  assert len(snaps) == 1
+  tags = {t["Key"]: t["Value"] for t in snaps[0]["Tags"]}
+  assert tags["AutoDelete"] == "true"
+  assert tags["RetentionDays"] == "3"
+  assert tags["NodeType"] == "writer"
+  assert "kgcustomer1234567" in tags["Databases"]
+
+
+def test_detach_creates_snapshot_for_shared_master(gvm):
+  """Shared master holds SEC data — must be snapshotted."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume(size=300)
+  _attach(volume_id, instance_id)
+  _seed_registry(
+    "test-volume-registry",
+    volume_id,
+    ["sec"],
+    status="attached",
+    node_type="shared_master",
+    tier="ladybug-shared",
+    instance_id=instance_id,
+  )
+
+  gvm.detach_volume({"volume_id": volume_id})
+
+  snaps = _describe_pre_detach_snapshots(volume_id)
+  assert len(snaps) == 1
+  tags = {t["Key"]: t["Value"] for t in snaps[0]["Tags"]}
+  assert tags["NodeType"] == "shared_master"
+  assert "sec" in tags["Databases"]
+
+
+def test_detach_skips_snapshot_for_shared_replica(gvm):
+  """Shared replicas hydrate from S3 on boot — must NOT be snapshotted.
+
+  In practice replicas don't even reach this code path (no /dev/xvdf, no
+  TerminationLifecycleHook), but defense-in-depth: the filter must reject them
+  if a future refactor wires them through.
+  """
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _attach(volume_id, instance_id)
+  _seed_registry(
+    "test-volume-registry",
+    volume_id,
+    ["sec"],  # Even with data — replicas are still skipped.
+    status="attached",
+    node_type="shared_replica",
+    tier="ladybug-shared",
+    instance_id=instance_id,
+  )
+
+  gvm.detach_volume({"volume_id": volume_id})
+
+  snaps = _describe_pre_detach_snapshots(volume_id)
+  assert snaps == [], "shared_replica volume must not be snapshotted"
+
+
+def test_detach_skips_snapshot_for_empty_pool_volume(gvm):
+  """Volumes with no databases (spare pool) have nothing worth snapshotting."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _attach(volume_id, instance_id)
+  _seed_registry(
+    "test-volume-registry",
+    volume_id,
+    [],  # empty pool volume
+    status="attached",
+    node_type="writer",
+    tier="ladybug-standard",
+    instance_id=instance_id,
+  )
+
+  gvm.detach_volume({"volume_id": volume_id})
+
+  snaps = _describe_pre_detach_snapshots(volume_id)
+  assert snaps == [], "empty pool volume must not be snapshotted"
+
+
+def test_detach_proceeds_when_snapshot_creation_fails(gvm):
+  """A snapshot failure must not block the detach itself."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _attach(volume_id, instance_id)
+  _seed_registry(
+    "test-volume-registry",
+    volume_id,
+    ["kgcustomer1234567"],
+    status="attached",
+    node_type="writer",
+    tier="ladybug-standard",
+    instance_id=instance_id,
+  )
+
+  with patch.object(
+    gvm.ec2, "create_snapshot", side_effect=RuntimeError("snapshot api down")
+  ):
+    result = gvm.detach_volume({"volume_id": volume_id})
+
+  # Detach must have succeeded despite the snapshot failure.
+  assert result["statusCode"] == 200
+  ddb = boto3.resource("dynamodb", region_name="us-east-1")
+  item = ddb.Table("test-volume-registry").get_item(Key={"volume_id": volume_id})[
+    "Item"
+  ]
+  assert item["status"] == "available"
+
+
+def test_cleanup_snapshots_honors_retention_days_tag(gvm):
+  """A snapshot tagged RetentionDays=3 must be deleted at 3 days, not 7.
+
+  Without the per-snapshot tag, all AutoDelete=true snapshots used the global
+  RETENTION_DAYS env (7 days), so pre-detach snapshots would linger beyond
+  their intended 3-day window.
+  """
+  ec2 = boto3.client("ec2", region_name="us-east-1")
+  vol_3day = _create_test_volume()
+  vol_7day = _create_test_volume()
+
+  s3 = ec2.create_snapshot(
+    VolumeId=vol_3day,
+    Description="3-day retention",
+    TagSpecifications=[
+      {
+        "ResourceType": "snapshot",
+        "Tags": [
+          {"Key": "Environment", "Value": "test"},
+          {"Key": "AutoDelete", "Value": "true"},
+          {"Key": "RetentionDays", "Value": "3"},
+        ],
+      }
+    ],
+  )
+  s7 = ec2.create_snapshot(
+    VolumeId=vol_7day,
+    Description="default retention (orphan-cleanup style)",
+    TagSpecifications=[
+      {
+        "ResourceType": "snapshot",
+        "Tags": [
+          {"Key": "Environment", "Value": "test"},
+          {"Key": "AutoDelete", "Value": "true"},
+        ],
+      }
+    ],
+  )
+
+  # Move both snapshots' StartTime to 5 days ago.
+  fake_now = datetime.now(UTC)
+  fake_start = fake_now - timedelta(days=5)
+
+  def fake_describe(*args, **kwargs):
+    real = ec2.describe_snapshots(*args, **kwargs)
+    for snap in real["Snapshots"]:
+      snap["StartTime"] = fake_start
+    return real
+
+  with patch.object(gvm.ec2, "describe_snapshots", side_effect=fake_describe):
+    result = gvm.cleanup_old_snapshots({})
+
+  deleted = result["deleted_snapshots"]
+  # The 3-day snapshot is past retention (5 > 3) → deleted.
+  # The 7-day default snapshot is within retention (5 < 7) → kept.
+  assert s3["SnapshotId"] in deleted
+  assert s7["SnapshotId"] not in deleted
