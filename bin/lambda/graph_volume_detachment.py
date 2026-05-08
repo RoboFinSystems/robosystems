@@ -16,6 +16,7 @@ ec2 = boto3.client("ec2")
 ssm = boto3.client("ssm")
 asg = boto3.client("autoscaling")
 lambda_client = boto3.client("lambda")
+dynamodb = boto3.client("dynamodb")
 
 
 def format_missing_field_error(field_name: str, available_keys: list) -> dict:
@@ -113,17 +114,22 @@ def handler(event, context):
         except Exception as e:
           print(f"Failed to unmount (may be expected if instance is terminating): {e}")
 
-    # Call Volume Manager to detach volumes and update registry
+    # Call Volume Manager to detach volumes and update registry.
+    # Track per-volume success: if any detach fails or the volume doesn't reach
+    # `available` state, we'll signal ABANDON so the next launch doesn't race a
+    # half-detached volume (the 2026-05-08 outage cause).
+    all_detached = True
     for volume in volumes:
+      volume_id = volume["VolumeId"]
       try:
-        print(f"Calling Volume Manager to detach volume {volume['VolumeId']}")
+        print(f"Calling Volume Manager to detach volume {volume_id}")
         response = lambda_client.invoke(
           FunctionName=os.environ["VOLUME_MANAGER_FUNCTION_ARN"],
           InvocationType="RequestResponse",
           Payload=json.dumps(
             {
               "action": "detach_volume",
-              "volume_id": volume["VolumeId"],
+              "volume_id": volume_id,
               "force": False,  # Don't force detach, let it fail gracefully
             }
           ),
@@ -131,13 +137,54 @@ def handler(event, context):
 
         # Log the response from Volume Manager
         response_payload = json.loads(response["Payload"].read())
-        print(f"Volume Manager response for {volume['VolumeId']}: {response_payload}")
+        print(f"Volume Manager response for {volume_id}: {response_payload}")
+        if response_payload.get("statusCode") != 200:
+          all_detached = False
+          continue
+
+        # The detach_volume API call returns as soon as EBS accepts the request
+        # — the volume is still in `detaching` state for 15-30s afterward. Wait
+        # for actual completion before signalling lifecycle CONTINUE; otherwise
+        # the replacement instance's volume-manager will race and hit VolumeInUse.
+        try:
+          waiter = ec2.get_waiter("volume_available")
+          waiter.wait(
+            VolumeIds=[volume_id], WaiterConfig={"Delay": 5, "MaxAttempts": 36}
+          )
+          print(f"Volume {volume_id} reached available state")
+        except Exception as e:
+          print(
+            f"Volume {volume_id} did not reach available in 3 min: {e}; "
+            f"will signal ABANDON so the next launch doesn't race"
+          )
+          all_detached = False
 
       except Exception as e:
-        print(f"Failed to detach volume {volume['VolumeId']}: {e}")
+        print(f"Failed to detach volume {volume_id}: {e}")
+        all_detached = False
 
-    # Complete lifecycle action
-    return complete_lifecycle(asg_name, lifecycle_hook, instance_id, "CONTINUE")
+    # Clean stale instance-registry entry for the terminating instance.
+    # Without this, registry accumulates dead instance IDs and the graph-registry
+    # routing layer can keep pointing at IPs that no longer exist (the cleanup
+    # we did manually during the 2026-05-08 recovery).
+    try:
+      registry_table = (
+        f"robosystems-graph-{os.environ['ENVIRONMENT']}-instance-registry"
+      )
+      dynamodb.delete_item(
+        TableName=registry_table,
+        Key={"instance_id": {"S": instance_id}},
+      )
+      print(f"Removed {instance_id} from instance-registry")
+    except Exception as e:
+      print(f"Failed to clean instance-registry for {instance_id}: {e}")
+
+    return complete_lifecycle(
+      asg_name,
+      lifecycle_hook,
+      instance_id,
+      "CONTINUE" if all_detached else "ABANDON",
+    )
 
   except Exception as e:
     print(f"Error processing termination: {e}")
