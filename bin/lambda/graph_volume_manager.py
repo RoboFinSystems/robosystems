@@ -575,13 +575,24 @@ def attach_volume(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def detach_volume(event: dict[str, Any]) -> dict[str, Any]:
-  """Safely detach a volume"""
+  """Safely detach a volume.
+
+  Before detaching, take a defensive 3-day-retention snapshot of any volume
+  that holds unique data (writers + shared_master). This captures the
+  volume's last-known-good state at the moment of instance replacement,
+  giving us fast recovery when rebuild-from-source is slow or broken.
+  Replicas (and empty pool volumes) are skipped.
+  """
   volume_id = event["volume_id"]
   force = event.get("force", False)
 
-  # Get current databases on the volume before detaching
-  response = table.get_item(Key={"volume_id": volume_id})
-  databases = response.get("Item", {}).get("databases", [])
+  # Load registry metadata so we can decide whether to snapshot.
+  item = table.get_item(Key={"volume_id": volume_id}).get("Item", {})
+  databases = item.get("databases") or []
+  node_type = item.get("node_type", "")
+  tier = item.get("tier", "")
+
+  _maybe_snapshot_pre_detach(volume_id, node_type, tier, databases)
 
   # Detach the volume
   try:
@@ -607,6 +618,65 @@ def detach_volume(event: dict[str, Any]) -> dict[str, Any]:
   logger.info(f"Volume {volume_id} detached, preserving databases: {databases}")
 
   return {"statusCode": 200, "volume_id": volume_id, "databases": databases}
+
+
+def _maybe_snapshot_pre_detach(
+  volume_id: str, node_type: str, tier: str, databases: list[str]
+) -> None:
+  """Defensively snapshot a volume before detach.
+
+  Skipped for shared_replica (rebuilt from S3 on boot, no unique state) and
+  for empty pool volumes (no data to preserve). CreateSnapshot is async —
+  AWS copies blocks from the volume in the background even after detach,
+  so we don't wait. Failure logs + alerts but does NOT block the detach.
+  """
+  if node_type == "shared_replica":
+    logger.info(f"Skipping pre-detach snapshot for {volume_id}: shared_replica")
+    return
+  if not databases:
+    logger.info(f"Skipping pre-detach snapshot for {volume_id}: no databases")
+    return
+
+  # AWS snapshot Description is capped at 255 chars; keep it concise.
+  # The full graph list lives in the Databases tag (JSON-encoded) below — the
+  # description just needs to be human-identifiable at a glance.
+  description = (
+    f"Pre-detach {volume_id} node_type={node_type} tier={tier} dbs={len(databases)}"
+  )[:255]
+
+  try:
+    snap = ec2.create_snapshot(
+      VolumeId=volume_id,
+      Description=description,
+      TagSpecifications=[
+        {
+          "ResourceType": "snapshot",
+          "Tags": [
+            {"Key": "Name", "Value": f"pre-detach-{volume_id}"},
+            {"Key": "Environment", "Value": ENVIRONMENT},
+            {"Key": "Type", "Value": "pre_detach"},
+            {"Key": "AutoDelete", "Value": "true"},
+            {"Key": "RetentionDays", "Value": "3"},
+            {"Key": "VolumeId", "Value": volume_id},
+            {"Key": "NodeType", "Value": node_type},
+            {"Key": "Tier", "Value": tier},
+            {"Key": "Databases", "Value": json.dumps(databases)},
+          ],
+        }
+      ],
+    )
+    logger.info(
+      f"Created pre-detach snapshot {snap['SnapshotId']} for {volume_id} "
+      f"(node_type={node_type}, databases={databases})"
+    )
+  except Exception as e:
+    # Don't block detach on snapshot failure — alert and continue.
+    logger.error(f"Failed to create pre-detach snapshot for {volume_id}: {e}")
+    send_alert(
+      "Pre-detach Snapshot Failed",
+      f"Failed to snapshot {volume_id} (node_type={node_type}, "
+      f"databases={databases}) before detach: {e}",
+    )
 
 
 def expand_volume(event: dict[str, Any]) -> dict[str, Any]:
@@ -763,25 +833,57 @@ def cleanup_orphaned_volumes() -> dict[str, Any]:
 
 
 def cleanup_old_snapshots(event: dict[str, Any]) -> dict[str, Any]:
-  """Clean up snapshots older than retention period"""
-  cutoff_time = datetime.now(UTC) - timedelta(days=RETENTION_DAYS)
+  """Clean up snapshots older than their retention period.
 
-  # Find snapshots to delete
-  response = ec2.describe_snapshots(
-    OwnerIds=["self"],
-    Filters=[
-      {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
-      {"Name": "tag:AutoDelete", "Values": ["true"]},
-    ],
-  )
+  Per-snapshot retention via the `RetentionDays` tag takes precedence over the
+  global RETENTION_DAYS env var. This lets pre-detach snapshots use 3-day
+  retention without affecting orphan-cleanup snapshots (default 7 days).
+  """
+  now = datetime.now(UTC)
+
+  # Find snapshots to delete. describe_snapshots returns up to 1000 per page;
+  # paginate via NextToken so we don't silently miss snapshots at scale (which
+  # would leak past the retention window). Pre-detach snapshots add per-detach
+  # snapshot churn so this matters more than it did pre-PR-664.
+  all_snapshots = []
+  next_token = None
+  while True:
+    kwargs: dict[str, Any] = {
+      "OwnerIds": ["self"],
+      "Filters": [
+        {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
+        {"Name": "tag:AutoDelete", "Values": ["true"]},
+      ],
+    }
+    if next_token:
+      kwargs["NextToken"] = next_token
+    response = ec2.describe_snapshots(**kwargs)
+    all_snapshots.extend(response.get("Snapshots", []))
+    next_token = response.get("NextToken")
+    if not next_token:
+      break
 
   deleted = []
-  for snapshot in response["Snapshots"]:
-    if snapshot["StartTime"].replace(tzinfo=UTC) < cutoff_time:
+  for snapshot in all_snapshots:
+    tags = {tag["Key"]: tag["Value"] for tag in snapshot.get("Tags", [])}
+    try:
+      retention_days = int(tags.get("RetentionDays", RETENTION_DAYS))
+    except ValueError:
+      logger.warning(
+        f"Snapshot {snapshot['SnapshotId']} has malformed RetentionDays tag "
+        f"{tags.get('RetentionDays')!r}; using default {RETENTION_DAYS}"
+      )
+      retention_days = RETENTION_DAYS
+
+    cutoff = now - timedelta(days=retention_days)
+    if snapshot["StartTime"].replace(tzinfo=UTC) < cutoff:
       try:
         ec2.delete_snapshot(SnapshotId=snapshot["SnapshotId"])
         deleted.append(snapshot["SnapshotId"])
-        logger.info(f"Deleted old snapshot: {snapshot['SnapshotId']}")
+        logger.info(
+          f"Deleted snapshot {snapshot['SnapshotId']} "
+          f"(retention={retention_days}d, age={(now - snapshot['StartTime'].replace(tzinfo=UTC)).days}d)"
+        )
       except Exception as e:
         logger.error(f"Failed to delete snapshot {snapshot['SnapshotId']}: {e}")
 
