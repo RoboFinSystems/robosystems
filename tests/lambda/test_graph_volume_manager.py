@@ -215,6 +215,39 @@ def test_attach_adopts_caller_databases_when_registry_empty(gvm):
   assert item["databases"] == ["sec"]
 
 
+def test_attach_signals_instance_with_preserved_databases(gvm):
+  """The SSM signal to the instance must include the preserved databases list.
+
+  Without this, the OS-side /tmp/databases.json gets the caller's [] on every
+  replacement — re-introducing the same orphaning bug at the OS level even
+  though the registry write now preserves the list correctly.
+  """
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  preserved = ["kgexistinggraph123"]
+  _seed_registry("test-volume-registry", volume_id, preserved)
+
+  with patch.object(gvm.ssm, "send_command") as mock_send:
+    result = gvm.attach_and_register_volume(volume_id, instance_id, [])
+
+  assert mock_send.called, "ssm.send_command should be invoked to signal the instance"
+  call_kwargs = mock_send.call_args.kwargs
+  commands = call_kwargs["Parameters"]["commands"]
+  # commands[1] is the databases.json write
+  assert "kgexistinggraph123" in commands[1], (
+    "SSM signal must contain preserved databases, not the caller's empty list"
+  )
+  assert "[]" not in commands[1], (
+    "SSM signal must NOT contain the empty caller list when registry has data"
+  )
+
+  # Function return value must also reflect the preserved list (callers may
+  # parse it to register graphs).
+  assert result["databases"] == preserved, (
+    "Return value must use preserved databases list"
+  )
+
+
 def test_attach_reroutes_graph_registry_using_preserved_databases(gvm):
   """graph-registry must be updated with the preserved (not caller-provided) list.
 

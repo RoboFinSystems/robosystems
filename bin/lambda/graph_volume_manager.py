@@ -444,7 +444,9 @@ def attach_and_register_volume(
   graph_update_result = update_graph_registry_for_instance(instance_id, final_dbs)
   logger.info(f"Graph registry update result: {graph_update_result}")
 
-  # Signal the instance that volume is ready
+  # Signal the instance that volume is ready. Use final_dbs (preserved list),
+  # not the caller-provided databases — otherwise the OS-side databases.json
+  # re-introduces the orphaning bug we just fixed in the registry.
   try:
     ssm.send_command(
       InstanceIds=[instance_id],
@@ -452,7 +454,7 @@ def attach_and_register_volume(
       Parameters={
         "commands": [
           "echo 'VOLUME_READY' > /tmp/volume_status",
-          f"echo '{json.dumps(databases)}' > /tmp/databases.json",
+          f"echo '{json.dumps(final_dbs)}' > /tmp/databases.json",
         ]
       },
     )
@@ -463,7 +465,7 @@ def attach_and_register_volume(
     "statusCode": 200,
     "volume_id": volume_id,
     "attachment_state": response["State"],
-    "databases": databases,
+    "databases": final_dbs,
   }
 
 
