@@ -363,26 +363,19 @@ def create_app() -> FastAPI:
       },
     )
 
-  # 4xx HTTPException pass-through — Starlette's default already returns
-  # `{"detail": <whatever-was-passed>}`. We re-implement to add `request_id`
-  # for correlation and to ensure the shape stays a flat object (some
-  # callers raise with `detail=dict(...)` which we preserve as-is).
+  # HTTPException pass-through (any status code) — match Starlette's default
+  # `{"detail": <whatever-was-passed>}` shape and add `request_id` for
+  # correlation. Detail may be a string (most common) or a dict (close-period
+  # blockers, graph_limit, etc.); callers parse it as `response["detail"]`
+  # in both cases, so always wrap — never spread.
   @app.exception_handler(StarletteHTTPException)
   async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
   ) -> JSONResponse:
     request_id = getattr(request.state, "request_id", None)
-    detail = exc.detail
-    # Detail may be a string (most common) or a dict (used by close-period
-    # for blockers). Both shapes are valid OpenAPI; preserve the dict
-    # case verbatim, wrap the string case in our ErrorResponse shape.
-    if isinstance(detail, dict):
-      content: dict = {**detail, "request_id": request_id}
-    else:
-      content = {"detail": detail, "request_id": request_id}
     return JSONResponse(
       status_code=exc.status_code,
-      content=content,
+      content={"detail": exc.detail, "request_id": request_id},
       headers=getattr(exc, "headers", None),
     )
 

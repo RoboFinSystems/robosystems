@@ -257,13 +257,27 @@ class TestLegacyTypedArmDisjoint:
 
   def _typed_arm_block_types(self, union_alias) -> set[str]:
     """Return block types covered by *typed* arms (excluding the
-    catch-all legacy arm)."""
+    catch-all legacy arm).
+
+    Identifies the legacy arm structurally — its ``block_type`` Literal
+    args equal the args of ``_LEGACY_BLOCK_TYPES`` — and skips it. We
+    must NOT post-subtract ``_LEGACY_BLOCK_TYPES`` from the aggregate
+    set: that would erase the exact overlap this class is asserting
+    against and the test would pass vacuously.
+    """
     from typing import get_args
 
     from robosystems.models.api.information_block import _LEGACY_BLOCK_TYPES
 
     legacy_values = set(get_args(_LEGACY_BLOCK_TYPES))
-    return _arm_block_types(union_alias) - legacy_values
+    inner_union, _discriminator = get_args(union_alias)
+    typed: set[str] = set()
+    for arm in get_args(inner_union):
+      arm_values = set(get_args(arm.model_fields["block_type"].annotation))
+      if arm_values == legacy_values:
+        continue
+      typed.update(arm_values)
+    return typed
 
   def test_create_arms_disjoint_from_legacy(self) -> None:
     from typing import get_args
