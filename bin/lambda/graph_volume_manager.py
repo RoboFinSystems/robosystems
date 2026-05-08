@@ -13,6 +13,7 @@ Key improvements:
 import json
 import logging
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -361,8 +362,25 @@ def attach_and_register_volume(
     logger.error(f"Instance {instance_id} did not reach running state: {e}")
     return {"statusCode": 500, "error": f"Instance not ready: {e!s}"}
 
-  # Attach the volume with retry logic
+  # Wait for volume to actually reach `available`. EBS detach is async — the
+  # detachment Lambda may have ack'd before the volume left `detaching`. Without
+  # this wait, AttachVolume races the previous instance's detach and EC2 returns
+  # VolumeInUse. Log-and-proceed on timeout; the retry loop below handles the
+  # residual race.
+  vol_waiter = ec2.get_waiter("volume_available")
+  try:
+    vol_waiter.wait(VolumeIds=[volume_id], WaiterConfig={"Delay": 5, "MaxAttempts": 24})
+  except Exception as e:
+    logger.warning(
+      f"Volume {volume_id} did not reach available in 2 min: {e}; will attempt attach"
+    )
+
+  # Attach the volume with retry logic.
+  # Retry both IncorrectState (instance not ready) and VolumeInUse (volume still
+  # detaching from prior instance). Use a longer sleep for VolumeInUse since
+  # actual detach completion takes 15-30s in observed AWS host-failure recoveries.
   max_retries = 3
+  retryable_tokens = ("IncorrectState", "VolumeInUse")
   response = None
   for attempt in range(max_retries):
     try:
@@ -374,15 +392,19 @@ def attach_and_register_volume(
       )
       break
     except Exception as e:
-      if "IncorrectState" in str(e) and attempt < max_retries - 1:
-        logger.warning("Volume or instance not ready, retrying in 10 seconds...")
-        import time
-
-        time.sleep(10)
+      err_str = str(e)
+      if (
+        any(token in err_str for token in retryable_tokens)
+        and attempt < max_retries - 1
+      ):
+        sleep_s = 30 if "VolumeInUse" in err_str else 10
+        logger.warning(
+          f"Volume not ready ({e}); sleeping {sleep_s}s before retry {attempt + 2}/{max_retries}"
+        )
+        time.sleep(sleep_s)
         continue
-      else:
-        logger.error(f"Failed to attach volume after {attempt + 1} attempts: {e}")
-        raise
+      logger.error(f"Failed to attach volume after {attempt + 1} attempts: {e}")
+      raise
 
   if response is None:
     raise RuntimeError("Failed to attach volume: no response received")
@@ -390,6 +412,16 @@ def attach_and_register_volume(
   # Wait for attachment
   waiter = ec2.get_waiter("volume_in_use")
   waiter.wait(VolumeIds=[volume_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60})
+
+  # Preserve the registry's existing databases list when present. This list is
+  # maintained by allocation_manager.py (add on graph create, remove on graph
+  # drop). Userdata for non-shared writers passes [] on every launch, so a naive
+  # overwrite wipes the volume↔graph linkage on every instance replacement —
+  # exactly the bug that orphaned kg19dcbe757481af06fc9b on 2026-05-08.
+  current = table.get_item(Key={"volume_id": volume_id}).get("Item", {})
+  existing_dbs = current.get("databases") or []
+  caller_dbs = databases if isinstance(databases, list) else [databases]
+  final_dbs = existing_dbs if existing_dbs else caller_dbs
 
   # Update registry
   table.update_item(
@@ -400,19 +432,21 @@ def attach_and_register_volume(
       ":instance_id": instance_id,
       ":status": "attached",
       ":timestamp": datetime.now(UTC).isoformat(),
-      ":databases": databases if isinstance(databases, list) else [databases],
+      ":databases": final_dbs,
     },
   )
 
   logger.info(f"Successfully attached volume {volume_id} to instance {instance_id}")
 
-  # CRITICAL: Update graph registry with new instance info for routing
-  # This ensures queries route to the correct IP after instance replacement
-  db_list = databases if isinstance(databases, list) else [databases]
-  graph_update_result = update_graph_registry_for_instance(instance_id, db_list)
+  # CRITICAL: Update graph registry with new instance info for routing.
+  # Use final_dbs (preserved list) so a replacement instance reroutes ALL graphs
+  # the volume actually holds, not just the (often empty) list userdata passed.
+  graph_update_result = update_graph_registry_for_instance(instance_id, final_dbs)
   logger.info(f"Graph registry update result: {graph_update_result}")
 
-  # Signal the instance that volume is ready
+  # Signal the instance that volume is ready. Use final_dbs (preserved list),
+  # not the caller-provided databases — otherwise the OS-side databases.json
+  # re-introduces the orphaning bug we just fixed in the registry.
   try:
     ssm.send_command(
       InstanceIds=[instance_id],
@@ -420,7 +454,7 @@ def attach_and_register_volume(
       Parameters={
         "commands": [
           "echo 'VOLUME_READY' > /tmp/volume_status",
-          f"echo '{json.dumps(databases)}' > /tmp/databases.json",
+          f"echo '{json.dumps(final_dbs)}' > /tmp/databases.json",
         ]
       },
     )
@@ -431,7 +465,7 @@ def attach_and_register_volume(
     "statusCode": 200,
     "volume_id": volume_id,
     "attachment_state": response["State"],
-    "databases": databases,
+    "databases": final_dbs,
   }
 
 

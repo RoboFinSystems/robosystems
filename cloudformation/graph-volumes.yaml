@@ -799,6 +799,7 @@ Resources:
       Environment:
         Variables:
           VOLUME_MANAGER_FUNCTION_ARN: !GetAtt VolumeManagerFunction.Arn
+          ENVIRONMENT: !Ref Environment
       Code:
         ImageUri: !Ref LambdaImageUri
       ImageConfig:
@@ -851,6 +852,12 @@ Resources:
                   - ssm:SendCommand
                   - ssm:GetCommandInvocation
                 Resource: "*"
+              # Sweep instance-registry entries for terminating instances so
+              # graph-registry routing can't keep pointing at dead IPs.
+              - Effect: Allow
+                Action:
+                  - dynamodb:DeleteItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry"
               # ECR permissions for container-based Lambda
               - Effect: Allow
                 Action:
