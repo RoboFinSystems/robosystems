@@ -287,6 +287,25 @@ def _attach(volume_id: str, instance_id: str) -> None:
   )
 
 
+def _moto_safe_detach_volume(gvm):
+  """Wrap gvm.ec2.detach_volume to fill in InstanceId from attachment state.
+
+  Real AWS infers InstanceId from the volume's current attachment, but moto
+  crashes (`len(None)` on InvalidInstanceIdError) when InstanceId is omitted.
+  This wrapper mirrors the real behavior locally.
+  """
+  real_detach = gvm.ec2.detach_volume
+
+  def patched(**kwargs):
+    if "InstanceId" not in kwargs:
+      vol = gvm.ec2.describe_volumes(VolumeIds=[kwargs["VolumeId"]])["Volumes"][0]
+      if vol["Attachments"]:
+        kwargs["InstanceId"] = vol["Attachments"][0]["InstanceId"]
+    return real_detach(**kwargs)
+
+  return patch.object(gvm.ec2, "detach_volume", side_effect=patched)
+
+
 def _describe_pre_detach_snapshots(volume_id: str) -> list[dict]:
   ec2 = boto3.client("ec2", region_name="us-east-1")
   resp = ec2.describe_snapshots(
@@ -314,7 +333,8 @@ def test_detach_creates_snapshot_for_writer_with_data(gvm):
     instance_id=instance_id,
   )
 
-  gvm.detach_volume({"volume_id": volume_id})
+  with _moto_safe_detach_volume(gvm):
+    gvm.detach_volume({"volume_id": volume_id})
 
   snaps = _describe_pre_detach_snapshots(volume_id)
   assert len(snaps) == 1
@@ -340,7 +360,8 @@ def test_detach_creates_snapshot_for_shared_master(gvm):
     instance_id=instance_id,
   )
 
-  gvm.detach_volume({"volume_id": volume_id})
+  with _moto_safe_detach_volume(gvm):
+    gvm.detach_volume({"volume_id": volume_id})
 
   snaps = _describe_pre_detach_snapshots(volume_id)
   assert len(snaps) == 1
@@ -369,7 +390,8 @@ def test_detach_skips_snapshot_for_shared_replica(gvm):
     instance_id=instance_id,
   )
 
-  gvm.detach_volume({"volume_id": volume_id})
+  with _moto_safe_detach_volume(gvm):
+    gvm.detach_volume({"volume_id": volume_id})
 
   snaps = _describe_pre_detach_snapshots(volume_id)
   assert snaps == [], "shared_replica volume must not be snapshotted"
@@ -390,7 +412,8 @@ def test_detach_skips_snapshot_for_empty_pool_volume(gvm):
     instance_id=instance_id,
   )
 
-  gvm.detach_volume({"volume_id": volume_id})
+  with _moto_safe_detach_volume(gvm):
+    gvm.detach_volume({"volume_id": volume_id})
 
   snaps = _describe_pre_detach_snapshots(volume_id)
   assert snaps == [], "empty pool volume must not be snapshotted"
@@ -411,8 +434,11 @@ def test_detach_proceeds_when_snapshot_creation_fails(gvm):
     instance_id=instance_id,
   )
 
-  with patch.object(
-    gvm.ec2, "create_snapshot", side_effect=RuntimeError("snapshot api down")
+  with (
+    patch.object(
+      gvm.ec2, "create_snapshot", side_effect=RuntimeError("snapshot api down")
+    ),
+    _moto_safe_detach_volume(gvm),
   ):
     result = gvm.detach_volume({"volume_id": volume_id})
 
