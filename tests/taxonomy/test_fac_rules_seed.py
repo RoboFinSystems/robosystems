@@ -26,7 +26,7 @@ SEED_PATH = (
   Path(__file__).resolve().parents[2]
   / "robosystems"
   / "taxonomy"
-  / "seeds"
+  / "packages"
   / "fac-rules"
   / "v1"
   / "taxonomy.jsonld"

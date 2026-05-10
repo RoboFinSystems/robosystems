@@ -16,6 +16,7 @@ split and the aspects-only-on-events rule.
 # Base ontology concepts
 from .association import Association
 from .association_classification import AssociationClassification
+from .bridge import Bridge
 from .classification import Classification
 from .dimension import Dimension
 from .element import Account, Element
@@ -24,6 +25,9 @@ from .element_reference import ElementReference
 from .element_trait import ElementTrait
 from .entity import Entity
 from .entity_taxonomy import EntityTaxonomy
+from .framework import Framework
+from .framework_bridge import FrameworkBridge
+from .framework_package import FrameworkPackage
 
 # RoboInvestor extension
 from .roboinvestor import (
@@ -65,6 +69,7 @@ __all__ = [
   "Account",
   "Association",
   "AssociationClassification",
+  "Bridge",
   "Classification",
   "Dimension",
   "Element",
@@ -79,6 +84,9 @@ __all__ = [
   "FiscalCalendar",
   "FiscalCalendarEvent",
   "FiscalPeriod",
+  "Framework",
+  "FrameworkBridge",
+  "FrameworkPackage",
   "LineItem",
   # RoboInvestor
   "Portfolio",
