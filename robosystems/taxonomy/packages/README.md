@@ -58,7 +58,6 @@ Each package declares its provenance in its top-level JSON-LD metadata:
 
 ```
 packages/
-├── sfac6/v1/                          forked  — SFAC 6 elements of financial statements
 ├── fac/v1/                            forked  — FAC fundamental concepts (~177)
 ├── fac-presentation/v1/               native  — FAC multi-variant presentation hierarchies
 ├── fac-calculations/v1/               native  — FAC BS/IS/CF accounting identities
@@ -67,7 +66,7 @@ packages/
 ├── rs-gaap-presentation/v1/           native  — rs-gaap presentation hierarchies
 ├── rs-gaap-calculations/v1/           native  — rs-gaap calc DAG (composes with fac-calculations)
 ├── rs-gaap-hierarchy/v1/              forked  — rs-gaap class hierarchy
-├── us-gaap-metamodel/v1/              forked  — FASB metamodel trait vocabulary (99 traits)
+├── us-gaap-metamodel/v1/              forked  — FASB metamodel trait vocabulary (99 traits, 25 categories — incl. SFAC 6 as `elementsOfFinancialStatements` traits)
 ├── rs-gaap-to-metamodel/v1/           native  — trait assignments (rs-gaap ↔ FASB metamodel)
 ├── type-subtype/v1/                   forked  — rs-gaap classification linkbase
 ├── rs-gaap-disclosures/v1/            native  — named Disclosures (~30)        ★ Phase C
@@ -75,6 +74,12 @@ packages/
 ├── rs-gaap-reporting-checklist/v1/    native  — DR rules per report type       ★ Phase C
 └── rs-gaap-reporting-styles/v1/       native  — composition styles             ★ Phase C
 ```
+
+Note: SFAC 6 doesn't have its own package — its content (Assets, Liabilities,
+Equity, Revenues, Expenses, etc.) is encoded as the `elementsOfFinancialStatements`
+trait category inside `us-gaap-metamodel/v1` and attached to concepts via
+`element_traits`.  This keeps the SFAC 6 categorization queryable per-element
+without giving it a separate concept namespace.
 
 Cross-namespace equivalence taxonomies (e.g. `fac-to-rs-gaap`) live
 under `../bridges/`, not here.
