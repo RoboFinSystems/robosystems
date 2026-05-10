@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from robosystems.models.api.information_block import InformationBlockEnvelope
 
@@ -34,9 +34,19 @@ class FileReportRequest(BaseModel):
   ``filed_at`` are stamped from the auth context + server clock; the
   request itself carries no fields today (kept as a model for OpenAPI
   shape consistency and to avoid breaking changes if we add fields).
+  Use ``transition-filing-status`` for the non-file legs of the
+  lifecycle (`draft ↔ under_review`, `filed → archived`).
   """
 
   report_id: str = Field(..., description="The Report to file.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0"},
+      ]
+    }
+  )
 
 
 class TransitionFilingStatusRequest(BaseModel):
@@ -48,8 +58,31 @@ class TransitionFilingStatusRequest(BaseModel):
   audit fields land cleanly.
   """
 
-  report_id: str
-  target_status: str = Field(..., description="under_review | archived")
+  report_id: str = Field(..., description="The Report to transition.")
+  target_status: str = Field(
+    ...,
+    description=(
+      "Target lifecycle state: `under_review` (submit a draft for "
+      "review) or `archived` (supersede / retire a filed report). "
+      "Reaching `filed` goes through `file-report` so audit fields "
+      "land cleanly."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0",
+          "target_status": "under_review",
+        },
+        {
+          "report_id": "rpt_01HVF8T0M2YTAY3BBNRH0V0",
+          "target_status": "archived",
+        },
+      ]
+    }
+  )
 
 
 # ── Response models ────────────────────────────────────────────────────────

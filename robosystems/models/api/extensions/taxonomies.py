@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from robosystems.models.api.common import PaginationInfo
 
@@ -12,6 +12,17 @@ from robosystems.models.api.common import PaginationInfo
 
 
 class TaxonomyResponse(BaseModel):
+  """One taxonomy header — identity + lifecycle flags. Atoms
+  (elements, structures, associations, rules) are exposed via the
+  Taxonomy Block envelope.
+
+  ``taxonomy_type`` discriminates: ``chart_of_accounts``,
+  ``reporting_standard``, ``reporting_extension``, ``custom_ontology``,
+  ``mapping``, ``schedule``. ``is_locked=True`` means library-origin
+  (immutable for tenants); ``is_shared=True`` means visible to multiple
+  graphs from a shared registry.
+  """
+
   id: str
   name: str
   description: str | None = None
@@ -27,6 +38,8 @@ class TaxonomyResponse(BaseModel):
 
 
 class TaxonomyListResponse(BaseModel):
+  """Flat list of taxonomy headers. Used by the catalog/picker UIs."""
+
   taxonomies: list[TaxonomyResponse]
 
 
@@ -50,6 +63,14 @@ class CreateTaxonomyRequest(BaseModel):
 
 
 class StructureResponse(BaseModel):
+  """One structure header — a renderable section within a taxonomy
+  (balance sheet, income statement, schedule, etc.).
+
+  ``structure_type`` drives presentation: 'balance_sheet',
+  'income_statement', 'cash_flow_statement', 'equity_statement',
+  'schedule', 'chart_of_accounts', 'coa_mapping', 'rollforward', etc.
+  """
+
   id: str
   name: str
   description: str | None = None
@@ -59,6 +80,8 @@ class StructureResponse(BaseModel):
 
 
 class StructureListResponse(BaseModel):
+  """Flat list of structures within a taxonomy."""
+
   structures: list[StructureResponse]
 
 
@@ -91,6 +114,16 @@ class CreateStructureRequest(BaseModel):
 
 
 class AssociationResponse(BaseModel):
+  """One edge between two elements within a structure (parent/child
+  presentation, calculation rollup, mapping, equivalence).
+
+  ``association_type`` discriminates the edge semantics. Mapping edges
+  are the user-facing path (CoA → reporting concept); presentation /
+  calculation edges express structure layout and roll-ups.
+  ``confidence`` is set on AI-suggested mappings (≥0.90 auto-approved,
+  0.70-0.89 flagged for review).
+  """
+
   id: str
   structure_id: str
   from_element_id: str
@@ -108,25 +141,95 @@ class AssociationResponse(BaseModel):
 
 
 class CreateAssociationRequest(BaseModel):
-  from_element_id: str
-  to_element_id: str
-  association_type: Literal["presentation", "calculation", "mapping", "equivalence"] = (
-    "mapping"
+  """Create an edge between two elements within a structure.
+
+  Used by all structure types — presentation, calculation, mapping,
+  equivalence. The mapping operation (`create-mapping-association`)
+  is the user-facing path; raw associations on other structure types
+  are not exposed publicly.
+  """
+
+  from_element_id: str = Field(
+    ..., description="Source element (typically a CoA element)."
   )
-  order_value: float | None = None
-  weight: float | None = None
-  confidence: float | None = None
-  suggested_by: str | None = None
+  to_element_id: str = Field(
+    ...,
+    description="Target element (typically a US GAAP reporting concept).",
+  )
+  association_type: Literal["presentation", "calculation", "mapping", "equivalence"] = (
+    Field(
+      "mapping",
+      description=(
+        "Edge semantics. `mapping` rolls up CoA elements into reporting "
+        "concepts; `presentation` orders concepts in a structure; "
+        "`calculation` carries debit/credit weights; `equivalence` is a "
+        "synonym link."
+      ),
+    )
+  )
+  order_value: float | None = Field(
+    None, description="Display order within the structure (lower = earlier)."
+  )
+  weight: float | None = Field(
+    None,
+    description=(
+      "Calculation weight (typically +1.0 or -1.0). Used by calculation "
+      "linkbases to express signed roll-ups."
+    ),
+  )
+  confidence: float | None = Field(
+    None,
+    ge=0.0,
+    le=1.0,
+    description=(
+      "Confidence score (0–1). For AI-suggested mappings: ≥0.90 "
+      "auto-approved, 0.70–0.89 flagged for review, <0.70 skipped."
+    ),
+  )
+  suggested_by: str | None = Field(
+    None,
+    description=(
+      "Source of the suggestion (e.g., 'mapping_agent', 'user'). "
+      "Captured for audit; not used by the runtime."
+    ),
+  )
 
 
 class CreateMappingAssociationOperation(CreateAssociationRequest):
-  """CQRS-shaped body for `POST /operations/create-mapping-association`.
+  """Create one CoA → reporting-concept mapping edge.
 
-  Bundles the target mapping structure's `mapping_id` with the association
-  payload so REST + MCP share a single body type via the registrar.
+  This is the iterative, AI-assisted craft path. Each call adds a single
+  association to the target mapping structure. Use `auto-map-elements`
+  to create many at once via the MappingAgent. Reject duplicates: if
+  the (from, to, type) tuple already exists, the call returns 409.
   """
 
   mapping_id: str = Field(..., description="Target mapping structure ID.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "mapping_id": "map_01HVF8T0M2YTAY3BBNRH0V0",
+          "from_element_id": "elem_coa_revenue_product",
+          "to_element_id": "elem_usgaap_Revenues",
+          "association_type": "mapping",
+          "weight": 1.0,
+          "confidence": 0.95,
+          "suggested_by": "user",
+        },
+        {
+          "mapping_id": "map_01HVF8T0M2YTAY3BBNRH0V0",
+          "from_element_id": "elem_coa_returns_allowances",
+          "to_element_id": "elem_usgaap_Revenues",
+          "association_type": "mapping",
+          "weight": -1.0,
+          "confidence": 0.92,
+          "suggested_by": "mapping_agent",
+        },
+      ]
+    },
+  )
 
 
 # ── Mapping ───────────────────────────────────────────────────────────────
@@ -184,6 +287,8 @@ class ElementResponse(BaseModel):
 
 
 class ElementListResponse(BaseModel):
+  """Paginated element listing with taxonomy context."""
+
   elements: list[ElementResponse]
   pagination: PaginationInfo
 
@@ -239,24 +344,63 @@ class LinkEntityTaxonomyRequest(BaseModel):
   """Link an entity to a taxonomy (creates the ENTITY_HAS_TAXONOMY edge).
 
   This is how a graph declares "this entity reports under this taxonomy."
-  For chart_of_accounts taxonomies, this tells the platform which CoA the
-  entity uses. For reporting taxonomies, which standard (us-gaap, ifrs).
+  For ``chart_of_accounts`` taxonomies, this tells the platform which CoA
+  the entity uses. For reporting taxonomies, which standard (us-gaap,
+  ifrs). Idempotent — re-linking returns the existing edge unchanged.
+
+  CoA blocks auto-link at create time; use this to switch the primary
+  CoA, link a reporting extension, or attach a custom ontology
+  explicitly.
   """
 
-  taxonomy_id: str
-  basis: Literal["reporting", "chart_of_accounts", "mapping", "schedule"] = (
-    "chart_of_accounts"
+  taxonomy_id: str = Field(..., description="The taxonomy to link to.")
+  basis: Literal["reporting", "chart_of_accounts", "mapping", "schedule"] = Field(
+    "chart_of_accounts",
+    description=(
+      "Linkage role: `chart_of_accounts` (the entity's CoA), `reporting` "
+      "(reporting standard like us-gaap), `mapping` (CoA→reporting "
+      "rollup), `schedule` (schedule structure)."
+    ),
   )
-  is_primary: bool = True
-  adoption_context: str | None = "voluntary"
+  is_primary: bool = Field(
+    True,
+    description=(
+      "Mark this as the primary linkage for the basis. False allows "
+      "secondary attachments (e.g. parallel reporting standards)."
+    ),
+  )
+  adoption_context: str | None = Field(
+    "voluntary",
+    description=(
+      "Why the entity is reporting under this taxonomy "
+      "(e.g. 'voluntary', 'regulatory', 'lender_requirement')."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"taxonomy_id": "tax_acme_coa", "basis": "chart_of_accounts"},
+        {
+          "taxonomy_id": "tax_usgaap_reporting",
+          "basis": "reporting",
+          "adoption_context": "lender_requirement",
+        },
+      ]
+    }
+  )
 
 
 class EntityTaxonomyResponse(BaseModel):
-  entity_id: str
-  taxonomy_id: str
-  basis: str
-  is_primary: bool
-  adoption_context: str | None = None
+  """Result of `link-entity-taxonomy` — the ENTITY_HAS_TAXONOMY edge."""
+
+  entity_id: str = Field(..., description="The entity that was linked.")
+  taxonomy_id: str = Field(..., description="The taxonomy that was linked.")
+  basis: str = Field(..., description="Linkage role (see request).")
+  is_primary: bool = Field(..., description="Whether this is the primary linkage.")
+  adoption_context: str | None = Field(
+    None, description="Adoption context recorded at link time."
+  )
 
 
 # ── Taxonomy update / delete ──────────────────────────────────────────────

@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ── Line item shapes ─────────────────────────────────────────────────────
 
@@ -29,10 +29,18 @@ class JournalEntryLineItemInput(BaseModel):
   Exactly one of `debit_amount` / `credit_amount` must be non-zero; the
   other must be zero. Amounts are in minor currency units (cents)."""
 
-  element_id: str
-  debit_amount: int = 0
-  credit_amount: int = 0
-  description: str | None = None
+  element_id: str = Field(
+    ..., description="Element ULID identifying the account to post to."
+  )
+  debit_amount: int = Field(
+    0, description="Debit amount in cents. Must be 0 if `credit_amount` > 0."
+  )
+  credit_amount: int = Field(
+    0, description="Credit amount in cents. Must be 0 if `debit_amount` > 0."
+  )
+  description: str | None = Field(
+    None, description="Per-line memo (overrides the entry-level memo on this line)."
+  )
 
 
 class JournalEntryLineItemResponse(BaseModel):
@@ -110,11 +118,39 @@ class UpdateJournalEntryRequest(BaseModel):
   existing line items are left untouched.
   """
 
-  entry_id: str
-  posting_date: date | None = None
-  memo: str | None = None
-  type: Literal["standard", "adjusting", "closing", "reversing"] | None = None
-  line_items: list[JournalEntryLineItemInput] | None = None
+  entry_id: str = Field(..., description="The draft entry to update.")
+  posting_date: date | None = Field(None, description="New posting date.")
+  memo: str | None = Field(None, description="New entry-level memo.")
+  type: Literal["standard", "adjusting", "closing", "reversing"] | None = Field(
+    None,
+    description="New entry type. `closing` should normally only be set by close-period.",
+  )
+  line_items: list[JournalEntryLineItemInput] | None = Field(
+    None,
+    description=(
+      "Replacement line items. Whole-list replacement (not patch). The "
+      "new set must still balance (total_debit == total_credit). Omit to "
+      "leave existing lines untouched."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "entry_id": "ent_01HVF8T0M2YTAY3BBNRH0V0",
+          "memo": "Corrected vendor reference",
+        },
+        {
+          "entry_id": "ent_01HVF8T0M2YTAY3BBNRH0V0",
+          "line_items": [
+            {"element_id": "elem_coa_office_supplies", "debit_amount": 12500},
+            {"element_id": "elem_coa_accounts_payable", "credit_amount": 12500},
+          ],
+        },
+      ]
+    }
+  )
 
 
 # ── Delete ────────────────────────────────────────────────────────────────
@@ -124,7 +160,15 @@ class DeleteJournalEntryRequest(BaseModel):
   """Hard delete a draft journal entry. Posted entries cannot be
   deleted — reverse them instead."""
 
-  entry_id: str
+  entry_id: str = Field(..., description="The draft entry to delete.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"entry_id": "ent_01HVF8T0M2YTAY3BBNRH0V0"},
+      ]
+    }
+  )
 
 
 # ── Reverse ───────────────────────────────────────────────────────────────

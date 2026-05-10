@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
@@ -19,6 +19,22 @@ PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 
 class InitializeLedgerRequest(BaseModel):
+  """One-time setup for a graph's fiscal calendar.
+
+  Creates the `FiscalCalendar` row, seeds `FiscalPeriod` rows from
+  ``earliest_data_period`` (or 24 months ago) through the current month,
+  and stamps periods on or before ``closed_through`` as already closed.
+  Subsequent calls return 409 — there's no re-initialize.
+
+  The two pointers it sets up:
+
+  - ``closed_through`` (system-maintained): the latest period whose
+    books are locked. Set on init for businesses with prior close
+    history; null for a fresh start.
+  - ``close_target`` (user-controlled): the goal date the user is
+    closing toward. Set independently via `set-close-target`.
+  """
+
   closed_through: str | None = Field(
     None,
     pattern=PERIOD_PATTERN,
@@ -54,19 +70,74 @@ class InitializeLedgerRequest(BaseModel):
     None, description="Free-form note attached to the audit event"
   )
 
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"closed_through": None, "fiscal_year_start_month": 1},
+        {
+          "closed_through": "2025-12",
+          "fiscal_year_start_month": 1,
+          "earliest_data_period": "2024-01",
+          "note": "Migrating from QuickBooks; 2025 already closed there.",
+        },
+        {
+          "closed_through": "2026-03",
+          "fiscal_year_start_month": 7,
+          "note": "FY runs July–June.",
+        },
+      ]
+    }
+  )
+
 
 class SetCloseTargetRequest(BaseModel):
+  """Set the user-controlled goal period the books should close through.
+
+  The close target drives the catch-up sequence (every period between
+  ``closed_through`` and ``close_target`` becomes a candidate for
+  closing) and is auto-advanced when reached. Independent from
+  ``closed_through``: setting a target doesn't close anything — call
+  `close-period` for that.
+  """
+
   period: str = Field(
     ...,
     pattern=PERIOD_PATTERN,
-    description="Target period in YYYY-MM format",
+    description="Target period in YYYY-MM format. Must be > current `closed_through`.",
   )
   note: str | None = Field(
     None, description="Free-form note attached to the audit event"
   )
 
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"period": "2026-03"},
+        {
+          "period": "2026-12",
+          "note": "Year-end target — accelerated close required.",
+        },
+      ]
+    }
+  )
+
 
 class ClosePeriodRequest(BaseModel):
+  """Lock a single fiscal period — the final commit action of close.
+
+  Closes the next period in the catch-up sequence (must be exactly
+  ``closed_through + 1`` — sequence violations get rejected). Posts
+  draft entries, runs balance-sheet equation check, advances
+  ``closed_through`` by one, and auto-advances ``close_target`` if
+  this close caught up to it. Operation rejects with 422 + structured
+  ``blockers`` when gates fail (sync stale, draft entries unbalanced,
+  etc).
+
+  ``period`` is supplied separately on the wire — pass it as part of
+  the operation's request body. The path identifies the graph; the
+  body identifies the period.
+  """
+
   note: str | None = Field(
     None, description="Free-form note attached to the close event"
   )
@@ -80,6 +151,14 @@ class ClosePeriodRequest(BaseModel):
 
 
 class ReopenPeriodRequest(BaseModel):
+  """Decrement ``closed_through`` by one — un-locks the most recent close.
+
+  Only the most recently closed period can be reopened (no
+  reach-back). The ``reason`` is required and captured in the audit
+  log. Use sparingly — reopen invalidates downstream artifacts that
+  trusted the closed state (reports, shared filings).
+  """
+
   reason: str = Field(
     ...,
     min_length=1,
@@ -92,6 +171,13 @@ class ReopenPeriodRequest(BaseModel):
 
 
 class FiscalPeriodSummary(BaseModel):
+  """One fiscal period row — header view used in calendar listings.
+
+  Status lifecycle: ``open`` → ``closing`` → ``closed``. ``closing``
+  is the transient state during a close run; ``closed_at`` stamps when
+  the lock landed.
+  """
+
   name: str = Field(..., description="Period name (YYYY-MM)")
   start_date: date
   end_date: date

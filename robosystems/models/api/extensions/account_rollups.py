@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 
 class AccountRollupRow(BaseModel):
+  """One CoA account contributing to a reporting concept's rollup."""
+
   element_id: str
   account_name: str
   account_code: str | None = None
@@ -18,6 +20,10 @@ class AccountRollupRow(BaseModel):
 
 
 class AccountRollupGroup(BaseModel):
+  """All CoA accounts that roll up into a single reporting concept,
+  with the group total and per-account contributions.
+  """
+
   reporting_element_id: str
   reporting_name: str
   reporting_qname: str
@@ -28,6 +34,11 @@ class AccountRollupGroup(BaseModel):
 
 
 class AccountRollupsResponse(BaseModel):
+  """Mapping rendered as account rollups — every reporting concept the
+  mapping defines, with the CoA accounts that contribute to it and the
+  current balance for each. ``total_unmapped`` tracks gaps for UI.
+  """
+
   mapping_id: str
   mapping_name: str
   groups: list[AccountRollupGroup]

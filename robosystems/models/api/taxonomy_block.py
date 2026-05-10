@@ -314,6 +314,53 @@ class CreateTaxonomyBlockRequest(BaseModel):
       )
     return self
 
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "name": "Acme CoA",
+          "taxonomy_type": "chart_of_accounts",
+          "elements": [
+            {
+              "qname": "acme:Cash",
+              "name": "Cash",
+              "trait": "asset",
+              "balance_type": "debit",
+              "code": "1000",
+            },
+            {
+              "qname": "acme:AccountsPayable",
+              "name": "Accounts Payable",
+              "trait": "liability",
+              "balance_type": "credit",
+              "code": "2000",
+            },
+          ],
+          "structures": [
+            {"name": "main", "structure_type": "chart_of_accounts"},
+          ],
+        },
+        {
+          "name": "Acme us-gaap Extension",
+          "taxonomy_type": "reporting_extension",
+          "parent_taxonomy_id": "tax_usgaap_reporting",
+          "elements": [
+            {
+              "qname": "acme:NonGAAPAdjustedRevenue",
+              "name": "Non-GAAP Adjusted Revenue",
+              "trait": "revenue",
+              "balance_type": "credit",
+              "parent_ref": "us-gaap:Revenues",
+            },
+          ],
+          "structures": [
+            {"name": "income_statement", "structure_type": "income_statement"},
+          ],
+        },
+      ]
+    }
+  )
+
 
 class ElementUpdatePatch(BaseModel):
   """Partial-update patch for a single element, keyed by qname."""
@@ -374,6 +421,37 @@ class UpdateTaxonomyBlockRequest(BaseModel):
     default_factory=list, description="Rule ids to remove."
   )
 
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "taxonomy_id": "tax_acme_coa",
+          "name": "Acme CoA (v2)",
+          "version": "2.0",
+        },
+        {
+          "taxonomy_id": "tax_acme_coa",
+          "elements_to_add": [
+            {
+              "qname": "acme:DeferredRevenue",
+              "name": "Deferred Revenue",
+              "trait": "liability",
+              "balance_type": "credit",
+              "code": "2200",
+            },
+          ],
+        },
+        {
+          "taxonomy_id": "tax_acme_coa",
+          "elements_to_remove": ["acme:LegacyAccount"],
+          "elements_to_update": [
+            {"qname": "acme:Cash", "name": "Cash and Cash Equivalents"},
+          ],
+        },
+      ]
+    }
+  )
+
 
 class DeleteTaxonomyBlockRequest(BaseModel):
   """Request body for the ``delete-taxonomy-block`` operation.
@@ -384,12 +462,35 @@ class DeleteTaxonomyBlockRequest(BaseModel):
   ``facts_deleted``.
   """
 
-  taxonomy_id: str
-  cascade_facts: bool = False
+  taxonomy_id: str = Field(..., description="The taxonomy to delete.")
+  cascade_facts: bool = Field(
+    False,
+    description=(
+      "When true, also deletes any Fact rows referencing elements in "
+      "this taxonomy. When false (default), the operation fails with "
+      "422 if such rows exist."
+    ),
+  )
   reason: str = Field(
     ...,
     min_length=1,
     description="Human-readable justification (audit log).",
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "taxonomy_id": "tax_acme_coa_legacy",
+          "reason": "Replaced by Acme CoA v2.",
+        },
+        {
+          "taxonomy_id": "tax_acme_coa_legacy",
+          "cascade_facts": True,
+          "reason": "Pruning historical experiment — facts no longer needed.",
+        },
+      ]
+    }
   )
 
 

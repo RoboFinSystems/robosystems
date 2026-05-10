@@ -18,6 +18,14 @@ from robosystems.models.api.common import PaginationInfo
 
 
 class LedgerTransactionSummaryResponse(BaseModel):
+  """Transaction header — list/grid view without entries.
+
+  Transaction is the business-event level (what happened in the real
+  world). Entries (journal entries) live one level down and are loaded
+  in the detail view. ``source`` distinguishes integration-imported
+  rows (quickbooks / xero / plaid) from native-created ones.
+  """
+
   id: str
   number: str | None = None
   type: str
@@ -34,11 +42,17 @@ class LedgerTransactionSummaryResponse(BaseModel):
 
 
 class LedgerTransactionListResponse(BaseModel):
+  """Paginated transaction listing — header view."""
+
   transactions: list[LedgerTransactionSummaryResponse]
   pagination: PaginationInfo
 
 
 class LedgerLineItemResponse(BaseModel):
+  """One debit/credit line within a journal entry. Always exactly one
+  side has a non-zero amount.
+  """
+
   id: str
   account_id: str
   account_name: str | None = None
@@ -50,6 +64,14 @@ class LedgerLineItemResponse(BaseModel):
 
 
 class LedgerEntryResponse(BaseModel):
+  """A journal entry — accounting interpretation of a transaction.
+
+  Each transaction has 1+ entries; each entry has 2+ line items that
+  must balance. ``status`` is the draft/posted/reversed lifecycle;
+  ``type`` is the entry classification ('standard' | 'adjusting' |
+  'closing' | 'reversing').
+  """
+
   id: str
   number: str | None = None
   type: str
@@ -61,6 +83,9 @@ class LedgerEntryResponse(BaseModel):
 
 
 class LedgerTransactionDetailResponse(BaseModel):
+  """Full transaction detail — header + every journal entry + every
+  line item underneath. Used by the transaction detail page."""
+
   id: str
   number: str | None = None
   type: str

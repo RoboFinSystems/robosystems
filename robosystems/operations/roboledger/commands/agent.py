@@ -8,8 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.agent import (
-  AgentResponse,
   CreateAgentRequest,
+  LedgerAgentResponse,
   UpdateAgentRequest,
 )
 from robosystems.models.extensions.roboledger.agent import Agent
@@ -35,7 +35,7 @@ def create_agent(
   session: Session,
   body: CreateAgentRequest,
   created_by: str,
-) -> AgentResponse:
+) -> LedgerAgentResponse:
   agent = Agent(
     agent_type=body.agent_type,
     name=body.name,
@@ -72,7 +72,7 @@ def update_agent(
   session: Session,
   body: UpdateAgentRequest,
   created_by: str,
-) -> AgentResponse:
+) -> LedgerAgentResponse:
   agent = session.get(Agent, body.agent_id)
   if agent is None:
     raise AgentNotFoundError(body.agent_id)

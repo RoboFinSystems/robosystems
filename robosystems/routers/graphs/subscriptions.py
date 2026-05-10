@@ -22,7 +22,7 @@ from ...models.api.billing.subscription import (
   UpgradeSubscriptionRequest,
 )
 from ...models.api.common import RESOURCE_ERROR_RESPONSES
-from ...models.core import User
+from ...models.core import User, UserRepository
 from ...models.core.billing import BillingAuditLog, BillingCustomer, BillingSubscription
 from ...models.core.billing.audit_log import BillingEventType
 
@@ -663,6 +663,20 @@ async def cancel_repository_subscription(
       )
 
   subscription.cancel(db, immediate=body.immediate)
+
+  user_repo = UserRepository.get_by_user_and_repository(
+    user_id=current_user.id,
+    repository_name=parent_repo_id,
+    session=db,
+  )
+  if user_repo:
+    if body.immediate:
+      user_repo.revoke_access(db)
+    else:
+      user_repo.expires_at = subscription.ends_at
+      user_repo.next_billing_at = None
+      user_repo.updated_at = subscription.updated_at
+      db.commit()
 
   BillingAuditLog.log_event(
     session=db,

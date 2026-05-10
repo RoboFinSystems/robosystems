@@ -1,6 +1,6 @@
 [project]
 name = "robosystems"
-version = "1.4.69"
+version = "1.4.70"
 description = "RoboSystems"
 requires-python = ">=3.13"
 authors = [
@@ -94,19 +94,18 @@ dependencies = [
     "psutil>=7.2.1,<8.0",
     "pydantic[email]>=2.11.0,<3.0",
     "pyjwt>=2.10.0,<3.0",
-    "python-multipart>=0.0.16,<1.0",
+    "python-multipart>=0.0.27,<1.0",
     "python-ulid>=3.0.0",
     "pyyaml>=6.0.0,<7.0",
     "requests>=2.32.0,<3.0",
     "retrying>=1.4.0,<2.0",
     "uuid6>=2025.0.0",
-    "robosystems-client>=0.3.14",
 ]
 
 [project.optional-dependencies]
 dev = [
     # RoboSystems client for demo and testing
-    "robosystems-client==0.3.21",
+    "robosystems-client==0.3.24",
 
     # Testing framework
     "pytest>=8.4.0,<9.0",

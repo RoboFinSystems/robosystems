@@ -152,11 +152,11 @@ class TestDisabledProviderHandling:
     # Invalid providers should return 422 Unprocessable Entity (Pydantic validation)
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
     response_json = response.json()
-    # 422 errors have detail as a list of validation errors
-    assert isinstance(response_json["detail"], list)
-    assert len(response_json["detail"]) > 0
-    # Check that it's about the provider field
-    assert any("provider" in str(error).lower() for error in response_json["detail"])
+    # 422s are normalized to ErrorResponse shape: detail is a compressed string,
+    # code is "VALIDATION_ERROR" (see request_validation_handler in main.py).
+    assert isinstance(response_json["detail"], str)
+    assert "provider" in response_json["detail"].lower()
+    assert response_json.get("code") == "VALIDATION_ERROR"
 
   @pytest.fixture
   def auth_headers(self, test_user, test_org, test_db):

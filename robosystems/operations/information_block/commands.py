@@ -20,6 +20,7 @@ FastAPI's default handling.
 
 from __future__ import annotations
 
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.information_block import (
@@ -40,6 +41,20 @@ def _get_entry_or_422(block_type: str):
     raise ValueError(str(exc)) from exc
 
 
+def _coerce_payload(request_model: type[BaseModel], payload):
+  """Validate ``payload`` against the registry entry's request model.
+
+  Already-typed payloads (BaseModel instances supplied by a typed
+  discriminated-union arm at the API boundary) are returned as-is —
+  the API-level validation already checked them against the right
+  shape. Dict payloads from legacy untyped arms are validated at
+  dispatch time.
+  """
+  if isinstance(payload, BaseModel):
+    return payload
+  return request_model.model_validate(payload)
+
+
 def create_information_block(
   session: Session,
   body: CreateInformationBlockRequest,
@@ -54,7 +69,7 @@ def create_information_block(
   """
   entry = _get_entry_or_422(body.block_type)
 
-  typed_payload = entry.create_request_model.model_validate(body.payload)
+  typed_payload = _coerce_payload(entry.create_request_model, body.payload)
   structure_id = entry.dispatch_create(session, typed_payload, created_by)
 
   envelope = entry.dispatch_build_envelope(session, structure_id)
@@ -88,7 +103,7 @@ def update_information_block(
   """
   entry = _get_entry_or_422(body.block_type)
 
-  typed_payload = entry.update_request_model.model_validate(body.payload)
+  typed_payload = _coerce_payload(entry.update_request_model, body.payload)
   structure_id = entry.dispatch_update(session, typed_payload, created_by)
 
   envelope = entry.dispatch_build_envelope(session, structure_id)
@@ -114,7 +129,7 @@ def delete_information_block(
   """
   entry = _get_entry_or_422(body.block_type)
 
-  typed_payload = entry.delete_request_model.model_validate(body.payload)
+  typed_payload = _coerce_payload(entry.delete_request_model, body.payload)
 
   # Build the envelope BEFORE deletion so we can surface name + id on
   # the response. build_envelope returning None here means the payload

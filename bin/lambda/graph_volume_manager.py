@@ -13,6 +13,7 @@ Key improvements:
 import json
 import logging
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -361,8 +362,25 @@ def attach_and_register_volume(
     logger.error(f"Instance {instance_id} did not reach running state: {e}")
     return {"statusCode": 500, "error": f"Instance not ready: {e!s}"}
 
-  # Attach the volume with retry logic
+  # Wait for volume to actually reach `available`. EBS detach is async — the
+  # detachment Lambda may have ack'd before the volume left `detaching`. Without
+  # this wait, AttachVolume races the previous instance's detach and EC2 returns
+  # VolumeInUse. Log-and-proceed on timeout; the retry loop below handles the
+  # residual race.
+  vol_waiter = ec2.get_waiter("volume_available")
+  try:
+    vol_waiter.wait(VolumeIds=[volume_id], WaiterConfig={"Delay": 5, "MaxAttempts": 24})
+  except Exception as e:
+    logger.warning(
+      f"Volume {volume_id} did not reach available in 2 min: {e}; will attempt attach"
+    )
+
+  # Attach the volume with retry logic.
+  # Retry both IncorrectState (instance not ready) and VolumeInUse (volume still
+  # detaching from prior instance). Use a longer sleep for VolumeInUse since
+  # actual detach completion takes 15-30s in observed AWS host-failure recoveries.
   max_retries = 3
+  retryable_tokens = ("IncorrectState", "VolumeInUse")
   response = None
   for attempt in range(max_retries):
     try:
@@ -374,15 +392,19 @@ def attach_and_register_volume(
       )
       break
     except Exception as e:
-      if "IncorrectState" in str(e) and attempt < max_retries - 1:
-        logger.warning("Volume or instance not ready, retrying in 10 seconds...")
-        import time
-
-        time.sleep(10)
+      err_str = str(e)
+      if (
+        any(token in err_str for token in retryable_tokens)
+        and attempt < max_retries - 1
+      ):
+        sleep_s = 30 if "VolumeInUse" in err_str else 10
+        logger.warning(
+          f"Volume not ready ({e}); sleeping {sleep_s}s before retry {attempt + 2}/{max_retries}"
+        )
+        time.sleep(sleep_s)
         continue
-      else:
-        logger.error(f"Failed to attach volume after {attempt + 1} attempts: {e}")
-        raise
+      logger.error(f"Failed to attach volume after {attempt + 1} attempts: {e}")
+      raise
 
   if response is None:
     raise RuntimeError("Failed to attach volume: no response received")
@@ -390,6 +412,16 @@ def attach_and_register_volume(
   # Wait for attachment
   waiter = ec2.get_waiter("volume_in_use")
   waiter.wait(VolumeIds=[volume_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60})
+
+  # Preserve the registry's existing databases list when present. This list is
+  # maintained by allocation_manager.py (add on graph create, remove on graph
+  # drop). Userdata for non-shared writers passes [] on every launch, so a naive
+  # overwrite wipes the volume↔graph linkage on every instance replacement —
+  # exactly the bug that orphaned kg19dcbe757481af06fc9b on 2026-05-08.
+  current = table.get_item(Key={"volume_id": volume_id}).get("Item", {})
+  existing_dbs = current.get("databases") or []
+  caller_dbs = databases if isinstance(databases, list) else [databases]
+  final_dbs = existing_dbs if existing_dbs else caller_dbs
 
   # Update registry
   table.update_item(
@@ -400,19 +432,21 @@ def attach_and_register_volume(
       ":instance_id": instance_id,
       ":status": "attached",
       ":timestamp": datetime.now(UTC).isoformat(),
-      ":databases": databases if isinstance(databases, list) else [databases],
+      ":databases": final_dbs,
     },
   )
 
   logger.info(f"Successfully attached volume {volume_id} to instance {instance_id}")
 
-  # CRITICAL: Update graph registry with new instance info for routing
-  # This ensures queries route to the correct IP after instance replacement
-  db_list = databases if isinstance(databases, list) else [databases]
-  graph_update_result = update_graph_registry_for_instance(instance_id, db_list)
+  # CRITICAL: Update graph registry with new instance info for routing.
+  # Use final_dbs (preserved list) so a replacement instance reroutes ALL graphs
+  # the volume actually holds, not just the (often empty) list userdata passed.
+  graph_update_result = update_graph_registry_for_instance(instance_id, final_dbs)
   logger.info(f"Graph registry update result: {graph_update_result}")
 
-  # Signal the instance that volume is ready
+  # Signal the instance that volume is ready. Use final_dbs (preserved list),
+  # not the caller-provided databases — otherwise the OS-side databases.json
+  # re-introduces the orphaning bug we just fixed in the registry.
   try:
     ssm.send_command(
       InstanceIds=[instance_id],
@@ -420,7 +454,7 @@ def attach_and_register_volume(
       Parameters={
         "commands": [
           "echo 'VOLUME_READY' > /tmp/volume_status",
-          f"echo '{json.dumps(databases)}' > /tmp/databases.json",
+          f"echo '{json.dumps(final_dbs)}' > /tmp/databases.json",
         ]
       },
     )
@@ -431,7 +465,7 @@ def attach_and_register_volume(
     "statusCode": 200,
     "volume_id": volume_id,
     "attachment_state": response["State"],
-    "databases": databases,
+    "databases": final_dbs,
   }
 
 
@@ -541,13 +575,24 @@ def attach_volume(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def detach_volume(event: dict[str, Any]) -> dict[str, Any]:
-  """Safely detach a volume"""
+  """Safely detach a volume.
+
+  Before detaching, take a defensive 3-day-retention snapshot of any volume
+  that holds unique data (writers + shared_master). This captures the
+  volume's last-known-good state at the moment of instance replacement,
+  giving us fast recovery when rebuild-from-source is slow or broken.
+  Replicas (and empty pool volumes) are skipped.
+  """
   volume_id = event["volume_id"]
   force = event.get("force", False)
 
-  # Get current databases on the volume before detaching
-  response = table.get_item(Key={"volume_id": volume_id})
-  databases = response.get("Item", {}).get("databases", [])
+  # Load registry metadata so we can decide whether to snapshot.
+  item = table.get_item(Key={"volume_id": volume_id}).get("Item", {})
+  databases = item.get("databases") or []
+  node_type = item.get("node_type", "")
+  tier = item.get("tier", "")
+
+  _maybe_snapshot_pre_detach(volume_id, node_type, tier, databases)
 
   # Detach the volume
   try:
@@ -573,6 +618,65 @@ def detach_volume(event: dict[str, Any]) -> dict[str, Any]:
   logger.info(f"Volume {volume_id} detached, preserving databases: {databases}")
 
   return {"statusCode": 200, "volume_id": volume_id, "databases": databases}
+
+
+def _maybe_snapshot_pre_detach(
+  volume_id: str, node_type: str, tier: str, databases: list[str]
+) -> None:
+  """Defensively snapshot a volume before detach.
+
+  Skipped for shared_replica (rebuilt from S3 on boot, no unique state) and
+  for empty pool volumes (no data to preserve). CreateSnapshot is async —
+  AWS copies blocks from the volume in the background even after detach,
+  so we don't wait. Failure logs + alerts but does NOT block the detach.
+  """
+  if node_type == "shared_replica":
+    logger.info(f"Skipping pre-detach snapshot for {volume_id}: shared_replica")
+    return
+  if not databases:
+    logger.info(f"Skipping pre-detach snapshot for {volume_id}: no databases")
+    return
+
+  # AWS snapshot Description is capped at 255 chars; keep it concise.
+  # The full graph list lives in the Databases tag (JSON-encoded) below — the
+  # description just needs to be human-identifiable at a glance.
+  description = (
+    f"Pre-detach {volume_id} node_type={node_type} tier={tier} dbs={len(databases)}"
+  )[:255]
+
+  try:
+    snap = ec2.create_snapshot(
+      VolumeId=volume_id,
+      Description=description,
+      TagSpecifications=[
+        {
+          "ResourceType": "snapshot",
+          "Tags": [
+            {"Key": "Name", "Value": f"pre-detach-{volume_id}"},
+            {"Key": "Environment", "Value": ENVIRONMENT},
+            {"Key": "Type", "Value": "pre_detach"},
+            {"Key": "AutoDelete", "Value": "true"},
+            {"Key": "RetentionDays", "Value": "3"},
+            {"Key": "VolumeId", "Value": volume_id},
+            {"Key": "NodeType", "Value": node_type},
+            {"Key": "Tier", "Value": tier},
+            {"Key": "Databases", "Value": json.dumps(databases)},
+          ],
+        }
+      ],
+    )
+    logger.info(
+      f"Created pre-detach snapshot {snap['SnapshotId']} for {volume_id} "
+      f"(node_type={node_type}, databases={databases})"
+    )
+  except Exception as e:
+    # Don't block detach on snapshot failure — alert and continue.
+    logger.error(f"Failed to create pre-detach snapshot for {volume_id}: {e}")
+    send_alert(
+      "Pre-detach Snapshot Failed",
+      f"Failed to snapshot {volume_id} (node_type={node_type}, "
+      f"databases={databases}) before detach: {e}",
+    )
 
 
 def expand_volume(event: dict[str, Any]) -> dict[str, Any]:
@@ -729,25 +833,57 @@ def cleanup_orphaned_volumes() -> dict[str, Any]:
 
 
 def cleanup_old_snapshots(event: dict[str, Any]) -> dict[str, Any]:
-  """Clean up snapshots older than retention period"""
-  cutoff_time = datetime.now(UTC) - timedelta(days=RETENTION_DAYS)
+  """Clean up snapshots older than their retention period.
 
-  # Find snapshots to delete
-  response = ec2.describe_snapshots(
-    OwnerIds=["self"],
-    Filters=[
-      {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
-      {"Name": "tag:AutoDelete", "Values": ["true"]},
-    ],
-  )
+  Per-snapshot retention via the `RetentionDays` tag takes precedence over the
+  global RETENTION_DAYS env var. This lets pre-detach snapshots use 3-day
+  retention without affecting orphan-cleanup snapshots (default 7 days).
+  """
+  now = datetime.now(UTC)
+
+  # Find snapshots to delete. describe_snapshots returns up to 1000 per page;
+  # paginate via NextToken so we don't silently miss snapshots at scale (which
+  # would leak past the retention window). Pre-detach snapshots add per-detach
+  # snapshot churn so this matters more than it did pre-PR-664.
+  all_snapshots = []
+  next_token = None
+  while True:
+    kwargs: dict[str, Any] = {
+      "OwnerIds": ["self"],
+      "Filters": [
+        {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
+        {"Name": "tag:AutoDelete", "Values": ["true"]},
+      ],
+    }
+    if next_token:
+      kwargs["NextToken"] = next_token
+    response = ec2.describe_snapshots(**kwargs)
+    all_snapshots.extend(response.get("Snapshots", []))
+    next_token = response.get("NextToken")
+    if not next_token:
+      break
 
   deleted = []
-  for snapshot in response["Snapshots"]:
-    if snapshot["StartTime"].replace(tzinfo=UTC) < cutoff_time:
+  for snapshot in all_snapshots:
+    tags = {tag["Key"]: tag["Value"] for tag in snapshot.get("Tags", [])}
+    try:
+      retention_days = int(tags.get("RetentionDays", RETENTION_DAYS))
+    except ValueError:
+      logger.warning(
+        f"Snapshot {snapshot['SnapshotId']} has malformed RetentionDays tag "
+        f"{tags.get('RetentionDays')!r}; using default {RETENTION_DAYS}"
+      )
+      retention_days = RETENTION_DAYS
+
+    cutoff = now - timedelta(days=retention_days)
+    if snapshot["StartTime"].replace(tzinfo=UTC) < cutoff:
       try:
         ec2.delete_snapshot(SnapshotId=snapshot["SnapshotId"])
         deleted.append(snapshot["SnapshotId"])
-        logger.info(f"Deleted old snapshot: {snapshot['SnapshotId']}")
+        logger.info(
+          f"Deleted snapshot {snapshot['SnapshotId']} "
+          f"(retention={retention_days}d, age={(now - snapshot['StartTime'].replace(tzinfo=UTC)).days}d)"
+        )
       except Exception as e:
         logger.error(f"Failed to delete snapshot {snapshot['SnapshotId']}: {e}")
 

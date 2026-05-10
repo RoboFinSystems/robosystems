@@ -162,7 +162,14 @@ while [ -z "$DATA_DEVICE" ] && [ $COUNTER -lt $MAX_WAIT ]; do
 done
 
 if [ -z "$DATA_DEVICE" ]; then
-  echo "ERROR: Data volume not found after ${MAX_WAIT} seconds"
+  echo "ERROR: Data volume not found after ${MAX_WAIT} seconds; signalling ASG unhealthy"
+  # Without this, EC2 status checks pass (the OS is fine), so ASG considers
+  # this idle instance healthy and never replaces it. Marking Unhealthy forces
+  # ASG to terminate-and-replace, giving the volume-manager Lambda another shot.
+  aws autoscaling set-instance-health \
+    --instance-id "${INSTANCE_ID}" \
+    --health-status Unhealthy \
+    --region "${REGION}" || echo "WARNING: failed to signal Unhealthy; ASG will rely on EC2 status checks"
   exit 1
 fi
 

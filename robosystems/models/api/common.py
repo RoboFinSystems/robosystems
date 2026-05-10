@@ -113,6 +113,29 @@ class HealthStatus(BaseModel):
   )
 
 
+class DeleteResult(BaseModel):
+  """Shared response shape for delete / soft-delete operations.
+
+  ``deleted=True`` means the operation succeeded (a row was deleted or
+  flipped). The handler returns 404 instead when the row didn't exist
+  to begin with — the response shape is never used to communicate "not
+  found".
+
+  Defined once here to avoid OpenAPI components key collisions
+  between roboledger and roboinvestor (both surfaces produced
+  separate ``DeleteResult`` classes before consolidation).
+  """
+
+  deleted: bool = Field(
+    ...,
+    description=(
+      "`true` when the row was deleted in this call. Always `true` "
+      "today — 404 covers the not-found case at the HTTP layer rather "
+      "than via this field."
+    ),
+  )
+
+
 class CreditCostInfo(BaseModel):
   """Information about credit costs for an operation."""
 
@@ -217,6 +240,14 @@ OPERATION_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     "model": ErrorResponse,
     "description": "Idempotency-Key conflict — key reused with different body",
   },
+  # FastAPI's default 422 schema is `HTTPValidationError` (request-body
+  # pydantic validation), but our routes also raise
+  # `HTTPException(422, "...")` for business-validation failures with a
+  # plain string detail. The runtime `RequestValidationError` handler in
+  # ``main.py`` normalizes both shapes into the `ErrorResponse` shape;
+  # this declaration aligns the OpenAPI spec so SDK generators get the
+  # correct response model.
+  422: {"model": ErrorResponse, "description": "Validation error"},
 }
 
 
