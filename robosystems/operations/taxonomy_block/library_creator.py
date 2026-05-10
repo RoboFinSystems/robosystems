@@ -58,6 +58,12 @@ _ALLOWED_SOURCES = frozenset(
     "native",
     "import",
     "system",
+    # rs-gaap-base framework extension packages — each declares a
+    # sibling namespace anchored to the rs-gaap framework. Elements
+    # carry the namespace prefix as their source value.
+    "disclosures",
+    "checklist",
+    "styles",
   }
 )
 

@@ -97,6 +97,43 @@ class TestSeedFiles:
     assert "taxonomy.jsonld" in seeded_names
     assert ("fac-rules", "v1") in seeded_paths
 
+  def test_phase_c_packages_pinned_in_framework_manifest(self) -> None:
+    """The four Phase C packages + bridge are declared in
+    rs-gaap-base@v1's manifest. ``is_required: false`` lets the
+    framework resolve gracefully even if a deployment is missing
+    them, but the manifest entries must be present."""
+    from robosystems.taxonomy.loaders import load_framework_manifest
+
+    manifest = load_framework_manifest("rs-gaap-base", "v1")
+    package_names = {p["standard"] for p in manifest["packages"]}
+    bridge_names = {b["bridge"] for b in manifest["bridges"]}
+    for required in (
+      "rs-gaap-disclosures",
+      "rs-gaap-disclosure-mechanics",
+      "rs-gaap-reporting-checklist",
+      "rs-gaap-reporting-styles",
+    ):
+      assert required in package_names, f"{required} missing from manifest"
+    assert "rs-gaap-disclosures-to-rs-gaap-textblocks" in bridge_names
+
+
+class TestPhaseCCheckWidens:
+  """Phase C added new namespace prefixes and a new association_type
+  that need to land in 0002's CHECK constants for fresh DBs (and 0007
+  for already-deployed tenant schemas).
+
+  Drift here would surface as a CHECK violation on first INSERT — the
+  most common authoring footgun when adding a new package."""
+
+  def test_element_source_check_admits_phase_c_namespaces(self) -> None:
+    for prefix in ("disclosures", "checklist", "styles"):
+      assert f"'{prefix}'" in mig_0002._WIDENED_ELEMENT_SOURCE_CHECK, (
+        f"namespace prefix {prefix!r} missing from element source CHECK"
+      )
+
+  def test_association_type_check_admits_definition(self) -> None:
+    assert "'definition'" in mig_0002._WIDENED_ASSOCIATION_CHECK
+
 
 class TestRuleCheckConstraints:
   def test_category_check_lists_every_enum_value(self) -> None:

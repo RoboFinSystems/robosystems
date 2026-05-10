@@ -251,6 +251,112 @@ def _seed_framework_rows(conn) -> None:
       )
 
 
+# Widen the elements.source CHECK constraint to admit the namespace
+# prefixes used by the rs-gaap-base framework extension packages
+# (disclosures, checklist, styles). Without this, elements from those
+# packages get rejected at INSERT time. The widen runs in every
+# tenant schema (each has its own copy of the constraint) plus the
+# public schema.
+_WIDENED_ELEMENT_SOURCE_CHECK = (
+  "source IN ("
+  "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
+  "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
+  "'disclosures', 'checklist', 'styles'"
+  ")"
+)
+_PRIOR_ELEMENT_SOURCE_CHECK = (
+  "source IN ("
+  "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
+  "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
+  ")"
+)
+
+# Widen the associations.association_type CHECK to admit 'definition' arcs
+# (Disclosure Mechanics + Reporting Checklist + Reporting Style packages all
+# encode their semantics as definition-arcrole arcs).
+_WIDENED_ASSOCIATION_TYPE_CHECK = (
+  "association_type IN ("
+  "'presentation', 'calculation', 'mapping', "
+  "'equivalence', 'general-special', 'essence-alias', "
+  "'definition'"
+  ")"
+)
+_PRIOR_ASSOCIATION_TYPE_CHECK = (
+  "association_type IN ("
+  "'presentation', 'calculation', 'mapping', "
+  "'equivalence', 'general-special', 'essence-alias'"
+  ")"
+)
+
+
+def _widen_association_type_check(conn, schema: str) -> None:
+  """Drop and re-add the associations.association_type CHECK with the widened list."""
+  if schema == "public":
+    table = "public.associations"
+    constraint = "check_association_type"
+  else:
+    table = f'"{schema}".associations'
+    constraint = f"check_{schema}_association_type"
+  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"))
+  conn.execute(
+    text(
+      f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+      f"CHECK ({_WIDENED_ASSOCIATION_TYPE_CHECK})"
+    )
+  )
+
+
+def _restore_association_type_check(conn, schema: str) -> None:
+  """Inverse of :func:`_widen_association_type_check` for downgrade."""
+  if schema == "public":
+    table = "public.associations"
+    constraint = "check_association_type"
+  else:
+    table = f'"{schema}".associations'
+    constraint = f"check_{schema}_association_type"
+  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"))
+  conn.execute(
+    text(
+      f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+      f"CHECK ({_PRIOR_ASSOCIATION_TYPE_CHECK})"
+    )
+  )
+
+
+def _widen_element_source_check(conn, schema: str) -> None:
+  """Drop and re-add the elements.source CHECK with the widened list."""
+  if schema == "public":
+    table = "public.elements"
+    constraint = "check_element_source"
+  else:
+    table = f'"{schema}".elements'
+    constraint = f"check_{schema}_element_source"
+  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"))
+  conn.execute(
+    text(
+      f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+      f"CHECK ({_WIDENED_ELEMENT_SOURCE_CHECK})"
+    )
+  )
+
+
+def _restore_element_source_check(conn, schema: str) -> None:
+  """Inverse of :func:`_widen_element_source_check` for downgrade."""
+  if schema == "public":
+    table = "public.elements"
+    constraint = "check_element_source"
+  else:
+    table = f'"{schema}".elements'
+    constraint = f"check_{schema}_element_source"
+  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"))
+  conn.execute(
+    text(
+      f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+      f"CHECK ({_PRIOR_ELEMENT_SOURCE_CHECK})"
+    )
+  )
+
+
 def upgrade() -> None:
   # ── bridges table ──────────────────────────────────────────────
   op.create_table(
@@ -385,12 +491,30 @@ def upgrade() -> None:
     schema="public",
   )
 
-  # ── seed framework manifest rows ───────────────────────────────
+  # ── widen elements.source CHECK in public + every tenant ──────
   conn = op.get_bind()
+  from migrations.extensions.helpers import for_each_tenant_schema
+
+  _widen_element_source_check(conn, "public")
+  for_each_tenant_schema(conn, _widen_element_source_check)
+
+  _widen_association_type_check(conn, "public")
+  for_each_tenant_schema(conn, _widen_association_type_check)
+
+  # ── seed framework manifest rows ───────────────────────────────
   _seed_framework_rows(conn)
 
 
 def downgrade() -> None:
+  conn = op.get_bind()
+  from migrations.extensions.helpers import for_each_tenant_schema
+
+  _restore_element_source_check(conn, "public")
+  for_each_tenant_schema(conn, _restore_element_source_check)
+
+  _restore_association_type_check(conn, "public")
+  for_each_tenant_schema(conn, _restore_association_type_check)
+
   op.drop_index(
     "idx_framework_packages_pkg",
     table_name="framework_packages",

@@ -101,13 +101,23 @@ _IMMUTABLE_TABLES = (
 _WIDENED_ASSOCIATION_CHECK = (
   "association_type IN ("
   "'presentation', 'calculation', 'mapping', "
-  "'equivalence', 'general-special', 'essence-alias'"
+  "'equivalence', 'general-special', 'essence-alias', "
+  # 'definition' arcs land from the rs-gaap-disclosure-mechanics +
+  # rs-gaap-reporting-checklist + rs-gaap-reporting-styles packages.
+  # See migration 0007 for the same widen applied to already-deployed
+  # tenant schemas.
+  "'definition'"
   ")"
 )
 _WIDENED_ELEMENT_SOURCE_CHECK = (
   "source IN ("
   "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
-  "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
+  "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
+  # rs-gaap-base framework extension packages (Phase C). Each declares
+  # a sibling namespace anchored to the rs-gaap framework. See
+  # migration 0007 for the same widen applied to already-deployed
+  # tenant schemas.
+  "'disclosures', 'checklist', 'styles'"
   ")"
 )
 _WIDENED_TAXONOMY_TYPE_CHECK = (

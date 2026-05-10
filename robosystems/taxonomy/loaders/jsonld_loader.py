@@ -105,6 +105,51 @@ ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
     "equivalence",
     "http://xbrlsite.azurewebsites.net/2016/conceptual-model/arcrole/class-equivalentClass",
   ),
+  # Disclosure Mechanics predicates (rs-gaap-disclosure-mechanics package).
+  # Mirror Charlie Hoffman's Seattle Method arcrole vocabulary so a future
+  # Arelle harvest of his theory file can land into the same association
+  # rows. Composition-style: each Disclosure declares what it requires.
+  f"{RS_NS}reportedDisclosureRequiresDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/reportedDisclosure-requiresDisclosure",
+  ),
+  f"{RS_NS}conceptArrangementPatternRequiresConcept": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/conceptArrangementPattern-requiresConcept",
+  ),
+  f"{RS_NS}disclosureRequiresHypercube": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-requiresHypercube",
+  ),
+  f"{RS_NS}disclosureRequiresConcept": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-requiresConcept",
+  ),
+  f"{RS_NS}disclosureEquivalentTextblock": (
+    "equivalence",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-equivalentTextblock",
+  ),
+  # Reporting Checklist predicates (rs-gaap-reporting-checklist package).
+  # A FinancialReport requires/may-have/has-alternatives-for specific
+  # Disclosures.
+  f"{RS_NS}financialReportRequiresDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/financialReport-requiresDisclosure",
+  ),
+  f"{RS_NS}financialReportPossibleDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/financialReport-possibleDisclosure",
+  ),
+  f"{RS_NS}disclosureAllowedAlternativeDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-allowedAlternativeDisclosure",
+  ),
+  # Reporting Style predicates (rs-gaap-reporting-styles package).
+  # A Style composes specific Disclosures for a vertical / filer profile.
+  f"{RS_NS}reportingStyleComposesDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/reportingStyle-composesDisclosure",
+  ),
 }
 
 
