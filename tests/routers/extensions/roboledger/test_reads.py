@@ -3,7 +3,8 @@
 Covers the OLTP-backed view operation registered in
 `routers/extensions/roboledger/reads.py`. Verifies:
 - wiring: window resolution + get_live_financial_statement call shape
-- statement_type validation (400 for unknown, 400 for cash_flow_statement)
+- statement_type validation (400 for unknown statement types, with the
+  error message pointing users at the graph-backed analysis op)
 - CoaMappingNotFoundError → 422 translation
 - ProgrammingError (missing schema) → ledger_404 translation
 """
@@ -111,9 +112,10 @@ class TestLiveFinancialStatementOp:
     assert "not_real" in exc_info.value.detail
 
   @pytest.mark.unit
-  async def test_cash_flow_statement_rejected_with_hint(self):
-    """cash_flow is unsupported on OLTP; message must point users at analysis op."""
-    body = LiveFinancialStatementRequest(statement_type="cash_flow_statement")
+  async def test_unknown_statement_type_returns_400_with_valid_types(self):
+    """Unknown statement types return 400 with the list of valid types
+    so callers know what to retry with."""
+    body = LiveFinancialStatementRequest(statement_type="bogus_statement")
     with pytest.raises(HTTPException) as exc_info:
       await live_financial_statement_op(
         body=body,
@@ -124,7 +126,9 @@ class TestLiveFinancialStatementOp:
         cache=_FakeCache(),
       )
     assert exc_info.value.status_code == 400
-    assert "financial-statement-analysis" in exc_info.value.detail
+    assert "Unknown statement_type" in exc_info.value.detail
+    assert "income_statement" in exc_info.value.detail
+    assert "cash_flow_statement" in exc_info.value.detail
 
   @pytest.mark.unit
   async def test_missing_mapping_translated_to_422(self):
