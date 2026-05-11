@@ -8699,6 +8699,93 @@
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "arcOrder": 31500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "structureName": "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)",
+      "structureType": "equity_statement",
+      "conceptArrangementPattern": "roll_forward"
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-1",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityAbstract" },
+      "arcTo": { "@id": "fac:StatementOfChangesInEquityTable" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40000.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-2",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityTable" },
+      "arcTo": { "@id": "fac:StatementOfChangesInEquityLineItems" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-3",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityLineItems" },
+      "arcTo": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-4",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "arcTo": { "@id": "fac:Equity" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-5",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "arcTo": { "@id": "rs-gaap:NetIncomeLoss" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-6",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "arcTo": { "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTax" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-7",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40600.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-8",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "arcTo": { "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40700.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-9",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "arcTo": { "@id": "rs-gaap:ShareBasedCompensation" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40800.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-equity-arc-10",
+      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "arcTo": { "@id": "rs-gaap:PaymentsOfDividends" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
+      "arcOrder": 40900.0
     }
   ]
 }

@@ -10886,6 +10886,210 @@
       ]
     },
     {
+      "@id": "fac:StatementOfChangesInEquityAbstract",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Statement of Changes in Equity [Abstract]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ]
+    },
+    {
+      "@id": "fac:StatementOfChangesInEquityLineItems",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Statement of Changes in Equity [Line Items]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ]
+    },
+    {
+      "@id": "fac:StatementOfChangesInEquityRollForward",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Statement of Changes in Equity [Roll Forward]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "abstract"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrli:item"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ]
+    },
+    {
+      "@id": "fac:StatementOfChangesInEquityTable",
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@language": "en",
+          "@value": "Statement of Changes in Equity [Table]"
+        }
+      ],
+      "https://robosystems.ai/vocab/abstract": [
+        {
+          "@type": "xsd:boolean",
+          "@value": true
+        }
+      ],
+      "https://robosystems.ai/vocab/elementType": [
+        {
+          "@value": "hypercube"
+        }
+      ],
+      "https://robosystems.ai/vocab/monetary": [
+        {
+          "@type": "xsd:boolean",
+          "@value": false
+        }
+      ],
+      "https://robosystems.ai/vocab/periodType": [
+        {
+          "@value": "duration"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac"
+        }
+      ],
+      "https://robosystems.ai/vocab/substitutionGroup": [
+        {
+          "@id": "xbrldt:hypercubeItem"
+        }
+      ],
+      "https://robosystems.ai/vocab/derivationRole": [
+        {
+          "@value": "structural"
+        }
+      ],
+      "https://robosystems.ai/vocab/statementContext": [
+        {
+          "@value": "equity_changes"
+        }
+      ]
+    },
+    {
       "@id": "fac:SustainableGrowthRate",
       "http://purl.org/dc/terms/references": [
         {
