@@ -31,7 +31,8 @@ does not change.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any
 
 from robosystems.taxonomy.loaders.discovery import (
   expand_framework_to_pin,
@@ -106,7 +107,24 @@ def resolve_pin(graph: Graph | None) -> dict[str, str]:
   )
 
 
-# Backward-compat export — derived from the default framework manifest at
-# import time so callers that import the symbol see the same content the
-# resolver would return for an unpinned graph.
-DEFAULT_TAXONOMY_PIN: dict[str, str] = resolve_pin(None)
+@lru_cache(maxsize=1)
+def _default_taxonomy_pin() -> dict[str, str]:
+  """Cache-once expansion of the default framework manifest.
+
+  Lazy so importing :mod:`robosystems.taxonomy.pins` never touches the
+  filesystem — environments without the taxonomy tree on disk can still
+  import the module, and the manifest read only happens the first time
+  a caller actually needs the pin.
+  """
+  return resolve_pin(None)
+
+
+def __getattr__(name: str) -> Any:
+  """Lazy module-level attribute: ``DEFAULT_TAXONOMY_PIN``.
+
+  Resolves the default pin on first access and caches it. Returning a
+  shallow copy keeps mutation from callers from corrupting the cache.
+  """
+  if name == "DEFAULT_TAXONOMY_PIN":
+    return dict(_default_taxonomy_pin())
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

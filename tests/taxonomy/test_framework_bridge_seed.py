@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text as sa_text
 
 from robosystems.db.extensions import extensions_session
 from robosystems.models.extensions import (
@@ -40,6 +41,25 @@ _MANIFEST_PATH = (
 @pytest.fixture(scope="module")
 def manifest() -> dict:
   return json.loads(_MANIFEST_PATH.read_text())
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _require_extensions_db() -> None:
+  """Skip the whole file when the extensions DB isn't reachable.
+
+  These tests verify migration 0007 actually seeded rows into the
+  extensions library schema — they need a live, migrated extensions
+  database. CI runs against a bare postgres service that only has
+  ``robosystems_test``; in that environment the test should skip
+  cleanly instead of erroring out.
+  """
+  from sqlalchemy.exc import OperationalError
+
+  try:
+    with extensions_session("library") as s:
+      s.execute(sa_text("SELECT 1"))
+  except OperationalError as exc:
+    pytest.skip(f"extensions DB unavailable: {exc.orig}")
 
 
 @pytest.mark.integration

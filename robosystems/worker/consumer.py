@@ -94,8 +94,10 @@ async def run() -> None:
     shutdown_wait.cancel()
     try:
       await queue.aclose()
-    except redis.exceptions.ConnectionError:
-      pass
+    except redis.exceptions.ConnectionError as exc:
+      # Connection already dropped during shutdown — non-fatal; the
+      # server-side close will release any remaining resources.
+      logger.debug(f"Connection error during queue close (expected on shutdown): {exc}")
     logger.info(f"Worker terminated: {worker_id}")
 
 

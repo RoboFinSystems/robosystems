@@ -649,13 +649,11 @@ def _count_unmapped(
   """Count CoA elements that have no association of the given arc-type."""
   from robosystems.models.extensions.roboledger import COA_SOURCES
 
-  # Build a safe SQL IN clause from the constant
-  source_list = ", ".join(f"'{s}'" for s in COA_SOURCES)
   result = session.execute(
-    text(f"""
+    text("""
       SELECT COUNT(*) AS cnt
       FROM elements e
-      WHERE e.source IN ({source_list})
+      WHERE e.source = ANY(:sources)
         AND e.is_active = true
         AND NOT EXISTS (
           SELECT 1 FROM associations ea
@@ -664,7 +662,11 @@ def _count_unmapped(
             AND ea.structure_id = :mapping_id
         )
     """),
-    {"mapping_id": mapping_id, "arc_type": arc_type},
+    {
+      "sources": list(COA_SOURCES),
+      "mapping_id": mapping_id,
+      "arc_type": arc_type,
+    },
   )
   row = result.fetchone()
   return row.cnt if row else 0
