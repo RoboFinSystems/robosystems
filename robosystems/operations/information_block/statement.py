@@ -84,7 +84,7 @@ STATEMENT_DISPLAY: dict[str, tuple[str, str]] = {
   ),
 }
 
-# All four statement block types share the same sidebar category.
+# All five statement block types share the same sidebar category.
 STATEMENT_CATEGORY = "Reporting"
 
 

@@ -41,7 +41,6 @@ from robosystems.operations.information_block.envelope import (
   element_to_lite,
   fact_to_lite,
   load_base_envelope_atoms,
-  load_disclosure_id_for_structure,
 )
 from robosystems.operations.roboledger.commands.schedules import (
   create_schedule as cmd_create_schedule,
@@ -204,7 +203,10 @@ def build_envelope(
     fact_filters.append(Fact.fact_set_id == fact_set_id)
   facts = session.execute(select(Fact).where(*fact_filters)).scalars().all()
 
-  disclosure_id = load_disclosure_id_for_structure(session, structure.id)
+  # Schedules are tenant-authored; they never have a disclosure mapping.
+  # Short-circuit the DB roundtrip — saves a query per envelope on a
+  # call path that's invoked once per item in the list view.
+  disclosure_id: str | None = None
   return InformationBlockEnvelope(
     id=structure.id,
     block_type=SCHEDULE_BLOCK_TYPE,

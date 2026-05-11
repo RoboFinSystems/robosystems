@@ -415,6 +415,60 @@ def load_base_envelope_atoms(
 
 _DISCLOSURE_ROLE_PREFIX = "https://robosystems.ai/seattle/cm-roles/roles/disclosures/"
 
+# Module-level cache keyed by structure_type. The rs-gaap-disclosures
+# package is library-seeded and immutable, so the mapping from
+# structure_type (e.g. 'balance_sheet') to disclosure qname
+# (e.g. 'disclosures:BalanceSheet') is global for the process lifetime.
+# A miss caches None so we don't re-query for types that have no
+# corresponding disclosure (validation_rules, taxonomy_mapping, schedules).
+# Eliminates the N+1 round-trip pattern when ``list_information_blocks``
+# builds dozens of statement envelopes in a single call.
+_DISCLOSURE_QNAME_BY_TYPE: dict[str, str | None] = {}
+_MISSING: object = object()
+
+
+def _structure_role_uri(structure: Structure) -> str | None:
+  """Read ``role_uri`` from the metadata JSONB blob.
+
+  ``role_uri`` isn't a top-level column on the structures table — the
+  library_creator persists it inside ``metadata_['role_uri']`` because
+  the column was added before XBRL role semantics were first-class.
+  Returns ``None`` when the field is absent or the metadata blob is
+  malformed.
+  """
+  metadata = structure.metadata_ or {}
+  value = metadata.get("role_uri")
+  return value if isinstance(value, str) else None
+
+
+def _disclosure_qname_for_type(session: Session, structure_type: str) -> str | None:
+  """Memoized lookup: structure_type -> disclosures:<Name> qname.
+
+  Uses ``metadata->>'role_uri'`` JSONB access and the matching expression
+  index (``idx_structures_role_uri``) for a single fast lookup.
+  """
+  cached = _DISCLOSURE_QNAME_BY_TYPE.get(structure_type, _MISSING)
+  if cached is not _MISSING:
+    return cached  # type: ignore[return-value]
+
+  role_uri = session.execute(
+    select(Structure.metadata_["role_uri"].astext)
+    .where(
+      Structure.structure_type == structure_type,
+      Structure.metadata_["role_uri"].astext.like(f"{_DISCLOSURE_ROLE_PREFIX}%"),
+    )
+    .limit(1)
+  ).scalar()
+
+  qname: str | None
+  if role_uri is None:
+    qname = None
+  else:
+    qname = f"disclosures:{role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
+
+  _DISCLOSURE_QNAME_BY_TYPE[structure_type] = qname
+  return qname
+
 
 def load_disclosure_id_for_structure(session: Session, structure_id: str) -> str | None:
   """Return the ``disclosures:<Name>`` qname this structure corresponds to.
@@ -433,30 +487,26 @@ def load_disclosure_id_for_structure(session: Session, structure_id: str) -> str
      cash_flow_statement, equity_statement, comprehensive_income) this
      is a 1:1 match. Returns ``None`` for structure_types that have no
      corresponding disclosure (validation_rules, taxonomy_mapping, etc.).
+
+  The structure_type -> disclosure qname mapping is memoized at module
+  level via :data:`_DISCLOSURE_QNAME_BY_TYPE`; library-seeded disclosure
+  rows are immutable so the cache is safe for the process lifetime.
   """
   target = session.get(Structure, structure_id)
-  if target is None or not target.role_uri:
+  if target is None:
     return None
 
-  if target.role_uri.startswith(_DISCLOSURE_ROLE_PREFIX):
-    return f"disclosures:{target.role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
+  role_uri = _structure_role_uri(target)
+  if not role_uri:
+    return None
+
+  if role_uri.startswith(_DISCLOSURE_ROLE_PREFIX):
+    return f"disclosures:{role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
 
   if target.structure_type is None:
     return None
 
-  disclosure = session.execute(
-    select(Structure)
-    .where(
-      Structure.structure_type == target.structure_type,
-      Structure.role_uri.like(f"{_DISCLOSURE_ROLE_PREFIX}%"),
-    )
-    .limit(1)
-  ).scalar()
-
-  if disclosure is None:
-    return None
-
-  return f"disclosures:{disclosure.role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
+  return _disclosure_qname_for_type(session, target.structure_type)
 
 
 __all__ = [

@@ -420,6 +420,64 @@ def _restore_element_source_check(conn, schema: str) -> None:
   )
 
 
+def _drop_legacy_prefixed_checks(conn, schema: str) -> None:
+  """Drop spurious schema-prefixed CHECK constraints left by an old version
+  of this migration.
+
+  The previous logic generated names like ``check_kg123_element_source``
+  for tenant schemas; those never matched the original unprefixed
+  constraint created in 0002, so the DROP silently missed and the ADD
+  produced a redundant prefixed sibling. Drop those siblings now;
+  the unprefixed CHECKs widened above carry the correct definitions.
+
+  ``IF EXISTS`` keeps this safe on environments that never ran the
+  buggy version (fresh installs).
+  """
+  if schema == "public":
+    # public never had the prefix bug (the if-branch always used the
+    # unprefixed name); nothing to do.
+    return
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".elements '
+      f"DROP CONSTRAINT IF EXISTS check_{schema}_element_source"
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".associations '
+      f"DROP CONSTRAINT IF EXISTS check_{schema}_association_type"
+    )
+  )
+
+
+def _add_role_uri_index(conn, schema: str) -> None:
+  """Create idx_structures_role_uri as an expression index over
+  ``metadata->>'role_uri'``.
+
+  ``role_uri`` isn't a top-level column — the library_creator stores it
+  inside the JSONB ``metadata`` blob. The matching expression index
+  accelerates the ``LIKE 'https://.../disclosures/%'`` lookup in
+  :func:`load_disclosure_id_for_structure`.
+  """
+  table = "public.structures" if schema == "public" else f'"{schema}".structures'
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_structures_role_uri "
+      f"ON {table} ((metadata->>'role_uri'))"
+    )
+  )
+
+
+def _drop_role_uri_index(conn, schema: str) -> None:
+  """Inverse of :func:`_add_role_uri_index` for downgrade."""
+  if schema == "public":
+    qualified = "public.idx_structures_role_uri"
+  else:
+    qualified = f'"{schema}".idx_structures_role_uri'
+  conn.execute(text(f"DROP INDEX IF EXISTS {qualified}"))
+
+
 def upgrade() -> None:
   # ── bridges table ──────────────────────────────────────────────
   op.create_table(
@@ -567,6 +625,19 @@ def upgrade() -> None:
   _widen_structure_type_check(conn, "public")
   for_each_tenant_schema(conn, _widen_structure_type_check)
 
+  # ── clean up spurious prefixed CHECK constraints left by an old ──
+  # version of this migration that used schema-prefixed names. Those
+  # never matched the original (unprefixed) constraint created in
+  # 0002, so the original stayed in place and the prefixed copy was
+  # added as a redundant sibling. Drop them now so the constraint
+  # set matches 0002's intent.
+  _drop_legacy_prefixed_checks(conn, "public")
+  for_each_tenant_schema(conn, _drop_legacy_prefixed_checks)
+
+  # ── add role_uri index to support disclosure_id lookups ──────────
+  _add_role_uri_index(conn, "public")
+  for_each_tenant_schema(conn, _add_role_uri_index)
+
   # ── seed framework manifest rows ───────────────────────────────
   _seed_framework_rows(conn)
 
@@ -574,6 +645,9 @@ def upgrade() -> None:
 def downgrade() -> None:
   conn = op.get_bind()
   from migrations.extensions.helpers import for_each_tenant_schema
+
+  _drop_role_uri_index(conn, "public")
+  for_each_tenant_schema(conn, _drop_role_uri_index)
 
   _restore_structure_type_check(conn, "public")
   for_each_tenant_schema(conn, _restore_structure_type_check)
