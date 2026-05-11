@@ -173,6 +173,7 @@ BALANCE_SHEET_BLOCK = _make_statement_entry("balance_sheet", "scale-3d")
 INCOME_STATEMENT_BLOCK = _make_statement_entry("income_statement", "trending-up")
 CASH_FLOW_STATEMENT_BLOCK = _make_statement_entry("cash_flow_statement", "waves")
 EQUITY_STATEMENT_BLOCK = _make_statement_entry("equity_statement", "pie-chart")
+COMPREHENSIVE_INCOME_BLOCK = _make_statement_entry("comprehensive_income", "activity")
 
 
 # ── Metric (derivative) ────────────────────────────────────────────────────
@@ -229,6 +230,7 @@ REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   INCOME_STATEMENT_BLOCK.id: INCOME_STATEMENT_BLOCK,
   CASH_FLOW_STATEMENT_BLOCK.id: CASH_FLOW_STATEMENT_BLOCK,
   EQUITY_STATEMENT_BLOCK.id: EQUITY_STATEMENT_BLOCK,
+  COMPREHENSIVE_INCOME_BLOCK.id: COMPREHENSIVE_INCOME_BLOCK,
   METRIC_BLOCK.id: METRIC_BLOCK,
 }
 
@@ -254,6 +256,7 @@ def list_registered() -> list[BlockTypeRegistryEntry]:
 __all__ = [
   "BALANCE_SHEET_BLOCK",
   "CASH_FLOW_STATEMENT_BLOCK",
+  "COMPREHENSIVE_INCOME_BLOCK",
   "EQUITY_STATEMENT_BLOCK",
   "INCOME_STATEMENT_BLOCK",
   "METRIC_BLOCK",

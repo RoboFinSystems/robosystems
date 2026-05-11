@@ -413,6 +413,52 @@ def load_base_envelope_atoms(
   )
 
 
+_DISCLOSURE_ROLE_PREFIX = "https://robosystems.ai/seattle/cm-roles/roles/disclosures/"
+
+
+def load_disclosure_id_for_structure(session: Session, structure_id: str) -> str | None:
+  """Return the ``disclosures:<Name>`` qname this structure corresponds to.
+
+  Two cases:
+
+  1. The structure IS a disclosure-namespace structure (role_uri prefixed
+     by ``.../disclosures/``). Return ``disclosures:<Name>`` derived from
+     its own role_uri — covers Note disclosures and the disclosure-typed
+     statement entries themselves.
+
+  2. The structure is a renderable presentation (e.g. ``BS-classified``)
+     with a statement-level structure_type. Look up the
+     disclosure-namespace structure that shares the same structure_type
+     — for statement types (balance_sheet, income_statement,
+     cash_flow_statement, equity_statement, comprehensive_income) this
+     is a 1:1 match. Returns ``None`` for structure_types that have no
+     corresponding disclosure (validation_rules, taxonomy_mapping, etc.).
+  """
+  target = session.get(Structure, structure_id)
+  if target is None or not target.role_uri:
+    return None
+
+  if target.role_uri.startswith(_DISCLOSURE_ROLE_PREFIX):
+    return f"disclosures:{target.role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
+
+  if target.structure_type is None:
+    return None
+
+  disclosure = session.execute(
+    select(Structure)
+    .where(
+      Structure.structure_type == target.structure_type,
+      Structure.role_uri.like(f"{_DISCLOSURE_ROLE_PREFIX}%"),
+    )
+    .limit(1)
+  ).scalar()
+
+  if disclosure is None:
+    return None
+
+  return f"disclosures:{disclosure.role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
+
+
 __all__ = [
   "BaseEnvelopeAtoms",
   "association_to_connection",
@@ -421,6 +467,7 @@ __all__ = [
   "fact_to_lite",
   "load_base_envelope_atoms",
   "load_classifications_for_associations",
+  "load_disclosure_id_for_structure",
   "load_fact_set_by_id_for_structure",
   "load_latest_fact_set_for_structure",
   "load_rules_for_structure",

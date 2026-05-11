@@ -56,6 +56,7 @@ from robosystems.operations.information_block.envelope import (
   element_to_lite,
   fact_to_lite,
   load_base_envelope_atoms,
+  load_disclosure_id_for_structure,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   FactRow,
@@ -77,6 +78,10 @@ STATEMENT_DISPLAY: dict[str, tuple[str, str]] = {
   "income_statement": ("Income Statement", "Income Statements"),
   "cash_flow_statement": ("Cash Flow Statement", "Cash Flow Statements"),
   "equity_statement": ("Equity Statement", "Equity Statements"),
+  "comprehensive_income": (
+    "Statement of Comprehensive Income",
+    "Statements of Comprehensive Income",
+  ),
 }
 
 # All four statement block types share the same sidebar category.
@@ -154,6 +159,7 @@ def _build_statement_envelope(
   )
 
   display_name, _display_plural = STATEMENT_DISPLAY[block_type]
+  disclosure_id = load_disclosure_id_for_structure(session, structure.id)
   return InformationBlockEnvelope(
     id=structure.id,
     block_type=block_type,
@@ -162,6 +168,7 @@ def _build_statement_envelope(
     category=STATEMENT_CATEGORY,
     taxonomy_id=structure.taxonomy_id,
     taxonomy_name=atoms.taxonomy_name,
+    disclosure_id=disclosure_id,
     information_model=InformationModelResponse(
       concept_arrangement=structure.concept_arrangement or "roll_up",
       member_arrangement=structure.member_arrangement or "aggregation",

@@ -41,6 +41,7 @@ from robosystems.operations.information_block.envelope import (
   element_to_lite,
   fact_to_lite,
   load_base_envelope_atoms,
+  load_disclosure_id_for_structure,
 )
 from robosystems.operations.roboledger.commands.schedules import (
   create_schedule as cmd_create_schedule,
@@ -203,6 +204,7 @@ def build_envelope(
     fact_filters.append(Fact.fact_set_id == fact_set_id)
   facts = session.execute(select(Fact).where(*fact_filters)).scalars().all()
 
+  disclosure_id = load_disclosure_id_for_structure(session, structure.id)
   return InformationBlockEnvelope(
     id=structure.id,
     block_type=SCHEDULE_BLOCK_TYPE,
@@ -211,6 +213,7 @@ def build_envelope(
     category=SCHEDULE_CATEGORY,
     taxonomy_id=structure.taxonomy_id,
     taxonomy_name=atoms.taxonomy_name,
+    disclosure_id=disclosure_id,
     information_model=InformationModelResponse(
       concept_arrangement=structure.concept_arrangement or "roll_forward",
       member_arrangement=structure.member_arrangement,

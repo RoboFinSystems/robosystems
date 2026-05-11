@@ -153,6 +153,7 @@ _WIDENED_STRUCTURE_TYPE_CHECK = (
   # Renderable financial-statement presentations
   "'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', "
+  "'comprehensive_income', "
   # Domain-specific working-paper / schedule patterns
   "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
   # CoA + CoA→GAAP mapping
