@@ -25,6 +25,7 @@ STATEMENT_BLOCK_IDS = [
   "income_statement",
   "cash_flow_statement",
   "equity_statement",
+  "comprehensive_income",
 ]
 
 

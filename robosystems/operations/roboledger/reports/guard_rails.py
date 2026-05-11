@@ -27,9 +27,11 @@ class ValidationResult:
 def validate_report(structure_type: str, rows: list[FactRow]) -> ValidationResult:
   """Run structural and semantic validation for a rendered structure.
 
-  Note: `cash_flow_statement` is intentionally not handled — the
-  roboledger renderer isn't implemented yet. When it is, re-wire the
-  `_validate_cash_flow` helper below.
+  Note: `cash_flow_statement`, `equity_statement`, and
+  `comprehensive_income` are intentionally not handled — the
+  roboledger renderers for those types aren't implemented yet. When
+  they are, re-wire the `_validate_cash_flow` helper below and add
+  equity / comprehensive-income validators.
   """
   if structure_type == "income_statement":
     return _validate_income_statement(rows)

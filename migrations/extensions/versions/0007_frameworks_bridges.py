@@ -290,17 +290,20 @@ _PRIOR_ASSOCIATION_TYPE_CHECK = (
 
 
 def _widen_association_type_check(conn, schema: str) -> None:
-  """Drop and re-add the associations.association_type CHECK with the widened list."""
-  if schema == "public":
-    table = "public.associations"
-    constraint = "check_association_type"
-  else:
-    table = f'"{schema}".associations'
-    constraint = f"check_{schema}_association_type"
-  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"))
+  """Drop and re-add the associations.association_type CHECK with the widened list.
+
+  The constraint name is ``check_association_type`` in every schema —
+  ``0002_taxonomy_library.py`` creates it unprefixed via
+  :meth:`TenantOps.add_check`. Using a schema-prefixed name here would
+  silently miss the original (and add a redundant duplicate).
+  """
+  table = "public.associations" if schema == "public" else f'"{schema}".associations'
+  conn.execute(
+    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_association_type")
+  )
   conn.execute(
     text(
-      f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+      f"ALTER TABLE {table} ADD CONSTRAINT check_association_type "
       f"CHECK ({_WIDENED_ASSOCIATION_TYPE_CHECK})"
     )
   )
@@ -308,33 +311,96 @@ def _widen_association_type_check(conn, schema: str) -> None:
 
 def _restore_association_type_check(conn, schema: str) -> None:
   """Inverse of :func:`_widen_association_type_check` for downgrade."""
-  if schema == "public":
-    table = "public.associations"
-    constraint = "check_association_type"
-  else:
-    table = f'"{schema}".associations'
-    constraint = f"check_{schema}_association_type"
-  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"))
+  table = "public.associations" if schema == "public" else f'"{schema}".associations'
+  conn.execute(
+    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_association_type")
+  )
   conn.execute(
     text(
-      f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+      f"ALTER TABLE {table} ADD CONSTRAINT check_association_type "
       f"CHECK ({_PRIOR_ASSOCIATION_TYPE_CHECK})"
     )
   )
 
 
-def _widen_element_source_check(conn, schema: str) -> None:
-  """Drop and re-add the elements.source CHECK with the widened list."""
+# Widen the structures.structure_type CHECK to admit 'comprehensive_income'
+# so the rs-gaap-disclosures package can carry the Statement of
+# Comprehensive Income with its own type (previously conflated with
+# 'income_statement'). The renderer dispatches by structure_type, so the
+# unconflation only takes effect once existing tenant schemas accept the
+# new value at the DB layer.
+_WIDENED_STRUCTURE_TYPE_CHECK = (
+  "structure_type IN ("
+  "'income_statement', 'balance_sheet', "
+  "'cash_flow_statement', 'equity_statement', "
+  "'comprehensive_income', "
+  "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
+  "'chart_of_accounts', 'coa_mapping', "
+  "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+  "'custom'"
+  ")"
+)
+_PRIOR_STRUCTURE_TYPE_CHECK = (
+  "structure_type IN ("
+  "'income_statement', 'balance_sheet', "
+  "'cash_flow_statement', 'equity_statement', "
+  "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
+  "'chart_of_accounts', 'coa_mapping', "
+  "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+  "'custom'"
+  ")"
+)
+
+
+def _widen_structure_type_check(conn, schema: str) -> None:
+  """Drop and re-add the structures.structure_type CHECK with the widened list."""
   if schema == "public":
-    table = "public.elements"
-    constraint = "check_element_source"
+    table = "public.structures"
   else:
-    table = f'"{schema}".elements'
-    constraint = f"check_{schema}_element_source"
-  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"))
+    table = f'"{schema}".structures'
+  conn.execute(
+    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_structure_type")
+  )
   conn.execute(
     text(
-      f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+      f"ALTER TABLE {table} ADD CONSTRAINT check_structure_type "
+      f"CHECK ({_WIDENED_STRUCTURE_TYPE_CHECK})"
+    )
+  )
+
+
+def _restore_structure_type_check(conn, schema: str) -> None:
+  """Inverse of :func:`_widen_structure_type_check` for downgrade."""
+  if schema == "public":
+    table = "public.structures"
+  else:
+    table = f'"{schema}".structures'
+  conn.execute(
+    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_structure_type")
+  )
+  conn.execute(
+    text(
+      f"ALTER TABLE {table} ADD CONSTRAINT check_structure_type "
+      f"CHECK ({_PRIOR_STRUCTURE_TYPE_CHECK})"
+    )
+  )
+
+
+def _widen_element_source_check(conn, schema: str) -> None:
+  """Drop and re-add the elements.source CHECK with the widened list.
+
+  The constraint name is ``check_element_source`` in every schema —
+  ``0002_taxonomy_library.py`` creates it unprefixed via
+  :meth:`TenantOps.add_check`. Using a schema-prefixed name here would
+  silently miss the original (and add a redundant duplicate).
+  """
+  table = "public.elements" if schema == "public" else f'"{schema}".elements'
+  conn.execute(
+    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_element_source")
+  )
+  conn.execute(
+    text(
+      f"ALTER TABLE {table} ADD CONSTRAINT check_element_source "
       f"CHECK ({_WIDENED_ELEMENT_SOURCE_CHECK})"
     )
   )
@@ -342,19 +408,74 @@ def _widen_element_source_check(conn, schema: str) -> None:
 
 def _restore_element_source_check(conn, schema: str) -> None:
   """Inverse of :func:`_widen_element_source_check` for downgrade."""
-  if schema == "public":
-    table = "public.elements"
-    constraint = "check_element_source"
-  else:
-    table = f'"{schema}".elements'
-    constraint = f"check_{schema}_element_source"
-  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}"))
+  table = "public.elements" if schema == "public" else f'"{schema}".elements'
+  conn.execute(
+    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_element_source")
+  )
   conn.execute(
     text(
-      f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+      f"ALTER TABLE {table} ADD CONSTRAINT check_element_source "
       f"CHECK ({_PRIOR_ELEMENT_SOURCE_CHECK})"
     )
   )
+
+
+def _drop_legacy_prefixed_checks(conn, schema: str) -> None:
+  """Drop spurious schema-prefixed CHECK constraints left by an old version
+  of this migration.
+
+  The previous logic generated names like ``check_kg123_element_source``
+  for tenant schemas; those never matched the original unprefixed
+  constraint created in 0002, so the DROP silently missed and the ADD
+  produced a redundant prefixed sibling. Drop those siblings now;
+  the unprefixed CHECKs widened above carry the correct definitions.
+
+  ``IF EXISTS`` keeps this safe on environments that never ran the
+  buggy version (fresh installs).
+  """
+  if schema == "public":
+    # public never had the prefix bug (the if-branch always used the
+    # unprefixed name); nothing to do.
+    return
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".elements '
+      f"DROP CONSTRAINT IF EXISTS check_{schema}_element_source"
+    )
+  )
+  conn.execute(
+    text(
+      f'ALTER TABLE "{schema}".associations '
+      f"DROP CONSTRAINT IF EXISTS check_{schema}_association_type"
+    )
+  )
+
+
+def _add_role_uri_index(conn, schema: str) -> None:
+  """Create idx_structures_role_uri as an expression index over
+  ``metadata->>'role_uri'``.
+
+  ``role_uri`` isn't a top-level column — the library_creator stores it
+  inside the JSONB ``metadata`` blob. The matching expression index
+  accelerates the ``LIKE 'https://.../disclosures/%'`` lookup in
+  :func:`load_disclosure_id_for_structure`.
+  """
+  table = "public.structures" if schema == "public" else f'"{schema}".structures'
+  conn.execute(
+    text(
+      f"CREATE INDEX IF NOT EXISTS idx_structures_role_uri "
+      f"ON {table} ((metadata->>'role_uri'))"
+    )
+  )
+
+
+def _drop_role_uri_index(conn, schema: str) -> None:
+  """Inverse of :func:`_add_role_uri_index` for downgrade."""
+  if schema == "public":
+    qualified = "public.idx_structures_role_uri"
+  else:
+    qualified = f'"{schema}".idx_structures_role_uri'
+  conn.execute(text(f"DROP INDEX IF EXISTS {qualified}"))
 
 
 def upgrade() -> None:
@@ -501,6 +622,22 @@ def upgrade() -> None:
   _widen_association_type_check(conn, "public")
   for_each_tenant_schema(conn, _widen_association_type_check)
 
+  _widen_structure_type_check(conn, "public")
+  for_each_tenant_schema(conn, _widen_structure_type_check)
+
+  # ── clean up spurious prefixed CHECK constraints left by an old ──
+  # version of this migration that used schema-prefixed names. Those
+  # never matched the original (unprefixed) constraint created in
+  # 0002, so the original stayed in place and the prefixed copy was
+  # added as a redundant sibling. Drop them now so the constraint
+  # set matches 0002's intent.
+  _drop_legacy_prefixed_checks(conn, "public")
+  for_each_tenant_schema(conn, _drop_legacy_prefixed_checks)
+
+  # ── add role_uri index to support disclosure_id lookups ──────────
+  _add_role_uri_index(conn, "public")
+  for_each_tenant_schema(conn, _add_role_uri_index)
+
   # ── seed framework manifest rows ───────────────────────────────
   _seed_framework_rows(conn)
 
@@ -508,6 +645,12 @@ def upgrade() -> None:
 def downgrade() -> None:
   conn = op.get_bind()
   from migrations.extensions.helpers import for_each_tenant_schema
+
+  _drop_role_uri_index(conn, "public")
+  for_each_tenant_schema(conn, _drop_role_uri_index)
+
+  _restore_structure_type_check(conn, "public")
+  for_each_tenant_schema(conn, _restore_structure_type_check)
 
   _restore_element_source_check(conn, "public")
   for_each_tenant_schema(conn, _restore_element_source_check)

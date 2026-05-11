@@ -625,6 +625,16 @@ class InformationBlockEnvelope(BaseModel):
     None, description="Display name of the source taxonomy."
   )
 
+  disclosure_id: str | None = Field(
+    None,
+    description=(
+      "Qname of the named Disclosure this block corresponds to "
+      "(e.g., 'disclosures:BalanceSheet'), when an inbound "
+      "reportedDisclosure-requiresDisclosure arc identifies one. "
+      "Null for tenant-authored blocks without a Disclosure mapping."
+    ),
+  )
+
   information_model: InformationModelResponse
   artifact: ArtifactResponse
 
@@ -724,6 +734,7 @@ _LEGACY_BLOCK_TYPES = Literal[
   "income_statement",
   "cash_flow_statement",
   "equity_statement",
+  "comprehensive_income",
   "metric",
 ]
 
@@ -733,11 +744,11 @@ class _CreateLegacyArm(BaseModel):
   a typed construction path at the API boundary.
 
   Statement-family blocks (balance_sheet, income_statement,
-  cash_flow_statement, equity_statement) are constructed via
-  `create-report`, not this endpoint. Metric blocks are recognized
-  but their evaluator has not shipped. Calling this endpoint with one
-  of these block types returns HTTP 501 with a hint pointing to the
-  correct construction path.
+  cash_flow_statement, equity_statement, comprehensive_income) are
+  constructed via `create-report`, not this endpoint. Metric blocks
+  are recognized but their evaluator has not shipped. Calling this
+  endpoint with one of these block types returns HTTP 501 with a hint
+  pointing to the correct construction path.
   """
 
   block_type: _LEGACY_BLOCK_TYPES = Field(

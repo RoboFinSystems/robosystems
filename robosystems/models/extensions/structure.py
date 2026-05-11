@@ -20,6 +20,7 @@ from sqlalchemy import (
   Index,
   String,
 )
+from sqlalchemy import text as sqlalchemy_text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from robosystems.db.extensions import ExtensionsBase
@@ -31,6 +32,13 @@ class Structure(ExtensionsBase):
   __table_args__ = (
     Index("idx_structures_taxonomy", "taxonomy_id"),
     Index("idx_structures_type", "structure_type"),
+    # Expression index over metadata->>'role_uri' to support the
+    # ``load_disclosure_id_for_structure`` LIKE lookup. ``role_uri`` is
+    # stored inside the metadata JSONB blob, not as a top-level column.
+    Index(
+      "idx_structures_role_uri",
+      sqlalchemy_text("(metadata->>'role_uri')"),
+    ),
     CheckConstraint(
       "structure_type IN ("
       # Renderable financial-statement presentations (the user-facing forms)

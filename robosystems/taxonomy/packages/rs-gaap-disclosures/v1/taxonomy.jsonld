@@ -99,7 +99,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/StatementOfComprehensiveIncome",
       "structureName": "Statement of Comprehensive Income",
-      "structureType": "income_statement",
+      "structureType": "comprehensive_income",
       "conceptArrangementPattern": "component",
       "secType": "statement"
     },
