@@ -70,6 +70,9 @@ from robosystems.taxonomy.loaders.discovery import (
   PACKAGES_DIR as _PACKAGES_DIR,
 )
 from robosystems.taxonomy.loaders.discovery import (
+  TAXONOMY_ROOT as _TAXONOMY_ROOT,
+)
+from robosystems.taxonomy.loaders.discovery import (
   list_framework_seed_paths as _list_framework_seed_paths,
 )
 from robosystems.taxonomy.loaders.discovery import (
@@ -1254,7 +1257,9 @@ def upgrade() -> None:
       if not seed_path.exists():
         print(f"  [WARN] Seed file missing, skipping: {seed_path}")
         continue
-      print(f"  Loading seed: {seed_path.relative_to(SEEDS_DIR)}")
+      # ``seed_path`` may live under packages/ or bridges/, so anchor the
+      # relative display at the taxonomy root (the common parent).
+      print(f"  Loading seed: {seed_path.relative_to(_TAXONOMY_ROOT)}")
       package = load_taxonomy_package(seed_path)
       loaded_packages.append(package)
       _, counts = create_library_taxonomy_elements(session, package)
