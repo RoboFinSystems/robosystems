@@ -55,12 +55,18 @@ VALID_STRUCTURE_TYPES = {
   "custom",
 }
 
-# Statement types accepted by the live (OLTP) path — cash_flow_statement is
-# not yet supported on OLTP (no generator). Shared across REST router and
-# MCP tool so they stay in sync.
+# Statement types accepted by the live (OLTP) path. cash_flow_statement
+# is supported via the rs-gaap-presentation CashFlow-indirect Disclosure;
+# the renderer compiles it like any other arithmetic CAP, but for OLTP
+# data without explicit operating/investing/financing tagging, leaf rows
+# typically render zero (filtered out as empty) — the structure is in
+# place for sources that DO post directly to those leaves (e.g. SEC
+# filings, manual close adjustments). Shared across REST router and MCP
+# tool so they stay in sync.
 LIVE_STATEMENT_TYPES: tuple[str, ...] = (
   "income_statement",
   "balance_sheet",
+  "cash_flow_statement",
   "equity_statement",
 )
 
@@ -87,7 +93,7 @@ def generate_adhoc_private_statement(
   *,
   statement_type: str,
   periods: list[FactPeriodSpec],
-  taxonomy_id: str = "tax_usgaap_reporting",
+  taxonomy_id: str | None = None,
 ):
   """Generate an ad-hoc private-company statement directly from OLTP data.
 
@@ -95,6 +101,11 @@ def generate_adhoc_private_statement(
   helper builds a one-shot statement from the current ledger using the
   active CoA→GAAP mapping. Used by the `live-financial-statement`
   operation (both REST and MCP) — no saved Report needed.
+
+  When ``taxonomy_id`` is None, resolves to the rs-gaap-presentation
+  taxonomy (default tenant pin) — gives the renderer a stable target
+  with full Disclosure structures. Callers that want fac-presentation
+  or another taxonomy can pass the id explicitly.
 
   Returns the rendered structure grid plus an `unmapped_count` counter.
   Raises `CoaMappingNotFoundError` if the tenant hasn't completed the
@@ -108,9 +119,20 @@ def generate_adhoc_private_statement(
       "No CoA→GAAP mapping found. Run the mapping workflow first."
     )
 
+  resolved_taxonomy_id = taxonomy_id
+  if resolved_taxonomy_id is None:
+    row = session.execute(
+      text(
+        "SELECT id FROM taxonomies WHERE standard = 'rs-gaap-presentation' "
+        "ORDER BY version DESC LIMIT 1"
+      )
+    ).fetchone()
+    if row is not None:
+      resolved_taxonomy_id = row.id
+
   facts = generate_report_facts(
     session=session,
-    taxonomy_id=taxonomy_id,
+    taxonomy_id=resolved_taxonomy_id or "",
     mapping_id=mapping.id,
     periods=periods,
   )
@@ -120,6 +142,7 @@ def generate_adhoc_private_statement(
     facts=facts.facts,
     structure_type=statement_type,
     periods=periods,
+    taxonomy_id=resolved_taxonomy_id,
   )
 
   return grid, facts.unmapped_count
@@ -406,19 +429,26 @@ def get_statement(
     )
 
   # Classification (FASB elementsOfFinancialStatements trait) is resolved via
-  # the element_traits junction table.
+  # the element_traits junction table. The trait join is wrapped in a
+  # subquery to prevent fact-row duplication when an element has
+  # multiple ``is_primary=TRUE`` traits across different categories
+  # (e.g. an asset element marked primary in both EFS and liquidity
+  # axes). Without the subquery, a single fact would emit one row per
+  # primary trait and double-count downstream.
   fact_rows = session.execute(
     text("""
       SELECT rf.element_id, rf.value, rf.period_start, rf.period_end,
              rf.period_type, e.qname, e.name,
-             t.identifier AS trait, e.balance_type
+             trait_info.identifier AS trait, e.balance_type
       FROM facts rf
       JOIN elements e ON e.id = rf.element_id
-      LEFT JOIN element_traits et
-        ON et.element_id = e.id AND et.is_primary = TRUE
-      LEFT JOIN traits t
-        ON t.id = et.trait_id
-        AND t.category = 'elementsOfFinancialStatements'
+      LEFT JOIN (
+        SELECT et.element_id, t.identifier
+        FROM element_traits et
+        JOIN traits t ON t.id = et.trait_id
+        WHERE et.is_primary = TRUE
+          AND t.category = 'elementsOfFinancialStatements'
+      ) trait_info ON trait_info.element_id = e.id
       WHERE rf.report_id = :report_id
     """),
     {"report_id": report_id},
@@ -453,6 +483,7 @@ def get_statement(
     facts=facts,
     structure_type=structure_type,
     periods=periods,
+    taxonomy_id=report_def.taxonomy_id,
   )
 
   if not grid.structure_id:
@@ -596,8 +627,21 @@ def get_live_financial_statement(
 
   facts: list[LiveStatementFactRow] = []
   for row in grid.rows:
-    if row.is_subtotal:
+    # Drop XBRL `is_abstract` rows (`*Abstract`, `*Table`, `*LineItems`,
+    # `*RollUp`). They're presentation scaffolding — section headers and
+    # calc-cluster wrappers — that carry the rolled-up value of their
+    # children in the disclosure DAG but aren't themselves reportable
+    # concepts. Their value is duplicated by the concrete subtotal
+    # underneath them (e.g., `fac:CostRevenueRollUp` mirrors
+    # `fac:CostOfRevenue`).
+    if row.is_abstract:
       continue
+    # Show every concrete row that carries a value, including subtotals.
+    # FAC anchor rows (fac:GrossProfit, fac:OperatingIncomeLoss, …) are
+    # `is_subtotal=True` because they have child summands in the
+    # Disclosure DAG, but their value is the calc-DAG result the reader
+    # most wants to see. The UI distinguishes them via the `is_subtotal`
+    # flag on the response.
     if not any(v != 0.0 for v in row.values):
       continue
     facts.append(

@@ -1,9 +1,10 @@
 """Smoke tests for the Arelle → rdflib → JSON-LD pipeline.
 
-These tests avoid live XBRL fetches by relying on the committed seed
-artifacts at `robosystems/taxonomy/seeds/`. They exercise the
-serializer/loader round-trip and the TaxonomyPackage shape,
-but not the extractor (which needs a live ModelXbrl).
+These tests avoid live XBRL fetches by relying on the committed
+artifacts under `robosystems/taxonomy/packages/` and
+`robosystems/taxonomy/bridges/`. They exercise the serializer/loader
+round-trip and the TaxonomyPackage shape, but not the extractor
+(which needs a live ModelXbrl).
 
 Extractor unit tests are Phase 1 work — they require either a mocked
 Arelle model or a lightweight fixture package.
@@ -26,10 +27,12 @@ from robosystems.taxonomy.model import (
   TaxonomyPackage,
 )
 
-SEEDS_DIR = Path(__file__).parent.parent.parent / "robosystems" / "taxonomy" / "seeds"
+TAXONOMY_DIR = Path(__file__).parent.parent.parent / "robosystems" / "taxonomy"
+PACKAGES_DIR = TAXONOMY_DIR / "packages"
+BRIDGES_DIR = TAXONOMY_DIR / "bridges"
 
-FAC_SEED = SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld"
-FAC_TO_RS_GAAP_SEED = SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld"
+FAC_SEED = PACKAGES_DIR / "fac" / "v1" / "taxonomy.jsonld"
+FAC_TO_RS_GAAP_SEED = BRIDGES_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld"
 
 
 @pytest.fixture(scope="module")

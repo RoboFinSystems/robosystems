@@ -121,7 +121,10 @@ def _evaluate_report_structures(
 
 
 def _build_structure_mapping(
-  session: Session, taxonomy_id: str, mapping_id: str | None = None
+  session: Session,
+  taxonomy_id: str,
+  mapping_id: str | None = None,
+  arc_type: str = "mapping",
 ) -> tuple[dict[str, str], dict[str, str]]:
   """Return (element_id→structure_id, structure_id→fact_set_id) for a taxonomy.
 
@@ -174,7 +177,7 @@ def _build_structure_mapping(
     return {}, {}
 
   canonical_by_type = _select_canonical_render_targets(
-    session, rows, mapping_id=mapping_id
+    session, rows, mapping_id=mapping_id, arc_type=arc_type
   )
   canonical_ids = set(canonical_by_type.values())
 
@@ -190,15 +193,20 @@ def _build_structure_mapping(
 
 
 def _select_canonical_render_targets(
-  session: Session, rows, *, mapping_id: str | None
+  session: Session,
+  rows,
+  *,
+  mapping_id: str | None,
+  arc_type: str = "mapping",
 ) -> dict[str, str]:
   """Pick one canonical structure per block_type from the candidate rows.
 
   When ``mapping_id`` is provided, scores each candidate by counting
   elements that overlap with the CoA mapping's target element set
-  (associations of ``association_type='mapping'`` whose
-  ``structure_id == :mapping_id``). The candidate with the highest
-  overlap wins per block_type.
+  (associations of the given ``arc_type``: ``'mapping'`` for FAC, or
+  ``'equivalence'`` for rs-gaap). The candidate with the highest
+  overlap wins per block_type — picks the structure whose elements
+  best match what the user's CoA is mapped to.
 
   When ``mapping_id`` is null or returns no targets, falls back to the
   candidate with the most elements per block_type (a reasonable proxy
@@ -222,10 +230,10 @@ def _select_canonical_render_targets(
         """
         SELECT DISTINCT to_element_id AS element_id
         FROM associations
-        WHERE structure_id = :mid AND association_type = 'mapping'
+        WHERE structure_id = :mid AND association_type = :arc_type
         """
       ),
-      {"mid": mapping_id},
+      {"mid": mapping_id, "arc_type": arc_type},
     ).fetchall()
     mapping_targets = {r.element_id for r in target_rows}
 
@@ -342,11 +350,20 @@ def create_report(
   """
   # Verify taxonomy exists
   tax_result = session.execute(
-    text("SELECT id FROM taxonomies WHERE id = :tid LIMIT 1"),
+    text("SELECT id, standard FROM taxonomies WHERE id = :tid LIMIT 1"),
     {"tid": body.taxonomy_id},
   )
-  if tax_result.fetchone() is None:
+  tax_row = tax_result.fetchone()
+  if tax_row is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
+
+  # rs-gaap-presentation reports walk CoA→rs-gaap equivalence arcs;
+  # everything else (fac-presentation, legacy us-gaap) walks CoA→FAC
+  # mapping arcs. The auto-mapper writes both per CoA, so callers don't
+  # need to remap.
+  arc_type = (
+    "equivalence" if (tax_row.standard or "").startswith("rs-gaap") else "mapping"
+  )
 
   periods = build_periods(
     body.period_start, body.period_end, body.comparative, body.periods
@@ -376,7 +393,7 @@ def create_report(
 
   entity_id = _get_entity_id(session, graph_id)
   element_to_structure, structure_to_factset = _build_structure_mapping(
-    session, body.taxonomy_id, mapping_id=body.mapping_id
+    session, body.taxonomy_id, mapping_id=body.mapping_id, arc_type=arc_type
   )
   _persist_report_facts(
     session,
@@ -466,6 +483,18 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
+  # Match create_report's arc-type selection so a regenerate honors the
+  # same FAC-vs-rs-gaap target as the original report.
+  tax_row = session.execute(
+    text("SELECT standard FROM taxonomies WHERE id = :tid LIMIT 1"),
+    {"tid": report_def.taxonomy_id},
+  ).fetchone()
+  arc_type = (
+    "equivalence"
+    if (tax_row and (tax_row.standard or "").startswith("rs-gaap"))
+    else "mapping"
+  )
+
   facts = generate_report_facts(
     session=session,
     taxonomy_id=report_def.taxonomy_id,
@@ -475,7 +504,10 @@ def regenerate_report(
 
   entity_id = _get_entity_id(session, graph_id)
   element_to_structure, structure_to_factset = _build_structure_mapping(
-    session, report_def.taxonomy_id, mapping_id=report_def.mapping_id
+    session,
+    report_def.taxonomy_id,
+    mapping_id=report_def.mapping_id,
+    arc_type=arc_type,
   )
   # Stale FactSet rows from the prior generation must be cleared before
   # new rows are inserted with freshly-minted ULIDs.

@@ -53,6 +53,18 @@ CANONICAL_CONTEXT: dict = {
   # us-gaap-2017; equivalence arcs bridge rs-gaap ↔ external us-gaap
   # versions, keeping our namespace stable as FASB evolves.
   "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+  # rs-gaap-disclosures — named Disclosures (BalanceSheet, IncomeStatement,
+  # PropertyPlantAndEquipmentDisclosure, …) anchored to the rs-gaap framework.
+  # Each entry is an abstract qname-addressable element AND a Structure with
+  # CAP + secType metadata. Sibling namespace to rs-gaap, not nested under it.
+  "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+  # rs-gaap-reporting-checklist — declares the abstract "FinancialReport"
+  # subjects that a Reporting Checklist's `financialReport-requiresDisclosure`
+  # arcs anchor on.
+  "checklist": "https://robosystems.ai/taxonomy/rs-gaap/reporting-checklist/v1/",
+  # rs-gaap-reporting-styles — declares Style entities that compose specific
+  # Disclosures for a vertical / filer profile.
+  "styles": "https://robosystems.ai/taxonomy/rs-gaap/reporting-styles/v1/",
   "ifrs": "http://xbrl.ifrs.org/taxonomy/",
   "dei": "http://xbrl.sec.gov/dei/",
   # Seattle Method conceptual-model role URIs (Charlie's CM namespace)

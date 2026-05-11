@@ -50,10 +50,6 @@
     "source": {
       "@id": "https://robosystems.ai/vocab/source"
     },
-    "parent": {
-      "@id": "https://robosystems.ai/vocab/parent",
-      "@type": "@id"
-    },
     "equivalent": {
       "@id": "owl:equivalentClass",
       "@type": "@id"
@@ -129,7 +125,7 @@
   },
   "forked_at": "2026-04-19",
   "upstream_tracking": "frozen",
-  "description": "Type-subtype classification linkbase — general-special arcs that classify rs-gaap concepts into reporting networks (CurrentAssets, Revenues, OperatingExpenses, etc.). RoboSystems canonical fork (frozen 2026-04-19). Originally derived from Charlie Hoffman's type-subtype-usgaap linkbase; edits happen in this JSON-LD, upstream XBRL is not tracked. Pure arc enrichment on rs-gaap.",
+  "description": "Type-subtype classification linkbase \u2014 general-special arcs that classify rs-gaap concepts into reporting networks (CurrentAssets, Revenues, OperatingExpenses, etc.). RoboSystems canonical fork (frozen 2026-04-19). Originally derived from Charlie Hoffman's type-subtype-usgaap linkbase; edits happen in this JSON-LD, upstream XBRL is not tracked. Pure arc enrichment on rs-gaap.",
   "@graph": [
     {
       "@id": "_:N0002387bf59146cea5d202b326d0b423",

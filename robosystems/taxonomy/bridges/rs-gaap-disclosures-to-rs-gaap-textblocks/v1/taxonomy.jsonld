@@ -1,0 +1,43 @@
+{
+  "@context": {
+    "rs": "https://robosystems.ai/vocab/",
+    "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "structureType": {
+      "@id": "https://robosystems.ai/vocab/structureType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    },
+    "conceptArrangementPattern": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
+    },
+    "disclosureEquivalentTextblock": {
+      "@id": "https://robosystems.ai/vocab/disclosureEquivalentTextblock",
+      "@type": "@id"
+    }
+  },
+  "standard": "rs-gaap-disclosures-to-rs-gaap-textblocks",
+  "version": "v1",
+  "taxonomy_type": "mapping",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+  "source_namespace": "disclosures",
+  "target_namespace": "rs-gaap",
+  "origin": "native",
+  "created_at": "2026-05-10",
+  "default_structure_type": "taxonomy_mapping",
+  "description": "Bridge package — equivalence arcs from rs-gaap-disclosures qnames to underlying rs-gaap text-block elements. Mirrors Charlie Hoffman's disclosure-equivalentTextblock arcrole (e.g. disclosures:PropertyPlantAndEquipmentDisclosure ↔ us-gaap:PropertyPlantAndEquipmentDisclosureTextBlock). v1 ships an empty arc set because rs-gaap currently has no TextBlock-type elements; arcs will populate as either (a) rs-gaap is extended with text-block leaves, or (b) a sibling rs-gaap-to-us-gaap bridge is authored for SEC-export framework variants.",
+  "@graph": [
+    {
+      "@id": "_:bridge-disclosures-to-textblocks",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/bridges/rs-gaap-disclosures-to-rs-gaap-textblocks",
+      "structureName": "rs-gaap-disclosures → rs-gaap text-blocks (v1, placeholder)",
+      "structureType": "taxonomy_mapping",
+      "conceptArrangementPattern": "set"
+    }
+  ]
+}

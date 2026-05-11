@@ -44,7 +44,9 @@ class TestLiveFinancialStatementToolDefinition:
     assert "statement_type" in d["inputSchema"]["required"]
     enum = d["inputSchema"]["properties"]["statement_type"]["enum"]
     assert "income_statement" in enum
-    assert "cash_flow_statement" not in enum
+    assert "balance_sheet" in enum
+    assert "cash_flow_statement" in enum
+    assert "equity_statement" in enum
 
 
 @pytest.mark.asyncio
@@ -94,14 +96,8 @@ class TestLiveFinancialStatementToolExecute:
     tool = LiveFinancialStatementTool(_make_client())
     result = await tool.execute({"statement_type": "bogus"})
     assert "Unknown statement_type" in result["error"]
-
-  @pytest.mark.unit
-  async def test_cash_flow_hints_at_analysis_op(self):
-    tool = LiveFinancialStatementTool(_make_client())
-    result = await tool.execute({"statement_type": "cash_flow_statement"})
-    # cash_flow isn't in the enum → same "Unknown" error. The tool-def text
-    # is where users see the cash_flow guidance.
-    assert "Unknown statement_type" in result["error"]
+    # The error message points users at the graph-backed analysis op as a
+    # fall-through for statement types not covered by the OLTP path.
     assert "financial-statement-analysis" in result["error"]
 
   @pytest.mark.unit

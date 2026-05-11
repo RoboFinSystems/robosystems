@@ -1,0 +1,28 @@
+{
+  "framework": "rs-gaap-base",
+  "version": "v1",
+  "title": "RoboSystems rs-gaap Base Reporting Framework",
+  "description": "Sovereign rs-gaap leaf catalog with FAC categorization, named Disclosures, Disclosure Mechanics, and presentation/rendering machinery. The default framework pinned by every tenant graph that has not opted into a vertical-specific or extended framework.",
+  "framework_type": "reporting",
+  "packages": [
+    {"standard": "us-gaap-metamodel",            "version": "v1", "ordinal": 0,  "is_required": true},
+    {"standard": "fac",                          "version": "v1", "ordinal": 1,  "is_required": true},
+    {"standard": "rs-gaap",                      "version": "v1", "ordinal": 2,  "is_required": true},
+    {"standard": "rs-gaap-to-metamodel",         "version": "v1", "ordinal": 3,  "is_required": true},
+    {"standard": "rs-gaap-hierarchy",            "version": "v1", "ordinal": 4,  "is_required": true},
+    {"standard": "rs-gaap-presentation",         "version": "v1", "ordinal": 5,  "is_required": true},
+    {"standard": "fac-calculations",             "version": "v1", "ordinal": 6,  "is_required": true},
+    {"standard": "rs-gaap-calculations",         "version": "v1", "ordinal": 7,  "is_required": true},
+    {"standard": "fac-presentation",             "version": "v1", "ordinal": 8,  "is_required": true},
+    {"standard": "type-subtype",                 "version": "v1", "ordinal": 9,  "is_required": true},
+    {"standard": "fac-rules",                    "version": "v1", "ordinal": 10, "is_required": true},
+    {"standard": "rs-gaap-disclosures",          "version": "v1", "ordinal": 11, "is_required": false},
+    {"standard": "rs-gaap-disclosure-mechanics", "version": "v1", "ordinal": 12, "is_required": false},
+    {"standard": "rs-gaap-reporting-checklist",  "version": "v1", "ordinal": 13, "is_required": false},
+    {"standard": "rs-gaap-reporting-styles",     "version": "v1", "ordinal": 14, "is_required": false}
+  ],
+  "bridges": [
+    {"bridge": "fac-to-rs-gaap",                            "version": "v1", "ordinal": 0, "is_required": true},
+    {"bridge": "rs-gaap-disclosures-to-rs-gaap-textblocks", "version": "v1", "ordinal": 1, "is_required": false}
+  ]
+}

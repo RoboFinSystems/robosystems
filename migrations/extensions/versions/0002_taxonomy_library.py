@@ -1,7 +1,9 @@
 """Taxonomy library — XBRL-faithful model.
 
 Replaces the Python-dict seed (``seed_reporting_taxonomy``) with JSON-LD
-artifacts loaded from ``robosystems/taxonomy/seeds/``, aligned with
+artifacts loaded from ``robosystems/taxonomy/packages/`` and
+``robosystems/taxonomy/bridges/`` (composed via the framework manifest
+at ``robosystems/taxonomy/frameworks/rs-gaap-base/v1.json``), aligned with
 XBRL's association model: elements carry only XBRL-intrinsic attributes
 (balance, periodType, abstract, monetary, elementType,
 substitutionGroup). FASB metamodel trait assignments (asset, current,
@@ -64,6 +66,15 @@ from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 
 from migrations.extensions.helpers import TenantOps, for_each_tenant_schema
+from robosystems.taxonomy.loaders.discovery import (
+  PACKAGES_DIR as _PACKAGES_DIR,
+)
+from robosystems.taxonomy.loaders.discovery import (
+  list_framework_seed_paths as _list_framework_seed_paths,
+)
+from robosystems.taxonomy.loaders.discovery import (
+  load_framework_manifest as _load_framework_manifest,
+)
 from robosystems.taxonomy.writers.tenant_writer import copy_library_into_tenant
 
 # revision identifiers, used by Alembic.
@@ -90,13 +101,23 @@ _IMMUTABLE_TABLES = (
 _WIDENED_ASSOCIATION_CHECK = (
   "association_type IN ("
   "'presentation', 'calculation', 'mapping', "
-  "'equivalence', 'general-special', 'essence-alias'"
+  "'equivalence', 'general-special', 'essence-alias', "
+  # 'definition' arcs land from the rs-gaap-disclosure-mechanics +
+  # rs-gaap-reporting-checklist + rs-gaap-reporting-styles packages.
+  # See migration 0007 for the same widen applied to already-deployed
+  # tenant schemas.
+  "'definition'"
   ")"
 )
 _WIDENED_ELEMENT_SOURCE_CHECK = (
   "source IN ("
   "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
-  "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system'"
+  "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
+  # rs-gaap-base framework extension packages (Phase C). Each declares
+  # a sibling namespace anchored to the rs-gaap framework. See
+  # migration 0007 for the same widen applied to already-deployed
+  # tenant schemas.
+  "'disclosures', 'checklist', 'styles'"
   ")"
 )
 _WIDENED_TAXONOMY_TYPE_CHECK = (
@@ -772,32 +793,30 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
   )
 
 
-SEEDS_DIR = (
-  Path(__file__).parent.parent.parent.parent / "robosystems" / "taxonomy" / "seeds"
-)
+# Seed files are derived from the default framework manifest at
+# ``frameworks/rs-gaap-base/v1.json``. The manifest pins specific
+# (package, version) and (bridge, version) tuples in load order via
+# the ``ordinal`` field; the discovery helper resolves them to absolute
+# paths and skips entries marked ``is_required: false`` whose seeds
+# don't yet exist on disk (used while authoring optional packages).
+#
+# Backwards-compat: ``SEEDS_DIR`` and ``SEED_FILES`` are still exported
+# under their old names for the test at
+# ``tests/taxonomy/test_rules_migration_shape.py`` and any other
+# importers; their values now come from the manifest.
 
-# Concept taxonomies first (referenced by qname from mapping + assignment
-# seeds); then the trait vocabulary; then assignments/mappings.
-SEED_FILES = [
-  # Trait vocabulary FIRST — FAC + rs-gaap seeds reference these
-  # via hasTrait arcs; create_library_arcs resolves traits via
-  # DB lookup so they must be persisted in phase 1 before phase 2 runs.
-  SEEDS_DIR / "us-gaap-metamodel" / "v1" / "taxonomy.jsonld",
-  SEEDS_DIR / "fac" / "v1" / "taxonomy.jsonld",
-  SEEDS_DIR / "rs-gaap" / "v1" / "taxonomy.jsonld",
-  # Classification assignments + hierarchy (reference rs-gaap concepts)
-  SEEDS_DIR / "rs-gaap-to-metamodel" / "v1" / "taxonomy.jsonld",
-  SEEDS_DIR / "rs-gaap-hierarchy" / "v1" / "taxonomy.jsonld",
-  SEEDS_DIR / "rs-gaap-presentation" / "v1" / "taxonomy.jsonld",
-  # Cross-taxonomy mapping + calculation + presentation arc packs
-  SEEDS_DIR / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld",
-  SEEDS_DIR / "fac-calculations" / "v1" / "taxonomy.jsonld",
-  SEEDS_DIR / "fac-presentation" / "v1" / "taxonomy.jsonld",
-  SEEDS_DIR / "type-subtype" / "v1" / "taxonomy.jsonld",
-  # Phase d.2 — verification rules (Seattle Method). Last because rules
-  # reference structures loaded by fac-calculations/fac-presentation.
-  SEEDS_DIR / "fac-rules" / "v1" / "taxonomy.jsonld",
-]
+# Kept for backward compat with importers that referenced the old name.
+SEEDS_DIR = _PACKAGES_DIR
+
+
+def _framework_seed_files() -> list[Path]:
+  """Resolve the default framework's pinned packages + bridges to the
+  on-disk taxonomy.jsonld paths the loader should walk in order."""
+  manifest = _load_framework_manifest("rs-gaap-base", "v1")
+  return _list_framework_seed_paths(manifest, skip_missing_optional=True)
+
+
+SEED_FILES = _framework_seed_files()
 
 
 def upgrade() -> None:
@@ -1278,12 +1297,19 @@ def upgrade() -> None:
   # the tenant copy picks up populated values rather than NULL. See
   # ``local/docs/specs/information-block.md`` section 5.9 block inventory
   # for the arrangement defaults.
+  #
+  # ``concept_arrangement`` and ``member_arrangement`` are only set when
+  # NULL — the seed loader (``jsonld_loader._extract_structures``) already
+  # writes Charlie's Concept Arrangement Pattern (``arithmetic`` /
+  # ``roll_forward`` / etc.) explicitly per Disclosure Structure when the
+  # seed declares ``conceptArrangementPattern``. This backfill is the
+  # legacy default for pre-Stage-2 seeds that don't declare a CAP.
   conn.execute(
     text(
       """
       UPDATE public.structures
-      SET concept_arrangement = 'roll_up',
-          member_arrangement = 'aggregation',
+      SET concept_arrangement = COALESCE(concept_arrangement, 'roll_up'),
+          member_arrangement = COALESCE(member_arrangement, 'aggregation'),
           artifact_mechanics = jsonb_build_object(
             'kind', 'statement_renderer'
           )

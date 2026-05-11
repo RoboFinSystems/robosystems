@@ -289,6 +289,34 @@ def list_unmapped_elements(
   ]
 
 
+def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
+  """Return the set of element_ids that appear in any
+  ``rs-gaap-presentation`` structure (as either parent or child).
+
+  Used by ``expand_to_rs_gaap_candidates`` to restrict auto-mapper
+  targets to concepts that will render on the standard BS/IS/CF
+  reports. Returns an empty set if the presentation taxonomy isn't
+  seeded — caller treats empty as "no filter" so partial deployments
+  still function.
+  """
+  rows = session.execute(
+    text("""
+      SELECT DISTINCT a.from_element_id AS element_id
+      FROM associations a
+      JOIN structures s ON s.id = a.structure_id
+      JOIN taxonomies t ON t.id = s.taxonomy_id
+      WHERE t.standard = 'rs-gaap-presentation'
+      UNION
+      SELECT DISTINCT a.to_element_id AS element_id
+      FROM associations a
+      JOIN structures s ON s.id = a.structure_id
+      JOIN taxonomies t ON t.id = s.taxonomy_id
+      WHERE t.standard = 'rs-gaap-presentation'
+    """),
+  ).fetchall()
+  return {r.element_id for r in rows}
+
+
 def expand_to_rs_gaap_candidates(
   session: Session,
   fac_element_id: str,
@@ -323,6 +351,19 @@ def expand_to_rs_gaap_candidates(
   ).fetchone()
   fac_qname = fac_row.qname if fac_row else fac_element_id
 
+  # Lazy import to avoid pulling agent constants into every read path.
+  from robosystems.operations.agents.implementations.mapping.constants import (
+    RS_GAAP_SUBTOTAL_DENYLIST,
+  )
+
+  # Pre-load the set of rs-gaap element_ids that appear in any
+  # rs-gaap-presentation structure. The auto-mapper restricts candidates
+  # to this set so any picked target is guaranteed to render on the
+  # standard BS/IS/CF reports. Manual mappings can still target the
+  # wider rs-gaap concept set; the renderer's ancestor-rollup will
+  # walk up to an in-presentation ancestor at render time.
+  presentation_set = _load_rs_gaap_presentation_set(session)
+
   equiv_rows = session.execute(
     text("""
       SELECT e.id, e.qname, e.name
@@ -341,26 +382,58 @@ def expand_to_rs_gaap_candidates(
   if not equiv_rows:
     return None
 
+  # Two filters serve different purposes here:
+  #
+  #   * The denylist tells us which rs-gaap concepts a CoA arc must not
+  #     TARGET (statement-level rollups whose value comes from rendering,
+  #     not from a leaf fact). It does NOT mean "don't traverse through
+  #     this concept" — `rs-gaap:LiabilitiesCurrent` is denylisted
+  #     precisely because its children (AccountsPayable…, DebtCurrent,
+  #     DeferredRevenueCurrent, …) are exactly what we want to land on.
+  #
+  #   * The presentation_set tells us which concepts will actually render
+  #     in some Disclosure. We require the candidate (the writeable target)
+  #     to be in this set, but we still walk type-subtype children of
+  #     equivalents that aren't.
+  #
+  # Earlier this function dropped denylisted equivalents up front and
+  # returned None when none remained, which silently blanked
+  # fac:CurrentAssets / fac:CurrentLiabilities (their only equivalents
+  # are denylisted rollups) and forced every BS asset/liability CoA to
+  # the per-FAC Other bucket. Now we keep all equivalents as traversal
+  # roots, and only filter at the candidate-emission step.
+  traversal_roots = list(equiv_rows)
+
   _NARROW_THRESHOLD = 3
 
-  if len(equiv_rows) > _NARROW_THRESHOLD:
-    # Wide case: equivalents are already the filing-specific candidates.
+  # Identify equivalents that are themselves valid candidate targets:
+  # not denylisted AND (if a presentation set exists) in the set.
+  def _is_valid_target(qname: str | None, eid: str) -> bool:
+    if qname in RS_GAAP_SUBTOTAL_DENYLIST:
+      return False
+    if presentation_set and eid not in presentation_set:
+      return False
+    return True
+
+  emittable_equivalents = [
+    r for r in traversal_roots if _is_valid_target(r.qname, r.id)
+  ]
+
+  if len(emittable_equivalents) > _NARROW_THRESHOLD:
+    # Wide case: enough specific equivalents on their own — the rs-gaap
+    # peers ARE the filing-specific candidates (e.g. fac:Revenues fans
+    # out to dozens of industry-specific revenue tags).
     return {
       "fac_qname": fac_qname,
       "rs_gaap_parent": None,
       "candidates": [
-        {"id": r.id, "qname": r.qname, "name": r.name} for r in equiv_rows
+        {"id": r.id, "qname": r.qname, "name": r.name} for r in emittable_equivalents
       ],
     }
 
-  # Narrow case (≤ 3 equivalents): walk type-subtype children under EACH
-  # equivalent and union them — previously we blindly picked equiv_rows[0]
-  # after alpha-sort, which discarded siblings. `fac:Assets` is the
-  # canonical example: it maps to both `rs-gaap:Assets` and
-  # `rs-gaap:AssetsCurrent`, and the useful type-subtype children live
-  # under the Current branch. The equivalents themselves are included in
-  # the candidate set so the AI can pick a parent-level target when no
-  # sub-type fits.
+  # Narrow case: walk type-subtype children under EVERY equivalent
+  # (denylisted or not) so we can land on a leaf even when the only
+  # equivalent is a rollup.
   child_rows = session.execute(
     text("""
       SELECT e.id, e.qname, e.name, a.from_element_id AS parent_id
@@ -373,35 +446,58 @@ def expand_to_rs_gaap_candidates(
         AND a.association_type = 'general-special'
       ORDER BY e.qname
     """),
-    {"rs_ids": [r.id for r in equiv_rows]},
+    {"rs_ids": [r.id for r in traversal_roots]},
   ).fetchall()
 
-  # Pick the equivalent with the most type-subtype children as the
-  # "primary parent" so the fallback path in the refinement agent lands
-  # on the most-expanded branch. Ties break by the pre-existing alpha
-  # sort from the equivalence query.
-  children_by_parent: dict[str, int] = {}
+  # Pick the equivalent with the most emittable type-subtype children as
+  # the "primary parent" — the refinement agent's fallback chain lands
+  # on this when the AI can't pick a child confidently. We require the
+  # parent itself to be a valid target so the fallback never points at a
+  # rollup; if no equivalent is emittable (rare — narrow case with all
+  # rollups and no surviving children either), parent stays None and the
+  # higher-level FAC_TO_RS_GAAP_FALLBACK kicks in.
+  emittable_children_per_parent: dict[str, int] = {}
   for r in child_rows:
-    children_by_parent[r.parent_id] = children_by_parent.get(r.parent_id, 0) + 1
-  parent = max(
-    equiv_rows,
-    key=lambda e: (children_by_parent.get(e.id, 0), e.qname),
-  )
+    if not _is_valid_target(r.qname, r.id):
+      continue
+    emittable_children_per_parent[r.parent_id] = (
+      emittable_children_per_parent.get(r.parent_id, 0) + 1
+    )
+
+  parent_row = None
+  if emittable_equivalents:
+    parent_row = max(
+      emittable_equivalents,
+      key=lambda e: (emittable_children_per_parent.get(e.id, 0), e.qname),
+    )
 
   candidate_ids: set[str] = set()
   candidates: list[dict] = []
-  for r in equiv_rows:
-    if r.id not in candidate_ids:
-      candidate_ids.add(r.id)
-      candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
+  for r in emittable_equivalents:
+    if r.id in candidate_ids:
+      continue
+    candidate_ids.add(r.id)
+    candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
   for r in child_rows:
-    if r.id not in candidate_ids:
-      candidate_ids.add(r.id)
-      candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
+    if r.id in candidate_ids or not _is_valid_target(r.qname, r.id):
+      continue
+    candidate_ids.add(r.id)
+    candidates.append({"id": r.id, "qname": r.qname, "name": r.name})
+
+  if not candidates:
+    return None
 
   return {
     "fac_qname": fac_qname,
-    "rs_gaap_parent": {"id": parent.id, "qname": parent.qname, "name": parent.name},
+    "rs_gaap_parent": (
+      {
+        "id": parent_row.id,
+        "qname": parent_row.qname,
+        "name": parent_row.name,
+      }
+      if parent_row is not None
+      else None
+    ),
     "candidates": candidates,
   }
 

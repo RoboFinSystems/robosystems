@@ -1,0 +1,419 @@
+{
+  "@context": {
+    "rs": "https://robosystems.ai/vocab/",
+    "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "label": {
+      "@id": "http://www.w3.org/2000/01/rdf-schema#label"
+    },
+    "balance": {
+      "@id": "https://robosystems.ai/vocab/balance"
+    },
+    "periodType": {
+      "@id": "https://robosystems.ai/vocab/periodType"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract"
+    },
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "structureType": {
+      "@id": "https://robosystems.ai/vocab/structureType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    },
+    "conceptArrangementPattern": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
+    },
+    "secType": {
+      "@id": "https://robosystems.ai/vocab/secType"
+    }
+  },
+  "standard": "rs-gaap-disclosures",
+  "version": "v1",
+  "taxonomy_type": "reporting_extension",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+  "origin": "native",
+  "created_at": "2026-05-10",
+  "description": "RoboSystems-authored named Disclosures for the rs-gaap reporting framework. Each disclosure is an abstract qname-addressable element (so DM rule arcs can reference it as arcFrom/arcTo) and also a Structure with conceptArrangementPattern + secType metadata (so the renderer can dispatch by CAP). Composes with rs-gaap-disclosure-mechanics for structural rules and bridges/rs-gaap-disclosures-to-rs-gaap-textblocks for SEC text-block equivalence. Mirrors the layered vocabulary from Charlie Hoffman's Seattle Method (Disclosure topic + Concept Arrangement Pattern + SEC Type) but anchored to rs-gaap concepts rather than us-gaap.",
+  "@graph": [
+    {
+      "@id": "disclosures:BalanceSheet",
+      "label": "Balance Sheet",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/BalanceSheet",
+      "structureName": "Balance Sheet",
+      "structureType": "balance_sheet",
+      "conceptArrangementPattern": "component",
+      "secType": "statement"
+    },
+    {
+      "@id": "disclosures:IncomeStatement",
+      "label": "Income Statement",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/IncomeStatement",
+      "structureName": "Income Statement",
+      "structureType": "income_statement",
+      "conceptArrangementPattern": "component",
+      "secType": "statement"
+    },
+    {
+      "@id": "disclosures:CashFlowStatement",
+      "label": "Cash Flow Statement",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CashFlowStatement",
+      "structureName": "Cash Flow Statement",
+      "structureType": "cash_flow_statement",
+      "conceptArrangementPattern": "component",
+      "secType": "statement"
+    },
+    {
+      "@id": "disclosures:StatementOfChangesInEquity",
+      "label": "Statement of Changes in Equity",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/StatementOfChangesInEquity",
+      "structureName": "Statement of Changes in Equity",
+      "structureType": "equity_statement",
+      "conceptArrangementPattern": "roll_forward",
+      "secType": "statement"
+    },
+    {
+      "@id": "disclosures:StatementOfComprehensiveIncome",
+      "label": "Statement of Comprehensive Income",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/StatementOfComprehensiveIncome",
+      "structureName": "Statement of Comprehensive Income",
+      "structureType": "income_statement",
+      "conceptArrangementPattern": "component",
+      "secType": "statement"
+    },
+    {
+      "@id": "disclosures:AssetsRollUp",
+      "label": "Assets Roll Up",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/AssetsRollUp",
+      "structureName": "Assets Roll Up",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:LiabilitiesAndEquityRollUp",
+      "label": "Liabilities and Equity Roll Up",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/LiabilitiesAndEquityRollUp",
+      "structureName": "Liabilities and Equity Roll Up",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:CurrentAssetsRollUp",
+      "label": "Current Assets Roll Up",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CurrentAssetsRollUp",
+      "structureName": "Current Assets Roll Up",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:NoncurrentAssetsRollUp",
+      "label": "Noncurrent Assets Roll Up",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/NoncurrentAssetsRollUp",
+      "structureName": "Noncurrent Assets Roll Up",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:CurrentLiabilitiesRollUp",
+      "label": "Current Liabilities Roll Up",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CurrentLiabilitiesRollUp",
+      "structureName": "Current Liabilities Roll Up",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:NoncurrentLiabilitiesRollUp",
+      "label": "Noncurrent Liabilities Roll Up",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/NoncurrentLiabilitiesRollUp",
+      "structureName": "Noncurrent Liabilities Roll Up",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:RevenuesRollUp",
+      "label": "Revenues Roll Up",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/RevenuesRollUp",
+      "structureName": "Revenues Roll Up",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:OperatingExpensesRollUp",
+      "label": "Operating Expenses Roll Up",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/OperatingExpensesRollUp",
+      "structureName": "Operating Expenses Roll Up",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:EquityRollForward",
+      "label": "Equity Roll Forward",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/EquityRollForward",
+      "structureName": "Equity Roll Forward",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "roll_forward",
+      "secType": "statement_component"
+    },
+    {
+      "@id": "disclosures:DocumentAndEntityInformation",
+      "label": "Document and Entity Information",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/DocumentAndEntityInformation",
+      "structureName": "Document and Entity Information",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "hierarchy",
+      "secType": "document"
+    },
+    {
+      "@id": "disclosures:NatureOfOperations",
+      "label": "Nature of Operations",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/NatureOfOperations",
+      "structureName": "Nature of Operations",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:SignificantAccountingPolicies",
+      "label": "Significant Accounting Policies",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/SignificantAccountingPolicies",
+      "structureName": "Significant Accounting Policies",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:PropertyPlantAndEquipmentDisclosure",
+      "label": "Property, Plant and Equipment Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/PropertyPlantAndEquipmentDisclosure",
+      "structureName": "Property, Plant and Equipment Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:GoodwillRollForward",
+      "label": "Goodwill Roll Forward",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/GoodwillRollForward",
+      "structureName": "Goodwill Roll Forward",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "roll_forward",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:IntangibleAssetsDisclosure",
+      "label": "Intangible Assets Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/IntangibleAssetsDisclosure",
+      "structureName": "Intangible Assets Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:DebtDisclosure",
+      "label": "Debt Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/DebtDisclosure",
+      "structureName": "Debt Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:LongTermDebtMaturities",
+      "label": "Long-Term Debt Maturities",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/LongTermDebtMaturities",
+      "structureName": "Long-Term Debt Maturities",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:IncomeTaxDisclosure",
+      "label": "Income Tax Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/IncomeTaxDisclosure",
+      "structureName": "Income Tax Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:DeferredTaxAssetsAndLiabilities",
+      "label": "Deferred Tax Assets and Liabilities",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/DeferredTaxAssetsAndLiabilities",
+      "structureName": "Deferred Tax Assets and Liabilities",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "roll_up",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:EarningsPerShareDisclosures",
+      "label": "Earnings Per Share Disclosures",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/EarningsPerShareDisclosures",
+      "structureName": "Earnings Per Share Disclosures",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:SegmentReportingDisclosure",
+      "label": "Segment Reporting Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/SegmentReportingDisclosure",
+      "structureName": "Segment Reporting Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:CommitmentsDisclosure",
+      "label": "Commitments Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CommitmentsDisclosure",
+      "structureName": "Commitments Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:ContingenciesDisclosure",
+      "label": "Contingencies Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/ContingenciesDisclosure",
+      "structureName": "Contingencies Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:LeasesOfLesseeDisclosure",
+      "label": "Leases of Lessee Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/LeasesOfLesseeDisclosure",
+      "structureName": "Leases of Lessee Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:ShareBasedCompensationDisclosure",
+      "label": "Share-Based Compensation Disclosure",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/ShareBasedCompensationDisclosure",
+      "structureName": "Share-Based Compensation Disclosure",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    },
+    {
+      "@id": "disclosures:RelatedPartyDisclosures",
+      "label": "Related Party Disclosures",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/RelatedPartyDisclosures",
+      "structureName": "Related Party Disclosures",
+      "structureType": "disclosure",
+      "conceptArrangementPattern": "level1_textblock",
+      "secType": "disclosure"
+    }
+  ]
+}

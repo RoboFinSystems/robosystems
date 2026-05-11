@@ -81,7 +81,10 @@ LABEL_ROLE_FROM_PREDICATE: dict[URIRef, str] = {
 # Reverse of arcrole → association_type, but keyed by the RDF predicate
 ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
   # predicate_iri: (association_type, arcrole)
-  f"{RS_NS}parent": ("presentation", "http://www.xbrl.org/2003/arcrole/parent-child"),
+  f"{RS_NS}hasChild": (
+    "presentation",
+    "http://www.xbrl.org/2003/arcrole/parent-child",
+  ),
   f"{RS_NS}summationOf": (
     "calculation",
     "http://www.xbrl.org/2003/arcrole/summation-item",
@@ -101,6 +104,51 @@ ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
   str(OWL.equivalentClass): (
     "equivalence",
     "http://xbrlsite.azurewebsites.net/2016/conceptual-model/arcrole/class-equivalentClass",
+  ),
+  # Disclosure Mechanics predicates (rs-gaap-disclosure-mechanics package).
+  # Mirror Charlie Hoffman's Seattle Method arcrole vocabulary so a future
+  # Arelle harvest of his theory file can land into the same association
+  # rows. Composition-style: each Disclosure declares what it requires.
+  f"{RS_NS}reportedDisclosureRequiresDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/reportedDisclosure-requiresDisclosure",
+  ),
+  f"{RS_NS}conceptArrangementPatternRequiresConcept": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/conceptArrangementPattern-requiresConcept",
+  ),
+  f"{RS_NS}disclosureRequiresHypercube": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-requiresHypercube",
+  ),
+  f"{RS_NS}disclosureRequiresConcept": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-requiresConcept",
+  ),
+  f"{RS_NS}disclosureEquivalentTextblock": (
+    "equivalence",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-equivalentTextblock",
+  ),
+  # Reporting Checklist predicates (rs-gaap-reporting-checklist package).
+  # A FinancialReport requires/may-have/has-alternatives-for specific
+  # Disclosures.
+  f"{RS_NS}financialReportRequiresDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/financialReport-requiresDisclosure",
+  ),
+  f"{RS_NS}financialReportPossibleDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/financialReport-possibleDisclosure",
+  ),
+  f"{RS_NS}disclosureAllowedAlternativeDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/disclosure-allowedAlternativeDisclosure",
+  ),
+  # Reporting Style predicates (rs-gaap-reporting-styles package).
+  # A Style composes specific Disclosures for a vertical / filer profile.
+  f"{RS_NS}reportingStyleComposesDisclosure": (
+    "definition",
+    "https://robosystems.ai/seattle/cm/drules-arcroles/reportingStyle-composesDisclosure",
   ),
 }
 
@@ -236,9 +284,14 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
   if sg_vals and isinstance(sg_vals[0], URIRef):
     sub_group = _iri_to_qname(str(sg_vals[0]), CANONICAL_CONTEXT)
 
-  # Parent (optional)
+  # Parent (optional). Element-level tree-parent declarations.
+  # No active seeds use this today; kept for back-compat with seed
+  # packages that emit ``rs:childOf`` (RDF "subject is a child of X")
+  # or ``rs:parent`` on individual element definitions.
   parent_qname: str | None = None
-  parent_vals = list(graph.objects(subject, URIRef(f"{RS_NS}parent")))
+  parent_vals = list(graph.objects(subject, URIRef(f"{RS_NS}childOf"))) or list(
+    graph.objects(subject, URIRef(f"{RS_NS}parent"))
+  )
   if parent_vals and isinstance(parent_vals[0], URIRef):
     parent_qname = _iri_to_qname(str(parent_vals[0]), CANONICAL_CONTEXT)
 
@@ -370,6 +423,12 @@ def _extract_associations(graph: Graph) -> list[AssociationSpec]:
      ``link:presentationArc`` in XBRL linkbases.
   """
   associations: list[AssociationSpec] = []
+
+  # All flat arc predicates declare arcs in XBRL parent-child / general-
+  # special / summation-item direction (subject is the parent / general
+  # / summation, object is the child / special / operand). The loader
+  # extracts ``from=subject, to=object`` directly — same direction the
+  # renderer expects. No per-predicate swapping needed.
 
   # 1. Flat arc predicates
   for pred_iri, (assoc_type, arcrole) in ARC_PREDICATE_TO_ASSOC_TYPE.items():
@@ -569,6 +628,7 @@ def _extract_structures(
   role_pred = URIRef(f"{RS_NS}roleUri")
   name_pred = URIRef(f"{RS_NS}structureName")
   type_pred = URIRef(f"{RS_NS}structureType")
+  cap_pred = URIRef(f"{RS_NS}conceptArrangementPattern")
   for subject, role_uri in graph.subject_objects(role_pred):
     names = list(graph.objects(subject, name_pred))
     name = str(names[0]) if names else str(role_uri).rsplit("/", 1)[-1]
@@ -594,10 +654,36 @@ def _extract_structures(
         stype = "equity_statement"
       else:
         stype = "custom"
+
+    # Concept Arrangement Pattern: explicit field wins; otherwise default
+    # by structure_type.
+    explicit_caps = list(graph.objects(subject, cap_pred))
+    if explicit_caps:
+      cap: str | None = str(explicit_caps[0])
+    else:
+      cap = _default_concept_arrangement(stype)
+
     structures.append(
-      StructureSpec(name=name, role_uri=str(role_uri), structure_type=stype)
+      StructureSpec(
+        name=name,
+        role_uri=str(role_uri),
+        structure_type=stype,
+        concept_arrangement=cap,
+      )
     )
   return structures
+
+
+def _default_concept_arrangement(structure_type: str) -> str | None:
+  """Default Concept Arrangement Pattern per structure_type when seed
+  doesn't declare one explicitly. Charlie's vocabulary."""
+  return {
+    "income_statement": "arithmetic",
+    "balance_sheet": "arithmetic",
+    "cash_flow_statement": "arithmetic",
+    "equity_statement": "roll_forward",
+    "validation_rules": "arithmetic",
+  }.get(structure_type)
 
 
 def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:

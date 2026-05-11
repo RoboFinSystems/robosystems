@@ -30,6 +30,11 @@ from robosystems.operations.agents.base import (
   ExecutionProfile,
   GraphScope,
 )
+from robosystems.operations.agents.implementations.mapping.constants import (
+  FAC_TO_RS_GAAP_FALLBACK,
+  FALLBACK_CONFIDENCE,
+  RS_GAAP_SUBTOTAL_DENYLIST,
+)
 from robosystems.operations.agents.implementations.mapping.prompt import (
   MAPPING_SYSTEM_PROMPT,
   RS_GAAP_REFINEMENT_SYSTEM_PROMPT,
@@ -162,7 +167,40 @@ class MappingAgent(Agent):
         try:
           mappings = await self._map_batch(ctx, batch, candidates)
 
+          # Dedupe by element_id — keep the highest-confidence pick per
+          # element. Claude occasionally returns the same element_id
+          # twice within a batch (or in a duplicated wrapping array
+          # that the tolerant parser correctly recovers). Without this,
+          # ``confirmed_fac`` would carry duplicates that re-fire the
+          # rs-gaap refinement AI call N times for the same CoA → same
+          # equivalence-arc insert → an N-fold loop of duplicate-key
+          # warnings until the worker timeout fires.
+          seen_in_batch: dict[str, dict] = {}
           for m in mappings:
+            eid = m.get("element_id")
+            if not eid:
+              continue
+            existing = seen_in_batch.get(eid)
+            if existing is None or m.get("confidence", 0) > existing.get(
+              "confidence", 0
+            ):
+              seen_in_batch[eid] = m
+
+          # Account for elements Bedrock dropped from the response
+          # entirely. Without this they disappear from the counters and
+          # the user sees no signal that an element needs attention —
+          # this was how Notes Payable silently went unmapped on the
+          # demo graph and stranded $25k of QB-balanced credit.
+          batch_ids = {e["id"] for e in batch}
+          for missing_id in batch_ids - seen_in_batch.keys():
+            logger.warning(
+              "Bedrock omitted element %s from %s mapping batch — counting as skipped",
+              missing_id,
+              cls,
+            )
+            skipped += 1
+
+          for m in seen_in_batch.values():
             fac_target = m.get("target_id")
             confidence = m["confidence"]
             if fac_target and confidence >= CONFIDENCE_AUTO_APPROVE:
@@ -241,10 +279,16 @@ class MappingAgent(Agent):
     """
     prompt = build_mapping_prompt(elements, candidates)
 
+    # 8000 tokens accommodates a full BATCH_SIZE=10 response with verbose
+    # `reasoning` fields. The previous 4000 ceiling truncated liability
+    # batches mid-string ("Unterminated string starting at: line 241")
+    # so the JSON parser raised and the entire batch was dropped — every
+    # liability CoA fell to "skipped" and the BS imbalance traced back
+    # to Notes Payable being unmapped (carrying a $25k QB credit).
     response = await ctx.ai.create_message(
       messages=[AIMessage(role="user", content=prompt)],
       system=MAPPING_SYSTEM_PROMPT,
-      max_tokens=4000,
+      max_tokens=8000,
       temperature=0.3,
       agent_type="mapping",
       operation_description="CoA to FAC mapping",
@@ -272,59 +316,118 @@ class MappingAgent(Agent):
     Groups confirmed mappings by FAC element ID so one expand_tool call
     (and one AI call) serves all CoA accounts that share the same FAC parent.
     """
-    # Group CoA elements by their FAC target
-    by_fac: dict[str, list[dict]] = defaultdict(list)
+    # Group CoA elements by their FAC target — deduped on (coa_id,
+    # fac_id) so even if an upstream caller passes the same pair
+    # twice, the refinement runs once per element. The agent's own
+    # FAC pass dedupes too; this is belt-and-suspenders against the
+    # 5-minute insert loop we hit when Claude returned a duplicated
+    # batch and pre-dedupe ``confirmed_fac`` carried each pair N times.
+    by_fac: dict[str, dict[str, dict]] = defaultdict(dict)
     for coa_elem, fac_id in confirmed_fac:
-      by_fac[fac_id].append(coa_elem)
+      by_fac[fac_id].setdefault(coa_elem["id"], coa_elem)
+    by_fac_list: dict[str, list[dict]] = {
+      fid: list(elems.values()) for fid, elems in by_fac.items()
+    }
 
-    for fac_id, coa_elements in by_fac.items():
+    # Pre-fetch FAC qnames so the fallback path can route each CoA to
+    # its per-FAC Other bucket even when ``expand_to_rs_gaap_candidates``
+    # returns an error (e.g. the FAC concept's wide equivalence set was
+    # entirely filtered out by the presentation-set + denylist filters).
+    # Without this, every CoA in such a group silently misses its
+    # rs-gaap mapping.
+    fac_qnames = await self._fetch_fac_qnames(ctx, list(by_fac_list.keys()))
+
+    for fac_id, coa_elements in by_fac_list.items():
       if await ctx.progress.is_cancelled():
         break
 
       # Expand FAC → rs-gaap parent + type-subtype children
       expand_result = await expand_tool.execute({"fac_element_id": fac_id})
-      if "error" in expand_result:
+      expand_failed = "error" in expand_result
+      if expand_failed:
         logger.debug(f"No rs-gaap expansion for {fac_id}: {expand_result['error']}")
-        continue
+        rs_gaap_parent = None
+        candidates: list[dict] = []
+        fac_qname = fac_qnames.get(fac_id, fac_id)
+      else:
+        rs_gaap_parent = expand_result["rs_gaap_parent"]
+        candidates = expand_result["candidates"]
+        fac_qname = expand_result.get("fac_qname", fac_id)
 
-      rs_gaap_parent = expand_result["rs_gaap_parent"]
-      candidates = expand_result["candidates"]
-      fac_qname = expand_result.get("fac_qname", fac_id)
-
-      # One AI call per CoA element in this FAC group.
+      # One AI call per CoA element in this FAC group. Skip the AI
+      # entirely when no candidates exist (expand failed) — the
+      # fallback path below routes the CoA to its per-FAC Other bucket
+      # without burning a Bedrock call.
       for coa_elem in coa_elements:
         rs_gaap_id: str | None = None
         rs_gaap_conf: float = 0.0
-        try:
-          prompt = build_rs_gaap_refinement_prompt(
-            coa_elem, fac_qname, rs_gaap_parent, candidates
-          )
-          response = await ctx.ai.create_message(
-            messages=[AIMessage(role="user", content=prompt)],
-            system=RS_GAAP_REFINEMENT_SYSTEM_PROMPT,
-            max_tokens=500,
-            temperature=0.2,
-            agent_type="mapping",
-            operation_description="CoA to rs-gaap refinement",
-          )
+        if candidates:
+          try:
+            prompt = build_rs_gaap_refinement_prompt(
+              coa_elem, fac_qname, rs_gaap_parent, candidates
+            )
+            response = await ctx.ai.create_message(
+              messages=[AIMessage(role="user", content=prompt)],
+              system=RS_GAAP_REFINEMENT_SYSTEM_PROMPT,
+              max_tokens=500,
+              temperature=0.2,
+              agent_type="mapping",
+              operation_description="CoA to rs-gaap refinement",
+            )
 
-          result = self._parse_rs_gaap_response(response.content)
-          # Use a lower threshold here — the FAC pass already confirmed the
-          # semantic bucket; the refinement is just picking the specific tag.
-          if (
-            result and result.get("rs_gaap_id") and result.get("confidence", 0) >= 0.50
-          ):
-            rs_gaap_id = result["rs_gaap_id"]
-            rs_gaap_conf = result["confidence"]
+            result = self._parse_rs_gaap_response(response.content)
+            # Use a lower threshold here — the FAC pass already confirmed the
+            # semantic bucket; the refinement is just picking the specific tag.
+            if (
+              result
+              and result.get("rs_gaap_id")
+              and result.get("confidence", 0) >= 0.50
+              # Belt-and-suspenders: even if the prompt instructed
+              # "no rollups", filter the AI's pick against the denylist
+              # in case it ignored the instruction.
+              and result.get("rs_gaap_qname") not in RS_GAAP_SUBTOTAL_DENYLIST
+            ):
+              rs_gaap_id = result["rs_gaap_id"]
+              rs_gaap_conf = result["confidence"]
+            else:
+              logger.info(
+                "rs-gaap refinement REJECTED for %s (FAC=%s): result=%s — falling back",
+                coa_elem.get("name", coa_elem["id"]),
+                fac_qname,
+                result,
+              )
 
-        except Exception as e:
-          logger.warning(f"rs-gaap refinement failed for {coa_elem['id']}: {e}")
+          except Exception as e:
+            logger.warning(f"rs-gaap refinement failed for {coa_elem['id']}: {e}")
 
-        # Fall back to the rs-gaap parent when the AI returned nothing useful
-        # (only possible in the narrow case where a parent exists).
+        # Fallback chain when the AI returned nothing usable:
+        #   1. The narrow-case parent equivalent (if not denylisted).
+        #      Already filtered upstream in expand_to_rs_gaap_candidates,
+        #      but the explicit guard here is belt-and-suspenders for
+        #      callers that bypass the filter.
+        #   2. The per-FAC "Other" bucket (FAC_TO_RS_GAAP_FALLBACK) at
+        #      a low ``FALLBACK_CONFIDENCE`` so the user sees it as a
+        #      placeholder mapping in the CoA UI and can correct it.
         if not rs_gaap_id and rs_gaap_parent:
-          rs_gaap_id = rs_gaap_parent["id"]
-          rs_gaap_conf = 0.60
+          parent_qname = rs_gaap_parent.get("qname", "")
+          if parent_qname not in RS_GAAP_SUBTOTAL_DENYLIST:
+            rs_gaap_id = rs_gaap_parent["id"]
+            rs_gaap_conf = 0.60
+
+        if not rs_gaap_id:
+          fallback_qname = FAC_TO_RS_GAAP_FALLBACK.get(fac_qname)
+          if fallback_qname:
+            fallback_id = await self._resolve_qname_to_id(ctx, fallback_qname)
+            if fallback_id:
+              rs_gaap_id = fallback_id
+              rs_gaap_conf = FALLBACK_CONFIDENCE
+              logger.info(
+                "rs-gaap fallback for %s (FAC=%s): %s @ confidence=%.2f",
+                coa_elem.get("qname", coa_elem["id"]),
+                fac_qname,
+                fallback_qname,
+                FALLBACK_CONFIDENCE,
+              )
 
         if rs_gaap_id:
           try:
@@ -339,6 +442,64 @@ class MappingAgent(Agent):
             )
           except Exception as e:
             logger.warning(f"rs-gaap create failed for {coa_elem['id']}: {e}")
+
+  async def _fetch_fac_qnames(
+    self, ctx: AgentContext, fac_ids: list[str]
+  ) -> dict[str, str]:
+    """Bulk-resolve a list of FAC element ids → qnames in one query.
+
+    Used by ``_refine_to_rs_gaap`` so the per-FAC fallback (look up
+    ``FAC_TO_RS_GAAP_FALLBACK[fac_qname]``) works even when
+    ``expand_to_rs_gaap_candidates`` returns an error and we don't have
+    a ``fac_qname`` from the expand result.
+    """
+    if not fac_ids:
+      return {}
+
+    from sqlalchemy import text
+
+    from robosystems.db.extensions import extensions_session
+
+    with extensions_session(ctx.graph_id) as session:
+      rows = session.execute(
+        text("SELECT id, qname FROM elements WHERE id = ANY(:ids)"),
+        {"ids": fac_ids},
+      ).fetchall()
+    return {r.id: r.qname for r in rows}
+
+  async def _resolve_qname_to_id(self, ctx: AgentContext, qname: str) -> str | None:
+    """Resolve an rs-gaap qname → element_id within the agent's tenant
+    schema.
+
+    Cached on the agent instance for the duration of a single ``run()``
+    call so the fallback path doesn't re-query for every CoA element
+    that lands on the same Other bucket. Returns ``None`` when the
+    qname isn't seeded — surfaces missing taxonomy data instead of
+    silently falling through.
+    """
+    if not hasattr(self, "_qname_cache"):
+      self._qname_cache: dict[str, str | None] = {}
+    if qname in self._qname_cache:
+      return self._qname_cache[qname]
+
+    from sqlalchemy import text
+
+    from robosystems.db.extensions import extensions_session
+
+    with extensions_session(ctx.graph_id) as session:
+      row = session.execute(
+        text("SELECT id FROM elements WHERE qname = :qname LIMIT 1"),
+        {"qname": qname},
+      ).fetchone()
+    elem_id = row.id if row else None
+    self._qname_cache[qname] = elem_id
+    if elem_id is None:
+      logger.warning(
+        "rs-gaap fallback target %r not found in graph %s — fallback skipped",
+        qname,
+        ctx.graph_id,
+      )
+    return elem_id
 
   def _parse_rs_gaap_response(self, content: str) -> dict | None:
     """Parse the single-object JSON from the rs-gaap refinement pass."""
@@ -355,21 +516,32 @@ class MappingAgent(Agent):
       return None
 
   def _parse_response(self, content: str, elements: list[dict]) -> list[dict]:
-    """Parse Bedrock JSON response into mapping results."""
-    try:
-      text = content.strip()
-      if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-          text = text[:-3]
-        text = text.strip()
+    """Parse Bedrock JSON response into mapping results.
 
-      mappings = json.loads(text)
-      if not isinstance(mappings, list):
-        mappings = [mappings]
+    Tolerant of three failure modes Claude exhibits in the wild:
+
+    1. Markdown fences (```json … ```) — stripped before parsing.
+    2. Multiple JSON values back-to-back (one array per element, or an
+       array followed by a trailing object). We scan with
+       ``json.JSONDecoder.raw_decode`` and accumulate every top-level
+       value, flattening lists and unwrapping single objects. This is
+       why ``json.loads`` was failing with "Extra data" on the asset
+       and liability batches — Claude was emitting one mapping object
+       per line instead of a single wrapping array.
+    3. Lines of explanatory prose between values — skipped by advancing
+       past whitespace and any non-`{`/`[` prefix between values.
+    """
+    try:
+      text = self._strip_markdown_fences(content.strip())
+      mappings = self._parse_concatenated_json(text)
+
+      if not mappings:
+        raise json.JSONDecodeError("no JSON values found in response", text, 0)
 
       valid = []
       for m in mappings:
+        if not isinstance(m, dict):
+          continue
         valid.append(
           {
             "element_id": m.get("element_id", ""),
@@ -381,7 +553,7 @@ class MappingAgent(Agent):
         )
       return valid
 
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
       logger.warning(f"Failed to parse Bedrock response: {e}")
       return [
         {
@@ -393,3 +565,83 @@ class MappingAgent(Agent):
         }
         for elem in elements
       ]
+
+  @staticmethod
+  def _strip_markdown_fences(text: str) -> str:
+    """Strip a single ```json … ``` (or bare ```) wrapper if present.
+
+    Claude follows the prompt's "Respond ONLY with the JSON" rule
+    inconsistently — sometimes the response arrives wrapped in a
+    fenced code block, sometimes not, and very occasionally the
+    fences land mid-stream after a leading explanation. We only
+    strip when fences bracket the entire payload.
+    """
+    if not text.startswith("```"):
+      return text
+    after_open = text.split("\n", 1)[1] if "\n" in text else text[3:]
+    if after_open.endswith("```"):
+      after_open = after_open[:-3]
+    return after_open.strip()
+
+  @staticmethod
+  def _parse_concatenated_json(text: str) -> list:
+    """Decode every top-level JSON value in ``text`` and flatten lists.
+
+    Uses ``json.JSONDecoder().raw_decode`` to walk the buffer one
+    value at a time so a response like
+    ``[{...}, {...}]\\n{...}`` or ``{...}\\n{...}\\n{...}``
+    yields all of the contained objects rather than failing the whole
+    parse on the first leftover byte.
+
+    When raw_decode raises mid-stream (truncated array, unterminated
+    string from a max_tokens cutoff, malformed trailing object), we
+    keep whatever objects we already extracted instead of dropping
+    the whole batch. Partial recovery is the right behavior here: a
+    Bedrock truncation that yields 6 of 7 mappings is still better
+    than 0, and the orchestrator's per-element loop tolerates a
+    short result list (missing element_ids fall through to "skipped"
+    rather than corrupt the rest).
+
+    A list value parses fine but its trailing `]` may be missing on
+    truncation; in that case we attempt an inner-element scan over
+    its body so the partial array still contributes whatever complete
+    objects it has.
+    """
+    decoder = json.JSONDecoder()
+    out: list = []
+    i = 0
+    n = len(text)
+    while i < n:
+      while i < n and text[i] not in "[{":
+        i += 1
+      if i >= n:
+        break
+      try:
+        value, end = decoder.raw_decode(text, i)
+      except json.JSONDecodeError:
+        # Truncated value at this position. If we're inside a `[...]`
+        # whose contents are object literals, scan forward and
+        # recover each complete `{...}` we can find — typical
+        # max_tokens cutoff shape. Otherwise stop here with whatever
+        # we've accumulated.
+        if text[i] == "[":
+          inner = i + 1
+          while inner < n:
+            while inner < n and text[inner] != "{":
+              inner += 1
+            if inner >= n:
+              break
+            try:
+              obj, obj_end = decoder.raw_decode(text, inner)
+            except json.JSONDecodeError:
+              break
+            if isinstance(obj, dict):
+              out.append(obj)
+            inner = obj_end
+        break
+      if isinstance(value, list):
+        out.extend(value)
+      else:
+        out.append(value)
+      i = end
+    return out

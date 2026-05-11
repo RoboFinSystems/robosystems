@@ -164,6 +164,30 @@ class StructureSpec(BaseModel):
       "equity_statement | chart_of_accounts | coa_mapping | schedule | custom"
     ),
   )
+  concept_arrangement: str | None = Field(
+    None,
+    description=(
+      "Charlie's Concept Arrangement Pattern declared on this Disclosure. "
+      "Drives the renderer's compilation strategy. Values:\n"
+      "  arithmetic       — additive identity (Assets = Liabilities + Equity)\n"
+      "  roll_up          — sub-totals roll up to a parent total\n"
+      "  roll_forward     — beginning + delta = ending balance\n"
+      "  variance         — actual vs target / budget\n"
+      "  adjustment       — point-in-time correction\n"
+      "  set              — flat enumeration with no aggregation\n"
+      "  component        — composite Disclosure recursing into other "
+      "Disclosures (BalanceSheet → AssetsRollUp + LiabilitiesAndEquityRollUp)\n"
+      "  hierarchy        — nested grouping with no arithmetic\n"
+      "  level1_textblock — top-level note (e.g. PropertyPlantAndEquipment)\n"
+      "  level2_textblock — sub-note within a level-1\n"
+      "  level3_textblock — third-level note\n"
+      "  level4_textblock — fourth-level note\n"
+      "  textblock        — generic note text block (legacy alias)\n"
+      "When None, the renderer falls back to a per-structure_type default "
+      "(income_statement / balance_sheet / cash_flow_statement → arithmetic; "
+      "equity_statement → roll_forward; validation_rules → arithmetic)."
+    ),
+  )
 
 
 class RuleTargetSpec(BaseModel):

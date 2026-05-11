@@ -130,6 +130,7 @@ class LibraryQuery:
     info: Info[GraphQLContext, None],
     taxonomy_id: strawberry.ID,
     association_type: str | None = None,
+    structure_id: strawberry.ID | None = None,
     limit: int = 200,
     offset: int = 0,
   ) -> list[LibraryAssociation]:
@@ -139,6 +140,9 @@ class LibraryQuery:
     this is the primary browse view — the arcs ARE what the taxonomy
     contributes, not concepts. Each entry includes the from/to element
     qname + name so the UI can render the arc directly.
+
+    Pass ``structure_id`` to scope to a single structure (one
+    presentation/calculation hierarchy).
     """
     _validate_pagination(limit, offset)
     with _open_session(info) as session:
@@ -146,6 +150,7 @@ class LibraryQuery:
         session,
         taxonomy_id=str(taxonomy_id),
         association_type=association_type,
+        structure_id=str(structure_id) if structure_id else None,
         limit=limit,
         offset=offset,
       )
@@ -156,10 +161,17 @@ class LibraryQuery:
     self,
     info: Info[GraphQLContext, None],
     taxonomy_id: strawberry.ID,
+    association_type: str | None = None,
+    structure_id: strawberry.ID | None = None,
   ) -> int:
     """Count of arcs contributed by a taxonomy."""
     with _open_session(info) as session:
-      return count_taxonomy_arcs(session, str(taxonomy_id))
+      return count_taxonomy_arcs(
+        session,
+        str(taxonomy_id),
+        association_type=association_type,
+        structure_id=str(structure_id) if structure_id else None,
+      )
 
   # ── Elements ────────────────────────────────────────────────────────────
 

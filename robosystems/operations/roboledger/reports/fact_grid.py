@@ -69,6 +69,7 @@ class FactRow:
   balance_type: str
   values: list[float | None]  # one per period column
   is_subtotal: bool = False
+  is_abstract: bool = False
   depth: int = 0
 
 
@@ -85,6 +86,34 @@ class FactGrid:
 
 
 # ── Stage 1: Generate facts (structure-agnostic) ─────────────────────────
+
+
+def _arc_type_for_taxonomy(session: Session, taxonomy_id: str) -> str:
+  """Pick which CoA→target arc-type to walk for fact generation based on
+  the report's render-target taxonomy.
+
+  Currently returns ``mapping`` for all targets. After the rs-gaap
+  Disclosure Structure rebuild (Stage 2 of the taxonomy plan), every
+  Disclosure anchors on FAC concepts (fac:Revenues, fac:OperatingExpenses,
+  etc.) with rs-gaap leaves underneath. The ``mapping`` arc-type lands
+  facts at the FAC anchors, which the Arithmetic CAP renderer then
+  composes through the calc DAG (rs-gaap leaves sum into FAC parents
+  via rs-gaap-calculations). ``equivalence`` arcs (CoA → rs-gaap leaf)
+  stay valid for tenant-side audit + element-detail views, but aren't
+  the primary fact-generation path under the new architecture.
+
+  Each CoA element has both arc-types written by the auto-mapper, so
+  this choice doesn't affect the mapping workflow — only which arc
+  the renderer follows when generating facts.
+  """
+  # Lookup retained for future per-taxonomy dispatch (e.g., custom
+  # tenant taxonomies that want equivalence-direct rendering).
+  row = session.execute(
+    text("SELECT standard FROM taxonomies WHERE id = :tid LIMIT 1"),
+    {"tid": taxonomy_id},
+  ).fetchone()
+  _ = row  # silence unused-binding lint until we re-introduce dispatch
+  return "mapping"
 
 
 def generate_report_facts(
@@ -107,10 +136,13 @@ def generate_report_facts(
   Returns:
       ReportFacts with all generated facts and metadata.
   """
+  arc_type = _arc_type_for_taxonomy(session, taxonomy_id)
   facts: list[ReportFact] = []
 
   for period in periods:
-    balances = _read_mapped_balances(session, mapping_id, period.start, period.end)
+    balances = _read_mapped_balances(
+      session, mapping_id, period.start, period.end, arc_type=arc_type
+    )
     for balance in balances.values():
       facts.append(
         ReportFact(
@@ -138,10 +170,10 @@ def generate_report_facts(
     # returns only the still-unclosed portion. Adding that to whatever
     # RE balance the ledger already carries is always correct.
     _close_prior_periods_to_retained_earnings(
-      session, mapping_id, facts, period.start, period.end
+      session, mapping_id, facts, period.start, period.end, arc_type=arc_type
     )
 
-  unmapped_count = _count_unmapped(session, mapping_id)
+  unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
 
   return ReportFacts(
     facts=facts,
@@ -160,24 +192,40 @@ def render_structure_view(
   facts: list[ReportFact],
   structure_type: str,
   periods: list[PeriodSpec],
+  taxonomy_id: str | None = None,
 ) -> FactGrid:
   """Apply a structure's hierarchy to raw facts to produce a rendered view.
 
   This is the "lens" — same facts, different structure = different view.
+
+  Facts whose ``element_id`` isn't in the structure's hierarchy are
+  resolved upward via type-subtype ``general-special`` arcs to the
+  nearest in-structure ancestor (see ``_resolve_renderable_ancestor``)
+  and aggregated there. Facts with no in-structure ancestor are dropped
+  from the rendered view — they're persisted in ``facts`` for audit
+  but invisible to the standard report.
 
   Args:
       session: Extensions database session.
       facts: Pre-generated ReportFact objects (from generate_report_facts).
       structure_type: Structure type to render (income_statement, balance_sheet, etc.).
       periods: Ordered list of period specifications for columns.
+      taxonomy_id: When set, restricts structure selection to this taxonomy.
+          Multiple taxonomies (FAC, rs-gaap-presentation, etc.) declare the
+          same structure_type; without this filter ``_load_reporting_structure``
+          picks ambiguously. Saved Reports always pass their taxonomy_id;
+          live-statement readers may omit it (legacy behaviour).
 
   Returns:
       FactGrid with rows ordered per the structure's hierarchy.
   """
-  # Load structure hierarchy
-  structure_id, structure_name, hierarchy = _load_reporting_structure(
-    session, structure_type
-  )
+  # Load Disclosure structure + Concept Arrangement Pattern
+  (
+    structure_id,
+    structure_name,
+    concept_arrangement,
+    hierarchy,
+  ) = _load_reporting_structure(session, structure_type, taxonomy_id=taxonomy_id)
 
   if not hierarchy:
     return FactGrid(
@@ -187,11 +235,23 @@ def render_structure_view(
       periods=periods,
     )
 
-  # Build balance dicts per period (keyed by element_id)
-  period_balances = [_facts_to_balance_dict(facts, p.start, p.end) for p in periods]
+  # Resolve out-of-structure facts to their nearest in-structure ancestor.
+  in_structure = _collect_hierarchy_element_ids(hierarchy)
+  rolled_up = _roll_up_facts_to_structure(session, facts, in_structure)
 
-  # Load calculation associations for computed elements (Total Assets, Net Income, etc.)
-  calculations = _load_calculations(session, structure_id)
+  # Build balance dicts per period (keyed by element_id, summing across
+  # facts that resolved to the same ancestor).
+  period_balances = [_facts_to_balance_dict(rolled_up, p.start, p.end) for p in periods]
+
+  # Load calculation arcs. For ``arithmetic`` Disclosures we compose
+  # calcs across taxonomies (fac-calculations + rs-gaap-calculations +
+  # any others) — load all calcs whose subtotal target appears in the
+  # Disclosure's element set. Other CAPs use the legacy single-structure
+  # behavior so existing rendering paths don't change.
+  if concept_arrangement == "arithmetic":
+    calculations = _load_calculations(session, element_ids=in_structure)
+  else:
+    calculations = _load_calculations(session, structure_id=structure_id)
 
   # Walk hierarchy depth-first
   # Facts from the facts table are already natural-signed, so skip sign conversion
@@ -204,6 +264,156 @@ def render_structure_view(
     periods=periods,
     rows=rows,
   )
+
+
+# ── Ancestor rollup ────────────────────────────────────────────────────────
+
+
+def _collect_hierarchy_element_ids(hierarchy: list[_HierarchyNode]) -> set[str]:
+  """Walk a hierarchy tree and return every element_id reachable.
+
+  Used by ``render_structure_view`` to identify in-structure elements
+  so out-of-structure facts can be resolved to a renderable ancestor.
+  """
+  ids: set[str] = set()
+
+  def _walk(node: _HierarchyNode) -> None:
+    ids.add(node.element_id)
+    for child in node.children:
+      _walk(child)
+
+  for root in hierarchy:
+    _walk(root)
+  return ids
+
+
+def _resolve_renderable_ancestor(
+  session: Session,
+  element_id: str,
+  in_structure: set[str],
+  cache: dict[str, str | None],
+) -> str | None:
+  """Walk anchor arcs upward from ``element_id`` until reaching an
+  element in ``in_structure``. Returns the ancestor's element_id, or
+  ``None`` if no ancestor is reachable.
+
+  Three arc types are followed (these are the recognized
+  CoA-to-reporting bridges):
+
+  - ``equivalence`` — explicit owl-style "this concept IS that one";
+    the auto-mapper writes one of these from each tenant CoA element
+    to its rs-gaap leaf equivalent
+  - ``mapping`` — broader category placement; auto-mapper writes one
+    of these from each CoA element to its FAC anchor (e.g.,
+    fac:Revenues, fac:OperatingExpenses)
+  - ``general-special`` — class-subtype hierarchy (type-subtype,
+    rs-gaap-hierarchy); used to roll a specialized rs-gaap concept up
+    to its in-Disclosure ancestor
+
+  All three are walked together via BFS-by-depth so the nearest
+  ancestor wins when multiple paths exist (semantic 'a' from Option C
+  planning — deterministic, mirrors XBRL renderer convention). The
+  cache memoizes per call so multiple facts on the same out-of-
+  structure element only walk once.
+  """
+  if element_id in cache:
+    return cache[element_id]
+  if element_id in in_structure:
+    cache[element_id] = element_id
+    return element_id
+
+  visited: set[str] = {element_id}
+  frontier: list[str] = [element_id]
+
+  while frontier:
+    # Two arc-direction conventions both walk "upward" from a tenant
+    # CoA element / specific concept toward an in-Disclosure anchor:
+    #
+    # - ``general-special``: from = general (parent), to = specific
+    #   (child). Walk: where to = child, return from = parent.
+    # - ``mapping`` / ``equivalence``: from = specific (CoA), to =
+    #   anchor (FAC concept / rs-gaap leaf). Walk: where from = child,
+    #   return to = parent. The auto-mapper writes both kinds with this
+    #   direction.
+    parent_rows = session.execute(
+      text(
+        """
+        SELECT DISTINCT a.from_element_id AS parent_id
+        FROM associations a
+        WHERE a.association_type = 'general-special'
+          AND a.to_element_id = ANY(:children)
+        UNION
+        SELECT DISTINCT a.to_element_id AS parent_id
+        FROM associations a
+        WHERE a.association_type IN ('mapping', 'equivalence')
+          AND a.from_element_id = ANY(:children)
+        """
+      ),
+      {"children": frontier},
+    ).fetchall()
+
+    next_frontier: list[str] = []
+    for r in parent_rows:
+      pid = r.parent_id
+      if pid in visited:
+        continue
+      visited.add(pid)
+      if pid in in_structure:
+        cache[element_id] = pid
+        return pid
+      next_frontier.append(pid)
+    frontier = next_frontier
+
+  cache[element_id] = None
+  return None
+
+
+def _roll_up_facts_to_structure(
+  session: Session,
+  facts: list[ReportFact],
+  in_structure: set[str],
+) -> list[ReportFact]:
+  """For each fact whose element isn't in the rendered structure,
+  resolve to the nearest in-structure ancestor and emit a rewritten
+  ReportFact pointing at that ancestor.
+
+  Facts with no in-structure ancestor are dropped (they're audit-only
+  data — invisible to the standard report). Facts whose element is
+  already in-structure pass through unchanged.
+
+  ``_facts_to_balance_dict`` sums multiple facts on the same
+  element_id, so this function doesn't aggregate — it just rewrites
+  the element pointers.
+  """
+  if not facts:
+    return facts
+
+  cache: dict[str, str | None] = {}
+  rolled: list[ReportFact] = []
+  for fact in facts:
+    if fact.element_id in in_structure:
+      rolled.append(fact)
+      continue
+    ancestor = _resolve_renderable_ancestor(
+      session, fact.element_id, in_structure, cache
+    )
+    if ancestor is None:
+      continue
+    # Reuse fact metadata; only the element_id pointer changes.
+    rolled.append(
+      ReportFact(
+        element_id=ancestor,
+        element_qname=fact.element_qname,
+        element_name=fact.element_name,
+        classification=fact.classification,
+        balance_type=fact.balance_type,
+        value=fact.value,
+        period_start=fact.period_start,
+        period_end=fact.period_end,
+        period_type=fact.period_type,
+      )
+    )
+  return rolled
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────
@@ -249,10 +459,17 @@ def _facts_to_balance_dict(
   _natural_sign(balance.net_balance, node.balance_type), so we set
   balance_type to "debit" to pass through the value unchanged (since
   natural sign was already applied during fact generation).
+
+  Multiple facts on the same ``element_id`` for the same period sum —
+  needed for the ancestor-rollup path where many out-of-structure
+  facts can resolve to a single in-structure ancestor.
   """
   balances: dict[str, _Balance] = {}
   for fact in facts:
-    if fact.period_start == period_start and fact.period_end == period_end:
+    if fact.period_start != period_start or fact.period_end != period_end:
+      continue
+    existing = balances.get(fact.element_id)
+    if existing is None:
       balances[fact.element_id] = _Balance(
         element_id=fact.element_id,
         qname=fact.element_qname,
@@ -263,6 +480,8 @@ def _facts_to_balance_dict(
         total_credits=0.0,
         net_balance=fact.value,  # already natural-sign
       )
+    else:
+      existing.net_balance += fact.value
   return balances
 
 
@@ -271,7 +490,7 @@ def _infer_classification(qname: str | None, balance_type: str | None) -> str | 
 
   Reference taxonomies (FAC, rs-gaap, type-subtype) and freshly-loaded
   custom taxonomies often have no ``element_traits`` rows pointing at
-  ``classifications.category='elementsOfFinancialStatements'``. Without
+  ``traits.category='elementsOfFinancialStatements'``. Without
   classification, ``_close_to_retained_earnings`` can't compute Net
   Income (revenue/expense facts never match) and the BS doesn't balance.
 
@@ -335,8 +554,13 @@ def _read_mapped_balances(
   mapping_id: str,
   period_start: date,
   period_end: date,
+  arc_type: str = "mapping",
 ) -> dict[str, _Balance]:
   """Read mapped trial balance — same join as the /trial-balance/mapped endpoint.
+
+  ``arc_type`` selects which CoA→target arc-type to follow:
+  ``'mapping'`` (CoA→FAC, default for fac-presentation reports) or
+  ``'equivalence'`` (CoA→rs-gaap, for rs-gaap-presentation reports).
 
   ``classification`` is resolved via ``element_traits`` →
   ``classifications`` with ``category='elementsOfFinancialStatements'``
@@ -349,6 +573,10 @@ def _read_mapped_balances(
   elements aren't wired to FASB traits), :func:`_infer_classification`
   fills in best-effort classification from qname + balance_type. Real
   trait data always wins; the fallback only fires for null rows.
+
+  Belt-and-suspenders ``element_type='concept'`` filter on the target
+  ensures facts never land on abstracts, hypercubes, axes, or members
+  even if a future bad mapping arc points there.
   """
   result = session.execute(
     text("""
@@ -365,15 +593,17 @@ def _read_mapped_balances(
       JOIN entries e ON e.id = li.entry_id
       JOIN associations mapping
         ON mapping.from_element_id = source_elem.id
-        AND mapping.association_type = 'mapping'
+        AND mapping.association_type = :arc_type
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
       LEFT JOIN element_traits tet
         ON tet.element_id = target.id AND tet.is_primary = TRUE
-      LEFT JOIN classifications tcls
+      LEFT JOIN traits tcls
         ON tcls.id = tet.trait_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
+        AND target.element_type = 'concept'
+        AND target.is_abstract = false
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
         AND (
           tcls.identifier IN ('asset', 'liability', 'equity')
@@ -386,6 +616,7 @@ def _read_mapped_balances(
     """),
     {
       "mapping_id": mapping_id,
+      "arc_type": arc_type,
       "start_date": period_start,
       "end_date": period_end,
     },
@@ -412,26 +643,30 @@ def _read_mapped_balances(
   return balances
 
 
-def _count_unmapped(session: Session, mapping_id: str) -> int:
-  """Count CoA elements that have no mapping association."""
+def _count_unmapped(
+  session: Session, mapping_id: str, arc_type: str = "mapping"
+) -> int:
+  """Count CoA elements that have no association of the given arc-type."""
   from robosystems.models.extensions.roboledger import COA_SOURCES
 
-  # Build a safe SQL IN clause from the constant
-  source_list = ", ".join(f"'{s}'" for s in COA_SOURCES)
   result = session.execute(
-    text(f"""
+    text("""
       SELECT COUNT(*) AS cnt
       FROM elements e
-      WHERE e.source IN ({source_list})
+      WHERE e.source = ANY(:sources)
         AND e.is_active = true
         AND NOT EXISTS (
           SELECT 1 FROM associations ea
           WHERE ea.from_element_id = e.id
-            AND ea.association_type = 'mapping'
+            AND ea.association_type = :arc_type
             AND ea.structure_id = :mapping_id
         )
     """),
-    {"mapping_id": mapping_id},
+    {
+      "sources": list(COA_SOURCES),
+      "mapping_id": mapping_id,
+      "arc_type": arc_type,
+    },
   )
   row = result.fetchone()
   return row.cnt if row else 0
@@ -571,6 +806,7 @@ def _close_prior_periods_to_retained_earnings(
   facts: list[ReportFact],
   period_start: date,
   period_end: date,
+  arc_type: str = "mapping",
 ) -> None:
   """Close un-closed cumulative net income into retained earnings.
 
@@ -620,20 +856,23 @@ def _close_prior_periods_to_retained_earnings(
       JOIN entries e ON e.id = li.entry_id
       JOIN associations mapping
         ON mapping.from_element_id = source_elem.id
-        AND mapping.association_type = 'mapping'
+        AND mapping.association_type = :arc_type
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
       LEFT JOIN element_traits tet
         ON tet.element_id = target.id AND tet.is_primary = TRUE
-      LEFT JOIN classifications tcls
+      LEFT JOIN traits tcls
         ON tcls.id = tet.trait_id
         AND tcls.category = 'elementsOfFinancialStatements'
       WHERE e.status = 'posted'
+        AND target.element_type = 'concept'
+        AND target.is_abstract = false
         AND e.posting_date <= :end_date
       GROUP BY tcls.identifier, target.qname, target.balance_type
     """),
     {
       "mapping_id": mapping_id,
+      "arc_type": arc_type,
       "end_date": period_end,
     },
   )
@@ -709,26 +948,59 @@ def _infer_period_type(classification: str) -> str:
 def _load_reporting_structure(
   session: Session,
   report_type: str,
-) -> tuple[str, str, list[_HierarchyNode]]:
+  taxonomy_id: str | None = None,
+) -> tuple[str, str, str | None, list[_HierarchyNode]]:
   """Load the reporting structure hierarchy for the given report type.
 
-  Returns (structure_id, structure_name, root_nodes).
+  When ``taxonomy_id`` is provided, restricts structure selection to
+  that taxonomy — necessary when multiple taxonomies (FAC vs
+  rs-gaap-presentation) declare the same ``structure_type``. Without
+  the filter the query returns whichever row the planner happens to
+  pick first.
+
+  Returns (structure_id, structure_name, concept_arrangement, root_nodes).
+  ``concept_arrangement`` is Charlie's CAP declared on the Disclosure
+  (``arithmetic`` / ``roll_up`` / ``roll_forward`` / ``hierarchy``);
+  the renderer uses it to pick a compilation strategy.
   """
-  # Find the structure for this report type
-  struct_result = session.execute(
-    text("""
-      SELECT id, name FROM structures
-      WHERE structure_type = :report_type
-      LIMIT 1
-    """),
-    {"report_type": report_type},
-  )
+  # Filter is_active so deactivated/legacy structures are skipped.
+  # Order by created_at DESC so when multiple active structures match
+  # (e.g., during the rs-gaap-presentation Disclosure rebuild's
+  # transition window), the newer one wins — newly authored Disclosures
+  # supersede legacy entries automatically.
+  if taxonomy_id is not None:
+    struct_result = session.execute(
+      text("""
+        SELECT id, name, concept_arrangement FROM structures
+        WHERE structure_type = :report_type
+          AND taxonomy_id = :taxonomy_id
+          AND is_active = true
+        ORDER BY created_at DESC
+        LIMIT 1
+      """),
+      {"report_type": report_type, "taxonomy_id": taxonomy_id},
+    )
+  else:
+    # Legacy callers (live-financial-statement) without an explicit
+    # taxonomy. Picks any matching structure — caller assumes there's
+    # only one or doesn't care which.
+    struct_result = session.execute(
+      text("""
+        SELECT id, name, concept_arrangement FROM structures
+        WHERE structure_type = :report_type
+          AND is_active = true
+        ORDER BY created_at DESC
+        LIMIT 1
+      """),
+      {"report_type": report_type},
+    )
   struct_row = struct_result.fetchone()
   if not struct_row:
-    return "", "", []
+    return "", "", None, []
 
   structure_id = struct_row.id
   structure_name = struct_row.name
+  concept_arrangement = struct_row.concept_arrangement
 
   # Load all elements and associations for this structure.
   # Classification is resolved via element_traits → classifications
@@ -750,7 +1022,7 @@ def _load_reporting_structure(
       JOIN elements e ON e.id = ea.to_element_id
       LEFT JOIN element_traits et
         ON et.element_id = e.id AND et.is_primary = TRUE
-      LEFT JOIN classifications cls
+      LEFT JOIN traits cls
         ON cls.id = et.trait_id
         AND cls.category = 'elementsOfFinancialStatements'
       WHERE ea.structure_id = :structure_id
@@ -796,7 +1068,7 @@ def _load_reporting_structure(
         FROM elements e
         LEFT JOIN element_traits et
           ON et.element_id = e.id AND et.is_primary = TRUE
-        LEFT JOIN classifications cls
+        LEFT JOIN traits cls
           ON cls.id = et.trait_id
           AND cls.category = 'elementsOfFinancialStatements'
         WHERE e.id IN ({placeholders})
@@ -814,7 +1086,20 @@ def _load_reporting_structure(
         "depth": row.depth or 0,
       }
 
-  def _build_tree(element_id: str, depth: int) -> _HierarchyNode:
+  # Render each element at most once globally per structure walk. The
+  # rs-gaap-presentation hierarchy is a DAG (a concept may have
+  # multiple parents — e.g. "Cash" rolls up under both Current Assets
+  # and the Cash Flow reconciliation). Without global dedup the walk
+  # would expand a shared subtree under each parent, producing
+  # exponential row counts and double-counting facts at render time.
+  # The first parent that reaches a node owns it; subsequent parents
+  # treat the node as already-rendered.
+  emitted: set[str] = set()
+
+  def _build_tree(element_id: str, depth: int) -> _HierarchyNode | None:
+    if element_id in emitted:
+      return None
+    emitted.add(element_id)
     info = element_info.get(element_id, {})
     node = _HierarchyNode(
       element_id=element_id,
@@ -827,7 +1112,8 @@ def _load_reporting_structure(
     )
     for child_data in children_map.get(element_id, []):
       child_node = _build_tree(child_data["element_id"], depth + 1)
-      node.children.append(child_node)
+      if child_node is not None:
+        node.children.append(child_node)
     return node
 
   # Build trees from roots, ordered by the root-ordering associations
@@ -835,14 +1121,16 @@ def _load_reporting_structure(
   # Roots that have an explicit order_value sort by that; others sort last.
   root_order = _load_root_order(session, structure_id)
 
-  roots = []
+  roots: list[_HierarchyNode] = []
   for root_id in sorted(
     root_parent_ids,
     key=lambda rid: root_order.get(rid, float("inf")),
   ):
-    roots.append(_build_tree(root_id, 0))
+    root_node = _build_tree(root_id, 0)
+    if root_node is not None:
+      roots.append(root_node)
 
-  return structure_id, structure_name, roots
+  return structure_id, structure_name, concept_arrangement, roots
 
 
 def _load_root_order(
@@ -870,29 +1158,146 @@ def _load_root_order(
 
 def _load_calculations(
   session: Session,
-  structure_id: str,
+  structure_id: str | None = None,
+  element_ids: set[str] | None = None,
 ) -> dict[str, list[tuple[str, float]]]:
-  """Load calculation associations for a structure.
+  """Load calculation associations.
 
-  Returns a dict mapping computed element ID → list of (source_element_id, weight).
+  Two modes:
+
+  1. **Single-structure (legacy)** — pass ``structure_id``. Returns calcs
+     authored INSIDE that structure (the older convention where presentation +
+     calculation arcs lived in the same structure).
+  2. **Cross-structure (Stage 2 disclosure rebuild)** — pass ``element_ids``
+     (the set of element ids reachable in the Disclosure hierarchy). Returns
+     calcs from ANY structure whose subtotal target (``from_element_id``) is
+     in the hierarchy. This composes ``fac-calculations`` (FAC's 18 canonical
+     equations) + ``rs-gaap-calculations`` (rs-gaap leaf→FAC summations) +
+     any other calc structures into a single calc DAG for the renderer.
+
+  Returns a dict mapping subtotal element_id → list of (summand element_id, weight).
   For example, Total Assets might map to [(Current Assets, 1.0), (Non-Current Assets, 1.0)].
   """
-  result = session.execute(
-    text("""
-      SELECT from_element_id, to_element_id, weight
-      FROM associations
-      WHERE structure_id = :structure_id
-        AND association_type = 'calculation'
-      ORDER BY order_value
-    """),
-    {"structure_id": structure_id},
-  )
+  if structure_id is not None:
+    result = session.execute(
+      text("""
+        SELECT from_element_id, to_element_id, weight
+        FROM associations
+        WHERE structure_id = :structure_id
+          AND association_type = 'calculation'
+        ORDER BY order_value
+      """),
+      {"structure_id": structure_id},
+    )
+  elif element_ids:
+    # Cross-structure load. Filter to calcs whose subtotal target lives
+    # in the Disclosure — that's the set the renderer can actually
+    # position. Calcs whose target is outside the hierarchy are
+    # irrelevant for this rendering pass.
+    placeholders = ", ".join(f":e{i}" for i in range(len(element_ids)))
+    params = {f"e{i}": eid for i, eid in enumerate(element_ids)}
+    result = session.execute(
+      text(f"""
+        SELECT structure_id, from_element_id, to_element_id, weight
+        FROM associations
+        WHERE association_type = 'calculation'
+          AND from_element_id IN ({placeholders})
+        ORDER BY structure_id, order_value
+      """),
+      params,
+    )
+  else:
+    return {}
 
   calculations: dict[str, list[tuple[str, float]]] = {}
+
+  if structure_id is not None:
+    for row in result:
+      weight = row.weight if row.weight is not None else 1.0
+      calculations.setdefault(row.from_element_id, []).append(
+        (row.to_element_id, weight)
+      )
+    return calculations
+
+  # Cross-structure path: multiple calc structures may target the same
+  # element (e.g. FAC IS2 multistep and IS11 single-step both compute
+  # fac:OperatingIncomeLoss; BS2 and BS3 both compute fac:Assets). They
+  # are alternative arrangements, not summands — merging them double-
+  # counts. Pick exactly one structure per target by requiring every
+  # summand to also live in the disclosure's hierarchy. The arrangement
+  # whose inputs the disclosure actually carries is the one the
+  # disclosure is asking the renderer to apply.
+  assert element_ids is not None  # narrowed by the elif above
+  by_struct_target: dict[tuple[str, str], list[tuple[str, float]]] = {}
   for row in result:
     weight = row.weight if row.weight is not None else 1.0
-    calculations.setdefault(row.from_element_id, []).append((row.to_element_id, weight))
+    by_struct_target.setdefault((row.structure_id, row.from_element_id), []).append(
+      (row.to_element_id, weight)
+    )
+
+  candidates_per_target: dict[str, list[tuple[str, list[tuple[str, float]]]]] = {}
+  for (sid, target), sources in by_struct_target.items():
+    if not all(src_id in element_ids for src_id, _ in sources):
+      continue
+    candidates_per_target.setdefault(target, []).append((sid, sources))
+
+  for target, candidates in candidates_per_target.items():
+    # When multiple calc structures target the same element AND each
+    # one's summands are all carried by the disclosure, pick the
+    # decomposition with the MOST summands. The fewest-summands variant
+    # is almost always an identity check — fac-calculations BS2 says
+    # `Assets = LiabilitiesAndEquity`, which is meant for VALIDATION,
+    # not COMPUTATION (Assets's value comes from summing real
+    # current/noncurrent leaves, not from a tautology pointing at
+    # another rollup). The decomposition (BS3: `Assets = Current +
+    # Noncurrent`) is the calc that walks down to leaf data. For IS the
+    # tie is moot — every variant has the same summand count after the
+    # hierarchy filter — so structure_id breaks it deterministically.
+    candidates.sort(key=lambda c: (-len(c[1]), c[0]))
+    calculations[target] = candidates[0][1]
   return calculations
+
+
+def _topo_sort_calculations(
+  calculations: dict[str, list[tuple[str, float]]],
+) -> list[str]:
+  """Return calc subtotal targets in topological dependency order.
+
+  When calcs chain (e.g., GrossProfit = Rev - COGS, then OperatingIncome =
+  GrossProfit - OpEx, then NetIncome = OperatingIncome - Tax), the renderer
+  must compute them in order so each depends on the resolved values of the
+  prior ones. Returns target ids in the order they should be computed.
+  Targets with no internal dependencies come first.
+  """
+  targets = set(calculations.keys())
+  # Edge: target → target it depends on (when its summand is itself a
+  # calc target). Inputs that are leaves (not calc targets) don't create
+  # edges.
+  deps: dict[str, set[str]] = {t: set() for t in targets}
+  for target, sources in calculations.items():
+    for src_id, _ in sources:
+      if src_id in targets:
+        deps[target].add(src_id)
+
+  # Kahn's algorithm: emit nodes with no remaining deps; remove from graph.
+  ready = [t for t, d in deps.items() if not d]
+  ordered: list[str] = []
+  while ready:
+    n = ready.pop(0)
+    ordered.append(n)
+    for other, other_deps in deps.items():
+      if n in other_deps:
+        other_deps.discard(n)
+        if not other_deps and other not in ordered and other not in ready:
+          ready.append(other)
+  # Any remaining targets indicate a cycle in the calc DAG — emit them
+  # last in arbitrary order. The renderer's existing behavior is to use
+  # whatever values are present, so a cycle just means one iteration of
+  # stale values rather than a crash.
+  for t in targets:
+    if t not in ordered:
+      ordered.append(t)
+  return ordered
 
 
 def _balance_value(
@@ -934,16 +1339,34 @@ def _build_rows(
   computed_per_period: list[dict[str, float]] = [{} for _ in range(n_periods)]
 
   def _collect(node: _HierarchyNode) -> list[float]:
-    """Walk a node, return list of values (one per period) for rollup."""
+    """Walk a node, return list of values (one per period) for rollup.
+
+    A parent node can receive a value via two distinct reporting paths:
+    (a) directly — a fact mapped at the parent's element_id (the auto-
+    mapper writes one of these per CoA element to its FAC anchor like
+    fac:Revenues), or (b) computed — sum of child values when the
+    breakdown is reported at the leaves. Whichever path is populated
+    in a given period wins; we never sum a real direct fact under empty
+    leaves.
+    """
     if node.children:
       child_totals = [0.0] * n_periods
       for child in node.children:
         child_vals = _collect(child)
         for i in range(n_periods):
           child_totals[i] += child_vals[i]
+      vals = []
       for i in range(n_periods):
-        computed_per_period[i][node.element_id] = child_totals[i]
-      return child_totals
+        direct = _balance_value(
+          period_balances[i], node.element_id, pre_signed, node.balance_type
+        )
+        # Prefer the direct fact when present (mapping landed at this
+        # FAC anchor); fall back to children sum (rs-gaap leaves
+        # populated by equivalence path).
+        chosen = direct if direct != 0.0 else child_totals[i]
+        computed_per_period[i][node.element_id] = chosen
+        vals.append(chosen)
+      return vals
     else:
       vals = []
       for i in range(n_periods):
@@ -958,23 +1381,49 @@ def _build_rows(
     _collect(root)
 
   # Resolve calculations (may chain: Gross Profit → Operating Income → Net Income).
-  # Iterate in definition order; each resolved value is stored so
-  # downstream calculations can reference it.
-  for elem_id, sources in calculations.items():
+  # Topologically sort by dependency so each subtotal is computed AFTER
+  # the subtotals it depends on. Without this, a calc whose summand is
+  # itself a calc target gets a stale value (or zero) when iterated in
+  # dict insertion order.
+  #
+  # If a direct fact has already populated computed_per_period[i][elem_id]
+  # in pass 1 (mapping arc landed at this anchor), prefer it over the
+  # calc result — calc is the fallback path for subtotals not directly
+  # reported, not an override of authoritative direct facts.
+  for elem_id in _topo_sort_calculations(calculations):
+    sources = calculations[elem_id]
     for i in range(n_periods):
-      computed_per_period[i][elem_id] = sum(
+      direct = computed_per_period[i].get(elem_id, 0.0)
+      computed = sum(
         computed_per_period[i].get(src_id, 0.0) * weight for src_id, weight in sources
       )
+      computed_per_period[i][elem_id] = direct if direct != 0.0 else computed
 
-  # Pass 2: build rows in presentation order
+  # Pass 2: build rows in financial-statement order — children first,
+  # then their parent subtotal (post-order). This matches the convention
+  # readers expect: revenues / expenses listed before Gross Profit;
+  # current / non-current sections before Total Assets; everything
+  # before Net Income (which lands at the bottom of the IS). Pre-order
+  # would put rollups at the top with details below, which reads as
+  # an outline rather than a financial statement.
   rows: list[FactRow] = []
 
+  calc_targets = set(calculations.keys())
+
   def _emit(node: _HierarchyNode) -> None:
+    for child in node.children or []:
+      _emit(child)
     # Both subtotal (has children) and leaf rows read the precomputed
     # value from `computed_per_period`. Pass 1 populated it with the
     # rolled-up sum of all descendants for parent nodes, so subtotal
     # rows get the correct aggregate instead of zeros.
     vals = [computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)]
+    # A row is a subtotal if it aggregates other rows by either path:
+    # (a) it has child summands in the disclosure DAG, or (b) it is a
+    # calc-DAG target whose summands live elsewhere in the disclosure
+    # (e.g., fac:GrossProfit's summands fac:Revenues / fac:CostOfRevenue
+    # are siblings, not children). The UI treats both the same way.
+    is_subtotal = bool(node.children) or node.element_id in calc_targets
     rows.append(
       FactRow(
         element_id=node.element_id,
@@ -983,15 +1432,22 @@ def _build_rows(
         classification=node.classification,
         balance_type=node.balance_type,
         values=vals,
-        is_subtotal=bool(node.children),
+        is_subtotal=is_subtotal,
+        is_abstract=node.is_abstract,
         depth=node.depth,
       )
     )
-    for child in node.children or []:
-      _emit(child)
 
   for root in hierarchy:
     _emit(root)
+
+  # Drop rows whose every period value is zero / null. The full
+  # rs-gaap presentation tree includes every concept the seed knows
+  # about; for any given filer only a fraction carry data. Suppressing
+  # the empty rows turns ~600-row trees into the dozen or two lines
+  # that actually populate the statement, which is what readers expect
+  # to see.
+  rows = [r for r in rows if any(v not in (None, 0, 0.0) for v in r.values)]
 
   return rows
 

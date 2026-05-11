@@ -97,9 +97,7 @@ async def live_financial_statement_op(
       status_code=400,
       detail=(
         f"Unknown statement_type '{body.statement_type}'. "
-        f"Valid types: {', '.join(LIVE_STATEMENT_TYPES)}. "
-        "Note: cash_flow_statement is not yet supported for OLTP ledgers; "
-        "use financial-statement-analysis against SEC for cash flow data."
+        f"Valid types: {', '.join(LIVE_STATEMENT_TYPES)}."
       ),
     )
 

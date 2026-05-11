@@ -1,0 +1,95 @@
+{
+  "@context": {
+    "rs": "https://robosystems.ai/vocab/",
+    "checklist": "https://robosystems.ai/taxonomy/rs-gaap/reporting-checklist/v1/",
+    "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "label": {
+      "@id": "http://www.w3.org/2000/01/rdf-schema#label"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "periodType": {
+      "@id": "https://robosystems.ai/vocab/periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract"
+    },
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "structureType": {
+      "@id": "https://robosystems.ai/vocab/structureType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    },
+    "conceptArrangementPattern": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
+    },
+    "financialReportRequiresDisclosure": {
+      "@id": "https://robosystems.ai/vocab/financialReportRequiresDisclosure",
+      "@type": "@id"
+    },
+    "financialReportPossibleDisclosure": {
+      "@id": "https://robosystems.ai/vocab/financialReportPossibleDisclosure",
+      "@type": "@id"
+    }
+  },
+  "standard": "rs-gaap-reporting-checklist",
+  "version": "v1",
+  "taxonomy_type": "rules",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/reporting-checklist/v1/",
+  "origin": "native",
+  "created_at": "2026-05-10",
+  "default_structure_type": "validation_rules",
+  "description": "Reporting Checklist (DR rules) — what disclosures a 'general purpose financial report' requires vs may have. Mirrors Charlie Hoffman's reportingChecklist arcrole vocabulary (financialReport-requiresDisclosure, financialReport-possibleDisclosure). Declares one abstract checklist:GeneralPurposeFinancialReport subject and arcs to the disclosures it scopes.",
+  "@graph": [
+    {
+      "@id": "checklist:GeneralPurposeFinancialReport",
+      "label": "General Purpose Financial Report",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true
+    },
+
+    {
+      "@id": "_:dr-checklist",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dr/ReportingChecklist",
+      "structureName": "Reporting Checklist — General Purpose Financial Report",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "set"
+    },
+
+    {
+      "@id": "checklist:GeneralPurposeFinancialReport",
+      "financialReportRequiresDisclosure": [
+        {"@id": "disclosures:BalanceSheet"},
+        {"@id": "disclosures:IncomeStatement"},
+        {"@id": "disclosures:CashFlowStatement"},
+        {"@id": "disclosures:StatementOfChangesInEquity"},
+        {"@id": "disclosures:DocumentAndEntityInformation"},
+        {"@id": "disclosures:NatureOfOperations"},
+        {"@id": "disclosures:SignificantAccountingPolicies"}
+      ],
+      "financialReportPossibleDisclosure": [
+        {"@id": "disclosures:StatementOfComprehensiveIncome"},
+        {"@id": "disclosures:PropertyPlantAndEquipmentDisclosure"},
+        {"@id": "disclosures:GoodwillRollForward"},
+        {"@id": "disclosures:IntangibleAssetsDisclosure"},
+        {"@id": "disclosures:DebtDisclosure"},
+        {"@id": "disclosures:LongTermDebtMaturities"},
+        {"@id": "disclosures:IncomeTaxDisclosure"},
+        {"@id": "disclosures:DeferredTaxAssetsAndLiabilities"},
+        {"@id": "disclosures:EarningsPerShareDisclosures"},
+        {"@id": "disclosures:SegmentReportingDisclosure"},
+        {"@id": "disclosures:CommitmentsDisclosure"},
+        {"@id": "disclosures:ContingenciesDisclosure"},
+        {"@id": "disclosures:LeasesOfLesseeDisclosure"},
+        {"@id": "disclosures:ShareBasedCompensationDisclosure"},
+        {"@id": "disclosures:RelatedPartyDisclosures"}
+      ]
+    }
+  ]
+}
