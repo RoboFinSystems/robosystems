@@ -138,7 +138,7 @@ lambda = [
     "boto3>=1.39.0,<2.0",           # AWS SDK (all Lambdas)
     "psycopg2-binary>=2.9.0,<3.0",  # PostgreSQL (postgres-init, postgres-rotation)
     "redis>=7.0.0,<8.0",            # Valkey/Redis (valkey-rotation)
-    "urllib3>=2.0.0,<3.0",          # HTTP client (graph-volume-monitor)
+    "urllib3>=2.7.0,<3.0",          # HTTP client (graph-volume-monitor)
 ]
 
 [tool.setuptools]
