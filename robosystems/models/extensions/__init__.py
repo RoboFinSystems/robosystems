@@ -28,6 +28,7 @@ from .entity_taxonomy import EntityTaxonomy
 from .framework import Framework
 from .framework_bridge import FrameworkBridge
 from .framework_package import FrameworkPackage
+from .reporting_style_network import ReportingStyleNetwork
 
 # RoboInvestor extension
 from .roboinvestor import (
@@ -95,6 +96,7 @@ __all__ = [
   "PublishListMember",
   "Report",
   "ReportShare",
+  "ReportingStyleNetwork",
   "Rule",
   "Security",
   "Structure",

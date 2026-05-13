@@ -45,6 +45,11 @@ from robosystems.operations.roboledger.reads.reports import (
   resolve_entity_name,
 )
 from robosystems.operations.roboledger.reports.fact_grid import generate_report_facts
+from robosystems.operations.roboledger.reports.network_picker import (
+  NoNetworkForStatementTypeError,
+  get_render_network,
+  load_graph_reporting_style,
+)
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
@@ -120,137 +125,67 @@ def _evaluate_report_structures(
   return _rule_summary(all_results)
 
 
+_RENDER_TARGET_STATEMENT_TYPES: tuple[str, ...] = (
+  "balance_sheet",
+  "income_statement",
+  "cash_flow_statement",
+  "equity_statement",
+)
+
+
 def _build_structure_mapping(
   session: Session,
-  taxonomy_id: str,
-  mapping_id: str | None = None,
-  arc_type: str = "mapping",
+  reporting_style_id: str,
 ) -> tuple[dict[str, str], dict[str, str]]:
-  """Return (element_id→structure_id, structure_id→fact_set_id) for a taxonomy.
+  """Return (element_id→structure_id, structure_id→fact_set_id) for the
+  Reporting Style composed for this graph.
 
-  Queries associations to find which elements belong to which
-  **render-target** structure (statements + metric), then
-  pre-generates one fact_set_id ULID per structure.
+  Walks ``reporting_style_networks`` to pick one Network per statement
+  type (per §3.2 Phase 1), then enumerates each Network's association
+  rows to map elements → structure id. Pre-generates a fact_set_id
+  ULID per picked structure.
 
-  When ``mapping_id`` is provided, picks **one canonical structure per
-  block_type** by scoring each candidate against the CoA mapping's
-  target elements (the elements the user's Chart of Accounts is mapped
-  to). The structure whose elements have the highest overlap with the
-  mapping wins — that's the variant that best fits the user's data.
-  Without scoring, multiple variants of the same block_type (FAC ships
-  7 IS variants alone) all received elements via dict-overwrite-wins,
-  splitting a coherent statement across multiple incoherent FactSets.
-
-  Excluded by design (block_type filter):
-
-  - **Schedule / rollforward / reconciliation / policy / CoA**: facts
-    for those come from ScheduleService, not reports.
-  - **validation_rules / disclosure / taxonomy_mapping**: XBRL networks
-    with non-rendering roles (formal calculation rules, SEC schedule
-    disclosures, taxonomy crosswalks). Surfaced through their own
-    consumption paths (rule engine, disclosure registry, mapping
-    resolver) — never report-package render targets.
-  - **custom**: too generic to be safe as a default render target.
+  Networks for statement types the Style doesn't compose are skipped
+  silently — a Style is free to omit, say, the comprehensive_income
+  Network. Statement types the renderer asks for that the Style
+  *does* try to render but lacks a composition row for surface as
+  ``NoNetworkForStatementTypeError`` at picker time (the caller wraps
+  the loop and decides whether to fail closed).
   """
+  element_to_structure: dict[str, str] = {}
+  structure_to_factset: dict[str, str] = {}
+  picked_structure_ids: list[str] = []
+
+  for statement_type in _RENDER_TARGET_STATEMENT_TYPES:
+    try:
+      network = get_render_network(session, reporting_style_id, statement_type)
+    except NoNetworkForStatementTypeError:
+      # Style doesn't compose this statement type — skip silently so a
+      # Style that ships without (say) an equity Network still renders.
+      continue
+    picked_structure_ids.append(network.structure_id)
+
+  if not picked_structure_ids:
+    return {}, {}
+
   rows = session.execute(
     text(
       """
       SELECT DISTINCT
-        s.id AS structure_id,
-        s.structure_type,
+        a.structure_id AS structure_id,
         a.to_element_id AS element_id
-      FROM structures s
-      JOIN associations a ON a.structure_id = s.id
-      WHERE s.taxonomy_id = :tid
-        AND s.structure_type IN (
-          'income_statement', 'balance_sheet',
-          'cash_flow_statement', 'equity_statement',
-          'metric'
-        )
-        AND s.is_active = true
+      FROM associations a
+      WHERE a.structure_id = ANY(:struct_ids)
       """
     ),
-    {"tid": taxonomy_id},
+    {"struct_ids": picked_structure_ids},
   ).fetchall()
 
-  if not rows:
-    return {}, {}
-
-  canonical_by_type = _select_canonical_render_targets(
-    session, rows, mapping_id=mapping_id, arc_type=arc_type
-  )
-  canonical_ids = set(canonical_by_type.values())
-
-  element_to_structure: dict[str, str] = {
-    row.element_id: row.structure_id
-    for row in rows
-    if row.structure_id in canonical_ids
-  }
-  structure_to_factset: dict[str, str] = {
-    structure_id: generate_prefixed_ulid("fs") for structure_id in canonical_ids
+  element_to_structure = {row.element_id: row.structure_id for row in rows}
+  structure_to_factset = {
+    sid: generate_prefixed_ulid("fs") for sid in picked_structure_ids
   }
   return element_to_structure, structure_to_factset
-
-
-def _select_canonical_render_targets(
-  session: Session,
-  rows,
-  *,
-  mapping_id: str | None,
-  arc_type: str = "mapping",
-) -> dict[str, str]:
-  """Pick one canonical structure per block_type from the candidate rows.
-
-  When ``mapping_id`` is provided, scores each candidate by counting
-  elements that overlap with the CoA mapping's target element set
-  (associations of the given ``arc_type``: ``'mapping'`` for FAC, or
-  ``'equivalence'`` for rs-gaap). The candidate with the highest
-  overlap wins per block_type — picks the structure whose elements
-  best match what the user's CoA is mapped to.
-
-  When ``mapping_id`` is null or returns no targets, falls back to the
-  candidate with the most elements per block_type (a reasonable proxy
-  for "richest variant"). Final tie-break is the lexicographically
-  smallest structure_id for determinism across runs.
-
-  Returns ``{block_type: structure_id}`` for every block_type that has
-  at least one candidate.
-  """
-  # Group element sets per (structure_type, structure_id)
-  per_struct_elems: dict[tuple[str, str], set[str]] = {}
-  for r in rows:
-    per_struct_elems.setdefault((r.structure_type, r.structure_id), set()).add(
-      r.element_id
-    )
-
-  mapping_targets: set[str] = set()
-  if mapping_id:
-    target_rows = session.execute(
-      text(
-        """
-        SELECT DISTINCT to_element_id AS element_id
-        FROM associations
-        WHERE structure_id = :mid AND association_type = :arc_type
-        """
-      ),
-      {"mid": mapping_id, "arc_type": arc_type},
-    ).fetchall()
-    mapping_targets = {r.element_id for r in target_rows}
-
-  # Per block_type, pick the structure with the highest score.
-  candidates_by_type: dict[str, list[tuple[int, int, str]]] = {}
-  for (block_type, structure_id), elems in per_struct_elems.items():
-    coverage = len(elems & mapping_targets) if mapping_targets else 0
-    size = len(elems)
-    # Sort key: highest coverage, then largest size, then earliest id.
-    candidates_by_type.setdefault(block_type, []).append((coverage, size, structure_id))
-
-  canonical: dict[str, str] = {}
-  for block_type, scored in candidates_by_type.items():
-    # Highest coverage first; ties broken by largest size, then by id (asc).
-    scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
-    canonical[block_type] = scored[0][2]
-  return canonical
 
 
 def _persist_report_facts(
@@ -357,14 +292,6 @@ def create_report(
   if tax_row is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
 
-  # rs-gaap-presentation reports walk CoA→rs-gaap equivalence arcs;
-  # everything else (fac-presentation, legacy us-gaap) walks CoA→FAC
-  # mapping arcs. The auto-mapper writes both per CoA, so callers don't
-  # need to remap.
-  arc_type = (
-    "equivalence" if (tax_row.standard or "").startswith("rs-gaap") else "mapping"
-  )
-
   periods = build_periods(
     body.period_start, body.period_end, body.comparative, body.periods
   )
@@ -392,8 +319,9 @@ def create_report(
   )
 
   entity_id = _get_entity_id(session, graph_id)
+  reporting_style_id = load_graph_reporting_style(graph_id)
   element_to_structure, structure_to_factset = _build_structure_mapping(
-    session, body.taxonomy_id, mapping_id=body.mapping_id, arc_type=arc_type
+    session, reporting_style_id
   )
   _persist_report_facts(
     session,
@@ -483,18 +411,6 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
-  # Match create_report's arc-type selection so a regenerate honors the
-  # same FAC-vs-rs-gaap target as the original report.
-  tax_row = session.execute(
-    text("SELECT standard FROM taxonomies WHERE id = :tid LIMIT 1"),
-    {"tid": report_def.taxonomy_id},
-  ).fetchone()
-  arc_type = (
-    "equivalence"
-    if (tax_row and (tax_row.standard or "").startswith("rs-gaap"))
-    else "mapping"
-  )
-
   facts = generate_report_facts(
     session=session,
     taxonomy_id=report_def.taxonomy_id,
@@ -503,11 +419,9 @@ def regenerate_report(
   )
 
   entity_id = _get_entity_id(session, graph_id)
+  reporting_style_id = load_graph_reporting_style(graph_id)
   element_to_structure, structure_to_factset = _build_structure_mapping(
-    session,
-    report_def.taxonomy_id,
-    mapping_id=report_def.mapping_id,
-    arc_type=arc_type,
+    session, reporting_style_id
   )
   # Stale FactSet rows from the prior generation must be cleared before
   # new rows are inserted with freshly-minted ULIDs.

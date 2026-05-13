@@ -35,6 +35,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
+from robosystems.config.constants import ReportingStyleConstants
 from robosystems.config.graph_tier import GraphTier
 from robosystems.database import Model
 
@@ -176,6 +177,21 @@ class Graph(Model):
   # listed (standard, version) pair is copied from public.* into the tenant
   # schema at provision time. See robosystems/taxonomy/pins.py.
   taxonomy_pin = Column(JSONB, nullable=True)
+
+  # Reporting Style — Charlie Hoffman's term for the bundle a company
+  # picks (e.g. Default / Small Private Company / Banking). The value is
+  # a Structure id in the per-tenant extensions schema; the renderer
+  # picker uses it to resolve which Network fills each statement-type
+  # slot via ``reporting_style_networks``. NOT NULL because every entity
+  # graph must have a Reporting Style the way it has a fiscal year start
+  # month — see ``local/docs/specs/roadmap.md`` §3.2. No DB-level FK
+  # because ``structures`` lives in a separate database (extensions);
+  # validated at application layer.
+  reporting_style_id = Column(
+    String,
+    nullable=False,
+    default=ReportingStyleConstants.DEFAULT_STYLE_ID,
+  )
 
   # Per-graph autopilot for the period-boundary obligation promoter.
   # When False (default — co-pilot), the sensor flips matured `pending`

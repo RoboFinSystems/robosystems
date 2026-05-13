@@ -744,9 +744,12 @@ class LedgerQuery:
     structure_type: str,
   ) -> Statement | None:
     """Rendered financial statement for a report + structure_type."""
+    graph_id = require_graph_id(info)
     try:
       with _open_session(info, "roboledger") as session:
-        response = reads_reports.get_statement(session, report_id, structure_type)
+        response = reads_reports.get_statement(
+          session, graph_id, report_id, structure_type
+        )
     except reads_reports.StatementStructureNotFoundError:
       return None
     except (ValueError, ProgrammingError):

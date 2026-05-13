@@ -168,6 +168,10 @@ _LIBRARY_IMMUTABLE_TABLES = (
   "classifications",
   "association_classifications",
   "rules",
+  # Reporting Style composition (Phase 1 of §3.2). Library-seeded rows
+  # pin Networks per statement_type for each Style; tenant writes are
+  # blocked so customer-authored Styles use their own non-seeded rows.
+  "reporting_style_networks",
 )
 
 
@@ -265,6 +269,9 @@ def _widen_library_checks(conn, schema: str) -> None:
     # from presentation): formal calculation rules, named SEC/regulatory
     # disclosures, crosswalks between taxonomies.
     "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+    # Reporting Style — the bundle a company picks (Phase 1 of §3.2);
+    # composes Networks per statement_type via reporting_style_networks.
+    "'reporting_style', "
     # Escape hatch
     "'custom'"
     ")"

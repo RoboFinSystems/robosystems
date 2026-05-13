@@ -1,0 +1,119 @@
+"""Reporting Style → Network picker (§3.2 Phase 1).
+
+The render-target resolver: given the graph's Reporting Style and a
+statement type, return the Network Structure the renderer should walk.
+Single source of truth for both the saved-report path
+(``commands/reports.py``) and the live-statement path
+(``reports/fact_grid.py``); replaces the prior "latest active by
+structure_type" + CoA-coverage scoring fallbacks.
+
+Composition lives in ``reporting_style_networks`` (one row per
+``(reporting_style_id, statement_type)``); the Default Style ships
+seeded with rs-gaap Classified BS / Multi-step IS / Indirect CF /
+Equity Roll Forward. Other Styles are placeholders until library or
+customer authoring fills them in.
+
+The picker runs strict: a missing composition row raises
+``NoNetworkForStatementTypeError``. Reporting Style hasn't shipped to
+prod, so there's no legacy tenant the picker needs to be lenient with;
+local dev tenants pick up the composition by re-provisioning.
+"""
+
+from dataclasses import dataclass
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+
+class NoNetworkForStatementTypeError(LookupError):
+  """Raised when a Reporting Style has no Network composed for this statement."""
+
+  def __init__(self, reporting_style_id: str, statement_type: str) -> None:
+    super().__init__(
+      f"Reporting Style {reporting_style_id} has no Network composed "
+      f"for statement_type={statement_type!r}. Seed the composition in "
+      f"reporting_style_networks (Phase 1 of §3.2)."
+    )
+    self.reporting_style_id = reporting_style_id
+    self.statement_type = statement_type
+
+
+@dataclass(frozen=True)
+class RenderNetwork:
+  """The Network resolved for one (Reporting Style, statement_type) pair."""
+
+  structure_id: str
+  name: str
+  concept_arrangement: str | None
+
+
+def get_render_network(
+  session: Session,
+  reporting_style_id: str,
+  statement_type: str,
+) -> RenderNetwork:
+  """Resolve which Network this Reporting Style composes for the given
+  statement type.
+
+  Single join against ``reporting_style_networks ⋈ structures``. Filters
+  on ``structures.is_active`` so a deactivated Network composition row
+  reads as missing (forces the caller to author a replacement rather
+  than silently rendering against a stale Network).
+
+  Args:
+      session: Extensions database session (tenant schema active via
+          ``SET search_path``). The same session that holds the rest of
+          the renderer's reads — no fan-out to platform DB.
+      reporting_style_id: The graph's ``Graph.reporting_style_id``. The
+          column is NOT NULL with the Default Style as server default,
+          so callers can pass it verbatim.
+      statement_type: One of ``balance_sheet`` / ``income_statement`` /
+          ``cash_flow_statement`` / ``equity_statement`` /
+          ``comprehensive_income``.
+
+  Raises:
+      NoNetworkForStatementTypeError: when the composition row is
+          missing or the target Network is inactive.
+  """
+  row = session.execute(
+    text(
+      """
+      SELECT s.id, s.name, s.concept_arrangement
+      FROM reporting_style_networks rsn
+      JOIN structures s ON s.id = rsn.network_id
+      WHERE rsn.reporting_style_id = :style_id
+        AND rsn.statement_type = :stmt_type
+        AND s.is_active = true
+      """
+    ),
+    {"style_id": reporting_style_id, "stmt_type": statement_type},
+  ).fetchone()
+
+  if row is None:
+    raise NoNetworkForStatementTypeError(reporting_style_id, statement_type)
+
+  return RenderNetwork(
+    structure_id=row.id,
+    name=row.name,
+    concept_arrangement=row.concept_arrangement,
+  )
+
+
+def load_graph_reporting_style(graph_id: str) -> str:
+  """Fetch ``graphs.reporting_style_id`` from the platform DB.
+
+  Helper for callers that have a graph_id but not a platform session.
+  Opens a short-lived session and returns the Style id; the actual
+  picker query runs against the caller's extensions session.
+
+  Raises:
+      LookupError: when the graph doesn't exist or has been deprovisioned.
+  """
+  from robosystems.database import platform_session
+  from robosystems.models.core.graph.graph import Graph
+
+  with platform_session() as pdb:
+    graph = pdb.query(Graph).filter(Graph.graph_id == graph_id).first()
+    if graph is None:
+      raise LookupError(f"Graph {graph_id!r} not found in platform DB.")
+    return str(graph.reporting_style_id)

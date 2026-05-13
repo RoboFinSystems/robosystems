@@ -158,9 +158,15 @@ class TestGetLiveFinancialStatement:
       _row("Revenue", [50.0, None]),
     ]
 
-    with patch(
-      "robosystems.operations.roboledger.reads.reports.generate_adhoc_private_statement",
-      return_value=(mock_grid, 3),
+    with (
+      patch(
+        "robosystems.operations.roboledger.reads.reports.generate_adhoc_private_statement",
+        return_value=(mock_grid, 3),
+      ),
+      patch(
+        "robosystems.operations.roboledger.reports.network_picker.load_graph_reporting_style",
+        return_value="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
+      ),
     ):
       resp = get_live_financial_statement(
         session,
@@ -196,9 +202,15 @@ class TestGetLiveFinancialStatement:
     mock_grid = MagicMock()
     mock_grid.rows = rows
 
-    with patch(
-      "robosystems.operations.roboledger.reads.reports.generate_adhoc_private_statement",
-      return_value=(mock_grid, 0),
+    with (
+      patch(
+        "robosystems.operations.roboledger.reads.reports.generate_adhoc_private_statement",
+        return_value=(mock_grid, 0),
+      ),
+      patch(
+        "robosystems.operations.roboledger.reports.network_picker.load_graph_reporting_style",
+        return_value="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
+      ),
     ):
       resp = get_live_financial_statement(
         session,
@@ -215,9 +227,15 @@ class TestGetLiveFinancialStatement:
   @pytest.mark.unit
   def test_coa_mapping_missing_propagates(self):
     session = MagicMock()
-    with patch(
-      "robosystems.operations.roboledger.reads.reports.generate_adhoc_private_statement",
-      side_effect=CoaMappingNotFoundError("missing mapping"),
+    with (
+      patch(
+        "robosystems.operations.roboledger.reads.reports.generate_adhoc_private_statement",
+        side_effect=CoaMappingNotFoundError("missing mapping"),
+      ),
+      patch(
+        "robosystems.operations.roboledger.reports.network_picker.load_graph_reporting_style",
+        return_value="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
+      ),
     ):
       with pytest.raises(CoaMappingNotFoundError):
         get_live_financial_statement(

@@ -93,7 +93,7 @@ def generate_adhoc_private_statement(
   *,
   statement_type: str,
   periods: list[FactPeriodSpec],
-  taxonomy_id: str | None = None,
+  reporting_style_id: str,
 ):
   """Generate an ad-hoc private-company statement directly from OLTP data.
 
@@ -102,10 +102,16 @@ def generate_adhoc_private_statement(
   active CoA→GAAP mapping. Used by the `live-financial-statement`
   operation (both REST and MCP) — no saved Report needed.
 
-  When ``taxonomy_id`` is None, resolves to the rs-gaap-presentation
-  taxonomy (default tenant pin) — gives the renderer a stable target
-  with full Disclosure structures. Callers that want fac-presentation
-  or another taxonomy can pass the id explicitly.
+  The Network is resolved via the graph's Reporting Style composition
+  (§3.2 Phase 1) — the renderer doesn't pick among same-typed structures
+  by recency anymore. Pass ``Graph.reporting_style_id`` from the platform
+  DB.
+
+  ``generate_report_facts`` still wants a ``taxonomy_id`` to scope its
+  CoA→GAAP arc walk; rs-gaap-presentation remains the canonical target
+  taxonomy (every Default Style Network lives in it). Other Styles that
+  cite Networks in a different taxonomy will need this resolved per
+  picked Network in a future commit.
 
   Returns the rendered structure grid plus an `unmapped_count` counter.
   Raises `CoaMappingNotFoundError` if the tenant hasn't completed the
@@ -119,20 +125,17 @@ def generate_adhoc_private_statement(
       "No CoA→GAAP mapping found. Run the mapping workflow first."
     )
 
-  resolved_taxonomy_id = taxonomy_id
-  if resolved_taxonomy_id is None:
-    row = session.execute(
-      text(
-        "SELECT id FROM taxonomies WHERE standard = 'rs-gaap-presentation' "
-        "ORDER BY version DESC LIMIT 1"
-      )
-    ).fetchone()
-    if row is not None:
-      resolved_taxonomy_id = row.id
+  taxonomy_row = session.execute(
+    text(
+      "SELECT id FROM taxonomies WHERE standard = 'rs-gaap-presentation' "
+      "ORDER BY version DESC LIMIT 1"
+    )
+  ).fetchone()
+  resolved_taxonomy_id = taxonomy_row.id if taxonomy_row else ""
 
   facts = generate_report_facts(
     session=session,
-    taxonomy_id=resolved_taxonomy_id or "",
+    taxonomy_id=resolved_taxonomy_id,
     mapping_id=mapping.id,
     periods=periods,
   )
@@ -142,7 +145,7 @@ def generate_adhoc_private_statement(
     facts=facts.facts,
     structure_type=statement_type,
     periods=periods,
-    taxonomy_id=resolved_taxonomy_id,
+    reporting_style_id=reporting_style_id,
   )
 
   return grid, facts.unmapped_count
@@ -395,13 +398,23 @@ def get_report_package(
 
 
 def get_statement(
-  session: Session, report_id: str, structure_type: str
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  structure_type: str,
 ) -> StatementResponse | None:
   """Render a financial statement for a report + structure_type.
 
   Returns `None` when the report itself doesn't exist. Raises
   `StatementStructureNotFoundError` when the structure_type isn't in
   the report's taxonomy. The caller translates both into HTTP 404s.
+
+  ``graph_id`` is required to resolve the graph's Reporting Style (§3.2
+  Phase 1); the picker reads ``Graph.reporting_style_id`` from the
+  platform DB and the renderer uses it to pick the Network for this
+  statement type. Saved Reports don't need to re-pick because Phase 1
+  defers ``change-reporting-style`` to Phase 2 — until then, re-rendering
+  is stable across calls.
   """
   if structure_type not in VALID_STRUCTURE_TYPES:
     raise ValueError(
@@ -478,12 +491,17 @@ def get_statement(
       periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
     )
 
+  from robosystems.operations.roboledger.reports.network_picker import (
+    load_graph_reporting_style,
+  )
+
+  reporting_style_id = load_graph_reporting_style(graph_id)
   grid = render_structure_view(
     session=session,
     facts=facts,
     structure_type=structure_type,
     periods=periods,
-    taxonomy_id=report_def.taxonomy_id,
+    reporting_style_id=reporting_style_id,
   )
 
   if not grid.structure_id:
@@ -618,11 +636,17 @@ def get_live_financial_statement(
   Raises ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists;
   the caller translates to a user-facing tip (400/422).
   """
+  from robosystems.operations.roboledger.reports.network_picker import (
+    load_graph_reporting_style,
+  )
+
+  reporting_style_id = load_graph_reporting_style(graph_id)
   periods = build_current_and_prior_periods(period_start, period_end)
   grid, unmapped_count = generate_adhoc_private_statement(
     session,
     statement_type=statement_type,
     periods=periods,
+    reporting_style_id=reporting_style_id,
   )
 
   facts: list[LiveStatementFactRow] = []
