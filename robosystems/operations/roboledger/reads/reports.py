@@ -749,8 +749,19 @@ def _best_is_subtotal(
     if best is None:
       best = f
       continue
-    f_val = abs(f.values[0] if f.values and f.values[0] is not None else 0.0)
-    b_val = abs(best.values[0] if best.values and best.values[0] is not None else 0.0)
+    # Use the max absolute value across ALL periods, not just values[0].
+    # For multi-period statements where the first column is zero (TTM
+    # views, year-of-incorporation patterns), comparing only values[0]
+    # picks the wrong anchor and the synthesized Net Income row computes
+    # against an unintended subtotal.
+    f_val = max(
+      (abs(v) for v in (f.values or []) if v is not None),
+      default=0.0,
+    )
+    b_val = max(
+      (abs(v) for v in (best.values or []) if v is not None),
+      default=0.0,
+    )
     if f.depth < best.depth:
       best = f
     elif f.depth == best.depth:

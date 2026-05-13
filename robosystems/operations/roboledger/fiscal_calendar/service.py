@@ -740,13 +740,16 @@ class FiscalCalendarService:
         sid = meta.get("schedule_id")
         period_end_iso = meta.get("period_end") or ""
         # period_end is "YYYY-MM-DD" — derive "YYYY-MM" for the response.
-        period = period_end_iso[:7] if period_end_iso else ""
+        # Named `evt_period` to avoid shadowing the outer `period` parameter
+        # (the one this gate is checking) — latent-bug avoidance for any
+        # post-loop logic that needs the outer value.
+        evt_period = period_end_iso[:7] if period_end_iso else ""
         pending_sample.append(
           PendingObligationDetail(
             event_id=str(evt.id),
             schedule_id=str(sid) if sid else None,
             schedule_name=schedule_names.get(sid) if sid else None,
-            period=period,
+            period=evt_period,
           )
         )
       # earliest = the period of the first pending event (already

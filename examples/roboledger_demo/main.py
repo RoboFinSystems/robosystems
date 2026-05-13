@@ -330,10 +330,9 @@ def create_agents(graph_id: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 # Account codes used by the typed-event branching logic — defined as
-# constants so the cash / AR / AP semantics are visible at the call site
+# constants so the cash / AP semantics are visible at the call site
 # rather than buried inside string comparisons.
 _CASH_CODE = "1000"
-_AR_CODE = "1100"
 _AP_CODE = "2000"
 
 
