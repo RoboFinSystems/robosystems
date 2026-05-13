@@ -383,6 +383,65 @@ def flatten_sales_receipt_headers(raw: list[Any]) -> list[dict[str, Any]]:
   return _flatten_txn_header(raw, "SalesReceipt", "CustomerRef", "customer")
 
 
+# Maps QB Purchase.PaymentType to the tx_type strings JournalReport surfaces
+# for that payment method. Each Purchase emits multiple header rows (one
+# per candidate tx_type) so the LEFT JOIN in transactions.sql matches
+# whichever flavor the JournalReport produced for that row. JournalReport's
+# emit varies between "Expense" / "Cash Expense" depending on company
+# settings, so we cover both.
+_PURCHASE_PAYMENT_TYPE_TX_TYPES: dict[str, list[str]] = {
+  "Cash": ["Cash Expense", "Expense"],
+  "Check": ["Check"],
+  "CreditCard": ["Credit Card Expense"],
+}
+
+
+def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
+  """Flatten QB Purchase entities to header rows for agent enrichment.
+
+  Purchase is QB's umbrella for cash-side expenses: regular Expense,
+  Cash Expense, Check, and Credit Card Expense. The PaymentType
+  discriminator selects which tx_type variants JournalReport surfaces
+  for the row. We emit one row per (Purchase, candidate_tx_type) pair
+  so the LEFT JOIN in transactions.sql matches by (tx_type, tx_id)
+  regardless of which flavor JournalReport chose.
+
+  ``EntityRef`` carries the counterparty. Per QB API, EntityRef.type
+  can be "Customer", "Vendor", or "Employee" — we surface whichever
+  is present rather than hardcoding a single agent_type so all three
+  flow through to ``agent_external_id`` on the captured event.
+  """
+  rows: list[dict[str, Any]] = []
+  for raw_obj in raw:
+    data = raw_obj.to_dict() if hasattr(raw_obj, "to_dict") else raw_obj
+    tx_id = str(data.get("Id", ""))
+    entity_ref = data.get("EntityRef") or {}
+    payment_type = str(data.get("PaymentType", ""))
+    candidate_tx_types = _PURCHASE_PAYMENT_TYPE_TX_TYPES.get(
+      payment_type, [payment_type or "Expense"]
+    )
+    entity_type_raw = str(entity_ref.get("type", "")).lower() if entity_ref else ""
+    agent_type = (
+      entity_type_raw
+      if entity_type_raw in {"customer", "vendor", "employee"}
+      else "vendor"
+    )
+    base_row = {
+      "tx_id": tx_id,
+      "external_id": f"Purchase_{tx_id}",
+      "txn_date": data.get("TxnDate", ""),
+      "doc_number": data.get("DocNumber", ""),
+      "total_amount": float(data.get("TotalAmt", 0) or 0),
+      "currency": (data.get("CurrencyRef") or {}).get("value", "USD"),
+      "memo": data.get("PrivateNote", "") or "",
+      "agent_external_id": str(entity_ref.get("value", "")) if entity_ref else "",
+      "agent_type": agent_type,
+    }
+    for candidate in candidate_tx_types:
+      rows.append({**base_row, "tx_type": candidate})
+  return rows
+
+
 def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
   """Flatten CompanyInfo objects into rows matching raw_company_info schema.
 
@@ -535,6 +594,7 @@ def write_extract_parquet(
   payment_headers: list[dict[str, Any]] | None = None,
   bill_payment_headers: list[dict[str, Any]] | None = None,
   sales_receipt_headers: list[dict[str, Any]] | None = None,
+  purchase_headers: list[dict[str, Any]] | None = None,
 ) -> None:
   """Write extracted QB data as parquet files.
 
@@ -580,6 +640,9 @@ def write_extract_parquet(
   )
   _to_dataframe(sales_receipt_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
     output_dir / "raw_sales_receipt_headers.parquet", index=False
+  )
+  _to_dataframe(purchase_headers or [], _TXN_HEADER_SCHEMA).to_parquet(
+    output_dir / "raw_purchase_headers.parquet", index=False
   )
 
   logger.info(

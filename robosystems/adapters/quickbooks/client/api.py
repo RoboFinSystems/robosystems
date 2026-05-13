@@ -250,6 +250,18 @@ class QBClient:
     where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
     return self._paginate(SalesReceipt, where_clause=where)
 
+  def get_purchases(self, start_date: str, end_date: str):
+    """Fetch Purchase entities — covers QB's Expense / Check / Cash Expense /
+    Credit Card Expense in JournalReport. Each carries an EntityRef (the
+    vendor or customer paid) plus a PaymentType discriminator
+    ("Cash" | "Check" | "CreditCard"). Used to populate `agent_external_id`
+    on the JournalReport-derived events the cmd_create_event handler
+    captures."""
+    from quickbooks.objects.purchase import Purchase
+
+    where = f"TxnDate >= '{start_date}' AND TxnDate <= '{end_date}'"
+    return self._paginate(Purchase, where_clause=where)
+
   def get_journal_entries(
     self, start_date: str | None = None, end_date: str | None = None
   ):

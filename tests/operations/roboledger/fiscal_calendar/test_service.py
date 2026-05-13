@@ -108,7 +108,8 @@ class _Query:
     return rows[0] if rows else None
 
   def all(self):
-    return self._apply_filters(list(self._session._objects.get(self._model, [])))
+    rows = self._apply_filters(list(self._session._objects.get(self._model, [])))
+    return self._maybe_apply_limit(rows)
 
   def first(self):
     rows = self._apply_filters(list(self._session._objects.get(self._model, [])))
@@ -119,6 +120,14 @@ class _Query:
 
   def order_by(self, *args):
     return self
+
+  def limit(self, n):
+    self._limit = n
+    return self
+
+  def _maybe_apply_limit(self, rows: list) -> list:
+    limit = getattr(self, "_limit", None)
+    return rows[:limit] if limit is not None else rows
 
 
 # ────────────────────────────────────────────────────────────────────────────

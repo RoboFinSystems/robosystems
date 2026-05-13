@@ -35,6 +35,14 @@ sales_receipt_headers as (
   select tx_type, tx_id, agent_external_id, agent_type
   from {{ ref('stg_qb_sales_receipt_headers') }}
 ),
+purchase_headers as (
+  -- Purchase covers QB's Expense / Cash Expense / Check / Credit Card Expense.
+  -- The Python flattener emits multiple header rows per Purchase (one per
+  -- candidate tx_type JournalReport might use for that PaymentType), so the
+  -- LEFT JOIN below resolves to whichever flavor matched.
+  select tx_type, tx_id, agent_external_id, agent_type
+  from {{ ref('stg_qb_purchase_headers') }}
+),
 all_headers as (
   select * from invoice_headers
   union all
@@ -45,6 +53,8 @@ all_headers as (
   select * from bill_payment_headers
   union all
   select * from sales_receipt_headers
+  union all
+  select * from purchase_headers
 )
 
 select
