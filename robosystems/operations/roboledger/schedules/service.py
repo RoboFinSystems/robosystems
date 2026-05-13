@@ -242,6 +242,26 @@ class ScheduleService:
     fact_set_id = generate_prefixed_ulid("fs")
     entity_id = self._get_entity_id(session)
 
+    # Block = Fact Set. Per §6.5: create the fact_sets row first so the
+    # facts we stamp below reference an existing parent; lets us enforce
+    # facts.fact_set_id → fact_sets.id as a real FK without orphan risk.
+    # Explicit flush so the FactSet row hits the DB before the bulk
+    # fact INSERTs — SQLAlchemy's session-flush ordering is by INSERT
+    # statement type, not by FK dependency, and would otherwise emit
+    # facts INSERTs ahead of the FactSet row in the same flush.
+    session.add(
+      FactSet(
+        id=fact_set_id,
+        structure_id=structure.id,
+        period_start=period_start,
+        period_end=period_end,
+        factset_type="schedule",
+        entity_id=entity_id,
+        created_by=created_by,
+      )
+    )
+    session.flush()
+
     periods = _generate_monthly_periods(period_start, period_end)
     amount_dollars = round(monthly_amount / 100.0, 2)
     original_dollars = (
@@ -352,20 +372,6 @@ class ScheduleService:
             fact_scope=fact_scope,
           )
         )
-
-    # Block = Fact Set. One fact_sets row per Information Block creation
-    # event; reuses the ULID already stamped on every fact above.
-    session.add(
-      FactSet(
-        id=fact_set_id,
-        structure_id=structure.id,
-        period_start=period_start,
-        period_end=period_end,
-        factset_type="schedule",
-        entity_id=entity_id,
-        created_by=created_by,
-      )
-    )
 
     # Auto-generate a SumEquals rule so the engine can verify that
     # the sum of period debit facts equals original_amount.

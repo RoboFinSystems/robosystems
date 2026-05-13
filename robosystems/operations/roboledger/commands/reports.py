@@ -45,6 +45,11 @@ from robosystems.operations.roboledger.reads.reports import (
   resolve_entity_name,
 )
 from robosystems.operations.roboledger.reports.fact_grid import generate_report_facts
+from robosystems.operations.roboledger.reports.network_picker import (
+  NoNetworkForStatementTypeError,
+  get_render_network,
+  load_graph_reporting_style,
+)
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
@@ -120,137 +125,73 @@ def _evaluate_report_structures(
   return _rule_summary(all_results)
 
 
+_RENDER_TARGET_STATEMENT_TYPES: tuple[str, ...] = (
+  "balance_sheet",
+  "income_statement",
+  "cash_flow_statement",
+  "equity_statement",
+)
+
+
 def _build_structure_mapping(
   session: Session,
-  taxonomy_id: str,
-  mapping_id: str | None = None,
-  arc_type: str = "mapping",
+  reporting_style_id: str,
 ) -> tuple[dict[str, str], dict[str, str]]:
-  """Return (element_id→structure_id, structure_id→fact_set_id) for a taxonomy.
+  """Return (element_id→structure_id, structure_id→fact_set_id) for the
+  Reporting Style composed for this graph.
 
-  Queries associations to find which elements belong to which
-  **render-target** structure (statements + metric), then
-  pre-generates one fact_set_id ULID per structure.
+  Walks ``reporting_style_networks`` to pick one Network per statement
+  type (per §3.2 Phase 1), then enumerates each Network's association
+  rows to map elements → structure id. Pre-generates a fact_set_id
+  ULID per picked structure.
 
-  When ``mapping_id`` is provided, picks **one canonical structure per
-  block_type** by scoring each candidate against the CoA mapping's
-  target elements (the elements the user's Chart of Accounts is mapped
-  to). The structure whose elements have the highest overlap with the
-  mapping wins — that's the variant that best fits the user's data.
-  Without scoring, multiple variants of the same block_type (FAC ships
-  7 IS variants alone) all received elements via dict-overwrite-wins,
-  splitting a coherent statement across multiple incoherent FactSets.
-
-  Excluded by design (block_type filter):
-
-  - **Schedule / rollforward / reconciliation / policy / CoA**: facts
-    for those come from ScheduleService, not reports.
-  - **validation_rules / disclosure / taxonomy_mapping**: XBRL networks
-    with non-rendering roles (formal calculation rules, SEC schedule
-    disclosures, taxonomy crosswalks). Surfaced through their own
-    consumption paths (rule engine, disclosure registry, mapping
-    resolver) — never report-package render targets.
-  - **custom**: too generic to be safe as a default render target.
+  Networks for statement types the Style doesn't compose are skipped
+  silently — a Style is free to omit, say, the comprehensive_income
+  Network. Statement types the renderer asks for that the Style
+  *does* try to render but lacks a composition row for surface as
+  ``NoNetworkForStatementTypeError`` at picker time (the caller wraps
+  the loop and decides whether to fail closed).
   """
+  element_to_structure: dict[str, str] = {}
+  structure_to_factset: dict[str, str] = {}
+  picked_structure_ids: list[str] = []
+
+  for statement_type in _RENDER_TARGET_STATEMENT_TYPES:
+    try:
+      network = get_render_network(session, reporting_style_id, statement_type)
+    except NoNetworkForStatementTypeError:
+      # Style doesn't compose this statement type — skip silently so a
+      # Style that ships without (say) an equity Network still renders.
+      # Safety net: ``change_reporting_style_cmd`` (Phase 2 of §3.2)
+      # validates that every required statement_type has a composition
+      # row before flipping ``graphs.reporting_style_id``, so by the time
+      # this loop runs the only `NoNetworkForStatementTypeError` we
+      # should see is for genuinely optional types (e.g. a Style that
+      # deliberately omits ``comprehensive_income``).
+      continue
+    picked_structure_ids.append(network.structure_id)
+
+  if not picked_structure_ids:
+    return {}, {}
+
   rows = session.execute(
     text(
       """
       SELECT DISTINCT
-        s.id AS structure_id,
-        s.structure_type,
+        a.structure_id AS structure_id,
         a.to_element_id AS element_id
-      FROM structures s
-      JOIN associations a ON a.structure_id = s.id
-      WHERE s.taxonomy_id = :tid
-        AND s.structure_type IN (
-          'income_statement', 'balance_sheet',
-          'cash_flow_statement', 'equity_statement',
-          'metric'
-        )
-        AND s.is_active = true
+      FROM associations a
+      WHERE a.structure_id = ANY(:struct_ids)
       """
     ),
-    {"tid": taxonomy_id},
+    {"struct_ids": picked_structure_ids},
   ).fetchall()
 
-  if not rows:
-    return {}, {}
-
-  canonical_by_type = _select_canonical_render_targets(
-    session, rows, mapping_id=mapping_id, arc_type=arc_type
-  )
-  canonical_ids = set(canonical_by_type.values())
-
-  element_to_structure: dict[str, str] = {
-    row.element_id: row.structure_id
-    for row in rows
-    if row.structure_id in canonical_ids
-  }
-  structure_to_factset: dict[str, str] = {
-    structure_id: generate_prefixed_ulid("fs") for structure_id in canonical_ids
+  element_to_structure = {row.element_id: row.structure_id for row in rows}
+  structure_to_factset = {
+    sid: generate_prefixed_ulid("fs") for sid in picked_structure_ids
   }
   return element_to_structure, structure_to_factset
-
-
-def _select_canonical_render_targets(
-  session: Session,
-  rows,
-  *,
-  mapping_id: str | None,
-  arc_type: str = "mapping",
-) -> dict[str, str]:
-  """Pick one canonical structure per block_type from the candidate rows.
-
-  When ``mapping_id`` is provided, scores each candidate by counting
-  elements that overlap with the CoA mapping's target element set
-  (associations of the given ``arc_type``: ``'mapping'`` for FAC, or
-  ``'equivalence'`` for rs-gaap). The candidate with the highest
-  overlap wins per block_type — picks the structure whose elements
-  best match what the user's CoA is mapped to.
-
-  When ``mapping_id`` is null or returns no targets, falls back to the
-  candidate with the most elements per block_type (a reasonable proxy
-  for "richest variant"). Final tie-break is the lexicographically
-  smallest structure_id for determinism across runs.
-
-  Returns ``{block_type: structure_id}`` for every block_type that has
-  at least one candidate.
-  """
-  # Group element sets per (structure_type, structure_id)
-  per_struct_elems: dict[tuple[str, str], set[str]] = {}
-  for r in rows:
-    per_struct_elems.setdefault((r.structure_type, r.structure_id), set()).add(
-      r.element_id
-    )
-
-  mapping_targets: set[str] = set()
-  if mapping_id:
-    target_rows = session.execute(
-      text(
-        """
-        SELECT DISTINCT to_element_id AS element_id
-        FROM associations
-        WHERE structure_id = :mid AND association_type = :arc_type
-        """
-      ),
-      {"mid": mapping_id, "arc_type": arc_type},
-    ).fetchall()
-    mapping_targets = {r.element_id for r in target_rows}
-
-  # Per block_type, pick the structure with the highest score.
-  candidates_by_type: dict[str, list[tuple[int, int, str]]] = {}
-  for (block_type, structure_id), elems in per_struct_elems.items():
-    coverage = len(elems & mapping_targets) if mapping_targets else 0
-    size = len(elems)
-    # Sort key: highest coverage, then largest size, then earliest id.
-    candidates_by_type.setdefault(block_type, []).append((coverage, size, structure_id))
-
-  canonical: dict[str, str] = {}
-  for block_type, scored in candidates_by_type.items():
-    # Highest coverage first; ties broken by largest size, then by id (asc).
-    scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
-    canonical[block_type] = scored[0][2]
-  return canonical
 
 
 def _persist_report_facts(
@@ -292,49 +233,54 @@ def _persist_report_facts(
     session.add(rf)
 
 
-def _create_report_fact_sets(
+def _pre_create_report_fact_sets(
   session: Session,
   report_id: str,
   entity_id: str,
   created_by: str,
-  facts,
-  element_to_structure: dict[str, str],
+  periods,
   structure_to_factset: dict[str, str],
 ) -> None:
-  """Insert one FactSet row per statement structure that received facts.
+  """Insert one FactSet row per picked Network — before facts are stamped.
 
-  Period envelope: for comparative reports with multi-period fact sets,
-  the FactSet row spans the outer range (min period_start, max period_end)
-  of the facts actually linked to this structure. This matches the
-  "Block = fragment" model — the IS block is ONE block regardless of how
-  many periods are compared, and the envelope read
-  (`ORDER BY period_end DESC LIMIT 1`) picks the latest FactSet per
-  structure cleanly.
+  Per §3.5/§6.5 of information-block.md: ``create_report`` creates the
+  ``fact_sets`` row first, then stamps facts referencing its id. The
+  period envelope comes from the report's ``periods`` (min start, max
+  end) rather than being derived post-hoc from filtered facts. That
+  pattern keeps the dataflow forward and lets us add a real FK from
+  ``facts.fact_set_id`` → ``fact_sets.id`` without orphan risk.
+
+  Every picked Network gets a FactSet row, even one whose Network the
+  CoA hasn't reached yet (e.g., the demo's CF Network with no
+  cash-flow CoA mappings). The envelope read
+  (``ORDER BY period_end DESC LIMIT 1``) still resolves cleanly per
+  structure; consumers can detect "no facts in this period" by the
+  zero fact_count on the resulting envelope.
   """
-  per_structure: dict[str, list] = {}
-  for f in facts.facts:
-    sid = element_to_structure.get(f.element_id)
-    if sid is not None:
-      per_structure.setdefault(sid, []).append(f)
+  if not periods:
+    return
 
-  for structure_id, struct_facts in per_structure.items():
-    starts = [f.period_start for f in struct_facts if f.period_start is not None]
-    ends = [f.period_end for f in struct_facts if f.period_end is not None]
-    if not ends:
-      # period_end is NOT NULL on fact_sets — skip structures with no dated facts
-      continue
+  starts = [p.start for p in periods if getattr(p, "start", None) is not None]
+  envelope_start = min(starts) if starts else None
+  envelope_end = max(p.end for p in periods)
+
+  for structure_id, fact_set_id in structure_to_factset.items():
     session.add(
       FactSet(
-        id=structure_to_factset[structure_id],
+        id=fact_set_id,
         structure_id=structure_id,
-        period_start=min(starts) if starts else None,
-        period_end=max(ends),
+        period_start=envelope_start,
+        period_end=envelope_end,
         factset_type="report",
         entity_id=entity_id,
         report_id=report_id,
         created_by=created_by,
       )
     )
+  # Explicit flush so the new fact_sets rows hit the DB before the fact
+  # INSERTs that reference them. SQLAlchemy's session-flush ordering is
+  # by INSERT statement type, not by FK dependency.
+  session.flush()
 
 
 def create_report(
@@ -356,14 +302,6 @@ def create_report(
   tax_row = tax_result.fetchone()
   if tax_row is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
-
-  # rs-gaap-presentation reports walk CoA→rs-gaap equivalence arcs;
-  # everything else (fac-presentation, legacy us-gaap) walks CoA→FAC
-  # mapping arcs. The auto-mapper writes both per CoA, so callers don't
-  # need to remap.
-  arc_type = (
-    "equivalence" if (tax_row.standard or "").startswith("rs-gaap") else "mapping"
-  )
 
   periods = build_periods(
     body.period_start, body.period_end, body.comparative, body.periods
@@ -392,23 +330,26 @@ def create_report(
   )
 
   entity_id = _get_entity_id(session, graph_id)
+  reporting_style_id = load_graph_reporting_style(graph_id)
   element_to_structure, structure_to_factset = _build_structure_mapping(
-    session, body.taxonomy_id, mapping_id=body.mapping_id, arc_type=arc_type
+    session, reporting_style_id
+  )
+  # §6.5: create fact_sets rows first so the facts we stamp reference
+  # a row that already exists. Lets us enforce facts.fact_set_id →
+  # fact_sets.id at the DB layer (post-§3.5).
+  _pre_create_report_fact_sets(
+    session,
+    report_def.id,
+    entity_id,
+    created_by,
+    periods,
+    structure_to_factset,
   )
   _persist_report_facts(
     session,
     report_def.id,
     facts,
     entity_id,
-    element_to_structure,
-    structure_to_factset,
-  )
-  _create_report_fact_sets(
-    session,
-    report_def.id,
-    entity_id,
-    created_by,
-    facts,
     element_to_structure,
     structure_to_factset,
   )
@@ -483,18 +424,6 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
-  # Match create_report's arc-type selection so a regenerate honors the
-  # same FAC-vs-rs-gaap target as the original report.
-  tax_row = session.execute(
-    text("SELECT standard FROM taxonomies WHERE id = :tid LIMIT 1"),
-    {"tid": report_def.taxonomy_id},
-  ).fetchone()
-  arc_type = (
-    "equivalence"
-    if (tax_row and (tax_row.standard or "").startswith("rs-gaap"))
-    else "mapping"
-  )
-
   facts = generate_report_facts(
     session=session,
     taxonomy_id=report_def.taxonomy_id,
@@ -503,32 +432,37 @@ def regenerate_report(
   )
 
   entity_id = _get_entity_id(session, graph_id)
+  reporting_style_id = load_graph_reporting_style(graph_id)
   element_to_structure, structure_to_factset = _build_structure_mapping(
-    session,
-    report_def.taxonomy_id,
-    mapping_id=report_def.mapping_id,
-    arc_type=arc_type,
+    session, reporting_style_id
   )
-  # Stale FactSet rows from the prior generation must be cleared before
-  # new rows are inserted with freshly-minted ULIDs.
+  # Stale rows from the prior generation must clear before fresh ULIDs
+  # land. Order matters once the facts → fact_sets FK exists (§6.5):
+  # facts go first (they reference fact_sets), then fact_sets. The
+  # ``_persist_report_facts`` call below also DELETEs by report_id —
+  # idempotent here, but doing the explicit fact delete first keeps
+  # the FK ordering correct even before SQLAlchemy autoflushes.
+  session.execute(
+    text("DELETE FROM facts WHERE report_id = :report_id"),
+    {"report_id": report_def.id},
+  )
   session.execute(
     text("DELETE FROM fact_sets WHERE report_id = :report_id"),
     {"report_id": report_def.id},
+  )
+  _pre_create_report_fact_sets(
+    session,
+    report_def.id,
+    entity_id,
+    acting_user_id,
+    periods,
+    structure_to_factset,
   )
   _persist_report_facts(
     session,
     report_def.id,
     facts,
     entity_id,
-    element_to_structure,
-    structure_to_factset,
-  )
-  _create_report_fact_sets(
-    session,
-    report_def.id,
-    entity_id,
-    acting_user_id,
-    facts,
     element_to_structure,
     structure_to_factset,
   )

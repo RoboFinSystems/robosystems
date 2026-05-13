@@ -172,11 +172,16 @@ class GraphExtensionContext:
 
   Returned by `require_graph_extension(...)` so callers that already need
   the graph type or extension list don't reload the row.
+
+  ``reporting_style_id`` is included so the §3.2 picker doesn't need to
+  reopen a platform session per render — the statement read path can
+  thread it through from the route / GraphQL context instead.
   """
 
   graph_type: str
   schema_extensions: tuple[str, ...]
   is_repository: bool
+  reporting_style_id: str
 
 
 def load_graph_metadata(graph_id: str, session: Session) -> GraphExtensionContext:
@@ -196,6 +201,7 @@ def load_graph_metadata(graph_id: str, session: Session) -> GraphExtensionContex
     graph_type=graph.graph_type or "",
     schema_extensions=tuple(graph.schema_extensions or []),
     is_repository=bool(graph.is_repository),
+    reporting_style_id=str(graph.reporting_style_id),
   )
 
 

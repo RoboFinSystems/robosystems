@@ -160,22 +160,29 @@ class SuggestMappingTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "suggest-mapping",
-      "description": """Find matching US GAAP reporting concepts for a CoA element.
+      "description": """Find matching rs-gaap reporting concepts for a CoA element.
 
 **WHEN TO USE:**
 - When deciding which reporting concept a CoA account should map to
 - Narrows by classification (asset→Assets subtree, revenue→Revenues subtree, etc.)
 
 **HOW IT WORKS:**
-- Reads the shared US GAAP reporting taxonomy (FAC → us-gaap hierarchy)
-- Filters by the same classification as the source element
-- Returns candidate concepts with qname, name, and hierarchy depth
+- Queries rs-gaap elements filtered by the EFS trait (FASB
+  elementsOfFinancialStatements) matching the source element's
+  classification.
+- Restricts to concepts that appear in at least one rs-gaap-presentation
+  Network — any picked target is guaranteed to render on the standard
+  BS / IS / CF / SE reports under the active Reporting Style.
+- Excludes statement-level subtotals whose value comes from rendering
+  (e.g., rs-gaap:Assets, rs-gaap:LiabilitiesCurrent) — those are
+  computed by the calc DAG, not by a leaf fact.
 
 **TIPS:**
-- The classification filter (asset/liability/equity/revenue/expense) narrows candidates by ~80%
-- Depth 1 = high-level line items (Revenue, Cost of Revenue, Operating Expenses)
-- Depth 2 = detail items (R&D, SGA, Depreciation)
-- Abstract elements are grouping nodes — map to non-abstract concepts""",
+- The classification filter (asset / liability / equity / revenue /
+  expense / gain / loss) narrows candidates by ~80%.
+- Depth 1 = high-level line items; depth 2+ = detail items.
+- rs-gaap is the canonical render target (per §3.2 Reporting Style);
+  no longer a target_taxonomy parameter — only one taxonomy renders.""",
       "inputSchema": {
         "type": "object",
         "properties": {

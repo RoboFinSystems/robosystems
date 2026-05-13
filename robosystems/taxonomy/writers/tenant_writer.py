@@ -81,6 +81,10 @@ _RULE_COLS = (
   "target_taxonomy_id, rule_variables, metadata, created_at, updated_at, created_by"
 )
 
+_REPORTING_STYLE_NETWORK_COLS = (
+  "reporting_style_id, statement_type, network_id, created_at, created_by"
+)
+
 
 @dataclass(frozen=True)
 class CopyStats:
@@ -97,6 +101,7 @@ class CopyStats:
   classifications: int
   association_classifications: int
   rules: int
+  reporting_style_networks: int
 
   @property
   def total(self) -> int:
@@ -112,6 +117,7 @@ class CopyStats:
       + self.classifications
       + self.association_classifications
       + self.rules
+      + self.reporting_style_networks
     )
 
 
@@ -141,7 +147,7 @@ def copy_library_into_tenant(
   """
   resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
   if not resolved_pin:
-    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
   # Flatten the pin into a parameterized IN clause via VALUES.
   # E.g., ("fac", "v1"), ("rs-gaap", "v1"), …
@@ -319,6 +325,20 @@ def copy_library_into_tenant(
     pin_params,
   )
 
+  # Reporting Style composition (Phase 1 of §3.2). Each row points at a
+  # Style Structure + a Network Structure that have both been copied into
+  # this tenant — gate on both structure_ids existing locally so an
+  # unpinned package doesn't leave dangling composition references.
+  rsn_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.reporting_style_networks ({_REPORTING_STYLE_NETWORK_COLS})
+      SELECT {_REPORTING_STYLE_NETWORK_COLS} FROM public.reporting_style_networks rsn
+      WHERE EXISTS (SELECT 1 FROM {schema}.structures s WHERE s.id = rsn.reporting_style_id)
+        AND EXISTS (SELECT 1 FROM {schema}.structures s WHERE s.id = rsn.network_id)
+      ON CONFLICT (reporting_style_id, statement_type) DO NOTHING
+    """),
+  )
+
   return CopyStats(
     taxonomies=tax_result.rowcount or 0,
     elements=elem_result.rowcount or 0,
@@ -331,4 +351,5 @@ def copy_library_into_tenant(
     classifications=cls_result.rowcount or 0,
     association_classifications=ac_result.rowcount or 0,
     rules=rule_result.rowcount or 0,
+    reporting_style_networks=rsn_result.rowcount or 0,
   )

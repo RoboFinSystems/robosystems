@@ -13,14 +13,16 @@ The demo also initializes a **fiscal calendar** with `closed_through = month_bef
 just start
 
 # Run the demo setup (creates graph, loads data, creates schedules, uploads policies)
-uv run python -m examples.roboledger_demo.main
+just demo-roboledger
 
 # Or load into an existing graph
-uv run python -m examples.roboledger_demo.main <graph_id>
+just demo-roboledger <graph_id>
 
 # Dry run (validate data only)
-uv run python -m examples.roboledger_demo.main --dry-run
+just demo-roboledger --dry-run
 ```
+
+The `just demo-roboledger` recipe sets `ROBOLEDGER_ENABLED=true` and `UV_ENV_FILE` for you. Running `uv run python -m examples.roboledger_demo.main` directly raises `RuntimeError: Extensions database access attempted but no extension domain is enabled` — the extensions DB session is gated behind the per-domain flag.
 
 ## What Gets Created
 

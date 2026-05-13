@@ -192,7 +192,7 @@ def render_structure_view(
   facts: list[ReportFact],
   structure_type: str,
   periods: list[PeriodSpec],
-  taxonomy_id: str | None = None,
+  reporting_style_id: str,
 ) -> FactGrid:
   """Apply a structure's hierarchy to raw facts to produce a rendered view.
 
@@ -210,22 +210,20 @@ def render_structure_view(
       facts: Pre-generated ReportFact objects (from generate_report_facts).
       structure_type: Structure type to render (income_statement, balance_sheet, etc.).
       periods: Ordered list of period specifications for columns.
-      taxonomy_id: When set, restricts structure selection to this taxonomy.
-          Multiple taxonomies (FAC, rs-gaap-presentation, etc.) declare the
-          same structure_type; without this filter ``_load_reporting_structure``
-          picks ambiguously. Saved Reports always pass their taxonomy_id;
-          live-statement readers may omit it (legacy behaviour).
+      reporting_style_id: The graph's Reporting Style id
+          (``Graph.reporting_style_id``). Resolves which Network this
+          statement type renders against via the §3.2 picker.
 
   Returns:
       FactGrid with rows ordered per the structure's hierarchy.
   """
-  # Load Disclosure structure + Concept Arrangement Pattern
+  # Load the Network the Style composes for this statement type
   (
     structure_id,
     structure_name,
     concept_arrangement,
     hierarchy,
-  ) = _load_reporting_structure(session, structure_type, taxonomy_id=taxonomy_id)
+  ) = _load_reporting_structure(session, structure_type, reporting_style_id)
 
   if not hierarchy:
     return FactGrid(
@@ -948,59 +946,41 @@ def _infer_period_type(classification: str) -> str:
 def _load_reporting_structure(
   session: Session,
   report_type: str,
-  taxonomy_id: str | None = None,
+  reporting_style_id: str,
 ) -> tuple[str, str, str | None, list[_HierarchyNode]]:
   """Load the reporting structure hierarchy for the given report type.
 
-  When ``taxonomy_id`` is provided, restricts structure selection to
-  that taxonomy — necessary when multiple taxonomies (FAC vs
-  rs-gaap-presentation) declare the same ``structure_type``. Without
-  the filter the query returns whichever row the planner happens to
-  pick first.
+  Resolves the Network deterministically via the Reporting Style
+  composition layer (§3.2 Phase 1) — the renderer never picks among
+  same-typed Structures by recency / heuristics anymore. The Style's
+  ``reporting_style_networks`` row pins exactly one Network per
+  statement_type.
 
   Returns (structure_id, structure_name, concept_arrangement, root_nodes).
   ``concept_arrangement`` is Charlie's CAP declared on the Disclosure
   (``arithmetic`` / ``roll_up`` / ``roll_forward`` / ``hierarchy``);
   the renderer uses it to pick a compilation strategy.
+
+  When the Reporting Style doesn't compose a Network for this statement
+  type, returns the empty tuple — callers treat that as "no statement
+  to render". This matches the prior behaviour of "no matching structure
+  row" so upstream code paths don't need to grow new error branches.
   """
-  # Filter is_active so deactivated/legacy structures are skipped.
-  # Order by created_at DESC so when multiple active structures match
-  # (e.g., during the rs-gaap-presentation Disclosure rebuild's
-  # transition window), the newer one wins — newly authored Disclosures
-  # supersede legacy entries automatically.
-  if taxonomy_id is not None:
-    struct_result = session.execute(
-      text("""
-        SELECT id, name, concept_arrangement FROM structures
-        WHERE structure_type = :report_type
-          AND taxonomy_id = :taxonomy_id
-          AND is_active = true
-        ORDER BY created_at DESC
-        LIMIT 1
-      """),
-      {"report_type": report_type, "taxonomy_id": taxonomy_id},
-    )
-  else:
-    # Legacy callers (live-financial-statement) without an explicit
-    # taxonomy. Picks any matching structure — caller assumes there's
-    # only one or doesn't care which.
-    struct_result = session.execute(
-      text("""
-        SELECT id, name, concept_arrangement FROM structures
-        WHERE structure_type = :report_type
-          AND is_active = true
-        ORDER BY created_at DESC
-        LIMIT 1
-      """),
-      {"report_type": report_type},
-    )
-  struct_row = struct_result.fetchone()
-  if not struct_row:
+  # Lazy import to avoid the picker's `from .. import` chain pulling
+  # commands code into the reads layer at module-import time.
+  from robosystems.operations.roboledger.reports.network_picker import (
+    NoNetworkForStatementTypeError,
+    get_render_network,
+  )
+
+  try:
+    network = get_render_network(session, reporting_style_id, report_type)
+  except NoNetworkForStatementTypeError:
     return "", "", None, []
 
-  structure_id = struct_row.id
-  structure_name = struct_row.name
-  concept_arrangement = struct_row.concept_arrangement
+  structure_id = network.structure_id
+  structure_name = network.name
+  concept_arrangement = network.concept_arrangement
 
   # Load all elements and associations for this structure.
   # Classification is resolved via element_traits → classifications

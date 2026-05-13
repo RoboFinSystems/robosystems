@@ -84,6 +84,7 @@ class TestCopyStats:
       classifications=1,
       association_classifications=7,
       rules=1,
+      reporting_style_networks=1,
     )
     assert stats.association_classifications == 7
-    assert stats.total == 17
+    assert stats.total == 18

@@ -103,6 +103,11 @@ class GraphQLContext(TypedDict):
   graph_id: str
   schema_extensions: tuple[str, ...]
   graph_type: str
+  # The graph's active Reporting Style (Phase 1 of §3.2). Populated from
+  # the platform DB during context build so resolvers don't reopen a
+  # platform session per render. Empty string for unauthenticated
+  # introspection traffic and the library sentinel.
+  reporting_style_id: str
 
 
 async def get_context(
@@ -147,6 +152,7 @@ async def get_context(
 
   schema_extensions: tuple[str, ...] = ()
   graph_type: str = ""
+  reporting_style_id: str = ""
   if user is not None:
     check_graph_access(user, graph_id)
     # Library sentinel — no graph row to load, no per-graph metadata.
@@ -161,6 +167,7 @@ async def get_context(
       meta = load_graph_metadata(graph_id, db)
       schema_extensions = meta.schema_extensions
       graph_type = meta.graph_type
+      reporting_style_id = meta.reporting_style_id
 
   return {
     "request": request,
@@ -168,6 +175,7 @@ async def get_context(
     "graph_id": graph_id,
     "schema_extensions": schema_extensions,
     "graph_type": graph_type,
+    "reporting_style_id": reporting_style_id,
   }
 
 

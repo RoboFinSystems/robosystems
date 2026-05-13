@@ -196,6 +196,22 @@ class URIConstants:
   ISO_4217_URI = "http://www.xbrl.org/2003/iso4217"
 
 
+class ReportingStyleConstants:
+  """Reporting Style identifiers (Charlie Hoffman's term).
+
+  Library-seeded Structure UUIDs for the 3 placeholder Reporting Styles
+  declared in ``rs-gaap-reporting-styles/v1``. Each id is derived
+  deterministically from its style's role URI via
+  ``generate_deterministic_uuid(role, namespace='structure')``; pinned
+  here so the platform-side ``graphs.reporting_style_id`` default and
+  the renderer's picker share a single source of truth.
+  """
+
+  DEFAULT_STYLE_ID = "025f5d48-12ce-5d65-b9eb-4f137a10ef06"
+  SMALL_PRIVATE_COMPANY_STYLE_ID = "921f5214-afd8-565c-8189-50bcc94c0234"
+  BANKING_STYLE_ID = "511aeedc-fa99-5fe5-b7f1-67673b7bdb19"
+
+
 class PrefixConstants:
   """Prefix constants for namespacing."""
 

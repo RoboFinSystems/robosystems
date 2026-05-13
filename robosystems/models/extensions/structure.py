@@ -44,6 +44,7 @@ class Structure(ExtensionsBase):
       # Renderable financial-statement presentations (the user-facing forms)
       "'income_statement', 'balance_sheet', "
       "'cash_flow_statement', 'equity_statement', "
+      "'comprehensive_income', "
       # Domain-specific working-paper / schedule patterns
       "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
       # Chart-of-accounts and CoA→GAAP mapping
@@ -57,6 +58,11 @@ class Structure(ExtensionsBase):
       # consumption paths (rule engine, disclosure registry, mapping
       # resolver).
       "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+      # Reporting Style — the bundle a company picks (Charlie Hoffman's
+      # term). One per entity graph, set at provision via
+      # graphs.reporting_style_id; composes Networks per statement_type
+      # via the reporting_style_networks table.
+      "'reporting_style', "
       # Escape hatch for everything that doesn't fit the above
       "'custom'"
       ")",
