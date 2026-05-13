@@ -75,6 +75,7 @@ def _entity_meta(schema_extensions=("roboinvestor",), graph_type="entity"):
     graph_type=graph_type,
     schema_extensions=tuple(schema_extensions),
     is_repository=False,
+    reporting_style_id="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
   )
 
 

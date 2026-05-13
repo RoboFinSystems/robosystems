@@ -39,6 +39,7 @@ def _entity_meta(
     graph_type="entity",
     schema_extensions=extensions,
     is_repository=False,
+    reporting_style_id="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
   )
 
 

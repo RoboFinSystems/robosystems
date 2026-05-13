@@ -15,6 +15,7 @@ from robosystems.operations.graph.commands.reporting_style import (
 
 _GRAPH = "robosystems.models.core.graph.Graph"
 _EXT_SESSION = "robosystems.db.extensions.extensions_session"
+_ORG_USER = "robosystems.models.core.OrgUser"
 
 GRAPH_ID = "kg19e1f9744ea2a8ab4ef7"
 DEFAULT_STYLE_ID = "025f5d48-12ce-5d65-b9eb-4f137a10ef06"
@@ -32,6 +33,21 @@ def _make_user():
   user = MagicMock()
   user.id = "user_abc"
   return user
+
+
+def _patch_owner_membership():
+  """Patch ``OrgUser.get_user_orgs`` to return a single OWNER membership.
+
+  Every command path runs the auth check first; tests that exercise
+  downstream behavior (404, 422, happy path) must set this up so the
+  call doesn't 403 before reaching the validation under test.
+  """
+  from robosystems.models.core import OrgRole
+
+  membership = MagicMock()
+  membership.role = OrgRole.OWNER
+  membership.org_id = "org_123"
+  return patch(f"{_ORG_USER}.get_user_orgs", return_value=[membership])
 
 
 def _make_ext_session(
@@ -70,10 +86,40 @@ def _make_ext_session(
 @pytest.mark.asyncio
 @pytest.mark.unit
 class TestChangeReportingStyleCmd:
+  async def test_non_member_rejected_403(self):
+    """User with no organization memberships is rejected before any
+    graph lookup runs — the auth check fires first."""
+    db = MagicMock()
+    user = _make_user()
+    with patch(f"{_ORG_USER}.get_user_orgs", return_value=[]):
+      with pytest.raises(HTTPException) as ctx:
+        await change_reporting_style_cmd(GRAPH_ID, DEFAULT_STYLE_ID, user, db)
+    assert ctx.value.status_code == 403
+    assert "member" in ctx.value.detail.lower()
+
+  async def test_non_owner_rejected_403(self):
+    """Org members who are not owners cannot change the Reporting
+    Style — matches the change-tier authorization bar."""
+    from robosystems.models.core import OrgRole
+
+    db = MagicMock()
+    user = _make_user()
+    membership = MagicMock()
+    membership.role = OrgRole.ADMIN
+    membership.org_id = "org_123"
+    with patch(f"{_ORG_USER}.get_user_orgs", return_value=[membership]):
+      with pytest.raises(HTTPException) as ctx:
+        await change_reporting_style_cmd(GRAPH_ID, DEFAULT_STYLE_ID, user, db)
+    assert ctx.value.status_code == 403
+    assert "owner" in ctx.value.detail.lower()
+
   async def test_same_target_is_idempotent_noop(self):
     db = MagicMock()
     user = _make_user()
-    with patch(f"{_GRAPH}.get_by_id", return_value=_make_graph(DEFAULT_STYLE_ID)):
+    with (
+      _patch_owner_membership(),
+      patch(f"{_GRAPH}.get_by_id", return_value=_make_graph(DEFAULT_STYLE_ID)),
+    ):
       result = await change_reporting_style_cmd(GRAPH_ID, DEFAULT_STYLE_ID, user, db)
 
     assert result["changed"] is False
@@ -85,7 +131,7 @@ class TestChangeReportingStyleCmd:
   async def test_unknown_graph_404(self):
     db = MagicMock()
     user = _make_user()
-    with patch(f"{_GRAPH}.get_by_id", return_value=None):
+    with _patch_owner_membership(), patch(f"{_GRAPH}.get_by_id", return_value=None):
       with pytest.raises(HTTPException) as ctx:
         await change_reporting_style_cmd(GRAPH_ID, SMALL_PRIVATE_STYLE_ID, user, db)
     assert ctx.value.status_code == 404
@@ -95,6 +141,7 @@ class TestChangeReportingStyleCmd:
     user = _make_user()
     ext_cm = _make_ext_session(style_row=None, composed_types=None)
     with (
+      _patch_owner_membership(),
       patch(f"{_GRAPH}.get_by_id", return_value=_make_graph(DEFAULT_STYLE_ID)),
       patch(_EXT_SESSION, return_value=ext_cm),
     ):
@@ -114,6 +161,7 @@ class TestChangeReportingStyleCmd:
     row.is_active = True
     ext_cm = _make_ext_session(style_row=row, composed_types=None)
     with (
+      _patch_owner_membership(),
       patch(f"{_GRAPH}.get_by_id", return_value=_make_graph(DEFAULT_STYLE_ID)),
       patch(_EXT_SESSION, return_value=ext_cm),
     ):
@@ -121,6 +169,10 @@ class TestChangeReportingStyleCmd:
         await change_reporting_style_cmd(GRAPH_ID, "wrong-type-id", user, db)
     assert ctx.value.status_code == 422
     assert "structure_type" in ctx.value.detail
+    # Legacy hint mentioned so tenants whose Style rows weren't
+    # promoted by migration 0008 know 'custom' is also accepted.
+    assert "custom" in ctx.value.detail
+    assert "legacy" in ctx.value.detail
 
   async def test_inactive_target_422(self):
     db = MagicMock()
@@ -132,6 +184,7 @@ class TestChangeReportingStyleCmd:
     row.is_active = False
     ext_cm = _make_ext_session(style_row=row, composed_types=None)
     with (
+      _patch_owner_membership(),
       patch(f"{_GRAPH}.get_by_id", return_value=_make_graph(DEFAULT_STYLE_ID)),
       patch(_EXT_SESSION, return_value=ext_cm),
     ):
@@ -155,6 +208,7 @@ class TestChangeReportingStyleCmd:
       style_row=row, composed_types=["balance_sheet", "income_statement"]
     )
     with (
+      _patch_owner_membership(),
       patch(f"{_GRAPH}.get_by_id", return_value=_make_graph(DEFAULT_STYLE_ID)),
       patch(_EXT_SESSION, return_value=ext_cm),
     ):
@@ -178,6 +232,7 @@ class TestChangeReportingStyleCmd:
       style_row=row, composed_types=list(_REQUIRED_STATEMENT_TYPES)
     )
     with (
+      _patch_owner_membership(),
       patch(f"{_GRAPH}.get_by_id", return_value=graph),
       patch(_EXT_SESSION, return_value=ext_cm),
     ):
@@ -209,6 +264,7 @@ class TestChangeReportingStyleCmd:
       style_row=row, composed_types=list(_REQUIRED_STATEMENT_TYPES)
     )
     with (
+      _patch_owner_membership(),
       patch(f"{_GRAPH}.get_by_id", return_value=graph),
       patch(_EXT_SESSION, return_value=ext_cm),
     ):

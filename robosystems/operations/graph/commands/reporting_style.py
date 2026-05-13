@@ -49,8 +49,10 @@ async def change_reporting_style_cmd(
           exist in the graph's tenant extensions schema with
           ``structure_type='reporting_style'`` and have a complete
           composition.
-      current_user: Authenticated caller (graph access already
-          validated upstream by ``get_current_user_with_graph``).
+      current_user: Authenticated caller. Must be an organization
+          owner — the Reporting Style governs every render the org
+          produces going forward, so this matches the authorization
+          bar on ``change-tier`` (the other graph-wide settings op).
       db: Platform-DB session.
 
   Returns:
@@ -58,11 +60,27 @@ async def change_reporting_style_cmd(
       ``reporting_style_id``, and ``changed`` (False when same target).
 
   Raises:
+      HTTPException 403: caller is not an org member, or not an owner.
       HTTPException 404: graph not found.
       HTTPException 422: target Style not found in tenant, has wrong
           structure_type, or has an incomplete composition.
   """
   from robosystems.db.extensions import extensions_session
+  from robosystems.models.core import OrgRole, OrgUser
+
+  # Authorization: org owners only. Reporting Style is a graph-wide
+  # setting that affects every render the org sees; matches the
+  # change-tier auth bar (operations/graph/commands/tier.py).
+  user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+  if not user_orgs:
+    raise HTTPException(
+      status_code=403, detail="You are not a member of any organization"
+    )
+  if user_orgs[0].role != OrgRole.OWNER:
+    raise HTTPException(
+      status_code=403,
+      detail="Only organization owners can change the Reporting Style",
+    )
 
   graph = Graph.get_by_id(graph_id, db)
   if not graph:
@@ -114,7 +132,9 @@ async def change_reporting_style_cmd(
         status_code=422,
         detail=(
           f"Structure {new_reporting_style_id!r} has structure_type="
-          f"{row.structure_type!r}; expected 'reporting_style'."
+          f"{row.structure_type!r}; expected 'reporting_style' "
+          f"(or 'custom' for legacy tenants whose Style rows weren't "
+          f"promoted by migration 0008)."
         ),
       )
     if not row.is_active:

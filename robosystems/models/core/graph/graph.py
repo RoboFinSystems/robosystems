@@ -65,6 +65,7 @@ class Graph(Model):
     Index("idx_graphs_stale", "graph_stale"),
     Index("idx_graphs_status", "status"),
     Index("idx_graphs_status_tier_created", "status", "graph_tier", "created_at"),
+    Index("idx_graphs_reporting_style", "reporting_style_id"),
     CheckConstraint(
       "graph_type IN ('generic', 'entity', 'repository')", name="check_graph_type"
     ),

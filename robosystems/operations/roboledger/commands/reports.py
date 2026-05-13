@@ -162,6 +162,12 @@ def _build_structure_mapping(
     except NoNetworkForStatementTypeError:
       # Style doesn't compose this statement type — skip silently so a
       # Style that ships without (say) an equity Network still renders.
+      # Safety net: ``change_reporting_style_cmd`` (Phase 2 of §3.2)
+      # validates that every required statement_type has a composition
+      # row before flipping ``graphs.reporting_style_id``, so by the time
+      # this loop runs the only `NoNetworkForStatementTypeError` we
+      # should see is for genuinely optional types (e.g. a Style that
+      # deliberately omits ``comprehensive_income``).
       continue
     picked_structure_ids.append(network.structure_id)
 

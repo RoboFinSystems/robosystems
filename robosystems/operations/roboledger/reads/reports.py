@@ -402,6 +402,7 @@ def get_statement(
   graph_id: str,
   report_id: str,
   structure_type: str,
+  reporting_style_id: str | None = None,
 ) -> StatementResponse | None:
   """Render a financial statement for a report + structure_type.
 
@@ -409,12 +410,12 @@ def get_statement(
   `StatementStructureNotFoundError` when the structure_type isn't in
   the report's taxonomy. The caller translates both into HTTP 404s.
 
-  ``graph_id`` is required to resolve the graph's Reporting Style (§3.2
-  Phase 1); the picker reads ``Graph.reporting_style_id`` from the
-  platform DB and the renderer uses it to pick the Network for this
-  statement type. Saved Reports don't need to re-pick because Phase 1
-  defers ``change-reporting-style`` to Phase 2 — until then, re-rendering
-  is stable across calls.
+  ``reporting_style_id`` resolves the graph's active Style (§3.2 Phase 1).
+  Callers with the value already in scope (REST routes via
+  ``GraphExtensionContext``, GraphQL resolvers via ``info.context``)
+  should pass it explicitly to avoid the per-render platform-DB
+  round-trip; if omitted, falls back to ``load_graph_reporting_style``
+  which opens its own platform session.
   """
   if structure_type not in VALID_STRUCTURE_TYPES:
     raise ValueError(
@@ -491,11 +492,12 @@ def get_statement(
       periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
     )
 
-  from robosystems.operations.roboledger.reports.network_picker import (
-    load_graph_reporting_style,
-  )
+  if reporting_style_id is None:
+    from robosystems.operations.roboledger.reports.network_picker import (
+      load_graph_reporting_style,
+    )
 
-  reporting_style_id = load_graph_reporting_style(graph_id)
+    reporting_style_id = load_graph_reporting_style(graph_id)
   grid = render_structure_view(
     session=session,
     facts=facts,
@@ -625,6 +627,7 @@ def get_live_financial_statement(
   period_start: date,
   period_end: date,
   limit: int = 50,
+  reporting_style_id: str | None = None,
 ) -> LiveFinancialStatementResponse:
   """Generate an OLTP-backed ad-hoc statement and format the response.
 
@@ -633,14 +636,20 @@ def get_live_financial_statement(
   - filters subtotal rows and all-zero rows
   - caps at ``limit`` rows (marking ``truncated=True`` when capped)
 
+  ``reporting_style_id`` resolves the graph's active Style (§3.2 Phase 1).
+  Routes already loading ``GraphExtensionContext`` (which carries it)
+  should pass the value explicitly to skip the platform-DB lookup;
+  callers without it in scope fall back to ``load_graph_reporting_style``.
+
   Raises ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists;
   the caller translates to a user-facing tip (400/422).
   """
-  from robosystems.operations.roboledger.reports.network_picker import (
-    load_graph_reporting_style,
-  )
+  if reporting_style_id is None:
+    from robosystems.operations.roboledger.reports.network_picker import (
+      load_graph_reporting_style,
+    )
 
-  reporting_style_id = load_graph_reporting_style(graph_id)
+    reporting_style_id = load_graph_reporting_style(graph_id)
   periods = build_current_and_prior_periods(period_start, period_end)
   grid, unmapped_count = generate_adhoc_private_statement(
     session,

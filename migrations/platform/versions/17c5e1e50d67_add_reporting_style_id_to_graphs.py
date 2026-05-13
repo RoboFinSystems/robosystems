@@ -39,7 +39,16 @@ def upgrade() -> None:
       server_default=ReportingStyleConstants.DEFAULT_STYLE_ID,
     ),
   )
+  # Supports future "which graphs use style X" queries
+  # (style-deprecation workflows, per-style usage analytics).
+  # Without this index those queries seq-scan the graphs table.
+  op.create_index(
+    "idx_graphs_reporting_style",
+    "graphs",
+    ["reporting_style_id"],
+  )
 
 
 def downgrade() -> None:
+  op.drop_index("idx_graphs_reporting_style", table_name="graphs")
   op.drop_column("graphs", "reporting_style_id")

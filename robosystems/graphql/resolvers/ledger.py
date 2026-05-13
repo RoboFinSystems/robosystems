@@ -745,10 +745,18 @@ class LedgerQuery:
   ) -> Statement | None:
     """Rendered financial statement for a report + structure_type."""
     graph_id = require_graph_id(info)
+    # Reporting Style is pre-loaded onto the context at request build
+    # time (graphql/context.py) so this resolver doesn't reopen a
+    # platform session per render.
+    reporting_style_id = info.context["reporting_style_id"]
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_reports.get_statement(
-          session, graph_id, report_id, structure_type
+          session,
+          graph_id,
+          report_id,
+          structure_type,
+          reporting_style_id=reporting_style_id,
         )
     except reads_reports.StatementStructureNotFoundError:
       return None

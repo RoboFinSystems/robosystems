@@ -119,6 +119,9 @@ async def live_financial_statement_op(
             period_start=start,
             period_end=end,
             limit=body.limit,
+            # Skip the per-render platform-DB lookup — the value is
+            # already on _ext from the require_roboledger dep.
+            reporting_style_id=_ext.reporting_style_id,
           )
         except CoaMappingNotFoundError as exc:
           raise HTTPException(status_code=422, detail=str(exc))

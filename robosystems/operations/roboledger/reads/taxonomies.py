@@ -313,16 +313,34 @@ def list_unmapped_elements(
   ]
 
 
+_RS_GAAP_PRESENTATION_SET_ATTR = "_rs_gaap_presentation_set_cache"
+
+
 def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
   """Return the set of element_ids that appear in any
   ``rs-gaap-presentation`` structure (as either parent or child).
 
-  Used by ``expand_to_rs_gaap_candidates`` to restrict auto-mapper
-  targets to concepts that will render on the standard BS/IS/CF
-  reports. Returns an empty set if the presentation taxonomy isn't
-  seeded — caller treats empty as "no filter" so partial deployments
-  still function.
+  Used by ``expand_to_rs_gaap_candidates`` and ``suggest_mapping_candidates``
+  to restrict mapping targets to concepts that will render on the
+  standard BS / IS / CF reports. Returns an empty set if the
+  presentation taxonomy isn't seeded — caller treats empty as "no
+  filter" so partial deployments still function.
+
+  **Cached on the session** under a private attribute. The UNION query
+  walks `associations → structures → taxonomies` twice and is invariant
+  for the lifetime of a tenant session (rs-gaap-presentation is
+  library-seeded and immutable per-tenant). Mapping workflows that
+  invoke ``suggest-mapping`` repeatedly within one HTTP request would
+  otherwise re-execute the same query on each call.
   """
+  # ``isinstance(..., set)`` guards against MagicMock sessions: a vanilla
+  # ``getattr(mock, attr, None)`` returns a fresh MagicMock (not None),
+  # so the sentinel fallback wouldn't fire. The type check returns False
+  # for MagicMock and treats the test session as uncached.
+  cached = getattr(session, _RS_GAAP_PRESENTATION_SET_ATTR, None)
+  if isinstance(cached, set):
+    return cached
+
   rows = session.execute(
     text("""
       SELECT DISTINCT a.from_element_id AS element_id
@@ -338,7 +356,14 @@ def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
       WHERE t.standard = 'rs-gaap-presentation'
     """),
   ).fetchall()
-  return {r.element_id for r in rows}
+  result = {r.element_id for r in rows}
+  try:
+    setattr(session, _RS_GAAP_PRESENTATION_SET_ATTR, result)
+  except (AttributeError, TypeError):
+    # MagicMock sessions in unit tests sometimes reject arbitrary
+    # attribute writes; fall through without caching in that case.
+    pass
+  return result
 
 
 def expand_to_rs_gaap_candidates(
