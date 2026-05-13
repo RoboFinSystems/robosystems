@@ -430,7 +430,7 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
       date(year, m, 1),
       "bill_payment",
       "Monthly SaaS tools (Slack, Zoom, etc.)",
-      "Various",
+      "Slack Technologies",
       [("6100", 450_00, 0), ("1000", 0, 450_00)],
     )
   )
@@ -464,7 +464,7 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
         date(year, m, min(20, end_day)),
         "bill_payment",
         "Travel & meals",
-        "Various",
+        "United Airlines",
         [("6600", travel, 0), ("1000", 0, travel)],
       )
     )

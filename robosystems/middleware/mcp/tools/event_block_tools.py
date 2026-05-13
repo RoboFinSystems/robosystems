@@ -109,9 +109,21 @@ class ListEventBlocksTool:
 - source (optional): 'manual' | 'schedule' | 'system' | 'quickbooks' | 'xero' | 'plaid'
 - limit (optional, default 50, max 1000)
 - offset (optional, default 0)
+- include_metadata (optional, default false): When false, returns a lean
+  per-event summary (id, event_type, event_category, status, occurred_at,
+  source, agent_id, amount, currency, description, has_discharge_link).
+  When true, includes the full event_block metadata blob — `entries`,
+  `qb_*` fields, connection_id, etc. — same shape as get-event-block.
+  Default is summary-only because bulk metadata across hundreds of
+  events can exceed agent context (1000 events with full metadata
+  ≈ 150 KB / 4600 lines). Fetch full metadata via get-event-block(id)
+  for specific events.
 
 **RETURNS:**
-List of EventBlockEnvelopes ordered by occurred_at descending.""",
+- event_count: number of matching events in the page
+- mode: "summary" | "full"
+- events: list of event summaries (or full envelopes when include_metadata=true)
+  ordered by occurred_at descending""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -122,6 +134,15 @@ List of EventBlockEnvelopes ordered by occurred_at descending.""",
           "source": {"type": "string"},
           "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50},
           "offset": {"type": "integer", "minimum": 0, "default": 0},
+          "include_metadata": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+              "Return full event envelopes (including the per-event "
+              "metadata blob) instead of the lean summary projection. "
+              "Off by default to keep list calls compact."
+            ),
+          },
         },
         "required": [],
       },
@@ -131,6 +152,7 @@ List of EventBlockEnvelopes ordered by occurred_at descending.""",
     graph_id = self.client.graph_id
     limit = int(arguments.get("limit", 50))
     offset = int(arguments.get("offset", 0))
+    include_metadata = bool(arguments.get("include_metadata", False))
 
     if not 1 <= limit <= 1000:
       return {
@@ -152,13 +174,49 @@ List of EventBlockEnvelopes ordered by occurred_at descending.""",
           limit=limit,
           offset=offset,
         )
+        if include_metadata:
+          events = [e.model_dump(mode="json") for e in envelopes]
+          mode = "full"
+        else:
+          events = [_summarize_event_block(e) for e in envelopes]
+          mode = "summary"
         return {
-          "event_count": len(envelopes),
-          "events": [e.model_dump(mode="json") for e in envelopes],
+          "mode": mode,
+          "event_count": len(events),
+          "events": events,
         }
     except Exception as exc:
       logger.warning(f"list-event-blocks failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
+
+
+def _summarize_event_block(envelope) -> dict[str, Any]:
+  """Project a full Event Block envelope to a lean summary shape.
+
+  Drops the per-event metadata blob (which carries the full QB
+  transaction payload, including all entries + line_items + every
+  `qb_*` field) and replaces it with surface signals: amount, currency,
+  description, and a `has_discharge_link` flag derived from
+  ``discharges_event_id``. Identity, type, status, and occurrence info
+  are preserved.
+  """
+  occurred_at = envelope.occurred_at
+  return {
+    "id": envelope.id,
+    "event_type": envelope.event_type,
+    "event_category": envelope.event_category,
+    "event_class": envelope.event_class,
+    "status": envelope.status,
+    "source": envelope.source,
+    "occurred_at": occurred_at.isoformat() if occurred_at else None,
+    "agent_id": envelope.agent_id,
+    "external_id": envelope.external_id,
+    "amount": envelope.amount,
+    "currency": envelope.currency,
+    "description": envelope.description,
+    "has_discharge_link": envelope.discharges_event_id is not None,
+    "has_obligation_link": envelope.obligated_by_event_id is not None,
+  }
 
 
 __all__ = ["GetEventBlockTool", "ListEventBlocksTool"]

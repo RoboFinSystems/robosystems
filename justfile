@@ -353,7 +353,7 @@ demo-sec-query *args:
 
 # Run RoboLedger end-to-end demo — synthetic consulting company, schedules, mappings, policies, FY 2025 filed report, and a queued period for AI close
 demo-roboledger *args="":
-    EXTENSIONS_ENABLED=true UV_ENV_FILE={{_local_env}} uv run python -m examples.roboledger_demo.main {{args}}
+    ROBOLEDGER_ENABLED=true UV_ENV_FILE={{_local_env}} uv run python -m examples.roboledger_demo.main {{args}}
 
 # Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
 demo-custom-graph flags="new-graph" real_s3="false" base_url="http://localhost:8000":

@@ -57,6 +57,19 @@ def qb_load(
   # Update last sync timestamp
   _update_last_sync(context, config)
 
+  # Bootstrap fiscal calendar on first sync. Idempotent: skips when the
+  # calendar is already initialized (re-sync). Without this, a fresh QB
+  # tenant lands with `calendar_not_initialized` and the entire close-period
+  # UX is unreachable until the user manually calls `initialize-ledger`.
+  _bootstrap_fiscal_calendar_if_needed(context, config)
+
+  # Trigger auto-map of CoA → reporting concepts on first sync. Idempotent:
+  # skips when the mapping structure already has associations (re-sync, or
+  # user has hand-curated). Without this, a fresh QB tenant has 0% mapping
+  # coverage and `live-financial-statement` returns empty facts even though
+  # GL data is fully loaded.
+  _trigger_auto_map_if_needed(context, config)
+
   # Mark graph stale so materialization pipeline knows OLTP data changed
   try:
     from robosystems.operations.extensions.staleness import mark_graph_stale
@@ -123,3 +136,148 @@ def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> N
       session.close()
   except Exception as e:
     context.log.warning(f"Failed to update last_sync (non-fatal): {e}")
+
+
+def _bootstrap_fiscal_calendar_if_needed(
+  context: AssetExecutionContext, config: QBSyncConfig
+) -> None:
+  """Initialize the fiscal calendar on the first QB sync.
+
+  Uses the same `closed_through = month_before_last` pattern the synthetic
+  demo uses: customers migrating from QB typically already closed historical
+  periods in QB, so RoboLedger starts from a sealed-history boundary with
+  exactly one period (`close_target = last_completed_month`) queued for the
+  first close.
+
+  Idempotent: re-syncs that find a calendar with `initialized_at` already
+  set skip silently. The exception type is caught explicitly so the load
+  asset doesn't fail on a benign re-init attempt.
+  """
+  from robosystems.db.extensions import extensions_session
+  from robosystems.operations.roboledger.fiscal_calendar import (
+    FiscalCalendarService,
+    current_month_period,
+    previous_period,
+  )
+  from robosystems.operations.roboledger.fiscal_calendar.service import (
+    CalendarAlreadyInitializedError,
+  )
+
+  try:
+    service = FiscalCalendarService()
+    with extensions_session(config.graph_id) as session:
+      existing = service.get(session, config.graph_id)
+      if existing is not None and existing.initialized_at is not None:
+        context.log.info(
+          "Fiscal calendar already initialized "
+          f"(closed_through={existing.closed_through_period}); skipping bootstrap"
+        )
+        return
+
+      closed_through = previous_period(previous_period(current_month_period()))
+      service.initialize(
+        session,
+        config.graph_id,
+        closed_through=closed_through,
+        actor_id=config.user_id,
+        actor_type="system",
+        note="Auto-initialized on first QB sync",
+      )
+      session.commit()
+      context.log.info(
+        f"Initialized fiscal calendar on first sync: closed_through={closed_through}"
+      )
+  except CalendarAlreadyInitializedError:
+    context.log.info("Fiscal calendar already initialized (race); skipping bootstrap")
+  except Exception as e:
+    # Non-fatal: a failed calendar bootstrap leaves the rest of the sync
+    # intact. Operator can manually initialize via the regular endpoint.
+    context.log.warning(f"Failed to bootstrap fiscal calendar (non-fatal): {e}")
+
+
+def _trigger_auto_map_if_needed(
+  context: AssetExecutionContext, config: QBSyncConfig
+) -> None:
+  """Enqueue the MappingAgent on the first sync if mapping coverage is 0.
+
+  Looks up the tenant's `coa_mapping` Structure, checks current association
+  count, and (only if zero) enqueues a background `agent_mapping` task. The
+  agent walks unmapped CoA elements, proposes associations, and auto-approves
+  high-confidence matches — the same path users invoke via the
+  `auto-map-elements` operation.
+
+  Idempotent on two levels:
+  - Skip when the mapping structure already has ≥1 association (user has
+    started curating, or auto-map already ran).
+  - The worker queue's per-task dedup window catches a second enqueue
+    of the same (graph, mapping_id) within DEDUP_TTL.
+
+  Runs the async `enqueue_task` via `asyncio.run`. `qb_load` is a sync
+  Dagster asset and doesn't have an enclosing event loop, so this is safe.
+  """
+  import asyncio
+
+  from robosystems.db.extensions import extensions_session
+  from robosystems.models.extensions import Association, Structure
+
+  mapping_id: str | None = None
+  try:
+    with extensions_session(config.graph_id) as session:
+      structure = (
+        session.query(Structure)
+        .filter(
+          Structure.structure_type == "coa_mapping",
+          Structure.is_active.is_(True),
+        )
+        .order_by(Structure.created_at.asc())
+        .first()
+      )
+      if structure is None:
+        context.log.info(
+          "No coa_mapping structure found on graph; skipping auto-map trigger"
+        )
+        return
+      existing_assoc_count = (
+        session.query(Association)
+        .filter(
+          Association.structure_id == structure.id,
+          Association.association_type == "mapping",
+        )
+        .count()
+      )
+      if existing_assoc_count > 0:
+        context.log.info(
+          f"Mapping structure has {existing_assoc_count} existing associations; "
+          "skipping auto-map trigger"
+        )
+        return
+      mapping_id = str(structure.id)
+  except Exception as e:
+    context.log.warning(f"Failed to inspect mapping structure (non-fatal): {e}")
+    return
+
+  if mapping_id is None:
+    return
+
+  try:
+    from robosystems.worker.client import enqueue_task
+
+    result = asyncio.run(
+      enqueue_task(
+        task_type="agent",
+        graph_id=config.graph_id,
+        user_id=config.user_id,
+        params={"agent_type": "mapping", "mapping_id": mapping_id},
+      )
+    )
+    if result.get("deduplicated"):
+      context.log.info(
+        f"Auto-map task already in-flight (operation_id={result.get('operation_id')})"
+      )
+    else:
+      context.log.info(
+        f"Enqueued auto-map task: operation_id={result.get('operation_id')}, "
+        f"mapping_id={mapping_id}"
+      )
+  except Exception as e:
+    context.log.warning(f"Failed to enqueue auto-map task (non-fatal): {e}")

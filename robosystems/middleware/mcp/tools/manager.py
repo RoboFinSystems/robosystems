@@ -320,6 +320,7 @@ class GraphMCPTools:
     # ROBOLEDGER_ENABLED). Writes — create-mapping-association,
     # create-associations, update/delete-association — are
     # registrar-generated.
+    self.list_mapping_structures_tool = None
     self.get_unmapped_elements_tool = None
     self.suggest_mapping_tool = None
     self.get_mapping_summary_tool = None
@@ -327,9 +328,11 @@ class GraphMCPTools:
       from .taxonomy_tools import (
         GetMappingSummaryTool,
         GetUnmappedElementsTool,
+        ListMappingStructuresTool,
         SuggestMappingTool,
       )
 
+      self.list_mapping_structures_tool = ListMappingStructuresTool(graph_client)
       self.get_unmapped_elements_tool = GetUnmappedElementsTool(graph_client)
       self.suggest_mapping_tool = SuggestMappingTool(graph_client)
       self.get_mapping_summary_tool = GetMappingSummaryTool(graph_client)
@@ -558,6 +561,8 @@ class GraphMCPTools:
   def _get_taxonomy_tool_definitions(self) -> list[dict[str, Any]]:
     """Get taxonomy read tool definitions (CoA → GAAP workflow)."""
     tools = []
+    if self.list_mapping_structures_tool is not None:
+      tools.append(self.list_mapping_structures_tool.get_tool_definition())
     if self.get_unmapped_elements_tool is not None:
       tools.append(self.get_unmapped_elements_tool.get_tool_definition())
     if self.suggest_mapping_tool is not None:
@@ -1093,6 +1098,15 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.get_mapping_summary_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-mapping-structures":
+        if self.list_mapping_structures_tool is None:
+          raise ValueError(
+            "list-mapping-structures tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.list_mapping_structures_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "search-documents":

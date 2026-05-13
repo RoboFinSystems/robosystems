@@ -126,15 +126,24 @@ class ListInformationBlocksTool:
 - category (optional): Filter by registry category (e.g., 'Close')
 - limit (optional, default 50): Max results to return (1-1000)
 - offset (optional, default 0): Pagination offset
+- include_atoms (optional, default false): When false, returns a lean
+  summary per block (id, type, name, display_name, category, taxonomy_id,
+  taxonomy_name, disclosure_id, element_count, fact_count, rule_count).
+  When true, returns the full envelope including elements, connections,
+  facts, rules, dimensions, fact_set, verification_results, and view
+  projections — same shape as get-information-block. Default is
+  summary-only because the full envelope can run ~40 KB per block; a
+  50-block list call with full atoms exceeds typical agent context.
+  Use the default for browsing; fetch full atoms via
+  get-information-block(id) for the specific blocks you need.
 
 **RETURNS:**
-List of Information Block envelopes. Each envelope includes the full
-atoms (elements, connections, facts) for the block — same shape as
-get-information-block. Use limit/offset for paging when a category
-has many blocks.
+- block_count: number of matching blocks in the page
+- blocks: list of block summaries (or full envelopes when include_atoms=true)
+- mode: "summary" | "full" — echoes which projection was returned
 
 **RELATED TOOLS:**
-- get-information-block — fetch a single block by id
+- get-information-block — fetch a single block by id (always full envelope)
 - create-information-block — build a new block""",
       "inputSchema": {
         "type": "object",
@@ -158,6 +167,15 @@ has many blocks.
             "minimum": 0,
             "default": 0,
           },
+          "include_atoms": {
+            "type": "boolean",
+            "default": False,
+            "description": (
+              "Return full envelopes (elements + facts + rules + view) "
+              "instead of the lean summary projection. Off by default to "
+              "keep list calls compact."
+            ),
+          },
         },
         "required": [],
       },
@@ -169,6 +187,7 @@ has many blocks.
     category = arguments.get("category")
     limit = int(arguments.get("limit", 50))
     offset = int(arguments.get("offset", 0))
+    include_atoms = bool(arguments.get("include_atoms", False))
 
     # MCP inputSchema declares minimum/maximum bounds for limit + offset,
     # but the stdio server doesn't enforce them — some clients (and
@@ -196,9 +215,16 @@ has many blocks.
           offset=offset,
           library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
         )
+        if include_atoms:
+          blocks = [e.model_dump(mode="json") for e in envelopes]
+          mode = "full"
+        else:
+          blocks = [_summarize_information_block(e) for e in envelopes]
+          mode = "summary"
         return {
-          "block_count": len(envelopes),
-          "blocks": [e.model_dump(mode="json") for e in envelopes],
+          "mode": mode,
+          "block_count": len(blocks),
+          "blocks": blocks,
         }
     except ValueError as exc:
       # Raised on unknown block_type — surface as an argument-level error.
@@ -206,6 +232,33 @@ has many blocks.
     except Exception as exc:
       logger.warning(f"list-information-blocks failed: {exc}")
       return {"error": "command_failed", "message": str(exc)}
+
+
+def _summarize_information_block(envelope) -> dict[str, Any]:
+  """Project a full Information Block envelope to a lean summary shape.
+
+  Drops the heavy atoms (elements, connections, facts, rules, dimensions,
+  fact_set, verification_results) and the view-projection block, replacing
+  them with counts so the caller can decide whether to fetch the full
+  envelope via ``get-information-block``. Identity, type, category, and
+  taxonomy linkage are preserved.
+  """
+  return {
+    "id": envelope.id,
+    "block_type": envelope.block_type,
+    "name": envelope.name,
+    "display_name": envelope.display_name,
+    "category": envelope.category,
+    "taxonomy_id": envelope.taxonomy_id,
+    "taxonomy_name": envelope.taxonomy_name,
+    "disclosure_id": envelope.disclosure_id,
+    "element_count": len(envelope.elements or []),
+    "connection_count": len(envelope.connections or []),
+    "fact_count": len(envelope.facts or []),
+    "rule_count": len(envelope.rules or []),
+    "has_fact_set": envelope.fact_set is not None,
+    "verification_result_count": len(envelope.verification_results or []),
+  }
 
 
 __all__ = [

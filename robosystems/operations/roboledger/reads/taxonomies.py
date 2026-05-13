@@ -611,7 +611,29 @@ def get_mapping_detail(
 
 
 def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageResponse:
-  """Return mapping coverage stats (total, mapped, unmapped, confidence)."""
+  """Return mapping coverage stats (total, mapped, unmapped, confidence).
+
+  Raises ``MappingStructureNotFoundError`` when ``mapping_id`` does not
+  resolve to an existing Structure row. Without this guard the count
+  query returns 0 mapped associations regardless of whether the
+  structure exists, silently misleading callers into thinking coverage
+  is 0 / 100 when in fact they're querying a nonexistent id.
+  """
+  # Lazy import: the commands module pulls in the full taxonomy write
+  # surface (assert_not_library_origin, generate_prefixed_ulid, etc.)
+  # which we don't need on the read path. Importing at the call site
+  # keeps the reads module cheap to import for callers that never hit
+  # this function.
+  from robosystems.operations.roboledger.commands.taxonomies import (
+    MappingStructureNotFoundError,
+  )
+
+  structure = session.execute(
+    select(Structure).where(Structure.id == mapping_id)
+  ).scalar_one_or_none()
+  if structure is None:
+    raise MappingStructureNotFoundError(mapping_id)
+
   total_coa = (
     session.execute(
       select(func.count())

@@ -7,18 +7,14 @@ documents, and a filed FY 2025 annual report. After running, use Claude
 Desktop or MCP tools to simulate the close workflow on the queued period.
 
 Data is generated for a rolling 16-month window ending at the current month,
-so the demo stays evergreen. OLTP load goes through the same `OLTPLoader`
-path that the QuickBooks pipeline uses in production.
+so the demo stays evergreen.
 
-**Transport split:**
-- **Bulk historical data** (elements, transactions, entries, line items)
-  goes through `OLTPLoader` — the same bulk-import pipeline QuickBooks
-  uses. This is the honest "migration/import" path.
-- **Additive setup** (mappings, schedules, fiscal calendar) goes through
-  the HTTP API via `LedgerClient` — the same path the frontend UI and
-  MCP tools use. This exercises the native-accounting operations surface.
-- **Reset** (demo-only cleanup for re-runs) goes through direct DB
-  access in `_reset.py` — this is intentionally NOT a product operation.
+**Transport rule**: all content goes through the HTTP API via `LedgerClient`
+— the same surface frontend UI and MCP tools use. This emulates "data
+arriving from outside the system" the way a real customer's integration
+would. The ONLY exception is `_reset.py`, which uses direct DB access for
+demo cleanup between runs — that path is intentionally NOT a product
+operation.
 
 Usage:
     uv run python -m examples.roboledger_demo.main                        # Create new graph + load
@@ -290,78 +286,269 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Step 2c: Create journal entries (via HTTP API)
+# Step 2b: Create counterparty agents (via HTTP API)
 # ---------------------------------------------------------------------------
 
 
-def create_journal_entries(
-  graph_id: str, txns: list, element_lookup: dict[str, str]
-) -> dict[str, int]:
-  """Create historical journal entries via the event-driven ledger.
+def create_agents(graph_id: str) -> dict[str, str]:
+  """Create counterparty agents (customers, vendors, employees).
 
-  Each transaction becomes one journal entry with balanced line items,
-  created with status='posted' (historical data). Posts directly to
-  ``create-event-block(event_type='journal_entry_recorded')`` to make
-  the event-driven flow explicit — the Python handler registry forwards
-  the metadata into the underlying journal entry command. The SDK's
-  ``LedgerClient.create_journal_entry()`` helper is a thin wrapper over
-  this same call; using ``create_event_block`` here keeps the demo's
-  storytelling aligned with the architectural primitive.
+  Each agent is posted via `create-agent` — the same surface a real
+  customer's integration uses. Returns a name → Agent.id lookup that
+  later steps use to populate `event_block.agent_id` on invoice / bill /
+  payment events, exercising the REA counterparty linkage that QB
+  pipelines surface by default.
+  """
+  from .agents import AGENTS
+
+  client = _get_ledger_client()
+  lookup: dict[str, str] = {}
+  skipped = 0
+
+  for body in AGENTS:
+    # No idempotency_key: reset_demo wipes the agents table per-run, but
+    # the Valkey idempotency cache outlives the DB reset and would replay
+    # a prior run's response (returning stale agent_ids that point at
+    # since-deleted rows). The DB-level uniqueness on
+    # (source, external_id) is sufficient to dedupe inside a single run.
+    try:
+      resp = client.create_agent(graph_id, body)
+    except Exception as e:
+      print(f"  WARNING: create-agent failed for {body['name']} — {e}")
+      skipped += 1
+      continue
+    lookup[body["name"]] = resp.id
+
+  if skipped:
+    print(f"  WARNING: Skipped {skipped} agents")
+
+  return lookup
+
+
+# ---------------------------------------------------------------------------
+# Step 2c: Create business events (via HTTP API)
+# ---------------------------------------------------------------------------
+
+# Account codes used by the typed-event branching logic — defined as
+# constants so the cash / AR / AP semantics are visible at the call site
+# rather than buried inside string comparisons.
+_CASH_CODE = "1000"
+_AR_CODE = "1100"
+_AP_CODE = "2000"
+
+
+def _build_line_items(
+  lines: list[tuple[str, int, int]],
+  element_lookup: dict[str, str],
+) -> list[dict] | None:
+  """Resolve `(code, debit, credit)` tuples to the event metadata shape.
+
+  Returns None if any element can't be resolved (caller decides whether
+  to skip the event or fall back to a generic journal entry).
+  """
+  out: list[dict] = []
+  for elem_code, debit, credit in lines:
+    elem_id = element_lookup.get(elem_code)
+    if not elem_id:
+      return None
+    out.append(
+      {"element_id": elem_id, "debit_amount": debit, "credit_amount": credit}
+    )
+  return out
+
+
+def _can_split_bill_payment(lines: list[tuple[str, int, int]]) -> bool:
+  """A bill_payment can be split into bill_received + bill_paid when its
+  shape is a vendor purchase: expense/asset DR + cash CR. Liability-side
+  debits (e.g. payroll tax deposits crediting cash against an existing
+  payable) are settlements, not vendor bills — keep those as plain
+  journal entries so we don't misroute the AP intermediate."""
+  has_cash_credit = any(
+    code == _CASH_CODE and credit > 0 for code, _, credit in lines
+  )
+  has_liability_debit = any(
+    code.startswith("2") and debit > 0 for code, debit, _ in lines
+  )
+  return has_cash_credit and not has_liability_debit
+
+
+def create_business_events(
+  graph_id: str,
+  txns: list,
+  element_lookup: dict[str, str],
+  agent_lookup: dict[str, str],
+) -> dict[str, int]:
+  """Create typed business events from synthetic transactions.
+
+  Branches per txn_type so the demo exercises the rich event vocabulary
+  rather than collapsing everything to `journal_entry_recorded`:
+
+  - `invoice` → `invoice_issued` (event_category=sales) with `agent_id`
+    set to the customer; event_id indexed for the matching payment.
+  - `payment` → `payment_received` (event_category=sales) with
+    `agent_id` and `discharges_event_id` linking back to the invoice
+    (REA duality: payment discharges the AR obligation).
+  - `bill_payment` for a known vendor with expense/asset debits → splits
+    into a `bill_received` (DR expense/asset, CR AP) followed by a
+    `bill_paid` (DR AP, CR cash) with `discharges_event_id` linking back
+    to the bill. The AP balance carries between the two events,
+    mirroring real-world AR/AP timing.
+  - `journal_entry`, `bill_payment` against unknown counterparties, and
+    bill_payments structurally identified as liability settlements
+    (e.g. payroll tax deposits) → `journal_entry_recorded` with
+    `event_category=adjustment` and optional `agent_id`.
+
+  All event handlers dispatch through the journal_entry_recorded Python
+  handler (per `python_handlers/registry.py`) — the event_type drives
+  inbox classification and the duality chain, not GL posting shape.
   """
   client = _get_ledger_client()
 
-  entry_count = 0
+  # Index of invoice events keyed by (customer_name, amount) so the
+  # subsequent payment can populate `discharges_event_id`. LIFO match
+  # via dict deletion handles the case where a single customer has
+  # multiple identical-amount invoices in flight.
+  invoice_index: dict[tuple[str, int], str] = {}
+
+  counts: dict[str, int] = {
+    "invoice_issued": 0,
+    "payment_received": 0,
+    "bill_received": 0,
+    "bill_paid": 0,
+    "journal_entry_recorded": 0,
+  }
   line_item_count = 0
   skipped = 0
 
-  for txn_date, txn_type, description, _amount, lines in txns:
-    li_list = []
-    for elem_code, debit, credit in lines:
-      elem_id = element_lookup.get(elem_code)
-      if not elem_id:
-        skipped += 1
-        continue
-      li_list.append(
-        {
-          "element_id": elem_id,
-          "debit_amount": debit,
-          "credit_amount": credit,
-        }
-      )
+  cash_id = element_lookup.get(_CASH_CODE)
+  ap_id = element_lookup.get(_AP_CODE)
 
-    if len(li_list) < 2:
+  for txn_date, txn_type, description, agent_name, lines in txns:
+    li_list = _build_line_items(lines, element_lookup)
+    if li_list is None or len(li_list) < 2:
       skipped += 1
       continue
 
+    agent_id = agent_lookup.get(agent_name) if agent_name else None
     memo = description or f"{txn_type} on {txn_date}"
-    body = {
-      "event_type": "journal_entry_recorded",
-      "event_category": "adjustment",
+    total_amount = sum(dr for _, dr, _ in lines)
+    occurred_at = f"{txn_date.isoformat()}T00:00:00+00:00"
+
+    base_metadata = {
+      "posting_date": txn_date.isoformat(),
+      "memo": memo,
+      "line_items": li_list,
+      "type": "standard",
+      "status": "posted",
+    }
+    base_body: dict = {
       "event_class": "economic",
       "source": "manual",
-      "occurred_at": f"{txn_date.isoformat()}T00:00:00+00:00",
+      "occurred_at": occurred_at,
       "apply_handlers": True,
-      "metadata": {
-        "posting_date": txn_date.isoformat(),
-        "memo": memo,
-        "line_items": li_list,
-        "type": "standard",
-        "status": "posted",
-      },
+      "amount": total_amount,
+      "currency": "USD",
+      "description": memo,
     }
+
     try:
-      client.create_event_block(graph_id, body)
+      if txn_type == "invoice":
+        body = {
+          **base_body,
+          "event_type": "invoice_issued",
+          "event_category": "sales",
+          "agent_id": agent_id,
+          "metadata": base_metadata,
+        }
+        resp = client.create_event_block(graph_id, body)
+        invoice_index[(agent_name or "", total_amount)] = resp.id
+        counts["invoice_issued"] += 1
+        line_item_count += len(li_list)
+
+      elif txn_type == "payment":
+        invoice_evt_id = invoice_index.pop((agent_name or "", total_amount), None)
+        body = {
+          **base_body,
+          "event_type": "payment_received",
+          "event_category": "sales",
+          "agent_id": agent_id,
+          "metadata": base_metadata,
+        }
+        if invoice_evt_id:
+          body["discharges_event_id"] = invoice_evt_id
+        client.create_event_block(graph_id, body)
+        counts["payment_received"] += 1
+        line_item_count += len(li_list)
+
+      elif (
+        txn_type == "bill_payment"
+        and agent_id is not None
+        and ap_id is not None
+        and cash_id is not None
+        and _can_split_bill_payment(lines)
+      ):
+        # bill_received: rewrite the cash credit to an AP credit
+        br_lines = [
+          {"element_id": ap_id, "debit_amount": 0, "credit_amount": credit}
+          if li["element_id"] == cash_id and li["credit_amount"] > 0
+          else li
+          for li, (_, _, credit) in zip(li_list, lines, strict=True)
+        ]
+        br_body = {
+          **base_body,
+          "event_type": "bill_received",
+          "event_category": "purchase",
+          "agent_id": agent_id,
+          "metadata": {**base_metadata, "line_items": br_lines, "memo": f"Bill: {memo}"},
+        }
+        br_resp = client.create_event_block(graph_id, br_body)
+        counts["bill_received"] += 1
+        line_item_count += len(br_lines)
+
+        # bill_paid: DR AP, CR cash — straight discharge
+        bp_lines = [
+          {"element_id": ap_id, "debit_amount": total_amount, "credit_amount": 0},
+          {"element_id": cash_id, "debit_amount": 0, "credit_amount": total_amount},
+        ]
+        bp_body = {
+          **base_body,
+          "event_type": "bill_paid",
+          "event_category": "purchase",
+          "agent_id": agent_id,
+          "discharges_event_id": br_resp.id,
+          "metadata": {**base_metadata, "line_items": bp_lines, "memo": f"Payment of: {memo}"},
+        }
+        client.create_event_block(graph_id, bp_body)
+        counts["bill_paid"] += 1
+        line_item_count += len(bp_lines)
+
+      else:
+        # journal_entry, unknown-vendor bill_payment, or liability settlement
+        body = {
+          **base_body,
+          "event_type": "journal_entry_recorded",
+          "event_category": "adjustment",
+          "metadata": base_metadata,
+        }
+        if agent_id:
+          body["agent_id"] = agent_id
+        client.create_event_block(graph_id, body)
+        counts["journal_entry_recorded"] += 1
+        line_item_count += len(li_list)
+
     except Exception as e:
-      print(f"  WARNING: create-journal-entry failed for {txn_date} — {e}")
+      print(f"  WARNING: create-event-block failed for {txn_date} {txn_type} — {e}")
       skipped += 1
       continue
-    entry_count += 1
-    line_item_count += len(li_list)
 
   if skipped:
-    print(f"  WARNING: Skipped {skipped} entries (missing elements or errors)")
+    print(f"  WARNING: Skipped {skipped} events (missing elements or errors)")
 
-  return {"entries": entry_count, "line_items": line_item_count}
+  return {
+    "entries": sum(counts.values()),
+    "line_items": line_item_count,
+    "events_by_type": counts,
+  }
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +570,7 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
 
   client = _get_ledger_client()
 
-  # Find the coa_mapping structure (created by OLTPLoader during taxonomy seed)
+  # Find the coa_mapping structure (created during create_chart_of_accounts step)
   structures = client.list_structures(graph_id, structure_type="coa_mapping")
   if not structures:
     print("  ERROR: No mapping structure found")
@@ -809,12 +996,21 @@ def main() -> None:
   print(f"  Taxonomy:     {coa_taxonomy_id}")
   print(f"  Elements:     {elem_count}")
 
-  # Create journal entries (via HTTP API — exercises
-  # create-event-block(event_type='journal_entry_recorded'))
-  print(f"\nCreating {len(txns)} journal entries...")
-  entry_counts = create_journal_entries(graph_id, txns, element_lookup)
-  print(f"  Entries:      {entry_counts['entries']}")
+  # Create counterparty agents (via HTTP API — exercises create-agent op)
+  print("\nCreating counterparty agents...")
+  agent_lookup = create_agents(graph_id)
+  print(f"  Agents:       {len(agent_lookup)}")
+
+  # Create business events (via HTTP API — exercises typed event vocabulary:
+  # invoice_issued, payment_received, bill_received, bill_paid,
+  # journal_entry_recorded — with REA duality chains)
+  print(f"\nCreating {len(txns)} business events...")
+  entry_counts = create_business_events(graph_id, txns, element_lookup, agent_lookup)
+  print(f"  Events:       {entry_counts['entries']}")
   print(f"  Line Items:   {entry_counts['line_items']}")
+  for event_type, count in entry_counts["events_by_type"].items():
+    if count > 0:
+      print(f"    {event_type}: {count}")
 
   # Create CoA → GAAP mappings — hardcoded or AI-powered
   if with_ai_mapping:
