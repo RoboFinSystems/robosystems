@@ -15,6 +15,7 @@ from .utils import (
   flatten_employees,
   flatten_invoice_headers,
   flatten_payment_headers,
+  flatten_purchase_headers,
   flatten_sales_receipt_headers,
   flatten_vendors,
   get_pipeline_work_dir,
@@ -131,10 +132,20 @@ def qb_extract(
   sales_receipt_headers = flatten_sales_receipt_headers(
     client.get_sales_receipts(start_date, end_date)
   )
+  # Purchase covers Expense / Cash Expense / Check / Credit Card Expense —
+  # the four collapsed tx_types JournalReport surfaces with EntityRef
+  # populated. Each Purchase emits multiple header rows (one per candidate
+  # tx_type the JournalReport might use) so the LEFT JOIN in
+  # transactions.sql resolves the agent regardless of which display
+  # label QB picked for the row.
+  purchase_headers = flatten_purchase_headers(
+    client.get_purchases(start_date, end_date)
+  )
   context.log.info(
     f"Fetched headers: {len(invoice_headers)} invoices, {len(bill_headers)} bills, "
     f"{len(payment_headers)} payments, {len(bill_payment_headers)} bill payments, "
-    f"{len(sales_receipt_headers)} sales receipts"
+    f"{len(sales_receipt_headers)} sales receipts, "
+    f"{len(purchase_headers)} purchases"
   )
 
   # Write parquet to shared pipeline directory
@@ -153,6 +164,7 @@ def qb_extract(
     payment_headers=payment_headers,
     bill_payment_headers=bill_payment_headers,
     sales_receipt_headers=sales_receipt_headers,
+    purchase_headers=purchase_headers,
   )
 
   context.log.info(f"Extract complete → {extract_dir}")
@@ -173,6 +185,7 @@ def qb_extract(
       "payment_headers": len(payment_headers),
       "bill_payment_headers": len(bill_payment_headers),
       "sales_receipt_headers": len(sales_receipt_headers),
+      "purchase_headers": len(purchase_headers),
       "full_rebuild": config.full_rebuild,
     }
   )

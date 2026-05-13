@@ -1,14 +1,15 @@
 """Taxonomy mapping read tools for CoA → GAAP mapping workflows.
 
-Three read-side tools; writes (`create-mapping-association`,
+Four read-side tools; writes (`create-mapping-association`,
 `delete-mapping-association`, `create-associations`, etc.) are
 registrar-generated from the roboledger OperationSpec declarations.
 
-1. get-unmapped-elements: List CoA elements not yet mapped to reporting taxonomy
-2. suggest-mapping: Query reporting taxonomy for matching concepts by classification
-3. get-mapping-summary: Get mapping coverage stats
+1. list-mapping-structures: List `coa_mapping` structures with their OLTP ids
+2. get-unmapped-elements: List CoA elements not yet mapped to reporting taxonomy
+3. suggest-mapping: Query reporting taxonomy for matching concepts by classification
+4. get-mapping-summary: Get mapping coverage stats
 
-All three route through `operations/roboledger/reads/taxonomies.py` so
+All four route through `operations/roboledger/reads/taxonomies.py` so
 MCP, GraphQL, and the REST read surface share one source of truth.
 """
 
@@ -27,9 +28,72 @@ from robosystems.operations.roboledger.reads.taxonomies import (
   expand_to_rs_gaap_candidates,
   get_element,
   get_mapping_coverage,
+  list_mappings,
   list_unmapped_elements,
   suggest_mapping_candidates,
 )
+
+
+class ListMappingStructuresTool:
+  """List the `coa_mapping` Structure rows on the tenant graph.
+
+  Solves the discoverability gap surfaced during the 2026-05-12 demo
+  walk: the OLTP `coa_mapping` Structure isn't materialized to the
+  Cypher graph, so an MCP-only agent had no way to find its id without
+  dropping to direct psql access. With this tool, the standard mapping
+  workflow (`get-mapping-summary`, `get-unmapped-elements`,
+  `suggest-mapping`, `create-mapping-association`) can be driven
+  entirely through MCP.
+  """
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "list-mapping-structures",
+      "description": """List the `coa_mapping` Structures on the tenant graph.
+
+**WHEN TO USE:**
+- At the start of any mapping workflow, to discover the active mapping
+  structure id without dropping out of the typed MCP surface
+- Before calling `get-mapping-summary`, `get-unmapped-elements`, or
+  `create-mapping-association` — each of those takes a `mapping_id`
+  that you get from here
+
+**RETURNS:**
+List of mapping structures with id, name, structure_type, taxonomy_id.
+Most tenants have exactly one `coa_mapping` structure ("CoA to US GAAP
+Mapping"); deployments that target multiple taxonomies (fac + rs-gaap)
+will have several.""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    graph_id = self.client.graph_id
+
+    try:
+      with extensions_session(graph_id) as session:
+        result = list_mappings(session)
+        return {
+          "structures": [
+            {
+              "id": s.id,
+              "name": s.name,
+              "structure_type": s.structure_type,
+              "taxonomy_id": s.taxonomy_id,
+            }
+            for s in result.structures
+          ],
+          "count": len(result.structures),
+        }
+    except Exception as exc:
+      logger.warning(f"list-mapping-structures failed: {exc}")
+      return {"error": str(exc)}
 
 
 class GetUnmappedElementsTool:

@@ -207,6 +207,7 @@ def build_envelope(
   # Short-circuit the DB roundtrip — saves a query per envelope on a
   # call path that's invoked once per item in the list view.
   disclosure_id: str | None = None
+  _elements_by_id = {e.id: e for e in atoms.elements}
   return InformationBlockEnvelope(
     id=structure.id,
     block_type=SCHEDULE_BLOCK_TYPE,
@@ -231,7 +232,7 @@ def build_envelope(
       association_to_connection(a, atoms.classifications_by_assoc.get(a.id, []))
       for a in atoms.associations
     ],
-    facts=[fact_to_lite(f) for f in facts],
+    facts=[fact_to_lite(f, _elements_by_id) for f in facts],
     rules=atoms.rules,
     fact_set=atoms.fact_set,
     verification_results=atoms.verification_results,

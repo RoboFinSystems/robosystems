@@ -2,7 +2,7 @@
 
 Demonstrates the full RoboLedger workflow — bulk OLTP import, taxonomy & schedule blocks, fiscal calendar, a filed FY 2025 annual report, and an AI-driven month-end close — using synthetic data for a boutique consulting firm (Cascade Advisory Group LLC).
 
-Data is generated on a **rolling 16-month window ending at the current month**, so the demo always covers "recent history" no matter when it's run. The OLTP load path is the same `OLTPLoader` the QuickBooks pipeline uses in production — synthetic data is written to a DuckDB file in the exact shape dbt produces, then handed off to the loader.
+Data is generated on a **rolling 16-month window ending at the current month**, so the demo always covers "recent history" no matter when it's run. All content flows in through the same HTTP API the frontend UI and MCP tools use — emulating data arriving from outside the system the way a real customer's integration would. The only direct-DB path is `_reset.py`, which exists only to clean up between demo re-runs.
 
 The demo also initializes a **fiscal calendar** with `closed_through = month_before_last`, so that `close_target = last_completed_month` — exactly **one period ready to close** on first run. Schedule facts are scoped against this boundary: periods ≤ `closed_through` are flagged `historical` (already reflected in opening balances, ignored by the close workflow), everything after is `in_scope`. This models the real onboarding flow — a business joining mid-year walls off prior periods and starts running the close workflow from a clean boundary.
 
@@ -27,9 +27,9 @@ uv run python -m examples.roboledger_demo.main --dry-run
 | Component | Count | Description |
 |---|---|---|
 | **Accounts** | 27 | Clean chart of accounts (assets, liabilities, equity, revenue, expenses) |
-| **Transactions** | ~220 | 16 months of double-entry journal entries, rolling to the current month |
-| **Entries** | ~220 | 1:1 with transactions (same pattern as QB's pre-journalized data) |
-| **Line Items** | ~490 | Balanced debit/credit pairs per entry |
+| **Agents** | 17 | 6 customers + 8 vendors + 2 employees + 1 government (IRS). Same shape a real QB sync produces. |
+| **Business Events** | ~305 | Typed event stream emulating data arriving from outside: `invoice_issued` + `payment_received` pairs (with `discharges_event_id` chain), `bill_received` + `bill_paid` pairs, `journal_entry_recorded` for opening balances / payroll / settlements |
+| **Discharge chains** | ~132 | `payment_received → invoice_issued` and `bill_paid → bill_received` REA duality links |
 | **Mappings** | 27 | CoA → US GAAP reporting concept associations |
 | **Fiscal Calendar** | 1 | `closed_through = month_before_last`, `close_target = last_completed_month` |
 | **Fiscal Periods** | 16 | One per month in the data window, first 14 marked `closed`, last 2 `open` |
@@ -37,6 +37,18 @@ uv run python -m examples.roboledger_demo.main --dry-run
 | **Schedule Facts** | mixed | Historical (pre-target) vs in_scope (target onward) — close workflow only acts on in_scope |
 | **Documents** | 4 | Close procedures, depreciation policy, prepaid policy, revenue policy |
 | **FY 2025 Report** | 1 | Annual report — generated, packaged, and **filed** as a Plan C capstone (Report Block lifecycle end-to-end). The current period stays queued for the AI close workflow. |
+
+### Event-type vocabulary
+
+The demo emits the same typed vocabulary a QuickBooks sync produces, exercising the REA duality chain:
+
+| Event type | Category | When | Discharges |
+|---|---|---|---|
+| `invoice_issued` | sales | Customer invoiced (DR AR, CR revenue) | — |
+| `payment_received` | sales | Customer pays an invoice (DR cash, CR AR) | `invoice_issued` event_id |
+| `bill_received` | purchase | Vendor bill arrives (DR expense/asset, CR AP) | — |
+| `bill_paid` | purchase | Bill settled (DR AP, CR cash) | `bill_received` event_id |
+| `journal_entry_recorded` | adjustment | Opening balances, payroll, settlements not from external counterparties | — |
 
 ## The Company
 
@@ -127,9 +139,9 @@ Schedules are anchored to month offsets from the demo start date, so they stay a
 
 | File | Purpose |
 |---|---|
-| `main.py` | Single entry point — creates graph, loads everything |
+| `main.py` | Single entry point — creates graph, loads everything via HTTP API |
 | `data.py` | Chart of accounts + synthetic transaction generator (evergreen dates) |
-| `oltp_writer.py` | Writes synthetic data into a DuckDB file in the shape `OLTPLoader` expects (same contract as QB's dbt output) |
+| `agents.py` | Seed counterparty agents (customers, vendors, employees) referenced by event-block `agent_id` |
 | `mappings.py` | CoA → GAAP mapping definitions |
 | `policies.py` | Accounting policy document content (markdown) |
 | `prompt.md` | Claude prompt for the close workflow — paste into Claude Desktop |

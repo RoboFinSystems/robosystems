@@ -151,9 +151,17 @@ class _Validator:
 
   def graphql_envelope(self) -> None:
     self._sub("GraphQL envelope (one schedule)")
+    # Fetch all schedules and pick the first one whose envelope carries
+    # facts. A schedule's envelope only surfaces `fact_scope='in_scope'`
+    # rows; schedules whose entire period window sits at or before
+    # `closed_through` (e.g. Business Insurance running Apr 2025 –
+    # Mar 2026 against closed_through=2026-03) correctly return zero
+    # facts. The check picks the first schedule with in_scope facts so
+    # it asserts envelope shape, not a side-effect of closed_through.
     data = self._gql("""
       {
-        informationBlocks(blockType: "schedule", limit: 1) {
+        informationBlocks(blockType: "schedule") {
+          name
           blockType
           factSet { id factsetType }
           rules { rulePattern ruleOrigin ruleSeverity }
@@ -166,10 +174,19 @@ class _Validator:
     if not blocks:
       self._check("schedule available for envelope check", False)
       return
-    b = blocks[0]
+    b = next((blk for blk in blocks if len(blk.get("facts", [])) > 0), None)
+    if b is None:
+      self._check(
+        "schedule with in_scope facts available",
+        False,
+        "all schedules have zero in_scope facts (closed_through covers every period?)",
+      )
+      return
     self._check("blockType = 'schedule'", b.get("blockType") == "schedule")
     self._check(
-      "facts present", len(b.get("facts", [])) > 0, f"{len(b.get('facts', []))} facts"
+      "facts present",
+      len(b.get("facts", [])) > 0,
+      f"{len(b.get('facts', []))} facts on '{b.get('name')}'",
     )
     self._check("factSet non-null", b.get("factSet") is not None)
     rules = b.get("rules", [])

@@ -655,6 +655,17 @@ def get_live_financial_statement(
       )
     )
 
+  # Synthesize a Net Income row for income statements that lack one.
+  # FAC variants targeting "single-step" or "no operating income" layouts
+  # legitimately omit a NetIncome line; for those, `get_live_financial_statement`
+  # would otherwise return Revenues + Expenses with no bottom line, which the
+  # validator already flags as a warning. Surfacing the implied NI as a row
+  # makes the IS feel complete without requiring a close-to-RE pass — works
+  # for in-flight periods, survives reopens, and matches the validator's
+  # implied_ni formula.
+  if statement_type == "income_statement":
+    facts = _maybe_synthesize_net_income(facts, n_periods=len(periods))
+
   truncated = len(facts) > limit
   if truncated:
     facts = facts[:limit]
@@ -668,3 +679,94 @@ def get_live_financial_statement(
     unmapped_count=unmapped_count,
     truncated=truncated,
   )
+
+
+def _maybe_synthesize_net_income(
+  facts: list[LiveStatementFactRow], *, n_periods: int
+) -> list[LiveStatementFactRow]:
+  """Append a synthesized `fac:NetIncomeLoss` row when the IS lacks one.
+
+  No-op when:
+  - The facts already include a NetIncome/NetLoss row
+  - The top-most revenue or expense subtotal can't be identified
+  - The computed Net Income is all zeros across every period
+
+  The synthesized row uses the same depth as the wider of the two
+  source subtotals so it lines up with `Revenues` / `OperatingExpenses`
+  in the rendered output, and `is_subtotal=True` because the value is
+  derived from a calc, not a balance.
+  """
+  for f in facts:
+    ql = (f.qname or "").lower()
+    if "netincome" in ql or "netloss" in ql:
+      return facts
+
+  revenue = _best_is_subtotal(facts, "revenue")
+  expense = _best_is_subtotal(facts, "expense")
+  if revenue is None or expense is None:
+    return facts
+
+  def _value(row: LiveStatementFactRow, idx: int) -> float:
+    if not row.values or idx >= len(row.values):
+      return 0.0
+    v = row.values[idx]
+    return float(v) if v is not None else 0.0
+
+  ni_values = [_value(revenue, i) - _value(expense, i) for i in range(n_periods)]
+  if not any(v != 0.0 for v in ni_values):
+    return facts
+
+  facts.append(
+    LiveStatementFactRow(
+      qname="fac:NetIncomeLoss",
+      name="Net Income (Loss)",
+      trait="revenue",
+      values=ni_values,
+      depth=max(revenue.depth, expense.depth),
+      is_subtotal=True,
+    )
+  )
+  return facts
+
+
+def _best_is_subtotal(
+  facts: list[LiveStatementFactRow], classification: str
+) -> LiveStatementFactRow | None:
+  """Pick the top-most subtotal row matching the classification.
+
+  Adapted from `guard_rails._top_most_subtotal_for_classification`,
+  applied to the response-side row shape rather than the fact-grid
+  internal shape. Combined L+E hybrid rows are skipped via the qname
+  check (consistent with the validator).
+  """
+  best: LiveStatementFactRow | None = None
+  for f in facts:
+    qn = (f.qname or "").lower()
+    if "liabilit" in qn and "equity" in qn:
+      continue
+    if (f.trait or "") != classification:
+      continue
+    if best is None:
+      best = f
+      continue
+    # Use the max absolute value across ALL periods, not just values[0].
+    # For multi-period statements where the first column is zero (TTM
+    # views, year-of-incorporation patterns), comparing only values[0]
+    # picks the wrong anchor and the synthesized Net Income row computes
+    # against an unintended subtotal.
+    f_val = max(
+      (abs(v) for v in (f.values or []) if v is not None),
+      default=0.0,
+    )
+    b_val = max(
+      (abs(v) for v in (best.values or []) if v is not None),
+      default=0.0,
+    )
+    if f.depth < best.depth:
+      best = f
+    elif f.depth == best.depth:
+      if (f.is_subtotal and not best.is_subtotal) or (
+        f.is_subtotal == best.is_subtotal and f_val > b_val
+      ):
+        best = f
+  return best

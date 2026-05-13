@@ -1,0 +1,5 @@
+tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type
+Cash Expense,201,Purchase_201,2026-02-08,EXP-201,42.50,USD,Office supplies (cash),qb_vend_2,vendor
+Expense,201,Purchase_201,2026-02-08,EXP-201,42.50,USD,Office supplies (cash),qb_vend_2,vendor
+Check,202,Purchase_202,2026-02-15,CHK-1042,1250.00,USD,Monthly rent,qb_vend_3,vendor
+Credit Card Expense,203,Purchase_203,2026-02-22,,89.99,USD,SaaS subscription,qb_vend_4,vendor

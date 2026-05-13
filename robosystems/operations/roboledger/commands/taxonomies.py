@@ -73,6 +73,10 @@ __all__ = [
 class MappingStructureNotFoundError(LookupError):
   """Raised when a referenced mapping structure does not exist."""
 
+  def __init__(self, mapping_id: str) -> None:
+    super().__init__(f"Mapping structure not found: {mapping_id}")
+    self.mapping_id = mapping_id
+
 
 class TaxonomyNotFoundError(LookupError):
   """Raised when a taxonomy is not found by id."""
