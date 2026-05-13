@@ -211,10 +211,22 @@ def suggest_mapping_candidates(
   trait: str | None = None,
   element_id: str | None = None,
 ) -> list[ElementResponse]:
-  """Return FAC candidates for a CoA element, narrowed by EFS trait.
+  """Return rs-gaap candidates for a CoA element, narrowed by EFS trait.
 
-  Filters active ``fac`` elements by the FASB
-  elementsOfFinancialStatements trait (via element_traits).
+  Filters active ``rs-gaap`` elements by the FASB
+  elementsOfFinancialStatements trait (via element_traits), restricted
+  to concepts that appear in at least one rs-gaap-presentation Network
+  (so any picked target is guaranteed to render on the standard BS / IS
+  / CF / SE reports under the §3.2 Reporting Style picker). Subtotal
+  rollups whose value comes from rendering, not from a leaf fact, are
+  excluded via ``RS_GAAP_SUBTOTAL_DENYLIST``.
+
+  Per §3.1.5 #3 (closed 2026-05-13): the prior behaviour returned FAC
+  candidates, which made the MappingAgent surface inconsistent with
+  the renderer (rs-gaap is the only render target). Flipping the
+  suggester to rs-gaap-only aligns the typed-API and the renderer; no
+  ``target_taxonomy`` parameter needed.
+
   ``element_id`` is reserved for future per-element overrides but is
   currently unused — trait alone drives the filter.
   """
@@ -222,18 +234,22 @@ def suggest_mapping_candidates(
   if trait is None:
     return []
 
+  # Lazy import to avoid pulling agent constants into every read path.
+  from robosystems.operations.agents.implementations.mapping.constants import (
+    RS_GAAP_SUBTOTAL_DENYLIST,
+  )
+
+  presentation_set = _load_rs_gaap_presentation_set(session)
+
   rows = (
     session.execute(
       select(Element)
       .where(
-        Element.source == "fac",
+        Element.source == "rs-gaap",
         Element.is_active.is_(True),
         Element.id.in_(
           select(ElementTrait.element_id)
-          .join(
-            Trait,
-            Trait.id == ElementTrait.trait_id,
-          )
+          .join(Trait, Trait.id == ElementTrait.trait_id)
           .where(
             Trait.category == "elementsOfFinancialStatements",
             Trait.identifier == trait,
@@ -245,8 +261,16 @@ def suggest_mapping_candidates(
     .scalars()
     .all()
   )
-  efs_map = _efs_by_element(session, [r.id for r in rows])
-  return [element_to_response(r, efs_map.get(r.id)) for r in rows]
+
+  filtered = [
+    r
+    for r in rows
+    if r.qname not in RS_GAAP_SUBTOTAL_DENYLIST
+    and (not presentation_set or r.id in presentation_set)
+  ]
+
+  efs_map = _efs_by_element(session, [r.id for r in filtered])
+  return [element_to_response(r, efs_map.get(r.id)) for r in filtered]
 
 
 def list_unmapped_elements(

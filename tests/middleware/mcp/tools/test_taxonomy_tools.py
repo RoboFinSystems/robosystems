@@ -161,22 +161,24 @@ class TestSuggestMappingTool:
     source = _element(
       id="elem_1", name="Product Revenue", trait="revenue", source="quickbooks"
     )
+    # Post-§3.1.5 #3: suggest-mapping returns rs-gaap candidates only
+    # (the §3.2 Reporting Style picker targets rs-gaap Networks).
     candidates = [
       _element(
         id="gaap_1",
-        qname="fac:Revenues",
-        name="Revenues",
-        source="fac",
+        qname="rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        name="Revenue From Contract With Customer (Excluding Assessed Tax)",
+        source="rs-gaap",
         trait="revenue",
-        is_abstract=True,
+        depth=2,
       ),
       _element(
         id="gaap_2",
-        qname="us-gaap:Revenues",
-        name="Revenue",
-        source="us-gaap",
+        qname="rs-gaap:SalesRevenueNet",
+        name="Sales Revenue, Net",
+        source="rs-gaap",
         trait="revenue",
-        depth=1,
+        depth=2,
       ),
     ]
 
@@ -189,7 +191,8 @@ class TestSuggestMappingTool:
 
     assert result["source_element"]["name"] == "Product Revenue"
     assert len(result["candidates"]) == 2
-    assert result["candidates"][0]["qname"] == "fac:Revenues"
+    assert result["candidates"][0]["qname"].startswith("rs-gaap:")
+    assert all(c["source"] == "rs-gaap" for c in result["candidates"])
 
   @pytest.mark.asyncio
   async def test_returns_error_for_missing_element(self, mock_graph_client):
