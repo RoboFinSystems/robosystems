@@ -185,6 +185,19 @@ class FiscalPeriodSummary(BaseModel):
   closed_at: datetime | None = None
 
 
+class PendingObligationDetailResponse(BaseModel):
+  """One pending schedule-derived obligation blocking close.
+
+  Surfaced on `FiscalCalendarResponse` when `pending_obligations` is in
+  the blockers list so callers can name which schedules to promote.
+  """
+
+  event_id: str
+  schedule_id: str | None = None
+  schedule_name: str | None = None
+  period: str = Field(..., description="Period in YYYY-MM format")
+
+
 class FiscalCalendarResponse(BaseModel):
   """Current fiscal calendar state for a graph."""
 
@@ -218,7 +231,42 @@ class FiscalCalendarResponse(BaseModel):
     description=(
       "Structured blocker codes when closeable_now is False: "
       "'sequence_violation', 'period_incomplete', 'sync_stale', "
-      "'calendar_not_initialized', 'period_already_closed'"
+      "'calendar_not_initialized', 'period_already_closed', "
+      "'pending_obligations'"
+    ),
+  )
+  # Detail fields for actionable blockers — populated only when the
+  # corresponding code is present in `blockers`. Keeps the default
+  # response shape compact while giving close agents and UIs the
+  # context they need to resolve a blocker without a sidecar query.
+  pending_obligation_count: int = Field(
+    0,
+    description=(
+      "Number of pending schedule_entry_due events blocking close. Non-zero "
+      "only when `pending_obligations` is in `blockers`."
+    ),
+  )
+  pending_obligation_sample: list[PendingObligationDetailResponse] = Field(
+    default_factory=list,
+    description=(
+      "Sample of up to 5 pending obligations (schedule_id, schedule_name, "
+      "period, event_id) ordered by occurred_at. Use `list-event-blocks` "
+      "with event_type=schedule_entry_due&status=pending for the full set."
+    ),
+  )
+  earliest_pending_period: str | None = Field(
+    None,
+    description=(
+      "Earliest period (YYYY-MM) with a pending obligation blocking close. "
+      "Null when no pending_obligations blocker is active."
+    ),
+  )
+  sync_stale_days: int | None = Field(
+    None,
+    description=(
+      "Days the most recent sync is stale relative to the period to close. "
+      "Populated only when `sync_stale` is in `blockers` and last_sync_at "
+      "exists (null when there's a connection but no sync has ever run)."
     ),
   )
   last_close_at: datetime | None = None

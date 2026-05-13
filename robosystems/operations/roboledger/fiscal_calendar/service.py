@@ -51,15 +51,46 @@ from .periods import (
 
 
 @dataclass
+class PendingObligationDetail:
+  """One pending schedule-derived obligation that's blocking close.
+
+  Surfaced on `CloseableGateResult` when the `pending_obligations`
+  blocker is present so callers (AI close agent, UI, audit) can name
+  which schedules need promotion without a sidecar query.
+  """
+
+  event_id: str
+  schedule_id: str | None
+  schedule_name: str | None
+  period: str  # YYYY-MM
+
+
+@dataclass
 class CloseableGateResult:
   """Outcome of the closeable gate check for a single period.
 
   When `is_closeable` is False, `blockers` holds one or more well-known
   reason codes that the caller can surface as structured validation errors.
+
+  When a specific blocker has actionable detail (count of items, sample
+  names, age), the relevant `*_detail` fields below are populated. These
+  default to None / 0 / [] when the corresponding blocker isn't active.
   """
 
   is_closeable: bool
   blockers: list[str] = field(default_factory=list)
+
+  # Detail fields for `pending_obligations` — populated when the blocker
+  # fires so an agent can name which schedules to promote rather than
+  # falling back to a sidecar Cypher / SQL query.
+  pending_obligation_count: int = 0
+  pending_obligation_sample: list[PendingObligationDetail] = field(default_factory=list)
+  earliest_pending_period: str | None = None
+
+  # Detail field for `sync_stale` — days since the last successful sync,
+  # so callers can phrase "sync is N days stale" instead of guessing.
+  # None when the blocker is not active.
+  sync_stale_days: int | None = None
 
   # Machine-readable codes
   SEQUENCE = "sequence_violation"
@@ -641,15 +672,18 @@ class FiscalCalendarService:
     # "Connection exists but never synced" (last_sync_at is None) is treated as
     # stale and blocks the close — you can't commit a period that hasn't seen
     # any data from the authoritative source.
+    sync_stale_days: int | None = None
     if not allow_stale_sync and has_sync_connection:
       if last_sync_at is None:
         blockers.append(CloseableGateResult.SYNC_STALE)
+        # "Never synced" — no meaningful day count to report.
       else:
         last_sync_date = (
           last_sync_at.date() if hasattr(last_sync_at, "date") else last_sync_at
         )
         if last_sync_date < period_end:
           blockers.append(CloseableGateResult.SYNC_STALE)
+          sync_stale_days = (period_end - last_sync_date).days
 
     # Gate 4: pending obligations. Schedules materialize one `pending`
     # `schedule_entry_due` event per period. The period cannot be closed
@@ -669,10 +703,65 @@ class FiscalCalendarService:
       )
       .count()
     )
+    pending_sample: list[PendingObligationDetail] = []
+    earliest_pending_period: str | None = None
     if pending_count > 0:
       blockers.append(CloseableGateResult.PENDING_OBLIGATIONS)
+      # Look up the earliest few pending obligations + their schedule names
+      # so callers can name what's blocking close. Cap at 5 to keep the
+      # response compact; full enumeration is available via list-event-blocks
+      # filtered by event_type=schedule_entry_due&status=pending.
+      from robosystems.models.extensions.roboledger import Structure
 
-    return CloseableGateResult(is_closeable=not blockers, blockers=blockers)
+      pending_events = (
+        session.query(Event)
+        .filter(
+          Event.event_type == "schedule_entry_due",
+          Event.status == "pending",
+          Event.occurred_at <= period_end_dt,
+        )
+        .order_by(Event.occurred_at.asc())
+        .limit(5)
+        .all()
+      )
+      schedule_ids = {
+        evt.metadata_.get("schedule_id")
+        for evt in pending_events
+        if evt.metadata_ and evt.metadata_.get("schedule_id")
+      }
+      schedule_names: dict[str, str] = {}
+      if schedule_ids:
+        for struct in (
+          session.query(Structure).filter(Structure.id.in_(schedule_ids)).all()
+        ):
+          schedule_names[str(struct.id)] = str(struct.name)
+      for evt in pending_events:
+        meta = evt.metadata_ or {}
+        sid = meta.get("schedule_id")
+        period_end_iso = meta.get("period_end") or ""
+        # period_end is "YYYY-MM-DD" — derive "YYYY-MM" for the response.
+        period = period_end_iso[:7] if period_end_iso else ""
+        pending_sample.append(
+          PendingObligationDetail(
+            event_id=str(evt.id),
+            schedule_id=str(sid) if sid else None,
+            schedule_name=schedule_names.get(sid) if sid else None,
+            period=period,
+          )
+        )
+      # earliest = the period of the first pending event (already
+      # ordered ASC by occurred_at).
+      if pending_sample:
+        earliest_pending_period = pending_sample[0].period
+
+    return CloseableGateResult(
+      is_closeable=not blockers,
+      blockers=blockers,
+      pending_obligation_count=pending_count,
+      pending_obligation_sample=pending_sample,
+      earliest_pending_period=earliest_pending_period,
+      sync_stale_days=sync_stale_days,
+    )
 
   # ── Derived state ──────────────────────────────────────────────────────
 

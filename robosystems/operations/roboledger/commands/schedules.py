@@ -50,6 +50,30 @@ class ScheduleNotFoundError(LookupError):
     self.structure_id = structure_id
 
 
+def _calendar_closed_through_date(session: Session):
+  """Return the active fiscal calendar's `closed_through_period` as a date.
+
+  Used by `create_schedule` to default the historical-voiding boundary
+  when the caller doesn't supply `closed_through` in the request body.
+  Returns None when no calendar is initialized or the calendar's
+  `closed_through_period` is null — preserving the existing
+  "all-periods-pending" behavior for graphs that haven't called
+  initialize-ledger yet.
+  """
+  from robosystems.models.extensions.roboledger.fiscal_calendar import (
+    FiscalCalendar,
+  )
+  from robosystems.operations.roboledger.fiscal_calendar import (
+    period_date_range,
+  )
+
+  cal = session.query(FiscalCalendar).first()
+  if cal is None or not cal.closed_through_period:
+    return None
+  _, period_end = period_date_range(str(cal.closed_through_period))
+  return period_end
+
+
 def _build_closing_entry_response(result) -> ClosingEntryResponse:
   """Map a ScheduleService ClosingEntryResult to the wire response."""
   reversal_resp = None
@@ -146,6 +170,20 @@ def create_schedule(
       periodic_amounts=body.schedule_metadata.periodic_amounts,
     )
 
+  # `closed_through` controls which schedule-generated periods become
+  # `pending` obligations vs `voided` (historical). When the caller
+  # doesn't supply one, fall back to the active fiscal calendar's
+  # `closed_through_period`. Without this default, callers (the demo,
+  # frontend, AI agents) who don't know to thread the field end up
+  # creating schedules that emit pending obligations for periods that
+  # are *already closed* — those obligations then block close-period
+  # forever because they're sealed inside a closed range yet still
+  # `pending`. The fiscal-calendar value IS the source of truth; using
+  # it as the default makes the right behavior automatic.
+  effective_closed_through = body.closed_through
+  if effective_closed_through is None:
+    effective_closed_through = _calendar_closed_through_date(session)
+
   structure = service.create_schedule(
     session,
     name=body.name,
@@ -157,7 +195,7 @@ def create_schedule(
     entry_template=et,
     schedule_metadata=sm,
     created_by=created_by,
-    closed_through=body.closed_through,
+    closed_through=effective_closed_through,
     source_transaction_id=body.source_transaction_id,
   )
 

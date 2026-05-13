@@ -78,6 +78,9 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   FiscalPeriodSummary as PydanticFiscalPeriodSummary,
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
+  PendingObligationDetailResponse as PydanticPendingObligationDetailResponse,
+)
+from robosystems.models.api.extensions.fiscal_calendar import (
   PeriodDraftsResponse as PydanticPeriodDraftsResponse,
 )
 from robosystems.models.api.extensions.publish_lists import (
@@ -501,6 +504,11 @@ class MappingCoverage:
 @pydantic_type(model=PydanticFiscalPeriodSummary, all_fields=True)
 class FiscalPeriodSummary:
   """Single fiscal period row."""
+
+
+@pydantic_type(model=PydanticPendingObligationDetailResponse, all_fields=True)
+class PendingObligationDetail:
+  """One pending schedule-derived obligation blocking close."""
 
 
 @pydantic_type(model=PydanticFiscalCalendarResponse, all_fields=True)
