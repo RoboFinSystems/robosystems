@@ -36,6 +36,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.graphs.backups import BackupCreateRequest
 from robosystems.models.api.graphs.operations import (
+  ChangeReportingStyleOp,
   ChangeTierOp,
   DeleteGraphOp,
   DeleteSubgraphOp,
@@ -834,6 +835,59 @@ async def change_tier_op(
     event=_AUDIT_EVENT,
   )
   return envelope
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# change-reporting-style
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/change-reporting-style",
+  response_model=OperationEnvelope,
+  operation_id="opChangeReportingStyle",
+  summary="Change Reporting Style",
+  description=(
+    "Switches the graph's Reporting Style (Phase 2 of §3.2). Synchronous: "
+    "validates the target Style has a complete composition in the tenant "
+    "schema, then updates `graphs.reporting_style_id`. Filed Reports are "
+    "unaffected; new reports use the new Style. Idempotent on the same id."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/change-reporting-style",
+  method="POST",
+  business_event_type="graph_change_reporting_style",
+)
+async def change_reporting_style_op(
+  body: ChangeReportingStyleOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  db: Session = Depends(get_async_db_session),
+) -> OperationEnvelope:
+  from robosystems.operations.graph.commands.reporting_style import (
+    change_reporting_style_cmd,
+  )
+
+  op_name = "change-reporting-style"
+  user_id = str(user.id)
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=user_id,
+    op=op_name,
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    return await change_reporting_style_cmd(graph_id, body.reporting_style_id, user, db)
+
+  return await _dispatch(ctx, _runner, cache)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
