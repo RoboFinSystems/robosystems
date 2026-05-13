@@ -68,21 +68,21 @@
       "@id": "_:style-default-structure",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/Default",
       "structureName": "Default Style — Composition",
-      "structureType": "reporting_style",
+      "structureType": "custom",
       "conceptArrangementPattern": "set"
     },
     {
       "@id": "_:style-smallprivate-structure",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/SmallPrivateCompany",
       "structureName": "Small Private Company Style — Composition",
-      "structureType": "reporting_style",
+      "structureType": "custom",
       "conceptArrangementPattern": "set"
     },
     {
       "@id": "_:style-banking-structure",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/Banking",
       "structureName": "Banking Style — Composition (placeholder)",
-      "structureType": "reporting_style",
+      "structureType": "custom",
       "conceptArrangementPattern": "set"
     },
 

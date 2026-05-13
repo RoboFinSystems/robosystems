@@ -227,49 +227,54 @@ def _persist_report_facts(
     session.add(rf)
 
 
-def _create_report_fact_sets(
+def _pre_create_report_fact_sets(
   session: Session,
   report_id: str,
   entity_id: str,
   created_by: str,
-  facts,
-  element_to_structure: dict[str, str],
+  periods,
   structure_to_factset: dict[str, str],
 ) -> None:
-  """Insert one FactSet row per statement structure that received facts.
+  """Insert one FactSet row per picked Network — before facts are stamped.
 
-  Period envelope: for comparative reports with multi-period fact sets,
-  the FactSet row spans the outer range (min period_start, max period_end)
-  of the facts actually linked to this structure. This matches the
-  "Block = fragment" model — the IS block is ONE block regardless of how
-  many periods are compared, and the envelope read
-  (`ORDER BY period_end DESC LIMIT 1`) picks the latest FactSet per
-  structure cleanly.
+  Per §3.5/§6.5 of information-block.md: ``create_report`` creates the
+  ``fact_sets`` row first, then stamps facts referencing its id. The
+  period envelope comes from the report's ``periods`` (min start, max
+  end) rather than being derived post-hoc from filtered facts. That
+  pattern keeps the dataflow forward and lets us add a real FK from
+  ``facts.fact_set_id`` → ``fact_sets.id`` without orphan risk.
+
+  Every picked Network gets a FactSet row, even one whose Network the
+  CoA hasn't reached yet (e.g., the demo's CF Network with no
+  cash-flow CoA mappings). The envelope read
+  (``ORDER BY period_end DESC LIMIT 1``) still resolves cleanly per
+  structure; consumers can detect "no facts in this period" by the
+  zero fact_count on the resulting envelope.
   """
-  per_structure: dict[str, list] = {}
-  for f in facts.facts:
-    sid = element_to_structure.get(f.element_id)
-    if sid is not None:
-      per_structure.setdefault(sid, []).append(f)
+  if not periods:
+    return
 
-  for structure_id, struct_facts in per_structure.items():
-    starts = [f.period_start for f in struct_facts if f.period_start is not None]
-    ends = [f.period_end for f in struct_facts if f.period_end is not None]
-    if not ends:
-      # period_end is NOT NULL on fact_sets — skip structures with no dated facts
-      continue
+  starts = [p.start for p in periods if getattr(p, "start", None) is not None]
+  envelope_start = min(starts) if starts else None
+  envelope_end = max(p.end for p in periods)
+
+  for structure_id, fact_set_id in structure_to_factset.items():
     session.add(
       FactSet(
-        id=structure_to_factset[structure_id],
+        id=fact_set_id,
         structure_id=structure_id,
-        period_start=min(starts) if starts else None,
-        period_end=max(ends),
+        period_start=envelope_start,
+        period_end=envelope_end,
         factset_type="report",
         entity_id=entity_id,
         report_id=report_id,
         created_by=created_by,
       )
     )
+  # Explicit flush so the new fact_sets rows hit the DB before the fact
+  # INSERTs that reference them. SQLAlchemy's session-flush ordering is
+  # by INSERT statement type, not by FK dependency.
+  session.flush()
 
 
 def create_report(
@@ -323,20 +328,22 @@ def create_report(
   element_to_structure, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )
+  # §6.5: create fact_sets rows first so the facts we stamp reference
+  # a row that already exists. Lets us enforce facts.fact_set_id →
+  # fact_sets.id at the DB layer (post-§3.5).
+  _pre_create_report_fact_sets(
+    session,
+    report_def.id,
+    entity_id,
+    created_by,
+    periods,
+    structure_to_factset,
+  )
   _persist_report_facts(
     session,
     report_def.id,
     facts,
     entity_id,
-    element_to_structure,
-    structure_to_factset,
-  )
-  _create_report_fact_sets(
-    session,
-    report_def.id,
-    entity_id,
-    created_by,
-    facts,
     element_to_structure,
     structure_to_factset,
   )
@@ -423,26 +430,33 @@ def regenerate_report(
   element_to_structure, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )
-  # Stale FactSet rows from the prior generation must be cleared before
-  # new rows are inserted with freshly-minted ULIDs.
+  # Stale rows from the prior generation must clear before fresh ULIDs
+  # land. Order matters once the facts → fact_sets FK exists (§6.5):
+  # facts go first (they reference fact_sets), then fact_sets. The
+  # ``_persist_report_facts`` call below also DELETEs by report_id —
+  # idempotent here, but doing the explicit fact delete first keeps
+  # the FK ordering correct even before SQLAlchemy autoflushes.
+  session.execute(
+    text("DELETE FROM facts WHERE report_id = :report_id"),
+    {"report_id": report_def.id},
+  )
   session.execute(
     text("DELETE FROM fact_sets WHERE report_id = :report_id"),
     {"report_id": report_def.id},
+  )
+  _pre_create_report_fact_sets(
+    session,
+    report_def.id,
+    entity_id,
+    acting_user_id,
+    periods,
+    structure_to_factset,
   )
   _persist_report_facts(
     session,
     report_def.id,
     facts,
     entity_id,
-    element_to_structure,
-    structure_to_factset,
-  )
-  _create_report_fact_sets(
-    session,
-    report_def.id,
-    entity_id,
-    acting_user_id,
-    facts,
     element_to_structure,
     structure_to_factset,
   )

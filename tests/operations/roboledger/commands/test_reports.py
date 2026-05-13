@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 from robosystems.operations.roboledger.commands.reports import (
   _build_structure_mapping,
-  _create_report_fact_sets,
   _persist_report_facts,
+  _pre_create_report_fact_sets,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
   NoNetworkForStatementTypeError,
@@ -190,64 +190,70 @@ def test_persist_report_facts_stamps_structure_and_fact_set() -> None:
   assert unmapped.fact_set_id is None
 
 
-def test_create_report_fact_sets_one_row_per_structure_with_envelope() -> None:
-  """One FactSet per structure that received facts, period envelope
-  spans the full range of that structure's facts."""
-  session = MagicMock()
-  facts = _FakeFacts(
-    [
-      _FakeFact("elem_rev", 100.0, date(2026, 1, 1), date(2026, 3, 31)),
-      _FakeFact("elem_rev", 110.0, date(2025, 10, 1), date(2025, 12, 31)),
-      _FakeFact("elem_cash", 50.0, date(2026, 3, 31), date(2026, 3, 31)),
-      _FakeFact("elem_unmapped", 1.0, date(2026, 1, 1), date(2026, 3, 31)),
-    ]
-  )
-  elem_map = {"elem_rev": "struct_is", "elem_cash": "struct_bs"}
-  fs_map = {"struct_is": "fs_IS", "struct_bs": "fs_BS"}
+class _FakePeriod:
+  """Stand-in for ``FactPeriodSpec`` — only ``start``/``end`` matter here."""
 
-  _create_report_fact_sets(
-    session,
-    "rep_01",
-    "ent_01",
-    "usr_test",
-    facts,
-    elem_map,
-    fs_map,
-  )
+  def __init__(self, start: date, end: date) -> None:
+    self.start = start
+    self.end = end
+
+
+def test_pre_create_report_fact_sets_one_row_per_picked_structure() -> None:
+  """One FactSet per picked Network — even Networks that will receive no
+  facts (e.g., the demo's CF Network when no cash-flow CoA mappings
+  exist). Period envelope comes from the report's ``periods``, not from
+  facts that haven't been stamped yet."""
+  session = MagicMock()
+  periods = [
+    _FakePeriod(date(2025, 10, 1), date(2025, 12, 31)),
+    _FakePeriod(date(2026, 1, 1), date(2026, 3, 31)),
+  ]
+  fs_map = {
+    "struct_bs": "fs_BS",
+    "struct_is": "fs_IS",
+    "struct_cf": "fs_CF",
+    "struct_se": "fs_SE",
+  }
+
+  _pre_create_report_fact_sets(session, "rep_01", "ent_01", "usr_test", periods, fs_map)
 
   added = [c[0][0] for c in session.add.call_args_list]
-  assert len(added) == 2
+  # Every picked Network gets a row — including ones with no facts.
+  assert len(added) == 4
   by_structure = {fs.structure_id: fs for fs in added}
-
+  assert set(by_structure.keys()) == {
+    "struct_bs",
+    "struct_is",
+    "struct_cf",
+    "struct_se",
+  }
   is_row = by_structure["struct_is"]
   assert is_row.id == "fs_IS"
   assert is_row.factset_type == "report"
   assert is_row.entity_id == "ent_01"
   assert is_row.report_id == "rep_01"
   assert is_row.created_by == "usr_test"
-  # Envelope spans both periods' extent
+  # Envelope spans the full period range from `periods`.
   assert is_row.period_start == date(2025, 10, 1)
   assert is_row.period_end == date(2026, 3, 31)
 
-  bs_row = by_structure["struct_bs"]
-  assert bs_row.period_start == date(2026, 3, 31)
-  assert bs_row.period_end == date(2026, 3, 31)
 
-
-def test_create_report_fact_sets_skips_structures_with_no_dated_facts() -> None:
+def test_pre_create_report_fact_sets_noop_on_empty_inputs() -> None:
+  """No picked Networks → no FactSet rows. No periods → no rows
+  either (we'd have nothing to envelope)."""
   session = MagicMock()
-  facts = _FakeFacts(
-    [
-      _FakeFact("elem_ghost", 0.0, period_start=None, period_end=None),
-    ]
+  _pre_create_report_fact_sets(
+    session, "rep_01", "ent_01", "usr_test", [], {"struct_x": "fs_x"}
   )
-  elem_map = {"elem_ghost": "struct_ghost"}
-  fs_map = {"struct_ghost": "fs_ghost"}
-
-  _create_report_fact_sets(
-    session, "rep_01", "ent_01", "usr_test", facts, elem_map, fs_map
-  )
-
-  # fact_sets.period_end is NOT NULL — a structure with no dated facts
-  # cannot produce a valid FactSet row.
   assert session.add.call_count == 0
+
+  session2 = MagicMock()
+  _pre_create_report_fact_sets(
+    session2,
+    "rep_01",
+    "ent_01",
+    "usr_test",
+    [_FakePeriod(date(2026, 1, 1), date(2026, 3, 31))],
+    {},
+  )
+  assert session2.add.call_count == 0

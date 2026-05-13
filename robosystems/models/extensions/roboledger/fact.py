@@ -19,6 +19,7 @@ from sqlalchemy import (
   Date,
   DateTime,
   Float,
+  ForeignKey,
   Index,
   String,
   text,
@@ -64,7 +65,14 @@ class Fact(ExtensionsBase):
   unit = Column(String, nullable=False, default="USD")
   entity_id = Column(String, nullable=False)
   structure_id = Column(String, nullable=True)  # structure this fact belongs to
-  fact_set_id = Column(String, nullable=True)  # fact set grouping within structure
+  # FK → fact_sets.id with ON DELETE SET NULL. Soft pointer, like
+  # report_id; the FactSet is created before the fact is stamped
+  # (§3.5/§6.5), so this should never be a dangling reference for new
+  # writes. Historical rows whose ULID didn't resolve were nulled out
+  # by migration 0009 ahead of the FK install.
+  fact_set_id = Column(
+    String, ForeignKey("fact_sets.id", ondelete="SET NULL"), nullable=True
+  )
   # fact_scope distinguishes "historical" (already reflected in opening balances,
   # ignored by close workflow) from "in_scope" (close workflow drafts entries from
   # these). Defaults to 'in_scope' so existing facts and non-schedule facts are
