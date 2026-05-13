@@ -148,6 +148,12 @@ class FactLite(BaseModel):
 
   id: str
   element_id: str
+  # Denormalized from the related Element row so consumers can render
+  # fact rows without an additional join through `elements[]`. Populated
+  # by `fact_to_lite` when an element lookup is supplied; null on
+  # legacy paths that haven't been migrated yet.
+  element_name: str | None = None
+  element_qname: str | None = None
   value: float
   period_start: date | None = None
   period_end: date

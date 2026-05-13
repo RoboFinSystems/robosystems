@@ -927,9 +927,14 @@ def generate_fy2025_report(graph_id: str) -> str | None:
   package = client.get_report_package(graph_id, report_id)
   if package:
     items = package.get("items", []) or []
-    print(
-      f"  Package:      {len(items)} block(s) — {', '.join(i.get('block_type', '?') for i in items)}"
-    )
+    # `block_type` lives nested at item.block.block_type — the rehydrated
+    # InformationBlockEnvelope. Earlier this read item.block_type directly
+    # and silently rendered "?" for every item.
+    block_names = [
+      (i.get("block") or {}).get("name") or (i.get("block") or {}).get("block_type") or "?"
+      for i in items
+    ]
+    print(f"  Package:      {len(items)} block(s) — {', '.join(block_names)}")
 
   # File it — flips filing_status draft → filed
   try:

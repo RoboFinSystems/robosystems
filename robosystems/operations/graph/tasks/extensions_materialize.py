@@ -53,6 +53,7 @@ class ExtensionsMaterializeTask(BaseTask):
           "status": "error",
           "errors": result.errors,
           "duration_ms": result.duration_ms,
+          "execution_time_ms": result.duration_ms,
         }
 
       await self.report_progress("Marking graph fresh...", percent=95)
@@ -94,6 +95,10 @@ class ExtensionsMaterializeTask(BaseTask):
         "tables_materialized": result.tables_materialized,
         "total_rows": result.total_rows,
         "duration_ms": result.duration_ms,
+        # Aliased so older SDK clients (graph_client.py < the field-rename
+        # commit) still see a non-zero elapsed time in the SSE progress
+        # message instead of "0.00ms".
+        "execution_time_ms": result.duration_ms,
         "errors": result.errors,
       }
 

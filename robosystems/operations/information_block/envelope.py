@@ -120,11 +120,24 @@ def load_classifications_for_associations(
   return grouped
 
 
-def fact_to_lite(fact: Fact) -> FactLite:
-  """Project a :class:`Fact` ORM row onto :class:`FactLite`."""
+def fact_to_lite(
+  fact: Fact,
+  elements_by_id: dict[str, Element] | None = None,
+) -> FactLite:
+  """Project a :class:`Fact` ORM row onto :class:`FactLite`.
+
+  When ``elements_by_id`` is supplied, the related Element's ``name``
+  and ``qname`` are denormalized into the projection so consumers can
+  render fact rows without joining back through ``envelope.elements``.
+  When omitted, ``element_name`` and ``element_qname`` are left ``None``
+  for backward compatibility.
+  """
+  element = elements_by_id.get(fact.element_id) if elements_by_id else None
   return FactLite(
     id=fact.id,
     element_id=fact.element_id,
+    element_name=element.name if element else None,
+    element_qname=element.qname if element else None,
     value=fact.value,
     period_start=fact.period_start,
     period_end=fact.period_end,
