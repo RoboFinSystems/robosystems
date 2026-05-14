@@ -278,7 +278,7 @@ _WIDENED_ASSOCIATION_TYPE_CHECK = (
   "association_type IN ("
   "'presentation', 'calculation', 'mapping', "
   "'equivalence', 'general-special', 'essence-alias', "
-  "'definition'"
+  "'definition', 'derivation'"
   ")"
 )
 _PRIOR_ASSOCIATION_TYPE_CHECK = (

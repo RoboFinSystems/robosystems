@@ -109,7 +109,13 @@ _WIDENED_ASSOCIATION_CHECK = (
   # rs-gaap-reporting-checklist + rs-gaap-reporting-styles packages.
   # See migration 0007 for the same widen applied to already-deployed
   # tenant schemas.
-  "'definition'"
+  "'definition', "
+  # 'derivation' arcs map BS leaves to their CF "default change tag"
+  # counterparts (e.g. ReceivablesNetCurrent → IncreaseDecreaseInAccountsReceivable),
+  # so the renderer can synthesize CF facts from period-over-period
+  # BS deltas without manual authoring. See migration 0012 for the
+  # same widen applied to already-deployed tenant schemas.
+  "'derivation'"
   ")"
 )
 _WIDENED_ELEMENT_SOURCE_CHECK = (

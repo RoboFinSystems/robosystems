@@ -747,6 +747,13 @@ def _derive_cash_flow_facts(
   if len(periods) < 2:
     return  # Single-period rendering has no prior to delta against.
 
+  # Period lists arrive in presentation order (typically newest-first:
+  # [Current, Prior]). Sort chronologically so periods[i] / periods[i-1]
+  # means "current / prior" in real time, not list-order. Without this
+  # the deltas come out negated AND the synthesized CF facts get tagged
+  # with the wrong period.
+  ordered = sorted(periods, key=lambda p: p.end)
+
   # Load derivation arcs: cf_leaf_id → list[(source_element_id, weight)]
   rows = session.execute(
     text("""
@@ -783,9 +790,9 @@ def _derive_cash_flow_facts(
   for f in facts:
     fact_index[(f.element_id, f.period_end)] = f.value
 
-  for i in range(1, len(periods)):
-    current = periods[i]
-    prior = periods[i - 1]
+  for i in range(1, len(ordered)):
+    current = ordered[i]
+    prior = ordered[i - 1]
     for cf_leaf_id, sources in derivations.items():
       cf_value = 0.0
       for source_id, weight in sources:

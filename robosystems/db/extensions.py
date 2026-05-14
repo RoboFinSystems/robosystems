@@ -226,7 +226,10 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'equivalence', 'general-special', 'essence-alias', "
     # 'definition' arcs land from rs-gaap-disclosure-mechanics,
     # rs-gaap-reporting-checklist, and rs-gaap-reporting-styles.
-    "'definition'"
+    "'definition', "
+    # 'derivation' arcs map BS leaves to their CF default change tags
+    # (rs-gaap-calculations). See migration 0012.
+    "'derivation'"
     ")"
   )
   widened_source = (

@@ -926,7 +926,9 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     period_start=date(2025, 1, 1),
     period_end=date(2025, 12, 31),
     period_type="annual",
-    comparative=False,
+    # CF derivation needs a prior period to delta against; SE roll-forward
+    # likewise needs a prior to compute period-over-period equity changes.
+    comparative=True,
   )
   report_id = report.id
   print(f"  Generated:    {report_id}")
