@@ -171,6 +171,14 @@ def generate_report_facts(
       session, mapping_id, facts, period.start, period.end, arc_type=arc_type
     )
 
+  # Derive Cash Flow facts from period-over-period BS deltas (indirect
+  # method). Each derivation arc encodes "this CF leaf is the change in
+  # this BS source element" with a sign weight for the
+  # asset-up=cash-use / liability-up=cash-source convention. Runs after
+  # the per-period loop because each derivation reads both the current
+  # and prior period's BS values.
+  _derive_cash_flow_facts(session, facts, periods)
+
   unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
 
   return ReportFacts(
@@ -706,6 +714,103 @@ def _append_empty_equity_facts(
         period_type="instant",
       )
     )
+
+
+def _derive_cash_flow_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+) -> None:
+  """Synthesize CF facts from period-over-period BS deltas (indirect method).
+
+  Each ``association_type='derivation'`` arc declares "this CF leaf is
+  the change in this BS source element" with a signed weight:
+
+  - ``IncreaseDecreaseInAccountsReceivable derivationOf ReceivablesNetCurrent (w=-1)``
+    (asset up = cash use)
+  - ``IncreaseDecreaseInAccountsPayableAndAccruedLiabilities derivationOf
+    AccountsPayableAndAccruedLiabilitiesCurrent (w=+1)``
+    (liability up = cash source)
+
+  For each period after the first, compute
+  ``cf_value = sum(weight * (BS_current - BS_prior))`` across all arcs
+  that target each CF leaf, and append a synthetic
+  ``ReportFact(period_type='duration')`` covering that period.
+
+  Zero-value derivations are skipped — keeps the rendered CF clean for
+  tenants whose BS hasn't moved on a given line. The renderer's calc
+  DAG (``rs-gaap:NetCashProvidedByUsedInOperatingActivities = Σ
+  derivation outputs + NetIncome + DDA``) does the upward roll-up.
+
+  Mutates the facts list in place.
+  """
+  if len(periods) < 2:
+    return  # Single-period rendering has no prior to delta against.
+
+  # Load derivation arcs: cf_leaf_id → list[(source_element_id, weight)]
+  rows = session.execute(
+    text("""
+      SELECT from_element_id, to_element_id, weight
+      FROM associations
+      WHERE association_type = 'derivation'
+    """)
+  ).fetchall()
+  if not rows:
+    return
+
+  derivations: dict[str, list[tuple[str, float]]] = {}
+  for cf_id, source_id, weight in rows:
+    derivations.setdefault(cf_id, []).append((source_id, float(weight or 1.0)))
+
+  # Element metadata for the CF leaves we'll synthesize
+  cf_leaf_ids = list(derivations.keys())
+  if not cf_leaf_ids:
+    return
+  meta_rows = session.execute(
+    text("""
+      SELECT id, qname, name, balance_type
+      FROM elements
+      WHERE id = ANY(:ids)
+    """),
+    {"ids": cf_leaf_ids},
+  ).fetchall()
+  cf_meta: dict[str, tuple[str, str, str]] = {
+    row[0]: (row[1], row[2], row[3] or "debit") for row in meta_rows
+  }
+
+  # Index existing facts by (element_id, period_end) for delta lookup
+  fact_index: dict[tuple[str, date], float] = {}
+  for f in facts:
+    fact_index[(f.element_id, f.period_end)] = f.value
+
+  for i in range(1, len(periods)):
+    current = periods[i]
+    prior = periods[i - 1]
+    for cf_leaf_id, sources in derivations.items():
+      cf_value = 0.0
+      for source_id, weight in sources:
+        current_v = fact_index.get((source_id, current.end), 0.0)
+        prior_v = fact_index.get((source_id, prior.end), 0.0)
+        cf_value += weight * (current_v - prior_v)
+      if cf_value == 0.0:
+        continue
+      meta = cf_meta.get(cf_leaf_id)
+      if meta is None:
+        continue
+      qname, name, balance_type = meta
+      facts.append(
+        ReportFact(
+          element_id=cf_leaf_id,
+          element_qname=qname,
+          element_name=name,
+          classification=None,  # CF leaves don't fit asset/liab/eq/rev/exp axes
+          balance_type=balance_type,
+          value=cf_value,
+          period_start=current.start,
+          period_end=current.end,
+          period_type="duration",
+        )
+      )
 
 
 def _count_unmapped(

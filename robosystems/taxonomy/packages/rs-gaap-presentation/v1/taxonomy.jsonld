@@ -8226,6 +8226,62 @@
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "arcOrder": 30400.0
     },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-5",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:NetIncomeLoss" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30110.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-6",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:DepreciationDepletionAndAmortization" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30120.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-7",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30130.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-8",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInInventories" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30140.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-9",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30150.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-10",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30160.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-11",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30170.0
+    },
 
     {
       "@id": "_:rs-gaap-pres-equity",
