@@ -308,6 +308,15 @@ class GetMappingSummaryTool:
               - coverage.low_confidence
             ),
           },
+          "unreachable_count": coverage.unreachable_count,
+          "unreachable": [
+            {
+              "coa_code": u.coa_code,
+              "coa_name": u.coa_name,
+              "target_qname": u.target_qname,
+            }
+            for u in coverage.unreachable
+          ],
         }
     except Exception as exc:
       logger.warning(f"get-mapping-summary failed: {exc}")
