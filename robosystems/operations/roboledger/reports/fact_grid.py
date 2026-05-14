@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.api.extensions import cents_to_dollars
 
 # ── Data classes ──────────────────────────────────────────────────────────
@@ -89,30 +90,15 @@ class FactGrid:
 
 
 def _arc_type_for_taxonomy(session: Session, taxonomy_id: str) -> str:
-  """Pick which CoA→target arc-type to walk for fact generation based on
-  the report's render-target taxonomy.
+  """Pick which CoA→target arc-type to walk for fact generation.
 
-  Currently returns ``mapping`` for all targets. After the rs-gaap
-  Disclosure Structure rebuild (Stage 2 of the taxonomy plan), every
-  Disclosure anchors on FAC concepts (fac:Revenues, fac:OperatingExpenses,
-  etc.) with rs-gaap leaves underneath. The ``mapping`` arc-type lands
-  facts at the FAC anchors, which the Arithmetic CAP renderer then
-  composes through the calc DAG (rs-gaap leaves sum into FAC parents
-  via rs-gaap-calculations). ``equivalence`` arcs (CoA → rs-gaap leaf)
-  stay valid for tenant-side audit + element-detail views, but aren't
-  the primary fact-generation path under the new architecture.
-
-  Each CoA element has both arc-types written by the auto-mapper, so
-  this choice doesn't affect the mapping workflow — only which arc
-  the renderer follows when generating facts.
+  Returns ``mapping`` unconditionally under the rs-gaap-anchored
+  architecture (roadmap §3.15). Each CoA element carries both ``mapping``
+  (CoA → rs-gaap leaf) and ``equivalence`` (cross-taxonomy bridge) arcs;
+  the rs-gaap reporting layer follows ``mapping``. Hook kept as a
+  function for per-taxonomy dispatch when custom tenant taxonomies need
+  ``equivalence``-direct rendering.
   """
-  # Lookup retained for future per-taxonomy dispatch (e.g., custom
-  # tenant taxonomies that want equivalence-direct rendering).
-  row = session.execute(
-    text("SELECT standard FROM taxonomies WHERE id = :tid LIMIT 1"),
-    {"tid": taxonomy_id},
-  ).fetchone()
-  _ = row  # silence unused-binding lint until we re-introduce dispatch
   return "mapping"
 
 
@@ -157,6 +143,18 @@ def generate_report_facts(
           period_type=_infer_period_type(balance.classification),
         )
       )
+
+    # Materialize zero-balance facts for mapped equity targets that
+    # didn't appear in `balances` because their source CoA element has
+    # no GL postings yet. Without this, `_find_close_target` can't see
+    # a RetainedEarnings-shaped target — even though the mapping points
+    # at one — and falls back to dumping net income onto whatever other
+    # equity fact exists (typically APIC), which produces wildly wrong
+    # equity values. Pre-seeding the empty equity facts gives the close
+    # logic a stable target.
+    _append_empty_equity_facts(
+      session, mapping_id, facts, period.start, period.end, arc_type=arc_type
+    )
 
     # Close the current period's temporary accounts (revenue/expense)
     # into retained earnings. For periods where real closing entries
@@ -594,11 +592,13 @@ def _read_mapped_balances(
         AND mapping.association_type = :arc_type
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
-      LEFT JOIN element_traits tet
-        ON tet.element_id = target.id AND tet.is_primary = TRUE
-      LEFT JOIN traits tcls
-        ON tcls.id = tet.trait_id
-        AND tcls.category = 'elementsOfFinancialStatements'
+      LEFT JOIN (
+        SELECT et.element_id, t.identifier
+        FROM element_traits et
+        JOIN traits t ON t.id = et.trait_id
+        WHERE et.is_primary = TRUE
+          AND t.category = 'elementsOfFinancialStatements'
+      ) tcls ON tcls.element_id = target.id
       WHERE e.status = 'posted'
         AND target.element_type = 'concept'
         AND target.is_abstract = false
@@ -641,6 +641,73 @@ def _read_mapped_balances(
   return balances
 
 
+def _append_empty_equity_facts(
+  session: Session,
+  mapping_id: str,
+  facts: list[ReportFact],
+  period_start: date,
+  period_end: date,
+  arc_type: str = "mapping",
+) -> None:
+  """Append zero-balance facts for mapped equity targets without postings.
+
+  Equity targets are stock concepts (period_type='instant') — they should
+  appear on the BS even when their source CoA element has no current
+  postings. The close-to-RE flow specifically needs the RE-shaped target
+  to exist as a fact so `_find_close_target` can route net income to
+  it. Without this, RE silently disappears and net income lands on
+  whatever other equity fact is present (typically APIC).
+  """
+  result = session.execute(
+    text("""
+      SELECT DISTINCT target.id, target.qname, target.name, target.balance_type,
+             tcls.identifier AS classification
+      FROM associations mapping
+      JOIN elements target ON target.id = mapping.to_element_id
+      LEFT JOIN (
+        SELECT et.element_id, t.identifier
+        FROM element_traits et
+        JOIN traits t ON t.id = et.trait_id
+        WHERE et.is_primary = TRUE
+          AND t.category = 'elementsOfFinancialStatements'
+      ) tcls ON tcls.element_id = target.id
+      WHERE mapping.structure_id = :mapping_id
+        AND mapping.association_type = :arc_type
+        AND target.element_type = 'concept'
+        AND target.is_abstract = false
+    """),
+    {"mapping_id": mapping_id, "arc_type": arc_type},
+  )
+
+  existing_ids = {
+    f.element_id
+    for f in facts
+    if f.period_start == period_start and f.period_end == period_end
+  }
+
+  for row in result:
+    if row.id in existing_ids:
+      continue
+    classification = row.classification or _infer_classification(
+      row.qname, row.balance_type
+    )
+    if classification != "equity":
+      continue
+    facts.append(
+      ReportFact(
+        element_id=row.id,
+        element_qname=row.qname,
+        element_name=row.name,
+        classification="equity",
+        balance_type=row.balance_type,
+        value=0.0,
+        period_start=period_start,
+        period_end=period_end,
+        period_type="instant",
+      )
+    )
+
+
 def _count_unmapped(
   session: Session, mapping_id: str, arc_type: str = "mapping"
 ) -> int:
@@ -678,9 +745,12 @@ def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, d
   return prior_start, prior_end
 
 
-# Deterministic ID from robosystems/taxonomy/seed.py: _elem("retained_earnings", ...)
-# Preferred close target when the seed.py us-gaap taxonomy is in use.
-_SEED_RETAINED_EARNINGS_ID = "elem_gaap_retained_earnings"
+# Anonymous element id used when no rs-gaap RE fact is present in the
+# mapping graph and the close logic has to append a fresh row. Reachable
+# only on legacy / unmapped graphs; properly-configured tenants always
+# have rs-gaap:RetainedEarningsAccumulatedDeficit materialized via
+# _append_empty_equity_facts before the close runs.
+_ANON_RE_ELEMENT_ID = "elem_rsgaap_retained_earnings_anon"
 
 
 def _find_close_target(
@@ -688,57 +758,26 @@ def _find_close_target(
   period_start: date,
   period_end: date,
 ) -> ReportFact | None:
-  """Find the equity element to receive a closing entry for this period.
+  """Find the rs-gaap RetainedEarnings fact to receive the closing entry.
 
-  Resolution order — falls back through three conventions so the close
-  works against seed.py us-gaap, FAC, rs-gaap, and arbitrary mapped
-  equity elements:
-
-  1. The seed.py-deterministic ``elem_gaap_retained_earnings`` element.
-  2. An equity-classified fact whose qname matches ``*RetainedEarnings*``
-     or ``*RetainedDeficit*`` (us-gaap-shaped taxonomies that diverge
-     from the seed ID).
-  3. Any equity-classified fact already populated for this period (FAC
-     ``fac:Equity``, single-line equity taxonomies). When multiple
-     candidates exist, prefer the one with qname matching ``*Equity*``
-     and the largest absolute value — usually the rolled-up equity line
-     rather than a sub-component.
-
-  Returns ``None`` when no equity fact exists; caller falls back to
-  appending a fresh us-gaap RE fact (preserves seed.py behaviour for
-  empty graphs).
+  Looks for an equity-classified fact whose qname matches
+  ``*RetainedEarnings*`` or ``*RetainedDeficit*`` — under the
+  rs-gaap-anchored architecture the canonical target is
+  ``rs-gaap:RetainedEarningsAccumulatedDeficit``, materialized at $0
+  by :func:`_append_empty_equity_facts` when the source CoA element has
+  no postings. Returns ``None`` if no such fact exists; caller appends
+  a fresh row (defensive fallback for unmapped graphs).
   """
-  seed_re_fact: ReportFact | None = None
-  retained_earnings_match: ReportFact | None = None
-  equity_candidates: list[ReportFact] = []
-
   for fact in facts:
     if fact.period_start != period_start or fact.period_end != period_end:
-      continue
-    if fact.element_id == _SEED_RETAINED_EARNINGS_ID:
-      seed_re_fact = fact
       continue
     if fact.classification != "equity":
       continue
     qname_lower = (fact.element_qname or "").lower()
     if "retainedearnings" in qname_lower or "retaineddeficit" in qname_lower:
-      retained_earnings_match = fact
-      continue
-    equity_candidates.append(fact)
+      return fact
 
-  if seed_re_fact is not None:
-    return seed_re_fact
-  if retained_earnings_match is not None:
-    return retained_earnings_match
-  if not equity_candidates:
-    return None
-  equity_candidates.sort(
-    key=lambda f: (
-      0 if "equity" in (f.element_qname or "").lower() else 1,
-      -abs(f.value),
-    )
-  )
-  return equity_candidates[0]
+  return None
 
 
 def _close_to_retained_earnings(
@@ -746,17 +785,14 @@ def _close_to_retained_earnings(
   period_start: date,
   period_end: date,
 ) -> None:
-  """Close temporary accounts (revenue/expense) into retained earnings.
+  """Close the current period's revenue/expense into retained earnings.
 
   Computes net income = sum(revenue facts) - sum(expense facts) for the
-  given period and adds it to the retained earnings fact. This is the
-  standard period-end closing entry that ensures the balance sheet balances.
-
-  Falls through three close-target conventions (see :func:`_find_close_target`)
-  so seed.py us-gaap, FAC, rs-gaap, and other equity-element shapes all
-  receive the closing amount instead of stranding it on a phantom
-  ``elem_gaap_retained_earnings`` fact that no rendering taxonomy
-  references.
+  given period and adds it to the rs-gaap:RetainedEarningsAccumulatedDeficit
+  fact materialized by :func:`_append_empty_equity_facts`. On
+  unmapped graphs where no RE fact exists, appends a fresh anonymous row
+  with the canonical rs-gaap qname so downstream rendering still has a
+  bottom line.
 
   Mutates the facts list in place.
   """
@@ -780,14 +816,24 @@ def _close_to_retained_earnings(
     target.value += net_income
     return
 
-  # No equity fact in scope — append a fresh us-gaap RE fact so the
-  # number is preserved even on graphs whose ledger has no equity
-  # accounts mapped yet (seed.py-only setups).
+  # No rs-gaap RE fact in scope — append a fresh anonymous row so the
+  # close amount is preserved even when the CoA isn't mapped to an
+  # equity target yet. The reachability validator
+  # (operations/roboledger/reads/taxonomies.py::check_mapping_reachability)
+  # surfaces this gap to operators; this warning makes it visible at
+  # render time too.
+  logger.warning(
+    "close_to_retained_earnings: no rs-gaap RE fact in scope for period "
+    "%s..%s; appending anonymous fallback row. CoA is missing a mapping "
+    "to an equity RetainedEarnings concept.",
+    period_start,
+    period_end,
+  )
   facts.append(
     ReportFact(
-      element_id=_SEED_RETAINED_EARNINGS_ID,
-      element_qname="us-gaap:RetainedEarningsAccumulatedDeficit",
-      element_name="Retained Earnings",
+      element_id=_ANON_RE_ELEMENT_ID,
+      element_qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+      element_name="Retained Earnings (Accumulated Deficit)",
       classification="equity",
       balance_type="credit",
       value=net_income,
@@ -857,11 +903,13 @@ def _close_prior_periods_to_retained_earnings(
         AND mapping.association_type = :arc_type
         AND mapping.structure_id = :mapping_id
       JOIN elements target ON target.id = mapping.to_element_id
-      LEFT JOIN element_traits tet
-        ON tet.element_id = target.id AND tet.is_primary = TRUE
-      LEFT JOIN traits tcls
-        ON tcls.id = tet.trait_id
-        AND tcls.category = 'elementsOfFinancialStatements'
+      LEFT JOIN (
+        SELECT et.element_id, t.identifier
+        FROM element_traits et
+        JOIN traits t ON t.id = et.trait_id
+        WHERE et.is_primary = TRUE
+          AND t.category = 'elementsOfFinancialStatements'
+      ) tcls ON tcls.element_id = target.id
       WHERE e.status = 'posted'
         AND target.element_type = 'concept'
         AND target.is_abstract = false
@@ -917,11 +965,18 @@ def _close_prior_periods_to_retained_earnings(
   if target is not None:
     target.value += prior_periods_net_income
   else:
+    logger.warning(
+      "close_prior_periods_to_retained_earnings: no rs-gaap RE fact in "
+      "scope for period %s..%s; appending anonymous fallback row. "
+      "CoA is missing a mapping to an equity RetainedEarnings concept.",
+      period_start,
+      period_end,
+    )
     facts.append(
       ReportFact(
-        element_id=_SEED_RETAINED_EARNINGS_ID,
-        element_qname="us-gaap:RetainedEarningsAccumulatedDeficit",
-        element_name="Retained Earnings",
+        element_id=_ANON_RE_ELEMENT_ID,
+        element_qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+        element_name="Retained Earnings (Accumulated Deficit)",
         classification="equity",
         balance_type="credit",
         value=prior_periods_net_income,
@@ -1000,11 +1055,13 @@ def _load_reporting_structure(
         ea.order_value
       FROM associations ea
       JOIN elements e ON e.id = ea.to_element_id
-      LEFT JOIN element_traits et
-        ON et.element_id = e.id AND et.is_primary = TRUE
-      LEFT JOIN traits cls
-        ON cls.id = et.trait_id
-        AND cls.category = 'elementsOfFinancialStatements'
+      LEFT JOIN (
+        SELECT et.element_id, t.identifier
+        FROM element_traits et
+        JOIN traits t ON t.id = et.trait_id
+        WHERE et.is_primary = TRUE
+          AND t.category = 'elementsOfFinancialStatements'
+      ) cls ON cls.element_id = e.id
       WHERE ea.structure_id = :structure_id
         AND ea.association_type = 'presentation'
         AND ea.from_element_id != :structure_id
@@ -1046,11 +1103,13 @@ def _load_reporting_structure(
         SELECT e.id, e.qname, e.name, cls.identifier AS classification,
                e.balance_type, e.is_abstract, e.depth
         FROM elements e
-        LEFT JOIN element_traits et
-          ON et.element_id = e.id AND et.is_primary = TRUE
-        LEFT JOIN traits cls
-          ON cls.id = et.trait_id
-          AND cls.category = 'elementsOfFinancialStatements'
+        LEFT JOIN (
+          SELECT et.element_id, t.identifier
+          FROM element_traits et
+          JOIN traits t ON t.id = et.trait_id
+          WHERE et.is_primary = TRUE
+            AND t.category = 'elementsOfFinancialStatements'
+        ) cls ON cls.element_id = e.id
         WHERE e.id IN ({placeholders})
       """),
       params,

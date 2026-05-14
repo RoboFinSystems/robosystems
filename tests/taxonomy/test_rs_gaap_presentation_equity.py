@@ -1,14 +1,15 @@
 """Shape tests for the rs-gaap Statement of Changes in Equity presentation.
 
-The equity statement was added in the same branch that authored the
-multi-step IS, classified BS, and indirect CF. Like those, it's a
-roll-forward anchored on new fac: abstracts: StatementOfChangesInEquity
-[Abstract/Table/LineItems/RollForward].
+Under the rs-gaap-anchored architecture (§3.2 + the rs-gaap-everything-at-the-
+reporting-layer rewrite), the roll-forward hangs directly off
+``rs-gaap:StockholdersEquity`` — no fac scaffolding. The activity arcs
+are the rs-gaap concepts the statement displays as change rows: NetIncomeLoss,
+OCI, issuance, repurchase, share-based compensation, dividends.
 
 These tests guard against:
 - the structure being dropped on a future edit
-- arcs being rewired away from the rollforward hub
-- the activity concept set shrinking below the eight items we ship
+- arcs being rewired away from the StockholdersEquity hub
+- the activity concept set shrinking below the six items we ship
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ EQUITY_STRUCTURE_NAME = (
   "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)"
 )
 EQUITY_ROLE_URI = "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward"
-ROLLFORWARD_HUB = "fac:StatementOfChangesInEquityRollForward"
+ROLLFORWARD_HUB = "rs-gaap:StockholdersEquity"
 
 
 @pytest.fixture(scope="module")
@@ -35,27 +36,6 @@ def presentation() -> TaxonomyPackage:
   return load_taxonomy_package(
     _PACKAGES / "rs-gaap-presentation" / "v1" / "taxonomy.jsonld"
   )
-
-
-@pytest.fixture(scope="module")
-def fac() -> TaxonomyPackage:
-  return load_taxonomy_package(_PACKAGES / "fac" / "v1" / "taxonomy.jsonld")
-
-
-class TestFacEquityAbstracts:
-  """The four fac: abstracts the equity structure hangs off must exist."""
-
-  REQUIRED = (
-    "fac:StatementOfChangesInEquityAbstract",
-    "fac:StatementOfChangesInEquityTable",
-    "fac:StatementOfChangesInEquityLineItems",
-    "fac:StatementOfChangesInEquityRollForward",
-  )
-
-  def test_all_present(self, fac: TaxonomyPackage) -> None:
-    qnames = {e.qname for e in fac.elements}
-    missing = [q for q in self.REQUIRED if q not in qnames]
-    assert not missing, f"missing fac abstracts: {missing}"
 
 
 class TestEquityPresentationStructure:
@@ -72,9 +52,9 @@ class TestEquityPresentationStructure:
   def test_rollforward_hub_has_activity_arcs(
     self, presentation: TaxonomyPackage
   ) -> None:
-    """The rollforward grouping must fan out to at least 7 activity items:
-    beginning balance + net income + OCI + issuance + repurchase + SBC +
-    dividends. (Ending balance reuses fac:Equity, same as opening.)"""
+    """The StockholdersEquity hub fans out to the six rs-gaap activity
+    concepts that drive the roll-forward: net income, OCI, issuance,
+    repurchase, share-based compensation, dividends."""
     arcs_from_hub = [
       a
       for a in presentation.associations
@@ -83,7 +63,6 @@ class TestEquityPresentationStructure:
     activity_targets = {a.to_qname for a in arcs_from_hub}
 
     required = {
-      "fac:Equity",
       "rs-gaap:NetIncomeLoss",
       "rs-gaap:OtherComprehensiveIncomeLossNetOfTax",
       "rs-gaap:ProceedsFromIssuanceOfCommonStock",

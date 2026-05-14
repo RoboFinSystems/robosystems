@@ -21,6 +21,7 @@ from robosystems.models.api.extensions.taxonomies import (
   TaxonomyListResponse,
   TaxonomyResponse,
   UnmappedElementResponse,
+  UnreachableMapping,
 )
 from robosystems.models.extensions import (
   Association,
@@ -722,6 +723,8 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
     1 for a in mapping_assocs if a.confidence is not None and a.confidence < 0.70
   )
 
+  unreachable = check_mapping_reachability(session, mapping_assocs)
+
   return MappingCoverageResponse(
     mapping_id=mapping_id,
     total_coa_elements=total_coa,
@@ -731,7 +734,165 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
     high_confidence=high,
     medium_confidence=medium,
     low_confidence=low,
+    unreachable_count=len(unreachable),
+    unreachable=unreachable,
   )
+
+
+# Canonical roots of the rs-gaap reporting layer. A mapping target is
+# "reachable" if it traces up through the rs-gaap calc DAG to one of
+# these — otherwise it lives on a dead branch and never renders.
+_CANONICAL_ROOTS: tuple[str, ...] = (
+  "rs-gaap:Assets",
+  "rs-gaap:LiabilitiesAndStockholdersEquity",
+  "rs-gaap:NetIncomeLoss",
+  "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease",
+)
+
+
+def is_target_reachable(
+  session: Session,
+  target_element_id: str,
+  *,
+  _calc_parents: dict[str, set[str]] | None = None,
+  _root_ids: set[str] | None = None,
+) -> bool:
+  """True if ``target_element_id`` traces to a canonical rs-gaap root.
+
+  Walks upward through ``association_type='calculation'`` arcs (each
+  step takes ``to_element_id`` → ``from_element_id`` — calc arcs point
+  parent→child, so we invert to walk child→parent). Reaches one of the
+  rs-gaap root concepts (Assets / LiabilitiesAndStockholdersEquity /
+  NetIncomeLoss / CashAndCashEquivalentsPeriodIncreaseDecrease) iff
+  the target is renderable.
+
+  The internal cache parameters let callers batch a full mapping check
+  against a single calc-DAG snapshot.
+  """
+  if _calc_parents is None:
+    _calc_parents = _load_calc_parents(session)
+  if _root_ids is None:
+    _root_ids = _resolve_root_ids(session)
+
+  if target_element_id in _root_ids:
+    return True
+
+  visited: set[str] = set()
+  frontier: set[str] = {target_element_id}
+  while frontier:
+    next_frontier: set[str] = set()
+    for node in frontier:
+      if node in visited:
+        continue
+      visited.add(node)
+      if node in _root_ids:
+        return True
+      next_frontier.update(_calc_parents.get(node, set()))
+    frontier = next_frontier - visited
+  return False
+
+
+def check_mapping_reachability(
+  session: Session,
+  mapping_assocs: list[Association],
+) -> list[UnreachableMapping]:
+  """Return the subset of mapping associations whose targets don't reach a root.
+
+  Single calc-DAG snapshot is loaded once and reused across all
+  targets — keeps the check ~linear in the number of associations.
+  """
+  if not mapping_assocs:
+    return []
+
+  calc_parents = _load_calc_parents(session)
+  root_ids = _resolve_root_ids(session)
+
+  # Element metadata lookup for response detail
+  target_ids = {a.to_element_id for a in mapping_assocs}
+  source_ids = {a.from_element_id for a in mapping_assocs}
+  element_lookup: dict[str, Element] = {
+    str(e.id): e
+    for e in session.execute(
+      select(Element).where(Element.id.in_(target_ids | source_ids))
+    )
+    .scalars()
+    .all()
+  }
+
+  unreachable: list[UnreachableMapping] = []
+  cache: dict[str, bool] = {}
+  for assoc in mapping_assocs:
+    target_id = assoc.to_element_id
+    if target_id not in cache:
+      cache[target_id] = is_target_reachable(
+        session, target_id, _calc_parents=calc_parents, _root_ids=root_ids
+      )
+    if cache[target_id]:
+      continue
+    target = element_lookup.get(target_id)
+    source = element_lookup.get(assoc.from_element_id)
+    unreachable.append(
+      UnreachableMapping(
+        coa_element_id=assoc.from_element_id,
+        coa_qname=source.qname if source else None,
+        coa_code=source.code if source else None,
+        coa_name=source.name if source else None,
+        target_element_id=target_id,
+        target_qname=target.qname if target else None,
+        target_name=target.name if target else None,
+      )
+    )
+  return unreachable
+
+
+def _load_calc_parents(session: Session) -> dict[str, set[str]]:
+  """Return ``child_element_id → {parent_element_id, …}`` for all calc arcs.
+
+  Calc arcs are declared parent→child (``from_element_id = parent``,
+  ``to_element_id = child``). To walk *up* from a target we want the
+  inverse mapping. Cached on the session — the calc DAG is constant
+  for the lifetime of a tenant request and the reachability check fires
+  on every `get_mapping_coverage` call.
+  """
+  cached = getattr(session, "_calc_parents_cache", None)
+  if isinstance(cached, dict):
+    return cached
+  rows = session.execute(
+    text("""
+      SELECT from_element_id, to_element_id
+      FROM associations
+      WHERE association_type = 'calculation'
+    """)
+  ).fetchall()
+  parents: dict[str, set[str]] = {}
+  for parent_id, child_id in rows:
+    parents.setdefault(child_id, set()).add(parent_id)
+  try:
+    session._calc_parents_cache = parents
+  except (AttributeError, TypeError):
+    pass  # MagicMock or other immutable session in tests
+  return parents
+
+
+def _resolve_root_ids(session: Session) -> set[str]:
+  """Return the element_id set for canonical rs-gaap roots.
+
+  Cached on the session — root concept ids don't change within a
+  request and the reachability check refers to this on every call.
+  """
+  cached = getattr(session, "_root_ids_cache", None)
+  if isinstance(cached, set):
+    return cached
+  rows = session.execute(
+    text("SELECT id FROM elements WHERE qname = ANY(:qnames)"),
+    {"qnames": list(_CANONICAL_ROOTS)},
+  ).fetchall()
+  root_ids = {row[0] for row in rows}
+  try:
+    session._root_ids_cache = root_ids
+  except (AttributeError, TypeError):
+    pass
+  return root_ids
 
 
 # ── Mapped Trial Balance ──────────────────────────────────────────────────
@@ -754,11 +915,13 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       AND mapping.association_type = 'mapping'
       AND mapping.structure_id = :mapping_id
   JOIN elements target ON target.id = mapping.to_element_id
-  LEFT JOIN element_traits tet
-      ON tet.element_id = target.id AND tet.is_primary = TRUE
-  LEFT JOIN traits tt
-      ON tt.id = tet.trait_id
-      AND tt.category = 'elementsOfFinancialStatements'
+  LEFT JOIN (
+      SELECT et.element_id, t.identifier
+      FROM element_traits et
+      JOIN traits t ON t.id = et.trait_id
+      WHERE et.is_primary = TRUE
+        AND t.category = 'elementsOfFinancialStatements'
+  ) tt ON tt.element_id = target.id
   WHERE e.status = 'posted'
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)

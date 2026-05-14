@@ -164,6 +164,9 @@ from robosystems.models.api.extensions.taxonomies import (
 from robosystems.models.api.extensions.taxonomies import (
   UnmappedElementResponse as PydanticUnmappedElementResponse,
 )
+from robosystems.models.api.extensions.taxonomies import (
+  UnreachableMapping as PydanticUnreachableMapping,
+)
 from robosystems.models.api.extensions.transactions import (
   LedgerEntryResponse as PydanticLedgerEntryResponse,
 )
@@ -491,6 +494,11 @@ class Association:
 @pydantic_type(model=PydanticMappingDetailResponse, all_fields=True)
 class MappingDetail:
   """A mapping structure with all its associations expanded."""
+
+
+@pydantic_type(model=PydanticUnreachableMapping, all_fields=True)
+class UnreachableMappingType:
+  """A CoA→rs-gaap mapping whose target doesn't reach a Network root."""
 
 
 @pydantic_type(model=PydanticMappingCoverageResponse, all_fields=True)

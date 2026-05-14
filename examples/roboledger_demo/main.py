@@ -556,11 +556,12 @@ def create_business_events(
 
 
 def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
-  """Create mapping associations between CoA elements and FAC reporting concepts.
+  """Create mapping associations between CoA elements and rs-gaap reporting concepts.
 
-  CoA → FAC (Fundamental Accounting Concepts) is the primary mapping
-  target. FAC → rs-gaap expansion is handled by equivalence arcs on
-  the FAC side.
+  CoA → rs-gaap is the canonical mapping target (§3.2 Reporting Style).
+  The Default Style's Networks resolve rs-gaap concepts up through the
+  calc-linkbase to FAC subtotals at render time; FAC subtotals are
+  derived, not mapped.
 
   Uses `LedgerClient.create_associations()` — the bulk HTTP API — to
   exercise the same path the frontend UI and MCP tools use.
@@ -576,32 +577,40 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
     return 0
   mapping_id = structures[0]["id"]
 
-  # Resolve FAC qnames → element IDs via the library in the entity graph.
-  fac_elements = client.list_elements(graph_id, source="fac", limit=500)
-  fac_by_qname: dict[str, str] = {
-    e["qname"]: e["id"]
-    for e in (fac_elements or {}).get("elements", [])
-    if e.get("qname")
-  }
+  # Resolve rs-gaap qnames → element IDs via the library in the entity graph.
+  # rs-gaap has ~2000 elements; list_elements caps at 1000 per page, so paginate.
+  rs_gaap_by_qname: dict[str, str] = {}
+  offset = 0
+  while True:
+    page = client.list_elements(graph_id, source="rs-gaap", limit=1000, offset=offset)
+    items = (page or {}).get("elements", [])
+    if not items:
+      break
+    for e in items:
+      if e.get("qname"):
+        rs_gaap_by_qname[e["qname"]] = e["id"]
+    if len(items) < 1000:
+      break
+    offset += 1000
 
   # Walk MAPPINGS and post each association one-by-one through
   # create-mapping-association which takes a single pair. The demo's
-  # mapping set is ~20 rows so per-call latency is fine.
+  # mapping set is ~27 rows so per-call latency is fine.
   created = 0
-  for coa_code, fac_qname in MAPPINGS:
+  for coa_code, rs_gaap_qname in MAPPINGS:
     coa_id = element_lookup.get(coa_code)
     if not coa_id:
       print(f"  WARNING: CoA code {coa_code} not in element_lookup")
       continue
-    fac_id = fac_by_qname.get(fac_qname)
-    if not fac_id:
-      print(f"  WARNING: FAC qname {fac_qname} not found in library")
+    rs_gaap_id = rs_gaap_by_qname.get(rs_gaap_qname)
+    if not rs_gaap_id:
+      print(f"  WARNING: rs-gaap qname {rs_gaap_qname} not found in library")
       continue
     client.create_mapping_association(
       graph_id,
       mapping_id=mapping_id,
       from_element_id=coa_id,
-      to_element_id=fac_id,
+      to_element_id=rs_gaap_id,
     )
     created += 1
 

@@ -246,6 +246,28 @@ class MappingDetailResponse(BaseModel):
   total_associations: int
 
 
+class UnreachableMapping(BaseModel):
+  """A CoA→rs-gaap mapping whose target doesn't reach a Network root.
+
+  The reporting layer is closed: every mapping target must trace upward
+  through the rs-gaap calc DAG to one of the canonical roots
+  (rs-gaap:Assets, rs-gaap:LiabilitiesAndStockholdersEquity,
+  rs-gaap:NetIncomeLoss, rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease).
+  When it doesn't, the fact will land on a dead branch — visible in the
+  trial balance but invisible to any rendered statement. Surfacing
+  these as defects lets operators fix the mapping before the report is
+  filed.
+  """
+
+  coa_element_id: str
+  coa_qname: str | None = None
+  coa_code: str | None = None
+  coa_name: str | None = None
+  target_element_id: str
+  target_qname: str | None = None
+  target_name: str | None = None
+
+
 class MappingCoverageResponse(BaseModel):
   """Coverage stats for a mapping."""
 
@@ -257,6 +279,8 @@ class MappingCoverageResponse(BaseModel):
   high_confidence: int = 0  # >0.90
   medium_confidence: int = 0  # 0.70-0.90
   low_confidence: int = 0  # <0.70
+  unreachable_count: int = 0
+  unreachable: list[UnreachableMapping] = []
 
 
 # ── Element (extended for taxonomy context) ───────────────────────────────
