@@ -794,10 +794,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
 
   tables["FactSet"] = f"""
     CREATE OR REPLACE TABLE FactSet AS
-    SELECT DISTINCT
-      fact_set_id                     AS identifier
-    FROM postgres_scan('{c}', '{s}', 'facts')
-    WHERE fact_set_id IS NOT NULL
+    SELECT
+      id                              AS identifier
+    FROM postgres_scan('{c}', '{s}', 'fact_sets')
   """
 
   # ── Base Ontology Relationships (Entity ↔ Taxonomy) ────────────────────
@@ -876,11 +875,13 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   tables["REPORT_HAS_FACT"] = f"""
     CREATE OR REPLACE TABLE REPORT_HAS_FACT AS
     SELECT
-      report_id                       AS src,
-      id                              AS dst,
+      fs.report_id                    AS src,
+      f.id                            AS dst,
       NULL::VARCHAR                   AS fact_context
-    FROM postgres_scan('{c}', '{s}', 'facts')
-    WHERE report_id IS NOT NULL
+    FROM postgres_scan('{c}', '{s}', 'facts') f
+    JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
+      ON fs.id = f.fact_set_id
+    WHERE fs.report_id IS NOT NULL
   """
 
   tables["FACT_HAS_ELEMENT"] = f"""
@@ -920,8 +921,10 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       rf.entity_id                    AS dst,
       NULL::VARCHAR                   AS entity_context
     FROM postgres_scan('{c}', '{s}', 'facts') rf
+    JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
+      ON fs.id = rf.fact_set_id
     JOIN postgres_scan('{c}', '{s}', 'reports') rd
-      ON rf.report_id = rd.id
+      ON fs.report_id = rd.id
     WHERE rd.source_graph_id IS NULL
     UNION ALL
     -- Shared facts: remap entity_id to the linked entity on this graph
@@ -930,8 +933,10 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       e.id                            AS dst,
       NULL::VARCHAR                   AS entity_context
     FROM postgres_scan('{c}', '{s}', 'facts') rf
+    JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
+      ON fs.id = rf.fact_set_id
     JOIN postgres_scan('{c}', '{s}', 'reports') rd
-      ON rf.report_id = rd.id
+      ON fs.report_id = rd.id
     JOIN postgres_scan('{c}', '{s}', 'entities') e
       ON e.metadata->>'source_graph_id' = rd.source_graph_id
     WHERE rd.source_graph_id IS NOT NULL
