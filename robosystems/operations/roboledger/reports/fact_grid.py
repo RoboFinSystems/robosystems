@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.api.extensions import cents_to_dollars
 
 # ── Data classes ──────────────────────────────────────────────────────────
@@ -89,30 +90,15 @@ class FactGrid:
 
 
 def _arc_type_for_taxonomy(session: Session, taxonomy_id: str) -> str:
-  """Pick which CoA→target arc-type to walk for fact generation based on
-  the report's render-target taxonomy.
+  """Pick which CoA→target arc-type to walk for fact generation.
 
-  Currently returns ``mapping`` for all targets. After the rs-gaap
-  Disclosure Structure rebuild (Stage 2 of the taxonomy plan), every
-  Disclosure anchors on FAC concepts (fac:Revenues, fac:OperatingExpenses,
-  etc.) with rs-gaap leaves underneath. The ``mapping`` arc-type lands
-  facts at the FAC anchors, which the Arithmetic CAP renderer then
-  composes through the calc DAG (rs-gaap leaves sum into FAC parents
-  via rs-gaap-calculations). ``equivalence`` arcs (CoA → rs-gaap leaf)
-  stay valid for tenant-side audit + element-detail views, but aren't
-  the primary fact-generation path under the new architecture.
-
-  Each CoA element has both arc-types written by the auto-mapper, so
-  this choice doesn't affect the mapping workflow — only which arc
-  the renderer follows when generating facts.
+  Returns ``mapping`` unconditionally under the rs-gaap-anchored
+  architecture (roadmap §3.15). Each CoA element carries both ``mapping``
+  (CoA → rs-gaap leaf) and ``equivalence`` (cross-taxonomy bridge) arcs;
+  the rs-gaap reporting layer follows ``mapping``. Hook kept as a
+  function for per-taxonomy dispatch when custom tenant taxonomies need
+  ``equivalence``-direct rendering.
   """
-  # Lookup retained for future per-taxonomy dispatch (e.g., custom
-  # tenant taxonomies that want equivalence-direct rendering).
-  row = session.execute(
-    text("SELECT standard FROM taxonomies WHERE id = :tid LIMIT 1"),
-    {"tid": taxonomy_id},
-  ).fetchone()
-  _ = row  # silence unused-binding lint until we re-introduce dispatch
   return "mapping"
 
 
@@ -832,7 +818,17 @@ def _close_to_retained_earnings(
 
   # No rs-gaap RE fact in scope — append a fresh anonymous row so the
   # close amount is preserved even when the CoA isn't mapped to an
-  # equity target yet. Phase 4 validator will hard-reject this case.
+  # equity target yet. The reachability validator
+  # (operations/roboledger/reads/taxonomies.py::check_mapping_reachability)
+  # surfaces this gap to operators; this warning makes it visible at
+  # render time too.
+  logger.warning(
+    "close_to_retained_earnings: no rs-gaap RE fact in scope for period "
+    "%s..%s; appending anonymous fallback row. CoA is missing a mapping "
+    "to an equity RetainedEarnings concept.",
+    period_start,
+    period_end,
+  )
   facts.append(
     ReportFact(
       element_id=_ANON_RE_ELEMENT_ID,
@@ -969,6 +965,13 @@ def _close_prior_periods_to_retained_earnings(
   if target is not None:
     target.value += prior_periods_net_income
   else:
+    logger.warning(
+      "close_prior_periods_to_retained_earnings: no rs-gaap RE fact in "
+      "scope for period %s..%s; appending anonymous fallback row. "
+      "CoA is missing a mapping to an equity RetainedEarnings concept.",
+      period_start,
+      period_end,
+    )
     facts.append(
       ReportFact(
         element_id=_ANON_RE_ELEMENT_ID,

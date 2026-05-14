@@ -850,8 +850,13 @@ def _load_calc_parents(session: Session) -> dict[str, set[str]]:
 
   Calc arcs are declared parent→child (``from_element_id = parent``,
   ``to_element_id = child``). To walk *up* from a target we want the
-  inverse mapping. Single query, in-memory dict.
+  inverse mapping. Cached on the session — the calc DAG is constant
+  for the lifetime of a tenant request and the reachability check fires
+  on every `get_mapping_coverage` call.
   """
+  cached = getattr(session, "_calc_parents_cache", None)
+  if isinstance(cached, dict):
+    return cached
   rows = session.execute(
     text("""
       SELECT from_element_id, to_element_id
@@ -862,16 +867,32 @@ def _load_calc_parents(session: Session) -> dict[str, set[str]]:
   parents: dict[str, set[str]] = {}
   for parent_id, child_id in rows:
     parents.setdefault(child_id, set()).add(parent_id)
+  try:
+    session._calc_parents_cache = parents
+  except (AttributeError, TypeError):
+    pass  # MagicMock or other immutable session in tests
   return parents
 
 
 def _resolve_root_ids(session: Session) -> set[str]:
-  """Return the element_id set for canonical rs-gaap roots."""
+  """Return the element_id set for canonical rs-gaap roots.
+
+  Cached on the session — root concept ids don't change within a
+  request and the reachability check refers to this on every call.
+  """
+  cached = getattr(session, "_root_ids_cache", None)
+  if isinstance(cached, set):
+    return cached
   rows = session.execute(
     text("SELECT id FROM elements WHERE qname = ANY(:qnames)"),
     {"qnames": list(_CANONICAL_ROOTS)},
   ).fetchall()
-  return {row[0] for row in rows}
+  root_ids = {row[0] for row in rows}
+  try:
+    session._root_ids_cache = root_ids
+  except (AttributeError, TypeError):
+    pass
+  return root_ids
 
 
 # ── Mapped Trial Balance ──────────────────────────────────────────────────
