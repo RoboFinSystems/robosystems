@@ -438,11 +438,6 @@ class TestCloseAutoRunsRules:
     )
     return session, eval_patcher
 
-  def _result(status: str):  # type: ignore[no-redef]
-    r = MagicMock()
-    r.status = status
-    return r
-
   def test_rule_summary_aggregates_across_schedules(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
     svc = PeriodCloseService(fcs)

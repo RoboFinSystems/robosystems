@@ -119,11 +119,17 @@ def _bind_sum_variables(
     if element_id is None:
       bindings[name] = None
       continue
+    # Match `_bind_variables` semantics — only sum facts the close
+    # workflow considers in-scope. Historical facts (already absorbed
+    # into opening balances) would otherwise inflate SumEquals checks
+    # that compare against a schedule's contracted total.
     row = session.execute(
       text(
         "SELECT ROUND(SUM(value)::numeric, 2) AS total "
         "FROM facts "
-        "WHERE element_id = :eid AND structure_id = :sid AND period_type = 'duration'"
+        "WHERE element_id = :eid AND structure_id = :sid "
+        "AND period_type = 'duration' "
+        "AND fact_scope = 'in_scope'"
       ),
       {"eid": element_id, "sid": structure_id},
     ).fetchone()

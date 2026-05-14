@@ -328,6 +328,12 @@ class PeriodCloseService:
       evaluate_rules_for_structure,
     )
 
+    # Unqualified table names — relies on `extensions_session(graph_id)`
+    # having SET the tenant's search_path before this method runs. The
+    # close service is only called from that session context (REST
+    # handler + MCP tool both go through `cmd_close_period`); any future
+    # refactor that bypasses the tenant session must qualify these
+    # tables explicitly to avoid silently querying the wrong schema.
     structure_ids = (
       session.execute(
         text(

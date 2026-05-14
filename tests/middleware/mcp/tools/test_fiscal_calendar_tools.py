@@ -140,6 +140,47 @@ class TestClosePeriodToolHappyPath:
     assert call.kwargs["allow_stale_sync"] is False
 
   @pytest.mark.asyncio
+  async def test_response_includes_rule_summary_and_evaluated_structure_ids(self):
+    """§3.8 — the MCP close-period response must carry the same rule
+    eval fields the REST ClosePeriodResponse exposes so agents can
+    report which schedule rules passed / failed after a close."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    response = _close_response(
+      rule_summary={"pass": 3, "fail": 0, "error": 0, "skipped": 0},
+      evaluated_structure_ids=["struct_dep", "struct_amort"],
+    )
+
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=response),
+    ):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["rule_summary"] == {
+      "pass": 3,
+      "fail": 0,
+      "error": 0,
+      "skipped": 0,
+    }
+    assert result["evaluated_structure_ids"] == ["struct_dep", "struct_amort"]
+
+  @pytest.mark.asyncio
+  async def test_response_handles_null_rule_summary(self):
+    """No schedules with facts in the period → rule_summary is None,
+    evaluated_structure_ids is an empty list. The MCP shape stays stable."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    response = _close_response()  # rule_summary defaults to None
+
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=response),
+    ):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["rule_summary"] is None
+    assert result["evaluated_structure_ids"] == []
+
+  @pytest.mark.asyncio
   async def test_actor_id_falls_back_to_graph_scoped_sentinel(self):
     """When the MCP client has no user_id, fall back to mcp:{graph_id}
     so audit logs stay traceable per tenant (matches ReopenPeriodTool)."""

@@ -167,7 +167,11 @@ class ClosePeriodTool:
 3. Validates the BS equation balances for the period
 4. Transitions the FiscalPeriod from open → closed
 5. Advances closed_through; auto-advances close_target if reached
-6. Emits a period_closed audit event
+6. Auto-runs the rule engine for every schedule Structure with facts in
+   the closed period (§3.8). Rule outcomes ride on the response as
+   `rule_summary` / `evaluated_structure_ids` so you can report which
+   schedules passed / failed to the user.
+7. Emits a period_closed audit event
 
 **PARAMETERS:**
 - period (required): YYYY-MM format (e.g., "2026-03")
@@ -180,6 +184,11 @@ class ClosePeriodTool:
 - entries_posted: number of drafts transitioned to posted
 - target_auto_advanced: true if close_target moved forward after this close
 - fiscal_calendar: updated calendar state (same shape as get-fiscal-calendar)
+- rule_summary: aggregated rule-eval tally across every schedule Structure
+  with facts in the closed period — keys: pass / fail / error / skipped.
+  null when no schedules had facts in the period.
+- evaluated_structure_ids: ids of schedule Structures whose rules were
+  evaluated. Pairs with rule_summary.
 
 **GUARDS (422 errors):**
 - Cannot close out of sequence
@@ -260,6 +269,11 @@ class ClosePeriodTool:
           "entries_posted": result.entries_posted,
           "target_auto_advanced": result.target_auto_advanced,
           "fiscal_calendar": fc_payload,
+          # §3.8 — rule eval outcomes from the auto-run on close. Pairs
+          # with the REST `ClosePeriodResponse` shape so agents and
+          # REST consumers see the same surface.
+          "rule_summary": result.rule_summary,
+          "evaluated_structure_ids": list(result.evaluated_structure_ids),
         }
     except CloseGateFailed as exc:
       if exc.no_calendar:

@@ -125,6 +125,7 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   FiscalCalendarResponse,
   InitializeLedgerRequest,
   InitializeLedgerResponse,
+  PendingObligationDetailResponse,
   ReopenPeriodRequest,
   SetCloseTargetRequest,
 )
@@ -1526,13 +1527,16 @@ async def close_period_op(
       }
       if e.gate.pending_obligation_count:
         detail["pending_obligation_count"] = e.gate.pending_obligation_count
+        # Route through the Pydantic response model so the error-detail
+        # shape stays aligned with the calendar-read shape; if the model
+        # gains a field, this serialization picks it up automatically.
         detail["pending_obligation_sample"] = [
-          {
-            "event_id": d.event_id,
-            "schedule_id": d.schedule_id,
-            "schedule_name": d.schedule_name,
-            "period": d.period,
-          }
+          PendingObligationDetailResponse(
+            event_id=d.event_id,
+            schedule_id=d.schedule_id,
+            schedule_name=d.schedule_name,
+            period=d.period,
+          ).model_dump()
           for d in e.gate.pending_obligation_sample
         ]
         detail["earliest_pending_period"] = e.gate.earliest_pending_period
