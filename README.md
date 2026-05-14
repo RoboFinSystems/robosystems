@@ -42,11 +42,11 @@ See [GraphQL Extensions](/robosystems/graphql/README.md) for the read-path imple
 
 ### [RoboLedger](https://roboledger.ai)
 
-Accounting and financial reporting extension. OLTP general ledger in schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions); 29 GraphQL read fields covering entities, accounts, trial balance, fiscal calendar, schedules, taxonomies, mappings, reports, and publish lists; 23 named command operations for closing periods, creating schedules and closing entries, managing CoA→GAAP mapping associations, and authoring multi-period reports; analytical view operations over the materialized graph; QuickBooks ELT pipeline via dbt/Dagster; SEC XBRL financial reporting; AI-powered CoA→GAAP mapping via the MappingAgent. Dedicated frontend app.
+Accounting and financial reporting extension. OLTP general ledger in schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions); 30+ GraphQL read fields covering entities, accounts, trial balance, fiscal calendar, schedules, taxonomies, mappings, reports, and publish lists; 30+ named command operations spanning close lifecycle, schedule and closing-entry authoring, CoA→GAAP mapping associations, multi-period report authoring, and publish lists; analytical view operations over the materialized graph; QuickBooks ELT pipeline via dbt/Dagster; SEC XBRL financial reporting; AI-powered CoA→GAAP mapping via the MappingAgent. Dedicated frontend app.
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
-Portfolio management and investment tracking extension. OLTP database with portfolios, securities, and positions in schema-per-tenant PostgreSQL; 7 GraphQL read fields (portfolios, securities, positions, holdings) and 9 named command operations for portfolio CRUD and position management. Securities can link to entities for cross-graph research between investor portfolios and SEC public-company data via the shared repository. Dedicated frontend app.
+Portfolio management and investment tracking extension. OLTP database with portfolios, securities, and positions in schema-per-tenant PostgreSQL; 7 GraphQL read fields (portfolios, securities, positions, holdings) and 6 named command operations for portfolio-block CRUD and security CRUD. Securities can link to entities for cross-graph research between investor portfolios and SEC public-company data via the shared repository. Dedicated frontend app.
 
 ## Quick Start
 
@@ -127,7 +127,7 @@ just logs dagster-webserver   # View Dagster Webserver logs
 just logs dagster-daemon      # View Dagster Daemon logs
 ```
 
-**See [justfile](justfile) for 50+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
+**See [justfile](justfile) for 80+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
 
 ### Prerequisites
 

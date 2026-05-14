@@ -107,7 +107,7 @@ POST /extensions/{domain}/{graph_id}/operations/{view_name}     → per-view fla
 
 A ledger-only deployment's GraphQL schema exposes only ledger fields — investor types never appear in introspection. The schema is built at class-construction time from whichever domain mixins are enabled, so there are no runtime `*_NOT_INITIALIZED` errors from disabled domains.
 
-Legacy env-var names (`LEDGER_ENABLED`, `INVESTOR_ENABLED`, standalone `EXTENSIONS_ENABLED`) are honored as fallbacks through the current migration window.
+Legacy env-var names (`LEDGER_ENABLED`, `INVESTOR_ENABLED`, standalone `EXTENSIONS_ENABLED`) have been retired — only the `ROBO*_ENABLED` names are read.
 
 ## Architecture
 

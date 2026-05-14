@@ -369,8 +369,8 @@ ROBOINVESTOR_ENABLED=true          # gates roboinvestor ops + GraphQL investor f
 EXTENSIONS_GRAPHQL_ENABLED=true    # kill switch for the GraphQL endpoint
 EXTENSIONS_DATABASE_URL=postgresql://...  # extensions OLTP database
 # EXTENSIONS_ENABLED is a derived property (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED)
-# — no longer a separate env var. The legacy LEDGER_ENABLED / INVESTOR_ENABLED
-# names are honored as backward-compat fallbacks during migration.
+# — not a separate env var. Legacy LEDGER_ENABLED / INVESTOR_ENABLED names
+# have been retired; only ROBOLEDGER_ENABLED / ROBOINVESTOR_ENABLED are read.
 ```
 
 ## Configuration System
