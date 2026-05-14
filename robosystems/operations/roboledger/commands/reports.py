@@ -199,27 +199,33 @@ def _persist_report_facts(
   report_id: str,
   facts,
   entity_id: str,
-  element_to_structure: dict[str, str] | None = None,
-  structure_to_factset: dict[str, str] | None = None,
+  element_to_structure: dict[str, str],
+  structure_to_factset: dict[str, str],
 ) -> None:
   """Clear any existing facts for this report and persist the new set.
 
-  If `element_to_structure` / `structure_to_factset` are provided, each
-  Fact is stamped with `structure_id` and `fact_set_id` so the Information
-  Block envelope can resolve its FactSet row. `report_id` is still set —
-  the CHECK constraint requires at least one of the two to be non-null.
+  Every persisted Fact is stamped with ``structure_id`` and
+  ``fact_set_id`` — the FactSet is the sole parent pointer post §3.5.
+  Facts whose element isn't reached by any Network in the picked
+  Reporting Style are skipped: there's no Network to render them
+  through, so they can't be stamped with a structure_id, and the
+  fact_set_id NOT NULL constraint would reject them.
   """
   session.execute(
-    text("DELETE FROM facts WHERE report_id = :report_id"),
+    text(
+      "DELETE FROM facts WHERE fact_set_id IN "
+      "(SELECT id FROM fact_sets WHERE report_id = :report_id)"
+    ),
     {"report_id": report_id},
   )
-  elem_map = element_to_structure or {}
-  fs_map = structure_to_factset or {}
   for fact in facts.facts:
-    structure_id = elem_map.get(fact.element_id)
-    fact_set_id = fs_map.get(structure_id) if structure_id else None
+    structure_id = element_to_structure.get(fact.element_id)
+    if structure_id is None:
+      continue
+    fact_set_id = structure_to_factset.get(structure_id)
+    if fact_set_id is None:
+      continue
     rf = Fact(
-      report_id=report_id,
       element_id=fact.element_id,
       value=fact.value,
       period_start=fact.period_start,
@@ -437,15 +443,9 @@ def regenerate_report(
     session, reporting_style_id
   )
   # Stale rows from the prior generation must clear before fresh ULIDs
-  # land. Order matters once the facts → fact_sets FK exists (§6.5):
-  # facts go first (they reference fact_sets), then fact_sets. The
-  # ``_persist_report_facts`` call below also DELETEs by report_id —
-  # idempotent here, but doing the explicit fact delete first keeps
-  # the FK ordering correct even before SQLAlchemy autoflushes.
-  session.execute(
-    text("DELETE FROM facts WHERE report_id = :report_id"),
-    {"report_id": report_def.id},
-  )
+  # land. Post §3.5 the FK `facts.fact_set_id → fact_sets.id` is
+  # ON DELETE CASCADE, so dropping the parent fact_sets cleans the
+  # child facts in one statement.
   session.execute(
     text("DELETE FROM fact_sets WHERE report_id = :report_id"),
     {"report_id": report_def.id},
@@ -616,10 +616,7 @@ def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool
       f"retiring; deletion is only available for 'draft' or 'under_review'."
     )
 
-  session.execute(
-    text("DELETE FROM facts WHERE report_id = :report_id"),
-    {"report_id": report_id},
-  )
+  # Post §3.5: facts cascade from their parent fact_sets on delete.
   session.execute(
     text("DELETE FROM fact_sets WHERE report_id = :report_id"),
     {"report_id": report_id},
@@ -692,9 +689,11 @@ def share_report(
 
     fact_rows = source_session.execute(
       text("""
-        SELECT id, report_id, element_id, value, period_start, period_end,
-               period_type, unit, entity_id, fact_set_id, created_at
-        FROM facts WHERE report_id = :report_id
+        SELECT f.id, f.element_id, f.value, f.period_start, f.period_end,
+               f.period_type, f.unit, f.entity_id, f.created_at
+        FROM facts f
+        JOIN fact_sets fs ON fs.id = f.fact_set_id
+        WHERE fs.report_id = :report_id
       """),
       {"report_id": report_id},
     ).fetchall()
@@ -789,14 +788,32 @@ def _share_to_target(
       target_session.add(shared_report)
       target_session.flush()
 
+      # Cross-graph share: source-graph structure_id references rows in
+      # the source tenant schema and is meaningless in the target.
+      # Populating target Networks per-structure on share is expand-pass
+      # work. For now we stamp every shared fact against a single
+      # cross-graph FactSet that back-references the shared report; the
+      # period envelope spans all incoming facts.
+      starts = [
+        fd["period_start"] for fd in source_facts if fd.get("period_start") is not None
+      ]
+      ends = [
+        fd["period_end"] for fd in source_facts if fd.get("period_end") is not None
+      ]
+      shared_fact_set = FactSet(
+        structure_id=None,
+        period_start=min(starts) if starts else None,
+        period_end=max(ends) if ends else None,
+        factset_type="report",
+        entity_id=source_facts[0]["entity_id"] if source_facts else "",
+        report_id=shared_report.id,
+        created_by=shared_by,
+      )
+      target_session.add(shared_fact_set)
+      target_session.flush()
+
       for fact_data in source_facts:
-        # Cross-graph share: source-graph structure_id/fact_set_id
-        # reference rows in the source tenant schema and are meaningless
-        # in the target. Drop both on copy — shared facts identify
-        # themselves via report_id alone. Populating target FactSet rows
-        # per-structure on share is expand-pass work.
         rf = Fact(
-          report_id=shared_report.id,
           element_id=fact_data["element_id"],
           value=fact_data["value"],
           period_start=fact_data["period_start"],
@@ -804,6 +821,7 @@ def _share_to_target(
           period_type=fact_data["period_type"],
           unit=fact_data["unit"],
           entity_id=fact_data["entity_id"],
+          fact_set_id=shared_fact_set.id,
         )
         target_session.add(rf)
 

@@ -25,12 +25,9 @@ For each ``{variable_name, variable_qname}`` entry in
    (the pattern evaluator surfaces this as ``skipped`` or ``fail``).
 3. Resolve ``element_id`` + period window → fact value via the facts
    table (``fact_scope = 'in_scope'``, most recent ``period_end`` first).
-   Structure-scoped facts win. If no structure fact exists, facts from
-   the latest matching statement/report are accepted via one pinned
-   ``report_id`` because report-write paths currently write
-   structure-agnostic facts (``structure_id`` / ``fact_set_id`` are not
-   yet stamped on every fact). Schedules do not use that fallback;
-   their own generated facts are the source of truth. None on miss.
+   Facts are filtered by ``structure_id`` (or ``fact_set_id`` when the
+   caller pins one); post §3.5 every fact has both stamped at write
+   time, so no legacy report-id fallback is needed. None on miss.
 
 One query per variable (N+1 is fine for 3-5 variables per rule).
 """
@@ -45,7 +42,6 @@ from sqlalchemy.orm import Session
 from robosystems.models.extensions import (
   Association,
   Element,
-  Report,
   Rule,
   Structure,
   VerificationResult,
@@ -65,8 +61,6 @@ def _bind_variables(
   period_start: date | None,
   period_end: date | None,
   fact_set_id: str | None = None,
-  allow_report_fallback: bool = True,
-  fallback_report_id: str | None = None,
 ) -> dict[str, float | None]:
   """Resolve each ``$Variable`` in a rule to a fact value or ``None``."""
   bindings: dict[str, float | None] = {}
@@ -100,55 +94,11 @@ def _bind_variables(
 
     if fact_set_id is not None:
       stmt = base_stmt.where(Fact.fact_set_id == fact_set_id)
-      value: float | None = session.execute(stmt).scalar()
-      bindings[name] = value
-      continue
-
-    # Structure-scoped facts are authoritative for declarative blocks
-    # such as schedules. Statement/report facts are currently
-    # structure-agnostic (report_id set, structure_id null), so fall
-    # back to those only when the block has no direct fact for the
-    # requested variable.
-    stmt = base_stmt.where(Fact.structure_id == structure_id)
-    value = session.execute(stmt).scalar()
-    if value is None and allow_report_fallback and fallback_report_id is not None:
-      report_stmt = base_stmt.where(
-        Fact.structure_id.is_(None),
-        Fact.report_id == fallback_report_id,
-      )
-      value = session.execute(report_stmt).scalar()
-    bindings[name] = value
+    else:
+      stmt = base_stmt.where(Fact.structure_id == structure_id)
+    bindings[name] = session.execute(stmt).scalar()
 
   return bindings
-
-
-def _latest_report_id_for_fallback(
-  session: Session,
-  element_ids: set[str],
-  period_start: date | None,
-  period_end: date | None,
-) -> str | None:
-  """Pick one report for all structure-agnostic fact fallback bindings."""
-  if not element_ids:
-    return None
-
-  stmt = (
-    select(Report.id)
-    .join(Fact, Fact.report_id == Report.id)
-    .where(
-      Fact.element_id.in_(element_ids),
-      Fact.fact_scope == "in_scope",
-      Fact.structure_id.is_(None),
-      Fact.report_id.is_not(None),
-    )
-    .order_by(Report.created_at.desc(), Report.id.desc())
-    .limit(1)
-  )
-  if period_end is not None:
-    stmt = stmt.where(Fact.period_end <= period_end)
-  if period_start is not None:
-    stmt = stmt.where(Fact.period_start >= period_start)
-  return session.execute(stmt).scalar()
 
 
 def _bind_sum_variables(
@@ -169,11 +119,17 @@ def _bind_sum_variables(
     if element_id is None:
       bindings[name] = None
       continue
+    # Match `_bind_variables` semantics — only sum facts the close
+    # workflow considers in-scope. Historical facts (already absorbed
+    # into opening balances) would otherwise inflate SumEquals checks
+    # that compare against a schedule's contracted total.
     row = session.execute(
       text(
         "SELECT ROUND(SUM(value)::numeric, 2) AS total "
         "FROM facts "
-        "WHERE element_id = :eid AND structure_id = :sid AND period_type = 'duration'"
+        "WHERE element_id = :eid AND structure_id = :sid "
+        "AND period_type = 'duration' "
+        "AND fact_scope = 'in_scope'"
       ),
       {"eid": element_id, "sid": structure_id},
     ).fetchone()
@@ -234,12 +190,6 @@ def evaluate_rules_for_structure(
   rule_ids = [r.id for r in rule_lites]
   rules = session.execute(select(Rule).where(Rule.id.in_(rule_ids))).scalars().all()
   rule_map = {r.id: r for r in rules}
-  allow_report_fallback = structure.structure_type != "schedule"
-  fallback_report_id = (
-    _latest_report_id_for_fallback(session, element_ids, period_start, period_end)
-    if allow_report_fallback and fact_set_id is None
-    else None
-  )
 
   results: list[VerificationResult] = []
   for rule_lite in rule_lites:
@@ -257,8 +207,6 @@ def evaluate_rules_for_structure(
           period_start,
           period_end,
           fact_set_id=fact_set_id,
-          allow_report_fallback=allow_report_fallback,
-          fallback_report_id=fallback_report_id,
         )
       outcome = evaluate_rule(rule, bindings)
     except Exception as exc:

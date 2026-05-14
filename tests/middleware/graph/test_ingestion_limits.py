@@ -91,6 +91,53 @@ class TestCheckMaterializationLimits:
     assert any("max_single_table_rows" in e for e in result["errors"])
 
   @pytest.mark.asyncio
+  async def test_storage_over_limit_blocks_materialization(self):
+    """§3.7 Phase 1: aggregate instance storage over cap blocks materialization."""
+    mock_db = MagicMock()
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_pending_row_counts",
+        return_value={"Entity": 1000},
+      ),
+      patch.object(
+        IngestionLimitChecker,
+        "_get_database_size_bytes",
+        new_callable=AsyncMock,
+        return_value=25 * 1024**3,  # 25 GB on a 20 GB tier
+      ),
+      patch(
+        "robosystems.models.core.graph.Graph.get_subgraphs",
+        return_value=[],
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_instance_storage_limit_gb",
+        return_value=20.0,
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_graph_limits",
+        return_value={
+          "instance_storage_limit_gb": 20,
+          "max_rows_per_copy": 2_000_000,
+          "max_single_table_rows": 5_000_000,
+          "chunk_size_rows": 1_000_000,
+          "warn_at_percentage": 80,
+        },
+      ),
+    ):
+      result = await IngestionLimitChecker.check_materialization_limits(
+        db=mock_db,
+        graph_id="kg_test",
+        tier="ladybug-standard",
+      )
+
+    assert result["allowed"] is False
+    assert any("instance storage" in e for e in result["errors"])
+    assert result["current_usage"]["total_storage_gb"] == 25.0
+    assert result["current_usage"]["storage_usage_percentage"] == 125.0
+    assert result["limits"]["instance_storage_limit_gb"] == 20.0
+
+  @pytest.mark.asyncio
   async def test_no_node_or_relationship_blocking(self):
     """Test that materialization is never blocked by node/relationship counts.
 
@@ -221,6 +268,43 @@ class TestCheckInstanceStorage:
 
     assert result["status"] == "over_limit"
     assert result["usage_percentage"] == 105.0
+    # §3.7 Phase 1: over_limit populates blocking errors
+    assert result["allowed"] is False
+    assert len(result["errors"]) == 1
+    assert "exceeds" in result["errors"][0]
+
+  @pytest.mark.asyncio
+  async def test_healthy_status_is_allowed(self):
+    """§3.7 Phase 1: under-cap status returns allowed=True with empty errors."""
+    mock_db = MagicMock()
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_database_size_bytes",
+        new_callable=AsyncMock,
+        return_value=5 * 1024**3,
+      ),
+      patch(
+        "robosystems.models.core.graph.Graph.get_subgraphs",
+        return_value=[],
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_instance_storage_limit_gb",
+        return_value=20.0,
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_graph_limits",
+        return_value={"warn_at_percentage": 80},
+      ),
+    ):
+      result = await IngestionLimitChecker.check_instance_storage(
+        db=mock_db,
+        graph_id="kg_test",
+        tier="ladybug-standard",
+      )
+
+    assert result["allowed"] is True
+    assert result["errors"] == []
 
   @pytest.mark.asyncio
   async def test_aggregates_subgraphs(self):

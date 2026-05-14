@@ -140,6 +140,47 @@ class TestClosePeriodToolHappyPath:
     assert call.kwargs["allow_stale_sync"] is False
 
   @pytest.mark.asyncio
+  async def test_response_includes_rule_summary_and_evaluated_structure_ids(self):
+    """§3.8 — the MCP close-period response must carry the same rule
+    eval fields the REST ClosePeriodResponse exposes so agents can
+    report which schedule rules passed / failed after a close."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    response = _close_response(
+      rule_summary={"pass": 3, "fail": 0, "error": 0, "skipped": 0},
+      evaluated_structure_ids=["struct_dep", "struct_amort"],
+    )
+
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=response),
+    ):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["rule_summary"] == {
+      "pass": 3,
+      "fail": 0,
+      "error": 0,
+      "skipped": 0,
+    }
+    assert result["evaluated_structure_ids"] == ["struct_dep", "struct_amort"]
+
+  @pytest.mark.asyncio
+  async def test_response_handles_null_rule_summary(self):
+    """No schedules with facts in the period → rule_summary is None,
+    evaluated_structure_ids is an empty list. The MCP shape stays stable."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    response = _close_response()  # rule_summary defaults to None
+
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=response),
+    ):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["rule_summary"] is None
+    assert result["evaluated_structure_ids"] == []
+
+  @pytest.mark.asyncio
   async def test_actor_id_falls_back_to_graph_scoped_sentinel(self):
     """When the MCP client has no user_id, fall back to mcp:{graph_id}
     so audit logs stay traceable per tenant (matches ReopenPeriodTool)."""
@@ -185,7 +226,9 @@ class TestClosePeriodToolErrors:
   @pytest.mark.asyncio
   async def test_gate_failed_returns_not_closeable(self):
     result = await self._run_with_side_effect(
-      CloseGateFailed(blockers=[CloseableGateResult.SEQUENCE])
+      CloseGateFailed(
+        CloseableGateResult(is_closeable=False, blockers=[CloseableGateResult.SEQUENCE])
+      )
     )
     assert result["error"] == "not_closeable"
     assert CloseableGateResult.SEQUENCE in result["blockers"]
@@ -193,9 +236,47 @@ class TestClosePeriodToolErrors:
   @pytest.mark.asyncio
   async def test_no_calendar_returns_calendar_not_initialized(self):
     result = await self._run_with_side_effect(
-      CloseGateFailed(blockers=[CloseableGateResult.NO_CALENDAR])
+      CloseGateFailed(
+        CloseableGateResult(
+          is_closeable=False, blockers=[CloseableGateResult.NO_CALENDAR]
+        )
+      )
     )
     assert result["error"] == "calendar_not_initialized"
+
+  @pytest.mark.asyncio
+  async def test_pending_obligations_enriches_detail(self):
+    """§3.12 follow-up: pending_obligations blocker surfaces count + sample
+    + earliest_pending_period on the close-period response."""
+    from robosystems.operations.roboledger.fiscal_calendar.service import (
+      PendingObligationDetail,
+    )
+
+    result = await self._run_with_side_effect(
+      CloseGateFailed(
+        CloseableGateResult(
+          is_closeable=False,
+          blockers=[CloseableGateResult.PENDING_OBLIGATIONS],
+          pending_obligation_count=3,
+          pending_obligation_sample=[
+            PendingObligationDetail(
+              event_id="evt_1",
+              schedule_id="struct_dep",
+              schedule_name="Computer Depreciation",
+              period="2026-04",
+            ),
+          ],
+          earliest_pending_period="2026-04",
+        )
+      )
+    )
+    assert result["error"] == "not_closeable"
+    assert result["pending_obligation_count"] == 3
+    assert result["pending_obligation_sample"][0]["schedule_name"] == (
+      "Computer Depreciation"
+    )
+    assert result["earliest_pending_period"] == "2026-04"
+    assert "sync_stale_days" not in result  # only populated when sync blocker active
 
   @pytest.mark.asyncio
   async def test_period_not_found_error(self):

@@ -91,7 +91,7 @@ results = evaluate_rules_for_structure(
 
 The engine loads rules via `envelope.load_rules_for_structure` (so element- and association-scoped rules are included), binds `$Variable` names to fact values via qname lookup, dispatches to the per-pattern evaluator, writes one `VerificationResult` row per rule, and returns the written rows. `session.flush()` is called before returning; the caller owns `commit`.
 
-**Binding semantics**: schedule facts are structure-scoped (`Fact.structure_id`). Statement facts are currently report-scoped (`Fact.report_id`, `structure_id=NULL`) — the engine falls back to the most recent matching report for non-schedule blocks until report-write paths stamp `structure_id` on every fact.
+**Binding semantics**: every fact is structure-scoped (`Fact.structure_id`) and FactSet-anchored (`Fact.fact_set_id`) post §3.5. Reports stamp those fields via `_persist_report_facts`; schedules stamp them via `ScheduleService`. The engine filters by `structure_id` (or `fact_set_id` when the caller pins one) — no report-id fallback is needed.
 
 **Expression safety**: `expressions.py` rewrites `$Variable` → `_var_Name`, normalizes bare `=` → `==`, parses with `ast.parse(mode='eval')`, then walks the AST through a whitelist. `eval()` is never called — the AST is evaluated recursively by `_eval_arith`.
 

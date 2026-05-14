@@ -400,3 +400,132 @@ class TestStaleSyncAudit:
 
     call = fcs.advance_closed_through.call_args
     assert call.kwargs["note"] == "month-end close"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# §3.8 — Auto-run rules on close
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestCloseAutoRunsRules:
+  """Verify the close service evaluates rules for schedules with facts in
+  the closing period (§3.8 rule-engine auto-run)."""
+
+  def _session_with_schedules_and_rule_results(
+    self, fp, schedule_ids: list[str], rule_results_per_struct: dict
+  ):
+    """Build a session whose schedule query returns the given structure
+    ids and whose rule eval returns the configured results per id."""
+    from unittest.mock import patch
+
+    session = _mock_session_with_fp(fp)
+
+    # Override session.execute to return the BS row first, then the
+    # schedule id list for the new §3.8 query.
+    bs_row = MagicMock()
+    bs_row.total_debit = 0
+    bs_row.total_credit = 0
+    bs_exec = MagicMock()
+    bs_exec.fetchone.return_value = bs_row
+    schedules_exec = MagicMock()
+    schedules_exec.scalars.return_value.all.return_value = schedule_ids
+    session.execute.side_effect = [bs_exec, schedules_exec]
+
+    eval_patcher = patch(
+      "robosystems.operations.information_block.rules.engine."
+      "evaluate_rules_for_structure",
+      side_effect=lambda s, sid, **kw: rule_results_per_struct.get(sid, []),
+    )
+    return session, eval_patcher
+
+  def test_rule_summary_aggregates_across_schedules(self):
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    svc = PeriodCloseService(fcs)
+
+    _r = lambda status: MagicMock(status=status)  # noqa: E731
+    session, eval_patcher = self._session_with_schedules_and_rule_results(
+      _fp(status="open"),
+      schedule_ids=["struct_a", "struct_b"],
+      rule_results_per_struct={
+        "struct_a": [_r("pass"), _r("pass"), _r("fail")],
+        "struct_b": [_r("pass"), _r("error")],
+      },
+    )
+
+    with eval_patcher as mock_eval:
+      result = svc.close(
+        session,
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        has_sync_connection=False,
+        last_sync_at=None,
+      )
+
+    assert result.rule_summary == {"pass": 3, "fail": 1, "error": 1, "skipped": 0}
+    assert result.evaluated_structure_ids == ("struct_a", "struct_b")
+    assert mock_eval.call_count == 2
+
+  def test_no_schedules_returns_none_summary(self):
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    svc = PeriodCloseService(fcs)
+
+    session, eval_patcher = self._session_with_schedules_and_rule_results(
+      _fp(status="open"), schedule_ids=[], rule_results_per_struct={}
+    )
+
+    with eval_patcher as mock_eval:
+      result = svc.close(
+        session,
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        has_sync_connection=False,
+        last_sync_at=None,
+      )
+
+    assert result.rule_summary is None
+    assert result.evaluated_structure_ids == ()
+    mock_eval.assert_not_called()
+
+  def test_rule_eval_failure_isolated_from_close_success(self):
+    """A bare exception out of the rule engine is logged and skipped — the
+    close still succeeds with whatever results were tallied beforehand."""
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    svc = PeriodCloseService(fcs)
+
+    _r = lambda status: MagicMock(status=status)  # noqa: E731
+    session = _mock_session_with_fp(_fp(status="open"))
+    bs_row = MagicMock()
+    bs_row.total_debit = 0
+    bs_row.total_credit = 0
+    bs_exec = MagicMock()
+    bs_exec.fetchone.return_value = bs_row
+    schedules_exec = MagicMock()
+    schedules_exec.scalars.return_value.all.return_value = ["struct_ok", "struct_bad"]
+    session.execute.side_effect = [bs_exec, schedules_exec]
+
+    from unittest.mock import patch
+
+    def _eval(session, sid, **kw):
+      if sid == "struct_bad":
+        raise RuntimeError("schema mismatch")
+      return [_r("pass")]
+
+    with patch(
+      "robosystems.operations.information_block.rules.engine."
+      "evaluate_rules_for_structure",
+      side_effect=_eval,
+    ):
+      result = svc.close(
+        session,
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        has_sync_connection=False,
+        last_sync_at=None,
+      )
+
+    # close succeeded — only the good schedule's results land in the summary
+    assert result.rule_summary == {"pass": 1, "fail": 0, "error": 0, "skipped": 0}
+    assert result.evaluated_structure_ids == ("struct_ok", "struct_bad")

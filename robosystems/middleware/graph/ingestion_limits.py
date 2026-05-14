@@ -1,8 +1,17 @@
 """Graph content limit checking for materialization operations.
 
-Enforces per-operation safety limits (rows per copy, rows per table) to prevent
-OOM during materialization. Instance storage is tracked as a soft limit for
-reporting and alerting — it does not block operations.
+Two limit categories, both hard-blocking at the write path (per
+``tier-capacity-limits.md`` §3.7 Phase 1):
+
+1. **Aggregate storage GB** — the tier-scoped product cap. Bounds
+   instance disk COGS, drives upgrades. Hit at the write path so
+   customers can't pile up data they then can't promote.
+2. **Per-operation row caps** (`max_rows_per_copy`,
+   `max_single_table_rows`) — engineering OOM guardrails. Set per
+   instance class, framed internally; not surfaced as the marketing
+   tier limit.
+
+Both block materialization when exceeded.
 
 Data sources:
 - Row counts: GraphFile.duckdb_row_count (tracked at upload time)
@@ -38,11 +47,13 @@ class IngestionLimitChecker:
     tier: str,
     table_name: str | None = None,
   ) -> dict[str, Any]:
-    """Check if materialization would exceed per-operation safety limits.
+    """Check if materialization would exceed any tier limit.
 
-    Only enforces max_rows_per_copy and max_single_table_rows — these are
-    hard limits to prevent OOM during a single materialization operation.
-    Instance storage capacity is tracked separately as a soft limit.
+    Hard-blocks on three checks (per §3.7 Phase 1):
+
+    - ``max_rows_per_copy`` — OOM guardrail across all pending tables
+    - ``max_single_table_rows`` — OOM guardrail per table
+    - aggregate instance storage GB — product cap
 
     Args:
         db: Database session
@@ -76,17 +87,25 @@ class IngestionLimitChecker:
           f"Table '{tbl_name}' has {row_count:,} rows, exceeding max_single_table_rows limit ({max_single_table:,})"
         )
 
+    # Check aggregate instance storage cap (hard limit — product cap, blocks COGS overruns)
+    storage_check = await cls.check_instance_storage(db, graph_id, tier)
+    if not storage_check["allowed"]:
+      errors.extend(storage_check["errors"])
+
     return {
       "allowed": len(errors) == 0,
       "errors": errors,
       "warnings": warnings,
       "current_usage": {
         "total_pending_rows": total_pending_rows,
+        "total_storage_gb": storage_check["total_storage_gb"],
+        "storage_usage_percentage": storage_check["usage_percentage"],
       },
       "limits": {
         "max_rows_per_copy": max_rows_per_copy,
         "max_single_table_rows": max_single_table,
         "chunk_size_rows": limits.get("chunk_size_rows", 1_000_000),
+        "instance_storage_limit_gb": storage_check["limit_gb"],
       },
       "tier": tier,
     }
@@ -98,10 +117,13 @@ class IngestionLimitChecker:
     graph_id: str,
     tier: str,
   ) -> dict[str, Any]:
-    """Check aggregate storage usage across the entire dedicated instance.
+    """Check aggregate storage usage against the tier's instance cap.
 
-    Sums storage for the parent graph and all subgraphs. This is a soft
-    limit — used for reporting and email alerts, not enforcement.
+    Sums storage for the parent graph and all subgraphs. Returns
+    ``allowed=False`` with a populated ``errors`` list when the
+    aggregate exceeds the tier's ``instance_storage_limit_gb``. Per
+    §3.7 Phase 1 this is a hard product cap, blocking at the write
+    path (folded into :meth:`check_materialization_limits`).
 
     Args:
         db: Database session
@@ -109,7 +131,8 @@ class IngestionLimitChecker:
         tier: Graph tier
 
     Returns:
-        Dict with: total_storage_gb, limit_gb, usage_percentage, status, databases
+        Dict with: allowed, errors, total_storage_gb, limit_gb,
+        usage_percentage, status, databases
     """
     from robosystems.models.core.graph import Graph
 
@@ -156,7 +179,17 @@ class IngestionLimitChecker:
     else:
       instance_status = "healthy"
 
+    errors: list[str] = []
+    if instance_status == "over_limit":
+      errors.append(
+        f"Aggregate instance storage {total_storage_gb:.2f} GB exceeds "
+        f"{tier} limit of {limit_gb:.0f} GB ({usage_percentage:.1f}%). "
+        f"Upgrade tier or reduce data before materializing."
+      )
+
     return {
+      "allowed": len(errors) == 0,
+      "errors": errors,
       "total_storage_gb": total_storage_gb,
       "limit_gb": limit_gb,
       "usage_percentage": usage_percentage,

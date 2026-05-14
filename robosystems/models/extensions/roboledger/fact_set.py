@@ -7,9 +7,11 @@ Information Block envelope = Structure + FactSet for a given period.
 
 The table provides one period-scoped grouping concept that statements
 and schedules share. ``create_report`` creates a FactSet row first and
-stamps all facts with ``fact_set_id``; the legacy ``report_id`` column
-remains as a back-pointer for readers that have not yet been migrated
-to resolve through FactSet.
+stamps all facts with ``fact_set_id`` (post §3.5 the FK on
+``facts.fact_set_id`` is NOT NULL ON DELETE CASCADE, so deleting the
+FactSet cascades to its facts). FactSet carries its own ``report_id``
+back-pointer to the parent Report — the ``facts.report_id`` column
+was retired in migration 0010.
 """
 
 from datetime import UTC, datetime
@@ -65,8 +67,10 @@ class FactSet(ExtensionsBase):
   # without joining facts.
   entity_id = Column(String, nullable=False)
 
-  # Optional ``report_id`` back-pointer — populated while reports still
-  # live in the ``reports`` table; drops out when ``report_id`` retires.
+  # ``report_id`` back-pointer to the parent Report. Nullable so the
+  # cross-graph share path can mint a FactSet that references a target
+  # Report whose id isn't known until the snapshot is copied; report
+  # facts created via ``create_report`` always populate it.
   report_id = Column(String, nullable=True)
 
   # Provenance + free-form metadata (render config pins, template id at
