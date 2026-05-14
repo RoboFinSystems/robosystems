@@ -639,7 +639,9 @@ class TestClosePriorPeriodsToRetainedEarnings:
     return facts
 
   def _get_re_fact(self, facts: list[ReportFact]) -> ReportFact:
-    return next(f for f in facts if f.element_id == "elem_gaap_retained_earnings")
+    return next(
+      f for f in facts if "retainedearnings" in (f.element_qname or "").lower()
+    )
 
   def test_qb_history_no_closes(self):
     """QuickBooks shape: 12 months of history with no closing entries.
@@ -837,36 +839,45 @@ class TestFindCloseTarget:
       period_type="instant",
     )
 
-  def test_prefers_seed_retained_earnings_id(self):
-    seed = self._equity_fact(
-      qname="us-gaap:RetainedEarnings",
-      value=100.0,
-      element_id="elem_gaap_retained_earnings",
-    )
-    other = self._equity_fact(
-      qname="fac:Equity", value=200.0, element_id="elem_fac_equity"
-    )
-    target = _find_close_target([other, seed], self.P_START, self.P_END)
-    assert target is seed
-
-  def test_prefers_retainedearnings_qname_when_seed_id_missing(self):
+  def test_matches_retainedearnings_qname(self):
+    """Canonical case: rs-gaap:RetainedEarningsAccumulatedDeficit wins."""
     re = self._equity_fact(
-      qname="us-gaap:RetainedEarningsAccumulatedDeficit",
+      qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
       value=100.0,
       element_id="elem_xyz",
     )
-    eq = self._equity_fact(
-      qname="fac:Equity", value=200.0, element_id="elem_fac_equity"
+    apic = self._equity_fact(
+      qname="rs-gaap:AdditionalPaidInCapital",
+      value=200.0,
+      element_id="elem_apic",
     )
-    target = _find_close_target([eq, re], self.P_START, self.P_END)
+    target = _find_close_target([apic, re], self.P_START, self.P_END)
     assert target is re
 
-  def test_falls_back_to_fac_equity(self):
-    eq = self._equity_fact(
-      qname="fac:Equity", value=49_800.0, element_id="elem_fac_equity"
+  def test_matches_retaineddeficit_qname(self):
+    """Loose qname matcher: ``*RetainedDeficit*`` shape also wins."""
+    re = self._equity_fact(
+      qname="us-gaap:RetainedDeficit",
+      value=100.0,
+      element_id="elem_xyz",
     )
-    target = _find_close_target([eq], self.P_START, self.P_END)
-    assert target is eq
+    target = _find_close_target([re], self.P_START, self.P_END)
+    assert target is re
+
+  def test_does_not_fall_back_to_generic_equity(self):
+    """Without a RetainedEarnings-shaped fact, no close target is picked.
+
+    Generic equity facts (APIC, fac:Equity, etc.) are NOT acceptable
+    fallbacks under the rs-gaap-anchored architecture — dumping NI on
+    APIC corrupts the equity composition. Caller appends a fresh
+    anonymous RE fact instead.
+    """
+    apic = self._equity_fact(
+      qname="rs-gaap:AdditionalPaidInCapital",
+      value=49_800.0,
+      element_id="elem_apic",
+    )
+    assert _find_close_target([apic], self.P_START, self.P_END) is None
 
   def test_returns_none_when_no_equity_fact(self):
     asset = ReportFact(
@@ -883,8 +894,8 @@ class TestFindCloseTarget:
     assert _find_close_target([asset], self.P_START, self.P_END) is None
 
 
-class TestCloseToRetainedEarningsFacEquity:
-  """End-to-end: close NI into fac:Equity (no us-gaap RE element)."""
+class TestCloseToRetainedEarningsRsGaap:
+  """End-to-end: close NI into rs-gaap:RetainedEarningsAccumulatedDeficit."""
 
   P_START = date(2025, 1, 1)
   P_END = date(2025, 12, 31)
@@ -911,35 +922,40 @@ class TestCloseToRetainedEarningsFacEquity:
       period_type=period_type,
     )
 
-  def test_net_income_added_to_fac_equity(self):
+  def test_net_income_added_to_rs_gaap_re(self):
+    """When an rs-gaap RE fact exists, close routes NI to it."""
     facts = [
       self._fact(
-        qname="fac:Revenues",
+        qname="rs-gaap:SalesRevenueNet",
         classification="revenue",
         balance_type="credit",
         value=192_500.0,
         element_id="r",
       ),
       self._fact(
-        qname="fac:CostsAndExpenses",
+        qname="rs-gaap:SellingGeneralAndAdministrativeExpense",
         classification="expense",
         balance_type="debit",
         value=157_950.0,
         element_id="c",
       ),
       self._fact(
-        qname="fac:Equity",
+        qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
         classification="equity",
         balance_type="credit",
-        value=49_800.0,
-        element_id="e",
+        value=0.0,
+        element_id="re",
         period_type="instant",
       ),
     ]
 
     _close_to_retained_earnings(facts, self.P_START, self.P_END)
 
-    equity = next(f for f in facts if f.element_qname == "fac:Equity")
-    assert equity.value == 49_800.0 + (192_500.0 - 157_950.0)
-    # No phantom us-gaap RE fact created.
+    re = next(
+      f
+      for f in facts
+      if f.element_qname == "rs-gaap:RetainedEarningsAccumulatedDeficit"
+    )
+    assert re.value == 192_500.0 - 157_950.0
+    # No phantom legacy RE fact created.
     assert not any(f.element_id == "elem_gaap_retained_earnings" for f in facts)

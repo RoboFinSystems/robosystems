@@ -754,11 +754,13 @@ _MAPPED_TRIAL_BALANCE_SQL = text("""
       AND mapping.association_type = 'mapping'
       AND mapping.structure_id = :mapping_id
   JOIN elements target ON target.id = mapping.to_element_id
-  LEFT JOIN element_traits tet
-      ON tet.element_id = target.id AND tet.is_primary = TRUE
-  LEFT JOIN traits tt
-      ON tt.id = tet.trait_id
-      AND tt.category = 'elementsOfFinancialStatements'
+  LEFT JOIN (
+      SELECT et.element_id, t.identifier
+      FROM element_traits et
+      JOIN traits t ON t.id = et.trait_id
+      WHERE et.is_primary = TRUE
+        AND t.category = 'elementsOfFinancialStatements'
+  ) tt ON tt.element_id = target.id
   WHERE e.status = 'posted'
       AND (e.posting_date >= :start_date OR :start_date IS NULL)
       AND (e.posting_date <= :end_date OR :end_date IS NULL)

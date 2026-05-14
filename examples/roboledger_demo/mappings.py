@@ -1,65 +1,77 @@
-"""CoA to FAC mapping definitions for Cascade Advisory Group LLC.
+"""CoA to rs-gaap mapping definitions for Cascade Advisory Group LLC.
 
-CoA elements map to FAC (Fundamental Accounting Concepts) — the small,
-stable spine of high-level statement concepts that every rs-gaap
-presentation Network anchors to. The renderer follows the calc DAG
-from each FAC leaf into the rs-gaap detail when one of the Network's
-calculations cites it.
+CoA elements map to rs-gaap detail concepts that are admitted by the
+**Default Reporting Style's Networks** (§3.2). Only concepts that appear
+in the rs-gaap Balance Sheet — Classified or Income Statement —
+Multi-step Networks render through the Default Style; mapping to a
+concept outside those Networks drops the fact as "out of structure".
 
-The demo's Reporting Style is the Default Style (§3.2 Phase 1), so the
-target Networks are rs-gaap Classified BS / Multi-step IS / Indirect
-CF / Equity Roll Forward. Each line below maps to a concept that
-appears in those Networks — otherwise the renderer drops the row as
-"out of structure". In particular:
+The Multi-step IS deliberately presents a curated set of leaves (Sales
+Revenue / COGS / SG&A / R&D / D&A / Interest / Other Nonoperating /
+Tax). For a services firm like Cascade with no goods sold or R&D, the
+common rollups are:
 
-- Operating expenses target ``fac:OperatingExpenses`` (the Multi-step
-  IS concept), not the Single-step's ``fac:CostsAndExpenses``. Without
-  this, the IS would render empty above the bottom line and the
-  NetIncome synthesis would have nothing to bridge.
-- PP&E rolls into ``fac:NoncurrentAssets`` — BS-classified's parent
-  for long-lived assets. The Classified BS Network has no ``FixedAssets``
-  slot (that's a fac-presentation concept, not rs-gaap).
+- **Revenue** → ``rs-gaap:SalesRevenueNet``
+- **Operating expenses (everything not D&A or interest)** →
+  ``rs-gaap:SellingGeneralAndAdministrativeExpense``
+- **Depreciation** → ``rs-gaap:DepreciationDepletionAndAmortization``
 
-The demo resolves FAC qnames → element IDs at runtime against the
+The Classified BS admits a richer set of rs-gaap rollups:
+
+- **Cash** → ``rs-gaap:CashCashEquivalentsAndShortTermInvestments``
+- **AR** → ``rs-gaap:ReceivablesNetCurrent``
+- **Prepaids** → ``rs-gaap:PrepaidExpenseCurrent``
+- **PP&E (gross + accumulated)** → ``rs-gaap:PropertyPlantAndEquipmentNet``
+  (the contra-balance accumulated-depreciation account nets naturally:
+  Gross + (-Accum) = Net)
+- **AP / Accrued** → ``rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent``
+- **APIC** → ``rs-gaap:AdditionalPaidInCapital``
+- **Retained Earnings** → ``rs-gaap:RetainedEarningsAccumulatedDeficit``
+
+Finer rs-gaap concepts (CashAndCashEquivalentsAtCarryingValue,
+AccountsReceivableNetCurrent, AccountsPayableCurrent, PrepaidInsurance,
+SalariesAndWages, OccupancyNet, etc.) exist in the broader rs-gaap
+presentation library but are NOT in the Default Style's composed
+Networks — they won't render until a richer Reporting Style is picked.
+
+The demo resolves rs-gaap qnames → element IDs at runtime against the
 library in the entity graph.
 """
 
-# (coa_code, fac_qname)
+# (coa_code, rs_gaap_qname)
 MAPPINGS: list[tuple[str, str]] = [
   # Assets
-  ("1000", "fac:CurrentAssets"),  # Cash
-  ("1100", "fac:CurrentAssets"),  # Accounts Receivable
-  ("1200", "fac:CurrentAssets"),  # Prepaid Expenses
-  ("1210", "fac:CurrentAssets"),
-  ("1220", "fac:CurrentAssets"),
-  ("1300", "fac:NoncurrentAssets"),  # PP&E — Classified BS parent
-  ("1310", "fac:NoncurrentAssets"),
-  ("1350", "fac:NoncurrentAssets"),  # Accumulated Depreciation (contra)
+  ("1000", "rs-gaap:CashCashEquivalentsAndShortTermInvestments"),  # Cash
+  ("1100", "rs-gaap:ReceivablesNetCurrent"),  # Accounts Receivable
+  ("1200", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid Insurance
+  ("1210", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid Software
+  ("1220", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid Cloud Hosting
+  ("1300", "rs-gaap:PropertyPlantAndEquipmentNet"),  # Computer Equipment
+  ("1310", "rs-gaap:PropertyPlantAndEquipmentNet"),  # Office Furniture
+  ("1350", "rs-gaap:PropertyPlantAndEquipmentNet"),  # Accumulated Depreciation (contra)
   # Liabilities
-  ("2000", "fac:CurrentLiabilities"),  # Accounts Payable
-  ("2100", "fac:CurrentLiabilities"),  # Accrued Liabilities
-  ("2200", "fac:CurrentLiabilities"),
+  ("2000", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Accounts Payable
+  ("2100", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Accrued Liabilities
+  ("2200", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Payroll Taxes Payable
   # Equity
-  ("3000", "fac:Equity"),  # Additional Paid-In Capital
-  ("3100", "fac:Equity"),  # Retained Earnings
-  # Revenue
-  ("4000", "fac:Revenues"),
-  ("4100", "fac:Revenues"),
-  ("4200", "fac:Revenues"),
-  # Operating expenses — rs-gaap Multi-step IS anchors on
-  # fac:OperatingExpenses (the SG&A bucket); the calc DAG expands into
-  # rs-gaap leaves via the calc-linkbase bridges. Cascade is a services
-  # company, so nothing here is COGS-natured — everything sits under
-  # OperatingExpenses.
-  ("5000", "fac:OperatingExpenses"),
-  ("5100", "fac:OperatingExpenses"),
-  ("5200", "fac:OperatingExpenses"),
-  ("6000", "fac:OperatingExpenses"),
-  ("6100", "fac:OperatingExpenses"),
-  ("6200", "fac:OperatingExpenses"),
-  ("6300", "fac:OperatingExpenses"),
-  ("6400", "fac:OperatingExpenses"),
-  ("6500", "fac:OperatingExpenses"),
-  ("6600", "fac:OperatingExpenses"),
-  ("7000", "fac:OperatingExpenses"),  # Depreciation & Amortization
+  ("3000", "rs-gaap:AdditionalPaidInCapital"),  # Owner's Equity
+  ("3100", "rs-gaap:RetainedEarningsAccumulatedDeficit"),  # Retained Earnings
+  # Revenue — services firm, no goods sold; everything is net service revenue
+  ("4000", "rs-gaap:SalesRevenueNet"),  # Consulting Revenue
+  ("4100", "rs-gaap:SalesRevenueNet"),  # Strategy Advisory Revenue
+  ("4200", "rs-gaap:SalesRevenueNet"),  # Implementation Services Revenue
+  # Operating expenses — Multi-step IS Network only admits SG&A as the
+  # operating-expense bucket for non-COGS / non-D&A items. Everything
+  # below rolls into SG&A. Depreciation gets its own line.
+  ("5000", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Salaries & Wages
+  ("5100", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Payroll Taxes
+  ("5200", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Health Insurance
+  ("6000", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Office Rent
+  ("6100", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Software Subscriptions
+  ("6200", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Cloud Hosting
+  ("6300", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Professional Development
+  ("6400", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Business Insurance
+  ("6500", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Office Supplies
+  ("6600", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Travel & Entertainment
+  ("7000", "rs-gaap:DepreciationDepletionAndAmortization"),  # Depreciation Expense
 ]

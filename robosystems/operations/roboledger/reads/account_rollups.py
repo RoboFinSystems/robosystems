@@ -56,11 +56,13 @@ _ROLLUP_SQL = text("""
   FROM associations mapping
   JOIN elements source ON source.id = mapping.from_element_id
   JOIN elements target ON target.id = mapping.to_element_id
-  LEFT JOIN element_traits tet
-    ON tet.element_id = target.id AND tet.is_primary = TRUE
-  LEFT JOIN traits t
-    ON t.id = tet.trait_id
-    AND t.category = 'elementsOfFinancialStatements'
+  LEFT JOIN (
+    SELECT et.element_id, tr.identifier
+    FROM element_traits et
+    JOIN traits tr ON tr.id = et.trait_id
+    WHERE et.is_primary = TRUE
+      AND tr.category = 'elementsOfFinancialStatements'
+  ) t ON t.element_id = target.id
   LEFT JOIN line_items li ON li.element_id = source.id
   LEFT JOIN entries e ON e.id = li.entry_id AND e.status = 'posted'
     AND (e.posting_date >= :start_date OR :start_date IS NULL)

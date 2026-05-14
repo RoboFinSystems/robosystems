@@ -22,11 +22,13 @@ _TRIAL_BALANCE_SQL = text("""
   FROM elements a
   JOIN line_items li ON li.element_id = a.id
   JOIN entries e ON e.id = li.entry_id
-  LEFT JOIN element_traits et
-    ON et.element_id = a.id AND et.is_primary = TRUE
-  LEFT JOIN traits t
-    ON t.id = et.trait_id
-    AND t.category = 'elementsOfFinancialStatements'
+  LEFT JOIN (
+    SELECT et.element_id, tr.identifier
+    FROM element_traits et
+    JOIN traits tr ON tr.id = et.trait_id
+    WHERE et.is_primary = TRUE
+      AND tr.category = 'elementsOfFinancialStatements'
+  ) t ON t.element_id = a.id
   WHERE e.status = 'posted'
     AND (e.posting_date >= :start_date OR :start_date IS NULL)
     AND (e.posting_date <= :end_date OR :end_date IS NULL)

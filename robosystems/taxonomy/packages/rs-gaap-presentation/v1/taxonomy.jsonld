@@ -7724,457 +7724,6 @@
       ]
     },
     {
-      "@id": "_:rs-gaap-pres-is-multistep",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "structureName": "rs-gaap — Income Statement — Multi-step",
-      "structureType": "income_statement",
-      "conceptArrangementPattern": "arithmetic"
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-1",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementAbstract"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeStatementMultiStepTable"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-2",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementMultiStepTable"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeStatementLineItems"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10100.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-3",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementLineItems"
-      },
-      "arcTo": {
-        "@id": "fac:RevenuesRollUp"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10200.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-4",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementLineItems"
-      },
-      "arcTo": {
-        "@id": "fac:CostRevenueRollUp"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10300.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-5",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementLineItems"
-      },
-      "arcTo": {
-        "@id": "fac:GrossProfitRollUp"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-6",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementLineItems"
-      },
-      "arcTo": {
-        "@id": "fac:OperatingIncomeLossRollUp"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-7",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementLineItems"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-8",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementLineItems"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10700.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-9",
-      "arcFrom": {
-        "@id": "fac:IncomeStatementLineItems"
-      },
-      "arcTo": {
-        "@id": "fac:NetIncomeLossRollUp"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-10",
-      "arcFrom": {
-        "@id": "fac:RevenuesRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:Revenues"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 10900.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-11",
-      "arcFrom": {
-        "@id": "fac:Revenues"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:SalesRevenueNet"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-12",
-      "arcFrom": {
-        "@id": "fac:Revenues"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11100.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-13",
-      "arcFrom": {
-        "@id": "fac:CostRevenueRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:CostOfRevenue"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11200.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-14",
-      "arcFrom": {
-        "@id": "fac:CostOfRevenue"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:CostOfGoodsSold"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11300.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-15",
-      "arcFrom": {
-        "@id": "fac:CostOfRevenue"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-16",
-      "arcFrom": {
-        "@id": "fac:GrossProfitRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:GrossProfit"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-17",
-      "arcFrom": {
-        "@id": "fac:GrossProfitRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:Revenues"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-18",
-      "arcFrom": {
-        "@id": "fac:GrossProfitRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:CostOfRevenue"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11700.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-19",
-      "arcFrom": {
-        "@id": "fac:OperatingIncomeLossRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:OperatingIncomeLoss"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-20",
-      "arcFrom": {
-        "@id": "fac:OperatingIncomeLossRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:GrossProfit"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 11900.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-21",
-      "arcFrom": {
-        "@id": "fac:OperatingIncomeLossRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:OperatingExpenses"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-22",
-      "arcFrom": {
-        "@id": "fac:OperatingIncomeLossRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:OtherOperatingIncomeExpenses"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12100.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-23",
-      "arcFrom": {
-        "@id": "fac:OperatingExpenses"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12200.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-24",
-      "arcFrom": {
-        "@id": "fac:OperatingExpenses"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:ResearchAndDevelopmentExpense"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12300.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-25",
-      "arcFrom": {
-        "@id": "fac:OperatingExpenses"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:DepreciationDepletionAndAmortization"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-26",
-      "arcFrom": {
-        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-27",
-      "arcFrom": {
-        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:OperatingIncomeLoss"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-28",
-      "arcFrom": {
-        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:NonoperatingIncomeLoss"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12700.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-29",
-      "arcFrom": {
-        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTaxRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:InterestAndDebtExpense"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-30",
-      "arcFrom": {
-        "@id": "fac:NonoperatingIncomeLoss"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:OtherNonoperatingIncomeExpense"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 12900.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-31",
-      "arcFrom": {
-        "@id": "fac:InterestAndDebtExpense"
-      },
-      "arcTo": {
-        "@id": "rs-gaap:InterestExpense"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 13000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-32",
-      "arcFrom": {
-        "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeLossFromContinuingOperationsAfterTax"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 13100.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-33",
-      "arcFrom": {
-        "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeLossFromContinuingOperationsBeforeTax"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 13200.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-34",
-      "arcFrom": {
-        "@id": "fac:IncomeLossFromContinuingOperationsAfterTaxRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeTaxExpenseBenefit"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 13300.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-35",
-      "arcFrom": {
-        "@id": "fac:NetIncomeLossRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:NetIncomeLoss"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 13400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-36",
-      "arcFrom": {
-        "@id": "fac:NetIncomeLossRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeLossFromContinuingOperationsAfterTax"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 13500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-37",
-      "arcFrom": {
-        "@id": "fac:NetIncomeLossRollUp"
-      },
-      "arcTo": {
-        "@id": "fac:IncomeLossFromDiscontinuedOperationsNetOfTax"
-      },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "arcOrder": 13600.0
-    },
-    {
       "@id": "_:rs-gaap-pres-bs-classified",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
       "structureName": "rs-gaap — Balance Sheet — Classified",
@@ -8183,388 +7732,461 @@
     },
     {
       "@id": "_:rs-gaap-pres-bs-classified-arc-1",
-      "arcFrom": { "@id": "fac:BalanceSheetAbstract" },
-      "arcTo": { "@id": "fac:BalanceSheetClassifiedTable" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 20000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-2",
-      "arcFrom": { "@id": "fac:BalanceSheetClassifiedTable" },
-      "arcTo": { "@id": "fac:BalanceSheetLineItems" },
+      "arcFrom": { "@id": "rs-gaap:Assets" },
+      "arcTo": { "@id": "rs-gaap:AssetsCurrent" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
       "arcOrder": 20100.0
     },
     {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-2",
+      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
+      "arcTo": { "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20110.0
+    },
+    {
       "@id": "_:rs-gaap-pres-bs-classified-arc-3",
-      "arcFrom": { "@id": "fac:BalanceSheetLineItems" },
-      "arcTo": { "@id": "fac:AssetsRollUp" },
+      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
+      "arcTo": { "@id": "rs-gaap:ReceivablesNetCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20120.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-4",
+      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
+      "arcTo": { "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20130.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-5",
+      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
+      "arcTo": { "@id": "rs-gaap:PrepaidExpenseCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20140.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-6",
+      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
+      "arcTo": { "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20150.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-7",
+      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
+      "arcTo": { "@id": "rs-gaap:OtherAssetsCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20160.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-8",
+      "arcFrom": { "@id": "rs-gaap:Assets" },
+      "arcTo": { "@id": "rs-gaap:AssetsNoncurrent" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
       "arcOrder": 20200.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-4",
-      "arcFrom": { "@id": "fac:BalanceSheetLineItems" },
-      "arcTo": { "@id": "fac:LiabilitiesEquityRollUp" },
+      "@id": "_:rs-gaap-pres-bs-classified-arc-9",
+      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentNet" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20210.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-10",
+      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20220.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-11",
+      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20230.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-12",
+      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:OperatingLeaseRightOfUseAsset" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20240.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-13",
+      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:FinanceLeaseRightOfUseAsset" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20250.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-14",
+      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:OtherAssetsNoncurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20260.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-15",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesAndStockholdersEquity" },
+      "arcTo": { "@id": "rs-gaap:Liabilities" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
       "arcOrder": 20300.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-5",
-      "arcFrom": { "@id": "fac:AssetsRollUp" },
-      "arcTo": { "@id": "fac:Assets" },
+      "@id": "_:rs-gaap-pres-bs-classified-arc-16",
+      "arcFrom": { "@id": "rs-gaap:Liabilities" },
+      "arcTo": { "@id": "rs-gaap:LiabilitiesCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20310.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-17",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
+      "arcTo": { "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20311.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-18",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
+      "arcTo": { "@id": "rs-gaap:DebtCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20312.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-19",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
+      "arcTo": { "@id": "rs-gaap:DeferredRevenueCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20313.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-20",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
+      "arcTo": { "@id": "rs-gaap:FinanceLeaseLiabilityCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20314.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-21",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
+      "arcTo": { "@id": "rs-gaap:OtherLiabilitiesCurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20315.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-22",
+      "arcFrom": { "@id": "rs-gaap:Liabilities" },
+      "arcTo": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20320.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-23",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20321.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-24",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:DeferredIncomeTaxLiabilitiesNet" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20322.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-25",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:DeferredRevenueNoncurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20323.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-26",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:OperatingLeaseLiabilityNoncurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20324.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-27",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
+      "arcTo": { "@id": "rs-gaap:OtherLiabilitiesNoncurrent" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20325.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-28",
+      "arcFrom": { "@id": "rs-gaap:LiabilitiesAndStockholdersEquity" },
+      "arcTo": { "@id": "rs-gaap:StockholdersEquity" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
       "arcOrder": 20400.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-6",
-      "arcFrom": { "@id": "fac:AssetsRollUp" },
-      "arcTo": { "@id": "fac:CurrentAssets" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 20500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-7",
-      "arcFrom": { "@id": "fac:AssetsRollUp" },
-      "arcTo": { "@id": "fac:NoncurrentAssets" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 20600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-8",
-      "arcFrom": { "@id": "fac:CurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 20700.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-9",
-      "arcFrom": { "@id": "fac:CurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:ReceivablesNetCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 20800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-10",
-      "arcFrom": { "@id": "fac:CurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 20900.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-11",
-      "arcFrom": { "@id": "fac:CurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:PrepaidExpenseCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-12",
-      "arcFrom": { "@id": "fac:CurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21100.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-13",
-      "arcFrom": { "@id": "fac:CurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:OtherAssetsCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21200.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-14",
-      "arcFrom": { "@id": "fac:NoncurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentNet" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21300.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-15",
-      "arcFrom": { "@id": "fac:NoncurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-16",
-      "arcFrom": { "@id": "fac:NoncurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-17",
-      "arcFrom": { "@id": "fac:NoncurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:OperatingLeaseRightOfUseAsset" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-18",
-      "arcFrom": { "@id": "fac:NoncurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:FinanceLeaseRightOfUseAsset" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21700.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-19",
-      "arcFrom": { "@id": "fac:NoncurrentAssets" },
-      "arcTo": { "@id": "rs-gaap:OtherAssetsNoncurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-20",
-      "arcFrom": { "@id": "fac:LiabilitiesEquityRollUp" },
-      "arcTo": { "@id": "fac:LiabilitiesAndEquity" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 21900.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-21",
-      "arcFrom": { "@id": "fac:LiabilitiesEquityRollUp" },
-      "arcTo": { "@id": "fac:LiabilitiesRollUp" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-22",
-      "arcFrom": { "@id": "fac:LiabilitiesEquityRollUp" },
-      "arcTo": { "@id": "fac:EquityRollUp" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22100.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-23",
-      "arcFrom": { "@id": "fac:LiabilitiesRollUp" },
-      "arcTo": { "@id": "fac:Liabilities" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22200.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-24",
-      "arcFrom": { "@id": "fac:LiabilitiesRollUp" },
-      "arcTo": { "@id": "fac:CurrentLiabilities" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22300.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-25",
-      "arcFrom": { "@id": "fac:LiabilitiesRollUp" },
-      "arcTo": { "@id": "fac:NoncurrentLiabilities" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-26",
-      "arcFrom": { "@id": "fac:CurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-27",
-      "arcFrom": { "@id": "fac:CurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:DebtCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-28",
-      "arcFrom": { "@id": "fac:CurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:DeferredRevenueCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22700.0
-    },
-    {
       "@id": "_:rs-gaap-pres-bs-classified-arc-29",
-      "arcFrom": { "@id": "fac:CurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:FinanceLeaseLiabilityCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-30",
-      "arcFrom": { "@id": "fac:CurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:OtherLiabilitiesCurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 22900.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-31",
-      "arcFrom": { "@id": "fac:NoncurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-32",
-      "arcFrom": { "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations" },
-      "arcTo": { "@id": "rs-gaap:LongTermDebtNoncurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23100.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-33",
-      "arcFrom": { "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations" },
-      "arcTo": { "@id": "rs-gaap:FinanceLeaseLiabilityNoncurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23200.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-34",
-      "arcFrom": { "@id": "fac:NoncurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:DeferredIncomeTaxLiabilitiesNet" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23300.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-35",
-      "arcFrom": { "@id": "fac:NoncurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:DeferredRevenueNoncurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-36",
-      "arcFrom": { "@id": "fac:NoncurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:OperatingLeaseLiabilityNoncurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-37",
-      "arcFrom": { "@id": "fac:NoncurrentLiabilities" },
-      "arcTo": { "@id": "rs-gaap:OtherLiabilitiesNoncurrent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-38",
-      "arcFrom": { "@id": "fac:EquityRollUp" },
-      "arcTo": { "@id": "fac:Equity" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23700.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-39",
-      "arcFrom": { "@id": "fac:EquityRollUp" },
-      "arcTo": { "@id": "fac:EquityAttributableToParent" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-40",
-      "arcFrom": { "@id": "fac:EquityRollUp" },
-      "arcTo": { "@id": "fac:EquityAttributableToNoncontrollingInterest" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 23900.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-41",
-      "arcFrom": { "@id": "fac:EquityAttributableToParent" },
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
       "arcTo": { "@id": "rs-gaap:CommonStockValue" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 24000.0
+      "arcOrder": 20410.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-42",
-      "arcFrom": { "@id": "fac:EquityAttributableToParent" },
+      "@id": "_:rs-gaap-pres-bs-classified-arc-30",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
       "arcTo": { "@id": "rs-gaap:PreferredStockValue" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 24100.0
+      "arcOrder": 20420.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-43",
-      "arcFrom": { "@id": "fac:EquityAttributableToParent" },
+      "@id": "_:rs-gaap-pres-bs-classified-arc-31",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
       "arcTo": { "@id": "rs-gaap:AdditionalPaidInCapital" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 24200.0
+      "arcOrder": 20430.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-44",
-      "arcFrom": { "@id": "fac:EquityAttributableToParent" },
+      "@id": "_:rs-gaap-pres-bs-classified-arc-32",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
       "arcTo": { "@id": "rs-gaap:RetainedEarningsAccumulatedDeficit" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 24300.0
+      "arcOrder": 20440.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-45",
-      "arcFrom": { "@id": "fac:EquityAttributableToParent" },
-      "arcTo": { "@id": "rs-gaap:TreasuryStockValue" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 24400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-46",
-      "arcFrom": { "@id": "fac:EquityAttributableToParent" },
+      "@id": "_:rs-gaap-pres-bs-classified-arc-33",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
       "arcTo": { "@id": "rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 24500.0
+      "arcOrder": 20450.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-47",
-      "arcFrom": { "@id": "fac:EquityAttributableToParent" },
+      "@id": "_:rs-gaap-pres-bs-classified-arc-34",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
+      "arcTo": { "@id": "rs-gaap:TreasuryStockValue" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "arcOrder": 20460.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-bs-classified-arc-35",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
       "arcTo": { "@id": "rs-gaap:PartnersCapital" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 24600.0
+      "arcOrder": 20470.0
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-48",
-      "arcFrom": { "@id": "fac:EquityAttributableToParent" },
+      "@id": "_:rs-gaap-pres-bs-classified-arc-36",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
       "arcTo": { "@id": "rs-gaap:MembersEquity" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "arcOrder": 24700.0
+      "arcOrder": 20480.0
     },
+
+    {
+      "@id": "_:rs-gaap-pres-is-multistep",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "structureName": "rs-gaap — Income Statement — Multi-step",
+      "structureType": "income_statement",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:Revenues" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-2",
+      "arcFrom": { "@id": "rs-gaap:Revenues" },
+      "arcTo": { "@id": "rs-gaap:SalesRevenueNet" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10110.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-3",
+      "arcFrom": { "@id": "rs-gaap:Revenues" },
+      "arcTo": { "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10120.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-4",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:CostOfRevenue" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-5",
+      "arcFrom": { "@id": "rs-gaap:CostOfRevenue" },
+      "arcTo": { "@id": "rs-gaap:CostOfGoodsSold" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10210.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-6",
+      "arcFrom": { "@id": "rs-gaap:CostOfRevenue" },
+      "arcTo": { "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10220.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-7",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:GrossProfit" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-8",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:OperatingExpenses" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-9",
+      "arcFrom": { "@id": "rs-gaap:OperatingExpenses" },
+      "arcTo": { "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10410.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-10",
+      "arcFrom": { "@id": "rs-gaap:OperatingExpenses" },
+      "arcTo": { "@id": "rs-gaap:ResearchAndDevelopmentExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10420.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-11",
+      "arcFrom": { "@id": "rs-gaap:OperatingExpenses" },
+      "arcTo": { "@id": "rs-gaap:DepreciationDepletionAndAmortization" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10430.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-12",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:OperatingIncomeLoss" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-13",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10600.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-14",
+      "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
+      "arcTo": { "@id": "rs-gaap:OtherNonoperatingIncomeExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10610.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-15",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:InterestExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10700.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-16",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10800.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-17",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:IncomeTaxExpenseBenefit" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 10900.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-18",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:IncomeLossFromContinuingOperations" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11000.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-19",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-20",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:NetIncomeLoss" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "arcOrder": 11200.0
+    },
+
     {
       "@id": "_:rs-gaap-pres-cf-indirect",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
@@ -8574,132 +8196,37 @@
     },
     {
       "@id": "_:rs-gaap-pres-cf-indirect-arc-1",
-      "arcFrom": { "@id": "fac:CashFlowStatementAbstract" },
-      "arcTo": { "@id": "fac:CashFlowStatementTable" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 30000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-2",
-      "arcFrom": { "@id": "fac:CashFlowStatementTable" },
-      "arcTo": { "@id": "fac:CashFlowStatementLineItems" },
+      "arcFrom": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
+      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "arcOrder": 30100.0
     },
     {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-3",
-      "arcFrom": { "@id": "fac:CashFlowStatementLineItems" },
-      "arcTo": { "@id": "fac:NetCashFlowRollUp" },
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-2",
+      "arcFrom": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
+      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "arcOrder": 30200.0
     },
     {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-4",
-      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
-      "arcTo": { "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp" },
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-3",
+      "arcFrom": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
+      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "arcOrder": 30300.0
     },
     {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-5",
-      "arcFrom": { "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp" },
-      "arcTo": { "@id": "fac:NetCashFlowFromOperatingActivities" },
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-4",
+      "arcFrom": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
+      "arcTo": { "@id": "rs-gaap:EffectOfExchangeRateOnCash" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "arcOrder": 30400.0
     },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-6",
-      "arcFrom": { "@id": "fac:NetCashFlowFromOperatingActivitiesRollUp" },
-      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 30500.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-7",
-      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
-      "arcTo": { "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 30600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-8",
-      "arcFrom": { "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp" },
-      "arcTo": { "@id": "fac:NetCashFlowFromInvestingActivities" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 30700.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-9",
-      "arcFrom": { "@id": "fac:NetCashFlowFromInvestingActivitiesRollUp" },
-      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 30800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-10",
-      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
-      "arcTo": { "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 30900.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-11",
-      "arcFrom": { "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp" },
-      "arcTo": { "@id": "fac:NetCashFlowFromFinancingActivities" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 31000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-12",
-      "arcFrom": { "@id": "fac:NetCashFlowFromFinancingActivitiesRollUp" },
-      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 31100.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-13",
-      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
-      "arcTo": { "@id": "fac:NetCashFlow" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 31200.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-14",
-      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
-      "arcTo": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 31300.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-15",
-      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
-      "arcTo": { "@id": "fac:ExchangeGainsLosses" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 31400.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-cf-indirect-arc-16",
-      "arcFrom": { "@id": "fac:NetCashFlowRollUp" },
-      "arcTo": { "@id": "rs-gaap:EffectOfExchangeRateOnCash" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
-      "arcOrder": 31500.0
-    },
+
     {
       "@id": "_:rs-gaap-pres-equity",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
@@ -8709,83 +8236,51 @@
     },
     {
       "@id": "_:rs-gaap-pres-equity-arc-1",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityAbstract" },
-      "arcTo": { "@id": "fac:StatementOfChangesInEquityTable" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
-      "arcOrder": 40000.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-equity-arc-2",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityTable" },
-      "arcTo": { "@id": "fac:StatementOfChangesInEquityLineItems" },
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
+      "arcTo": { "@id": "rs-gaap:NetIncomeLoss" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
       "arcOrder": 40100.0
     },
     {
-      "@id": "_:rs-gaap-pres-equity-arc-3",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityLineItems" },
-      "arcTo": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "@id": "_:rs-gaap-pres-equity-arc-2",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
+      "arcTo": { "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTax" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
       "arcOrder": 40200.0
     },
     {
-      "@id": "_:rs-gaap-pres-equity-arc-4",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
-      "arcTo": { "@id": "fac:Equity" },
+      "@id": "_:rs-gaap-pres-equity-arc-3",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
       "arcOrder": 40300.0
     },
     {
-      "@id": "_:rs-gaap-pres-equity-arc-5",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
-      "arcTo": { "@id": "rs-gaap:NetIncomeLoss" },
+      "@id": "_:rs-gaap-pres-equity-arc-4",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
+      "arcTo": { "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
       "arcOrder": 40400.0
     },
     {
-      "@id": "_:rs-gaap-pres-equity-arc-6",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
-      "arcTo": { "@id": "rs-gaap:OtherComprehensiveIncomeLossNetOfTax" },
+      "@id": "_:rs-gaap-pres-equity-arc-5",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
+      "arcTo": { "@id": "rs-gaap:ShareBasedCompensation" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
       "arcOrder": 40500.0
     },
     {
-      "@id": "_:rs-gaap-pres-equity-arc-7",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
-      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
-      "arcOrder": 40600.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-equity-arc-8",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
-      "arcTo": { "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
-      "arcOrder": 40700.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-equity-arc-9",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
-      "arcTo": { "@id": "rs-gaap:ShareBasedCompensation" },
-      "arcAssociationType": "presentation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
-      "arcOrder": 40800.0
-    },
-    {
-      "@id": "_:rs-gaap-pres-equity-arc-10",
-      "arcFrom": { "@id": "fac:StatementOfChangesInEquityRollForward" },
+      "@id": "_:rs-gaap-pres-equity-arc-6",
+      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
       "arcTo": { "@id": "rs-gaap:PaymentsOfDividends" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
-      "arcOrder": 40900.0
+      "arcOrder": 40600.0
     }
   ]
 }
