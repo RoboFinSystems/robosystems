@@ -185,7 +185,9 @@ class TestClosePeriodToolErrors:
   @pytest.mark.asyncio
   async def test_gate_failed_returns_not_closeable(self):
     result = await self._run_with_side_effect(
-      CloseGateFailed(blockers=[CloseableGateResult.SEQUENCE])
+      CloseGateFailed(
+        CloseableGateResult(is_closeable=False, blockers=[CloseableGateResult.SEQUENCE])
+      )
     )
     assert result["error"] == "not_closeable"
     assert CloseableGateResult.SEQUENCE in result["blockers"]
@@ -193,9 +195,47 @@ class TestClosePeriodToolErrors:
   @pytest.mark.asyncio
   async def test_no_calendar_returns_calendar_not_initialized(self):
     result = await self._run_with_side_effect(
-      CloseGateFailed(blockers=[CloseableGateResult.NO_CALENDAR])
+      CloseGateFailed(
+        CloseableGateResult(
+          is_closeable=False, blockers=[CloseableGateResult.NO_CALENDAR]
+        )
+      )
     )
     assert result["error"] == "calendar_not_initialized"
+
+  @pytest.mark.asyncio
+  async def test_pending_obligations_enriches_detail(self):
+    """§3.12 follow-up: pending_obligations blocker surfaces count + sample
+    + earliest_pending_period on the close-period response."""
+    from robosystems.operations.roboledger.fiscal_calendar.service import (
+      PendingObligationDetail,
+    )
+
+    result = await self._run_with_side_effect(
+      CloseGateFailed(
+        CloseableGateResult(
+          is_closeable=False,
+          blockers=[CloseableGateResult.PENDING_OBLIGATIONS],
+          pending_obligation_count=3,
+          pending_obligation_sample=[
+            PendingObligationDetail(
+              event_id="evt_1",
+              schedule_id="struct_dep",
+              schedule_name="Computer Depreciation",
+              period="2026-04",
+            ),
+          ],
+          earliest_pending_period="2026-04",
+        )
+      )
+    )
+    assert result["error"] == "not_closeable"
+    assert result["pending_obligation_count"] == 3
+    assert result["pending_obligation_sample"][0]["schedule_name"] == (
+      "Computer Depreciation"
+    )
+    assert result["earliest_pending_period"] == "2026-04"
+    assert "sync_stale_days" not in result  # only populated when sync blocker active
 
   @pytest.mark.asyncio
   async def test_period_not_found_error(self):

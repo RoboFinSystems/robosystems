@@ -1520,13 +1520,25 @@ async def close_period_op(
             "Fiscal calendar not initialized. Call /operations/initialize first."
           ),
         )
-      raise HTTPException(
-        status_code=422,
-        detail={
-          "message": f"Cannot close period {body.period!r}.",
-          "blockers": e.blockers,
-        },
-      )
+      detail: dict = {
+        "message": f"Cannot close period {body.period!r}.",
+        "blockers": e.blockers,
+      }
+      if e.gate.pending_obligation_count:
+        detail["pending_obligation_count"] = e.gate.pending_obligation_count
+        detail["pending_obligation_sample"] = [
+          {
+            "event_id": d.event_id,
+            "schedule_id": d.schedule_id,
+            "schedule_name": d.schedule_name,
+            "period": d.period,
+          }
+          for d in e.gate.pending_obligation_sample
+        ]
+        detail["earliest_pending_period"] = e.gate.earliest_pending_period
+      if e.gate.sync_stale_days is not None:
+        detail["sync_stale_days"] = e.gate.sync_stale_days
+      raise HTTPException(status_code=422, detail=detail)
     except PeriodNotFoundError as e:
       raise HTTPException(status_code=404, detail=str(e))
     except UnbalancedLedgerError as e:

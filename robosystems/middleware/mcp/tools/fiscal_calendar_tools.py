@@ -267,11 +267,26 @@ class ClosePeriodTool:
           "error": "calendar_not_initialized",
           "message": "Fiscal calendar not initialized for this graph.",
         }
-      return {
+      payload: dict = {
         "error": "not_closeable",
         "message": f"Cannot close period {period!r}.",
         "blockers": exc.blockers,
       }
+      if exc.gate.pending_obligation_count:
+        payload["pending_obligation_count"] = exc.gate.pending_obligation_count
+        payload["pending_obligation_sample"] = [
+          {
+            "event_id": d.event_id,
+            "schedule_id": d.schedule_id,
+            "schedule_name": d.schedule_name,
+            "period": d.period,
+          }
+          for d in exc.gate.pending_obligation_sample
+        ]
+        payload["earliest_pending_period"] = exc.gate.earliest_pending_period
+      if exc.gate.sync_stale_days is not None:
+        payload["sync_stale_days"] = exc.gate.sync_stale_days
+      return payload
     except PeriodNotFoundError as exc:
       return {"error": "period_not_found", "message": str(exc)}
     except UnbalancedLedgerError as exc:

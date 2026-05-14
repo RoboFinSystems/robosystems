@@ -40,15 +40,19 @@ class PeriodCloseError(Exception):
 class CloseGateFailed(PeriodCloseError):
   """Raised when the closeable gate rejects the request.
 
-  `blockers` is the full list from `CloseableGateResult.blockers`.
-  `no_calendar` is True when the sole blocker is NO_CALENDAR — callers
-  typically surface this as 404 rather than 422.
+  Carries the full :class:`CloseableGateResult` so callers can surface
+  the enriched payload (``pending_obligation_count``,
+  ``pending_obligation_sample``, ``earliest_pending_period``,
+  ``sync_stale_days``) without re-fetching the calendar. ``blockers``
+  / ``no_calendar`` are kept as direct attributes for the common
+  branches; full detail lives on ``gate``.
   """
 
-  def __init__(self, blockers: list[str]):
-    super().__init__(f"Cannot close period: blockers={blockers}")
-    self.blockers = blockers
-    self.no_calendar = CloseableGateResult.NO_CALENDAR in blockers
+  def __init__(self, gate: CloseableGateResult):
+    super().__init__(f"Cannot close period: blockers={gate.blockers}")
+    self.gate = gate
+    self.blockers = gate.blockers
+    self.no_calendar = CloseableGateResult.NO_CALENDAR in gate.blockers
 
 
 class PeriodNotFoundError(PeriodCloseError):
@@ -152,7 +156,7 @@ class PeriodCloseService:
       allow_stale_sync=allow_stale_sync,
     )
     if not gate.is_closeable:
-      raise CloseGateFailed(gate.blockers)
+      raise CloseGateFailed(gate)
 
     period_start, period_end = period_date_range(period)
 
