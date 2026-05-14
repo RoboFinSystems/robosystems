@@ -178,11 +178,17 @@ def test_update_schedule_template_change_triggers_supersession() -> None:
     _exec_result(fetchone_row=MagicMock(cnt=12)),
   ]
 
-  with patch(
-    "robosystems.operations.roboledger.commands.schedules."
-    "ScheduleService.supersede_pending_obligations",
-    return_value=12,
-  ) as supersede:
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.supersede_pending_obligations",
+      return_value=12,
+    ) as supersede,
+    patch(
+      "robosystems.operations.roboledger.commands.schedules.evaluate_rules_for_structure",
+      return_value=[],
+    ) as eval_rules,
+  ):
     update_schedule(
       session,
       UpdateScheduleRequest(
@@ -202,6 +208,11 @@ def test_update_schedule_template_change_triggers_supersession() -> None:
   kwargs = supersede.call_args.kwargs
   assert kwargs["structure"] is structure
   assert kwargs["created_by"] == "usr_admin"
+  # §3.8: template change re-runs the rule engine.
+  eval_rules.assert_called_once()
+  rule_kwargs = eval_rules.call_args.kwargs
+  assert eval_rules.call_args.args[1] == "struct_sched"
+  assert rule_kwargs["created_by"] == "usr_admin"
 
 
 def test_update_schedule_no_template_change_skips_supersession() -> None:

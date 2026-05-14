@@ -169,25 +169,19 @@ def test_persist_report_facts_stamps_structure_and_fact_set() -> None:
   )
 
   added_facts = [c[0][0] for c in session.add.call_args_list]
-  assert len(added_facts) == 3
+  # Unmapped fact is skipped — facts.fact_set_id is NOT NULL post §3.5 so
+  # a fact with no Network can't be persisted.
+  assert len(added_facts) == 2
 
   rev = next(f for f in added_facts if f.element_id == "elem_rev")
   cash = next(f for f in added_facts if f.element_id == "elem_cash")
-  unmapped = next(f for f in added_facts if f.element_id == "elem_unmapped")
 
-  assert rev.report_id == "rep_01"
   assert rev.structure_id == "struct_is"
   assert rev.fact_set_id == "fs_IS"
   assert rev.entity_id == "ent_01"
 
   assert cash.structure_id == "struct_bs"
   assert cash.fact_set_id == "fs_BS"
-
-  # Facts whose elements aren't mapped to a report-eligible structure
-  # still persist (report_id satisfies the CHECK), but carry no
-  # structure/fact_set linkage.
-  assert unmapped.structure_id is None
-  assert unmapped.fact_set_id is None
 
 
 class _FakePeriod:

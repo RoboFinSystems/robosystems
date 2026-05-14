@@ -455,6 +455,7 @@ def get_statement(
              rf.period_type, e.qname, e.name,
              trait_info.identifier AS trait, e.balance_type
       FROM facts rf
+      JOIN fact_sets fs ON fs.id = rf.fact_set_id
       JOIN elements e ON e.id = rf.element_id
       LEFT JOIN (
         SELECT et.element_id, t.identifier
@@ -463,7 +464,7 @@ def get_statement(
         WHERE et.is_primary = TRUE
           AND t.category = 'elementsOfFinancialStatements'
       ) trait_info ON trait_info.element_id = e.id
-      WHERE rf.report_id = :report_id
+      WHERE fs.report_id = :report_id
     """),
     {"report_id": report_id},
   )

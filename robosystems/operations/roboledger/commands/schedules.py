@@ -385,6 +385,18 @@ def update_schedule(
       created_by=updated_by,
     )
 
+  # §3.8 — re-run rule engine when the template changes, since the
+  # underlying fact shape may have moved. No-op when the template was
+  # unchanged (existing verification_results stay authoritative).
+  rule_summary: dict[str, int] | None = None
+  if template_changed:
+    rule_results = evaluate_rules_for_structure(
+      session,
+      structure.id,
+      created_by=updated_by,
+    )
+    rule_summary = _rule_summary(rule_results)
+
   session.commit()
 
   # Recount for response (same as create_schedule response shape)
@@ -406,6 +418,7 @@ def update_schedule(
     taxonomy_id=structure.taxonomy_id,
     total_periods=period_row.cnt if period_row else 0,
     total_facts=count_row.cnt if count_row else 0,
+    rule_summary=rule_summary,
   )
 
 

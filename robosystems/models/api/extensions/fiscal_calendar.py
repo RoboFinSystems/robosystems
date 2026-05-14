@@ -304,6 +304,21 @@ class ClosePeriodResponse(BaseModel):
     False,
     description="Whether close_target was auto-advanced because it was reached",
   )
+  rule_summary: dict[str, int] | None = Field(
+    None,
+    description=(
+      "Aggregated rule-eval outcome across every schedule Structure with "
+      "facts in the closed period — keys: pass/fail/error/skipped. None when "
+      "no schedules had facts in the period (§3.8 auto-run on close)."
+    ),
+  )
+  evaluated_structure_ids: list[str] = Field(
+    default_factory=list,
+    description=(
+      "ids of schedule Structures whose rules were evaluated during the "
+      "close. Pairs with rule_summary."
+    ),
+  )
 
 
 # ── Draft review (read-only) ──────────────────────────────────────────────

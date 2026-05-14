@@ -90,6 +90,13 @@ class PeriodCloseResult:
   target_auto_advanced: bool
   calendar: FiscalCalendar
   was_reclose: bool
+  # §3.8 auto-run rules on close. None if no schedules with facts in the
+  # period had rules attached. Otherwise a dict tallying outcomes:
+  # {"pass": int, "fail": int, "error": int, "skipped": int}.
+  rule_summary: dict[str, int] | None = None
+  # ids of schedule Structures whose rules were evaluated. Empty when no
+  # schedule structures had facts in the closed period.
+  evaluated_structure_ids: tuple[str, ...] = ()
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -229,10 +236,25 @@ class PeriodCloseService:
       and calendar.close_target_period is not None
     )
 
+    # 6. §3.8 — Auto-run rules on schedules with facts in the closing
+    # period. Rule failures are isolated from the close result: the close
+    # succeeds even if a rule errors, and the failure surfaces only in
+    # rule_summary / verification_results for downstream inspection. This
+    # keeps the close path as the "single source of truth" while letting
+    # the validation panel accumulate fresh results without an explicit
+    # `POST /evaluate-rules` call.
+    rule_summary, evaluated_ids = self._evaluate_schedule_rules_in_period(
+      session,
+      period_start=period_start,
+      period_end=period_end,
+      actor_id=actor_id,
+    )
+
     logger.info(
       f"Period {period} closed for graph {graph_id}: "
       f"entries_posted={entries_posted} reclose={is_reclose} "
-      f"target_auto_advanced={target_auto_advanced}"
+      f"target_auto_advanced={target_auto_advanced} "
+      f"rule_summary={rule_summary}"
     )
 
     return PeriodCloseResult(
@@ -241,6 +263,8 @@ class PeriodCloseService:
       target_auto_advanced=target_auto_advanced,
       calendar=calendar,
       was_reclose=is_reclose,
+      rule_summary=rule_summary,
+      evaluated_structure_ids=evaluated_ids,
     )
 
   # ── Private helpers ────────────────────────────────────────────────────
@@ -275,6 +299,70 @@ class PeriodCloseService:
     total_credit = int(row.total_credit) if row else 0
     if total_debit != total_credit:
       raise UnbalancedLedgerError(total_debit, total_credit)
+
+  def _evaluate_schedule_rules_in_period(
+    self,
+    session: Session,
+    *,
+    period_start,
+    period_end,
+    actor_id: str,
+  ) -> tuple[dict[str, int] | None, tuple[str, ...]]:
+    """Run the rule engine for every schedule Structure with facts in the
+    closing period. Returns (rule_summary, evaluated_structure_ids).
+
+    Failures from individual rule evaluations are caught and logged —
+    they cannot break the close path, which has already succeeded by
+    the time this is called. The rule engine itself already converts
+    binding/dispatch failures into ``VerificationResult`` rows with
+    ``status='error'``; this wrapper guards against an outright engine
+    exception (e.g., schema-level issue) for robustness.
+    """
+    # Lazy import — keeps the close service free of information-block
+    # dependencies at module import time.
+    from robosystems.operations.information_block.rules.engine import (
+      evaluate_rules_for_structure,
+    )
+
+    structure_ids = (
+      session.execute(
+        text(
+          """
+          SELECT DISTINCT s.id
+          FROM structures s
+          JOIN facts f ON f.structure_id = s.id
+          WHERE s.structure_type = 'schedule'
+            AND f.fact_scope = 'in_scope'
+            AND f.period_end >= :period_start
+            AND f.period_end <= :period_end
+          """
+        ),
+        {"period_start": period_start, "period_end": period_end},
+      )
+      .scalars()
+      .all()
+    )
+
+    if not structure_ids:
+      return None, ()
+
+    tally: dict[str, int] = {"pass": 0, "fail": 0, "error": 0, "skipped": 0}
+    for sid in structure_ids:
+      try:
+        rows = evaluate_rules_for_structure(
+          session,
+          sid,
+          period_start=period_start,
+          period_end=period_end,
+          created_by=actor_id,
+        )
+      except Exception as exc:
+        logger.warning(f"Rule eval failed for structure {sid} during close: {exc}")
+        continue
+      for row in rows:
+        tally[row.status] = tally.get(row.status, 0) + 1
+
+    return tally, tuple(structure_ids)
 
   @staticmethod
   def _audit_note(note: str | None, *, allow_stale_sync: bool) -> str | None:
