@@ -21,9 +21,12 @@ The Classified BS admits a richer set of rs-gaap rollups:
 - **Cash** → ``rs-gaap:CashCashEquivalentsAndShortTermInvestments``
 - **AR** → ``rs-gaap:ReceivablesNetCurrent``
 - **Prepaids** → ``rs-gaap:PrepaidExpenseCurrent``
-- **PP&E (gross + accumulated)** → ``rs-gaap:PropertyPlantAndEquipmentNet``
-  (the contra-balance accumulated-depreciation account nets naturally:
-  Gross + (-Accum) = Net)
+- **PP&E gross** → ``rs-gaap:PropertyPlantAndEquipmentGross``
+  (separate from the contra-asset so the CF Investing derivation reads
+  ΔGross = purchases, not ΔNet which would conflate purchases with
+  depreciation activity)
+- **Accumulated Depreciation** → ``rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment``
+  (BS Net = Gross - AD synthesized at fact-generation time)
 - **AP / Accrued** → ``rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent``
 - **APIC** → ``rs-gaap:AdditionalPaidInCapital``
 - **Retained Earnings** → ``rs-gaap:RetainedEarningsAccumulatedDeficit``
@@ -46,9 +49,12 @@ MAPPINGS: list[tuple[str, str]] = [
   ("1200", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid Insurance
   ("1210", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid Software
   ("1220", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid Cloud Hosting
-  ("1300", "rs-gaap:PropertyPlantAndEquipmentNet"),  # Computer Equipment
-  ("1310", "rs-gaap:PropertyPlantAndEquipmentNet"),  # Office Furniture
-  ("1350", "rs-gaap:PropertyPlantAndEquipmentNet"),  # Accumulated Depreciation (contra)
+  ("1300", "rs-gaap:PropertyPlantAndEquipmentGross"),  # Computer Equipment
+  ("1310", "rs-gaap:PropertyPlantAndEquipmentGross"),  # Office Furniture
+  (
+    "1350",
+    "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+  ),  # Accumulated Depreciation (contra-asset)
   # Liabilities
   ("2000", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Accounts Payable
   ("2100", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Accrued Liabilities

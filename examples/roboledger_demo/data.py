@@ -481,6 +481,34 @@ def _monthly_transactions(start: date, offset: int) -> list[tuple]:
       )
     )
 
+  # End-of-month — Depreciation. Straight-line per the asset schedules
+  # in policies.py: Computer Equipment ($4,800 cost / 36 mo = $133.33/mo)
+  # starts depreciating the month after purchase (offset 0); Office
+  # Furniture ($1,500 cost / 60 mo = $25/mo) starts after offset 2.
+  # Posting DR 7000 Depreciation Expense / CR 1350 Accumulated Depreciation.
+  # Replaces the schedule-based promotion path for the demo; tenants
+  # using the schedule workflow get the same posting via close-period.
+  dep_lines: list[tuple[str, int, int]] = []
+  if offset >= 1:
+    dep_lines.append(("7000", 133_33, 0))
+    dep_lines.append(("1350", 0, 133_33))
+  if offset >= 3:
+    dep_lines.append(("7000", 25_00, 0))
+    dep_lines.append(("1350", 0, 25_00))
+  if dep_lines:
+    # Collapse to one balanced entry: sum DR 7000 / sum CR 1350.
+    total_dr = sum(d for c, d, _ in dep_lines if c == "7000")
+    total_cr = sum(cr for c, _, cr in dep_lines if c == "1350")
+    txns.append(
+      (
+        date(year, m, end_day),
+        "journal_entry",
+        f"Depreciation - {date(year, m, 1).strftime('%B %Y')}",
+        None,
+        [("7000", total_dr, 0), ("1350", 0, total_cr)],
+      )
+    )
+
   return txns
 
 

@@ -8298,6 +8298,30 @@
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "arcOrder": 30310.0
     },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-14",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30180.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-15",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30190.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-16",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30320.0
+    },
 
     {
       "@id": "_:rs-gaap-pres-equity",

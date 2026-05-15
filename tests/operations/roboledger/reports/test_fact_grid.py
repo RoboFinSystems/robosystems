@@ -22,6 +22,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _infer_classification,
   _infer_period_type,
   _natural_sign,
+  _synthesize_ppe_net_facts,
 )
 
 
@@ -1034,6 +1035,32 @@ class TestEmitNetIncomeFacts:
     )
     assert not any(f.element_qname == "rs-gaap:NetIncomeLoss" for f in facts)
 
+  def test_direct_fact_wins_over_synthesis(self):
+    """If a NetIncomeLoss fact already exists for the period (rare —
+    tenant maps a CoA element directly), don't synthesize a second."""
+    facts = [
+      _bs_fact("rev1", "revenue", 100.0, self.P_START, self.P_END),
+      _bs_fact("exp1", "expense", 30.0, self.P_START, self.P_END),
+      ReportFact(
+        element_id="ni_id",
+        element_qname="rs-gaap:NetIncomeLoss",
+        element_name="NI",
+        classification=None,
+        balance_type="credit",
+        value=999.0,  # direct value differs from rev-exp
+        period_start=self.P_START,
+        period_end=self.P_END,
+        period_type="duration",
+      ),
+    ]
+    session = _session_with_ni_lookup()
+    _emit_net_income_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    ni = [f for f in facts if f.element_qname == "rs-gaap:NetIncomeLoss"]
+    assert len(ni) == 1
+    assert ni[0].value == 999.0  # direct wins, not 70.0
+
 
 # ── _derive_cash_flow_facts ──────────────────────────────────────────────
 
@@ -1144,3 +1171,247 @@ class TestDeriveCashFlowFacts:
       ],
     )
     assert not any(f.element_id == "cf_leaf" for f in facts)
+
+  def test_direct_fact_wins_over_derivation(self):
+    """When a direct fact for the CF leaf already exists at the current
+    period, derivation is skipped — covers the DDA case where a tenant
+    maps Depreciation Expense directly to DDA AND also maps Accumulated
+    Depreciation (so both paths could produce a DDA fact). Direct wins."""
+    direct_dda = ReportFact(
+      element_id="cf_dda",
+      element_qname="rs-gaap:DepreciationDepletionAndAmortization",
+      element_name="DDA",
+      classification="expense",
+      balance_type="debit",
+      value=700.0,
+      period_start=self.CURR_S,
+      period_end=self.CURR_E,
+      period_type="duration",
+    )
+    bs_source = [
+      self._instant("accum_depn", 0.0, self.PRIOR_E, balance_type="credit"),
+      self._instant("accum_depn", 700.0, self.CURR_E, balance_type="credit"),
+    ]
+    facts = [direct_dda, *bs_source]
+    session = self._session_with_derivations(
+      deriv_rows=[("cf_dda", "accum_depn", 1.0)],
+      meta_rows=[
+        ("cf_dda", "rs-gaap:DepreciationDepletionAndAmortization", "DDA", "debit")
+      ],
+    )
+    _derive_cash_flow_facts(
+      session,
+      facts,
+      [
+        PeriodSpec(self.PRIOR_S, self.PRIOR_E, "Prior"),
+        PeriodSpec(self.CURR_S, self.CURR_E, "Current"),
+      ],
+    )
+    dda_facts = [f for f in facts if f.element_id == "cf_dda"]
+    # Only the direct fact remains; derivation skipped.
+    assert len(dda_facts) == 1
+    assert dda_facts[0].value == 700.0
+    assert dda_facts[0].classification == "expense"  # the direct one
+
+
+# ── _synthesize_ppe_net_facts ────────────────────────────────────────────
+
+
+def _ppe_session(net_row, src_rows):
+  """Two-call MagicMock: first call returns the PPE Net element lookup,
+  second returns the (Gross, AD) source element ids."""
+  session = MagicMock()
+  net_result = MagicMock()
+  net_result.fetchone.return_value = net_row
+  src_result = MagicMock()
+  src_result.fetchall.return_value = src_rows
+  session.execute.side_effect = [net_result, src_result]
+  return session
+
+
+class TestSynthesizePpeNetFacts:
+  P_START = date(2025, 1, 1)
+  P_END = date(2025, 12, 31)
+
+  def _src(self, element_id: str, value: float) -> ReportFact:
+    """Mirror how `_read_mapped_balances` emits source facts: period_start
+    and period_end match the PeriodSpec's bounds, regardless of period_type."""
+    return ReportFact(
+      element_id=element_id,
+      element_qname="x:" + element_id,
+      element_name=element_id,
+      classification="asset",
+      balance_type="debit",
+      value=value,
+      period_start=self.P_START,
+      period_end=self.P_END,
+      period_type="instant",
+    )
+
+  def test_computes_gross_minus_ad(self):
+    facts = [self._src("gross_id", 6300.0), self._src("ad_id", 1533.30)]
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[
+        ("rs-gaap:PropertyPlantAndEquipmentGross", "gross_id"),
+        (
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          "ad_id",
+        ),
+      ],
+    )
+    _synthesize_ppe_net_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    net = [f for f in facts if f.element_id == "net_id"]
+    assert len(net) == 1
+    assert abs(net[0].value - 4766.70) < 0.01  # 6300 - 1533.30
+    assert net[0].period_type == "instant"
+    assert net[0].classification == "asset"
+
+  def test_skips_when_direct_net_fact_exists(self):
+    direct_net = ReportFact(
+      element_id="net_id",
+      element_qname="rs-gaap:PropertyPlantAndEquipmentNet",
+      element_name="PPE Net",
+      classification="asset",
+      balance_type="debit",
+      value=9999.0,  # direct value differs from gross-ad
+      period_start=self.P_START,
+      period_end=self.P_END,
+      period_type="instant",
+    )
+    facts = [direct_net, self._src("gross_id", 6300.0), self._src("ad_id", 1500.0)]
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[
+        ("rs-gaap:PropertyPlantAndEquipmentGross", "gross_id"),
+        (
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          "ad_id",
+        ),
+      ],
+    )
+    _synthesize_ppe_net_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    net = [f for f in facts if f.element_id == "net_id"]
+    assert len(net) == 1
+    assert net[0].value == 9999.0  # direct wins
+
+  def test_no_op_when_net_element_missing(self):
+    facts = [self._src("gross_id", 6300.0)]
+    session = MagicMock()
+    session.execute.return_value.fetchone.return_value = None
+    _synthesize_ppe_net_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    assert not any(
+      f.element_qname == "rs-gaap:PropertyPlantAndEquipmentNet" for f in facts
+    )
+
+  def test_no_op_when_both_sources_missing(self):
+    facts: list[ReportFact] = []
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[],  # neither Gross nor AD in library
+    )
+    _synthesize_ppe_net_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    assert facts == []
+
+  def test_works_with_only_gross_source(self):
+    """Tenant maps PP&E gross but doesn't track Accumulated Depreciation
+    as a separate BS leaf — PPE Net = Gross - 0."""
+    facts = [self._src("gross_id", 5000.0)]
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[("rs-gaap:PropertyPlantAndEquipmentGross", "gross_id")],
+    )
+    _synthesize_ppe_net_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    net = [f for f in facts if f.element_id == "net_id"]
+    assert len(net) == 1
+    assert net[0].value == 5000.0
+
+  def test_zero_when_no_source_activity(self):
+    """Both source elements exist in the library but no facts in this
+    period — skip emitting (a 0 PPE Net fact would clutter the BS for
+    every tenant without PP&E)."""
+    facts: list[ReportFact] = []
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[
+        ("rs-gaap:PropertyPlantAndEquipmentGross", "gross_id"),
+        (
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          "ad_id",
+        ),
+      ],
+    )
+    _synthesize_ppe_net_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    assert facts == []
+
+  def test_refuses_negative_net_when_only_ad_present(self):
+    """If AD has a fact but Gross doesn't, synthesizing Net = -AD is
+    arithmetically wrong. The guard skips and emits no PPE Net fact."""
+    facts = [self._src("ad_id", 700.0)]
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[
+        ("rs-gaap:PropertyPlantAndEquipmentGross", "gross_id"),
+        (
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          "ad_id",
+        ),
+      ],
+    )
+    _synthesize_ppe_net_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    assert not any(f.element_id == "net_id" for f in facts)
+
+  def test_warns_on_legacy_all_in_net_mapping(self):
+    """When a direct PPE Net fact exists but no PPE Gross fact, the
+    tenant is using the legacy all-in-Net mapping. The synthesis is
+    correctly skipped (direct fact wins), but a warning fires so the
+    operator knows CF Investing will be 0 — the derivation now sources
+    from Gross which has no fact in this configuration."""
+    from unittest.mock import patch
+
+    direct_net = ReportFact(
+      element_id="net_id",
+      element_qname="rs-gaap:PropertyPlantAndEquipmentNet",
+      element_name="PPE Net",
+      classification="asset",
+      balance_type="debit",
+      value=6300.0,
+      period_start=self.P_START,
+      period_end=self.P_END,
+      period_type="instant",
+    )
+    facts = [direct_net]  # No Gross fact in the mix
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[
+        ("rs-gaap:PropertyPlantAndEquipmentGross", "gross_id"),
+        (
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          "ad_id",
+        ),
+      ],
+    )
+    with patch(
+      "robosystems.operations.roboledger.reports.fact_grid.logger.warning"
+    ) as mock_warn:
+      _synthesize_ppe_net_facts(
+        session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+      )
+    assert mock_warn.call_count == 1
+    msg = mock_warn.call_args[0][0]
+    assert "CF Investing" in msg
+    assert "PaymentsToAcquirePropertyPlantAndEquipment" in msg

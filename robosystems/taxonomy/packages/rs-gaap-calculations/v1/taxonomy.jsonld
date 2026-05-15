@@ -913,14 +913,14 @@
     {
       "@id": "_:rs-gaap-deriv-cf-ppe-purchases",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
-      "structureName": "rs-gaap derivation CF — PaymentsToAcquirePropertyPlantAndEquipment = -Δ(PropertyPlantAndEquipmentNet) [PP&E up = cash outflow, pre-signed negative for Investing section sum]",
+      "structureName": "rs-gaap derivation CF — PaymentsToAcquirePropertyPlantAndEquipment = -Δ(PropertyPlantAndEquipmentGross) [purchases of gross PP&E = cash outflow; PPE Gross is the right BS source because ΔGross isolates purchases from depreciation activity, unlike ΔNet which conflates them]",
       "structureType": "validation_rules",
       "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ppe-purchases-arc-1",
       "arcFrom": { "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment" },
-      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentNet" },
+      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentGross" },
       "arcAssociationType": "derivation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
       "arcWeight": -1.0,
@@ -942,6 +942,103 @@
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfCommonStock",
       "arcWeight": 1.0,
       "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-accrued-liabilities",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccruedLiabilities",
+      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInAccruedLiabilities = +Δ(AccruedLiabilitiesCurrent) [liab up = cash source]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-accrued-liabilities-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities" },
+      "arcTo": { "@id": "rs-gaap:AccruedLiabilitiesCurrent" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccruedLiabilities",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-income-taxes-payable",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-IncomeTaxesPayable",
+      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInAccruedIncomeTaxesPayable = +Δ(AccruedIncomeTaxesCurrent) [liab up = cash source]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-income-taxes-payable-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable" },
+      "arcTo": { "@id": "rs-gaap:AccruedIncomeTaxesCurrent" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-IncomeTaxesPayable",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-dda-from-accum",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-DDA-FromAccumulated",
+      "structureName": "rs-gaap derivation CF — DepreciationDepletionAndAmortization = +Δ(AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment) [contra-asset up = expense incurred, add-back to NI]. Fallback when tenant maps Accumulated Depreciation as a BS leaf instead of mapping Depreciation Expense to DDA directly; the double-count guard in _derive_cash_flow_facts skips if a direct DDA fact already exists from the IS side.",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-dda-from-accum-arc-1",
+      "arcFrom": { "@id": "rs-gaap:DepreciationDepletionAndAmortization" },
+      "arcTo": { "@id": "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-DDA-FromAccumulated",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-long-term-debt-net",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-LongTermDebtNet",
+      "structureName": "rs-gaap derivation CF — ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet = +Δ(LongTermDebtNoncurrent) [debt up = net proceeds, debt down = net repayments]. BS delta recovers net activity, not gross. For gross Proceeds + Repayments disclosure, author a rollforward IB with filter-based attribution (§3.16 Phase 3-4).",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-long-term-debt-net-arc-1",
+      "arcFrom": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet" },
+      "arcTo": { "@id": "rs-gaap:LongTermDebtNoncurrent" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-LongTermDebtNet",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-8",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 800.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-9",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 900.0
+    },
+
+    {
+      "@id": "_:rs-gaap-calc-cf-financing-arc-2",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "arcWeight": 1.0,
+      "arcOrder": 200.0
     }
   ]
 }
