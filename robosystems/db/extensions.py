@@ -228,7 +228,7 @@ def _widen_library_checks(conn, schema: str) -> None:
     # rs-gaap-reporting-checklist, and rs-gaap-reporting-styles.
     "'definition', "
     # 'derivation' arcs map BS leaves to their CF default change tags
-    # (rs-gaap-calculations). See migration 0012.
+    # (rs-gaap-calculations).
     "'derivation'"
     ")"
   )
