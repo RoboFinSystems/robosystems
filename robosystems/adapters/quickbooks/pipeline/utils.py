@@ -324,8 +324,38 @@ def flatten_employees(raw: list[Any]) -> list[dict[str, Any]]:
   return _flatten_party(raw, "employee", {})
 
 
+def _extract_linked_txns(data: dict[str, Any]) -> str:
+  """Pull LinkedTxn[] refs from a QB Payment/BillPayment's Line array.
+
+  QB Payment / BillPayment carry one or more ``Line`` entries; each line
+  has a ``LinkedTxn`` list naming the Invoice (for Payment) or Bill (for
+  BillPayment) it settles. QB's canonical TxnType strings ("Invoice",
+  "Bill") align with the composite-id prefix used everywhere else in
+  this pipeline, so the discharge handler can reconstruct the
+  originating event's ``external_id`` as ``"{TxnType}_{TxnId}"``.
+
+  Returns a JSON-stringified list of ``{txn_id, txn_type}`` dicts; empty
+  string-encoded list when nothing's linked. JSON string (not dict /
+  list) because the downstream parquet → DuckDB → dbt path needs a
+  scalar column type.
+  """
+  refs: list[dict[str, str]] = []
+  for line in data.get("Line", []) or []:
+    for linked in line.get("LinkedTxn", []) or []:
+      txn_id = str(linked.get("TxnId", "") or "")
+      txn_type = str(linked.get("TxnType", "") or "")
+      if txn_id and txn_type:
+        refs.append({"txn_id": txn_id, "txn_type": txn_type})
+  return json.dumps(refs)
+
+
 def _flatten_txn_header(
-  raw_list: list[Any], qb_class: str, agent_ref_field: str, agent_type: str
+  raw_list: list[Any],
+  qb_class: str,
+  agent_ref_field: str,
+  agent_type: str,
+  *,
+  extract_linked_txns: bool = False,
 ) -> list[dict[str, Any]]:
   """Shared flattener for Invoice / Bill / Payment headers.
 
@@ -336,6 +366,12 @@ def _flatten_txn_header(
 
   ``qb_class`` matches the prefix used by ``parse_journal_report`` to build
   composite tx ids (e.g. ``Invoice_123``).
+
+  ``extract_linked_txns`` opt-in surfaces QB's LinkedTxn[] refs into the
+  ``linked_txns`` column for header types that carry duality links
+  (Payment → Invoice, BillPayment → Bill). All other header types emit
+  an empty JSON array so the UNION ALL in transactions.sql sees a
+  consistent column shape.
 
   Per-class field notes:
   - ``DocNumber`` exists on Invoice and Bill but NOT on Payment (per Intuit
@@ -358,6 +394,7 @@ def _flatten_txn_header(
         "memo": data.get("PrivateNote", "") or "",
         "agent_external_id": str(agent_ref.get("value", "")) if agent_ref else "",
         "agent_type": agent_type,
+        "linked_txns": _extract_linked_txns(data) if extract_linked_txns else "[]",
       }
     )
   return rows
@@ -372,11 +409,15 @@ def flatten_bill_headers(raw: list[Any]) -> list[dict[str, Any]]:
 
 
 def flatten_payment_headers(raw: list[Any]) -> list[dict[str, Any]]:
-  return _flatten_txn_header(raw, "Payment", "CustomerRef", "customer")
+  return _flatten_txn_header(
+    raw, "Payment", "CustomerRef", "customer", extract_linked_txns=True
+  )
 
 
 def flatten_bill_payment_headers(raw: list[Any]) -> list[dict[str, Any]]:
-  return _flatten_txn_header(raw, "BillPayment", "VendorRef", "vendor")
+  return _flatten_txn_header(
+    raw, "BillPayment", "VendorRef", "vendor", extract_linked_txns=True
+  )
 
 
 def flatten_sales_receipt_headers(raw: list[Any]) -> list[dict[str, Any]]:
@@ -436,6 +477,9 @@ def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
       "memo": data.get("PrivateNote", "") or "",
       "agent_external_id": str(entity_ref.get("value", "")) if entity_ref else "",
       "agent_type": agent_type,
+      # Purchases (cash-side expenses) are not settlements; LinkedTxn
+      # is empty.
+      "linked_txns": "[]",
     }
     for candidate in candidate_tx_types:
       rows.append({**base_row, "tx_type": candidate})
@@ -566,6 +610,9 @@ _TXN_HEADER_SCHEMA = {
   "memo": "str",
   "agent_external_id": "str",
   "agent_type": "str",
+  # JSON-stringified [{txn_id, txn_type}] list — populated only for
+  # Payment + BillPayment headers; other types emit "[]".
+  "linked_txns": "str",
 }
 
 

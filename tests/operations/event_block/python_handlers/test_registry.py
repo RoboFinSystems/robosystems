@@ -12,11 +12,17 @@ from robosystems.operations.event_block.python_handlers.asset_disposed import (
   ASSET_DISPOSED_HANDLER,
   AssetDisposedMetadata,
 )
+from robosystems.operations.event_block.python_handlers.bill_paid import (
+  BILL_PAID_HANDLER,
+)
 from robosystems.operations.event_block.python_handlers.journal_entry_recorded import (
   JOURNAL_ENTRY_RECORDED_HANDLER,
 )
 from robosystems.operations.event_block.python_handlers.journal_entry_reversed import (
   JOURNAL_ENTRY_REVERSED_HANDLER,
+)
+from robosystems.operations.event_block.python_handlers.payment_received import (
+  PAYMENT_RECEIVED_HANDLER,
 )
 from robosystems.operations.event_block.python_handlers.schedule_entry_due import (
   SCHEDULE_ENTRY_DUE_HANDLER,
@@ -45,14 +51,27 @@ def test_unknown_event_type_returns_none() -> None:
 
 
 def test_qb_source_class_event_types_share_journal_handler() -> None:
-  """Phase 2: QB source-class events all dispatch through JOURNAL_ENTRY_RECORDED_HANDLER.
-  They differ in inbox display only; on approve they post journal entries via
-  the same handler."""
+  """QB source-class events with no class-specific side effect dispatch
+  through JOURNAL_ENTRY_RECORDED_HANDLER. They differ in inbox display
+  and event_category only; on approve they post journal entries via
+  the same handler. Payment / bill-payment are deliberately excluded —
+  they have dedicated handlers that also set discharges_event_id."""
   assert get_python_handler("invoice_issued") is JOURNAL_ENTRY_RECORDED_HANDLER
   assert get_python_handler("bill_received") is JOURNAL_ENTRY_RECORDED_HANDLER
-  assert get_python_handler("payment_received") is JOURNAL_ENTRY_RECORDED_HANDLER
-  assert get_python_handler("bill_paid") is JOURNAL_ENTRY_RECORDED_HANDLER
   assert get_python_handler("sales_receipt_recorded") is JOURNAL_ENTRY_RECORDED_HANDLER
+
+
+def test_payment_received_uses_dedicated_handler() -> None:
+  """AR-side duality: payment_received resolves discharges_event_id back
+  to the originating invoice. The GL writes still go through the journal
+  handler (delegated inside dispatch); the registry entry, however, is
+  the AR-aware handler — not the bare journal one."""
+  assert get_python_handler("payment_received") is PAYMENT_RECEIVED_HANDLER
+
+
+def test_bill_paid_uses_dedicated_handler() -> None:
+  """AP-side duality — symmetric to payment_received."""
+  assert get_python_handler("bill_paid") is BILL_PAID_HANDLER
 
 
 def test_registry_value_is_frozen() -> None:

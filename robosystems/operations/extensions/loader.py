@@ -978,6 +978,33 @@ class OLTPLoader:
       # different domain (captured / classified / committed / voided /
       # fulfilled). The two field names overlap because both are coupled
       # to the handler's wire contract.
+      # qb_linked_txns is a list of {txn_id, txn_type} refs naming the
+      # invoices/bills this payment settles (Payment/BillPayment only;
+      # other types pass through an empty list). dbt emits this as a
+      # JSON string; parse to native list so the metadata blob carries
+      # a structured shape the payment_received / bill_paid handlers
+      # can walk without re-parsing on every dispatch.
+      linked_txns_raw = txn.get("linked_txns")
+      qb_linked_txns: list[dict[str, str]] = []
+      if linked_txns_raw:
+        try:
+          parsed = json.loads(linked_txns_raw)
+          if isinstance(parsed, list):
+            qb_linked_txns = [
+              {
+                "txn_id": str(r.get("txn_id", "")),
+                "txn_type": str(r.get("txn_type", "")),
+              }
+              for r in parsed
+              if isinstance(r, dict) and r.get("txn_id") and r.get("txn_type")
+            ]
+        except (ValueError, TypeError) as e:
+          logger.warning(
+            "Failed to parse linked_txns for QB event %s: %s — proceeding with empty list",
+            ext_id,
+            e,
+          )
+
       metadata_blob = {
         "status": jeh_status,
         "qb_txn_type": qb_txn_type,
@@ -992,6 +1019,7 @@ class OLTPLoader:
         "qb_category": str(txn.get("category")) if txn.get("category") else None,
         "qb_source_class": qb_txn_type,
         "qb_agent_external_id": agent_ext_id or None,
+        "qb_linked_txns": qb_linked_txns,
         "connection_id": connection_id,
         "entries": hardened_entries,
       }
