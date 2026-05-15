@@ -10,6 +10,7 @@ import pytest
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.python_handlers.payment_received import (
   _AR_ORIGINATING_TYPES,
+  _TERMINAL_INVALID_STATUSES,
   _link_discharge,
   _resolve_by_linked_txns,
   _resolve_by_reference_number,
@@ -119,6 +120,31 @@ class TestResolveByLinkedTxns:
 
     assert match is None
     session.execute.assert_not_called()
+
+  def test_excludes_voided_and_superseded_originators(self) -> None:
+    """Terminal-invalid statuses must not appear as discharge targets.
+
+    `captured` / `classified` are intentionally allowed so a sync batch
+    that fires the payment handler before its sibling invoice handler
+    still links — the AR aggregate separately filters originating
+    events by `committed`/`fulfilled`, so a pre-commit invoice can't
+    pollute open totals if the link is set early.
+    """
+    session = MagicMock()
+    session.execute.return_value = _scalar_first_result(None)
+
+    _resolve_by_linked_txns(
+      session,
+      source="quickbooks",
+      linked_txns=[{"txn_id": "42", "txn_type": "Invoice"}],
+      candidate_event_types=_AR_ORIGINATING_TYPES,
+    )
+
+    sent_stmt = str(session.execute.call_args.args[0])
+    # SQLAlchemy compiles `notin_(("voided", "superseded"))` to NOT IN.
+    assert "NOT IN" in sent_stmt
+    assert True  # sanity ref
+    assert set(_TERMINAL_INVALID_STATUSES) == {"voided", "superseded"}
 
 
 class TestResolveByReferenceNumber:

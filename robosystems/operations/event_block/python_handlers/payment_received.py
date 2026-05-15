@@ -59,6 +59,20 @@ from .journal_entry_recorded import (
 )
 from .types import EventBlockPythonHandler, HandlerPreview, HandlerResult
 
+# Originating events in these terminal states can never legitimately
+# receive a discharge — a voided invoice was retracted; a superseded
+# one was replaced by a successor that owns its own discharge chain.
+# Linking a fresh payment to either would leave a stale pointer the
+# moment the originating row changes hands. We deliberately do NOT
+# exclude ``captured`` / ``classified`` here: a single QB sync batch
+# captures invoices and payments together, and handler firing order
+# inside the loader's auto-commit pass is dict-iteration order, not
+# guaranteed chronological. Allowing pre-commit invoices to be linked
+# keeps the in-batch case working — the AR aggregate separately
+# filters originating events by ``status IN ('committed', 'fulfilled')``
+# so an unlinked-but-still-captured invoice can't pollute open totals.
+_TERMINAL_INVALID_STATUSES: tuple[str, ...] = ("voided", "superseded")
+
 
 def _resolve_by_linked_txns(
   session: Session,
@@ -74,6 +88,8 @@ def _resolve_by_linked_txns(
   ``_flatten_txn_header``. Returns the first event whose event_type is
   in the allowed set — guards against a Payment's LinkedTxn pointing
   at, say, a CreditMemo, which would not be a valid discharge target.
+  Voided / superseded originating events are excluded so a payment
+  doesn't end up pointing at a row that was retracted or replaced.
   """
   if not linked_txns:
     return None
@@ -90,6 +106,7 @@ def _resolve_by_linked_txns(
       Event.source == source,
       Event.external_id.in_(candidate_ext_ids),
       Event.event_type.in_(candidate_event_types),
+      Event.status.notin_(_TERMINAL_INVALID_STATUSES),
     )
     .order_by(Event.occurred_at.asc())
   )
@@ -111,7 +128,8 @@ def _resolve_by_reference_number(
   across long-running tenants). When ``agent_id`` is NULL on the
   payment we still attempt the lookup but only match invoices with
   NULL ``agent_id`` — never silently cross-link an unscoped payment to
-  someone's invoice.
+  someone's invoice. Voided / superseded events are excluded for the
+  same reason as in ``_resolve_by_linked_txns``.
   """
   if not reference_number:
     return None
@@ -121,6 +139,7 @@ def _resolve_by_reference_number(
       Event.source == source,
       Event.event_type.in_(candidate_event_types),
       Event.metadata_["qb_doc_number"].astext == reference_number,
+      Event.status.notin_(_TERMINAL_INVALID_STATUSES),
     )
     .order_by(Event.occurred_at.asc())
   )
