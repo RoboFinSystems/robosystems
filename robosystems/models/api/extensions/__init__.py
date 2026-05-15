@@ -11,6 +11,10 @@ from .accounts import (
   AccountTreeNode,
   AccountTreeResponse,
 )
+from .ar_ap import (
+  OpenBalanceAggregate,
+  OpenBalanceByAgent,
+)
 from .closing_book import (
   ClosingBookCategory,
   ClosingBookItem,
@@ -106,6 +110,8 @@ __all__ = [
   "LiveFinancialStatementRequest",
   "LiveFinancialStatementResponse",
   "LiveStatementFactRow",
+  "OpenBalanceAggregate",
+  "OpenBalanceByAgent",
   "PortfolioBlockEnvelope",
   "PortfolioBlockPortfolioFields",
   "PortfolioBlockPortfolioPatch",

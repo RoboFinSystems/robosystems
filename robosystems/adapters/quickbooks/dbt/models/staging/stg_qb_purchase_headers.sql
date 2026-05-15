@@ -16,5 +16,6 @@ select
   cast("currency" as varchar) as currency,
   cast("memo" as varchar) as memo,
   cast("agent_external_id" as varchar) as agent_external_id,
-  cast("agent_type" as varchar) as agent_type
+  cast("agent_type" as varchar) as agent_type,
+  cast("linked_txns" as varchar) as linked_txns
 from source

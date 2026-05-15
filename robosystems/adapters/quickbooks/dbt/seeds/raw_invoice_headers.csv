@@ -1,2 +1,2 @@
-tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type
-Invoice,42,Invoice_42,2026-02-01,INV-42,1000.00,USD,Consulting services,qb_cust_1,customer
+tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type,linked_txns
+Invoice,42,Invoice_42,2026-02-01,INV-42,1000.00,USD,Consulting services,qb_cust_1,customer,[]

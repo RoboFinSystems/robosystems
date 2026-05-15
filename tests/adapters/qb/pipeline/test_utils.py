@@ -1,8 +1,126 @@
 """Tests for QuickBooks pipeline utility functions."""
 
+import json
 from datetime import datetime, timedelta
 
 import pytest
+
+
+@pytest.mark.unit
+class TestExtractLinkedTxns:
+  """LinkedTxn[] capture from QB Payment / BillPayment Line[] arrays."""
+
+  def test_pulls_single_linked_txn_from_one_line(self):
+    from robosystems.adapters.quickbooks.pipeline.utils import _extract_linked_txns
+
+    payment = {
+      "Id": "789",
+      "Line": [
+        {
+          "Amount": 100.0,
+          "LinkedTxn": [{"TxnId": "5", "TxnType": "Invoice"}],
+        }
+      ],
+    }
+
+    refs = json.loads(_extract_linked_txns(payment))
+    assert refs == [{"txn_id": "5", "txn_type": "Invoice"}]
+
+  def test_aggregates_refs_across_multiple_lines(self):
+    """One payment applied to two invoices surfaces both refs in order."""
+    from robosystems.adapters.quickbooks.pipeline.utils import _extract_linked_txns
+
+    payment = {
+      "Line": [
+        {"Amount": 100.0, "LinkedTxn": [{"TxnId": "5", "TxnType": "Invoice"}]},
+        {"Amount": 50.0, "LinkedTxn": [{"TxnId": "6", "TxnType": "Invoice"}]},
+      ],
+    }
+
+    refs = json.loads(_extract_linked_txns(payment))
+    assert refs == [
+      {"txn_id": "5", "txn_type": "Invoice"},
+      {"txn_id": "6", "txn_type": "Invoice"},
+    ]
+
+  def test_empty_line_array_yields_empty_json_list(self):
+    from robosystems.adapters.quickbooks.pipeline.utils import _extract_linked_txns
+
+    assert _extract_linked_txns({"Line": []}) == "[]"
+    assert _extract_linked_txns({}) == "[]"
+
+  def test_skips_refs_missing_either_field(self):
+    """A LinkedTxn entry without TxnId or TxnType is silently dropped."""
+    from robosystems.adapters.quickbooks.pipeline.utils import _extract_linked_txns
+
+    payment = {
+      "Line": [
+        {
+          "Amount": 100.0,
+          "LinkedTxn": [
+            {"TxnId": "5", "TxnType": "Invoice"},  # OK
+            {"TxnId": "", "TxnType": "Invoice"},  # Drop
+            {"TxnId": "6"},  # Drop
+            {"TxnType": "Bill"},  # Drop
+          ],
+        }
+      ],
+    }
+
+    refs = json.loads(_extract_linked_txns(payment))
+    assert refs == [{"txn_id": "5", "txn_type": "Invoice"}]
+
+
+@pytest.mark.unit
+class TestFlattenPaymentHeaders:
+  """Flatten Payment/BillPayment headers WITH linked_txns capture."""
+
+  def test_payment_carries_linked_txn_refs(self):
+    from robosystems.adapters.quickbooks.pipeline.utils import flatten_payment_headers
+
+    class _FakePayment:
+      def to_dict(self):
+        return {
+          "Id": "789",
+          "TxnDate": "2026-04-15",
+          "DocNumber": "",
+          "TotalAmt": 100.0,
+          "CurrencyRef": {"value": "USD"},
+          "PrivateNote": "Thanks!",
+          "CustomerRef": {"value": "C-1"},
+          "Line": [
+            {"Amount": 100.0, "LinkedTxn": [{"TxnId": "5", "TxnType": "Invoice"}]}
+          ],
+        }
+
+    rows = flatten_payment_headers([_FakePayment()])
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["tx_type"] == "Payment"
+    assert row["tx_id"] == "789"
+    assert row["external_id"] == "Payment_789"
+    assert row["agent_external_id"] == "C-1"
+    assert row["agent_type"] == "customer"
+    assert json.loads(row["linked_txns"]) == [{"txn_id": "5", "txn_type": "Invoice"}]
+
+  def test_invoice_header_carries_empty_linked_txns(self):
+    """Non-payment headers default linked_txns to '[]' for UNION shape parity."""
+    from robosystems.adapters.quickbooks.pipeline.utils import flatten_invoice_headers
+
+    class _FakeInvoice:
+      def to_dict(self):
+        return {
+          "Id": "42",
+          "TxnDate": "2026-03-31",
+          "DocNumber": "INV-001",
+          "TotalAmt": 100.0,
+          "CurrencyRef": {"value": "USD"},
+          "PrivateNote": "",
+          "CustomerRef": {"value": "C-1"},
+        }
+
+    rows = flatten_invoice_headers([_FakeInvoice()])
+    assert rows[0]["linked_txns"] == "[]"
 
 
 @pytest.mark.unit

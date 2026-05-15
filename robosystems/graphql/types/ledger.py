@@ -53,6 +53,12 @@ from robosystems.models.api.extensions.accounts import (
 from robosystems.models.api.extensions.agent import (
   LedgerAgentResponse as PydanticAgentResponse,
 )
+from robosystems.models.api.extensions.ar_ap import (
+  OpenBalanceAggregate as PydanticOpenBalanceAggregate,
+)
+from robosystems.models.api.extensions.ar_ap import (
+  OpenBalanceByAgent as PydanticOpenBalanceByAgent,
+)
 from robosystems.models.api.extensions.closing_book import (
   ClosingBookCategory as PydanticClosingBookCategory,
 )
@@ -249,6 +255,52 @@ class Agent:
       updated_at=row.updated_at,
       created_by=row.created_by,
     )
+
+  @strawberry.field
+  def open_receivable(self, info: strawberry.Info) -> OpenBalanceByAgent | None:
+    """This agent's open AR balance, or null when fully settled.
+
+    Single-agent lookup; resolves in one SQL round-trip. Querying this
+    on a paginated `agents` list triggers N+1 — wrap with a dataloader
+    when list views need it. The drill-in detail flow (one agent at a
+    time) is the supported v1 use case.
+    """
+    from robosystems.graphql.resolvers._common import open_extensions_session
+    from robosystems.operations.roboledger.reads import ar_ap as reads_ar_ap
+
+    with open_extensions_session(info, "roboledger") as session:
+      response = reads_ar_ap.get_open_receivable_for_agent(session, self.id)
+    if response is None:
+      return None
+    return OpenBalanceByAgent.from_pydantic(response)
+
+  @strawberry.field
+  def open_payable(self, info: strawberry.Info) -> OpenBalanceByAgent | None:
+    """This agent's open AP balance, or null when fully settled.
+
+    Same N+1 caveat as ``open_receivable``.
+    """
+    from robosystems.graphql.resolvers._common import open_extensions_session
+    from robosystems.operations.roboledger.reads import ar_ap as reads_ar_ap
+
+    with open_extensions_session(info, "roboledger") as session:
+      response = reads_ar_ap.get_open_payable_for_agent(session, self.id)
+    if response is None:
+      return None
+    return OpenBalanceByAgent.from_pydantic(response)
+
+
+# ── AR / AP open balances ─────────────────────────────────────────────────
+
+
+@pydantic_type(model=PydanticOpenBalanceAggregate, all_fields=True)
+class OpenBalanceAggregate:
+  """Graph-wide open AR or AP totals (event-driven-ledger.md §5.1)."""
+
+
+@pydantic_type(model=PydanticOpenBalanceByAgent, all_fields=True)
+class OpenBalanceByAgent:
+  """Per-counterparty open balance row."""
 
 
 # ── Event blocks (inbox) ──────────────────────────────────────────────────

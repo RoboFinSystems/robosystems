@@ -13,8 +13,10 @@ Adding a new handler:
 from __future__ import annotations
 
 from .asset_disposed import ASSET_DISPOSED_HANDLER
+from .bill_paid import BILL_PAID_HANDLER
 from .journal_entry_recorded import JOURNAL_ENTRY_RECORDED_HANDLER
 from .journal_entry_reversed import JOURNAL_ENTRY_REVERSED_HANDLER
+from .payment_received import PAYMENT_RECEIVED_HANDLER
 from .schedule_created import SCHEDULE_CREATED_HANDLER
 from .schedule_entry_due import SCHEDULE_ENTRY_DUE_HANDLER
 from .types import EventBlockPythonHandler
@@ -25,14 +27,16 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   SCHEDULE_ENTRY_DUE_HANDLER.event_type: SCHEDULE_ENTRY_DUE_HANDLER,
   JOURNAL_ENTRY_RECORDED_HANDLER.event_type: JOURNAL_ENTRY_RECORDED_HANDLER,
   JOURNAL_ENTRY_REVERSED_HANDLER.event_type: JOURNAL_ENTRY_REVERSED_HANDLER,
-  # QB source-class events all dispatch through the journal handler — they post
-  # journal entries on approve and only differ in inbox display + filtering.
-  # Class-specific handlers (revenue recognition, payment-discharges-invoice)
-  # are post-Phase-2 work; see event-driven-ledger.md Phase 4b/4c.
+  # AR/AP duality handlers — same GL shape as journal_entry_recorded
+  # plus a post-dispatch step that resolves discharges_event_id to the
+  # originating invoice/bill via QB's LinkedTxn refs (with a
+  # reference_number fallback). See event-driven-ledger.md §5.1.
+  PAYMENT_RECEIVED_HANDLER.event_type: PAYMENT_RECEIVED_HANDLER,
+  BILL_PAID_HANDLER.event_type: BILL_PAID_HANDLER,
+  # Remaining QB source-class events still dispatch through the journal
+  # handler — same GL shape, no class-specific side effect yet.
   "invoice_issued": JOURNAL_ENTRY_RECORDED_HANDLER,
   "bill_received": JOURNAL_ENTRY_RECORDED_HANDLER,
-  "payment_received": JOURNAL_ENTRY_RECORDED_HANDLER,
-  "bill_paid": JOURNAL_ENTRY_RECORDED_HANDLER,
   "sales_receipt_recorded": JOURNAL_ENTRY_RECORDED_HANDLER,
   # Additional QB source-class events (Phase 2.5, §3.14 of roadmap): the
   # QB importer used to collapse 7 transaction types into

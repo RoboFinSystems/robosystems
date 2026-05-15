@@ -45,6 +45,8 @@ from robosystems.graphql.types.ledger import (
   MappedTrialBalance,
   MappingCoverage,
   MappingDetail,
+  OpenBalanceAggregate,
+  OpenBalanceByAgent,
   PeriodCloseStatus,
   PeriodDrafts,
   PublishListDetail,
@@ -68,6 +70,9 @@ from robosystems.operations.roboledger.reads import (
 )
 from robosystems.operations.roboledger.reads import (
   agent as reads_agent,
+)
+from robosystems.operations.roboledger.reads import (
+  ar_ap as reads_ar_ap,
 )
 from robosystems.operations.roboledger.reads import (
   closing_book as reads_closing_book,
@@ -216,6 +221,57 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return [Agent.from_pydantic(r) for r in responses]
+
+  # ── AR / AP open balances ───────────────────────────────────────────────
+
+  @strawberry.field
+  def open_receivables(self, info: Info[GraphQLContext, None]) -> OpenBalanceAggregate:
+    """Graph-wide open AR — total + counterparty count + open invoice count.
+
+    Derived from the event duality chain: sum of unsettled
+    ``invoice_issued`` / ``sales_receipt_recorded`` amounts minus
+    discharges pointed at them. See ``event-driven-ledger.md`` §5.1.
+    """
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_ar_ap.compute_open_receivables(session)
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return OpenBalanceAggregate.from_pydantic(response)
+
+  @strawberry.field
+  def open_payables(self, info: Info[GraphQLContext, None]) -> OpenBalanceAggregate:
+    """Graph-wide open AP — symmetric to ``open_receivables``."""
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_ar_ap.compute_open_payables(session)
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return OpenBalanceAggregate.from_pydantic(response)
+
+  @strawberry.field
+  def open_receivables_by_agent(
+    self, info: Info[GraphQLContext, None]
+  ) -> list[OpenBalanceByAgent]:
+    """Per-counterparty open AR rows, ordered by absolute balance descending."""
+    try:
+      with _open_session(info, "roboledger") as session:
+        responses = reads_ar_ap.list_open_receivables_by_agent(session)
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return [OpenBalanceByAgent.from_pydantic(r) for r in responses]
+
+  @strawberry.field
+  def open_payables_by_agent(
+    self, info: Info[GraphQLContext, None]
+  ) -> list[OpenBalanceByAgent]:
+    """Per-counterparty open AP rows, ordered by absolute balance descending."""
+    try:
+      with _open_session(info, "roboledger") as session:
+        responses = reads_ar_ap.list_open_payables_by_agent(session)
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return [OpenBalanceByAgent.from_pydantic(r) for r in responses]
 
   # ── Event blocks (inbox) ────────────────────────────────────────────────
 

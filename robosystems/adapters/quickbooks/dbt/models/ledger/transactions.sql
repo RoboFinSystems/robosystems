@@ -16,23 +16,23 @@ with entries as (
   select * from {{ ref('stg_qb_journal_entries') }}
 ),
 invoice_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
   from {{ ref('stg_qb_invoice_headers') }}
 ),
 bill_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
   from {{ ref('stg_qb_bill_headers') }}
 ),
 payment_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
   from {{ ref('stg_qb_payment_headers') }}
 ),
 bill_payment_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
   from {{ ref('stg_qb_bill_payment_headers') }}
 ),
 sales_receipt_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
   from {{ ref('stg_qb_sales_receipt_headers') }}
 ),
 purchase_headers as (
@@ -40,7 +40,7 @@ purchase_headers as (
   -- The Python flattener emits multiple header rows per Purchase (one per
   -- candidate tx_type JournalReport might use for that PaymentType), so the
   -- LEFT JOIN below resolves to whichever flavor matched.
-  select tx_type, tx_id, agent_external_id, agent_type
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
   from {{ ref('stg_qb_purchase_headers') }}
 ),
 all_headers as (
@@ -125,7 +125,13 @@ select
       else 'adjustment'
     end                                                as event_category,
     h.agent_external_id                                as agent_external_id,
-    h.agent_type                                       as agent_type
+    h.agent_type                                       as agent_type,
+    -- linked_txns is a JSON-stringified [{txn_id, txn_type}] list,
+    -- populated only for Payment + BillPayment headers; defaults to
+    -- '[]' elsewhere. The loader forwards it to event metadata as
+    -- qb_linked_txns; the payment_received / bill_paid handlers walk
+    -- it to set discharges_event_id.
+    coalesce(h.linked_txns, '[]')                      as linked_txns
 from entries e
 left join all_headers h
   on h.tx_type = e.tx_type and h.tx_id = e.tx_number

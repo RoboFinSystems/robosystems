@@ -119,17 +119,21 @@ def _bind_sum_variables(
     if element_id is None:
       bindings[name] = None
       continue
-    # Match `_bind_variables` semantics — only sum facts the close
-    # workflow considers in-scope. Historical facts (already absorbed
-    # into opening balances) would otherwise inflate SumEquals checks
-    # that compare against a schedule's contracted total.
+    # SumEquals checks a structural invariant — Σ(periodic facts) ==
+    # contracted total — so it must sum every periodic fact on the
+    # structure regardless of `fact_scope`. Filtering to `in_scope`
+    # would silently break schedules that bisect `closed_through`:
+    # only the post-close tail would be summed, but `expected_total`
+    # still encodes the full contract amount, producing spurious
+    # failures. Schedule facts aren't replicated into GL line items,
+    # so summing historical periods here doesn't double-count
+    # anything that landed in opening balances.
     row = session.execute(
       text(
         "SELECT ROUND(SUM(value)::numeric, 2) AS total "
         "FROM facts "
         "WHERE element_id = :eid AND structure_id = :sid "
-        "AND period_type = 'duration' "
-        "AND fact_scope = 'in_scope'"
+        "AND period_type = 'duration'"
       ),
       {"eid": element_id, "sid": structure_id},
     ).fetchone()
