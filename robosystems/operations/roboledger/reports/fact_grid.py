@@ -180,6 +180,14 @@ def generate_report_facts(
   # CF sees it as a calc input.
   _emit_net_income_facts(session, facts, periods)
 
+  # Synthesize rs-gaap:PropertyPlantAndEquipmentNet = Gross - AccumulatedDepreciation
+  # for each period. Tenants who map PP&E with a gross + contra-asset split
+  # (the standard accounting setup that lets CF Investing read ΔGross as
+  # purchases instead of conflating it with depreciation) won't have a
+  # direct PPE Net fact — synthesize it so BS still renders the net carrying
+  # value. Skipped when a direct PPE Net fact already exists.
+  _synthesize_ppe_net_facts(session, facts, periods)
+
   # Derive Cash Flow facts from period-over-period BS deltas (indirect
   # method). Each derivation arc encodes "this CF leaf is the change in
   # this BS source element" with a sign weight for the
@@ -751,6 +759,17 @@ def _emit_net_income_facts(
   ni_id, ni_balance_type = ni_row[0], ni_row[1] or "credit"
 
   for period in periods:
+    # Skip if a NetIncomeLoss fact already exists for this period — a
+    # tenant might map a CoA element directly to rs-gaap:NetIncomeLoss
+    # (rare but legal), in which case the direct fact wins.
+    already_present = any(
+      f.element_id == ni_id
+      and f.period_start == period.start
+      and f.period_end == period.end
+      for f in facts
+    )
+    if already_present:
+      continue
     revenue = 0.0
     expense = 0.0
     for f in facts:
@@ -774,6 +793,88 @@ def _emit_net_income_facts(
         period_start=period.start,
         period_end=period.end,
         period_type="duration",
+      )
+    )
+
+
+def _synthesize_ppe_net_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+) -> None:
+  """Synthesize ``rs-gaap:PropertyPlantAndEquipmentNet`` per period as
+  ``PropertyPlantAndEquipmentGross - AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment``.
+
+  When a tenant maps PP&E with a gross + contra-asset split (so 1300/1310-type
+  fixed-asset accounts → Gross, 1350-type accumulated-depreciation account →
+  AD), there's no direct PPE Net fact for the BS to render. Computing it as
+  Gross - AD here keeps the BS correct AND lets the CF Investing derivation
+  source from Gross directly (ΔGross = purchases, cleanly isolated from
+  depreciation activity which flows through DDA on the Operating side).
+
+  Skipped when a direct PPE Net fact already exists for the period — tenants
+  using the simpler "all-in PPE Net" mapping (1300 + 1350 both → PPE Net)
+  still work because their direct fact wins.
+
+  Mutates the facts list in place.
+  """
+  row = session.execute(
+    text(
+      "SELECT id, balance_type FROM elements "
+      "WHERE qname = 'rs-gaap:PropertyPlantAndEquipmentNet'"
+    )
+  ).fetchone()
+  if row is None:
+    return
+  net_id, net_balance_type = row[0], row[1] or "debit"
+
+  # Resolve source element ids once.
+  src_rows = session.execute(
+    text(
+      "SELECT qname, id FROM elements WHERE qname IN ("
+      "'rs-gaap:PropertyPlantAndEquipmentGross', "
+      "'rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment')"
+    )
+  ).fetchall()
+  src_ids = dict(src_rows)
+  gross_id = src_ids.get("rs-gaap:PropertyPlantAndEquipmentGross")
+  ad_id = src_ids.get(
+    "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"
+  )
+  if gross_id is None and ad_id is None:
+    return  # Neither source mapped — nothing to synthesize.
+
+  for period in periods:
+    already_present = any(
+      f.element_id == net_id
+      and f.period_start == period.start
+      and f.period_end == period.end
+      for f in facts
+    )
+    if already_present:
+      continue
+    gross_value = 0.0
+    ad_value = 0.0
+    for f in facts:
+      if f.period_end != period.end:
+        continue
+      if gross_id is not None and f.element_id == gross_id:
+        gross_value += f.value
+      elif ad_id is not None and f.element_id == ad_id:
+        ad_value += f.value
+    if gross_value == 0.0 and ad_value == 0.0:
+      continue
+    facts.append(
+      ReportFact(
+        element_id=net_id,
+        element_qname="rs-gaap:PropertyPlantAndEquipmentNet",
+        element_name="Property, Plant and Equipment, Net",
+        classification="asset",
+        balance_type=net_balance_type,
+        value=gross_value - ad_value,
+        period_start=period.start,
+        period_end=period.end,
+        period_type="instant",
       )
     )
 
@@ -874,6 +975,13 @@ def _derive_cash_flow_facts(
     current = ordered[i]
     prior = ordered[i - 1]
     for cf_leaf_id, sources in derivations.items():
+      # Skip if a direct fact already exists for this CF leaf at the
+      # current period — direct fact wins, derivation is the fallback.
+      # Avoids double-counting when a tenant maps both source paths
+      # (e.g. Depreciation Expense → DDA fact directly, AND Accumulated
+      # Depreciation → DDA via ΔBS derivation).
+      if (cf_leaf_id, current.end) in fact_index:
+        continue
       cf_value = 0.0
       for source_id, weight in sources:
         current_v = fact_index.get((source_id, current.end), 0.0)

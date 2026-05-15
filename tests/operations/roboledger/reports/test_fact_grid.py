@@ -1034,6 +1034,32 @@ class TestEmitNetIncomeFacts:
     )
     assert not any(f.element_qname == "rs-gaap:NetIncomeLoss" for f in facts)
 
+  def test_direct_fact_wins_over_synthesis(self):
+    """If a NetIncomeLoss fact already exists for the period (rare —
+    tenant maps a CoA element directly), don't synthesize a second."""
+    facts = [
+      _bs_fact("rev1", "revenue", 100.0, self.P_START, self.P_END),
+      _bs_fact("exp1", "expense", 30.0, self.P_START, self.P_END),
+      ReportFact(
+        element_id="ni_id",
+        element_qname="rs-gaap:NetIncomeLoss",
+        element_name="NI",
+        classification=None,
+        balance_type="credit",
+        value=999.0,  # direct value differs from rev-exp
+        period_start=self.P_START,
+        period_end=self.P_END,
+        period_type="duration",
+      ),
+    ]
+    session = _session_with_ni_lookup()
+    _emit_net_income_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    ni = [f for f in facts if f.element_qname == "rs-gaap:NetIncomeLoss"]
+    assert len(ni) == 1
+    assert ni[0].value == 999.0  # direct wins, not 70.0
+
 
 # ── _derive_cash_flow_facts ──────────────────────────────────────────────
 
@@ -1144,3 +1170,44 @@ class TestDeriveCashFlowFacts:
       ],
     )
     assert not any(f.element_id == "cf_leaf" for f in facts)
+
+  def test_direct_fact_wins_over_derivation(self):
+    """When a direct fact for the CF leaf already exists at the current
+    period, derivation is skipped — covers the DDA case where a tenant
+    maps Depreciation Expense directly to DDA AND also maps Accumulated
+    Depreciation (so both paths could produce a DDA fact). Direct wins."""
+    direct_dda = ReportFact(
+      element_id="cf_dda",
+      element_qname="rs-gaap:DepreciationDepletionAndAmortization",
+      element_name="DDA",
+      classification="expense",
+      balance_type="debit",
+      value=700.0,
+      period_start=self.CURR_S,
+      period_end=self.CURR_E,
+      period_type="duration",
+    )
+    bs_source = [
+      self._instant("accum_depn", 0.0, self.PRIOR_E, balance_type="credit"),
+      self._instant("accum_depn", 700.0, self.CURR_E, balance_type="credit"),
+    ]
+    facts = [direct_dda, *bs_source]
+    session = self._session_with_derivations(
+      deriv_rows=[("cf_dda", "accum_depn", 1.0)],
+      meta_rows=[
+        ("cf_dda", "rs-gaap:DepreciationDepletionAndAmortization", "DDA", "debit")
+      ],
+    )
+    _derive_cash_flow_facts(
+      session,
+      facts,
+      [
+        PeriodSpec(self.PRIOR_S, self.PRIOR_E, "Prior"),
+        PeriodSpec(self.CURR_S, self.CURR_E, "Current"),
+      ],
+    )
+    dda_facts = [f for f in facts if f.element_id == "cf_dda"]
+    # Only the direct fact remains; derivation skipped.
+    assert len(dda_facts) == 1
+    assert dda_facts[0].value == 700.0
+    assert dda_facts[0].classification == "expense"  # the direct one
