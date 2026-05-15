@@ -171,6 +171,15 @@ def generate_report_facts(
       session, mapping_id, facts, period.start, period.end, arc_type=arc_type
     )
 
+  # Emit rs-gaap:NetIncomeLoss facts for each period. The close logic
+  # only rolls net income into RE; for the IS bottom-line row AND for the
+  # CF Operating calc rollup (NetIncomeLoss is its first child), we need
+  # NetIncomeLoss as its own fact. Persistence fan-out (per
+  # commands/reports.py::_persist_report_facts) then stamps the same fact
+  # into each owning structure's FactSet — IS sees it as the bottom line,
+  # CF sees it as a calc input.
+  _emit_net_income_facts(session, facts, periods)
+
   # Derive Cash Flow facts from period-over-period BS deltas (indirect
   # method). Each derivation arc encodes "this CF leaf is the change in
   # this BS source element" with a sign weight for the
@@ -712,6 +721,59 @@ def _append_empty_equity_facts(
         period_start=period_start,
         period_end=period_end,
         period_type="instant",
+      )
+    )
+
+
+def _emit_net_income_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+) -> None:
+  """Synthesize one ``rs-gaap:NetIncomeLoss`` fact per period.
+
+  ``_close_to_retained_earnings`` rolls (revenue - expense) into RE
+  but never emits NetIncomeLoss as its own fact. Two consumers need it
+  as a standalone fact: the Income Statement (where it's the bottom-line
+  row) and the Cash Flow Operating calc rollup (where it's the first
+  calc child of NetCashProvidedByUsedInOperatingActivities). Emit it
+  here once per period; the persistence fan-out then stamps the same
+  fact into every structure that references the element.
+
+  Skips zero net income — the renderer treats absent facts as 0 anyway.
+  Mutates the facts list in place.
+  """
+  ni_row = session.execute(
+    text("SELECT id, balance_type FROM elements WHERE qname='rs-gaap:NetIncomeLoss'")
+  ).fetchone()
+  if ni_row is None:
+    return
+  ni_id, ni_balance_type = ni_row[0], ni_row[1] or "credit"
+
+  for period in periods:
+    revenue = 0.0
+    expense = 0.0
+    for f in facts:
+      if f.period_start != period.start or f.period_end != period.end:
+        continue
+      if f.classification == "revenue":
+        revenue += f.value
+      elif f.classification == "expense":
+        expense += f.value
+    net_income = revenue - expense
+    if net_income == 0.0:
+      continue
+    facts.append(
+      ReportFact(
+        element_id=ni_id,
+        element_qname="rs-gaap:NetIncomeLoss",
+        element_name="Net Income (Loss)",
+        classification=None,
+        balance_type=ni_balance_type,
+        value=net_income,
+        period_start=period.start,
+        period_end=period.end,
+        period_type="duration",
       )
     )
 
