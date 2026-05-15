@@ -852,17 +852,54 @@ def _synthesize_ppe_net_facts(
       for f in facts
     )
     if already_present:
+      # Direct PPE Net fact exists — likely the legacy "all-in-Net"
+      # mapping (1300/1310/1350 all → PropertyPlantAndEquipmentNet). The
+      # BS renders correctly via the direct fact, BUT the CF Investing
+      # derivation now sources from PropertyPlantAndEquipmentGross (per
+      # rs-gaap-calculations) and will produce 0 for PaymentsToAcquirePPE
+      # — silently omitting capital expenditures from CF Investing.
+      # Warn so operators can migrate to the split mapping.
+      if gross_id is not None and not any(
+        f.element_id == gross_id
+        and f.period_start == period.start
+        and f.period_end == period.end
+        for f in facts
+      ):
+        logger.warning(
+          "_synthesize_ppe_net_facts: direct PropertyPlantAndEquipmentNet "
+          "fact exists for period %s..%s but no PropertyPlantAndEquipmentGross "
+          "fact — CF Investing's PaymentsToAcquirePropertyPlantAndEquipment "
+          "will be 0. Migrate the mapping: route fixed-asset accounts to "
+          "rs-gaap:PropertyPlantAndEquipmentGross and the accumulated-"
+          "depreciation contra-account to "
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment.",
+          period.start,
+          period.end,
+        )
       continue
     gross_value = 0.0
     ad_value = 0.0
     for f in facts:
-      if f.period_end != period.end:
+      if f.period_start != period.start or f.period_end != period.end:
         continue
       if gross_id is not None and f.element_id == gross_id:
         gross_value += f.value
       elif ad_id is not None and f.element_id == ad_id:
         ad_value += f.value
     if gross_value == 0.0 and ad_value == 0.0:
+      continue
+    if gross_value == 0.0:
+      # AD present but no Gross — would synthesize Net = -AD, which is
+      # arithmetically wrong (no asset to depreciate against). Indicates
+      # a misconfigured mapping; warn and skip.
+      logger.warning(
+        "_synthesize_ppe_net_facts: AD fact present without Gross fact "
+        "for period %s..%s — refusing to synthesize negative PPE Net. "
+        "Verify the CoA maps a fixed-asset account to "
+        "rs-gaap:PropertyPlantAndEquipmentGross.",
+        period.start,
+        period.end,
+      )
       continue
     facts.append(
       ReportFact(

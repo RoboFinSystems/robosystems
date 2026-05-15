@@ -1234,6 +1234,8 @@ class TestSynthesizePpeNetFacts:
   P_END = date(2025, 12, 31)
 
   def _src(self, element_id: str, value: float) -> ReportFact:
+    """Mirror how `_read_mapped_balances` emits source facts: period_start
+    and period_end match the PeriodSpec's bounds, regardless of period_type."""
     return ReportFact(
       element_id=element_id,
       element_qname="x:" + element_id,
@@ -1241,7 +1243,7 @@ class TestSynthesizePpeNetFacts:
       classification="asset",
       balance_type="debit",
       value=value,
-      period_start=self.P_END,  # instant facts
+      period_start=self.P_START,
       period_end=self.P_END,
       period_type="instant",
     )
@@ -1353,3 +1355,63 @@ class TestSynthesizePpeNetFacts:
       session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
     )
     assert facts == []
+
+  def test_refuses_negative_net_when_only_ad_present(self):
+    """If AD has a fact but Gross doesn't, synthesizing Net = -AD is
+    arithmetically wrong. The guard skips and emits no PPE Net fact."""
+    facts = [self._src("ad_id", 700.0)]
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[
+        ("rs-gaap:PropertyPlantAndEquipmentGross", "gross_id"),
+        (
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          "ad_id",
+        ),
+      ],
+    )
+    _synthesize_ppe_net_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    assert not any(f.element_id == "net_id" for f in facts)
+
+  def test_warns_on_legacy_all_in_net_mapping(self):
+    """When a direct PPE Net fact exists but no PPE Gross fact, the
+    tenant is using the legacy all-in-Net mapping. The synthesis is
+    correctly skipped (direct fact wins), but a warning fires so the
+    operator knows CF Investing will be 0 — the derivation now sources
+    from Gross which has no fact in this configuration."""
+    from unittest.mock import patch
+
+    direct_net = ReportFact(
+      element_id="net_id",
+      element_qname="rs-gaap:PropertyPlantAndEquipmentNet",
+      element_name="PPE Net",
+      classification="asset",
+      balance_type="debit",
+      value=6300.0,
+      period_start=self.P_START,
+      period_end=self.P_END,
+      period_type="instant",
+    )
+    facts = [direct_net]  # No Gross fact in the mix
+    session = _ppe_session(
+      net_row=("net_id", "debit"),
+      src_rows=[
+        ("rs-gaap:PropertyPlantAndEquipmentGross", "gross_id"),
+        (
+          "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+          "ad_id",
+        ),
+      ],
+    )
+    with patch(
+      "robosystems.operations.roboledger.reports.fact_grid.logger.warning"
+    ) as mock_warn:
+      _synthesize_ppe_net_facts(
+        session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+      )
+    assert mock_warn.call_count == 1
+    msg = mock_warn.call_args[0][0]
+    assert "CF Investing" in msg
+    assert "PaymentsToAcquirePropertyPlantAndEquipment" in msg
