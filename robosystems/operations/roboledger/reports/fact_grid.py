@@ -807,7 +807,15 @@ def _derive_cash_flow_facts(
   Mutates the facts list in place.
   """
   if len(periods) < 2:
-    return  # Single-period rendering has no prior to delta against.
+    # Indirect-method CF derivation needs a prior period to delta against.
+    # Caller should pass comparative=True (or supply explicit periods) when
+    # they want CF rows; logging at debug so an empty CF block isn't a
+    # mystery in logs.
+    logger.debug(
+      "_derive_cash_flow_facts: skipped — indirect method needs ≥2 periods (got %d)",
+      len(periods),
+    )
+    return
 
   # Period lists arrive in presentation order (typically newest-first:
   # [Current, Prior]). Sort chronologically so periods[i] / periods[i-1]
@@ -816,7 +824,12 @@ def _derive_cash_flow_facts(
   # with the wrong period.
   ordered = sorted(periods, key=lambda p: p.end)
 
-  # Load derivation arcs: cf_leaf_id → list[(source_element_id, weight)]
+  # Load every derivation arc — intentionally global (no structure_id /
+  # taxonomy_id filter). Derivation arcs are library-seeded into a
+  # dedicated structure per (cf_leaf, source) pair and the library
+  # immutability trigger blocks tenants from inserting their own. If
+  # tenant-authored derivations land later (§3.16 Phase 4), this query
+  # will need a scope (Reporting Style or taxonomy_id).
   rows = session.execute(
     text("""
       SELECT from_element_id, to_element_id, weight
@@ -847,10 +860,15 @@ def _derive_cash_flow_facts(
     row[0]: (row[1], row[2], row[3] or "debit") for row in meta_rows
   }
 
-  # Index existing facts by (element_id, period_end) for delta lookup
+  # Index existing facts by (element_id, period_end) for delta lookup.
+  # Sum on collision — multiple facts on the same (element, period) is
+  # already tolerated by `_facts_to_balance_dict` (it sums net_balance);
+  # do the same here so no future caller silently overwrites an upstream
+  # baseline and drops half the CF delta.
   fact_index: dict[tuple[str, date], float] = {}
   for f in facts:
-    fact_index[(f.element_id, f.period_end)] = f.value
+    key = (f.element_id, f.period_end)
+    fact_index[key] = fact_index.get(key, 0.0) + f.value
 
   for i in range(1, len(ordered)):
     current = ordered[i]
