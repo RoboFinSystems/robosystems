@@ -71,11 +71,14 @@ def test_build_structure_mapping_resolves_each_statement_type_via_picker() -> No
   with patch(_PICKER_PATH, side_effect=fake_picker):
     elem_map, fs_map = _build_structure_mapping(session, "025f5d48-style")
 
+  # element_to_structures is multi-valued — an element can appear in
+  # multiple structures (e.g. NetIncomeLoss is on IS as a bottom-line
+  # and on CF as a calc child).
   assert elem_map == {
-    "elem_cash": "struct_bs",
-    "elem_rev": "struct_is",
-    "elem_op_cash": "struct_cf",
-    "elem_re": "struct_se",
+    "elem_cash": ["struct_bs"],
+    "elem_rev": ["struct_is"],
+    "elem_op_cash": ["struct_cf"],
+    "elem_re": ["struct_se"],
   }
   assert set(fs_map.keys()) == {"struct_bs", "struct_is", "struct_cf", "struct_se"}
   assert all(v.startswith("fs_") for v in fs_map.values())
@@ -156,7 +159,7 @@ def test_persist_report_facts_stamps_structure_and_fact_set() -> None:
       ),
     ]
   )
-  elem_map = {"elem_rev": "struct_is", "elem_cash": "struct_bs"}
+  elem_map = {"elem_rev": ["struct_is"], "elem_cash": ["struct_bs"]}
   fs_map = {"struct_is": "fs_IS", "struct_bs": "fs_BS"}
 
   _persist_report_facts(

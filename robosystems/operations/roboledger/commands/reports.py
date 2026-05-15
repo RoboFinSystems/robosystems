@@ -95,7 +95,7 @@ def _get_entity_id(session: Session, graph_id: str) -> str:
 def _evaluate_report_structures(
   session: Session,
   facts,
-  element_to_structure: dict[str, str],
+  element_to_structures: dict[str, list[str]],
   structure_to_factset: dict[str, str],
   period_start,
   period_end,
@@ -106,11 +106,10 @@ def _evaluate_report_structures(
   Returns an aggregated rule_summary across all structures, or None if
   no structures have rules.
   """
-  structures_with_facts = {
-    element_to_structure[f.element_id]
-    for f in facts.facts
-    if f.element_id in element_to_structure
-  }
+  structures_with_facts: set[str] = set()
+  for f in facts.facts:
+    for sid in element_to_structures.get(f.element_id, ()):
+      structures_with_facts.add(sid)
   all_results = []
   for structure_id in structures_with_facts:
     results = evaluate_rules_for_structure(
@@ -136,14 +135,18 @@ _RENDER_TARGET_STATEMENT_TYPES: tuple[str, ...] = (
 def _build_structure_mapping(
   session: Session,
   reporting_style_id: str,
-) -> tuple[dict[str, str], dict[str, str]]:
-  """Return (element_id→structure_id, structure_id→fact_set_id) for the
+) -> tuple[dict[str, list[str]], dict[str, str]]:
+  """Return (element_id→[structure_ids], structure_id→fact_set_id) for the
   Reporting Style composed for this graph.
 
   Walks ``reporting_style_networks`` to pick one Network per statement
   type (per §3.2 Phase 1), then enumerates each Network's association
-  rows to map elements → structure id. Pre-generates a fact_set_id
-  ULID per picked structure.
+  rows to map elements → structure ids. An element can appear in
+  multiple structures (e.g. ``NetIncomeLoss`` is the bottom line of the
+  Income Statement AND the first calc-child of the Cash Flow Operating
+  rollup), and the fact must be stamped onto every owning structure's
+  FactSet so each block's renderer can resolve its calc rollups
+  locally. Pre-generates a fact_set_id ULID per picked structure.
 
   Networks for statement types the Style doesn't compose are skipped
   silently — a Style is free to omit, say, the comprehensive_income
@@ -152,7 +155,7 @@ def _build_structure_mapping(
   ``NoNetworkForStatementTypeError`` at picker time (the caller wraps
   the loop and decides whether to fail closed).
   """
-  element_to_structure: dict[str, str] = {}
+  element_to_structures: dict[str, list[str]] = {}
   structure_to_factset: dict[str, str] = {}
   picked_structure_ids: list[str] = []
 
@@ -187,11 +190,12 @@ def _build_structure_mapping(
     {"struct_ids": picked_structure_ids},
   ).fetchall()
 
-  element_to_structure = {row.element_id: row.structure_id for row in rows}
+  for row in rows:
+    element_to_structures.setdefault(row.element_id, []).append(row.structure_id)
   structure_to_factset = {
     sid: generate_prefixed_ulid("fs") for sid in picked_structure_ids
   }
-  return element_to_structure, structure_to_factset
+  return element_to_structures, structure_to_factset
 
 
 def _persist_report_facts(
@@ -199,7 +203,7 @@ def _persist_report_facts(
   report_id: str,
   facts,
   entity_id: str,
-  element_to_structure: dict[str, str],
+  element_to_structures: dict[str, list[str]],
   structure_to_factset: dict[str, str],
 ) -> None:
   """Clear any existing facts for this report and persist the new set.
@@ -210,6 +214,12 @@ def _persist_report_facts(
   Reporting Style are skipped: there's no Network to render them
   through, so they can't be stamped with a structure_id, and the
   fact_set_id NOT NULL constraint would reject them.
+
+  An element that appears in N structures (e.g. ``NetIncomeLoss`` =
+  bottom-line of the IS AND first calc-child of CF Operating) gets one
+  Fact row per owning structure, each pinned to that structure's
+  FactSet. This is what lets the CF block's calc walker resolve
+  NetIncome locally without cross-structure fact lookup.
   """
   session.execute(
     text(
@@ -219,24 +229,22 @@ def _persist_report_facts(
     {"report_id": report_id},
   )
   for fact in facts.facts:
-    structure_id = element_to_structure.get(fact.element_id)
-    if structure_id is None:
-      continue
-    fact_set_id = structure_to_factset.get(structure_id)
-    if fact_set_id is None:
-      continue
-    rf = Fact(
-      element_id=fact.element_id,
-      value=fact.value,
-      period_start=fact.period_start,
-      period_end=fact.period_end,
-      period_type=fact.period_type,
-      unit="USD",
-      entity_id=entity_id,
-      structure_id=structure_id,
-      fact_set_id=fact_set_id,
-    )
-    session.add(rf)
+    for structure_id in element_to_structures.get(fact.element_id, ()):
+      fact_set_id = structure_to_factset.get(structure_id)
+      if fact_set_id is None:
+        continue
+      rf = Fact(
+        element_id=fact.element_id,
+        value=fact.value,
+        period_start=fact.period_start,
+        period_end=fact.period_end,
+        period_type=fact.period_type,
+        unit="USD",
+        entity_id=entity_id,
+        structure_id=structure_id,
+        fact_set_id=fact_set_id,
+      )
+      session.add(rf)
 
 
 def _pre_create_report_fact_sets(
@@ -337,7 +345,7 @@ def create_report(
 
   entity_id = _get_entity_id(session, graph_id)
   reporting_style_id = load_graph_reporting_style(graph_id)
-  element_to_structure, structure_to_factset = _build_structure_mapping(
+  element_to_structures, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )
   # §6.5: create fact_sets rows first so the facts we stamp reference
@@ -356,13 +364,13 @@ def create_report(
     report_def.id,
     facts,
     entity_id,
-    element_to_structure,
+    element_to_structures,
     structure_to_factset,
   )
   summary = _evaluate_report_structures(
     session,
     facts,
-    element_to_structure,
+    element_to_structures,
     structure_to_factset,
     body.period_start,
     body.period_end,
@@ -439,7 +447,7 @@ def regenerate_report(
 
   entity_id = _get_entity_id(session, graph_id)
   reporting_style_id = load_graph_reporting_style(graph_id)
-  element_to_structure, structure_to_factset = _build_structure_mapping(
+  element_to_structures, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )
   # Stale rows from the prior generation must clear before fresh ULIDs
@@ -463,13 +471,13 @@ def regenerate_report(
     report_def.id,
     facts,
     entity_id,
-    element_to_structure,
+    element_to_structures,
     structure_to_factset,
   )
   summary = _evaluate_report_structures(
     session,
     facts,
-    element_to_structure,
+    element_to_structures,
     structure_to_factset,
     report_def.period_start,
     report_def.period_end,

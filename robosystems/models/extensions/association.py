@@ -44,7 +44,7 @@ class Association(ExtensionsBase):
     ),
     CheckConstraint(
       "association_type IN ("
-      "'presentation', 'calculation', 'mapping', "
+      "'presentation', 'calculation', 'mapping', 'derivation', "
       "'equivalence', 'general-special', 'essence-alias'"
       ")",
       name="check_association_type",

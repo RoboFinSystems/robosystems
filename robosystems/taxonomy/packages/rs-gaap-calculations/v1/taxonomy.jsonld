@@ -718,6 +718,230 @@
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
       "arcWeight": 1.0,
       "arcOrder": 400.0
+    },
+
+    {
+      "@id": "_:rs-gaap-calc-cf-operating",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "structureName": "rs-gaap calc CF-Operating — rs-gaap:NetCashProvidedByUsedInOperatingActivities = NetIncomeLoss + DDA + Σ working-capital deltas (indirect method)",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-1",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:NetIncomeLoss" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-2",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:DepreciationDepletionAndAmortization" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 200.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-3",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 300.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-4",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInInventories" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 400.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-5",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 500.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-6",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 600.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-operating-arc-7",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
+      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "arcWeight": 1.0,
+      "arcOrder": 700.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-ar",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsReceivable",
+      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInAccountsReceivable = -Δ(ReceivablesNetCurrent) [asset up = cash use]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-ar-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable" },
+      "arcTo": { "@id": "rs-gaap:ReceivablesNetCurrent" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsReceivable",
+      "arcWeight": -1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-inventory",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-Inventory",
+      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInInventories = -Δ(InventoryNetOfAllowances...) [asset up = cash use]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-inventory-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInInventories" },
+      "arcTo": { "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-Inventory",
+      "arcWeight": -1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-prepaid",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PrepaidExpense",
+      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInPrepaidExpense = -Δ(PrepaidExpenseCurrent) [asset up = cash use]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-prepaid-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense" },
+      "arcTo": { "@id": "rs-gaap:PrepaidExpenseCurrent" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PrepaidExpense",
+      "arcWeight": -1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-ap",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsPayable",
+      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInAccountsPayableAndAccruedLiabilities = +Δ(AccountsPayableAndAccruedLiabilitiesCurrent) [liab up = cash source]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-ap-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities" },
+      "arcTo": { "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsPayable",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-other-op",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-OtherOperatingCapital",
+      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInOtherOperatingCapitalNet = +Δ(OtherLiabilitiesCurrent) [catch-all working capital]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-other-op-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet" },
+      "arcTo": { "@id": "rs-gaap:OtherLiabilitiesCurrent" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-OtherOperatingCapital",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-calc-cf-investing",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "structureName": "rs-gaap calc CF-Investing — rs-gaap:NetCashProvidedByUsedInInvestingActivities = Σ Investing leaves (each pre-signed: outflows negative, proceeds positive)",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-investing-arc-1",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-calc-cf-financing",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "structureName": "rs-gaap calc CF-Financing — rs-gaap:NetCashProvidedByUsedInFinancingActivities = Σ proceeds − Σ payments",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-financing-arc-1",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-ppe-purchases",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
+      "structureName": "rs-gaap derivation CF — PaymentsToAcquirePropertyPlantAndEquipment = -Δ(PropertyPlantAndEquipmentNet) [PP&E up = cash outflow, pre-signed negative for Investing section sum]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-ppe-purchases-arc-1",
+      "arcFrom": { "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment" },
+      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentNet" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
+      "arcWeight": -1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-stock-proceeds",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfCommonStock",
+      "structureName": "rs-gaap derivation CF — ProceedsFromIssuanceOfCommonStock = +Δ(AdditionalPaidInCapital) [APIC up = stock issuance proceeds, rendered positive in Financing section]",
+      "structureType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-stock-proceeds-arc-1",
+      "arcFrom": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
+      "arcTo": { "@id": "rs-gaap:AdditionalPaidInCapital" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfCommonStock",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
     }
   ]
 }

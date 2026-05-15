@@ -109,7 +109,12 @@ _WIDENED_ASSOCIATION_CHECK = (
   # rs-gaap-reporting-checklist + rs-gaap-reporting-styles packages.
   # See migration 0007 for the same widen applied to already-deployed
   # tenant schemas.
-  "'definition'"
+  "'definition', "
+  # 'derivation' arcs map BS leaves to their CF "default change tag"
+  # counterparts (e.g. ReceivablesNetCurrent → IncreaseDecreaseInAccountsReceivable),
+  # so the renderer can synthesize CF facts from period-over-period
+  # BS deltas without manual authoring.
+  "'derivation'"
   ")"
 )
 _WIDENED_ELEMENT_SOURCE_CHECK = (
@@ -136,6 +141,11 @@ _WIDENED_TAXONOMY_TYPE_CHECK = (
 _NARROW_TAXONOMY_TYPE_CHECK = (
   "taxonomy_type IN ('chart_of_accounts', 'reporting', 'mapping', 'schedule')"
 )
+# Used only by ``downgrade()`` to restore the original CHECK. Operators
+# rolling back through this migration must first purge any rows whose
+# association_type isn't in this set (notably ``equivalence``,
+# ``general-special``, ``essence-alias``, ``definition``, ``derivation``)
+# — otherwise PostgreSQL fails the CHECK creation against existing data.
 _NARROW_ASSOCIATION_CHECK = (
   "association_type IN ('presentation', 'calculation', 'mapping')"
 )

@@ -7,12 +7,15 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from robosystems.operations.roboledger.reports.fact_grid import (
+  PeriodSpec,
   ReportFact,
   _Balance,
   _build_rows,
   _close_prior_periods_to_retained_earnings,
   _close_to_retained_earnings,
   _compute_prior_period,
+  _derive_cash_flow_facts,
+  _emit_net_income_facts,
   _facts_to_balance_dict,
   _find_close_target,
   _HierarchyNode,
@@ -959,3 +962,185 @@ class TestCloseToRetainedEarningsRsGaap:
     assert re.value == 192_500.0 - 157_950.0
     # No phantom legacy RE fact created.
     assert not any(f.element_id == "elem_gaap_retained_earnings" for f in facts)
+
+
+# ── _emit_net_income_facts ───────────────────────────────────────────────
+
+
+def _bs_fact(
+  element_id: str,
+  classification: str,
+  value: float,
+  start: date,
+  end: date,
+) -> ReportFact:
+  return ReportFact(
+    element_id=element_id,
+    element_qname="x:" + element_id,
+    element_name=element_id,
+    classification=classification,
+    balance_type="debit" if classification == "expense" else "credit",
+    value=value,
+    period_start=start,
+    period_end=end,
+    period_type="duration",
+  )
+
+
+def _session_with_ni_lookup(ni_id: str = "ni_id", balance_type: str = "credit"):
+  """Return a MagicMock session whose `execute().fetchone()` returns the
+  rs-gaap:NetIncomeLoss element row used by `_emit_net_income_facts`."""
+  session = MagicMock()
+  session.execute.return_value.fetchone.return_value = (ni_id, balance_type)
+  return session
+
+
+class TestEmitNetIncomeFacts:
+  P_START = date(2025, 1, 1)
+  P_END = date(2025, 12, 31)
+
+  def test_emits_one_fact_per_period(self):
+    facts = [
+      _bs_fact("rev1", "revenue", 100.0, self.P_START, self.P_END),
+      _bs_fact("exp1", "expense", 30.0, self.P_START, self.P_END),
+    ]
+    session = _session_with_ni_lookup()
+    _emit_net_income_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    ni = [f for f in facts if f.element_qname == "rs-gaap:NetIncomeLoss"]
+    assert len(ni) == 1
+    assert ni[0].value == 70.0
+    assert ni[0].period_type == "duration"
+    assert ni[0].classification is None  # never re-counted by close logic
+
+  def test_skips_zero_net_income(self):
+    facts = [
+      _bs_fact("rev1", "revenue", 50.0, self.P_START, self.P_END),
+      _bs_fact("exp1", "expense", 50.0, self.P_START, self.P_END),
+    ]
+    session = _session_with_ni_lookup()
+    _emit_net_income_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    assert not any(f.element_qname == "rs-gaap:NetIncomeLoss" for f in facts)
+
+  def test_no_op_when_element_missing(self):
+    facts = [_bs_fact("rev1", "revenue", 100.0, self.P_START, self.P_END)]
+    session = MagicMock()
+    session.execute.return_value.fetchone.return_value = None
+    _emit_net_income_facts(
+      session, facts, [PeriodSpec(self.P_START, self.P_END, "Current")]
+    )
+    assert not any(f.element_qname == "rs-gaap:NetIncomeLoss" for f in facts)
+
+
+# ── _derive_cash_flow_facts ──────────────────────────────────────────────
+
+
+class TestDeriveCashFlowFacts:
+  PRIOR_S = date(2024, 1, 1)
+  PRIOR_E = date(2024, 12, 31)
+  CURR_S = date(2025, 1, 1)
+  CURR_E = date(2025, 12, 31)
+
+  def _instant(
+    self, element_id: str, value: float, end: date, balance_type: str = "debit"
+  ) -> ReportFact:
+    return ReportFact(
+      element_id=element_id,
+      element_qname="x:" + element_id,
+      element_name=element_id,
+      classification="asset" if balance_type == "debit" else "liability",
+      balance_type=balance_type,
+      value=value,
+      period_start=end,  # instant: start == end
+      period_end=end,
+      period_type="instant",
+    )
+
+  def _session_with_derivations(self, deriv_rows, meta_rows):
+    """Two-call MagicMock: derivation arcs query, then element-meta query."""
+    session = MagicMock()
+    deriv_result = MagicMock()
+    deriv_result.fetchall.return_value = deriv_rows
+    meta_result = MagicMock()
+    meta_result.fetchall.return_value = meta_rows
+    session.execute.side_effect = [deriv_result, meta_result]
+    return session
+
+  def test_single_period_no_op(self):
+    facts: list[ReportFact] = [self._instant("ar", 100.0, self.CURR_E)]
+    session = MagicMock()
+    _derive_cash_flow_facts(
+      session, facts, [PeriodSpec(self.CURR_S, self.CURR_E, "Current")]
+    )
+    # No CF synthesis with <2 periods.
+    assert all(f.element_id == "ar" for f in facts)
+    # Query never executed (early return).
+    session.execute.assert_not_called()
+
+  def test_asset_up_yields_negative_cf_leaf(self):
+    """Indirect method: AR up → -Δ → cash use (negative for credit-balance leaf)."""
+    facts = [
+      self._instant("ar_src", 0.0, self.PRIOR_E),
+      self._instant("ar_src", 1000.0, self.CURR_E),  # AR up by 1000
+    ]
+    session = self._session_with_derivations(
+      deriv_rows=[("cf_ar_leaf", "ar_src", -1.0)],
+      meta_rows=[("cf_ar_leaf", "rs-gaap:IncreaseDecreaseInAR", "AR Δ", "credit")],
+    )
+    _derive_cash_flow_facts(
+      session,
+      facts,
+      [
+        PeriodSpec(self.CURR_S, self.CURR_E, "Current"),
+        PeriodSpec(self.PRIOR_S, self.PRIOR_E, "Prior"),  # newest-first
+      ],
+    )
+    cf = [f for f in facts if f.element_id == "cf_ar_leaf"]
+    assert len(cf) == 1
+    assert cf[0].value == -1000.0  # weight -1 * (1000 - 0)
+    assert cf[0].period_end == self.CURR_E  # tagged at current period
+    assert cf[0].period_type == "duration"
+
+  def test_liability_up_yields_positive_cf_leaf(self):
+    """Indirect method: AP up → +Δ → cash source (positive for debit-balance leaf)."""
+    facts = [
+      self._instant("ap_src", 0.0, self.PRIOR_E, balance_type="credit"),
+      self._instant("ap_src", 500.0, self.CURR_E, balance_type="credit"),
+    ]
+    session = self._session_with_derivations(
+      deriv_rows=[("cf_ap_leaf", "ap_src", 1.0)],
+      meta_rows=[("cf_ap_leaf", "rs-gaap:IncreaseDecreaseInAP", "AP Δ", "debit")],
+    )
+    _derive_cash_flow_facts(
+      session,
+      facts,
+      [
+        PeriodSpec(self.PRIOR_S, self.PRIOR_E, "Prior"),  # chronological
+        PeriodSpec(self.CURR_S, self.CURR_E, "Current"),
+      ],
+    )
+    cf = [f for f in facts if f.element_id == "cf_ap_leaf"]
+    assert len(cf) == 1
+    assert cf[0].value == 500.0  # weight +1 * (500 - 0)
+
+  def test_zero_delta_skipped(self):
+    facts = [
+      self._instant("src", 100.0, self.PRIOR_E),
+      self._instant("src", 100.0, self.CURR_E),  # no change
+    ]
+    session = self._session_with_derivations(
+      deriv_rows=[("cf_leaf", "src", -1.0)],
+      meta_rows=[("cf_leaf", "x:cf", "CF", "credit")],
+    )
+    _derive_cash_flow_facts(
+      session,
+      facts,
+      [
+        PeriodSpec(self.PRIOR_S, self.PRIOR_E, "Prior"),
+        PeriodSpec(self.CURR_S, self.CURR_E, "Current"),
+      ],
+    )
+    assert not any(f.element_id == "cf_leaf" for f in facts)
