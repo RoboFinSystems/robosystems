@@ -1,2 +1,2 @@
-tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type
-Bill,77,Bill_77,2026-02-05,BILL-77,500.00,USD,Office supplies,qb_vend_1,vendor
+tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type,linked_txns
+Bill,77,Bill_77,2026-02-05,BILL-77,500.00,USD,Office supplies,qb_vend_1,vendor,[]
