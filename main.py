@@ -191,6 +191,10 @@ def create_app() -> FastAPI:
     CORSMiddleware,
     allow_origins=main_cors_origins,
     allow_credentials=True,  # Always enabled for cookie-based auth
+    # Grant Chrome Private Network Access preflight in dev so a public-origin
+    # tunnel (e.g. ngrok) can call back to localhost. Production never needs
+    # this — no localhost endpoints are exposed.
+    allow_private_network=env.is_development(),
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=[
       "Accept",

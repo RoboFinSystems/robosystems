@@ -1280,7 +1280,7 @@ class EnvConfig:
       ]
     else:
       # Development
-      return [
+      origins = [
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3002",
@@ -1289,6 +1289,11 @@ class EnvConfig:
         "https://roboinvestor.ai",
         "https://robosystems.ai",
       ]
+      # Allow extra origins via env (e.g., ngrok tunnels for OAuth callbacks).
+      # Dev-only — production/staging lists are hardcoded above on purpose.
+      extra = get_secret_list_value("EXTRA_CORS_ORIGINS", "")
+      origins.extend(o for o in extra if o not in origins)
+      return origins
 
   @classmethod
   def get_lbug_cors_origins(cls) -> list[str]:

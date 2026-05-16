@@ -316,17 +316,26 @@ class OLTPLoader:
         ).delete(synchronize_session=False)
         session.flush()
 
-      # Drop element_traits before elements — the FK has no
-      # ON DELETE CASCADE, and re-syncs that previously wrote traits
-      # would otherwise hit a FK violation. Library-seeded traits are
+      # Drop element_traits and associations before elements — the FKs have
+      # no ON DELETE CASCADE, and re-syncs that previously seeded these
+      # would otherwise hit a FK violation. Library-seeded rows are
       # protected by the immutability trigger; the only rows touched
       # here are adapter-derived (created_by != 'library-seeder').
+      from robosystems.models.extensions.association import Association
+
       element_subq = session.query(Element.id).filter(
         Element.external_source == source,
         Element.connection_id == connection_id,
       )
       session.query(ElementTrait).filter(
         ElementTrait.element_id.in_(element_subq)
+      ).delete(synchronize_session=False)
+      # Associations are bidirectional (from_element_id / to_element_id);
+      # a CoA→us-gaap mapping has the CoA element on the `from` side and
+      # the us-gaap library element on the `to` side. Only need to scope
+      # by the from side since QB elements never appear as `to`.
+      session.query(Association).filter(
+        Association.from_element_id.in_(element_subq)
       ).delete(synchronize_session=False)
 
       session.query(Element).filter(
