@@ -52,7 +52,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/BalanceSheet",
       "structureName": "Balance Sheet",
       "blockType": "balance_sheet",
-      "conceptArrangementPattern": "component",
+      "conceptArrangementPattern": "set",
       "secType": "statement"
     },
     {
@@ -64,7 +64,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/IncomeStatement",
       "structureName": "Income Statement",
       "blockType": "income_statement",
-      "conceptArrangementPattern": "component",
+      "conceptArrangementPattern": "set",
       "secType": "statement"
     },
     {
@@ -76,7 +76,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CashFlowStatement",
       "structureName": "Cash Flow Statement",
       "blockType": "cash_flow_statement",
-      "conceptArrangementPattern": "component",
+      "conceptArrangementPattern": "set",
       "secType": "statement"
     },
     {
@@ -100,7 +100,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/StatementOfComprehensiveIncome",
       "structureName": "Statement of Comprehensive Income",
       "blockType": "comprehensive_income",
-      "conceptArrangementPattern": "component",
+      "conceptArrangementPattern": "set",
       "secType": "statement"
     },
     {
@@ -220,7 +220,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/DocumentAndEntityInformation",
       "structureName": "Document and Entity Information",
       "blockType": "regulatory_disclosure",
-      "conceptArrangementPattern": "hierarchy",
+      "conceptArrangementPattern": "set",
       "secType": "document"
     },
     {

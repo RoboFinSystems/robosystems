@@ -68,13 +68,20 @@ class Structure(ExtensionsBase):
       ")",
       name="check_block_type",
     ),
-    # Concept Arrangement Pattern (CAP). 8 canonical + 2 pseudo. See
+    # Concept Arrangement Pattern (CAP). 8 canonical + 5 cm.xsd
+    # text-block/detail specializations + 2 pseudo (15 total). See
     # information-block.md §3.2.1. NULL allowed for block types that
     # don't yet declare a default.
     CheckConstraint(
       "concept_arrangement IS NULL OR concept_arrangement IN ("
+      # 8 canonical CAPs
       "'set', 'roll_up', 'roll_forward', 'roll_forward_info', "
       "'adjustment', 'variance', 'arithmetic', 'text_block', "
+      # 5 cm.xsd text-block / detail specializations (Charlie encodes
+      # text-block level as the CAP itself; see Blocks PDF §1.9.1).
+      "'level1_textblock', 'level2_textblock', 'level3_textblock', "
+      "'level4_detail', 'table_equivalent_textblock', "
+      # 2 pseudo-patterns
       "'grid', 'compound_fact'"
       ")",
       name="check_concept_arrangement",
@@ -114,9 +121,19 @@ class Structure(ExtensionsBase):
   # for the canonical Concept Arrangement Pattern and Member Arrangement
   # Pattern enumerations from Charlie Hoffman's Seattle Method.
   #
-  # concept_arrangement — 8 canonical CAPs plus 2 pseudo-patterns:
-  #   set | roll_up | roll_forward | roll_forward_info | adjustment |
-  #   variance | arithmetic | text_block | grid | compound_fact.
+  # concept_arrangement — 8 canonical CAPs + 5 cm.xsd text-block /
+  # detail specializations + 2 pseudo-patterns (15 total). The
+  # specializations mirror seattlemethod/universal/cm.xsd — Charlie
+  # encodes text-block "level" as a first-class CAP value, not a
+  # separate axis (Blocks PDF §1.9.1; PROOF disclosure-mechanics).
+  #
+  #   Canonical (8):     set | roll_up | roll_forward | roll_forward_info
+  #                      | adjustment | variance | arithmetic | text_block
+  #   cm.xsd ext (5):    level1_textblock | level2_textblock |
+  #                      level3_textblock | level4_detail |
+  #                      table_equivalent_textblock
+  #   Pseudo (2):        grid | compound_fact
+  #
   # Nullable until every block type declares a default. CHECK constraint
   # below enforces the closed vocabulary.
   concept_arrangement = Column(String, nullable=True)

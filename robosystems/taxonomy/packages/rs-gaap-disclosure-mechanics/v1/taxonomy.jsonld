@@ -40,7 +40,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/BalanceSheet",
       "structureName": "BalanceSheet — Disclosure Mechanics",
       "blockType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:BalanceSheet",
@@ -55,7 +55,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/IncomeStatement",
       "structureName": "IncomeStatement — Disclosure Mechanics",
       "blockType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:IncomeStatement",
@@ -70,7 +70,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/StatementOfChangesInEquity",
       "structureName": "StatementOfChangesInEquity — Disclosure Mechanics",
       "blockType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:StatementOfChangesInEquity",
@@ -218,7 +218,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/CashFlowStatement",
       "structureName": "CashFlowStatement — Disclosure Mechanics",
       "blockType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:CashFlowStatement",
@@ -232,7 +232,7 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/StatementOfComprehensiveIncome",
       "structureName": "StatementOfComprehensiveIncome — Disclosure Mechanics",
       "blockType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:StatementOfComprehensiveIncome",

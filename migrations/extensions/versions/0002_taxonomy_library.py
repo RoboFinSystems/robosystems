@@ -223,13 +223,19 @@ _RULE_PATTERN_KIND_XOR_CHECK = (
   "(rule_pattern IS NOT NULL AND rule_check_kind IS NULL) "
   "OR (rule_pattern IS NULL AND rule_check_kind IS NOT NULL)"
 )
-# Concept Arrangement Pattern (CAP) — 8 canonical + 2 pseudo per
-# information-block.md §3.2.1. NULL allowed for block types that don't
-# yet declare a default.
+# Concept Arrangement Pattern (CAP) — 8 canonical + 5 cm.xsd
+# text-block/detail specializations + 2 pseudo (15 total) per
+# information-block.md §3.2.1. Charlie encodes text-block level as the
+# CAP itself (Blocks PDF §1.9.1; PROOF disclosure-mechanics rules
+# point disclosures at cm_LevelNTextBlock via
+# disclosure-hasConceptArrangementPattern). NULL allowed for block
+# types that don't yet declare a default.
 _CONCEPT_ARRANGEMENT_CHECK = (
   "concept_arrangement IS NULL OR concept_arrangement IN ("
   "'set', 'roll_up', 'roll_forward', 'roll_forward_info', "
   "'adjustment', 'variance', 'arithmetic', 'text_block', "
+  "'level1_textblock', 'level2_textblock', 'level3_textblock', "
+  "'level4_detail', 'table_equivalent_textblock', "
   "'grid', 'compound_fact'"
   ")"
 )
