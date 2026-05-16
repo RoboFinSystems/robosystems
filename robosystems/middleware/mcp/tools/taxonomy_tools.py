@@ -62,7 +62,7 @@ class ListMappingStructuresTool:
   that you get from here
 
 **RETURNS:**
-List of mapping structures with id, name, structure_type, taxonomy_id.
+List of mapping structures with id, name, block_type, taxonomy_id.
 Most tenants have exactly one `coa_mapping` structure ("CoA to US GAAP
 Mapping"); deployments that target multiple taxonomies (fac + rs-gaap)
 will have several.""",
@@ -84,7 +84,7 @@ will have several.""",
             {
               "id": s.id,
               "name": s.name,
-              "structure_type": s.structure_type,
+              "block_type": s.block_type,
               "taxonomy_id": s.taxonomy_id,
             }
             for s in result.structures

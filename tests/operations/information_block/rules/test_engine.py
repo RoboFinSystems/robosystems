@@ -250,7 +250,7 @@ class TestEvaluateRulesForStructure:
     )
 
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs", structure_type="schedule")
+    session.get.return_value = MagicMock(id="struct_bs", block_type="schedule")
     session.execute.return_value = _scalars()
 
     with patch(
@@ -267,7 +267,7 @@ class TestEvaluateRulesForStructure:
     )
 
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs", structure_type="schedule")
+    session.get.return_value = MagicMock(id="struct_bs", block_type="schedule")
 
     rule_lite = MagicMock()
     rule_lite.id = "rule_crash"
@@ -300,7 +300,7 @@ class TestEvaluateRulesForStructure:
     )
 
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs", structure_type="schedule")
+    session.get.return_value = MagicMock(id="struct_bs", block_type="schedule")
 
     rule_lite = MagicMock()
     rule_lite.id = "rule_eq"
@@ -341,7 +341,7 @@ class TestEvaluateRulesForStructure:
     )
 
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs", structure_type="schedule")
+    session.get.return_value = MagicMock(id="struct_bs", block_type="schedule")
     session.execute.return_value = _scalars()
 
     with patch(

@@ -213,7 +213,7 @@ class ScheduleService:
 
     structure = Structure(
       name=name,
-      structure_type="schedule",
+      block_type="schedule",
       taxonomy_id=taxonomy_id,
       concept_arrangement="roll_forward",
       artifact_mechanics=artifact_mechanics,
@@ -754,7 +754,7 @@ class ScheduleService:
           AND f.fact_scope = 'in_scope'
         LEFT JOIN best_entry be ON be.source_structure_id = s.id
         LEFT JOIN reversal r ON r.reversal_of = be.entry_id
-        WHERE s.structure_type = 'schedule'
+        WHERE s.block_type = 'schedule'
           AND s.is_active = true
         ORDER BY s.name
       """),
@@ -846,7 +846,7 @@ class ScheduleService:
     """
     # Load structure with entry template
     structure = session.get(Structure, structure_id)
-    if not structure or structure.structure_type != "schedule":
+    if not structure or structure.block_type != "schedule":
       raise ValueError(f"Schedule structure '{structure_id}' not found")
 
     template = (structure.metadata_ or {}).get("entry_template")
@@ -1276,7 +1276,7 @@ class ScheduleService:
       )
 
     structure = session.get(Structure, structure_id)
-    if not structure or structure.structure_type != "schedule":
+    if not structure or structure.block_type != "schedule":
       raise ValueError(f"Schedule structure '{structure_id}' not found")
 
     # Check there are any facts, and that new_end_date is within range

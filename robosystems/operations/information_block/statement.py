@@ -19,7 +19,7 @@ entry are the not-implemented stubs built by
 **Rendering projection.** As of Plan B (2026-04-25) the envelope
 populates ``view.rendering`` with the server-computed statement grid
 (rows + periods + validation). This replaces the legacy
-``getStatement(reportId, structureType)`` REST path: frontend
+``getStatement(reportId, blockType)`` REST path: frontend
 ``BlockView`` consumes ``envelope.view.rendering`` directly, no
 client-side rollup or hierarchy walk needed. The pure in-memory rollup
 helpers (``_build_rows``, ``_facts_to_balance_dict``, ``_natural_sign``)
@@ -172,11 +172,11 @@ def _build_statement_envelope(
     disclosure_id=disclosure_id,
     information_model=InformationModelResponse(
       concept_arrangement=structure.concept_arrangement or "roll_up",
-      member_arrangement=structure.member_arrangement or "aggregation",
+      member_arrangement=structure.member_arrangement or "whole_part",
     ),
     artifact=ArtifactResponse(
       topic=structure.description,
-      parenthetical_note=structure.parenthetical_note,
+      renderer_note=structure.renderer_note,
       template=None,
       mechanics=mechanics,
     ),

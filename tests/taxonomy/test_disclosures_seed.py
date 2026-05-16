@@ -88,15 +88,37 @@ class TestDisclosuresPackage:
     ):
       assert required in qnames, f"Primary statement {required} missing"
 
-  def test_cap_values_use_extended_vocabulary(
+  def test_cap_values_use_canonical_vocabulary(
     self, disclosures: TaxonomyPackage
   ) -> None:
-    """Phase C extends the CAP enum with `component`, `level1_textblock`,
-    and `hierarchy`. Verify those values round-trip from JSON-LD."""
+    """Vocab alignment (2026-05-15) maps the seed CAPs onto Charlie's
+    canonical enumeration. `component` and `hierarchy` collapsed to
+    `set`; `level1_textblock` retained as the cm.xsd specialization.
+    See information-block.md §3.2.1."""
     cap_values = {s.concept_arrangement for s in disclosures.structures}
-    assert "component" in cap_values
+    assert "set" in cap_values
     assert "level1_textblock" in cap_values
-    assert "hierarchy" in cap_values
+    # All values must be in the canonical 15-value CAP enumeration.
+    canonical = {
+      "set",
+      "roll_up",
+      "roll_forward",
+      "roll_forward_info",
+      "adjustment",
+      "variance",
+      "arithmetic",
+      "text_block",
+      "level1_textblock",
+      "level2_textblock",
+      "level3_textblock",
+      "level4_detail",
+      "table_equivalent_textblock",
+      "grid",
+      "compound_fact",
+    }
+    assert cap_values - {None} <= canonical, (
+      f"Non-canonical CAP values in seed: {cap_values - canonical - {None}}"
+    )
 
 
 class TestDisclosureMechanicsPackage:

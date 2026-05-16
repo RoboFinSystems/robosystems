@@ -171,7 +171,7 @@ class TestCreateLibraryTaxonomyElements:
     structure = StructureSpec(
       name="Balance Sheet",
       role_uri="http://role/bs",
-      structure_type="balance_sheet",
+      block_type="balance_sheet",
     )
     package = _make_package(structures=[structure])
     _, counts = create_library_taxonomy_elements(session, package)

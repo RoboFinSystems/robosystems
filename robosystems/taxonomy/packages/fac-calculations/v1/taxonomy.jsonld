@@ -33,8 +33,8 @@
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
-    "structureType": {
-      "@id": "https://robosystems.ai/vocab/structureType"
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
     },
     "roleUri": {
       "@id": "https://robosystems.ai/vocab/roleUri"
@@ -52,133 +52,133 @@
       "@id": "_:fac-calc-bs1",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS1",
       "structureName": "FAC BS1 \u2014 Equity = Parent + Noncontrolling",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-bs2",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS2",
       "structureName": "FAC BS2 \u2014 Assets = Liabilities + Equity",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-bs3",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS3",
       "structureName": "FAC BS3 \u2014 Assets = Current + Noncurrent (classified BS)",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-bs4",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS4",
       "structureName": "FAC BS4 \u2014 Liabilities = Current + Noncurrent (classified BS)",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-bs5",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/BS5",
       "structureName": "FAC BS5 \u2014 L+E = Liabilities + Commitments + Temp. Equity + Equity",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is1",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS1",
       "structureName": "FAC IS1 \u2014 Gross Profit = Revenues \u2212 Cost of Revenue (multi-step)",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is2",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS2",
       "structureName": "FAC IS2 \u2014 Operating Income = Gross Profit \u2212 Operating Exp. + Other Operating (multi-step)",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is3",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS3",
       "structureName": "FAC IS3 \u2014 Income Before Equity-Method Investments = Operating + Nonoperating \u2212 Interest & Debt",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is4",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS4",
       "structureName": "FAC IS4 \u2014 Income from Continuing Ops Before Tax = Before Equity-Method + Equity-Method Investments",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is5",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS5",
       "structureName": "FAC IS5 \u2014 Income from Continuing Ops After Tax = Before Tax \u2212 Income Tax Expense",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is6",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS6",
       "structureName": "FAC IS6 \u2014 Net Income = Continuing (After Tax) + Discontinued (Net of Tax)",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is7",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS7",
       "structureName": "FAC IS7 \u2014 Net Income = Parent + Noncontrolling",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is8",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS8",
       "structureName": "FAC IS8 \u2014 NI Available to Common (Basic) = Parent \u2212 Preferred Dividends & Other",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is9",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS9",
       "structureName": "FAC IS9 \u2014 Comprehensive Income = Parent + Noncontrolling",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is10",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS10",
       "structureName": "FAC IS10 \u2014 Comprehensive Income = Net Income + Other Comprehensive Income",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-is11",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/IS11",
       "structureName": "FAC IS11 \u2014 Operating Income = Revenues \u2212 Costs&Expenses + Other Operating (single-step)",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-cf1",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF1",
       "structureName": "FAC CF1 \u2014 Net Cash Flow = Operating + Investing + Financing + Exchange Gain/Loss",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-cf2",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF2",
       "structureName": "FAC CF2 \u2014 Net Cash Flows Continuing = Operating + Investing + Financing (Continuing)",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-cf3",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF3",
       "structureName": "FAC CF3 \u2014 Net Cash Flows Discontinued = Operating + Investing + Financing (Discontinued)",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-cf4",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF4",
       "structureName": "FAC CF4 \u2014 Operating Net Cash Flow = Continuing + Discontinued",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-cf5",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF5",
       "structureName": "FAC CF5 \u2014 Investing Net Cash Flow = Continuing + Discontinued",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-cf6",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-calculations/CF6",
       "structureName": "FAC CF6 \u2014 Financing Net Cash Flow = Continuing + Discontinued",
-      "structureType": "validation_rules"
+      "blockType": "validation_rules"
     },
     {
       "@id": "_:fac-calc-bs1-arc-1",

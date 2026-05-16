@@ -7,8 +7,8 @@
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
-    "structureType": {
-      "@id": "https://robosystems.ai/vocab/structureType"
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
     },
     "roleUri": {
       "@id": "https://robosystems.ai/vocab/roleUri"
@@ -31,7 +31,7 @@
   "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/disclosure-mechanics/v1/",
   "origin": "native",
   "created_at": "2026-05-10",
-  "default_structure_type": "validation_rules",
+  "default_block_type": "validation_rules",
   "description": "Disclosure Mechanics rules per rs-gaap Disclosure. Two arcrole patterns dominate: (1) reportedDisclosure-requiresDisclosure for composition (BalanceSheet → AssetsRollUp), and (2) conceptArrangementPattern-requiresConcept for concept binding (AssetsRollUp → rs-gaap:Assets). Mirrors Charlie Hoffman's seattlemethod arcrole vocabulary so a future Arelle harvest of his theory file lands into the same association rows.",
   "@graph": [
 
@@ -39,8 +39,8 @@
       "@id": "_:dm-balance-sheet",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/BalanceSheet",
       "structureName": "BalanceSheet — Disclosure Mechanics",
-      "structureType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:BalanceSheet",
@@ -54,8 +54,8 @@
       "@id": "_:dm-income-statement",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/IncomeStatement",
       "structureName": "IncomeStatement — Disclosure Mechanics",
-      "structureType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:IncomeStatement",
@@ -69,8 +69,8 @@
       "@id": "_:dm-changes-equity",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/StatementOfChangesInEquity",
       "structureName": "StatementOfChangesInEquity — Disclosure Mechanics",
-      "structureType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:StatementOfChangesInEquity",
@@ -83,7 +83,7 @@
       "@id": "_:dm-assets-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/AssetsRollUp",
       "structureName": "AssetsRollUp — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -101,7 +101,7 @@
       "@id": "_:dm-liab-equity-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/LiabilitiesAndEquityRollUp",
       "structureName": "LiabilitiesAndEquityRollUp — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -119,7 +119,7 @@
       "@id": "_:dm-current-assets-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/CurrentAssetsRollUp",
       "structureName": "CurrentAssetsRollUp — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -133,7 +133,7 @@
       "@id": "_:dm-noncurrent-assets-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/NoncurrentAssetsRollUp",
       "structureName": "NoncurrentAssetsRollUp — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -147,7 +147,7 @@
       "@id": "_:dm-current-liabilities-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/CurrentLiabilitiesRollUp",
       "structureName": "CurrentLiabilitiesRollUp — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -161,7 +161,7 @@
       "@id": "_:dm-noncurrent-liabilities-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/NoncurrentLiabilitiesRollUp",
       "structureName": "NoncurrentLiabilitiesRollUp — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -175,7 +175,7 @@
       "@id": "_:dm-revenues-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/RevenuesRollUp",
       "structureName": "RevenuesRollUp — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -189,7 +189,7 @@
       "@id": "_:dm-operating-expenses-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/OperatingExpensesRollUp",
       "structureName": "OperatingExpensesRollUp — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -203,7 +203,7 @@
       "@id": "_:dm-equity-rollforward",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/EquityRollForward",
       "structureName": "EquityRollForward — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_forward"
     },
     {
@@ -217,8 +217,8 @@
       "@id": "_:dm-cash-flow",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/CashFlowStatement",
       "structureName": "CashFlowStatement — Disclosure Mechanics",
-      "structureType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:CashFlowStatement",
@@ -231,8 +231,8 @@
       "@id": "_:dm-comprehensive-income",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/StatementOfComprehensiveIncome",
       "structureName": "StatementOfComprehensiveIncome — Disclosure Mechanics",
-      "structureType": "validation_rules",
-      "conceptArrangementPattern": "component"
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "set"
     },
     {
       "@id": "disclosures:StatementOfComprehensiveIncome",
@@ -245,7 +245,7 @@
       "@id": "_:dm-long-term-debt-maturities",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/LongTermDebtMaturities",
       "structureName": "LongTermDebtMaturities — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up"
     },
     {
@@ -259,7 +259,7 @@
       "@id": "_:dm-goodwill-rollforward",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/GoodwillRollForward",
       "structureName": "GoodwillRollForward — Disclosure Mechanics",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_forward"
     },
     {

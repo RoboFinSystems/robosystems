@@ -65,7 +65,22 @@ RULE_PATTERN_VALUES: frozenset[str] = frozenset(
     "LessThan",
     "RollForward",
     "RollUp",
+    "SumEquals",
     "Variance",
+  }
+)
+# Model-structure check kinds — walked over the association graph rather
+# than evaluated over fact values. Disjoint from RULE_PATTERN_VALUES; the
+# Rule.rule_pattern / Rule.rule_check_kind XOR CHECK enforces exactly one
+# is populated per row.
+RULE_CHECK_KIND_VALUES: frozenset[str] = frozenset(
+  {
+    "LeafHasClassification",
+    "LibraryOriginImmutability",
+    "NoCycles",
+    "NoOrphanArcs",
+    "ParentBeforeChild",
+    "UniqueQNameInTaxonomy",
   }
 )
 
@@ -606,15 +621,15 @@ def _extract_rules(graph: Graph) -> list[RuleSpec]:
 
 
 def _extract_structures(
-  graph: Graph, default_structure_type: str | None = None
+  graph: Graph, default_block_type: str | None = None
 ) -> list[StructureSpec]:
   """Extract extended link roles as structures.
 
-  Resolution order for ``structure_type``:
+  Resolution order for ``block_type``:
 
-  1. Explicit ``structureType`` on the role node — authoritative;
+  1. Explicit ``blockType`` on the role node — authoritative;
      used by presentation packages that carry per-structure types.
-  2. ``default_structure_type`` from the package — set by mapping /
+  2. ``default_block_type`` from the package — set by mapping /
      rules / disclosure packages to override the role-uri name
      heuristic that would otherwise mistake (e.g.) a fac-to-rs-gaap
      crosswalk role for a balance_sheet just because the role URI
@@ -627,7 +642,7 @@ def _extract_structures(
   structures: list[StructureSpec] = []
   role_pred = URIRef(f"{RS_NS}roleUri")
   name_pred = URIRef(f"{RS_NS}structureName")
-  type_pred = URIRef(f"{RS_NS}structureType")
+  type_pred = URIRef(f"{RS_NS}blockType")
   cap_pred = URIRef(f"{RS_NS}conceptArrangementPattern")
   for subject, role_uri in graph.subject_objects(role_pred):
     names = list(graph.objects(subject, name_pred))
@@ -635,8 +650,8 @@ def _extract_structures(
     explicit_types = list(graph.objects(subject, type_pred))
     if explicit_types:
       stype = str(explicit_types[0])
-    elif default_structure_type is not None:
-      stype = default_structure_type
+    elif default_block_type is not None:
+      stype = default_block_type
     else:
       role_str = str(role_uri).lower()
       if "balancesheet" in role_str or "/bs-" in role_str or "/bs/" in role_str:
@@ -656,7 +671,7 @@ def _extract_structures(
         stype = "custom"
 
     # Concept Arrangement Pattern: explicit field wins; otherwise default
-    # by structure_type.
+    # by block_type.
     explicit_caps = list(graph.objects(subject, cap_pred))
     if explicit_caps:
       cap: str | None = str(explicit_caps[0])
@@ -667,15 +682,15 @@ def _extract_structures(
       StructureSpec(
         name=name,
         role_uri=str(role_uri),
-        structure_type=stype,
+        block_type=stype,
         concept_arrangement=cap,
       )
     )
   return structures
 
 
-def _default_concept_arrangement(structure_type: str) -> str | None:
-  """Default Concept Arrangement Pattern per structure_type when seed
+def _default_concept_arrangement(block_type: str) -> str | None:
+  """Default Concept Arrangement Pattern per block_type when seed
   doesn't declare one explicitly. Charlie's vocabulary."""
   return {
     "income_statement": "arithmetic",
@@ -683,7 +698,7 @@ def _default_concept_arrangement(structure_type: str) -> str | None:
     "cash_flow_statement": "arithmetic",
     "equity_statement": "roll_forward",
     "validation_rules": "arithmetic",
-  }.get(structure_type)
+  }.get(block_type)
 
 
 def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
@@ -705,7 +720,7 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
   namespace_uri = doc.get("namespace_uri", "")
   description = doc.get("description")
   taxonomy_type = doc.get("taxonomy_type", "reporting_standard")
-  default_structure_type = doc.get("default_structure_type")
+  default_block_type = doc.get("default_block_type")
   name = f"{standard} {version}"
 
   # Parse with rdflib — it handles the @context expansion
@@ -735,7 +750,7 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
         elements.append(element)
 
   associations = _extract_associations(graph)
-  structures = _extract_structures(graph, default_structure_type=default_structure_type)
+  structures = _extract_structures(graph, default_block_type=default_block_type)
   trait_assignments = _extract_trait_assignments(graph)
   rules = _extract_rules(graph)
 
@@ -769,7 +784,7 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     trait_assignments=trait_assignments,
     rules=rules,
     taxonomy_type=taxonomy_type,
-    default_structure_type=default_structure_type,
+    default_block_type=default_block_type,
     is_shared=True,
     description=description,
   )

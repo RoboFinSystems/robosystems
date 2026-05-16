@@ -133,7 +133,7 @@ def _structure_to_response(row: Structure) -> StructureResponse:
     id=row.id,
     name=row.name,
     description=row.description,
-    structure_type=row.structure_type,
+    block_type=row.block_type,
     taxonomy_id=row.taxonomy_id,
     is_active=row.is_active,
   )
@@ -178,7 +178,7 @@ def create_structure(
     id=generate_prefixed_ulid("struct"),
     name=body.name,
     description=body.description,
-    structure_type=body.structure_type,
+    block_type=body.block_type,
     taxonomy_id=body.taxonomy_id,
     created_by=created_by,
   )
@@ -377,7 +377,7 @@ def update_structure(
   (``create-taxonomy-block`` / ``update-taxonomy-block``); this is
   invoked indirectly by those operations.
 
-  `structure_type` and `taxonomy_id` are immutable.
+  `block_type` and `taxonomy_id` are immutable.
   Raises `StructureNotFoundError` if the structure does not exist.
   """
   structure = session.execute(

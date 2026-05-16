@@ -21,7 +21,7 @@ def _make_structure(
 ) -> MagicMock:
   structure = MagicMock()
   structure.id = "struct_schedule"
-  structure.structure_type = "schedule"
+  structure.block_type = "schedule"
   structure.artifact_mechanics = {
     "schedule_metadata": {
       "original_amount": original_amount,

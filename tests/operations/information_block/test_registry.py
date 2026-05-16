@@ -95,7 +95,7 @@ class TestStatementRegistration:
     assert entry.category == "Reporting"
     assert entry.construction_mode == "compositional"
     assert entry.concept_arrangement_default == "roll_up"
-    assert entry.member_arrangement_default == "aggregation"
+    assert entry.member_arrangement_default == "whole_part"
     assert entry.mechanics_schema is StatementMechanics
     # All four statement block types surface on the library sentinel
     # because their Structures live in public.structures.

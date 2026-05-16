@@ -99,7 +99,7 @@ class TestUniqueness:
     assert any(i.code == "duplicate_element_qname" for i in issues)
 
   def test_duplicate_structure_name_rejected(self) -> None:
-    s = TaxonomyBlockStructureRequest(name="main", structure_type="chart_of_accounts")
+    s = TaxonomyBlockStructureRequest(name="main", block_type="chart_of_accounts")
     payload = _basic_coa(structures=[s, s.model_copy()])
     issues = validate_create_envelope(payload, _session_empty())
     assert any(i.code == "duplicate_structure_name" for i in issues)
@@ -118,7 +118,7 @@ class TestStructuralIntegrity:
       for n in ("A", "B", "C")
     ]
     structures = [
-      TaxonomyBlockStructureRequest(name="main", structure_type="chart_of_accounts")
+      TaxonomyBlockStructureRequest(name="main", block_type="chart_of_accounts")
     ]
     associations = [
       TaxonomyBlockAssociationRequest(
@@ -159,7 +159,7 @@ class TestStructuralIntegrity:
       for n in ("A", "B", "C")
     ]
     structures = [
-      TaxonomyBlockStructureRequest(name="main", structure_type="chart_of_accounts")
+      TaxonomyBlockStructureRequest(name="main", block_type="chart_of_accounts")
     ]
     associations = [
       TaxonomyBlockAssociationRequest(

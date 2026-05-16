@@ -2,7 +2,7 @@
 
 Synchronous platform-DB update. Validates the target Style is a
 library- or customer-authored Structure with
-``structure_type='reporting_style'`` and has a complete composition
+``block_type='reporting_style'`` and has a complete composition
 (one Network per required statement_type) in the graph's tenant
 schema. Then flips ``graphs.reporting_style_id``.
 
@@ -47,7 +47,7 @@ async def change_reporting_style_cmd(
       graph_id: Target graph (path parameter).
       new_reporting_style_id: Structure id of the target Style — must
           exist in the graph's tenant extensions schema with
-          ``structure_type='reporting_style'`` and have a complete
+          ``block_type='reporting_style'`` and have a complete
           composition.
       current_user: Authenticated caller. Must be an organization
           owner — the Reporting Style governs every render the org
@@ -63,7 +63,7 @@ async def change_reporting_style_cmd(
       HTTPException 403: caller is not an org member, or not an owner.
       HTTPException 404: graph not found.
       HTTPException 422: target Style not found in tenant, has wrong
-          structure_type, or has an incomplete composition.
+          block_type, or has an incomplete composition.
   """
   from robosystems.db.extensions import extensions_session
   from robosystems.models.core import OrgRole, OrgUser
@@ -108,7 +108,7 @@ async def change_reporting_style_cmd(
     row = ext.execute(
       text(
         """
-        SELECT id, name, structure_type, is_active
+        SELECT id, name, block_type, is_active
         FROM structures
         WHERE id = :sid
         """
@@ -126,13 +126,13 @@ async def change_reporting_style_cmd(
     # Accept legacy 'custom' rows so existing tenants whose Style rows
     # weren't promoted by migration 0008 (immutability trigger leaves
     # tenant copies alone) can still be selected. The picker doesn't
-    # filter on structure_type either.
-    if row.structure_type not in ("reporting_style", "custom"):
+    # filter on block_type either.
+    if row.block_type not in ("reporting_style", "custom"):
       raise HTTPException(
         status_code=422,
         detail=(
-          f"Structure {new_reporting_style_id!r} has structure_type="
-          f"{row.structure_type!r}; expected 'reporting_style' "
+          f"Structure {new_reporting_style_id!r} has block_type="
+          f"{row.block_type!r}; expected 'reporting_style' "
           f"(or 'custom' for legacy tenants whose Style rows weren't "
           f"promoted by migration 0008)."
         ),

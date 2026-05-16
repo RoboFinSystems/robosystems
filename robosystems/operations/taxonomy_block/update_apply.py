@@ -132,7 +132,7 @@ def apply_structures_to_add(
     structure = Structure(
       name=req.name,
       description=req.description,
-      structure_type=req.structure_type,
+      block_type=req.block_type,
       taxonomy_id=taxonomy.id,
       is_active=True,
       metadata_=dict(req.metadata),

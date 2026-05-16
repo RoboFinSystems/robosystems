@@ -3,9 +3,13 @@
 Covers the three association-level categories attached to Associations via
 `association_classifications`:
 
-- `concept_arrangement` — Charlie's FAC patterns (RollUp, RollForward,
-  Adjustment, Variance, Set, MemberAggregation, Textblock, …)
-- `member_arrangement`  — Aggregation / Nonaggregation
+- `concept_arrangement` — Charlie's 8 canonical Concept Arrangement
+  Patterns + 2 pseudo (Set, RollUp, RollForward, RollForwardInfo,
+  Adjustment, Variance, Arithmetic, TextBlock + Grid, CompoundFact per
+  information-block.md §3.2.1)
+- `member_arrangement`  — Charlie's 5-pattern aggregation spectrum:
+  IsA / WholePart / NestedWholePart / TwoDimensionAggregation /
+  ComplexAggregatingWholePart (information-block.md §3.2.2)
 - `named_disclosure`    — SEC disclosure mechanics catalog (AssetsRollUp,
   CashFlowStatement, …)
 

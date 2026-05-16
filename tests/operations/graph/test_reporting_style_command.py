@@ -151,13 +151,13 @@ class TestChangeReportingStyleCmd:
     assert "not found" in ctx.value.detail.lower()
     db.commit.assert_not_called()
 
-  async def test_wrong_structure_type_422(self):
+  async def test_wrong_block_type_422(self):
     db = MagicMock()
     user = _make_user()
     row = MagicMock()
     row.id = "wrong-type-id"
     row.name = "Some Random Structure"
-    row.structure_type = "balance_sheet"  # not a Reporting Style
+    row.block_type = "balance_sheet"  # not a Reporting Style
     row.is_active = True
     ext_cm = _make_ext_session(style_row=row, composed_types=None)
     with (
@@ -168,7 +168,7 @@ class TestChangeReportingStyleCmd:
       with pytest.raises(HTTPException) as ctx:
         await change_reporting_style_cmd(GRAPH_ID, "wrong-type-id", user, db)
     assert ctx.value.status_code == 422
-    assert "structure_type" in ctx.value.detail
+    assert "block_type" in ctx.value.detail
     # Legacy hint mentioned so tenants whose Style rows weren't
     # promoted by migration 0008 know 'custom' is also accepted.
     assert "custom" in ctx.value.detail
@@ -180,7 +180,7 @@ class TestChangeReportingStyleCmd:
     row = MagicMock()
     row.id = SMALL_PRIVATE_STYLE_ID
     row.name = "Small Private Company Style"
-    row.structure_type = "reporting_style"
+    row.block_type = "reporting_style"
     row.is_active = False
     ext_cm = _make_ext_session(style_row=row, composed_types=None)
     with (
@@ -201,7 +201,7 @@ class TestChangeReportingStyleCmd:
     row = MagicMock()
     row.id = SMALL_PRIVATE_STYLE_ID
     row.name = "Small Private Company Style"
-    row.structure_type = "reporting_style"
+    row.block_type = "reporting_style"
     row.is_active = True
     # Only BS + IS composed; CF + SE missing.
     ext_cm = _make_ext_session(
@@ -226,7 +226,7 @@ class TestChangeReportingStyleCmd:
     row = MagicMock()
     row.id = SMALL_PRIVATE_STYLE_ID
     row.name = "Small Private Company Style"
-    row.structure_type = "reporting_style"
+    row.block_type = "reporting_style"
     row.is_active = True
     ext_cm = _make_ext_session(
       style_row=row, composed_types=list(_REQUIRED_STATEMENT_TYPES)
@@ -248,17 +248,17 @@ class TestChangeReportingStyleCmd:
     db.commit.assert_called_once()
     db.refresh.assert_called_once_with(graph)
 
-  async def test_legacy_custom_structure_type_accepted(self):
+  async def test_legacy_custom_block_type_accepted(self):
     """Existing tenants whose 3 Style rows weren't promoted by 0008
     (immutability trigger leaves tenant copies as 'custom') can still
-    be selected — the picker doesn't filter on structure_type either."""
+    be selected — the picker doesn't filter on block_type either."""
     db = MagicMock()
     user = _make_user()
     graph = _make_graph(DEFAULT_STYLE_ID)
     row = MagicMock()
     row.id = SMALL_PRIVATE_STYLE_ID
     row.name = "Small Private Company Style — Composition"
-    row.structure_type = "custom"  # legacy tenant row
+    row.block_type = "custom"  # legacy tenant row
     row.is_active = True
     ext_cm = _make_ext_session(
       style_row=row, composed_types=list(_REQUIRED_STATEMENT_TYPES)

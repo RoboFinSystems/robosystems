@@ -109,7 +109,7 @@ def get_account_rollups(
     mapping = session.execute(
       select(Structure)
       .where(
-        Structure.structure_type == "coa_mapping",
+        Structure.block_type == "coa_mapping",
         Structure.is_active.is_(True),
       )
       .limit(1)

@@ -524,7 +524,7 @@ def get_element_arcs(
     .where(
       (Taxonomy.taxonomy_type == "mapping")
       | (Taxonomy.taxonomy_type == "classification-assignment")
-      | (Structure.structure_type == "coa_mapping")
+      | (Structure.block_type == "coa_mapping")
     )
   )
 

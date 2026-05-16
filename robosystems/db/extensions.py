@@ -257,9 +257,9 @@ def _widen_library_checks(conn, schema: str) -> None:
   # (``migrations/extensions/versions/0002_taxonomy_library.py``).
   # ``copy_library_into_tenant`` mirrors rows from ``public.structures``
   # — a tenant-side CHECK narrower than public's silently fails graph
-  # creation when the library introduces a new structure_type value.
-  widened_structure_type = (
-    "structure_type IN ("
+  # creation when the library introduces a new block_type value.
+  widened_block_type = (
+    "block_type IN ("
     # Renderable financial-statement presentations
     "'income_statement', 'balance_sheet', "
     "'cash_flow_statement', 'equity_statement', "
@@ -271,7 +271,7 @@ def _widen_library_checks(conn, schema: str) -> None:
     # Reference-taxonomy structure kinds (XBRL network roles distinct
     # from presentation): formal calculation rules, named SEC/regulatory
     # disclosures, crosswalks between taxonomies.
-    "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+    "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
     # Reporting Style — the bundle a company picks (Phase 1 of §3.2);
     # composes Networks per statement_type via reporting_style_networks.
     "'reporting_style', "
@@ -315,14 +315,13 @@ def _widen_library_checks(conn, schema: str) -> None:
   )
   conn.execute(
     text(
-      f'ALTER TABLE "{schema}".structures '
-      f"DROP CONSTRAINT IF EXISTS check_structure_type"
+      f'ALTER TABLE "{schema}".structures DROP CONSTRAINT IF EXISTS check_block_type'
     )
   )
   conn.execute(
     text(
       f'ALTER TABLE "{schema}".structures '
-      f"ADD CONSTRAINT check_structure_type CHECK ({widened_structure_type})"
+      f"ADD CONSTRAINT check_block_type CHECK ({widened_block_type})"
     )
   )
 

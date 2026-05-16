@@ -595,13 +595,13 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     taxonomy_id: str | None = None,
-    structure_type: str | None = None,
+    block_type: str | None = None,
   ) -> StructureList | None:
     """List active structures."""
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.list_structures(
-          session, taxonomy_id=taxonomy_id, structure_type=structure_type
+          session, taxonomy_id=taxonomy_id, block_type=block_type
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -797,9 +797,9 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     report_id: str,
-    structure_type: str,
+    block_type: str,
   ) -> Statement | None:
-    """Rendered financial statement for a report + structure_type."""
+    """Rendered financial statement for a report + block_type."""
     graph_id = require_graph_id(info)
     # Reporting Style is pre-loaded onto the context at request build
     # time (graphql/context.py) so this resolver doesn't reopen a
@@ -811,7 +811,7 @@ class LedgerQuery:
           session,
           graph_id,
           report_id,
-          structure_type,
+          block_type,
           reporting_style_id=reporting_style_id,
         )
     except reads_reports.StatementStructureNotFoundError:

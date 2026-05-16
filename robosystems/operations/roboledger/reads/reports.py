@@ -48,7 +48,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
 )
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
 
-VALID_STRUCTURE_TYPES = {
+VALID_BLOCK_TYPES = {
   "income_statement",
   "balance_sheet",
   "equity_statement",
@@ -81,7 +81,7 @@ ANALYSIS_STATEMENT_TYPES: tuple[str, ...] = (
 
 
 class StatementStructureNotFoundError(LookupError):
-  """Raised when a statement's structure_type isn't in the report's taxonomy."""
+  """Raised when a statement's block_type isn't in the report's taxonomy."""
 
 
 class CoaMappingNotFoundError(LookupError):
@@ -118,7 +118,7 @@ def generate_adhoc_private_statement(
   mapping workflow yet — the caller translates to a user-facing tip.
   """
   mapping = (
-    session.query(Structure).filter(Structure.structure_type == "coa_mapping").first()
+    session.query(Structure).filter(Structure.block_type == "coa_mapping").first()
   )
   if mapping is None:
     raise CoaMappingNotFoundError(
@@ -143,7 +143,7 @@ def generate_adhoc_private_statement(
   grid = render_structure_view(
     session=session,
     facts=facts.facts,
-    structure_type=statement_type,
+    block_type=statement_type,
     periods=periods,
     reporting_style_id=reporting_style_id,
   )
@@ -195,17 +195,16 @@ def load_structures(session: Session, taxonomy_id: str) -> list[StructureSummary
   """Load available (statement-ish) structures for a taxonomy."""
   result = session.execute(
     text("""
-      SELECT id, name, structure_type FROM structures
+      SELECT id, name, block_type FROM structures
       WHERE taxonomy_id = :taxonomy_id
-        AND structure_type NOT IN ('chart_of_accounts', 'coa_mapping')
+        AND block_type NOT IN ('chart_of_accounts', 'coa_mapping')
         AND is_active = true
-      ORDER BY structure_type
+      ORDER BY block_type
     """),
     {"taxonomy_id": taxonomy_id},
   )
   return [
-    StructureSummary(id=r.id, name=r.name, structure_type=r.structure_type)
-    for r in result
+    StructureSummary(id=r.id, name=r.name, block_type=r.block_type) for r in result
   ]
 
 
@@ -299,7 +298,7 @@ def get_report(session: Session, report_id: str) -> ReportResponse | None:
 # Display order for the package mode — drives ``ReportPackageItem.display_order``
 # when a Structure has no explicit ordering metadata of its own. New
 # statement-family block types should be added here as they're seeded.
-_STRUCTURE_TYPE_DISPLAY_ORDER: dict[str, int] = {
+_BLOCK_TYPE_DISPLAY_ORDER: dict[str, int] = {
   "balance_sheet": 1,
   "income_statement": 2,
   "cash_flow_statement": 3,
@@ -321,7 +320,7 @@ def get_report_package(
   the package without per-section refetches.
 
   Returns ``None`` when the Report doesn't exist. Items are ordered by
-  ``Structure.structure_type`` (BS → IS → CF → Equity → Schedule) with
+  ``Structure.block_type`` (BS → IS → CF → Equity → Schedule) with
   ties broken by ``fact_set.created_at``.
   """
   from robosystems.models.api.extensions.report_package import (
@@ -359,12 +358,12 @@ def get_report_package(
       # skipped — they're a real data row but the package mode has no
       # way to render them.
       continue
-    structure_type = structure.structure_type if structure is not None else None
+    block_type = structure.block_type if structure is not None else None
     items.append(
       ReportPackageItem(
         fact_set_id=fs.id,
         structure_id=fs.structure_id,
-        display_order=_STRUCTURE_TYPE_DISPLAY_ORDER.get(structure_type or "", 50),
+        display_order=_BLOCK_TYPE_DISPLAY_ORDER.get(block_type or "", 50),
         block=envelope,
       )
     )
@@ -401,13 +400,13 @@ def get_statement(
   session: Session,
   graph_id: str,
   report_id: str,
-  structure_type: str,
+  block_type: str,
   reporting_style_id: str | None = None,
 ) -> StatementResponse | None:
-  """Render a financial statement for a report + structure_type.
+  """Render a financial statement for a report + block_type.
 
   Returns `None` when the report itself doesn't exist. Raises
-  `StatementStructureNotFoundError` when the structure_type isn't in
+  `StatementStructureNotFoundError` when the block_type isn't in
   the report's taxonomy. The caller translates both into HTTP 404s.
 
   ``reporting_style_id`` resolves the graph's active Style (§3.2 Phase 1).
@@ -417,10 +416,10 @@ def get_statement(
   round-trip; if omitted, falls back to ``load_graph_reporting_style``
   which opens its own platform session.
   """
-  if structure_type not in VALID_STRUCTURE_TYPES:
+  if block_type not in VALID_BLOCK_TYPES:
     raise ValueError(
-      f"Invalid structure_type '{structure_type}'. "
-      f"Must be one of: {', '.join(sorted(VALID_STRUCTURE_TYPES))}"
+      f"Invalid block_type '{block_type}'. "
+      f"Must be one of: {', '.join(sorted(VALID_BLOCK_TYPES))}"
     )
 
   report_def = session.get(Report, report_id)
@@ -439,7 +438,7 @@ def get_statement(
       report_id=report_def.id,
       structure_id="",
       structure_name="",
-      structure_type=structure_type,
+      block_type=block_type,
     )
 
   # Classification (FASB elementsOfFinancialStatements trait) is resolved via
@@ -489,7 +488,7 @@ def get_statement(
       report_id=report_def.id,
       structure_id="",
       structure_name="",
-      structure_type=structure_type,
+      block_type=block_type,
       periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in periods],
     )
 
@@ -502,15 +501,15 @@ def get_statement(
   grid = render_structure_view(
     session=session,
     facts=facts,
-    structure_type=structure_type,
+    block_type=block_type,
     periods=periods,
     reporting_style_id=reporting_style_id,
   )
 
   if not grid.structure_id:
-    raise StatementStructureNotFoundError(structure_type)
+    raise StatementStructureNotFoundError(block_type)
 
-  validation = validate_report(structure_type, grid.rows)
+  validation = validate_report(block_type, grid.rows)
 
   rows = [
     FactRowResponse(
@@ -540,7 +539,7 @@ def get_statement(
     report_id=report_def.id,
     structure_id=grid.structure_id,
     structure_name=grid.structure_name,
-    structure_type=structure_type,
+    block_type=block_type,
     periods=[PeriodSpec(start=p.start, end=p.end, label=p.label) for p in grid.periods],
     rows=rows,
     validation=validation_resp,

@@ -168,7 +168,7 @@ class Artifact:
   """The block's producible-artifact envelope (topic, template, mechanics)."""
 
   topic: str | None
-  parenthetical_note: str | None
+  renderer_note: str | None
   template: MechanicsPayload | None
   mechanics: MechanicsPayload
 
@@ -176,7 +176,7 @@ class Artifact:
   def from_pydantic(cls, artifact: PydanticArtifact) -> Artifact:
     return cls(
       topic=artifact.topic,
-      parenthetical_note=artifact.parenthetical_note,
+      renderer_note=artifact.renderer_note,
       template=artifact.template,
       # Pydantic's discriminated union dumps cleanly to a JSON object
       # including the `kind` tag; the client can branch on that.

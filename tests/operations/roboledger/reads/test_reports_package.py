@@ -4,7 +4,7 @@ Verifies the read path that drives ``/reports/[id]`` in package mode:
 load Report metadata, look up its FactSets via ``fact_sets.report_id``,
 rehydrate each as an ``InformationBlockEnvelope`` via
 ``get_information_block_for_fact_set``, and order items by
-``Structure.structure_type`` (BS → IS → CF → Equity → Schedule).
+``Structure.block_type`` (BS → IS → CF → Equity → Schedule).
 """
 
 from __future__ import annotations
@@ -56,10 +56,10 @@ def _make_fact_set(*, fs_id: str, structure_id: str) -> MagicMock:
   return fs
 
 
-def _make_structure(*, structure_id: str, structure_type: str) -> MagicMock:
+def _make_structure(*, structure_id: str, block_type: str) -> MagicMock:
   s = MagicMock()
   s.id = structure_id
-  s.structure_type = structure_type
+  s.block_type = block_type
   return s
 
 
@@ -93,7 +93,7 @@ def test_returns_none_when_report_missing() -> None:
     assert get_report_package(session, "rpt_missing") is None
 
 
-def test_assembles_items_ordered_by_structure_type() -> None:
+def test_assembles_items_ordered_by_block_type() -> None:
   """IS comes back from the SQL query before BS; the result still puts
   BS (display_order=1) ahead of IS (display_order=2)."""
   session = MagicMock()
@@ -101,10 +101,8 @@ def test_assembles_items_ordered_by_structure_type() -> None:
 
   fs_is = _make_fact_set(fs_id="fs_is", structure_id="struct_is")
   fs_bs = _make_fact_set(fs_id="fs_bs", structure_id="struct_bs")
-  struct_is = _make_structure(
-    structure_id="struct_is", structure_type="income_statement"
-  )
-  struct_bs = _make_structure(structure_id="struct_bs", structure_type="balance_sheet")
+  struct_is = _make_structure(structure_id="struct_is", block_type="income_statement")
+  struct_bs = _make_structure(structure_id="struct_bs", block_type="balance_sheet")
 
   # Return order: IS first, BS second — to prove the read sorts deterministically.
   session.execute.return_value.all.return_value = [
@@ -140,10 +138,8 @@ def test_skips_fact_sets_with_unregistered_block_types() -> None:
 
   fs_known = _make_fact_set(fs_id="fs_bs", structure_id="struct_bs")
   fs_unknown = _make_fact_set(fs_id="fs_x", structure_id="struct_x")
-  struct_bs = _make_structure(structure_id="struct_bs", structure_type="balance_sheet")
-  struct_x = _make_structure(
-    structure_id="struct_x", structure_type="chart_of_accounts"
-  )
+  struct_bs = _make_structure(structure_id="struct_bs", block_type="balance_sheet")
+  struct_x = _make_structure(structure_id="struct_x", block_type="chart_of_accounts")
   session.execute.return_value.all.return_value = [
     (fs_known, struct_bs),
     (fs_unknown, struct_x),
@@ -186,14 +182,14 @@ def test_carries_filing_lifecycle_fields_through() -> None:
   assert pkg.items == []
 
 
-def test_unknown_structure_type_falls_back_to_default_order() -> None:
-  """Custom / future structure_types not in the display-order map land at the
+def test_unknown_block_type_falls_back_to_default_order() -> None:
+  """Custom / future block_types not in the display-order map land at the
   fallback slot (50) — between statements (1-4) and schedules (100)."""
   session = MagicMock()
   session.get.return_value = _make_report_def()
 
   fs = _make_fact_set(fs_id="fs_custom", structure_id="struct_custom")
-  structure = _make_structure(structure_id="struct_custom", structure_type="custom")
+  structure = _make_structure(structure_id="struct_custom", block_type="custom")
   session.execute.return_value.all.return_value = [(fs, structure)]
 
   envelope = _envelope("struct_custom", "custom")

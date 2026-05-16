@@ -154,7 +154,7 @@ def validate_update_envelope(
     virtual_structures.append(
       TaxonomyBlockStructureRequest(
         name=patch.name if patch and patch.name is not None else str(s.name),
-        structure_type=str(s.structure_type),
+        block_type=str(s.block_type),
         description=(
           patch.description
           if patch and patch.description is not None

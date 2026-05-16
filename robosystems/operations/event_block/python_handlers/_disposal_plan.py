@@ -62,7 +62,7 @@ def compute_disposal_plan(
   structure = session.execute(
     select(Structure).where(
       Structure.id == structure_id,
-      Structure.structure_type == "schedule",
+      Structure.block_type == "schedule",
     )
   ).scalar_one_or_none()
   if structure is None:

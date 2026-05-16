@@ -32,7 +32,7 @@ class TestEmitAutoRules:
     emit_auto_rules(session, taxonomy, [], created_by="usr_1")
 
     added = [c.args[0] for c in session.add.call_args_list]
-    patterns = {r.rule_pattern for r in added}
+    patterns = {r.rule_check_kind for r in added}
     assert patterns == {"UniqueQNameInTaxonomy"}
     session.flush.assert_called_once()
 
@@ -43,7 +43,7 @@ class TestEmitAutoRules:
     emit_auto_rules(session, taxonomy, [s1], created_by="usr_1")
 
     added = [c.args[0] for c in session.add.call_args_list]
-    patterns = {r.rule_pattern for r in added}
+    patterns = {r.rule_check_kind for r in added}
     assert {"NoCycles", "NoOrphanArcs", "ParentBeforeChild"}.issubset(patterns)
 
   def test_two_structures_emit_six_structure_rules(self) -> None:
@@ -65,7 +65,7 @@ class TestEmitAutoRules:
     emit_auto_rules(session, taxonomy, [], created_by="usr_1")
 
     added = [c.args[0] for c in session.add.call_args_list]
-    patterns = {r.rule_pattern for r in added}
+    patterns = {r.rule_check_kind for r in added}
     assert "LeafHasClassification" in patterns
 
   def test_non_coa_does_not_emit_leaf_has_classification(self) -> None:
@@ -74,7 +74,7 @@ class TestEmitAutoRules:
     emit_auto_rules(session, taxonomy, [], created_by="usr_1")
 
     added = [c.args[0] for c in session.add.call_args_list]
-    patterns = {r.rule_pattern for r in added}
+    patterns = {r.rule_check_kind for r in added}
     assert "LeafHasClassification" not in patterns
 
   def test_extend_mode_emits_library_origin_immutability(self) -> None:
@@ -83,7 +83,7 @@ class TestEmitAutoRules:
     emit_auto_rules(session, taxonomy, [], created_by="usr_1")
 
     added = [c.args[0] for c in session.add.call_args_list]
-    patterns = {r.rule_pattern for r in added}
+    patterns = {r.rule_check_kind for r in added}
     assert "LibraryOriginImmutability" in patterns
 
   def test_declarative_mode_does_not_emit_library_origin_immutability(self) -> None:
@@ -92,7 +92,7 @@ class TestEmitAutoRules:
     emit_auto_rules(session, taxonomy, [], created_by="usr_1")
 
     added = [c.args[0] for c in session.add.call_args_list]
-    patterns = {r.rule_pattern for r in added}
+    patterns = {r.rule_check_kind for r in added}
     assert "LibraryOriginImmutability" not in patterns
 
   def test_all_auto_rules_carry_auto_origin(self) -> None:
@@ -106,6 +106,22 @@ class TestEmitAutoRules:
     )
     added = [c.args[0] for c in session.add.call_args_list]
     assert all(r.rule_origin == "auto" for r in added)
+
+  def test_all_auto_rules_populate_check_kind_not_pattern(self) -> None:
+    """XOR contract: all auto-rules are structural (rule_check_kind set,
+    rule_pattern is None). See information-block.md §5.2.2 + the
+    check_rule_pattern_kind_xor CHECK constraint on the rules table."""
+    session = MagicMock()
+    taxonomy = _fake_taxonomy("chart_of_accounts", parent_taxonomy_id="lib_1")
+    emit_auto_rules(
+      session,
+      taxonomy,
+      [_fake_structure("s1")],
+      created_by="usr_1",
+    )
+    added = [c.args[0] for c in session.add.call_args_list]
+    assert all(r.rule_pattern is None for r in added)
+    assert all(r.rule_check_kind is not None for r in added)
 
   def test_taxonomy_level_rules_use_taxonomy_target_kind(self) -> None:
     session = MagicMock()

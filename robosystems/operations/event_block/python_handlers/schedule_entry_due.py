@@ -107,7 +107,7 @@ def dispatch_preview(
   from robosystems.models.extensions import Structure
 
   structure = session.get(Structure, metadata.schedule_id)
-  if structure is None or structure.structure_type != "schedule":
+  if structure is None or structure.block_type != "schedule":
     return HandlerPreview(
       would_succeed=False,
       planned_entries=[],

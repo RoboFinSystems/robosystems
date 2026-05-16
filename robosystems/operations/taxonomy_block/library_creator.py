@@ -270,7 +270,7 @@ def create_library_taxonomy_elements(
         id=struct_id,
         name=structure.name,
         description=None,
-        structure_type=structure.structure_type,
+        block_type=structure.block_type,
         concept_arrangement=structure.concept_arrangement,
         taxonomy_id=taxonomy_id,
         is_active=True,
@@ -289,7 +289,7 @@ def create_library_taxonomy_elements(
       id=default_struct_id,
       name=f"{package.name} — default structure",
       description=None,
-      structure_type="custom",
+      block_type="custom",
       taxonomy_id=taxonomy_id,
       is_active=True,
       metadata={"role_uri": default_role},
@@ -362,7 +362,7 @@ def _bulk_resolve_element_period_types(
 
 # rs-gaap qname prefixes that identify cash-flow-statement concepts.
 # Used to disambiguate duration concepts (IS vs CF) when a presentation
-# package declares both structure_types but no per-arc role.
+# package declares both block_types but no per-arc role.
 _CF_QNAME_PATTERNS: tuple[str, ...] = (
   "CashAndCashEquivalents",
   "NetCashProvided",
@@ -378,7 +378,7 @@ _CF_QNAME_PATTERNS: tuple[str, ...] = (
 
 
 def _build_arc_router(
-  structure_type_to_id: dict[str, str],
+  block_type_to_id: dict[str, str],
 ):
   """Return a callable that routes a parent arc to a structure_id by
   the parent element's period_type + qname when the source seed lacks
@@ -401,14 +401,14 @@ def _build_arc_router(
   parent relationships land on the catchall "default structure" and
   the BS/IS/CF structures stay empty.
   """
-  if "balance_sheet" not in structure_type_to_id:
+  if "balance_sheet" not in block_type_to_id:
     return None
-  if "income_statement" not in structure_type_to_id:
+  if "income_statement" not in block_type_to_id:
     return None
 
-  bs_id = structure_type_to_id["balance_sheet"]
-  is_id = structure_type_to_id["income_statement"]
-  cf_id = structure_type_to_id.get("cash_flow_statement")
+  bs_id = block_type_to_id["balance_sheet"]
+  is_id = block_type_to_id["income_statement"]
+  cf_id = block_type_to_id.get("cash_flow_statement")
 
   def _route(parent_qname: str, parent_period_type: str | None) -> str | None:
     if parent_period_type == "instant":
@@ -455,14 +455,14 @@ def create_library_arcs(
 
   default_struct_id = _structure_id(_default_role_uri(package))
 
-  # Build {structure_type → struct_id} so the per-arc router can land
+  # Build {block_type → struct_id} so the per-arc router can land
   # each association on the right declared structure when the seed
   # lacks per-arc role qualifiers (see ``_build_arc_router``).
-  structure_type_to_id: dict[str, str] = {}
+  block_type_to_id: dict[str, str] = {}
   for spec in package.structures:
     sid = _structure_id(spec.role_uri)
-    structure_type_to_id.setdefault(spec.structure_type, sid)
-  arc_router = _build_arc_router(structure_type_to_id)
+    block_type_to_id.setdefault(spec.block_type, sid)
+  arc_router = _build_arc_router(block_type_to_id)
 
   # Bulk-resolve all qnames needed by associations and trait assignments
   # in one query to avoid O(N) round trips for large packages.

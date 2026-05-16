@@ -27,7 +27,7 @@ class TestBuildEnvelope:
   def test_returns_none_when_structure_wrong_type(self) -> None:
     session = MagicMock()
     structure = MagicMock()
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     session.get.return_value = structure
     assert metric_handlers.build_envelope(session, "struct_other") is None
 
@@ -35,13 +35,13 @@ class TestBuildEnvelope:
     session = MagicMock()
     structure = MagicMock()
     structure.id = "struct_metric_1"
-    structure.structure_type = "metric"
+    structure.block_type = "metric"
     structure.name = "Debt-to-Equity Ratio"
     structure.description = "D/E covenant test"
     structure.taxonomy_id = "tax_01"
     structure.concept_arrangement = "arithmetic"
     structure.member_arrangement = None
-    structure.parenthetical_note = None
+    structure.renderer_note = None
     structure.artifact_mechanics = {
       "kind": "metric",
       "source_block_ids": ["struct_bs"],
@@ -74,13 +74,13 @@ class TestBuildEnvelope:
     session = MagicMock()
     structure = MagicMock()
     structure.id = "struct_metric_2"
-    structure.structure_type = "metric"
+    structure.block_type = "metric"
     structure.name = "Gross Margin"
     structure.description = None
     structure.taxonomy_id = "tax_02"
     structure.concept_arrangement = None
     structure.member_arrangement = None
-    structure.parenthetical_note = None
+    structure.renderer_note = None
     structure.artifact_mechanics = None
     session.get.return_value = structure
     session.execute.side_effect = [

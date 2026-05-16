@@ -56,7 +56,7 @@ def build_envelope(
   del fact_set_id  # see TODO above; metric FactSet wiring lands later
 
   structure = session.get(Structure, structure_id)
-  if structure is None or structure.structure_type != METRIC_BLOCK_TYPE:
+  if structure is None or structure.block_type != METRIC_BLOCK_TYPE:
     return None
 
   if structure.artifact_mechanics:
@@ -85,7 +85,7 @@ def build_envelope(
     ),
     artifact=ArtifactResponse(
       topic=structure.description,
-      parenthetical_note=structure.parenthetical_note,
+      renderer_note=structure.renderer_note,
       template=None,
       mechanics=mechanics,
     ),

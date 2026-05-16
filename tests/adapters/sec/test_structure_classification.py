@@ -8,7 +8,7 @@ class TestClassifyStructureHeuristic:
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED STATEMENTS OF INCOME",
       "0001001 - Statement - CONSOLIDATED STATEMENTS OF INCOME",
-      structure_type="Statement",
+      block_type="Statement",
     )
     assert stype == "income_statement"
     assert conf == 0.85
@@ -17,7 +17,7 @@ class TestClassifyStructureHeuristic:
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED BALANCE SHEETS",
       "0001002 - Statement - CONSOLIDATED BALANCE SHEETS",
-      structure_type="Statement",
+      block_type="Statement",
     )
     assert stype == "balance_sheet"
     assert conf == 0.85
@@ -26,7 +26,7 @@ class TestClassifyStructureHeuristic:
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED STATEMENTS OF CASH FLOWS",
       "0001003 - Statement - CONSOLIDATED STATEMENTS OF CASH FLOWS",
-      structure_type="Statement",
+      block_type="Statement",
     )
     assert stype == "cash_flow_statement"
     assert conf == 0.85
@@ -35,7 +35,7 @@ class TestClassifyStructureHeuristic:
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED STATEMENTS OF STOCKHOLDERS' EQUITY",
       "0001004 - Statement - CONSOLIDATED STATEMENTS OF STOCKHOLDERS' EQUITY",
-      structure_type="Statement",
+      block_type="Statement",
     )
     assert stype == "equity_statement"
     assert conf == 0.85
@@ -44,7 +44,7 @@ class TestClassifyStructureHeuristic:
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED STATEMENTS OF COMPREHENSIVE INCOME",
       "0001005 - Statement - CONSOLIDATED STATEMENTS OF COMPREHENSIVE INCOME",
-      structure_type="Statement",
+      block_type="Statement",
     )
     assert stype == "comprehensive_income"
     assert conf == 0.85
@@ -53,17 +53,17 @@ class TestClassifyStructureHeuristic:
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED BALANCE SHEETS [Parenthetical]",
       "0001002 - Statement - CONSOLIDATED BALANCE SHEETS [Parenthetical]",
-      structure_type="Statement",
+      block_type="Statement",
     )
     assert stype == "balance_sheet"
     assert conf == 0.75
 
-  def test_disclosure_skipped_by_structure_type(self):
-    """Disclosure structures should be skipped when structure_type is provided."""
+  def test_disclosure_skipped_by_block_type(self):
+    """Disclosure structures should be skipped when block_type is provided."""
     stype, conf = classify_structure_heuristic(
       "Balance Sheet Components - Inventories (Details)",
       "995410 - Disclosure - Balance Sheet Components - Inventories (Details)",
-      structure_type="Disclosure",
+      block_type="Disclosure",
     )
     assert stype is None
     assert conf == 0.0
@@ -73,7 +73,7 @@ class TestClassifyStructureHeuristic:
     stype, conf = classify_structure_heuristic(
       "Cash Flows (Details)",
       "995415 - Disclosure - Cash Flows (Details)",
-      structure_type="Disclosure",
+      block_type="Disclosure",
     )
     assert stype is None
     assert conf == 0.0
@@ -97,7 +97,7 @@ class TestClassifyStructureHeuristic:
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED STATEMENTS OF OPERATIONS",
       "0001001 - Statement - CONSOLIDATED STATEMENTS OF OPERATIONS",
-      structure_type="Statement",
+      block_type="Statement",
     )
     assert stype == "income_statement"
     assert conf == 0.85
@@ -111,22 +111,22 @@ class TestClassifyStructureHeuristic:
     assert stype == "comprehensive_income"
     assert conf == 0.85
 
-  def test_unknown_structure_type_still_classifies(self):
-    """When structure_type is None, classification proceeds normally."""
+  def test_unknown_block_type_still_classifies(self):
+    """When block_type is None, classification proceeds normally."""
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED BALANCE SHEETS",
       "0001002 - Statement - CONSOLIDATED BALANCE SHEETS",
-      structure_type=None,
+      block_type=None,
     )
     assert stype == "balance_sheet"
     assert conf == 0.85
 
-  def test_empty_structure_type_still_classifies(self):
-    """When structure_type is empty string, classification proceeds normally."""
+  def test_empty_block_type_still_classifies(self):
+    """When block_type is empty string, classification proceeds normally."""
     stype, conf = classify_structure_heuristic(
       "CONSOLIDATED BALANCE SHEETS",
       "0001002 - Statement - CONSOLIDATED BALANCE SHEETS",
-      structure_type="",
+      block_type="",
     )
     assert stype == "balance_sheet"
     assert conf == 0.85

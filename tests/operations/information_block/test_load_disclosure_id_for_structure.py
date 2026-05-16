@@ -5,11 +5,11 @@ Three branches covered:
 1. Target structure IS a disclosure-namespace structure -> derive qname
    from its own role_uri.
 2. Target is a renderable presentation -> look up the
-   disclosure-namespace sibling by structure_type.
+   disclosure-namespace sibling by block_type.
 3. No match (validation_rules, taxonomy_mapping, schedules) -> ``None``.
 
 Also confirms the module-level type cache short-circuits subsequent
-calls for the same structure_type.
+calls for the same block_type.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _clear_cache() -> Any:
   _DISCLOSURE_QNAME_BY_TYPE.clear()
 
 
-def _make_structure(*, role_uri: str | None, structure_type: str | None) -> Any:
+def _make_structure(*, role_uri: str | None, block_type: str | None) -> Any:
   """Build a mock Structure ORM row.
 
   ``role_uri`` lives inside the ``metadata_`` JSONB blob (see
@@ -44,7 +44,7 @@ def _make_structure(*, role_uri: str | None, structure_type: str | None) -> Any:
   """
   s = MagicMock()
   s.metadata_ = {"role_uri": role_uri} if role_uri is not None else {}
-  s.structure_type = structure_type
+  s.block_type = block_type
   return s
 
 
@@ -53,7 +53,7 @@ class TestDirectDisclosureRoleUri:
     session = MagicMock()
     session.get.return_value = _make_structure(
       role_uri=f"{_DISCLOSURE_ROLE_PREFIX}BalanceSheet",
-      structure_type="balance_sheet",
+      block_type="balance_sheet",
     )
     assert (
       load_disclosure_id_for_structure(session, "struct_bs_disclosure")
@@ -66,7 +66,7 @@ class TestDirectDisclosureRoleUri:
     session = MagicMock()
     session.get.return_value = _make_structure(
       role_uri=f"{_DISCLOSURE_ROLE_PREFIX}LeasesOfLesseeDisclosure",
-      structure_type="disclosure",
+      block_type="regulatory_disclosure",
     )
     assert (
       load_disclosure_id_for_structure(session, "struct_leases")
@@ -77,11 +77,11 @@ class TestDirectDisclosureRoleUri:
 class TestStructureTypeFallback:
   def test_presentation_finds_matching_disclosure(self) -> None:
     """A BS-classified presentation should resolve to disclosures:BalanceSheet
-    via the structure_type lookup."""
+    via the block_type lookup."""
     session = MagicMock()
     session.get.return_value = _make_structure(
       role_uri="https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      structure_type="balance_sheet",
+      block_type="balance_sheet",
     )
     # The fallback query selects metadata->>'role_uri' (a string), not the row
     session.execute.return_value.scalar.return_value = (
@@ -95,17 +95,17 @@ class TestStructureTypeFallback:
     assert session.execute.call_count == 1
 
   def test_cache_short_circuits_second_call_with_same_type(self) -> None:
-    """The N+1 fix: 2 envelopes of the same structure_type should issue
+    """The N+1 fix: 2 envelopes of the same block_type should issue
     only 1 fallback query thanks to the module-level cache."""
     session = MagicMock()
     session.get.side_effect = [
       _make_structure(
         role_uri="https://.../IS-multistep",
-        structure_type="income_statement",
+        block_type="income_statement",
       ),
       _make_structure(
         role_uri="https://.../IS-singlestep",
-        structure_type="income_statement",
+        block_type="income_statement",
       ),
     ]
     session.execute.return_value.scalar.return_value = (
@@ -130,11 +130,11 @@ class TestNoMatch:
   def test_target_without_role_uri_returns_none(self) -> None:
     session = MagicMock()
     session.get.return_value = _make_structure(
-      role_uri=None, structure_type="balance_sheet"
+      role_uri=None, block_type="balance_sheet"
     )
     assert load_disclosure_id_for_structure(session, "no_role") is None
 
-  def test_unknown_structure_type_returns_none(
+  def test_unknown_block_type_returns_none(
     self, monkeypatch: pytest.MonkeyPatch
   ) -> None:
     """validation_rules and taxonomy_mapping should resolve to None
@@ -142,7 +142,7 @@ class TestNoMatch:
     session = MagicMock()
     session.get.return_value = _make_structure(
       role_uri="https://.../rs-gaap-calculations/IS-Rev",
-      structure_type="validation_rules",
+      block_type="validation_rules",
     )
     session.execute.return_value.scalar.return_value = None
 
@@ -151,7 +151,7 @@ class TestNoMatch:
     session2 = MagicMock()
     session2.get.return_value = _make_structure(
       role_uri="https://.../rs-gaap-calculations/IS-COR",
-      structure_type="validation_rules",
+      block_type="validation_rules",
     )
     assert load_disclosure_id_for_structure(session2, "struct_calc2") is None
     session2.execute.assert_not_called()

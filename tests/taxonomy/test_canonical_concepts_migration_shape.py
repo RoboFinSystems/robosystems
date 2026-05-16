@@ -48,10 +48,10 @@ class TestTenantWriterCols:
 
 
 class TestMetricTypeInStructureCheck:
-  def test_metric_is_allowed_structure_type(self) -> None:
+  def test_metric_is_allowed_block_type(self) -> None:
     """The Phase η metric block type must be admissible in the widened
-    structure_type CHECK so tenant Structures can be created with it."""
-    assert "'metric'" in mig_0002._WIDENED_STRUCTURE_TYPE_CHECK
+    block_type CHECK so tenant Structures can be created with it."""
+    assert "'metric'" in mig_0002._WIDENED_BLOCK_TYPE_CHECK
 
   def test_metric_is_allowed_by_runtime_structure_model(self) -> None:
     """Fresh tenant schemas are created from SQLAlchemy metadata, so the
@@ -59,14 +59,14 @@ class TestMetricTypeInStructureCheck:
     checks = [
       c
       for c in Structure.__table__.constraints
-      if isinstance(c, CheckConstraint) and c.name == "check_structure_type"
+      if isinstance(c, CheckConstraint) and c.name == "check_block_type"
     ]
     assert len(checks) == 1
     assert "'metric'" in str(checks[0].sqltext)
 
   def test_fresh_tenant_check_widener_mentions_metric(self) -> None:
     """Provisioning widens checks after metadata create_all; it must not
-    narrow the freshly-created structure_type vocabulary."""
+    narrow the freshly-created block_type vocabulary."""
     statements: list[str] = []
 
     class FakeConn:

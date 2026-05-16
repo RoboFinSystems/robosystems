@@ -560,7 +560,7 @@ def _structure_to_response(row: Structure) -> StructureResponse:
     id=row.id,
     name=row.name,
     description=row.description,
-    structure_type=row.structure_type,
+    block_type=row.block_type,
     taxonomy_id=row.taxonomy_id,
     is_active=row.is_active,
   )
@@ -570,14 +570,14 @@ def list_structures(
   session: Session,
   *,
   taxonomy_id: str | None = None,
-  structure_type: str | None = None,
+  block_type: str | None = None,
 ) -> StructureListResponse:
   """List active structures, optionally filtered by taxonomy + type."""
   query = select(Structure).where(Structure.is_active.is_(True))
   if taxonomy_id:
     query = query.where(Structure.taxonomy_id == taxonomy_id)
-  if structure_type:
-    query = query.where(Structure.structure_type == structure_type)
+  if block_type:
+    query = query.where(Structure.block_type == block_type)
   rows = session.execute(query.order_by(Structure.name)).scalars().all()
   return StructureListResponse(structures=[_structure_to_response(r) for r in rows])
 
@@ -586,12 +586,12 @@ def list_structures(
 
 
 def list_mappings(session: Session) -> StructureListResponse:
-  """List all active mapping structures (structure_type = 'coa_mapping')."""
+  """List all active mapping structures (block_type = 'coa_mapping')."""
   rows = (
     session.execute(
       select(Structure)
       .where(
-        Structure.structure_type == "coa_mapping",
+        Structure.block_type == "coa_mapping",
         Structure.is_active.is_(True),
       )
       .order_by(Structure.name)
@@ -653,7 +653,7 @@ def get_mapping_detail(
   return MappingDetailResponse(
     id=structure.id,
     name=structure.name,
-    structure_type=structure.structure_type,
+    block_type=structure.block_type,
     taxonomy_id=structure.taxonomy_id,
     associations=associations,
     total_associations=len(associations),

@@ -226,7 +226,7 @@ def _trigger_auto_map_if_needed(
       structure = (
         session.query(Structure)
         .filter(
-          Structure.structure_type == "coa_mapping",
+          Structure.block_type == "coa_mapping",
           Structure.is_active.is_(True),
         )
         .order_by(Structure.created_at.asc())

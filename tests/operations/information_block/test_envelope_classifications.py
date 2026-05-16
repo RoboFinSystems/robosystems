@@ -103,7 +103,7 @@ class TestLoadClassificationsForAssociations:
     session = MagicMock()
     cls_rollup = _make_classification(identifier="RollUp")
     cls_aggr = _make_classification(
-      cls_id="cls_aggr", category="member_arrangement", identifier="aggregation"
+      cls_id="cls_aggr", category="member_arrangement", identifier="whole_part"
     )
     cls_hyper = _make_classification(
       cls_id="cls_hyper", category="concept_arrangement", identifier="Hypercube"
@@ -121,7 +121,7 @@ class TestLoadClassificationsForAssociations:
     assert len(result["assoc_2"]) == 1
     assert result["assoc_1"][0].identifier == "RollUp"
     assert result["assoc_1"][0].is_primary is True
-    assert result["assoc_1"][1].identifier == "aggregation"
+    assert result["assoc_1"][1].identifier == "whole_part"
     assert result["assoc_1"][1].is_primary is False
     assert result["assoc_2"][0].identifier == "Hypercube"
 

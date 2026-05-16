@@ -252,7 +252,7 @@ def upgrade() -> None:
     sa.Column("id", sa.String(), nullable=False),
     sa.Column("name", sa.String(), nullable=False),
     sa.Column("description", sa.String(), nullable=True),
-    sa.Column("structure_type", sa.String(), nullable=False),
+    sa.Column("block_type", sa.String(), nullable=False),
     sa.Column("taxonomy_id", sa.String(), nullable=False),
     sa.Column("graph_structure_id", sa.String(), nullable=True),
     sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
@@ -267,11 +267,11 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint("id"),
     sa.ForeignKeyConstraint(["taxonomy_id"], ["taxonomies.id"]),
     sa.CheckConstraint(
-      "structure_type IN ("
+      "block_type IN ("
       "'chart_of_accounts', 'income_statement', 'balance_sheet', "
       "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', 'schedule'"
       ")",
-      name="check_structure_type",
+      name="check_block_type",
     ),
     schema="public",
   )
@@ -284,7 +284,7 @@ def upgrade() -> None:
   op.create_index(
     "idx_structures_type",
     "structures",
-    ["structure_type"],
+    ["block_type"],
     schema="public",
   )
 

@@ -81,7 +81,7 @@ class ClassificationLite(BaseModel):
     ...,
     description=(
       "Vocabulary identifier within the category — e.g. 'RollUp', "
-      "'aggregation', 'AssetsRollUp'."
+      "'whole_part', 'AssetsRollUp'."
     ),
   )
   is_primary: bool = Field(
@@ -282,13 +282,26 @@ class RuleLite(BaseModel):
       "XBRLTechnicalSyntaxRule."
     ),
   )
-  rule_pattern: str = Field(
-    ...,
+  rule_pattern: str | None = Field(
+    None,
     description=(
-      "One of 10 cm:BusinessRulePattern mechanisms — Adjustment, "
+      "Arithmetic / logical pattern evaluated over fact values. "
+      "One of 11 cm:BusinessRulePattern mechanisms — Adjustment, "
       "CoExists, EqualTo, Exists, GreaterThan, "
       "GreaterThanOrEqualToZero, LessThan, RollForward, RollUp, "
-      "Variance."
+      "SumEquals, Variance. Null when the rule is a structural check "
+      "(see rule_check_kind)."
+    ),
+  )
+  rule_check_kind: str | None = Field(
+    None,
+    description=(
+      "Model-structure check kind evaluated over the association graph. "
+      "One of 6 kinds — LeafHasClassification, "
+      "LibraryOriginImmutability, NoCycles, NoOrphanArcs, "
+      "ParentBeforeChild, UniqueQNameInTaxonomy. Null when the rule is "
+      "an arithmetic pattern (see rule_pattern). Exactly one of "
+      "rule_pattern / rule_check_kind is non-null per rule."
     ),
   )
   rule_expression: str
@@ -470,7 +483,12 @@ class InformationModelResponse(BaseModel):
     ),
   )
   member_arrangement: str | None = Field(
-    None, description="aggregation | nonaggregation, or null if non-hypercube."
+    None,
+    description=(
+      "is_a | whole_part | nested_whole_part | "
+      "two_dimension_aggregation | complex_aggregating_whole_part, "
+      "or null if non-hypercube."
+    ),
   )
 
 
@@ -480,7 +498,7 @@ class ArtifactResponse(BaseModel):
   topic: str | None = Field(
     None, description="Structure.description — the block's human-readable topic."
   )
-  parenthetical_note: str | None = Field(
+  renderer_note: str | None = Field(
     None, description="e.g. 'in thousands', 'except per share'."
   )
   template: dict[str, Any] | None = Field(

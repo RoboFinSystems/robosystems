@@ -262,7 +262,7 @@ class StructureSummary(BaseModel):
 
   id: str = Field(..., description="Structure identifier.")
   name: str = Field(..., description="Human-readable structure name.")
-  structure_type: str = Field(
+  block_type: str = Field(
     ...,
     description=(
       "Structure category: `balance_sheet`, `income_statement`, "
@@ -422,7 +422,7 @@ class StatementResponse(BaseModel):
   )
   structure_id: str = Field(..., description="Structure projected for this statement.")
   structure_name: str = Field(..., description="Human-readable structure name.")
-  structure_type: str = Field(
+  block_type: str = Field(
     ...,
     description=(
       "Structure category: `balance_sheet`, `income_statement`, "

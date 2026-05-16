@@ -66,7 +66,7 @@ class StructureResponse(BaseModel):
   """One structure header — a renderable section within a taxonomy
   (balance sheet, income statement, schedule, etc.).
 
-  ``structure_type`` drives presentation: 'balance_sheet',
+  ``block_type`` drives presentation: 'balance_sheet',
   'income_statement', 'cash_flow_statement', 'equity_statement',
   'schedule', 'chart_of_accounts', 'coa_mapping', 'rollforward', etc.
   """
@@ -74,7 +74,7 @@ class StructureResponse(BaseModel):
   id: str
   name: str
   description: str | None = None
-  structure_type: str
+  block_type: str
   taxonomy_id: str
   is_active: bool
 
@@ -92,13 +92,13 @@ class CreateStructureRequest(BaseModel):
   # omitted from this Literal even though the DB CHECK constraint allows them.
   # The roboledger CF and CI renderers aren't implemented yet, so API
   # requests to *create* those structures are rejected at the Pydantic
-  # layer. Any pre-existing rows with those structure_types would only
+  # layer. Any pre-existing rows with those block_types would only
   # round-trip through this model if a write path validates it — the read
   # path uses `str`-typed response models and is unaffected. Confirmed no
   # rows in local/demo as of this commit; staging should be spot-checked
   # before rollout. SEC XBRL cash-flow parsing is a separate pipeline and
   # is unaffected. When the renderers land, add both back here.
-  structure_type: Literal[
+  block_type: Literal[
     "chart_of_accounts",
     "income_statement",
     "balance_sheet",
@@ -240,7 +240,7 @@ class MappingDetailResponse(BaseModel):
 
   id: str
   name: str
-  structure_type: str
+  block_type: str
   taxonomy_id: str
   associations: list[AssociationResponse]
   total_associations: int
@@ -453,7 +453,7 @@ class DeleteTaxonomyRequest(BaseModel):
 
 
 class UpdateStructureRequest(BaseModel):
-  """Update mutable fields on a structure. `structure_type` and
+  """Update mutable fields on a structure. `block_type` and
   `taxonomy_id` are immutable."""
 
   structure_id: str

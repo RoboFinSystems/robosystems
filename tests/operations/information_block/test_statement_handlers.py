@@ -50,7 +50,7 @@ def _make_statement_structure(
   taxonomy_id: str = "tax_usgaap",
   artifact_mechanics: dict[str, Any] | None = None,
   concept_arrangement: str | None = "roll_up",
-  member_arrangement: str | None = "aggregation",
+  member_arrangement: str | None = "whole_part",
 ) -> MagicMock:
   """Shape a MagicMock like a Structure row for a statement block.
 
@@ -59,7 +59,7 @@ def _make_statement_structure(
   """
   structure = MagicMock()
   structure.id = structure_id
-  structure.structure_type = block_type
+  structure.block_type = block_type
   structure.name = name
   structure.description = description
   structure.taxonomy_id = taxonomy_id
@@ -70,7 +70,7 @@ def _make_statement_structure(
   )
   structure.concept_arrangement = concept_arrangement
   structure.member_arrangement = member_arrangement
-  structure.parenthetical_note = None
+  structure.renderer_note = None
   return structure
 
 
@@ -145,7 +145,7 @@ class TestBuildEnvelope:
     """A ``schedule`` structure must not surface through the BS handler."""
     session = MagicMock()
     structure = MagicMock()
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     session.get.return_value = structure
     build = statement_handlers.make_statement_handlers("balance_sheet")
     assert build(session, "struct_other") is None
@@ -183,7 +183,7 @@ class TestBuildEnvelope:
     assert envelope.taxonomy_id == "tax_usgaap"
     assert envelope.taxonomy_name == "US GAAP"
     assert envelope.information_model.concept_arrangement == "roll_up"
-    assert envelope.information_model.member_arrangement == "aggregation"
+    assert envelope.information_model.member_arrangement == "whole_part"
     assert envelope.artifact.topic == "Assets + Liabilities + Equity"
     assert envelope.artifact.mechanics.kind == "statement_renderer"
     assert envelope.elements == []

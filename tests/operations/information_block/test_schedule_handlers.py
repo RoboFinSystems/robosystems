@@ -112,7 +112,7 @@ class TestBuildEnvelope:
   def test_returns_none_when_structure_wrong_type(self) -> None:
     session = MagicMock()
     structure = MagicMock()
-    structure.structure_type = "balance_sheet"
+    structure.block_type = "balance_sheet"
     session.get.return_value = structure
     assert schedule_handlers.build_envelope(session, "struct_other") is None
 
@@ -126,13 +126,13 @@ class TestBuildEnvelope:
     session = MagicMock()
     structure = MagicMock()
     structure.id = "struct_abc"
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     structure.name = "Equipment Depreciation"
     structure.description = "Depreciation schedule — equipment"
     structure.taxonomy_id = "tax_01"
     structure.concept_arrangement = "roll_forward"
     structure.member_arrangement = None
-    structure.parenthetical_note = None
+    structure.renderer_note = None
     structure.artifact_mechanics = {
       "kind": "closing_entry_generator",
       "entry_template": {
@@ -198,13 +198,13 @@ class TestBuildEnvelope:
     session = MagicMock()
     structure = MagicMock()
     structure.id = "struct_corrupted"
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     structure.name = "Corrupted"
     structure.description = None
     structure.taxonomy_id = "tax_01"
     structure.concept_arrangement = None
     structure.member_arrangement = None
-    structure.parenthetical_note = None
+    structure.renderer_note = None
     structure.artifact_mechanics = None
     structure.metadata_ = {}  # no entry_template key
     session.get.return_value = structure
@@ -231,13 +231,13 @@ class TestBuildEnvelope:
     session = MagicMock()
     structure = MagicMock()
     structure.id = "struct_legacy"
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     structure.name = "Legacy Schedule"
     structure.description = None
     structure.taxonomy_id = "tax_01"
     structure.concept_arrangement = None  # pre-backfill, read default
     structure.member_arrangement = None
-    structure.parenthetical_note = None
+    structure.renderer_note = None
     structure.artifact_mechanics = None
     structure.metadata_ = {
       "entry_template": {
@@ -274,13 +274,13 @@ class TestBuildEnvelope:
     session = MagicMock()
     structure = MagicMock()
     structure.id = "struct_dep"
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     structure.name = "Equipment Depreciation"
     structure.description = None
     structure.taxonomy_id = "tax_01"
     structure.concept_arrangement = "roll_forward"
     structure.member_arrangement = None
-    structure.parenthetical_note = None
+    structure.renderer_note = None
     structure.artifact_mechanics = {
       "kind": "closing_entry_generator",
       "entry_template": {

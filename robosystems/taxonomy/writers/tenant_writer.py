@@ -43,9 +43,9 @@ _ELEMENT_REFERENCE_COLS = (
 )
 
 _STRUCTURE_COLS = (
-  "id, name, description, structure_type, taxonomy_id, graph_structure_id, "
+  "id, name, description, block_type, taxonomy_id, graph_structure_id, "
   "is_active, concept_arrangement, member_arrangement, artifact_mechanics, "
-  "parenthetical_note, template_id, metadata, created_at, updated_at, created_by"
+  "renderer_note, template_id, metadata, created_at, updated_at, created_by"
 )
 
 _ASSOCIATION_COLS = (
@@ -75,8 +75,8 @@ _ASSOC_CLASSIFICATION_COLS = (
 )
 
 _RULE_COLS = (
-  "id, taxonomy_id, rule_category, rule_pattern, rule_expression, "
-  "rule_message, rule_severity, rule_origin, target_kind, "
+  "id, taxonomy_id, rule_category, rule_pattern, rule_check_kind, "
+  "rule_expression, rule_message, rule_severity, rule_origin, target_kind, "
   "target_structure_id, target_element_id, target_association_id, "
   "target_taxonomy_id, rule_variables, metadata, created_at, updated_at, created_by"
 )

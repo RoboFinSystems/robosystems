@@ -80,7 +80,7 @@ class FactGrid:
 
   structure_id: str
   structure_name: str
-  structure_type: str
+  block_type: str
   periods: list[PeriodSpec]
   rows: list[FactRow] = field(default_factory=list)
   unmapped_count: int = 0
@@ -213,7 +213,7 @@ def generate_report_facts(
 def render_structure_view(
   session: Session,
   facts: list[ReportFact],
-  structure_type: str,
+  block_type: str,
   periods: list[PeriodSpec],
   reporting_style_id: str,
 ) -> FactGrid:
@@ -231,7 +231,7 @@ def render_structure_view(
   Args:
       session: Extensions database session.
       facts: Pre-generated ReportFact objects (from generate_report_facts).
-      structure_type: Structure type to render (income_statement, balance_sheet, etc.).
+      block_type: Structure type to render (income_statement, balance_sheet, etc.).
       periods: Ordered list of period specifications for columns.
       reporting_style_id: The graph's Reporting Style id
           (``Graph.reporting_style_id``). Resolves which Network this
@@ -246,13 +246,13 @@ def render_structure_view(
     structure_name,
     concept_arrangement,
     hierarchy,
-  ) = _load_reporting_structure(session, structure_type, reporting_style_id)
+  ) = _load_reporting_structure(session, block_type, reporting_style_id)
 
   if not hierarchy:
     return FactGrid(
       structure_id=structure_id or "",
       structure_name=structure_name or "",
-      structure_type=structure_type,
+      block_type=block_type,
       periods=periods,
     )
 
@@ -281,7 +281,7 @@ def render_structure_view(
   return FactGrid(
     structure_id=structure_id,
     structure_name=structure_name,
-    structure_type=structure_type,
+    block_type=block_type,
     periods=periods,
     rows=rows,
   )
@@ -1350,8 +1350,9 @@ def _load_reporting_structure(
 
   Returns (structure_id, structure_name, concept_arrangement, root_nodes).
   ``concept_arrangement`` is Charlie's CAP declared on the Disclosure
-  (``arithmetic`` / ``roll_up`` / ``roll_forward`` / ``hierarchy``);
-  the renderer uses it to pick a compilation strategy.
+  (``arithmetic`` / ``roll_up`` / ``roll_forward`` / ``set`` / ...);
+  the renderer uses it to pick a compilation strategy. See
+  information-block.md §3.2.1 for the canonical 15-value enumeration.
 
   When the Reporting Style doesn't compose a Network for this statement
   type, returns the empty tuple — callers treat that as "no statement

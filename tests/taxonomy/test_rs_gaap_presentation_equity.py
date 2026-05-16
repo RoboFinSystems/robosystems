@@ -43,9 +43,9 @@ class TestEquityPresentationStructure:
     names = [s.name for s in presentation.structures]
     assert EQUITY_STRUCTURE_NAME in names
 
-  def test_structure_type_and_pattern(self, presentation: TaxonomyPackage) -> None:
+  def test_block_type_and_pattern(self, presentation: TaxonomyPackage) -> None:
     s = next(s for s in presentation.structures if s.name == EQUITY_STRUCTURE_NAME)
-    assert s.structure_type == "equity_statement"
+    assert s.block_type == "equity_statement"
     assert s.concept_arrangement == "roll_forward"
     assert s.role_uri == EQUITY_ROLE_URI
 

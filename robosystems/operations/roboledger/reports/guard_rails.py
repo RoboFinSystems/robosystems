@@ -24,7 +24,7 @@ class ValidationResult:
   warnings: list[str] = field(default_factory=list)
 
 
-def validate_report(structure_type: str, rows: list[FactRow]) -> ValidationResult:
+def validate_report(block_type: str, rows: list[FactRow]) -> ValidationResult:
   """Run structural and semantic validation for a rendered structure.
 
   Note: `cash_flow_statement`, `equity_statement`, and
@@ -33,9 +33,9 @@ def validate_report(structure_type: str, rows: list[FactRow]) -> ValidationResul
   they are, re-wire the `_validate_cash_flow` helper below and add
   equity / comprehensive-income validators.
   """
-  if structure_type == "income_statement":
+  if block_type == "income_statement":
     return _validate_income_statement(rows)
-  elif structure_type == "balance_sheet":
+  elif block_type == "balance_sheet":
     return _validate_balance_sheet(rows)
   return ValidationResult(checks=["no_validation_rules"])
 

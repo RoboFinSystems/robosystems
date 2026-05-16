@@ -37,6 +37,7 @@ def _make_rule(
   rule.id = rule_id
   rule.rule_category = category
   rule.rule_pattern = pattern
+  rule.rule_check_kind = None
   rule.rule_expression = expression
   rule.target_kind = target_kind
   rule.target_structure_id = target_structure_id

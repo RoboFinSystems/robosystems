@@ -51,7 +51,7 @@
   "version": "v1",
   "namespace_uri": "http://www.xbrlsite.com/fac/rules/",
   "taxonomy_type": "rules",
-  "default_structure_type": "validation_rules",
+  "default_block_type": "validation_rules",
   "forked_from": {
     "author": "Charlie Hoffman",
     "url": "http://xbrlsite.com/seattlemethod/cm/cm.xsd",

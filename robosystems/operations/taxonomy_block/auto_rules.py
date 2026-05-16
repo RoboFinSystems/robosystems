@@ -61,7 +61,7 @@ def emit_auto_rules(
     session,
     taxonomy_id=taxonomy_id,
     rule_category=_XBRL_RULES,
-    rule_pattern="UniqueQNameInTaxonomy",
+    rule_check_kind="UniqueQNameInTaxonomy",
     rule_message="Every element qname must be unique within this taxonomy.",
     target_kind="taxonomy",
     target_taxonomy_id=taxonomy_id,
@@ -73,7 +73,7 @@ def emit_auto_rules(
       session,
       taxonomy_id=taxonomy_id,
       rule_category=_STRUCTURE_RULES,
-      rule_pattern="LibraryOriginImmutability",
+      rule_check_kind="LibraryOriginImmutability",
       rule_message="Library-origin elements in the parent taxonomy cannot be mutated.",
       target_kind="taxonomy",
       target_taxonomy_id=taxonomy_id,
@@ -85,7 +85,7 @@ def emit_auto_rules(
       session,
       taxonomy_id=taxonomy_id,
       rule_category=_FAC_RULES,
-      rule_pattern="LeafHasClassification",
+      rule_check_kind="LeafHasClassification",
       rule_message="Every leaf element must have an EFS classification.",
       target_kind="taxonomy",
       target_taxonomy_id=taxonomy_id,
@@ -94,7 +94,7 @@ def emit_auto_rules(
 
   for structure in structures:
     structure_id = str(structure.id)
-    for pattern, message in (
+    for check_kind, message in (
       ("NoCycles", "The structure must contain no cycles."),
       ("NoOrphanArcs", "Every arc endpoint must reference a declared element."),
       ("ParentBeforeChild", "Parent elements must precede their children in ordering."),
@@ -103,7 +103,7 @@ def emit_auto_rules(
         session,
         taxonomy_id=taxonomy_id,
         rule_category=_STRUCTURE_RULES,
-        rule_pattern=pattern,
+        rule_check_kind=check_kind,
         rule_message=message,
         target_kind="structure",
         target_structure_id=structure_id,
@@ -118,18 +118,22 @@ def _add(
   *,
   taxonomy_id: str,
   rule_category: str,
-  rule_pattern: str,
+  rule_check_kind: str,
   rule_message: str,
   target_kind: str,
   target_taxonomy_id: str | None = None,
   target_structure_id: str | None = None,
   created_by: str,
 ) -> None:
+  """Persist a structural auto-rule. All auto-rules are model-structure
+  checks (no fact-value arithmetic), so they populate rule_check_kind
+  rather than rule_pattern."""
   session.add(
     Rule(
       taxonomy_id=taxonomy_id,
       rule_category=rule_category,
-      rule_pattern=rule_pattern,
+      rule_pattern=None,
+      rule_check_kind=rule_check_kind,
       rule_expression="",
       rule_message=rule_message,
       rule_severity="error",

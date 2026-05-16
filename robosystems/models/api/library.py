@@ -86,7 +86,7 @@ class LibraryStructureResponse(BaseModel):
 
   id: str
   name: str
-  structure_type: str = Field(
+  block_type: str = Field(
     ...,
     description="balance_sheet | income_statement | cash_flow_statement | custom | …",
   )

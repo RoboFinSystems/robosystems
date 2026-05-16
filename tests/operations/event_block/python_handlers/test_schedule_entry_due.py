@@ -135,7 +135,7 @@ class TestDispatchPreview:
     metadata = _make_metadata()
 
     structure = MagicMock()
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     structure.name = "Office Equipment"
     structure.metadata_ = {
       "entry_template": {
@@ -171,7 +171,7 @@ class TestDispatchPreview:
     metadata = _make_metadata()
 
     structure = MagicMock()
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     structure.name = "Office Equipment"
     structure.metadata_ = {
       "entry_template": {
@@ -209,7 +209,7 @@ class TestDispatchPreview:
     metadata = _make_metadata()
 
     structure = MagicMock()
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     structure.metadata_ = {}
     session.get.return_value = structure
 

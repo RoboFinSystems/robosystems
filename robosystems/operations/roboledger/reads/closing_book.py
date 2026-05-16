@@ -69,11 +69,11 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     types_list = ", ".join(f"'{t}'" for t in _STATEMENT_TYPES)
     stmt_result = session.execute(
       text(f"""
-        SELECT id, name, structure_type FROM structures
+        SELECT id, name, block_type FROM structures
         WHERE taxonomy_id = :taxonomy_id
-          AND structure_type IN ({types_list})
+          AND block_type IN ({types_list})
           AND is_active = true
-        ORDER BY structure_type
+        ORDER BY block_type
       """),
       {"taxonomy_id": latest_report.taxonomy_id},
     )
@@ -81,9 +81,9 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     statement_items = [
       ClosingBookItem(
         id=r.id,
-        name=_STATEMENT_LABELS.get(r.structure_type, r.name),
+        name=_STATEMENT_LABELS.get(r.block_type, r.name),
         item_type="statement",
-        structure_type=r.structure_type,
+        block_type=r.block_type,
         report_id=latest_report.id,
       )
       for r in stmt_result
@@ -97,7 +97,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     session.execute(
       select(Structure)
       .where(
-        Structure.structure_type == "coa_mapping",
+        Structure.block_type == "coa_mapping",
         Structure.is_active.is_(True),
       )
       .order_by(Structure.name)
@@ -122,7 +122,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
     session.execute(
       select(Structure)
       .where(
-        Structure.structure_type == "schedule",
+        Structure.block_type == "schedule",
         Structure.is_active.is_(True),
       )
       .order_by(Structure.name)
@@ -137,7 +137,7 @@ def get_closing_book_structures(session: Session) -> ClosingBookStructuresRespon
         id=s.id,
         name=s.name,
         item_type="schedule",
-        structure_type="schedule",
+        block_type="schedule",
       )
       for s in schedules
     ]

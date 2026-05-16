@@ -196,8 +196,8 @@ class TestStructures:
     # Cash Flow Statement is intentionally not seeded — see seed.py.
     assert len(STRUCTURES) == 2
 
-  def test_structure_types(self):
-    types = {s["structure_type"] for s in STRUCTURES}
+  def test_block_types(self):
+    types = {s["block_type"] for s in STRUCTURES}
     assert types == {"income_statement", "balance_sheet"}
 
   def test_all_reference_taxonomy(self):

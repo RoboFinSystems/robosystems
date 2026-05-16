@@ -91,7 +91,7 @@ class ChangeReportingStyleOp(BaseModel):
 
   Switches the graph to a different Reporting Style. The target Style
   must be a library- or customer-authored Structure with
-  ``structure_type='reporting_style'`` and a complete composition
+  ``block_type='reporting_style'`` and a complete composition
   (one Network per required statement type — BS / IS / CF / SE). Filed
   Reports are unaffected because each ``Report`` already pins its own
   ``structure_id`` per FactSet at create-time; new reports use the new
@@ -105,7 +105,7 @@ class ChangeReportingStyleOp(BaseModel):
       "Structure id of the target Reporting Style (e.g., "
       "`025f5d48-12ce-5d65-b9eb-4f137a10ef06` for the library-seeded "
       "Default Style). Must resolve to a Structure with "
-      "structure_type='reporting_style' that has a complete composition "
+      "block_type='reporting_style' that has a complete composition "
       "in the graph's tenant schema."
     ),
   )

@@ -155,14 +155,14 @@ _NARROW_ELEMENT_SOURCE_CHECK = (
   "'quickbooks', 'xero', 'plaid', 'native', 'import'"
   ")"
 )
-# Structure.structure_type widens to admit the Phase g.1 block types
+# Structure.block_type widens to admit the Phase g.1 block types
 # (rollforward, reconciliation, policy) required as admissible CHECK
 # values for Phase d (typed artifact_mechanics + rules) and Phase eta
 # (metric block type). Folded into 0002 rather than shipped as a
 # standalone migration since 0002 is still unreleased. See
 # ``local/docs/specs/information-block.md`` section 5.9, Phase g.1.
-_WIDENED_STRUCTURE_TYPE_CHECK = (
-  "structure_type IN ("
+_WIDENED_BLOCK_TYPE_CHECK = (
+  "block_type IN ("
   # Renderable financial-statement presentations
   "'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', "
@@ -176,13 +176,13 @@ _WIDENED_STRUCTURE_TYPE_CHECK = (
   # disclosures, crosswalks between taxonomies. Filtered out of the
   # report-package render path; surfaced through their own consumption
   # paths (rule engine, disclosure registry, mapping resolver).
-  "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+  "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
   # Escape hatch
   "'custom'"
   ")"
 )
-_NARROW_STRUCTURE_TYPE_CHECK = (
-  "structure_type IN ("
+_NARROW_BLOCK_TYPE_CHECK = (
+  "block_type IN ("
   "'chart_of_accounts', 'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', 'coa_mapping', 'custom', 'schedule'"
   ")"
@@ -206,13 +206,46 @@ _RULE_CATEGORY_CHECK = (
   ")"
 )
 _RULE_PATTERN_CHECK = (
-  "rule_pattern IN ("
+  "rule_pattern IS NULL OR rule_pattern IN ("
   "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
   "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
-  "'SumEquals', 'Variance', "
+  "'SumEquals', 'Variance'"
+  ")"
+)
+_RULE_CHECK_KIND_CHECK = (
+  "rule_check_kind IS NULL OR rule_check_kind IN ("
   "'LeafHasClassification', 'LibraryOriginImmutability', "
   "'NoCycles', 'NoOrphanArcs', 'ParentBeforeChild', "
   "'UniqueQNameInTaxonomy'"
+  ")"
+)
+_RULE_PATTERN_KIND_XOR_CHECK = (
+  "(rule_pattern IS NOT NULL AND rule_check_kind IS NULL) "
+  "OR (rule_pattern IS NULL AND rule_check_kind IS NOT NULL)"
+)
+# Concept Arrangement Pattern (CAP) — 8 canonical + 5 cm.xsd
+# text-block/detail specializations + 2 pseudo (15 total) per
+# information-block.md §3.2.1. Charlie encodes text-block level as the
+# CAP itself (Blocks PDF §1.9.1; PROOF disclosure-mechanics rules
+# point disclosures at cm_LevelNTextBlock via
+# disclosure-hasConceptArrangementPattern). NULL allowed for block
+# types that don't yet declare a default.
+_CONCEPT_ARRANGEMENT_CHECK = (
+  "concept_arrangement IS NULL OR concept_arrangement IN ("
+  "'set', 'roll_up', 'roll_forward', 'roll_forward_info', "
+  "'adjustment', 'variance', 'arithmetic', 'text_block', "
+  "'level1_textblock', 'level2_textblock', 'level3_textblock', "
+  "'level4_detail', 'table_equivalent_textblock', "
+  "'grid', 'compound_fact'"
+  ")"
+)
+# Member Arrangement Pattern (MAP) — 5 canonical per
+# information-block.md §3.2.2. NULL allowed for non-hypercube block
+# types.
+_MEMBER_ARRANGEMENT_CHECK = (
+  "member_arrangement IS NULL OR member_arrangement IN ("
+  "'is_a', 'whole_part', 'nested_whole_part', "
+  "'two_dimension_aggregation', 'complex_aggregating_whole_part'"
   ")"
 )
 _RULE_SEVERITY_CHECK = "rule_severity IN ('info', 'warning', 'error')"
@@ -386,7 +419,7 @@ def _widen_tenant_checks(conn, schema: str) -> None:
   t.add_check("associations", "check_association_type", _WIDENED_ASSOCIATION_CHECK)
   t.add_check("elements", "check_element_source", _WIDENED_ELEMENT_SOURCE_CHECK)
   t.add_check("taxonomies", "check_taxonomy_type", _WIDENED_TAXONOMY_TYPE_CHECK)
-  t.add_check("structures", "check_structure_type", _WIDENED_STRUCTURE_TYPE_CHECK)
+  t.add_check("structures", "check_block_type", _WIDENED_BLOCK_TYPE_CHECK)
 
 
 def _backfill_reporting_standard(conn, schema: str) -> None:
@@ -424,7 +457,7 @@ def _restore_narrow_tenant_checks(conn, schema: str) -> None:
   t.add_check("associations", "check_association_type", _NARROW_ASSOCIATION_CHECK)
   t.add_check("elements", "check_element_source", _NARROW_ELEMENT_SOURCE_CHECK)
   t.add_check("taxonomies", "check_taxonomy_type", _NARROW_TAXONOMY_TYPE_CHECK)
-  t.add_check("structures", "check_structure_type", _NARROW_STRUCTURE_TYPE_CHECK)
+  t.add_check("structures", "check_block_type", _NARROW_BLOCK_TYPE_CHECK)
 
 
 def _drop_old_element_columns(conn, schema: str) -> None:
@@ -498,16 +531,20 @@ def _add_phase_d_columns_to_tenant(conn, schema: str) -> None:
   t.add_column("structures", "concept_arrangement", "VARCHAR")
   t.add_column("structures", "member_arrangement", "VARCHAR")
   t.add_column("structures", "artifact_mechanics", "JSONB")
-  t.add_column("structures", "parenthetical_note", "VARCHAR")
+  t.add_column("structures", "renderer_note", "VARCHAR")
   t.add_column("structures", "template_id", "VARCHAR")
+  t.add_check("structures", "check_concept_arrangement", _CONCEPT_ARRANGEMENT_CHECK)
+  t.add_check("structures", "check_member_arrangement", _MEMBER_ARRANGEMENT_CHECK)
 
 
 def _drop_phase_d_columns_from_tenant(conn, schema: str) -> None:
   """Reverse of :func:`_add_phase_d_columns_to_tenant` for downgrade."""
   t = TenantOps(conn, schema)
+  t.drop_constraint("structures", "check_member_arrangement")
+  t.drop_constraint("structures", "check_concept_arrangement")
   for col in (
     "template_id",
-    "parenthetical_note",
+    "renderer_note",
     "artifact_mechanics",
     "member_arrangement",
     "concept_arrangement",
@@ -548,7 +585,7 @@ def _backfill_tenant_schedule_mechanics(conn, schema: str) -> None:
                 COALESCE(metadata -> 'schedule_metadata', 'null'::jsonb)
             )
           )
-      WHERE structure_type = 'schedule'
+      WHERE block_type = 'schedule'
       """
     )
   )
@@ -946,11 +983,11 @@ def upgrade() -> None:
   # library browser) sees the canonical form. The widened CHECK still
   # admits ``'reporting'`` transitionally so this UPDATE validates.
   _backfill_reporting_standard(op.get_bind(), "public")
-  # Phase g.1: widen structures.structure_type to admit rollforward,
+  # Phase g.1: widen structures.block_type to admit rollforward,
   # reconciliation, policy. Pure vocabulary expansion — no data change.
-  op.drop_constraint("check_structure_type", "structures", type_="check")
+  op.drop_constraint("check_block_type", "structures", type_="check")
   op.create_check_constraint(
-    "check_structure_type", "structures", _WIDENED_STRUCTURE_TYPE_CHECK
+    "check_block_type", "structures", _WIDENED_BLOCK_TYPE_CHECK
   )
 
   # Phase d: typed artifact_mechanics + Information-Model axis columns
@@ -984,12 +1021,25 @@ def upgrade() -> None:
   )
   op.add_column(
     "structures",
-    sa.Column("parenthetical_note", sa.String(), nullable=True),
+    sa.Column("renderer_note", sa.String(), nullable=True),
     schema="public",
   )
   op.add_column(
     "structures",
     sa.Column("template_id", sa.String(), nullable=True),
+    schema="public",
+  )
+  # CAP + MAP CHECK constraints on public.structures.
+  op.create_check_constraint(
+    "check_concept_arrangement",
+    "structures",
+    _CONCEPT_ARRANGEMENT_CHECK,
+    schema="public",
+  )
+  op.create_check_constraint(
+    "check_member_arrangement",
+    "structures",
+    _MEMBER_ARRANGEMENT_CHECK,
     schema="public",
   )
 
@@ -1170,7 +1220,8 @@ def upgrade() -> None:
     sa.Column("id", sa.String(), nullable=False),
     sa.Column("taxonomy_id", sa.String(), nullable=False),
     sa.Column("rule_category", sa.String(), nullable=False),
-    sa.Column("rule_pattern", sa.String(), nullable=False),
+    sa.Column("rule_pattern", sa.String(), nullable=True),
+    sa.Column("rule_check_kind", sa.String(), nullable=True),
     sa.Column("rule_expression", sa.Text(), nullable=False),
     sa.Column("rule_message", sa.Text(), nullable=True),
     sa.Column("rule_severity", sa.String(), nullable=False, server_default="error"),
@@ -1209,6 +1260,10 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint("id"),
     sa.CheckConstraint(_RULE_CATEGORY_CHECK, name="check_rule_category"),
     sa.CheckConstraint(_RULE_PATTERN_CHECK, name="check_rule_pattern"),
+    sa.CheckConstraint(_RULE_CHECK_KIND_CHECK, name="check_rule_check_kind"),
+    sa.CheckConstraint(
+      _RULE_PATTERN_KIND_XOR_CHECK, name="check_rule_pattern_kind_xor"
+    ),
     sa.CheckConstraint(_RULE_SEVERITY_CHECK, name="check_rule_severity"),
     sa.CheckConstraint(_RULE_ORIGIN_CHECK, name="check_rule_origin"),
     sa.CheckConstraint(
@@ -1325,11 +1380,11 @@ def upgrade() -> None:
       """
       UPDATE public.structures
       SET concept_arrangement = COALESCE(concept_arrangement, 'roll_up'),
-          member_arrangement = COALESCE(member_arrangement, 'aggregation'),
+          member_arrangement = COALESCE(member_arrangement, 'whole_part'),
           artifact_mechanics = jsonb_build_object(
             'kind', 'statement_renderer'
           )
-      WHERE structure_type IN (
+      WHERE block_type IN (
         'balance_sheet', 'income_statement',
         'cash_flow_statement', 'equity_statement'
       )
@@ -1473,10 +1528,15 @@ def downgrade() -> None:
   op.create_check_constraint(
     "check_taxonomy_type", "taxonomies", _NARROW_TAXONOMY_TYPE_CHECK
   )
-  op.drop_constraint("check_structure_type", "structures", type_="check")
-  op.create_check_constraint(
-    "check_structure_type", "structures", _NARROW_STRUCTURE_TYPE_CHECK
-  )
+  op.drop_constraint("check_block_type", "structures", type_="check")
+  op.create_check_constraint("check_block_type", "structures", _NARROW_BLOCK_TYPE_CHECK)
+
+  # Drop Phase d CAP/MAP CHECKs before dropping the columns they
+  # constrain.
+  for check in ("check_member_arrangement", "check_concept_arrangement"):
+    conn.execute(
+      text(f"ALTER TABLE public.structures DROP CONSTRAINT IF EXISTS {check}")
+    )
 
   # Drop Phase d columns from public.structures (tenant-schema columns
   # were dropped above in _teardown_tenant). IF EXISTS makes this safe
@@ -1484,7 +1544,7 @@ def downgrade() -> None:
   # migration run installed 0002 before the Phase δ columns existed.
   for col in (
     "template_id",
-    "parenthetical_note",
+    "renderer_note",
     "artifact_mechanics",
     "member_arrangement",
     "concept_arrangement",
