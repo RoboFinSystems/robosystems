@@ -107,6 +107,22 @@ class TestEmitAutoRules:
     added = [c.args[0] for c in session.add.call_args_list]
     assert all(r.rule_origin == "auto" for r in added)
 
+  def test_all_auto_rules_populate_check_kind_not_pattern(self) -> None:
+    """XOR contract: all auto-rules are structural (rule_check_kind set,
+    rule_pattern is None). See information-block.md §5.2.2 + the
+    check_rule_pattern_kind_xor CHECK constraint on the rules table."""
+    session = MagicMock()
+    taxonomy = _fake_taxonomy("chart_of_accounts", parent_taxonomy_id="lib_1")
+    emit_auto_rules(
+      session,
+      taxonomy,
+      [_fake_structure("s1")],
+      created_by="usr_1",
+    )
+    added = [c.args[0] for c in session.add.call_args_list]
+    assert all(r.rule_pattern is None for r in added)
+    assert all(r.rule_check_kind is not None for r in added)
+
   def test_taxonomy_level_rules_use_taxonomy_target_kind(self) -> None:
     session = MagicMock()
     taxonomy = _fake_taxonomy()

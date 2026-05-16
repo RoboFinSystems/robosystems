@@ -76,6 +76,7 @@ def _rule_to_lite(rule: Rule, qname_by_element_id: dict[str, str]) -> TaxonomyBl
     name=name,
     rule_category=rule.rule_category,
     rule_pattern=rule.rule_pattern,
+    rule_check_kind=rule.rule_check_kind,
     rule_expression=rule.rule_expression,
     severity=rule.rule_severity,
     origin=rule.rule_origin,

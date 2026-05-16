@@ -340,6 +340,13 @@ _WIDENED_BLOCK_TYPE_CHECK = (
   "'custom'"
   ")"
 )
+# Represents the CHECK constraint state *immediately before* this
+# migration runs (i.e., the post-0002 state). Used for downgrade only.
+# Includes 'regulatory_disclosure' (not 'disclosure') because 0002 was
+# rewritten in place during the 2026-05-15 vocabulary alignment;
+# `regulatory_disclosure` IS the canonical pre-0007 state. Don't
+# "restore" it to `disclosure` — that state never existed in a
+# deployed DB.
 _PRIOR_BLOCK_TYPE_CHECK = (
   "block_type IN ("
   "'income_statement', 'balance_sheet', "

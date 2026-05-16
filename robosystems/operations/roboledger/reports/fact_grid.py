@@ -1350,8 +1350,9 @@ def _load_reporting_structure(
 
   Returns (structure_id, structure_name, concept_arrangement, root_nodes).
   ``concept_arrangement`` is Charlie's CAP declared on the Disclosure
-  (``arithmetic`` / ``roll_up`` / ``roll_forward`` / ``hierarchy``);
-  the renderer uses it to pick a compilation strategy.
+  (``arithmetic`` / ``roll_up`` / ``roll_forward`` / ``set`` / ...);
+  the renderer uses it to pick a compilation strategy. See
+  information-block.md §3.2.1 for the canonical 15-value enumeration.
 
   When the Reporting Style doesn't compose a Network for this statement
   type, returns the empty tuple — callers treat that as "no statement

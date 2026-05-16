@@ -161,6 +161,15 @@ class TaxonomyBlockRuleRequest(BaseModel):
   Exactly one of ``target_structure_ref``, ``target_element_qname``, or
   ``target_taxonomy_self`` must be set (or all null for a global rule).
   The ``model_validator`` enforces this contract at the Pydantic layer.
+
+  Only **arithmetic** rule patterns are user-creatable via this API
+  (the ``rule_pattern`` Literal below). The 6 model-structure check
+  kinds (``NoCycles``, ``NoOrphanArcs``, ``ParentBeforeChild``,
+  ``LeafHasClassification``, ``LibraryOriginImmutability``,
+  ``UniqueQNameInTaxonomy``) are system-managed — they're auto-emitted
+  by :func:`emit_auto_rules` at taxonomy-block creation time and
+  populate ``rules.rule_check_kind`` instead of ``rule_pattern``. See
+  information-block.md §5.2.2 for the axis split.
   """
 
   name: str = Field(..., description="Rule identifier, unique within envelope.")
@@ -549,14 +558,21 @@ class TaxonomyBlockAssociation(BaseModel):
 
 
 class TaxonomyBlockRule(BaseModel):
-  """Rule projection for the Taxonomy Block envelope."""
+  """Rule projection for the Taxonomy Block envelope.
+
+  Exactly one of ``rule_pattern`` (arithmetic) or ``rule_check_kind``
+  (model-structure) is non-null per row, enforced by the
+  ``check_rule_pattern_kind_xor`` DB constraint. See
+  information-block.md §5.2.2.
+  """
 
   model_config = ConfigDict(from_attributes=True)
 
   id: str
   name: str
   rule_category: str
-  rule_pattern: str
+  rule_pattern: str | None = None
+  rule_check_kind: str | None = None
   rule_expression: str
   severity: str = "error"
   origin: str = Field(

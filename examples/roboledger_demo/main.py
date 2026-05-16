@@ -267,7 +267,7 @@ def create_chart_of_accounts(graph_id: str) -> tuple[dict[str, str], str, int]:
         {
           "name": "CoA to US GAAP Mapping",
           "description": "Maps Chart of Accounts to US GAAP reporting concepts",
-          "structure_type": "coa_mapping",
+          "block_type": "coa_mapping",
         },
       ],
       "associations": [],
@@ -571,7 +571,7 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
   client = _get_ledger_client()
 
   # Find the coa_mapping structure (created during create_chart_of_accounts step)
-  structures = client.list_structures(graph_id, structure_type="coa_mapping")
+  structures = client.list_structures(graph_id, block_type="coa_mapping")
   if not structures:
     print("  ERROR: No mapping structure found")
     return 0
@@ -638,7 +638,7 @@ def run_ai_mapping(graph_id: str) -> None:
   )
 
   ledger = _get_ledger_client()
-  structures = ledger.list_structures(graph_id, structure_type="coa_mapping")
+  structures = ledger.list_structures(graph_id, block_type="coa_mapping")
   if not structures:
     print("  ERROR: No coa_mapping structure found — was the CoA taxonomy created?")
     return
@@ -897,7 +897,7 @@ def generate_fy2025_report(graph_id: str) -> str | None:
   client = _get_ledger_client()
 
   # Find the coa_mapping structure created during the taxonomy seed
-  structures = client.list_structures(graph_id, structure_type="coa_mapping")
+  structures = client.list_structures(graph_id, block_type="coa_mapping")
   if not structures:
     print("  ERROR: No coa_mapping structure — was the CoA created?")
     return None

@@ -85,7 +85,12 @@ _WIDENED_BLOCK_TYPE_CHECK = (
   "'custom'"
   ")"
 )
-# Same set as 0007's widen — restored on downgrade.
+# Same set as 0007's widen — restored on downgrade. Represents the
+# CHECK constraint state *immediately before* this migration runs
+# (i.e., post-0007). Uses 'regulatory_disclosure' because the rename
+# landed in 0002 (rewritten in place during the 2026-05-15 vocabulary
+# alignment); the old 'disclosure' value never existed in a deployed
+# DB.
 _PRIOR_BLOCK_TYPE_CHECK = (
   "block_type IN ("
   "'income_statement', 'balance_sheet', "
