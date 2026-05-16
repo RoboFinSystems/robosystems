@@ -73,16 +73,32 @@ class Rule(ExtensionsBase):
       ")",
       name="check_rule_category",
     ),
+    # Arithmetic / logical rule patterns. Evaluated by the AST evaluator
+    # over fact values. Exactly one of rule_pattern / rule_check_kind is
+    # populated (see check_rule_pattern_kind_xor below).
     CheckConstraint(
-      "rule_pattern IN ("
+      "rule_pattern IS NULL OR rule_pattern IN ("
       "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
       "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
-      "'SumEquals', 'Variance', "
+      "'SumEquals', 'Variance'"
+      ")",
+      name="check_rule_pattern",
+    ),
+    # Model-structure check kinds. Walk associations / classifications
+    # rather than facts; need a separate evaluator path.
+    CheckConstraint(
+      "rule_check_kind IS NULL OR rule_check_kind IN ("
       "'LeafHasClassification', 'LibraryOriginImmutability', "
       "'NoCycles', 'NoOrphanArcs', 'ParentBeforeChild', "
       "'UniqueQNameInTaxonomy'"
       ")",
-      name="check_rule_pattern",
+      name="check_rule_check_kind",
+    ),
+    # XOR: exactly one of rule_pattern / rule_check_kind is non-null.
+    CheckConstraint(
+      "(rule_pattern IS NOT NULL AND rule_check_kind IS NULL) "
+      "OR (rule_pattern IS NULL AND rule_check_kind IS NOT NULL)",
+      name="check_rule_pattern_kind_xor",
     ),
     CheckConstraint(
       "rule_severity IN ('info', 'warning', 'error')",
@@ -118,7 +134,11 @@ class Rule(ExtensionsBase):
   taxonomy_id = Column(String, ForeignKey("taxonomies.id"), nullable=False)
 
   rule_category = Column(String, nullable=False)
-  rule_pattern = Column(String, nullable=False)
+  # Exactly one of rule_pattern (arithmetic) or rule_check_kind
+  # (structural) is populated per row; the other is NULL. See the
+  # check_rule_pattern_kind_xor CHECK constraint above.
+  rule_pattern = Column(String, nullable=True)
+  rule_check_kind = Column(String, nullable=True)
   rule_expression = Column(Text, nullable=False)
   rule_message = Column(Text, nullable=True)
   rule_severity = Column(String, nullable=False, default="error")
@@ -147,4 +167,5 @@ class Rule(ExtensionsBase):
   created_by = Column(String, nullable=False, default="system")
 
   def __repr__(self) -> str:
-    return f"<Rule {self.rule_category}/{self.rule_pattern} id={self.id}>"
+    kind = self.rule_pattern or self.rule_check_kind
+    return f"<Rule {self.rule_category}/{kind} id={self.id}>"

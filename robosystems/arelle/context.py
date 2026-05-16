@@ -107,7 +107,7 @@ CANONICAL_CONTEXT: dict = {
   "citation": {"@id": f"{RS_VOCAB}citation"},
   # Structure (extended link roles)
   "structureName": {"@id": f"{RS_VOCAB}structureName"},
-  "structureType": {"@id": f"{RS_VOCAB}structureType"},
+  "blockType": {"@id": f"{RS_VOCAB}blockType"},
   "roleUri": {"@id": f"{RS_VOCAB}roleUri"},
 }
 

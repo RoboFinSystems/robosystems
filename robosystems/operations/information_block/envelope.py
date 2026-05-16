@@ -273,6 +273,7 @@ def rule_to_lite(rule: Rule) -> RuleLite:
     id=rule.id,
     rule_category=rule.rule_category,
     rule_pattern=rule.rule_pattern,
+    rule_check_kind=rule.rule_check_kind,
     rule_expression=rule.rule_expression,
     rule_target=target,
     rule_variables=variables,
@@ -350,7 +351,7 @@ def load_base_envelope_atoms(
   """Load every atom shared by Information Block envelope builders.
 
   Returns ``None`` when the Structure doesn't exist or its
-  ``structure_type`` doesn't match ``expected_block_type`` — handlers
+  ``block_type`` doesn't match ``expected_block_type`` — handlers
   surface that as a clean miss to :func:`get_information_block`. Loading
   order: Structure -> taxonomy name -> associations -> elements -> rules
   -> classifications -> fact_set -> verification_results, matching the
@@ -364,7 +365,7 @@ def load_base_envelope_atoms(
   from robosystems.models.extensions import Taxonomy
 
   structure = session.get(Structure, structure_id)
-  if structure is None or structure.structure_type != expected_block_type:
+  if structure is None or structure.block_type != expected_block_type:
     return None
 
   # Validate the FactSet pin (when provided) before doing the heavy
@@ -428,9 +429,9 @@ def load_base_envelope_atoms(
 
 _DISCLOSURE_ROLE_PREFIX = "https://robosystems.ai/seattle/cm-roles/roles/disclosures/"
 
-# Module-level cache keyed by structure_type. The rs-gaap-disclosures
+# Module-level cache keyed by block_type. The rs-gaap-disclosures
 # package is library-seeded and immutable, so the mapping from
-# structure_type (e.g. 'balance_sheet') to disclosure qname
+# block_type (e.g. 'balance_sheet') to disclosure qname
 # (e.g. 'disclosures:BalanceSheet') is global for the process lifetime.
 # A miss caches None so we don't re-query for types that have no
 # corresponding disclosure (validation_rules, taxonomy_mapping, schedules).
@@ -454,20 +455,20 @@ def _structure_role_uri(structure: Structure) -> str | None:
   return value if isinstance(value, str) else None
 
 
-def _disclosure_qname_for_type(session: Session, structure_type: str) -> str | None:
-  """Memoized lookup: structure_type -> disclosures:<Name> qname.
+def _disclosure_qname_for_type(session: Session, block_type: str) -> str | None:
+  """Memoized lookup: block_type -> disclosures:<Name> qname.
 
   Uses ``metadata->>'role_uri'`` JSONB access and the matching expression
   index (``idx_structures_role_uri``) for a single fast lookup.
   """
-  cached = _DISCLOSURE_QNAME_BY_TYPE.get(structure_type, _MISSING)
+  cached = _DISCLOSURE_QNAME_BY_TYPE.get(block_type, _MISSING)
   if cached is not _MISSING:
     return cached  # type: ignore[return-value]
 
   role_uri = session.execute(
     select(Structure.metadata_["role_uri"].astext)
     .where(
-      Structure.structure_type == structure_type,
+      Structure.block_type == block_type,
       Structure.metadata_["role_uri"].astext.like(f"{_DISCLOSURE_ROLE_PREFIX}%"),
     )
     .limit(1)
@@ -479,7 +480,7 @@ def _disclosure_qname_for_type(session: Session, structure_type: str) -> str | N
   else:
     qname = f"disclosures:{role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
 
-  _DISCLOSURE_QNAME_BY_TYPE[structure_type] = qname
+  _DISCLOSURE_QNAME_BY_TYPE[block_type] = qname
   return qname
 
 
@@ -494,14 +495,14 @@ def load_disclosure_id_for_structure(session: Session, structure_id: str) -> str
      statement entries themselves.
 
   2. The structure is a renderable presentation (e.g. ``BS-classified``)
-     with a statement-level structure_type. Look up the
-     disclosure-namespace structure that shares the same structure_type
+     with a statement-level block_type. Look up the
+     disclosure-namespace structure that shares the same block_type
      — for statement types (balance_sheet, income_statement,
      cash_flow_statement, equity_statement, comprehensive_income) this
-     is a 1:1 match. Returns ``None`` for structure_types that have no
+     is a 1:1 match. Returns ``None`` for block_types that have no
      corresponding disclosure (validation_rules, taxonomy_mapping, etc.).
 
-  The structure_type -> disclosure qname mapping is memoized at module
+  The block_type -> disclosure qname mapping is memoized at module
   level via :data:`_DISCLOSURE_QNAME_BY_TYPE`; library-seeded disclosure
   rows are immutable so the cache is safe for the process lifetime.
   """
@@ -516,10 +517,10 @@ def load_disclosure_id_for_structure(session: Session, structure_id: str) -> str
   if role_uri.startswith(_DISCLOSURE_ROLE_PREFIX):
     return f"disclosures:{role_uri[len(_DISCLOSURE_ROLE_PREFIX) :]}"
 
-  if target.structure_type is None:
+  if target.block_type is None:
     return None
 
-  return _disclosure_qname_for_type(session, target.structure_type)
+  return _disclosure_qname_for_type(session, target.block_type)
 
 
 __all__ = [

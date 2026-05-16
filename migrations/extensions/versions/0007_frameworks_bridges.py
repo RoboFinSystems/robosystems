@@ -323,65 +323,61 @@ def _restore_association_type_check(conn, schema: str) -> None:
   )
 
 
-# Widen the structures.structure_type CHECK to admit 'comprehensive_income'
+# Widen the structures.block_type CHECK to admit 'comprehensive_income'
 # so the rs-gaap-disclosures package can carry the Statement of
 # Comprehensive Income with its own type (previously conflated with
-# 'income_statement'). The renderer dispatches by structure_type, so the
+# 'income_statement'). The renderer dispatches by block_type, so the
 # unconflation only takes effect once existing tenant schemas accept the
 # new value at the DB layer.
-_WIDENED_STRUCTURE_TYPE_CHECK = (
-  "structure_type IN ("
+_WIDENED_BLOCK_TYPE_CHECK = (
+  "block_type IN ("
   "'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', "
   "'comprehensive_income', "
   "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
   "'chart_of_accounts', 'coa_mapping', "
-  "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+  "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
   "'custom'"
   ")"
 )
-_PRIOR_STRUCTURE_TYPE_CHECK = (
-  "structure_type IN ("
+_PRIOR_BLOCK_TYPE_CHECK = (
+  "block_type IN ("
   "'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', "
   "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
   "'chart_of_accounts', 'coa_mapping', "
-  "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+  "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
   "'custom'"
   ")"
 )
 
 
-def _widen_structure_type_check(conn, schema: str) -> None:
-  """Drop and re-add the structures.structure_type CHECK with the widened list."""
+def _widen_block_type_check(conn, schema: str) -> None:
+  """Drop and re-add the structures.block_type CHECK with the widened list."""
   if schema == "public":
     table = "public.structures"
   else:
     table = f'"{schema}".structures'
-  conn.execute(
-    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_structure_type")
-  )
+  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_block_type"))
   conn.execute(
     text(
-      f"ALTER TABLE {table} ADD CONSTRAINT check_structure_type "
-      f"CHECK ({_WIDENED_STRUCTURE_TYPE_CHECK})"
+      f"ALTER TABLE {table} ADD CONSTRAINT check_block_type "
+      f"CHECK ({_WIDENED_BLOCK_TYPE_CHECK})"
     )
   )
 
 
-def _restore_structure_type_check(conn, schema: str) -> None:
-  """Inverse of :func:`_widen_structure_type_check` for downgrade."""
+def _restore_block_type_check(conn, schema: str) -> None:
+  """Inverse of :func:`_widen_block_type_check` for downgrade."""
   if schema == "public":
     table = "public.structures"
   else:
     table = f'"{schema}".structures'
-  conn.execute(
-    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_structure_type")
-  )
+  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_block_type"))
   conn.execute(
     text(
-      f"ALTER TABLE {table} ADD CONSTRAINT check_structure_type "
-      f"CHECK ({_PRIOR_STRUCTURE_TYPE_CHECK})"
+      f"ALTER TABLE {table} ADD CONSTRAINT check_block_type "
+      f"CHECK ({_PRIOR_BLOCK_TYPE_CHECK})"
     )
   )
 
@@ -622,8 +618,8 @@ def upgrade() -> None:
   _widen_association_type_check(conn, "public")
   for_each_tenant_schema(conn, _widen_association_type_check)
 
-  _widen_structure_type_check(conn, "public")
-  for_each_tenant_schema(conn, _widen_structure_type_check)
+  _widen_block_type_check(conn, "public")
+  for_each_tenant_schema(conn, _widen_block_type_check)
 
   # ── clean up spurious prefixed CHECK constraints left by an old ──
   # version of this migration that used schema-prefixed names. Those
@@ -649,8 +645,8 @@ def downgrade() -> None:
   _drop_role_uri_index(conn, "public")
   for_each_tenant_schema(conn, _drop_role_uri_index)
 
-  _restore_structure_type_check(conn, "public")
-  for_each_tenant_schema(conn, _restore_structure_type_check)
+  _restore_block_type_check(conn, "public")
+  for_each_tenant_schema(conn, _restore_block_type_check)
 
   _restore_element_source_check(conn, "public")
   for_each_tenant_schema(conn, _restore_element_source_check)

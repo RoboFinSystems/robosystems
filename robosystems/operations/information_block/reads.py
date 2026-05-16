@@ -39,9 +39,9 @@ def get_information_block(
   if structure is None:
     return None
   try:
-    entry = registry_module.get(structure.structure_type)
+    entry = registry_module.get(structure.block_type)
   except KeyError:
-    # Existing rows whose structure_type isn't a registered block type
+    # Existing rows whose block_type isn't a registered block type
     # surface as ``None`` rather than raising — the envelope just can't
     # be built.
     return None
@@ -56,7 +56,7 @@ def get_information_block_for_fact_set(
   Looks up the FactSet's Structure, then dispatches the registered
   block-type handler with the explicit fact_set pin. Returns ``None``
   when the FactSet doesn't exist, has no Structure, or its
-  ``structure_type`` isn't a registered block type.
+  ``block_type`` isn't a registered block type.
 
   Used by the Report Block read path: each ReportBlockItem pins a
   ``fact_set_id``; assembling the envelope for that item is exactly
@@ -118,11 +118,11 @@ def list_information_blocks(
   # never sees their schedules.
   query = (
     select(Structure)
-    .where(Structure.structure_type.in_(candidate_ids))
+    .where(Structure.block_type.in_(candidate_ids))
     .where(Structure.is_active.is_(True))
     .order_by(
       (Structure.created_by == "library-seeder").asc(),
-      Structure.structure_type,
+      Structure.block_type,
       Structure.name,
     )
     .limit(limit)
@@ -133,7 +133,7 @@ def list_information_blocks(
   envelopes: list[InformationBlockEnvelope] = []
   for structure in rows:
     try:
-      entry = registry_module.get(structure.structure_type)
+      entry = registry_module.get(structure.block_type)
     except KeyError:
       continue
     envelope = entry.dispatch_build_envelope(session, structure.id)

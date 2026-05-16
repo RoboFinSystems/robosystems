@@ -14,7 +14,7 @@ def _structure_to_response(structure: Structure) -> LibraryStructureResponse:
   return LibraryStructureResponse(
     id=structure.id,
     name=structure.name,
-    structure_type=structure.structure_type,
+    block_type=structure.block_type,
     taxonomy_id=structure.taxonomy_id,
     role_uri=role_uri,
     is_active=structure.is_active,
@@ -24,15 +24,15 @@ def _structure_to_response(structure: Structure) -> LibraryStructureResponse:
 def list_structures(
   session: Session,
   taxonomy_id: str | None = None,
-  structure_type: str | None = None,
+  block_type: str | None = None,
 ) -> list[LibraryStructureResponse]:
   """List structures, optionally filtered by taxonomy or type."""
   query = select(Structure)
   if taxonomy_id is not None:
     query = query.where(Structure.taxonomy_id == taxonomy_id)
-  if structure_type is not None:
-    query = query.where(Structure.structure_type == structure_type)
-  query = query.order_by(Structure.structure_type, Structure.name)
+  if block_type is not None:
+    query = query.where(Structure.block_type == block_type)
+  query = query.order_by(Structure.block_type, Structure.name)
 
   structures = session.execute(query).scalars().all()
   return [_structure_to_response(s) for s in structures]

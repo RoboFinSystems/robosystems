@@ -205,7 +205,7 @@ def _statement_envelope(
     display_name=display_name,
     category="Reporting",
     information_model=InformationModelResponse(
-      concept_arrangement="roll_up", member_arrangement="aggregation"
+      concept_arrangement="roll_up", member_arrangement="whole_part"
     ),
     artifact=ArtifactResponse(mechanics=StatementMechanics()),
   )
@@ -232,7 +232,7 @@ class TestStatementInformationBlocks:
     assert data["blockType"] == "balance_sheet"
     assert data["category"] == "Reporting"
     assert data["informationModel"]["conceptArrangement"] == "roll_up"
-    assert data["informationModel"]["memberArrangement"] == "aggregation"
+    assert data["informationModel"]["memberArrangement"] == "whole_part"
     assert data["artifact"]["mechanics"]["kind"] == "statement_renderer"
 
   def test_balance_sheet_filter_surfaces_on_library_sentinel(self) -> None:

@@ -5,8 +5,8 @@
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
-    "structureType": {
-      "@id": "https://robosystems.ai/vocab/structureType"
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
     },
     "roleUri": {
       "@id": "https://robosystems.ai/vocab/roleUri"
@@ -54,19 +54,19 @@
       "@id": "_:rs-gaap-pres-bs",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/rs-gaap-presentation/rs-gaap-pres-bs",
       "structureName": "rs-gaap — Balance Sheet presentation",
-      "structureType": "balance_sheet"
+      "blockType": "balance_sheet"
     },
     {
       "@id": "_:rs-gaap-pres-is",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/rs-gaap-presentation/rs-gaap-pres-is",
       "structureName": "rs-gaap — Income Statement presentation",
-      "structureType": "income_statement"
+      "blockType": "income_statement"
     },
     {
       "@id": "_:rs-gaap-pres-cf",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/rs-gaap-presentation/rs-gaap-pres-cf",
       "structureName": "rs-gaap — Cash Flow Statement presentation",
-      "structureType": "cash_flow_statement"
+      "blockType": "cash_flow_statement"
     },
     {
       "@id": "rs-gaap:AccountsNotesAndLoansReceivableNetCurrent",
@@ -7727,7 +7727,7 @@
       "@id": "_:rs-gaap-pres-bs-classified",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
       "structureName": "rs-gaap — Balance Sheet — Classified",
-      "structureType": "balance_sheet",
+      "blockType": "balance_sheet",
       "conceptArrangementPattern": "arithmetic"
     },
     {
@@ -8023,7 +8023,7 @@
       "@id": "_:rs-gaap-pres-is-multistep",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
       "structureName": "rs-gaap — Income Statement — Multi-step",
-      "structureType": "income_statement",
+      "blockType": "income_statement",
       "conceptArrangementPattern": "arithmetic"
     },
     {
@@ -8191,7 +8191,7 @@
       "@id": "_:rs-gaap-pres-cf-indirect",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "structureName": "rs-gaap — Cash Flow Statement — Indirect",
-      "structureType": "cash_flow_statement",
+      "blockType": "cash_flow_statement",
       "conceptArrangementPattern": "arithmetic"
     },
     {
@@ -8327,7 +8327,7 @@
       "@id": "_:rs-gaap-pres-equity",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward",
       "structureName": "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)",
-      "structureType": "equity_statement",
+      "blockType": "equity_statement",
       "conceptArrangementPattern": "roll_forward"
     },
     {

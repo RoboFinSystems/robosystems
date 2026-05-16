@@ -5,7 +5,7 @@ statement type, return the Network Structure the renderer should walk.
 Single source of truth for both the saved-report path
 (``commands/reports.py``) and the live-statement path
 (``reports/fact_grid.py``); replaces the prior "latest active by
-structure_type" + CoA-coverage scoring fallbacks.
+block_type" + CoA-coverage scoring fallbacks.
 
 Composition lives in ``reporting_style_networks`` (one row per
 ``(reporting_style_id, statement_type)``); the Default Style ships

@@ -157,7 +157,7 @@ class StructureSpec(BaseModel):
 
   name: str = Field(..., description="Human-readable name")
   role_uri: str = Field(..., description="Full XBRL extended link role URI")
-  structure_type: str = Field(
+  block_type: str = Field(
     "custom",
     description=(
       "balance_sheet | income_statement | cash_flow_statement | "
@@ -183,7 +183,7 @@ class StructureSpec(BaseModel):
       "  level3_textblock — third-level note\n"
       "  level4_textblock — fourth-level note\n"
       "  textblock        — generic note text block (legacy alias)\n"
-      "When None, the renderer falls back to a per-structure_type default "
+      "When None, the renderer falls back to a per-block_type default "
       "(income_statement / balance_sheet / cash_flow_statement → arithmetic; "
       "equity_statement → roll_forward; validation_rules → arithmetic)."
     ),
@@ -331,11 +331,11 @@ class TaxonomyPackage(BaseModel):
   is_shared: bool = Field(True, description="Shared across tenants (library-origin)")
   description: str | None = Field(None)
 
-  default_structure_type: str | None = Field(
+  default_block_type: str | None = Field(
     None,
     description=(
-      "Package-level default for ``StructureSpec.structure_type`` when a "
-      "structure has no explicit ``structureType`` and no role-uri "
+      "Package-level default for ``StructureSpec.block_type`` when a "
+      "structure has no explicit ``blockType`` and no role-uri "
       "heuristic match. Used by 'mapping' / 'rules' / 'disclosure' "
       "packages to override the role-uri name heuristic that would "
       "otherwise mistake (e.g.) a fac-to-rs-gaap crosswalk role for a "

@@ -1202,9 +1202,7 @@ class OLTPLoader:
         # Check if a mapping structure already exists
         existing_mapping = (
           session.query(Structure)
-          .filter(
-            Structure.structure_type == "coa_mapping", Structure.is_active.is_(True)
-          )
+          .filter(Structure.block_type == "coa_mapping", Structure.is_active.is_(True))
           .first()
         )
 
@@ -1213,7 +1211,7 @@ class OLTPLoader:
             id=generate_prefixed_ulid("struct"),
             name="CoA to US GAAP Mapping",
             description="Maps Chart of Accounts to US GAAP reporting concepts",
-            structure_type="coa_mapping",
+            block_type="coa_mapping",
             taxonomy_id=existing_coa.id,
             is_active=True,
             created_by=created_by,

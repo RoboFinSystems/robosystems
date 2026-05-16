@@ -57,19 +57,19 @@ class TestGetInformationBlock:
     assert get_information_block(session, "struct_missing") is None
 
   def test_unknown_block_type_returns_none(self) -> None:
-    """Structures with a structure_type not yet modeled in the registry
+    """Structures with a block_type not yet modeled in the registry
     (e.g., legacy ``custom`` or ``chart_of_accounts`` rows) return None
     rather than raising — can't build the envelope."""
     session = MagicMock()
     structure = MagicMock()
-    structure.structure_type = "chart_of_accounts"
+    structure.block_type = "chart_of_accounts"
     session.get.return_value = structure
     assert get_information_block(session, "struct_coa") is None
 
   def test_dispatches_to_schedule_handler(self) -> None:
     session = MagicMock()
     structure = MagicMock()
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     session.get.return_value = structure
     expected = _envelope("struct_1")
     mock_build = MagicMock(return_value=expected)
@@ -120,7 +120,7 @@ class TestListInformationBlocks:
     session = MagicMock()
     structure = MagicMock()
     structure.id = "struct_1"
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     session.execute.return_value.scalars.return_value.all.return_value = [structure]
     expected = _envelope("struct_1")
     mock_build = MagicMock(return_value=expected)
@@ -154,15 +154,15 @@ class TestListInformationBlocks:
     session.execute.assert_not_called()
 
   def test_skips_structures_whose_block_type_is_unregistered(self) -> None:
-    """If the DB returns a Structure row whose structure_type is not
+    """If the DB returns a Structure row whose block_type is not
     registered (legacy row, or mid-migration), it's skipped cleanly."""
     session = MagicMock()
     schedule_row = MagicMock()
     schedule_row.id = "struct_s"
-    schedule_row.structure_type = "schedule"
+    schedule_row.block_type = "schedule"
     coa_row = MagicMock()
     coa_row.id = "struct_coa"
-    coa_row.structure_type = "chart_of_accounts"  # not in registry yet
+    coa_row.block_type = "chart_of_accounts"  # not in registry yet
     session.execute.return_value.scalars.return_value.all.return_value = [
       schedule_row,
       coa_row,
@@ -189,7 +189,7 @@ class TestListInformationBlocks:
     session.execute.assert_called_once()
 
   def test_list_surfaces_statement_blocks_on_tenant_graph(self) -> None:
-    """A tenant Structure with ``structure_type='balance_sheet'`` flows
+    """A tenant Structure with ``block_type='balance_sheet'`` flows
     through the statement handler and surfaces its envelope."""
     from robosystems.operations.information_block.registry import (
       BALANCE_SHEET_BLOCK,
@@ -198,7 +198,7 @@ class TestListInformationBlocks:
     session = MagicMock()
     bs_row = MagicMock()
     bs_row.id = "struct_balance_sheet"
-    bs_row.structure_type = "balance_sheet"
+    bs_row.block_type = "balance_sheet"
     session.execute.return_value.scalars.return_value.all.return_value = [bs_row]
 
     expected = InformationBlockEnvelope(
@@ -208,7 +208,7 @@ class TestListInformationBlocks:
       display_name="Balance Sheet",
       category="Reporting",
       information_model=InformationModelResponse(
-        concept_arrangement="roll_up", member_arrangement="aggregation"
+        concept_arrangement="roll_up", member_arrangement="whole_part"
       ),
       artifact=ArtifactResponse(mechanics=StatementMechanics()),
     )
@@ -259,7 +259,7 @@ class TestGetInformationBlockForFactSet:
     fs.id = "fs_01"
     fs.structure_id = "struct_coa"
     structure = MagicMock()
-    structure.structure_type = "chart_of_accounts"
+    structure.block_type = "chart_of_accounts"
     session = self._patched_session(fact_set=fs, structure=structure)
 
     assert get_information_block_for_fact_set(session, "fs_01") is None
@@ -270,7 +270,7 @@ class TestGetInformationBlockForFactSet:
     fs.id = "fs_01"
     fs.structure_id = "struct_1"
     structure = MagicMock()
-    structure.structure_type = "schedule"
+    structure.block_type = "schedule"
     session = self._patched_session(fact_set=fs, structure=structure)
 
     expected = _envelope("struct_1")

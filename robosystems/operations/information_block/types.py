@@ -40,7 +40,7 @@ class BlockTypeRegistryEntry:
 
   id: str
   """Stable discriminator — e.g. 'schedule'. Matches the block_type
-  string on the wire and the ``structure_type`` value in the DB."""
+  string on the wire and the ``block_type`` value in the DB."""
 
   display_name: str
   """Human-readable singular name, e.g. 'Schedule'."""

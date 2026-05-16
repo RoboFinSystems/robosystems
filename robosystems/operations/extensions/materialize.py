@@ -512,13 +512,13 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR                   AS network_uri,
       description                     AS definition,
       NULL::VARCHAR                   AS number,
-      structure_type                  AS type,
+      block_type                  AS type,
       name,
-      structure_type                  AS canonical_type,
+      block_type                  AS canonical_type,
       1.0::DOUBLE                     AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
     FROM postgres_scan('{c}', '{s}', 'structures')
-    WHERE structure_type NOT IN ('chart_of_accounts', 'coa_mapping')
+    WHERE block_type NOT IN ('chart_of_accounts', 'coa_mapping')
       AND is_active = true
   """
 
@@ -835,7 +835,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR                   AS taxonomy_context
     FROM postgres_scan('{c}', '{s}', 'structures')
     WHERE taxonomy_id IS NOT NULL
-      AND structure_type NOT IN ('chart_of_accounts', 'coa_mapping')
+      AND block_type NOT IN ('chart_of_accounts', 'coa_mapping')
       AND is_active = true
   """
 

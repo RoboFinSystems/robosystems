@@ -130,7 +130,7 @@ def _make_statement_entry(block_type: str, icon: str) -> BlockTypeRegistryEntry:
       f"create-report, not create-information-block."
     ),
     concept_arrangement_default="roll_up",
-    member_arrangement_default="aggregation",
+    member_arrangement_default="whole_part",
     mechanics_schema=StatementMechanics,
     create_request_model=_EmptyPayload,
     update_request_model=_EmptyPayload,

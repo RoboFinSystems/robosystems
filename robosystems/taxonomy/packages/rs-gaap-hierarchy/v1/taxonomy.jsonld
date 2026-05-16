@@ -70,7 +70,7 @@
   "standard": "rs-gaap-hierarchy",
   "version": "v1",
   "taxonomy_type": "mapping",
-  "default_structure_type": "taxonomy_mapping",
+  "default_block_type": "taxonomy_mapping",
   "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap-hierarchy/v1/",
   "origin": "native",
   "created_at": "2026-04-20",

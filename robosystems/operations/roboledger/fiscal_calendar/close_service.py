@@ -341,7 +341,7 @@ class PeriodCloseService:
           SELECT DISTINCT s.id
           FROM structures s
           JOIN facts f ON f.structure_id = s.id
-          WHERE s.structure_type = 'schedule'
+          WHERE s.block_type = 'schedule'
             AND f.fact_scope = 'in_scope'
             AND f.period_end >= :period_start
             AND f.period_end <= :period_end

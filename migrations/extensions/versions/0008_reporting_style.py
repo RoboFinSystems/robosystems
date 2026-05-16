@@ -6,7 +6,7 @@ to resolve which Network renders each statement type.
 
 This migration is additive:
 
-1. Widen ``structures.check_structure_type`` to admit ``'reporting_style'``
+1. Widen ``structures.check_block_type`` to admit ``'reporting_style'``
    (public + every existing tenant schema). Replaces the 0007 widen.
 2. Create ``public.reporting_style_networks`` — the typed composition
    table ``(reporting_style_id, statement_type) → network_id``. Mirrors
@@ -14,9 +14,9 @@ This migration is additive:
    ``CREATE SCHEMA IF NOT EXISTS`` + ``metadata.create_all``) lands the
    table for fresh tenants and existing tenants get it via the loop.
 3. Promote the three placeholder Style Structures from
-   ``structure_type='custom'`` → ``'reporting_style'`` in **public only**.
+   ``block_type='custom'`` → ``'reporting_style'`` in **public only**.
    Existing tenant rows keep their legacy ``'custom'`` type — the picker
-   doesn't filter on the Style's structure_type, and the immutability
+   doesn't filter on the Style's block_type, and the immutability
    trigger blocks tenant-scope UPDATE on library-seeded rows. Newly
    re-provisioned tenants pick up the corrected type from public.
 4. Seed the Default Style's composition (Balance Sheet / Multi-step IS /
@@ -70,57 +70,53 @@ def _structure_id(role_uri: str) -> str:
   return generate_deterministic_uuid(role_uri, namespace="structure")
 
 
-# ── structure_type CHECK widen (admit 'reporting_style') ──────────────────
+# ── block_type CHECK widen (admit 'reporting_style') ──────────────────
 
 
-_WIDENED_STRUCTURE_TYPE_CHECK = (
-  "structure_type IN ("
+_WIDENED_BLOCK_TYPE_CHECK = (
+  "block_type IN ("
   "'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', "
   "'comprehensive_income', "
   "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
   "'chart_of_accounts', 'coa_mapping', "
-  "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+  "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
   "'reporting_style', "
   "'custom'"
   ")"
 )
 # Same set as 0007's widen — restored on downgrade.
-_PRIOR_STRUCTURE_TYPE_CHECK = (
-  "structure_type IN ("
+_PRIOR_BLOCK_TYPE_CHECK = (
+  "block_type IN ("
   "'income_statement', 'balance_sheet', "
   "'cash_flow_statement', 'equity_statement', "
   "'comprehensive_income', "
   "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
   "'chart_of_accounts', 'coa_mapping', "
-  "'validation_rules', 'disclosure', 'taxonomy_mapping', "
+  "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
   "'custom'"
   ")"
 )
 
 
-def _widen_structure_type_check(conn, schema: str) -> None:
+def _widen_block_type_check(conn, schema: str) -> None:
   table = "public.structures" if schema == "public" else f'"{schema}".structures'
-  conn.execute(
-    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_structure_type")
-  )
+  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_block_type"))
   conn.execute(
     text(
-      f"ALTER TABLE {table} ADD CONSTRAINT check_structure_type "
-      f"CHECK ({_WIDENED_STRUCTURE_TYPE_CHECK})"
+      f"ALTER TABLE {table} ADD CONSTRAINT check_block_type "
+      f"CHECK ({_WIDENED_BLOCK_TYPE_CHECK})"
     )
   )
 
 
-def _restore_structure_type_check(conn, schema: str) -> None:
+def _restore_block_type_check(conn, schema: str) -> None:
   table = "public.structures" if schema == "public" else f'"{schema}".structures'
-  conn.execute(
-    text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_structure_type")
-  )
+  conn.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS check_block_type"))
   conn.execute(
     text(
-      f"ALTER TABLE {table} ADD CONSTRAINT check_structure_type "
-      f"CHECK ({_PRIOR_STRUCTURE_TYPE_CHECK})"
+      f"ALTER TABLE {table} ADD CONSTRAINT check_block_type "
+      f"CHECK ({_PRIOR_BLOCK_TYPE_CHECK})"
     )
   )
 
@@ -204,7 +200,7 @@ def _promote_style_structures(conn) -> None:
   """Flip the 3 placeholder Style Structures in PUBLIC from 'custom' →
   'reporting_style'. Tenant rows are left untouched: the library
   immutability trigger blocks tenant-scope UPDATE, and the picker
-  doesn't care about the Style's structure_type. Fresh tenants pick
+  doesn't care about the Style's block_type. Fresh tenants pick
   up the corrected type when ``copy_library_into_tenant`` re-mirrors
   rows from public after this migration runs.
   """
@@ -217,8 +213,8 @@ def _promote_style_structures(conn) -> None:
     text(
       """
       UPDATE public.structures
-      SET structure_type = 'reporting_style'
-      WHERE id = ANY(:ids) AND structure_type = 'custom'
+      SET block_type = 'reporting_style'
+      WHERE id = ANY(:ids) AND block_type = 'custom'
       """
     ),
     {"ids": ids},
@@ -235,8 +231,8 @@ def _restore_style_structures(conn) -> None:
     text(
       """
       UPDATE public.structures
-      SET structure_type = 'custom'
-      WHERE id = ANY(:ids) AND structure_type = 'reporting_style'
+      SET block_type = 'custom'
+      WHERE id = ANY(:ids) AND block_type = 'reporting_style'
       """
     ),
     {"ids": ids},
@@ -247,9 +243,9 @@ def upgrade() -> None:
   conn = op.get_bind()
   from migrations.extensions.helpers import for_each_tenant_schema
 
-  # 1. Widen structure_type CHECK in public + every tenant schema.
-  _widen_structure_type_check(conn, "public")
-  for_each_tenant_schema(conn, _widen_structure_type_check)
+  # 1. Widen block_type CHECK in public + every tenant schema.
+  _widen_block_type_check(conn, "public")
+  for_each_tenant_schema(conn, _widen_block_type_check)
 
   # 2. Create reporting_style_networks table in public (Alembic op).
   op.create_table(
@@ -299,7 +295,7 @@ def downgrade() -> None:
   conn = op.get_bind()
   from migrations.extensions.helpers import for_each_tenant_schema
 
-  # Reverse step 4 + 5: restore Style structure_types + drop composition rows.
+  # Reverse step 4 + 5: restore Style block_types + drop composition rows.
   conn.execute(text("TRUNCATE TABLE public.reporting_style_networks"))
   _restore_style_structures(conn)
 
@@ -308,5 +304,5 @@ def downgrade() -> None:
   op.drop_table("reporting_style_networks")
 
   # Reverse the CHECK widen.
-  _restore_structure_type_check(conn, "public")
-  for_each_tenant_schema(conn, _restore_structure_type_check)
+  _restore_block_type_check(conn, "public")
+  for_each_tenant_schema(conn, _restore_block_type_check)

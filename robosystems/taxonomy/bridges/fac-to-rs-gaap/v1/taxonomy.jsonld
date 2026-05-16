@@ -106,8 +106,8 @@
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
-    "structureType": {
-      "@id": "https://robosystems.ai/vocab/structureType"
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
     },
     "roleUri": {
       "@id": "https://robosystems.ai/vocab/roleUri"
@@ -116,7 +116,7 @@
   "standard": "fac-to-rs-gaap",
   "version": "v1",
   "taxonomy_type": "mapping",
-  "default_structure_type": "taxonomy_mapping",
+  "default_block_type": "taxonomy_mapping",
   "namespace_uri": "https://robosystems.ai/taxonomy/fac-to-rs-gaap/v1/",
   "origin": "native",
   "created_at": "2026-04-20",

@@ -19,8 +19,8 @@
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
-    "structureType": {
-      "@id": "https://robosystems.ai/vocab/structureType"
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
     },
     "roleUri": {
       "@id": "https://robosystems.ai/vocab/roleUri"
@@ -39,7 +39,7 @@
   "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/reporting-styles/v1/",
   "origin": "native",
   "created_at": "2026-05-10",
-  "default_structure_type": "custom",
+  "default_block_type": "custom",
   "description": "Reporting Styles — composition profiles that pin specific Disclosures for a vertical / filer profile. Each Style is an abstract subject with reportingStyle-composesDisclosure arcs naming the disclosures it includes. Mirrors Charlie Hoffman's seattlemethod ReportingStyles concept (the COMID-BSC-CF1-… composition schemas at auditchain.finance) but anchored to rs-gaap disclosures instead of fac/us-gaap concepts. v1 ships three minimal styles; vertical-specific styles (banking, insurance) are placeholders until customer demand surfaces.",
   "@graph": [
     {
@@ -68,21 +68,21 @@
       "@id": "_:style-default-structure",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/Default",
       "structureName": "Default Style — Composition",
-      "structureType": "custom",
+      "blockType": "custom",
       "conceptArrangementPattern": "set"
     },
     {
       "@id": "_:style-smallprivate-structure",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/SmallPrivateCompany",
       "structureName": "Small Private Company Style — Composition",
-      "structureType": "custom",
+      "blockType": "custom",
       "conceptArrangementPattern": "set"
     },
     {
       "@id": "_:style-banking-structure",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/Banking",
       "structureName": "Banking Style — Composition (placeholder)",
-      "structureType": "custom",
+      "blockType": "custom",
       "conceptArrangementPattern": "set"
     },
 

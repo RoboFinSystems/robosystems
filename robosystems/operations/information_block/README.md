@@ -55,7 +55,7 @@ The compositional family (statements) and the derivative family (metrics) raise 
 
 3. **Register the entry** in `registry.py` — add a `BlockTypeRegistryEntry` literal and insert it into `REGISTRY`. That's it: the generic REST ops (`create-information-block`, etc.) and MCP tools pick it up automatically via the registry.
 
-4. **Widen the DB CHECK constraint** — add the new `structure_type` value to `migrations/extensions/versions/` and to `_widen_library_checks` in `db/extensions.py`.
+4. **Widen the DB CHECK constraint** — add the new `block_type` value to `migrations/extensions/versions/` and to `_widen_library_checks` in `db/extensions.py`.
 
 ## Envelope Assembly
 

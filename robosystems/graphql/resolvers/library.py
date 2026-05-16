@@ -324,14 +324,14 @@ class LibraryQuery:
     self,
     info: Info[GraphQLContext, None],
     taxonomy_id: strawberry.ID | None = None,
-    structure_type: str | None = None,
+    block_type: str | None = None,
   ) -> list[LibraryStructure]:
     """List structures (extended link roles) — BS, IS, custom, etc."""
     with _open_session(info) as session:
       rows = list_structures(
         session,
         taxonomy_id=str(taxonomy_id) if taxonomy_id else None,
-        structure_type=structure_type,
+        block_type=block_type,
       )
       return [LibraryStructure.from_pydantic(r) for r in rows]
 

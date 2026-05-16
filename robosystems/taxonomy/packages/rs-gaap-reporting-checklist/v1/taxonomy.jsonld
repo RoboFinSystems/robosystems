@@ -19,8 +19,8 @@
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
-    "structureType": {
-      "@id": "https://robosystems.ai/vocab/structureType"
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
     },
     "roleUri": {
       "@id": "https://robosystems.ai/vocab/roleUri"
@@ -43,7 +43,7 @@
   "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/reporting-checklist/v1/",
   "origin": "native",
   "created_at": "2026-05-10",
-  "default_structure_type": "validation_rules",
+  "default_block_type": "validation_rules",
   "description": "Reporting Checklist (DR rules) — what disclosures a 'general purpose financial report' requires vs may have. Mirrors Charlie Hoffman's reportingChecklist arcrole vocabulary (financialReport-requiresDisclosure, financialReport-possibleDisclosure). Declares one abstract checklist:GeneralPurposeFinancialReport subject and arcs to the disclosures it scopes.",
   "@graph": [
     {
@@ -58,7 +58,7 @@
       "@id": "_:dr-checklist",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dr/ReportingChecklist",
       "structureName": "Reporting Checklist — General Purpose Financial Report",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "set"
     },
 

@@ -104,7 +104,7 @@ class ReportPackageItem(BaseModel):
     0,
     description=(
       "Display position in the package. Derived from "
-      "``Structure.structure_type`` ordering (BS → IS → CF → Equity → "
+      "``Structure.block_type`` ordering (BS → IS → CF → Equity → "
       "Schedule), with ties broken by ``fact_set.created_at``."
     ),
   )

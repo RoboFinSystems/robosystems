@@ -536,18 +536,18 @@ class XBRLGraphProcessor:
       for idx, row in self.structures_df.iterrows():
         name = parsed_names[len(canonical_types)]
         definition = row.get("definition", "")
-        structure_type = row.get("type")
+        block_type = row.get("type")
         heuristic_type, heuristic_conf = classify_structure_heuristic(
-          name, definition, structure_type=structure_type
+          name, definition, block_type=block_type
         )
         if heuristic_type:
           canonical_types.append(heuristic_type)
           canonical_confidences.append(heuristic_conf)
-        elif structure_type != "Statement":
+        elif block_type != "Statement":
           # For Disclosure structures, attempt disclosure composition classification
           disc_type = None
           disc_conf = None
-          if structure_type == "Disclosure" and XBRL_GRAPH_REFINEMENT:
+          if block_type == "Disclosure" and XBRL_GRAPH_REFINEMENT:
             struct_id = row.get("identifier")
             elements = structure_element_map.get(struct_id, []) if struct_id else []
             if elements:

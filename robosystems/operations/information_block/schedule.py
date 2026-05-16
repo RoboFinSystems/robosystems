@@ -223,7 +223,7 @@ def build_envelope(
     ),
     artifact=ArtifactResponse(
       topic=structure.description,
-      parenthetical_note=structure.parenthetical_note,
+      renderer_note=structure.renderer_note,
       template=None,
       mechanics=mechanics,
     ),

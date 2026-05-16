@@ -26,8 +26,8 @@
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
-    "structureType": {
-      "@id": "https://robosystems.ai/vocab/structureType"
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
     },
     "roleUri": {
       "@id": "https://robosystems.ai/vocab/roleUri"
@@ -43,109 +43,109 @@
       "@id": "_:fac-pres-bs-classified",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BS-classified",
       "structureName": "FAC \u2014 Balance Sheet \u2014 Classified",
-      "structureType": "balance_sheet"
+      "blockType": "balance_sheet"
     },
     {
       "@id": "_:fac-pres-bs-unclassified",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BS-unclassified",
       "structureName": "FAC \u2014 Balance Sheet \u2014 Unclassified",
-      "structureType": "balance_sheet"
+      "blockType": "balance_sheet"
     },
     {
       "@id": "_:fac-pres-is-multistep",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-multistep",
       "structureName": "FAC \u2014 Income Statement \u2014 Multi-step",
-      "structureType": "income_statement"
+      "blockType": "income_statement"
     },
     {
       "@id": "_:fac-pres-is-singlestep",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-singlestep",
       "structureName": "FAC \u2014 Income Statement \u2014 Single-step",
-      "structureType": "income_statement"
+      "blockType": "income_statement"
     },
     {
       "@id": "_:fac-pres-is-insurance",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-insurance",
       "structureName": "FAC \u2014 Income Statement \u2014 Insurance-based",
-      "structureType": "income_statement"
+      "blockType": "income_statement"
     },
     {
       "@id": "_:fac-pres-is-interest",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-interest",
       "structureName": "FAC \u2014 Income Statement \u2014 Interest-based (Banking)",
-      "structureType": "income_statement"
+      "blockType": "income_statement"
     },
     {
       "@id": "_:fac-pres-is-securities",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/IS-securities",
       "structureName": "FAC \u2014 Income Statement \u2014 Securities-based",
-      "structureType": "income_statement"
+      "blockType": "income_statement"
     },
     {
       "@id": "_:fac-pres-comprehensiveincome",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome",
       "structureName": "FAC \u2014 Statement of Comprehensive Income",
-      "structureType": "equity_statement"
+      "blockType": "equity_statement"
     },
     {
       "@id": "_:fac-pres-cashflow",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/CashFlow",
       "structureName": "FAC \u2014 Cash Flow Statement",
-      "structureType": "cash_flow_statement"
+      "blockType": "cash_flow_statement"
     },
     {
       "@id": "_:fac-pres-niac-breakdown",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/NIAC-breakdown",
       "structureName": "FAC \u2014 Net Income Available to Common Stockholders \u2014 Breakdown",
-      "structureType": "income_statement"
+      "blockType": "income_statement"
     },
     {
       "@id": "_:fac-pres-netincome-breakdown",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/NetIncome-breakdown",
       "structureName": "FAC \u2014 Net Income \u2014 Parent/Noncontrolling Breakdown",
-      "structureType": "income_statement"
+      "blockType": "income_statement"
     },
     {
       "@id": "_:fac-pres-comprehensiveincome-breakdown",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ComprehensiveIncome-breakdown",
       "structureName": "FAC \u2014 Comprehensive Income \u2014 Parent/Noncontrolling Breakdown",
-      "structureType": "equity_statement"
+      "blockType": "equity_statement"
     },
     {
       "@id": "_:fac-pres-cashflow-breakdown",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/CashFlow-breakdown",
       "structureName": "FAC \u2014 Cash Flow \u2014 Continuing/Discontinued Breakdown",
-      "structureType": "cash_flow_statement"
+      "blockType": "cash_flow_statement"
     },
     {
       "@id": "_:fac-pres-generalinformation",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/GeneralInformation",
       "structureName": "FAC \u2014 General Information Hierarchy",
-      "structureType": "custom"
+      "blockType": "custom"
     },
     {
       "@id": "_:fac-pres-basicinformation",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/BasicInformation",
       "structureName": "FAC \u2014 Basic Information Hierarchy",
-      "structureType": "custom"
+      "blockType": "custom"
     },
     {
       "@id": "_:fac-pres-keyratios",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/KeyRatios",
       "structureName": "FAC \u2014 Key Ratios Hierarchy",
-      "structureType": "custom"
+      "blockType": "custom"
     },
     {
       "@id": "_:fac-pres-otherinformation",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/OtherInformation",
       "structureName": "FAC \u2014 Other Information Hierarchy",
-      "structureType": "custom"
+      "blockType": "custom"
     },
     {
       "@id": "_:fac-pres-validationresults",
       "roleUri": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/fac-presentation/ValidationResults",
       "structureName": "FAC \u2014 Validation Results Hierarchy",
-      "structureType": "custom"
+      "blockType": "custom"
     },
     {
       "@id": "_:fac-pres-bs-classified-arc-1",

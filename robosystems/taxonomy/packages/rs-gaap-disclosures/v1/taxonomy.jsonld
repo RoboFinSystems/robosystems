@@ -22,8 +22,8 @@
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
-    "structureType": {
-      "@id": "https://robosystems.ai/vocab/structureType"
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
     },
     "roleUri": {
       "@id": "https://robosystems.ai/vocab/roleUri"
@@ -51,7 +51,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/BalanceSheet",
       "structureName": "Balance Sheet",
-      "structureType": "balance_sheet",
+      "blockType": "balance_sheet",
       "conceptArrangementPattern": "component",
       "secType": "statement"
     },
@@ -63,7 +63,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/IncomeStatement",
       "structureName": "Income Statement",
-      "structureType": "income_statement",
+      "blockType": "income_statement",
       "conceptArrangementPattern": "component",
       "secType": "statement"
     },
@@ -75,7 +75,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CashFlowStatement",
       "structureName": "Cash Flow Statement",
-      "structureType": "cash_flow_statement",
+      "blockType": "cash_flow_statement",
       "conceptArrangementPattern": "component",
       "secType": "statement"
     },
@@ -87,7 +87,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/StatementOfChangesInEquity",
       "structureName": "Statement of Changes in Equity",
-      "structureType": "equity_statement",
+      "blockType": "equity_statement",
       "conceptArrangementPattern": "roll_forward",
       "secType": "statement"
     },
@@ -99,7 +99,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/StatementOfComprehensiveIncome",
       "structureName": "Statement of Comprehensive Income",
-      "structureType": "comprehensive_income",
+      "blockType": "comprehensive_income",
       "conceptArrangementPattern": "component",
       "secType": "statement"
     },
@@ -111,7 +111,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/AssetsRollUp",
       "structureName": "Assets Roll Up",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up",
       "secType": "statement_component"
     },
@@ -123,7 +123,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/LiabilitiesAndEquityRollUp",
       "structureName": "Liabilities and Equity Roll Up",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up",
       "secType": "statement_component"
     },
@@ -135,7 +135,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CurrentAssetsRollUp",
       "structureName": "Current Assets Roll Up",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up",
       "secType": "statement_component"
     },
@@ -147,7 +147,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/NoncurrentAssetsRollUp",
       "structureName": "Noncurrent Assets Roll Up",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up",
       "secType": "statement_component"
     },
@@ -159,7 +159,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CurrentLiabilitiesRollUp",
       "structureName": "Current Liabilities Roll Up",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up",
       "secType": "statement_component"
     },
@@ -171,7 +171,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/NoncurrentLiabilitiesRollUp",
       "structureName": "Noncurrent Liabilities Roll Up",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up",
       "secType": "statement_component"
     },
@@ -183,7 +183,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/RevenuesRollUp",
       "structureName": "Revenues Roll Up",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up",
       "secType": "statement_component"
     },
@@ -195,7 +195,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/OperatingExpensesRollUp",
       "structureName": "Operating Expenses Roll Up",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_up",
       "secType": "statement_component"
     },
@@ -207,7 +207,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/EquityRollForward",
       "structureName": "Equity Roll Forward",
-      "structureType": "validation_rules",
+      "blockType": "validation_rules",
       "conceptArrangementPattern": "roll_forward",
       "secType": "statement_component"
     },
@@ -219,7 +219,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/DocumentAndEntityInformation",
       "structureName": "Document and Entity Information",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "hierarchy",
       "secType": "document"
     },
@@ -231,7 +231,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/NatureOfOperations",
       "structureName": "Nature of Operations",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -243,7 +243,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/SignificantAccountingPolicies",
       "structureName": "Significant Accounting Policies",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -255,7 +255,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/PropertyPlantAndEquipmentDisclosure",
       "structureName": "Property, Plant and Equipment Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -267,7 +267,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/GoodwillRollForward",
       "structureName": "Goodwill Roll Forward",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "roll_forward",
       "secType": "disclosure"
     },
@@ -279,7 +279,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/IntangibleAssetsDisclosure",
       "structureName": "Intangible Assets Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -291,7 +291,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/DebtDisclosure",
       "structureName": "Debt Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -303,7 +303,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/LongTermDebtMaturities",
       "structureName": "Long-Term Debt Maturities",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "roll_up",
       "secType": "disclosure"
     },
@@ -315,7 +315,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/IncomeTaxDisclosure",
       "structureName": "Income Tax Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -327,7 +327,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/DeferredTaxAssetsAndLiabilities",
       "structureName": "Deferred Tax Assets and Liabilities",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "roll_up",
       "secType": "disclosure"
     },
@@ -339,7 +339,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/EarningsPerShareDisclosures",
       "structureName": "Earnings Per Share Disclosures",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -351,7 +351,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/SegmentReportingDisclosure",
       "structureName": "Segment Reporting Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -363,7 +363,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/CommitmentsDisclosure",
       "structureName": "Commitments Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -375,7 +375,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/ContingenciesDisclosure",
       "structureName": "Contingencies Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -387,7 +387,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/LeasesOfLesseeDisclosure",
       "structureName": "Leases of Lessee Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -399,7 +399,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/ShareBasedCompensationDisclosure",
       "structureName": "Share-Based Compensation Disclosure",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     },
@@ -411,7 +411,7 @@
       "abstract": true,
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/disclosures/RelatedPartyDisclosures",
       "structureName": "Related Party Disclosures",
-      "structureType": "disclosure",
+      "blockType": "regulatory_disclosure",
       "conceptArrangementPattern": "level1_textblock",
       "secType": "disclosure"
     }

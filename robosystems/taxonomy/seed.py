@@ -658,13 +658,13 @@ STRUCTURES = [
   {
     "id": STRUCT_IS_ID,
     "name": "US GAAP Income Statement",
-    "structure_type": "income_statement",
+    "block_type": "income_statement",
     "taxonomy_id": TAXONOMY_ID,
   },
   {
     "id": STRUCT_BS_ID,
     "name": "US GAAP Balance Sheet",
-    "structure_type": "balance_sheet",
+    "block_type": "balance_sheet",
     "taxonomy_id": TAXONOMY_ID,
   },
 ]
@@ -745,14 +745,14 @@ def seed_reporting_taxonomy(connection) -> None:
   for s in STRUCTURES:
     connection.execute(
       text("""
-                INSERT INTO public.structures (id, name, structure_type, taxonomy_id,
+                INSERT INTO public.structures (id, name, block_type, taxonomy_id,
                     is_active, metadata, created_by)
                 VALUES (:id, :name, :type, :tax_id, true, '{}'::jsonb, 'system')
             """),
       {
         "id": s["id"],
         "name": s["name"],
-        "type": s["structure_type"],
+        "type": s["block_type"],
         "tax_id": s["taxonomy_id"],
       },
     )
@@ -991,7 +991,7 @@ def seed_tenant_reporting_taxonomy(connection, schema: str) -> None:
   )
 
   struct_cols = (
-    "id, name, description, structure_type, taxonomy_id, graph_structure_id, "
+    "id, name, description, block_type, taxonomy_id, graph_structure_id, "
     "is_active, metadata, created_at, updated_at, created_by"
   )
   connection.execute(

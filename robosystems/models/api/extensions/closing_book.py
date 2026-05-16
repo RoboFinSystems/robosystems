@@ -16,7 +16,7 @@ class ClosingBookItem(BaseModel):
   id: str
   name: str
   item_type: str
-  structure_type: str | None = None
+  block_type: str | None = None
   report_id: str | None = None
   status: str | None = None
 

@@ -105,7 +105,7 @@ def parse_structure_definition(
 def classify_structure_heuristic(
   name: str | None,
   definition: str | None,
-  structure_type: str | None = None,
+  block_type: str | None = None,
 ) -> tuple[str | None, float]:
   """Classify a structure into a canonical statement type using keyword heuristics.
 
@@ -118,7 +118,7 @@ def classify_structure_heuristic(
       Confidence is capped at 0.85 for heuristic matches.
   """
   # Only classify Statement structures — Disclosures are not primary financial statements
-  if structure_type and structure_type.lower() not in ("statement", ""):
+  if block_type and block_type.lower() not in ("statement", ""):
     return (None, 0.0)
 
   text = ""

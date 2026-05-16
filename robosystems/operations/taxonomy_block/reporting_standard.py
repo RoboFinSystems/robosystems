@@ -163,7 +163,7 @@ def build_envelope(session: Session, taxonomy_id: str) -> TaxonomyBlockEnvelope 
     TaxonomyBlockStructure(
       id=s.id,
       name=s.name,
-      structure_type=s.structure_type,
+      block_type=s.block_type,
       description=s.description,
       role_uri=None,
     )

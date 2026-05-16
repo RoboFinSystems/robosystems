@@ -47,7 +47,7 @@ class TestBalanceSheetCalcs:
   def test_arithmetic_pattern(self, calculations: TaxonomyPackage) -> None:
     for s in calculations.structures:
       if s.name in self.EXPECTED_NAMES:
-        assert s.structure_type == "validation_rules"
+        assert s.block_type == "validation_rules"
         assert s.concept_arrangement == "arithmetic"
 
   def test_top_level_identity_uses_rs_gaap_subhubs(

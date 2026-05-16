@@ -970,7 +970,7 @@ class TestCreateScheduleMaterializesObligations:
 class TestCreateClosingEntry:
   def _mock_schedule_structure(self):
     struct = MagicMock()
-    struct.structure_type = "schedule"
+    struct.block_type = "schedule"
     struct.name = "Office Furniture Depreciation"
     struct.metadata_ = {
       "entry_template": {
@@ -1000,7 +1000,7 @@ class TestCreateClosingEntry:
   def test_raises_for_missing_template(self):
     session = _mock_session()
     struct = MagicMock()
-    struct.structure_type = "schedule"
+    struct.block_type = "schedule"
     struct.metadata_ = {}
     session.get.return_value = struct
     svc = ScheduleService()
@@ -1386,7 +1386,7 @@ class TestTruncateSchedule:
   def _mock_schedule_structure(self, metadata: dict | None = None):
     struct = MagicMock()
     struct.id = "struct_01"
-    struct.structure_type = "schedule"
+    struct.block_type = "schedule"
     struct.name = "Computer Equipment Depreciation"
     struct.metadata_ = metadata or {
       "entry_template": {

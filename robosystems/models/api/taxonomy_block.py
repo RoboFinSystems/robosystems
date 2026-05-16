@@ -91,7 +91,7 @@ class TaxonomyBlockStructureRequest(BaseModel):
   name: str = Field(
     ..., description="Envelope-local structure name (unique within envelope)."
   )
-  structure_type: Literal[
+  block_type: Literal[
     "chart_of_accounts",
     "custom",
     "balance_sheet",
@@ -107,7 +107,7 @@ class TaxonomyBlockStructureRequest(BaseModel):
   ] = Field(
     ...,
     description=(
-      "DB ``structures.structure_type`` enum. CoA blocks use "
+      "DB ``structures.block_type`` enum. CoA blocks use "
       "``chart_of_accounts``; reporting extensions use the statement "
       "family or ``custom``; custom ontology uses ``custom``."
     ),
@@ -337,7 +337,7 @@ class CreateTaxonomyBlockRequest(BaseModel):
             },
           ],
           "structures": [
-            {"name": "main", "structure_type": "chart_of_accounts"},
+            {"name": "main", "block_type": "chart_of_accounts"},
           ],
         },
         {
@@ -354,7 +354,7 @@ class CreateTaxonomyBlockRequest(BaseModel):
             },
           ],
           "structures": [
-            {"name": "income_statement", "structure_type": "income_statement"},
+            {"name": "income_statement", "block_type": "income_statement"},
           ],
         },
       ]
@@ -528,7 +528,7 @@ class TaxonomyBlockStructure(BaseModel):
 
   id: str
   name: str
-  structure_type: str
+  block_type: str
   description: str | None = None
   role_uri: str | None = None
 

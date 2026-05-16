@@ -73,7 +73,7 @@ class TaxonomyBlockStructure:
 
   id: str
   name: str
-  structure_type: str
+  block_type: str
   description: str | None
   role_uri: str | None
 
@@ -82,7 +82,7 @@ class TaxonomyBlockStructure:
     return cls(
       id=s.id,
       name=s.name,
-      structure_type=s.structure_type,
+      block_type=s.block_type,
       description=s.description,
       role_uri=s.role_uri,
     )
