@@ -32,17 +32,17 @@ In Docker, the worker runs as a separate container in the `robosystems` profile.
 from robosystems.worker.client import enqueue_task
 
 response = await enqueue_task(
-    task_type="agent",
+    task_type="operator",
     graph_id="kg...",
     user_id="user_...",
-    params={"agent_type": "mapping", "mapping_id": "struct_..."},
+    params={"operator_type": "mapping", "mapping_id": "struct_..."},
 )
 # response includes operation_id, _links.stream, _links.status
 ```
 
 ## Task Registration
 
-Non-agent tasks extend `BaseTask` and register with `@register_task`:
+Non-operator tasks extend `BaseTask` and register with `@register_task`:
 
 ```python
 from robosystems.worker.tasks.base import BaseTask
@@ -57,7 +57,7 @@ class MyTask(BaseTask):
         return {"result": "ok"}
 ```
 
-Agent tasks use the unified agent system instead — `AgentWorkerTask` at `operations/agents/adapters/worker_task.py` handles `task_type="agent"` and dispatches to the appropriate agent via `params["agent_type"]`.
+Operator tasks use the unified Operator system instead — `OperatorWorkerTask` at `operations/operators/adapters/worker_task.py` handles `task_type="operator"` and dispatches to the appropriate operator via `params["operator_type"]`.
 
 ## Module Layout
 

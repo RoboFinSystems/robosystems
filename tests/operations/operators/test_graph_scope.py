@@ -198,7 +198,7 @@ class TestOrchestratorScopeFiltering:
     ):
       orch = OperatorOrchestrator("kg_no_ledger", user)
       with pytest.raises(ValueError, match="not available for graph"):
-        await orch._route_to_specific_agent(
+        await orch._route_to_specific_operator(
           query="test",
           operator_type="scoped",
           mode=OperatorSpec.__dataclass_fields__["supported_modes"].default_factory()[

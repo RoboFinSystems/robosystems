@@ -65,7 +65,7 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
     ),
   ):
     result = await enqueue_task(
-      task_type="agent_mapping",
+      task_type="operator_mapping",
       graph_id="kg0123456789abcdef",
       user_id="user_01TEST",
       params={"confidence": 0.7},
@@ -73,7 +73,7 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
 
   # Verify SSE operation created
   mock_create.assert_called_once_with(
-    operation_type="agent_mapping",
+    operation_type="operator_mapping",
     user_id="user_01TEST",
     graph_id="kg0123456789abcdef",
     operation_id="op_01TESTID",
@@ -90,7 +90,7 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
   expected_hash = _params_hash({"confidence": 0.7})
   assert (
     dedup_args[0]
-    == f"worker:dedup:agent_mapping:kg0123456789abcdef:user_01TEST:{expected_hash}"
+    == f"worker:dedup:operator_mapping:kg0123456789abcdef:user_01TEST:{expected_hash}"
   )
   assert dedup_args[1] == "op_01TESTID"
 
@@ -99,7 +99,7 @@ async def test_enqueue_task_creates_operation_and_pushes(mock_operation_response
   assert rpush_args[0] == "worker:tasks"
   payload = json.loads(rpush_args[1])
   assert payload["task_id"] == "op_01TESTID"
-  assert payload["task_type"] == "agent_mapping"
+  assert payload["task_type"] == "operator_mapping"
   assert payload["graph_id"] == "kg0123456789abcdef"
   assert payload["user_id"] == "user_01TEST"
   assert payload["attempt"] == 1
@@ -165,7 +165,7 @@ async def test_enqueue_task_closes_queue_on_error(mock_operation_response):
   ):
     with pytest.raises(ConnectionError):
       await enqueue_task(
-        task_type="agent_mapping",
+        task_type="operator_mapping",
         graph_id="kg0123456789abcdef",
         user_id="user_01TEST",
       )
@@ -221,10 +221,10 @@ async def test_enqueue_task_different_params_bypass_dedup(mock_operation_respons
     ),
   ):
     result = await enqueue_task(
-      task_type="agent",
+      task_type="operator",
       graph_id="kg0123456789abcdef",
       user_id="user_01TEST",
-      params={"agent_type": "mapping", "mapping_id": "struct_abc"},
+      params={"operator_type": "mapping", "mapping_id": "struct_abc"},
     )
 
   # Should create a new operation, not dedup

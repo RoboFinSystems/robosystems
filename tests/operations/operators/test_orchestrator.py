@@ -83,7 +83,7 @@ class TestOrchestratorConfig:
 # ── Mock agents for testing ──────────────────────────────────────────────────
 
 
-class FinancialAgent(Operator):
+class FinancialOperator(Operator):
   spec = OperatorSpec(
     name="financial",
     description="Mock financial agent",
@@ -100,7 +100,7 @@ class FinancialAgent(Operator):
     return 0.8
 
 
-class ResearchAgent(Operator):
+class ResearchOperator(Operator):
   spec = OperatorSpec(
     name="research",
     description="Mock research agent",
@@ -117,7 +117,7 @@ class ResearchAgent(Operator):
     return 0.6
 
 
-class RagAgent(Operator):
+class RagOperator(Operator):
   spec = OperatorSpec(
     name="rag",
     description="Mock RAG agent",
@@ -137,9 +137,9 @@ class RagAgent(Operator):
 
 # Maps for mock registry
 _MOCK_AGENTS = {
-  "financial": FinancialAgent,
-  "research": ResearchAgent,
-  "rag": RagAgent,
+  "financial": FinancialOperator,
+  "research": ResearchOperator,
+  "rag": RagOperator,
 }
 
 
@@ -324,25 +324,25 @@ class TestOperatorOrchestrator:
       query="Complex analysis needed", mode=OperatorMode.EXTENDED, ensemble_size=2
     )
     assert response.metadata["routing_strategy"] == "ensemble"
-    assert "ensemble_agents" in response.metadata
-    assert len(response.metadata["ensemble_agents"]) >= 2
+    assert "ensemble_operators" in response.metadata
+    assert len(response.metadata["ensemble_operators"]) >= 2
 
   @pytest.mark.asyncio
   async def test_multi_agent_coordination(self, orchestrator):
-    response = await orchestrator.coordinate_agents(
+    response = await orchestrator.coordinate_operators(
       query="Complex multi-part question",
-      agent_sequence=["rag", "financial", "research"],
+      operator_sequence=["rag", "financial", "research"],
       mode=OperatorMode.EXTENDED,
     )
     assert response.metadata["coordination_type"] == "sequential"
-    assert len(response.metadata["agent_sequence"]) == 3
+    assert len(response.metadata["operator_sequence"]) == 3
     assert response.content is not None
 
   @pytest.mark.asyncio
   async def test_parallel_agent_execution(self, orchestrator):
-    response = await orchestrator.coordinate_agents(
+    response = await orchestrator.coordinate_operators(
       query="Analyze from multiple perspectives",
-      agent_sequence=["financial", "research"],
+      operator_sequence=["financial", "research"],
       mode=OperatorMode.STANDARD,
       coordination_type="parallel",
     )
@@ -395,8 +395,8 @@ class TestOperatorOrchestrator:
       query="Test query", operator_type="financial", mode=OperatorMode.STANDARD
     )
     metrics = orchestrator.get_metrics()
-    assert "financial" in metrics["agent_usage"]
-    assert metrics["agent_usage"]["financial"]["calls"] >= 1
+    assert "financial" in metrics["operator_usage"]
+    assert metrics["operator_usage"]["financial"]["calls"] >= 1
     assert metrics["total_queries"] >= 1
 
   @pytest.mark.asyncio
@@ -415,8 +415,8 @@ class TestOperatorOrchestrator:
         "available_credits": 5.0,
       }
 
-      agent = FinancialAgent()
-      response = await orchestrator._execute_agent(
+      agent = FinancialOperator()
+      response = await orchestrator._execute_operator(
         agent, "test query", OperatorMode.STANDARD, None, {}
       )
 
@@ -439,8 +439,8 @@ class TestOperatorOrchestrator:
         "available_credits": 100.0,
       }
 
-      agent = FinancialAgent()
-      response = await orchestrator._execute_agent(
+      agent = FinancialOperator()
+      response = await orchestrator._execute_operator(
         agent, "test query", OperatorMode.STANDARD, None, {}
       )
 
@@ -449,8 +449,8 @@ class TestOperatorOrchestrator:
   @pytest.mark.asyncio
   async def test_credit_check_skipped_for_non_credit_agents(self, mock_user):
     orchestrator = OperatorOrchestrator("test-graph", mock_user, None)
-    agent = RagAgent()
-    response = await orchestrator._execute_agent(
+    agent = RagOperator()
+    response = await orchestrator._execute_operator(
       agent, "test query", OperatorMode.QUICK, None, {}
     )
     assert "rag response" in response.content

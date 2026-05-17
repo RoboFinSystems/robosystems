@@ -245,7 +245,7 @@ class EnvValidator:
     """
     from robosystems.config import OperatorConfig
 
-    agent_validation = OperatorConfig.validate_configuration()
+    operator_validation = OperatorConfig.validate_configuration()
 
     return {
       "environment": env_config.ENVIRONMENT,
@@ -268,8 +268,8 @@ class EnvValidator:
         "email_verification": env_config.EMAIL_VERIFICATION_ENABLED,
         "captcha": env_config.CAPTCHA_ENABLED,
       },
-      "agents": {
-        "config_valid": agent_validation["valid"],
+      "operators": {
+        "config_valid": operator_validation["valid"],
         "default_model": OperatorConfig.DEFAULT_MODEL_CONFIG.default_model.value,
         "fallback_operator": OperatorConfig.ORCHESTRATOR_CONFIG["fallback_operator"],
         "available_models": len(OperatorConfig.BEDROCK_MODELS),

@@ -78,7 +78,7 @@ from robosystems.operations.operators.base import OperatorResponse  # noqa: E402
 class OperatorOrchestrator:
   """Orchestrates operator selection and coordination.
 
-  Uses the unified Operator protocol. Agents are instantiated without context —
+  Uses the unified Operator protocol. Operators are instantiated without context —
   the adapter (run_operator_api) injects tools, credits, and progress.
   """
 
@@ -97,7 +97,7 @@ class OperatorOrchestrator:
     # Metrics tracking
     self._metrics: dict[str, Any] = {
       "total_queries": 0,
-      "agent_usage": {},
+      "operator_usage": {},
       "total_response_time": 0.0,
       "cache_hits": 0,
       "cache_misses": 0,
@@ -192,7 +192,7 @@ class OperatorOrchestrator:
 
       # Route based on strategy
       if operator_type:
-        response = await self._route_to_specific_agent(
+        response = await self._route_to_specific_operator(
           query, operator_type, mode, history, context, stream_callback
         )
         if response.metadata is None:
@@ -236,10 +236,10 @@ class OperatorOrchestrator:
       self._metrics["total_response_time"] += execution_time
 
       operator_name = response.operator_name
-      if operator_name not in self._metrics["agent_usage"]:
-        self._metrics["agent_usage"][operator_name] = {"calls": 0, "total_time": 0.0}
-      self._metrics["agent_usage"][operator_name]["calls"] += 1
-      self._metrics["agent_usage"][operator_name]["total_time"] += execution_time
+      if operator_name not in self._metrics["operator_usage"]:
+        self._metrics["operator_usage"][operator_name] = {"calls": 0, "total_time": 0.0}
+      self._metrics["operator_usage"][operator_name]["calls"] += 1
+      self._metrics["operator_usage"][operator_name]["total_time"] += execution_time
 
       # Cache response
       if self._cache is not None and not force_extended:
@@ -259,7 +259,7 @@ class OperatorOrchestrator:
         execution_time=time.time() - start_time,
       )
 
-  async def _route_to_specific_agent(
+  async def _route_to_specific_operator(
     self,
     query: str,
     operator_type: str,
@@ -279,7 +279,7 @@ class OperatorOrchestrator:
         f"Operator '{operator_type}' is not available for graph '{self.graph_id}'"
       )
 
-    return await self._execute_agent(
+    return await self._execute_operator(
       operator, query, mode, history, context, stream_callback
     )
 
@@ -315,8 +315,8 @@ class OperatorOrchestrator:
         return await self._use_fallback_operator(query, mode, history, context)
       raise ValueError("No suitable operator found for query")
 
-    best_agent_type = max(scores, key=lambda x: scores[x])
-    best_score = scores[best_agent_type]
+    best_operator_type = max(scores, key=lambda x: scores[x])
+    best_score = scores[best_operator_type]
 
     if best_score < criteria.min_confidence:
       if self.config.enable_fallback:
@@ -327,8 +327,8 @@ class OperatorOrchestrator:
         response.metadata["confidence_scores"] = scores
         return response
 
-    operator = operators[best_agent_type]
-    response = await self._execute_agent(operator, query, mode, history, context)
+    operator = operators[best_operator_type]
+    response = await self._execute_operator(operator, query, mode, history, context)
     if response.metadata is None:
       response.metadata = {}
     response.metadata["confidence_scores"] = scores
@@ -361,8 +361,8 @@ class OperatorOrchestrator:
         f"No operator with capabilities: {criteria.required_capabilities}"
       )
 
-    best_agent = max(capable.values(), key=lambda a: a.can_handle(query, context))
-    return await self._execute_agent(best_agent, query, mode, history, context)
+    best_operator = max(capable.values(), key=lambda a: a.can_handle(query, context))
+    return await self._execute_operator(best_operator, query, mode, history, context)
 
   async def _ensemble_routing(
     self,
@@ -378,7 +378,7 @@ class OperatorOrchestrator:
     selected = scored[:ensemble_size]
 
     tasks = [
-      self._execute_agent(a, query, mode, history, context) for _, a, _ in selected
+      self._execute_operator(a, query, mode, history, context) for _, a, _ in selected
     ]
     responses = await asyncio.gather(*tasks, return_exceptions=True)
     valid = [r for r in responses if not isinstance(r, Exception)]
@@ -394,7 +394,7 @@ class OperatorOrchestrator:
       operator_name="ensemble",
       mode_used=mode,
       metadata={
-        "ensemble_agents": [r.operator_name for r in valid],
+        "ensemble_operators": [r.operator_name for r in valid],
         "individual_metadata": [r.metadata for r in valid],
       },
       tokens_used=self._sum_tokens(valid),
@@ -413,9 +413,11 @@ class OperatorOrchestrator:
 
     selected = min(
       operators.values(),
-      key=lambda a: self._metrics["agent_usage"].get(a.spec.name, {}).get("calls", 0),
+      key=lambda a: (
+        self._metrics["operator_usage"].get(a.spec.name, {}).get("calls", 0)
+      ),
     )
-    return await self._execute_agent(selected, query, mode, history, context)
+    return await self._execute_operator(selected, query, mode, history, context)
 
   async def _round_robin_routing(
     self,
@@ -429,7 +431,7 @@ class OperatorOrchestrator:
       raise ValueError("No operators available")
     operator = operators[self._round_robin_index % len(operators)]
     self._round_robin_index += 1
-    return await self._execute_agent(operator, query, mode, history, context)
+    return await self._execute_operator(operator, query, mode, history, context)
 
   async def _use_fallback_operator(
     self,
@@ -442,13 +444,13 @@ class OperatorOrchestrator:
       operator = get_operator(self.config.fallback_operator)
     except KeyError:
       raise ValueError(f"Fallback operator '{self.config.fallback_operator}' not found")
-    response = await self._execute_agent(operator, query, mode, history, context)
+    response = await self._execute_operator(operator, query, mode, history, context)
     if response.metadata is None:
       response.metadata = {}
     response.metadata["used_fallback"] = True
     return response
 
-  async def _execute_agent(
+  async def _execute_operator(
     self,
     operator: Operator,
     query: str,
@@ -461,7 +463,7 @@ class OperatorOrchestrator:
     try:
       # Credit pre-check
       if operator.spec.requires_credits and self.db_session:
-        credit_check = await self._check_credits_for_agent(operator, mode)
+        credit_check = await self._check_credits_for_operator(operator, mode)
         if not credit_check["has_sufficient_credits"]:
           return OperatorResponse(
             content=f"Insufficient credits for {operator.spec.name}. "
@@ -529,10 +531,10 @@ class OperatorOrchestrator:
         error_details={"code": "AGENT_ERROR", "message": str(e)},
       )
 
-  async def coordinate_agents(
+  async def coordinate_operators(
     self,
     query: str,
-    agent_sequence: list[str],
+    operator_sequence: list[str],
     mode: OperatorMode = OperatorMode.STANDARD,
     history: list[dict[str, Any]] | None = None,
     context: dict[str, Any] | None = None,
@@ -540,16 +542,16 @@ class OperatorOrchestrator:
   ) -> OperatorResponse:
     if coordination_type == "parallel":
       return await self._parallel_coordination(
-        query, agent_sequence, mode, history, context
+        query, operator_sequence, mode, history, context
       )
     return await self._sequential_coordination(
-      query, agent_sequence, mode, history, context
+      query, operator_sequence, mode, history, context
     )
 
   async def _sequential_coordination(
     self,
     query: str,
-    agent_sequence: list[str],
+    operator_sequence: list[str],
     mode: OperatorMode,
     history: list[dict[str, Any]] | None,
     context: dict[str, Any],
@@ -558,7 +560,7 @@ class OperatorOrchestrator:
     accumulated_metadata: dict[str, Any] = {}
     current_context = context.copy() if context else {}
 
-    for operator_type in agent_sequence:
+    for operator_type in operator_sequence:
       try:
         operator = get_operator(operator_type)
       except KeyError:
@@ -566,9 +568,9 @@ class OperatorOrchestrator:
         continue
 
       if accumulated_content:
-        current_context["previous_agent_output"] = accumulated_content
+        current_context["previous_operator_output"] = accumulated_content
 
-      response = await self._execute_agent(
+      response = await self._execute_operator(
         operator, query, mode, history, current_context
       )
       accumulated_content += f"\n\n{response.content}"
@@ -580,25 +582,28 @@ class OperatorOrchestrator:
       mode_used=mode,
       metadata={
         "coordination_type": "sequential",
-        "agent_sequence": agent_sequence,
-        "agent_metadata": accumulated_metadata,
+        "operator_sequence": operator_sequence,
+        "operator_metadata": accumulated_metadata,
       },
     )
 
   async def _parallel_coordination(
     self,
     query: str,
-    agent_sequence: list[str],
+    operator_sequence: list[str],
     mode: OperatorMode,
     history: list[dict[str, Any]] | None,
     context: dict[str, Any],
   ) -> OperatorResponse:
     tasks = []
-    for operator_type in agent_sequence:
+    for operator_type in operator_sequence:
       try:
         operator = get_operator(operator_type)
         tasks.append(
-          (operator_type, self._execute_agent(operator, query, mode, history, context))
+          (
+            operator_type,
+            self._execute_operator(operator, query, mode, history, context),
+          )
         )
       except KeyError:
         logger.warning(f"Operator {operator_type} not found, skipping")
@@ -620,8 +625,8 @@ class OperatorOrchestrator:
       mode_used=mode,
       metadata={
         "coordination_type": "parallel",
-        "agent_sequence": agent_sequence,
-        "agent_metadata": combined_metadata,
+        "operator_sequence": operator_sequence,
+        "operator_metadata": combined_metadata,
         "execution_time": sum(r.execution_time or 0 for _, r in results),
       },
     )
@@ -652,14 +657,14 @@ class OperatorOrchestrator:
     )
     return {
       "total_queries": self._metrics["total_queries"],
-      "agent_usage": self._metrics["agent_usage"],
+      "operator_usage": self._metrics["operator_usage"],
       "average_response_time": avg_time,
       "cache_hits": self._metrics.get("cache_hits", 0),
       "cache_misses": self._metrics.get("cache_misses", 0),
       "errors": self._metrics["errors"],
     }
 
-  async def _check_credits_for_agent(
+  async def _check_credits_for_operator(
     self, operator: Operator, mode: OperatorMode
   ) -> dict[str, Any]:
     from decimal import Decimal

@@ -264,10 +264,10 @@ def _trigger_auto_map_if_needed(
 
     result = asyncio.run(
       enqueue_task(
-        task_type="agent",
+        task_type="operator",
         graph_id=config.graph_id,
         user_id=config.user_id,
-        params={"agent_type": "mapping", "mapping_id": mapping_id},
+        params={"operator_type": "mapping", "mapping_id": mapping_id},
       )
     )
     if result.get("deduplicated"):

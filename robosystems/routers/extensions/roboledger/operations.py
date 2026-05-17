@@ -1015,10 +1015,10 @@ async def auto_map_elements_op(
     return replay
 
   task_response = await enqueue_task(
-    task_type="agent",
+    task_type="operator",
     graph_id=graph_id,
     user_id=user_id,
-    params={"agent_type": "mapping", "mapping_id": body.mapping_id},
+    params={"operator_type": "mapping", "mapping_id": body.mapping_id},
   )
 
   envelope = wrap_pending(
