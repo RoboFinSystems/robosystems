@@ -12,7 +12,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Operator",
-    "description": "🤖 AI Operators — The API surface for AI agents. Claude-driven executors that use MCP tools to do work on a graph.",
+    "description": "🤖 AI Operators - The API surface for AI agents (Claude-driven MCP tool executors)",
   },
   {
     "name": "Query",
