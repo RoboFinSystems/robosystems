@@ -587,6 +587,12 @@ class TestClosePriorPeriodsToRetainedEarnings:
     if revenue_cents:
       rows.append(
         SimpleNamespace(
+          # qname is required for the equity-flow-reducer check that
+          # runs ahead of the classification branch (per fix #11 — the
+          # close logic now inspects qname to detect dividend / buyback
+          # concepts). Synthetic test rows use canonical us-gaap qnames
+          # that the equity-flow-reducer check will not match.
+          qname="us-gaap:Revenues",
           classification="revenue",
           balance_type="credit",
           total_debits=0,
@@ -596,6 +602,7 @@ class TestClosePriorPeriodsToRetainedEarnings:
     if expense_cents:
       rows.append(
         SimpleNamespace(
+          qname="us-gaap:OperatingExpenses",
           classification="expense",
           balance_type="debit",
           total_debits=expense_cents,

@@ -168,77 +168,69 @@ class TestQBClient:
 
   @patch("quickbooks.objects.account.Account")
   def test_get_accounts_success(self, mock_account, mock_qb_client):
-    """Test successful account retrieval."""
-    # Setup mock client
+    """Test successful account retrieval with pagination via Account.query.
+
+    The adapter pulls active + inactive accounts (WHERE Active IN
+    (true, false)) and paginates until a page returns fewer than
+    page_size rows.
+    """
     client = QBClient.__new__(QBClient)
     client.client = mock_qb_client
 
-    # Mock account count and filtering
-    mock_account.count.return_value = 50  # 50 total accounts
-
-    # Mock account objects
     mock_account1 = Mock()
     mock_account1.to_dict.return_value = {"id": "1", "name": "Account 1"}
     mock_account2 = Mock()
     mock_account2.to_dict.return_value = {"id": "2", "name": "Account 2"}
 
-    # Mock filter results - simulate pagination
-    mock_account.filter.side_effect = [
-      [mock_account1, mock_account2],  # First batch (items 0-24)
-      [],  # Second batch (items 25-49, empty in this test)
-    ]
+    # First page returns 2 rows (less than page_size=100) → loop exits.
+    mock_account.query.return_value = [mock_account1, mock_account2]
 
-    # Execute
     result = client.get_accounts()
 
-    # Verify
-    expected_result = [
+    assert result == [
       {"id": "1", "name": "Account 1"},
       {"id": "2", "name": "Account 2"},
     ]
-    assert result == expected_result
-
-    # Verify correct pagination calls
-    # For 50 items with page size 25, we expect 2 calls: positions 0 and 25
-    assert mock_account.filter.call_count == 2
+    # One page was enough since the page came back shorter than page_size.
+    assert mock_account.query.call_count == 1
+    # Verify the query asks for both active + inactive — the bug this
+    # adapter was fixing was QB defaulting to active-only, which made
+    # historical journal lines reference unsynced accounts.
+    query_str = mock_account.query.call_args[0][0]
+    assert "Active IN (true, false)" in query_str
 
   @patch("quickbooks.objects.account.Account")
   def test_get_accounts_no_duplicates(self, mock_account, mock_qb_client):
-    """Test that duplicate accounts are filtered out."""
-    # Setup mock client
+    """Test that duplicate accounts (same dict on two pages) are filtered."""
     client = QBClient.__new__(QBClient)
     client.client = mock_qb_client
 
-    mock_account.count.return_value = 10
-
-    # Mock account objects - same account returned twice
     mock_account_obj = Mock()
     mock_account_obj.to_dict.return_value = {"id": "1", "name": "Account 1"}
 
-    mock_account.filter.return_value = [mock_account_obj, mock_account_obj]
+    # Page returns the same account twice — second occurrence should
+    # be deduped by the `if d not in all_accounts` check.
+    mock_account.query.return_value = [mock_account_obj, mock_account_obj]
 
-    # Execute
     result = client.get_accounts()
 
-    # Verify only one instance returned
     assert len(result) == 1
     assert result == [{"id": "1", "name": "Account 1"}]
 
   @patch("quickbooks.objects.account.Account")
   def test_get_accounts_zero_count(self, mock_account, mock_qb_client):
-    """Test account retrieval when count is zero."""
-    # Setup mock client
+    """Test account retrieval when QB returns no accounts at all."""
     client = QBClient.__new__(QBClient)
     client.client = mock_qb_client
 
-    mock_account.count.return_value = 0
+    # Empty first page → loop exits immediately.
+    mock_account.query.return_value = []
 
-    # Execute
     result = client.get_accounts()
 
-    # Verify
     assert result == []
-    mock_account.filter.assert_not_called()
+    # Query is still invoked once (we don't know it's empty until we ask).
+    assert mock_account.query.call_count == 1
 
   @patch("robosystems.adapters.quickbooks.client.api.QBClient.get_accounts")
   def test_get_accounts_df_processing(self, mock_get_accounts, mock_qb_client):
@@ -481,15 +473,16 @@ class TestQBClient:
 
   @patch("quickbooks.objects.account.Account")
   def test_get_accounts_pagination_edge_cases(self, mock_account, mock_qb_client):
-    """Test account pagination edge cases."""
-    # Setup mock client
+    """Test multi-page pagination with a partial last page.
+
+    Pagination terminates when a page returns fewer than ``page_size``
+    rows (the loop's "last page" signal). page_size is 100, so we
+    arrange a 100-row first page (full → continue) followed by a
+    smaller second page (partial → exit).
+    """
     client = QBClient.__new__(QBClient)
     client.client = mock_qb_client
 
-    # Test with count that doesn't divide evenly by 25
-    mock_account.count.return_value = 27
-
-    # Create unique account objects to avoid deduplication
     def create_mock_account(account_id):
       mock_obj = Mock()
       mock_obj.to_dict.return_value = {
@@ -498,23 +491,23 @@ class TestQBClient:
       }
       return mock_obj
 
-    # Create 25 unique accounts for first batch
-    first_batch = [create_mock_account(i) for i in range(1, 26)]
-    # Create 2 unique accounts for second batch
-    second_batch = [create_mock_account(i) for i in range(26, 28)]
+    # First page: exactly 100 unique accounts (== page_size → loop continues).
+    first_page = [create_mock_account(i) for i in range(1, 101)]
+    # Second page: 27 unique accounts (< page_size → loop exits).
+    second_page = [create_mock_account(i) for i in range(101, 128)]
 
-    # Mock filter to return accounts for first two calls
-    mock_account.filter.side_effect = [
-      first_batch,  # First batch: 25 unique accounts
-      second_batch,  # Second batch: 2 unique accounts
-    ]
+    mock_account.query.side_effect = [first_page, second_page]
 
-    # Execute
     result = client.get_accounts()
 
-    # Verify
-    assert len(result) == 27  # 25 + 2 unique accounts
-    assert mock_account.filter.call_count == 2  # Two pagination calls for 27 items
+    assert len(result) == 127
+    assert mock_account.query.call_count == 2
+
+    # Verify pagination cursors advance correctly.
+    first_query = mock_account.query.call_args_list[0][0][0]
+    second_query = mock_account.query.call_args_list[1][0][0]
+    assert "STARTPOSITION 1 " in first_query
+    assert "STARTPOSITION 101 " in second_query
 
   @patch("robosystems.adapters.quickbooks.client.api.QBClient.get_accounts")
   def test_get_accounts_df_complex_hierarchy(self, mock_get_accounts, mock_qb_client):
