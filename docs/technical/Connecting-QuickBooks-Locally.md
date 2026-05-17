@@ -551,7 +551,7 @@ The URI you sent in the OAuth init request doesn't match anything registered in 
 
 Symptom: login fails silently when you open the ngrok URL in Chrome, console shows:
 
-```
+```text
 Access to fetch at 'http://localhost:8000/v1/auth/...' from origin
 'https://<your-domain>.ngrok-free.dev' has been blocked by CORS policy:
 Permission was denied for this request to access the `loopback` address space.
