@@ -112,15 +112,22 @@ def list_accounts(
   )
 
 
-def get_account_tree(session: Session) -> AccountTreeResponse:
-  """Return the Chart of Accounts as a parent/child tree."""
-  rows = (
-    session.execute(
-      select(Element).where(Element.source.in_(COA_SOURCES)).order_by(Element.code)
-    )
-    .scalars()
-    .all()
-  )
+def get_account_tree(
+  session: Session, *, include_inactive: bool = False
+) -> AccountTreeResponse:
+  """Return the Chart of Accounts as a parent/child tree.
+
+  Filters to ``is_active=True`` by default. Inactive accounts (deleted
+  in the source system but still referenced by historical journal
+  lines — see the QB adapter's ``Active IN (true, false)`` fetch) are
+  load-bearing for the materializer's foreign-key integrity but clutter
+  every CoA-facing view. Pass ``include_inactive=True`` to surface them
+  (admin / cleanup contexts only).
+  """
+  query = select(Element).where(Element.source.in_(COA_SOURCES))
+  if not include_inactive:
+    query = query.where(Element.is_active.is_(True))
+  rows = session.execute(query.order_by(Element.code)).scalars().all()
 
   efs_map = _efs_by_element(session, [r.id for r in rows])
   nodes: dict[str, AccountTreeNode] = {}
