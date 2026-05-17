@@ -19,7 +19,7 @@ RoboSystems is an open-source financial intelligence platform built on a unified
 The platform provides the core infrastructure that all extensions build on:
 
 - **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
-- **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) — graph queries, taxonomy mapping, report generation — with automatic credit tracking and SSE progress streaming. Distinct from the REA `Agent` model (customer/vendor/employee counterparties).
+- **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming. The API surface behind "AI agent" features in product copy.
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
 - **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
@@ -221,7 +221,6 @@ See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robos
 - Dual execution: API (sync/SSE) and background worker (Valkey queue + SSE progress)
 - Automatic credit tracking per AI call — Operators cannot forget billing
 - Extensible: new Operators implement `run(ctx)` and register with a decorator
-- Distinct from REA `Agent` (counterparty model — customer/vendor/employee)
 - See [Operator README](/robosystems/operations/operators/README.md) for details
 
 ### Credit System
