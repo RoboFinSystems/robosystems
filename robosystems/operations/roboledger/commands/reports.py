@@ -308,14 +308,26 @@ def create_report(
   Raises `TaxonomyNotFoundError`, `NoEntityError` — caller translates
   to HTTP 422.
   """
-  # Verify taxonomy exists
+  # Resolve taxonomy: accept either an exact ID (tenant-specific UUID) or a
+  # standard name (e.g. 'rs-gaap'). Standard-name resolution prefers the
+  # 'reporting_standard' type so callers don't accidentally pick a linkbase
+  # taxonomy. Per-tenant UUIDs make hardcoding an ID in the request default
+  # unreliable, so the request defaults to the standard name 'rs-gaap'.
   tax_result = session.execute(
-    text("SELECT id, standard FROM taxonomies WHERE id = :tid LIMIT 1"),
+    text(
+      "SELECT id, standard FROM taxonomies "
+      "WHERE id = :tid "
+      "   OR (standard = :tid AND taxonomy_type = 'reporting_standard') "
+      "ORDER BY (id = :tid) DESC, version DESC LIMIT 1"
+    ),
     {"tid": body.taxonomy_id},
   )
   tax_row = tax_result.fetchone()
   if tax_row is None:
     raise TaxonomyNotFoundError(body.taxonomy_id)
+  # Use the resolved UUID for downstream queries even if caller passed a
+  # standard name.
+  resolved_taxonomy_id = tax_row[0]
 
   periods = build_periods(
     body.period_start, body.period_end, body.comparative, body.periods
@@ -323,7 +335,7 @@ def create_report(
 
   report_def = Report(
     name=body.name,
-    taxonomy_id=body.taxonomy_id,
+    taxonomy_id=resolved_taxonomy_id,
     mapping_id=body.mapping_id,
     period_type=body.period_type,
     period_start=body.period_start,
@@ -338,7 +350,7 @@ def create_report(
 
   facts = generate_report_facts(
     session=session,
-    taxonomy_id=body.taxonomy_id,
+    taxonomy_id=resolved_taxonomy_id,
     mapping_id=body.mapping_id,
     periods=periods,
   )

@@ -506,6 +506,38 @@ def _facts_to_balance_dict(
   return balances
 
 
+# rs-gaap concepts that represent equity-reducing cash flows. These appear
+# on the Statement of Equity and Cash Flow Statement as separate line items,
+# but their cumulative effect also has to net out of Retained Earnings on
+# the Balance Sheet. They're flow concepts (period_type='duration') that
+# rs-gaap models with balance_type='credit' (XBRL outflow-as-negative
+# convention), so they don't pick up the 'equity' EFS classification trait
+# automatically. Detection by qname is more reliable than trait inference.
+_EQUITY_FLOW_REDUCER_QNAMES: frozenset[str] = frozenset(
+  {
+    "rs-gaap:PaymentsOfDividends",
+    "rs-gaap:PaymentsOfDividendsCommonStock",
+    "rs-gaap:PaymentsOfDividendsPreferredStockAndPreferenceStock",
+    "rs-gaap:PaymentsForRepurchaseOfCommonStock",
+    "rs-gaap:PaymentsForRepurchaseOfEquity",
+    "rs-gaap:PaymentsForRepurchaseOfPreferredStockAndPreferenceStock",
+    "rs-gaap:DistributionsMade",
+    "rs-gaap:DistributionsMadeToLimitedLiabilityCompanyLlcMember",
+  }
+)
+
+
+def _is_equity_flow_reducer(qname: str | None) -> bool:
+  """True if a fact's concept represents an equity-reducing cash flow.
+
+  Dividends paid, distributions to members, treasury stock buybacks —
+  these reduce retained earnings on the balance sheet even though they
+  render on the SE / CF as their own line items. See the constant
+  above for the curated list of recognized rs-gaap concepts.
+  """
+  return qname in _EQUITY_FLOW_REDUCER_QNAMES
+
+
 def _infer_classification(qname: str | None, balance_type: str | None) -> str | None:
   """Best-effort classification fallback for elements lacking FASB traits.
 
@@ -1135,6 +1167,15 @@ def _close_to_retained_earnings(
   """
   total_revenue = 0.0
   total_expenses = 0.0
+  # Equity-flow concepts (dividends paid, treasury stock buybacks, etc.)
+  # affect retained earnings on the BS but don't appear with classification
+  # 'equity' in element_traits — they're flow-on-equity concepts that
+  # rs-gaap models with balance_type='credit' (per XBRL outflow-as-negative
+  # convention). Detect them by qname pattern. Their stored fact.value is
+  # already natural-signed negative (dividends present as -$2,500), so we
+  # add it directly without a sign flip — without this term the BS
+  # misbalances by exactly the cumulative dividend / buyback amount.
+  total_equity_reductions = 0.0
 
   for fact in facts:
     if fact.period_start != period_start or fact.period_end != period_end:
@@ -1143,8 +1184,10 @@ def _close_to_retained_earnings(
       total_revenue += fact.value
     elif fact.classification == "expense":
       total_expenses += fact.value
+    elif _is_equity_flow_reducer(fact.element_qname):
+      total_equity_reductions += fact.value
 
-  net_income = total_revenue - total_expenses
+  net_income = total_revenue - total_expenses + total_equity_reductions
   if net_income == 0.0:
     return
 
@@ -1262,7 +1305,17 @@ def _close_prior_periods_to_retained_earnings(
 
   cumulative_revenue = 0.0
   cumulative_expenses = 0.0
+  # Equity-flow concepts (dividends paid, distributions, treasury buybacks)
+  # reduce retained earnings on the balance sheet. Detect by qname pattern
+  # rather than classification because rs-gaap models these as
+  # balance_type='credit' flow concepts that often lack the 'equity' EFS
+  # trait. Tracked separately so prior-period closing nets them out of RE.
+  cumulative_equity_reductions = 0.0
   for row in result:
+    if _is_equity_flow_reducer(row.qname):
+      net = cents_to_dollars(row.total_debits - row.total_credits)
+      cumulative_equity_reductions += _natural_sign(net, row.balance_type)
+      continue
     classification = row.classification or _infer_classification(
       row.qname, row.balance_type
     )
@@ -1275,7 +1328,9 @@ def _close_prior_periods_to_retained_earnings(
     else:
       cumulative_expenses += natural
 
-  cumulative_net_income = cumulative_revenue - cumulative_expenses
+  cumulative_net_income = (
+    cumulative_revenue - cumulative_expenses + cumulative_equity_reductions
+  )
 
   # Current period net income was already closed — compute it from facts.
   # The closed amount is now sitting on whichever element
@@ -1284,6 +1339,7 @@ def _close_prior_periods_to_retained_earnings(
   # locate that fact here, only to compute the prior-period delta.
   current_revenue = 0.0
   current_expenses = 0.0
+  current_equity_reductions = 0.0
   for fact in facts:
     if fact.period_start != period_start or fact.period_end != period_end:
       continue
@@ -1291,8 +1347,10 @@ def _close_prior_periods_to_retained_earnings(
       current_revenue += fact.value
     elif fact.classification == "expense":
       current_expenses += fact.value
+    elif _is_equity_flow_reducer(fact.element_qname):
+      current_equity_reductions += fact.value
 
-  current_net_income = current_revenue - current_expenses
+  current_net_income = current_revenue - current_expenses + current_equity_reductions
   prior_periods_net_income = cumulative_net_income - current_net_income
 
   if prior_periods_net_income == 0.0:

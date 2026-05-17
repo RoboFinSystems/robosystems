@@ -200,9 +200,21 @@ class SuggestMappingTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    from robosystems.operations.roboledger.reports.network_picker import (
+      load_graph_reporting_style,
+    )
+
     graph_id = self.client.graph_id
     element_id = arguments["element_id"]
     classification_override = arguments.get("classification")
+
+    # Resolve the active Reporting Style so candidate filtering matches
+    # what the renderer actually walks (not the wider rs-gaap-presentation
+    # taxonomy). Soft-fail to wider filter if Style lookup fails.
+    try:
+      reporting_style_id = load_graph_reporting_style(graph_id)
+    except LookupError:
+      reporting_style_id = None
 
     try:
       with extensions_session(graph_id) as session:
@@ -223,7 +235,10 @@ class SuggestMappingTool:
           }
 
         candidates = suggest_mapping_candidates(
-          session, trait=classification, element_id=element_id
+          session,
+          trait=classification,
+          element_id=element_id,
+          reporting_style_id=reporting_style_id,
         )
 
         return {
@@ -355,11 +370,21 @@ rs-gaap parent, then return type-subtype children as specific filing-level candi
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    from robosystems.operations.roboledger.reports.network_picker import (
+      load_graph_reporting_style,
+    )
+
     graph_id = self.client.graph_id
     fac_element_id = arguments["fac_element_id"]
     try:
+      reporting_style_id = load_graph_reporting_style(graph_id)
+    except LookupError:
+      reporting_style_id = None
+    try:
       with extensions_session(graph_id) as session:
-        result = expand_to_rs_gaap_candidates(session, fac_element_id)
+        result = expand_to_rs_gaap_candidates(
+          session, fac_element_id, reporting_style_id=reporting_style_id
+        )
         if result is None:
           return {"error": f"No fac-to-rs-gaap equivalence found for {fac_element_id}"}
         return result

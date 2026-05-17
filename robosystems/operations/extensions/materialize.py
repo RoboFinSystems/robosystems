@@ -552,7 +552,16 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR                   AS root,
       NULL::VARCHAR                   AS preferred_label
     FROM postgres_scan('{c}', '{s}', 'associations')
-    WHERE association_type = 'presentation'
+    -- Materialize every association type that downstream graph queries
+    -- might need: presentation (rendering), mapping (CoA → rs-gaap projection),
+    -- calculation (XBRL rollups), general-special (IS-A inheritance),
+    -- equivalence (FAC ↔ rs-gaap bridge), definition (XBRL definition arcs),
+    -- derivation (derived-from). Originally limited to 'presentation' only,
+    -- which made CoA→rs-gaap mappings invisible to the renderer.
+    WHERE association_type IN (
+      'presentation', 'mapping', 'calculation',
+      'general-special', 'equivalence', 'definition', 'derivation'
+    )
   """
 
   # ── Relationship Tables ──────────────────────────────────────────────
@@ -611,7 +620,16 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS dst,
       NULL::VARCHAR                   AS association_context
     FROM postgres_scan('{c}', '{s}', 'associations')
-    WHERE association_type = 'presentation'
+    -- Materialize every association type that downstream graph queries
+    -- might need: presentation (rendering), mapping (CoA → rs-gaap projection),
+    -- calculation (XBRL rollups), general-special (IS-A inheritance),
+    -- equivalence (FAC ↔ rs-gaap bridge), definition (XBRL definition arcs),
+    -- derivation (derived-from). Originally limited to 'presentation' only,
+    -- which made CoA→rs-gaap mappings invisible to the renderer.
+    WHERE association_type IN (
+      'presentation', 'mapping', 'calculation',
+      'general-special', 'equivalence', 'definition', 'derivation'
+    )
   """
 
   tables["ASSOCIATION_HAS_FROM_ELEMENT"] = f"""
@@ -629,7 +647,16 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS src,
       from_element_id                 AS dst
     FROM postgres_scan('{c}', '{s}', 'associations')
-    WHERE association_type = 'presentation'
+    -- Materialize every association type that downstream graph queries
+    -- might need: presentation (rendering), mapping (CoA → rs-gaap projection),
+    -- calculation (XBRL rollups), general-special (IS-A inheritance),
+    -- equivalence (FAC ↔ rs-gaap bridge), definition (XBRL definition arcs),
+    -- derivation (derived-from). Originally limited to 'presentation' only,
+    -- which made CoA→rs-gaap mappings invisible to the renderer.
+    WHERE association_type IN (
+      'presentation', 'mapping', 'calculation',
+      'general-special', 'equivalence', 'definition', 'derivation'
+    )
   """
 
   tables["ASSOCIATION_HAS_TO_ELEMENT"] = f"""
@@ -647,7 +674,16 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS src,
       to_element_id                   AS dst
     FROM postgres_scan('{c}', '{s}', 'associations')
-    WHERE association_type = 'presentation'
+    -- Materialize every association type that downstream graph queries
+    -- might need: presentation (rendering), mapping (CoA → rs-gaap projection),
+    -- calculation (XBRL rollups), general-special (IS-A inheritance),
+    -- equivalence (FAC ↔ rs-gaap bridge), definition (XBRL definition arcs),
+    -- derivation (derived-from). Originally limited to 'presentation' only,
+    -- which made CoA→rs-gaap mappings invisible to the renderer.
+    WHERE association_type IN (
+      'presentation', 'mapping', 'calculation',
+      'general-special', 'equivalence', 'definition', 'derivation'
+    )
   """
 
   tables["ELEMENT_HAS_TRAIT"] = f"""

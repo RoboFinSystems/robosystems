@@ -1299,6 +1299,17 @@ class OLTPLoader:
         entity.address_state = company.get("state")
         entity.address_postal_code = company.get("postal_code")
         entity.address_country = company.get("country", "US")
+        # Reporting metadata — fall back to existing values rather than
+        # overwriting with NULL if the adapter doesn't provide them.
+        # (QB CompanyInfo doesn't include tax_id / industry / entity_type
+        # directly; those fields stay user-curated until populated
+        # through a separate path.)
+        if company.get("phone"):
+          entity.phone = company.get("phone")
+        if company.get("website"):
+          entity.website = company.get("website")
+        if company.get("fiscal_year_end"):
+          entity.fiscal_year_end = company.get("fiscal_year_end")
         entity.source = source
         entity.connection_id = connection_id
         entity.source_id = company.get("id", "")
