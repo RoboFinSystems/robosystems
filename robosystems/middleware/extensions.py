@@ -7,7 +7,7 @@ the same `OperationSpec` is designed to also drive:
 - **REST routes** via `OperationRegistrar.register` (implemented here)
 - **MCP tools** via a future `MCPRegistrar` (the spec's `command`,
   `request_model`, and `description` fields give MCP everything it needs)
-- **Agent tools** via a future `AgentToolRegistrar` (same reasoning)
+- **Agent tools** via a future `OperatorToolRegistrar` (same reasoning)
 
 This is the scaling surface for capabilities: a new op is **one
 `OperationSpec` + one command function + one Pydantic request model**,

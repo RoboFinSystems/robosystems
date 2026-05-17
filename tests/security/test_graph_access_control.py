@@ -185,12 +185,12 @@ class TestGraphEndpointAccessControl:
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
-  async def test_graph_agent_endpoint_denies_unauthorized_user(
+  async def test_graph_operator_endpoint_denies_unauthorized_user(
     self, auth_integration_client, test_user_token, other_user_token, sample_graph
   ):
-    """Test /v1/graphs/{graph_id}/agent denies unauthorized users."""
+    """Test /v1/graphs/{graph_id}/operator denies unauthorized users."""
     response = await auth_integration_client.post(
-      f"/v1/graphs/{sample_graph.graph_id}/agent",
+      f"/v1/graphs/{sample_graph.graph_id}/operator",
       headers={"Authorization": f"Bearer {other_user_token}"},
       json={"message": "Test query"},
     )

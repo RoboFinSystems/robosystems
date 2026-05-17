@@ -9,10 +9,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.config.agents import AgentConfig, BedrockModel
+from robosystems.config.operators import BedrockModel, OperatorConfig
 
 # Module paths for patching
-AI_CLIENT_MODULE = "robosystems.operations.agents.ai_client"
+AI_CLIENT_MODULE = "robosystems.operations.operators.ai_client"
 
 
 def _make_ai_client():
@@ -31,7 +31,7 @@ def _make_ai_client():
     mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "test"
     mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "test"
 
-    from robosystems.operations.agents.ai_client import AIClient
+    from robosystems.operations.operators.ai_client import AIClient
 
     client = AIClient()
 
@@ -44,7 +44,7 @@ class TestAIMessage:
   @pytest.mark.unit
   def test_message_creation(self):
     """Test basic AIMessage creation with role and content."""
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     msg = AIMessage(role="user", content="Hello, world!")
     assert msg.role == "user"
@@ -53,7 +53,7 @@ class TestAIMessage:
   @pytest.mark.unit
   def test_message_with_assistant_role(self):
     """Test AIMessage with assistant role."""
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     msg = AIMessage(role="assistant", content="I can help with that.")
     assert msg.role == "assistant"
@@ -62,7 +62,7 @@ class TestAIMessage:
   @pytest.mark.unit
   def test_message_with_empty_content(self):
     """Test AIMessage with empty content string."""
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     msg = AIMessage(role="user", content="")
     assert msg.content == ""
@@ -74,7 +74,7 @@ class TestAIResponse:
   @pytest.mark.unit
   def test_response_creation(self):
     """Test basic AIResponse creation."""
-    from robosystems.operations.agents.ai_client import AIResponse
+    from robosystems.operations.operators.ai_client import AIResponse
 
     resp = AIResponse(
       content="Analysis complete.",
@@ -91,7 +91,7 @@ class TestAIResponse:
   @pytest.mark.unit
   def test_response_with_stop_reason(self):
     """Test AIResponse with explicit stop_reason."""
-    from robosystems.operations.agents.ai_client import AIResponse
+    from robosystems.operations.operators.ai_client import AIResponse
 
     resp = AIResponse(
       content="Done.",
@@ -105,7 +105,7 @@ class TestAIResponse:
   @pytest.mark.unit
   def test_response_with_zero_tokens(self):
     """Test AIResponse with zero token counts."""
-    from robosystems.operations.agents.ai_client import AIResponse
+    from robosystems.operations.operators.ai_client import AIResponse
 
     resp = AIResponse(
       content="",
@@ -134,7 +134,7 @@ class TestAIClientInitialization:
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "test-access-key"
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "test-secret-key"
 
-      from robosystems.operations.agents.ai_client import AIClient
+      from robosystems.operations.operators.ai_client import AIClient
 
       ai_client = AIClient()
 
@@ -162,7 +162,7 @@ class TestAIClientInitialization:
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = ""
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = ""
 
-      from robosystems.operations.agents.ai_client import AIClient
+      from robosystems.operations.operators.ai_client import AIClient
 
       ai_client = AIClient()
 
@@ -196,7 +196,7 @@ class TestAIClientInitialization:
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = ""
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = ""
 
-      from robosystems.operations.agents.ai_client import AIClient
+      from robosystems.operations.operators.ai_client import AIClient
 
       ai_client = AIClient()
 
@@ -217,7 +217,7 @@ class TestAIClientInitialization:
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "bad-key"
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "bad-secret"
 
-      from robosystems.operations.agents.ai_client import AIClient
+      from robosystems.operations.operators.ai_client import AIClient
 
       with pytest.raises(ValueError, match="Failed to initialize AWS Bedrock client"):
         AIClient()
@@ -245,7 +245,7 @@ class TestAIClientInitialization:
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = ""
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = ""
 
-      from robosystems.operations.agents.ai_client import AIClient
+      from robosystems.operations.operators.ai_client import AIClient
 
       with pytest.raises(ValueError, match="Failed to initialize AWS Bedrock client"):
         AIClient()
@@ -260,7 +260,7 @@ class TestAIClientGetModelId:
     client, _ = _make_ai_client()
     model_id = client._get_model_id()
 
-    expected = AgentConfig.get_bedrock_model_id()
+    expected = OperatorConfig.get_bedrock_model_id()
     assert model_id == expected
 
   @pytest.mark.unit
@@ -269,7 +269,7 @@ class TestAIClientGetModelId:
     client, _ = _make_ai_client()
     model_id = client._get_model_id(model=BedrockModel.SONNET_4.value)
 
-    expected = AgentConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
+    expected = OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
     assert model_id == expected
 
   @pytest.mark.unit
@@ -279,36 +279,36 @@ class TestAIClientGetModelId:
     model_id = client._get_model_id(model="not-a-real-model")
 
     # Should use default when model is invalid
-    expected = AgentConfig.get_bedrock_model_id()
+    expected = OperatorConfig.get_bedrock_model_id()
     assert model_id == expected
 
   @pytest.mark.unit
   def test_agent_type_override(self):
-    """Test model ID with agent_type parameter."""
+    """Test model ID with operator_type parameter."""
     client, _ = _make_ai_client()
-    model_id = client._get_model_id(agent_type="financial")
+    model_id = client._get_model_id(operator_type="financial")
 
-    expected = AgentConfig.get_bedrock_model_id(agent_type="financial")
+    expected = OperatorConfig.get_bedrock_model_id(operator_type="financial")
     assert model_id == expected
 
   @pytest.mark.unit
   def test_model_and_agent_type_model_takes_precedence(self):
-    """Test that explicit model overrides agent_type."""
+    """Test that explicit model overrides operator_type."""
     client, _ = _make_ai_client()
     model_id = client._get_model_id(
-      model=BedrockModel.SONNET_4.value, agent_type="financial"
+      model=BedrockModel.SONNET_4.value, operator_type="financial"
     )
 
-    expected = AgentConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
+    expected = OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
     assert model_id == expected
 
   @pytest.mark.unit
   def test_none_model_and_none_agent_type(self):
     """Test default model returned when both params are None."""
     client, _ = _make_ai_client()
-    model_id = client._get_model_id(model=None, agent_type=None)
+    model_id = client._get_model_id(model=None, operator_type=None)
 
-    expected = AgentConfig.get_bedrock_model_id()
+    expected = OperatorConfig.get_bedrock_model_id()
     assert model_id == expected
 
 
@@ -319,7 +319,7 @@ class TestAIClientCreateMessage:
   async def test_create_message_basic(self):
     """Test basic message creation through Bedrock."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     response_body = {
       "content": [{"text": "Financial analysis complete."}],
@@ -347,7 +347,7 @@ class TestAIClientCreateMessage:
   async def test_create_message_with_system_prompt(self):
     """Test message creation with a system prompt."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     response_body = {
       "content": [{"text": "Response with system context."}],
@@ -375,7 +375,7 @@ class TestAIClientCreateMessage:
   async def test_create_message_without_system_prompt(self):
     """Test message creation without a system prompt excludes it from request."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     response_body = {
       "content": [{"text": "Response without system."}],
@@ -397,7 +397,7 @@ class TestAIClientCreateMessage:
   async def test_create_message_formats_messages_correctly(self):
     """Test that messages are formatted into the correct dict structure."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     response_body = {
       "content": [{"text": "OK"}],
@@ -439,7 +439,7 @@ class TestAIClientCreateMessage:
   async def test_create_message_with_model_override(self):
     """Test message creation with explicit model override."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     response_body = {
       "content": [{"text": "OK"}],
@@ -457,7 +457,7 @@ class TestAIClientCreateMessage:
     )
 
     call_args = mock_bedrock.invoke_model.call_args
-    expected_model_id = AgentConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
+    expected_model_id = OperatorConfig.get_bedrock_model_id(model=BedrockModel.SONNET_4)
     assert call_args[1]["modelId"] == expected_model_id
     assert result.model == expected_model_id
 
@@ -465,7 +465,7 @@ class TestAIClientCreateMessage:
   async def test_create_message_bedrock_api_error(self):
     """Test that Bedrock API errors propagate correctly."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     mock_bedrock.invoke_model.side_effect = Exception("Bedrock throttling error")
 
@@ -478,7 +478,7 @@ class TestAIClientCreateMessage:
   async def test_create_message_stop_reason_none(self):
     """Test response when stop_reason is not in the response body."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     response_body = {
       "content": [{"text": "Partial response"}],
@@ -496,9 +496,9 @@ class TestAIClientCreateMessage:
 
   @pytest.mark.unit
   async def test_create_message_with_agent_type(self):
-    """Test message creation passes agent_type for model resolution."""
+    """Test message creation passes operator_type for model resolution."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     response_body = {
       "content": [{"text": "OK"}],
@@ -512,17 +512,17 @@ class TestAIClientCreateMessage:
 
     result = await client.create_message(
       messages=messages,
-      agent_type="financial",
+      operator_type="financial",
     )
 
-    expected_model_id = AgentConfig.get_bedrock_model_id(agent_type="financial")
+    expected_model_id = OperatorConfig.get_bedrock_model_id(operator_type="financial")
     assert result.model == expected_model_id
 
   @pytest.mark.unit
   async def test_create_message_default_parameters(self):
     """Test create_message uses correct default parameters."""
     client, mock_bedrock = _make_ai_client()
-    from robosystems.operations.agents.ai_client import AIMessage
+    from robosystems.operations.operators.ai_client import AIMessage
 
     response_body = {
       "content": [{"text": "OK"}],
@@ -560,7 +560,7 @@ class TestAIClientBedrockEndpoint:
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "test"
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "test"
 
-      from robosystems.operations.agents.ai_client import AIClient
+      from robosystems.operations.operators.ai_client import AIClient
 
       AIClient()
 
@@ -584,7 +584,7 @@ class TestAIClientBedrockEndpoint:
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "test"
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "test"
 
-      from robosystems.operations.agents.ai_client import AIClient
+      from robosystems.operations.operators.ai_client import AIClient
 
       AIClient()
 

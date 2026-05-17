@@ -7,15 +7,6 @@ including rate limits, credits, constants, and external services.
 Note: Billing and repository configurations are now model-based (see unified_billing.py and UserRepository model).
 """
 
-# Import env first to avoid circular dependencies
-from .agents import (
-  AgentConfig,
-  AgentExecutionMode,
-  BedrockModel,
-  ExecutionProfile,
-  ModelConfig,
-)
-
 # Core configuration modules
 from .billing import (
   DEFAULT_GRAPH_BILLING_PLANS,
@@ -25,6 +16,13 @@ from .billing import (
 from .constants import PrefixConstants, URIConstants, XBRLConstants
 from .credits import CreditConfig
 from .env import EnvConfig, env
+from .operators import (
+  BedrockModel,
+  ExecutionProfile,
+  ModelConfig,
+  OperatorConfig,
+  OperatorExecutionMode,
+)
 from .query_queue import QueryQueueConfig
 from .rate_limits import EndpointCategory, RateLimitConfig, RateLimitPeriod
 from .validation import EnvValidator
@@ -32,9 +30,6 @@ from .validation import EnvValidator
 __all__ = [
   "DEFAULT_GRAPH_BILLING_PLANS",
   "AIBillingConfig",
-  # Agent exports
-  "AgentConfig",
-  "AgentExecutionMode",
   "BedrockModel",
   # Billing exports
   "BillingConfig",
@@ -47,6 +42,9 @@ __all__ = [
   "EnvValidator",
   "ExecutionProfile",
   "ModelConfig",
+  # AI Operator exports
+  "OperatorConfig",
+  "OperatorExecutionMode",
   "PrefixConstants",
   # Query configuration exports
   "QueryQueueConfig",

@@ -260,7 +260,7 @@ robosystems/
 │   │   └── commands/             # portfolios, securities, positions
 │   ├── graph/                    # Graph services (credit, entity, subscription)
 │   ├── lbug/                     # LadybugDB operations (backup, ingest)
-│   ├── agents/                   # AI agent operations
+│   ├── operators/                # AI Operator operations (Claude/MCP executors — distinct from REA Agent counterparty model)
 │   └── providers/                # Provider registry and implementations
 ├── middleware/                   # Cross-cutting concerns
 │   ├── auth/                     # Authentication (JWT, API keys, SSO)
@@ -287,11 +287,12 @@ robosystems/
 ### Key Architectural Patterns
 
 1. **Operations orchestrate, adapters integrate**: Operations coordinate business logic; adapters handle external service integration and data transformation
-2. **Operations kernel as single source of truth**: `operations/roboledger/{reads,commands,views}/` and `operations/roboinvestor/{reads,commands}/` hold domain logic as pure functions (session-in, Pydantic-out, domain exceptions). GraphQL resolvers, REST command operation routers, analytical view handlers, MCP tools, and agents all delegate to the same functions. Adding business logic in a router, resolver, or MCP tool handler is a mistake — route it through the ops layer.
+2. **Operations kernel as single source of truth**: `operations/roboledger/{reads,commands,views}/` and `operations/roboinvestor/{reads,commands}/` hold domain logic as pure functions (session-in, Pydantic-out, domain exceptions). GraphQL resolvers, REST command operation routers, analytical view handlers, MCP tools, and AI Operators all delegate to the same functions. Adding business logic in a router, resolver, or MCP tool handler is a mistake — route it through the ops layer.
 3. **Multi-tenant by design**: Core platform operations scoped to `graph_id`; extensions OLTP uses schema-per-graph-id PostgreSQL tenancy with `SET search_path` isolation
 4. **Two-database split**: Platform (`robosystems`) for IAM/billing/metadata; extensions (`extensions`) for per-graph OLTP. Different `DeclarativeBase` classes, independent migration histories, same shared RDS instance
 5. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
 6. **Graph backend**: LadybugDB (`GRAPH_BACKEND_TYPE=ladybug`)
+7. **Two `Agent` concepts, disambiguated**: `Agent` (REA party — customer/vendor/employee counterparty) lives in `models/extensions/roboledger/agent.py` and is the canonical ontology term. The AI executor layer (Claude/MCP-driven, used to be called "AI agents") is named **Operator** throughout the codebase: `routers/graphs/operator/`, `operations/operators/`, classes like `CypherOperator` / `MappingOperator`, endpoint `/v1/graphs/{g}/operator`. Marketing-facing copy can still say "AI agent" / "AI assistant" — that's decoupled from internal naming.
 
 ## Testing
 
@@ -385,7 +386,7 @@ All configuration is centralized in `/robosystems/config/`. See `config/README.m
 | `graph_tier.py`         | Graph tier config from `.github/configs/graph.yml` |
 | `rate_limits.py`        | Burst-focused rate limiting (1-minute windows) |
 | `credits.py`            | AI operation credit costs                      |
-| `agents.py`             | Claude model configuration (Bedrock)           |
+| `operators.py`          | Claude model configuration (Bedrock) — AI Operator config |
 | `validation.py`         | Startup configuration checks                   |
 | `valkey_registry.py`    | Valkey database allocation (never hardcode DB numbers) |
 | `storage/`              | S3 path helpers (shared data, graph storage)   |

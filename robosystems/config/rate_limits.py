@@ -44,7 +44,7 @@ class EndpointCategory(str, Enum):
   GRAPH_BACKUP = "graph_backup"
   GRAPH_SYNC = "graph_sync"
   GRAPH_MCP = "graph_mcp"
-  GRAPH_AGENT = "graph_agent"
+  GRAPH_OPERATOR = "graph_operator"
   GRAPH_SEARCH = "graph_search"  # OpenSearch full-text search (shared resource)
 
   # High-cost operations
@@ -110,7 +110,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_BACKUP: (2, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (3, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MCP: (5, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_AGENT: (3, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_OPERATOR: (3, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SEARCH: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_QUERY: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_IMPORT: (2, RateLimitPeriod.MINUTE),
@@ -134,7 +134,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_AGENT: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_OPERATOR: (15, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SEARCH: (
         10,
         RateLimitPeriod.MINUTE,
@@ -162,7 +162,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_AGENT: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_OPERATOR: (15, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SEARCH: (
         10,
         RateLimitPeriod.MINUTE,
@@ -190,7 +190,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_AGENT: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_OPERATOR: (15, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SEARCH: (
         10,
         RateLimitPeriod.MINUTE,
@@ -336,11 +336,11 @@ class RateLimitConfig:
         else:
           return EndpointCategory.GRAPH_READ  # Table listing/info
 
-      # MCP and Agent endpoints
+      # MCP and Operator endpoints
       elif endpoint_type == "mcp":
         return EndpointCategory.GRAPH_MCP
-      elif endpoint_type == "agent":
-        return EndpointCategory.GRAPH_AGENT
+      elif endpoint_type == "operator":
+        return EndpointCategory.GRAPH_OPERATOR
 
       # Search operations (OpenSearch - shared resource)
       elif endpoint_type == "search":

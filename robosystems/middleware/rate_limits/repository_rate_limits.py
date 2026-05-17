@@ -283,7 +283,7 @@ class DualLayerRateLimiter:
     mapping = {
       "query": EndpointCategory.GRAPH_QUERY,
       "mcp": EndpointCategory.GRAPH_MCP,
-      "agent": EndpointCategory.GRAPH_AGENT,
+      "operator": EndpointCategory.GRAPH_OPERATOR,
       "search": EndpointCategory.GRAPH_SEARCH,
     }
     return mapping.get(operation, EndpointCategory.GRAPH_READ)

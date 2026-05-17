@@ -19,7 +19,7 @@ RoboSystems is an open-source financial intelligence platform built on a unified
 The platform provides the core infrastructure that all extensions build on:
 
 - **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
-- **AI Agent System**: Autonomous financial operations — graph queries, taxonomy mapping, report generation — with automatic credit tracking and SSE progress streaming
+- **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) — graph queries, taxonomy mapping, report generation — with automatic credit tracking and SSE progress streaming. Distinct from the REA `Agent` model (customer/vendor/employee counterparties).
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
 - **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
@@ -42,7 +42,7 @@ See [GraphQL Extensions](/robosystems/graphql/README.md) for the read-path imple
 
 ### [RoboLedger](https://roboledger.ai)
 
-Accounting and financial reporting extension. OLTP general ledger in schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions); 30+ GraphQL read fields covering entities, accounts, trial balance, fiscal calendar, schedules, taxonomies, mappings, reports, and publish lists; 30+ named command operations spanning close lifecycle, schedule and closing-entry authoring, CoA→GAAP mapping associations, multi-period report authoring, and publish lists; analytical view operations over the materialized graph; QuickBooks ELT pipeline via dbt/Dagster; SEC XBRL financial reporting; AI-powered CoA→GAAP mapping via the MappingAgent. Dedicated frontend app.
+Accounting and financial reporting extension. OLTP general ledger in schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions); 30+ GraphQL read fields covering entities, accounts, trial balance, fiscal calendar, schedules, taxonomies, mappings, reports, and publish lists; 30+ named command operations spanning close lifecycle, schedule and closing-entry authoring, CoA→GAAP mapping associations, multi-period report authoring, and publish lists; analytical view operations over the materialized graph; QuickBooks ELT pipeline via dbt/Dagster; SEC XBRL financial reporting; AI-powered CoA→GAAP mapping via the MappingOperator. Dedicated frontend app.
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
@@ -159,7 +159,7 @@ RoboSystems is built on a modern, scalable architecture with:
 - FastAPI REST API with versioned endpoints
 - Extension GraphQL API for reads with command operations
 - MCP Server for AI-powered graph database access with schema-aware tools
-- AI Agent System for autonomous financial operations with automatic credit tracking
+- AI Operator System for autonomous financial operations with automatic credit tracking
 - Dagster for data pipeline orchestration and background jobs
 
 **LadybugDB Graph Database:** ([configuration](/.github/configs/graph.yml))
@@ -192,7 +192,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 ## SEC Shared Repository
 
-A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI agent.
+A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
 
 - **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
 - **Graph**: 14 node types and 24 relationship types modeling the full XBRL reporting hierarchy
@@ -215,17 +215,18 @@ See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robos
 - **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, financial analysis, document search, and AI memory operations
 - **Handler Pool**: Managed MCP handler instances with resource limits
 
-### Agent System
+### AI Operator System
 
-- Unified architecture: stateless agents with protocol-based service injection
+- Unified architecture: stateless Operators (Claude/MCP executors) with protocol-based service injection
 - Dual execution: API (sync/SSE) and background worker (Valkey queue + SSE progress)
-- Automatic credit tracking per AI call — agents cannot forget billing
-- Extensible: new agents implement `run(ctx)` and register with a decorator
-- See [Agent README](/robosystems/operations/agents/README.md) for details
+- Automatic credit tracking per AI call — Operators cannot forget billing
+- Extensible: new Operators implement `run(ctx)` and register with a decorator
+- Distinct from REA `Agent` (counterparty model — customer/vendor/employee)
+- See [Operator README](/robosystems/operations/operators/README.md) for details
 
 ### Credit System
 
-- **AI Operations Only**: Credits are consumed exclusively by AI agent calls (Anthropic Claude via AWS Bedrock)
+- **AI Operations Only**: Credits are consumed exclusively by AI Operator calls (Anthropic Claude via AWS Bedrock)
 - **Token-Based Billing**: Credits based on actual token usage and model cost
 - **MCP Tool Access**: No credits consumed for MCP calls or database operations
 

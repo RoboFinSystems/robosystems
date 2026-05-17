@@ -333,63 +333,63 @@ BedrockModel.SONNET_4    # us.anthropic.claude-sonnet-4-20250514-v1:0
 **Execution Modes:**
 
 ```python
-from robosystems.config import AgentExecutionMode
+from robosystems.config import OperatorExecutionMode
 
 # Quick: 2-5 seconds, 2 tool calls, 50k input tokens
-AgentExecutionMode.QUICK
+OperatorExecutionMode.QUICK
 
 # Standard: 5-15 seconds, 5 tool calls, 100k input tokens
-AgentExecutionMode.STANDARD
+OperatorExecutionMode.STANDARD
 
 # Extended: 30-120 seconds, 12 tool calls, 150k input tokens
-AgentExecutionMode.EXTENDED
+OperatorExecutionMode.EXTENDED
 
 # Streaming: 5-60 seconds, 8 tool calls, SSE responses
-AgentExecutionMode.STREAMING
+OperatorExecutionMode.STREAMING
 ```
 
 **Usage:**
 
 ```python
-from robosystems.config import AgentConfig, BedrockModel
+from robosystems.config import OperatorConfig, BedrockModel
 
 # Get default model ID
-model_id = AgentConfig.get_bedrock_model_id()
+model_id = OperatorConfig.get_bedrock_model_id()
 
 # Get model for specific agent with override
-model_id = AgentConfig.get_bedrock_model_id(
+model_id = OperatorConfig.get_bedrock_model_id(
     model=BedrockModel.SONNET_4_5,
     agent_type="financial"
 )
 
 # Get execution profile
-from robosystems.config import AgentExecutionMode
-profile = AgentConfig.get_execution_profile(AgentExecutionMode.STANDARD)
+from robosystems.config import OperatorExecutionMode
+profile = OperatorConfig.get_execution_profile(OperatorExecutionMode.STANDARD)
 # profile.max_tool_calls = 5
 # profile.timeout_seconds = 60
 # profile.max_input_tokens = 100000
 
 # Get mode limits (backward compatible)
-limits = AgentConfig.get_mode_limits("standard")
+limits = OperatorConfig.get_mode_limits("standard")
 # limits = {"max_tools": 5, "timeout": 60, ...}
 
 # Get orchestrator config
-fallback_agent = AgentConfig.ORCHESTRATOR_CONFIG["fallback_agent"]  # "cypher"
-enable_rag = AgentConfig.ORCHESTRATOR_CONFIG["enable_rag"]  # False
+fallback_operator = OperatorConfig.ORCHESTRATOR_CONFIG["fallback_operator"]  # "cypher"
+enable_rag = OperatorConfig.ORCHESTRATOR_CONFIG["enable_rag"]  # False
 
 # Validate configuration
-validation = AgentConfig.validate_configuration()
+validation = OperatorConfig.validate_configuration()
 if not validation["valid"]:
     print(f"Issues: {validation['issues']}")
 ```
 
 **Customizing Agent Models:**
 
-To use a different model for a specific agent, update `AGENT_MODEL_OVERRIDES`:
+To use a different model for a specific agent, update `OPERATOR_MODEL_OVERRIDES`:
 
 ```python
 # In robosystems/config/agents.py
-AGENT_MODEL_OVERRIDES: Dict[str, BedrockModel] = {
+OPERATOR_MODEL_OVERRIDES: Dict[str, BedrockModel] = {
     "financial": BedrockModel.SONNET_4_5,  # Use latest model for financial analysis
     "cypher": BedrockModel.SONNET_4,      # Use Sonnet 4 for Cypher queries
 }

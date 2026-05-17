@@ -198,7 +198,7 @@ def _bootstrap_fiscal_calendar_if_needed(
 def _trigger_auto_map_if_needed(
   context: AssetExecutionContext, config: QBSyncConfig
 ) -> None:
-  """Enqueue the MappingAgent on the first sync if mapping coverage is 0.
+  """Enqueue the MappingOperator on the first sync if mapping coverage is 0.
 
   Looks up the tenant's `coa_mapping` Structure, checks current association
   count, and (only if zero) enqueues a background `agent_mapping` task. The

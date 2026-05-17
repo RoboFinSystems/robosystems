@@ -549,9 +549,9 @@ class EnvConfig:
     "BACKUP_CREATION_ENABLED",
     get_parameter_value("BACKUP_CREATION_ENABLED", "true").lower() == "true",
   )
-  AGENT_POST_ENABLED = get_bool_env(
-    "AGENT_POST_ENABLED",
-    get_parameter_value("AGENT_POST_ENABLED", "true").lower() == "true",
+  OPERATOR_POST_ENABLED = get_bool_env(
+    "OPERATOR_POST_ENABLED",
+    get_parameter_value("OPERATOR_POST_ENABLED", "true").lower() == "true",
   )
   FACT_GRID_ENABLED = get_bool_env(
     "FACT_GRID_ENABLED",
