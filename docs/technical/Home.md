@@ -23,6 +23,8 @@ New to RoboSystems? Start here:
 
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Working with SEC financial data
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
+- **[RoboLedger Demo Walkthrough](RoboLedger-Demo-Walkthrough)** - One-command synthetic demo: filed report, close workflow, rules, no QB needed
+- **[Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)** - Run real QB OAuth against a local stack via ngrok
 
 ### Reference
 
