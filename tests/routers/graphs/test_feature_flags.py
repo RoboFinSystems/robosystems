@@ -597,7 +597,7 @@ class TestGraphOperationFeatureFlags:
 
 
 class TestOperatorPostFeatureFlags:
-  """Test agent POST operation feature flags."""
+  """Test operator POST operation feature flags."""
 
   @pytest.fixture
   def mock_user(self):
@@ -612,7 +612,7 @@ class TestOperatorPostFeatureFlags:
     """Create a mock database session."""
     return MagicMock(spec=Session)
 
-  def test_agent_auto_disabled(self, client: TestClient, mock_user, mock_db):
+  def test_operator_auto_disabled(self, client: TestClient, mock_user, mock_db):
     """Test auto agent endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_db_session
@@ -645,7 +645,7 @@ class TestOperatorPostFeatureFlags:
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_specific_disabled(self, client: TestClient, mock_user, mock_db):
+  def test_operator_specific_disabled(self, client: TestClient, mock_user, mock_db):
     """Test specific agent endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_db_session
@@ -678,7 +678,7 @@ class TestOperatorPostFeatureFlags:
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_batch_disabled(self, client: TestClient, mock_user, mock_db):
+  def test_operator_batch_disabled(self, client: TestClient, mock_user, mock_db):
     """Test batch agent endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_db_session
@@ -732,8 +732,8 @@ class TestOperatorPostFeatureFlags:
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_recommend_disabled(self, client: TestClient, mock_user, mock_db):
-    """Test agent recommendation endpoint when feature flag is disabled."""
+  def test_operator_recommend_disabled(self, client: TestClient, mock_user, mock_db):
+    """Test operator recommendation endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -760,7 +760,9 @@ class TestOperatorPostFeatureFlags:
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_get_endpoints_still_work(self, client: TestClient, mock_user, mock_db):
+  def test_operator_get_endpoints_still_work(
+    self, client: TestClient, mock_user, mock_db
+  ):
     """Test that GET endpoints still work when POST endpoints are disabled."""
     from main import app
     from robosystems.database import get_db_session
@@ -775,19 +777,19 @@ class TestOperatorPostFeatureFlags:
       with patch("robosystems.routers.graphs.operator.execute.env") as mock_env:
         mock_env.OPERATOR_POST_ENABLED = False
 
-        # Test list agents endpoint (GET)
+        # Test list operators endpoint (GET)
         response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/operator")
         # Should not return 403 - GET endpoints are not affected by this flag
         assert response.status_code != 403
 
-        # Test agent metadata endpoint (GET)
+        # Test operator metadata endpoint (GET)
         response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/operator/financial")
         # Should not return 403 - GET endpoints are not affected by this flag
         assert response.status_code != 403
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_post_feature_flag_environment_variables(self):
+  def test_operator_post_feature_flag_environment_variables(self):
     """Test that OPERATOR_POST_ENABLED flag can be controlled via environment variables."""
     from robosystems.config.env import get_bool_env
 

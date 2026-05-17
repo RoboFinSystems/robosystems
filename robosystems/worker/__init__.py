@@ -5,7 +5,7 @@ reporting via the SSE system and observability via Dagster.
 
 Task registration happens via side-effect imports at module load time:
 - Platform tasks: worker infrastructure (dagster_monitoring) and
-  operations (graph creation/materialization/subgraph, agents)
+  operations (graph creation/materialization/subgraph, operators)
 - Adapter tasks: loaded via load_adapter_tasks() for future adapter extensions
 """
 
