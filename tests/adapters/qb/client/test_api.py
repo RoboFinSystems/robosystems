@@ -177,10 +177,12 @@ class TestQBClient:
     client = QBClient.__new__(QBClient)
     client.client = mock_qb_client
 
+    # Intuit's API returns the key as "Id" (capital I) — the adapter's
+    # dedup keys on that field, so the test fixtures must match.
     mock_account1 = Mock()
-    mock_account1.to_dict.return_value = {"id": "1", "name": "Account 1"}
+    mock_account1.to_dict.return_value = {"Id": "1", "Name": "Account 1"}
     mock_account2 = Mock()
-    mock_account2.to_dict.return_value = {"id": "2", "name": "Account 2"}
+    mock_account2.to_dict.return_value = {"Id": "2", "Name": "Account 2"}
 
     # First page returns 2 rows (less than page_size=100) → loop exits.
     mock_account.query.return_value = [mock_account1, mock_account2]
@@ -188,8 +190,8 @@ class TestQBClient:
     result = client.get_accounts()
 
     assert result == [
-      {"id": "1", "name": "Account 1"},
-      {"id": "2", "name": "Account 2"},
+      {"Id": "1", "Name": "Account 1"},
+      {"Id": "2", "Name": "Account 2"},
     ]
     # One page was enough since the page came back shorter than page_size.
     assert mock_account.query.call_count == 1
@@ -201,21 +203,22 @@ class TestQBClient:
 
   @patch("quickbooks.objects.account.Account")
   def test_get_accounts_no_duplicates(self, mock_account, mock_qb_client):
-    """Test that duplicate accounts (same dict on two pages) are filtered."""
+    """Duplicate accounts (same Id on two pages, or duplicated within a
+    page) must be filtered out via the O(1) seen-set keyed on Id."""
     client = QBClient.__new__(QBClient)
     client.client = mock_qb_client
 
     mock_account_obj = Mock()
-    mock_account_obj.to_dict.return_value = {"id": "1", "name": "Account 1"}
+    mock_account_obj.to_dict.return_value = {"Id": "1", "Name": "Account 1"}
 
-    # Page returns the same account twice — second occurrence should
-    # be deduped by the `if d not in all_accounts` check.
+    # Page returns the same account twice — second occurrence should be
+    # deduped by the seen-set keyed on the "Id" field.
     mock_account.query.return_value = [mock_account_obj, mock_account_obj]
 
     result = client.get_accounts()
 
     assert len(result) == 1
-    assert result == [{"id": "1", "name": "Account 1"}]
+    assert result == [{"Id": "1", "Name": "Account 1"}]
 
   @patch("quickbooks.objects.account.Account")
   def test_get_accounts_zero_count(self, mock_account, mock_qb_client):
@@ -486,8 +489,9 @@ class TestQBClient:
     def create_mock_account(account_id):
       mock_obj = Mock()
       mock_obj.to_dict.return_value = {
-        "id": str(account_id),
-        "name": f"Account {account_id}",
+        # Intuit returns "Id" with capital I; adapter dedup keys on it.
+        "Id": str(account_id),
+        "Name": f"Account {account_id}",
       }
       return mock_obj
 

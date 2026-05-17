@@ -84,6 +84,7 @@ class QBClient:
     page_size = 100
     start = 1
     all_accounts: list[dict] = []
+    seen_ids: set[str] = set()
     while True:
       page = Account.query(
         f"SELECT * FROM Account WHERE Active IN (true, false) "
@@ -94,7 +95,12 @@ class QBClient:
         break
       for a in page:
         d = a.to_dict()
-        if d not in all_accounts:
+        # Dedup by Id rather than full-dict membership (O(1) vs O(n))
+        # so tenants with thousands of accounts don't pay an O(n²)
+        # tax on the import path.
+        ext_id = str(d.get("Id", ""))
+        if ext_id and ext_id not in seen_ids:
+          seen_ids.add(ext_id)
           all_accounts.append(d)
       if len(page) < page_size:
         break

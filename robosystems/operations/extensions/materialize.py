@@ -25,6 +25,32 @@ if TYPE_CHECKING:
 
 from robosystems.logger import logger
 
+# Association types that downstream graph queries might need:
+#   presentation     — rendering hierarchies on Reporting Style structures
+#   mapping          — CoA → rs-gaap projection
+#   calculation      — XBRL rollup arcs
+#   general-special  — IS-A inheritance
+#   equivalence      — FAC ↔ rs-gaap bridge
+#   definition       — XBRL definition arcs (dimensions, hypercubes)
+#   derivation       — derived-from arcs
+# Limiting to a single type makes any of these invisible to the graph
+# renderer. Originally scoped to 'presentation' only, which made CoA→rs-gaap
+# mappings invisible (and reports empty) even when the mappings existed in
+# OLTP. Used as ``WHERE association_type IN <_MATERIALIZED_ASSOCIATION_TYPES>``
+# in each of the four SQL strings below.
+_MATERIALIZED_ASSOCIATION_TYPES: tuple[str, ...] = (
+  "presentation",
+  "mapping",
+  "calculation",
+  "general-special",
+  "equivalence",
+  "definition",
+  "derivation",
+)
+_MATERIALIZED_ASSOCIATION_TYPES_SQL = (
+  "(" + ", ".join(f"'{t}'" for t in _MATERIALIZED_ASSOCIATION_TYPES) + ")"
+)
+
 
 @dataclass
 class MaterializeResult:
@@ -552,16 +578,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       NULL::VARCHAR                   AS root,
       NULL::VARCHAR                   AS preferred_label
     FROM postgres_scan('{c}', '{s}', 'associations')
-    -- Materialize every association type that downstream graph queries
-    -- might need: presentation (rendering), mapping (CoA → rs-gaap projection),
-    -- calculation (XBRL rollups), general-special (IS-A inheritance),
-    -- equivalence (FAC ↔ rs-gaap bridge), definition (XBRL definition arcs),
-    -- derivation (derived-from). Originally limited to 'presentation' only,
-    -- which made CoA→rs-gaap mappings invisible to the renderer.
-    WHERE association_type IN (
-      'presentation', 'mapping', 'calculation',
-      'general-special', 'equivalence', 'definition', 'derivation'
-    )
+    -- See _MATERIALIZED_ASSOCIATION_TYPES for the curated list.
+    WHERE association_type IN {_MATERIALIZED_ASSOCIATION_TYPES_SQL}
   """
 
   # ── Relationship Tables ──────────────────────────────────────────────
@@ -620,16 +638,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS dst,
       NULL::VARCHAR                   AS association_context
     FROM postgres_scan('{c}', '{s}', 'associations')
-    -- Materialize every association type that downstream graph queries
-    -- might need: presentation (rendering), mapping (CoA → rs-gaap projection),
-    -- calculation (XBRL rollups), general-special (IS-A inheritance),
-    -- equivalence (FAC ↔ rs-gaap bridge), definition (XBRL definition arcs),
-    -- derivation (derived-from). Originally limited to 'presentation' only,
-    -- which made CoA→rs-gaap mappings invisible to the renderer.
-    WHERE association_type IN (
-      'presentation', 'mapping', 'calculation',
-      'general-special', 'equivalence', 'definition', 'derivation'
-    )
+    -- See _MATERIALIZED_ASSOCIATION_TYPES for the curated list.
+    WHERE association_type IN {_MATERIALIZED_ASSOCIATION_TYPES_SQL}
   """
 
   tables["ASSOCIATION_HAS_FROM_ELEMENT"] = f"""
@@ -647,16 +657,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS src,
       from_element_id                 AS dst
     FROM postgres_scan('{c}', '{s}', 'associations')
-    -- Materialize every association type that downstream graph queries
-    -- might need: presentation (rendering), mapping (CoA → rs-gaap projection),
-    -- calculation (XBRL rollups), general-special (IS-A inheritance),
-    -- equivalence (FAC ↔ rs-gaap bridge), definition (XBRL definition arcs),
-    -- derivation (derived-from). Originally limited to 'presentation' only,
-    -- which made CoA→rs-gaap mappings invisible to the renderer.
-    WHERE association_type IN (
-      'presentation', 'mapping', 'calculation',
-      'general-special', 'equivalence', 'definition', 'derivation'
-    )
+    -- See _MATERIALIZED_ASSOCIATION_TYPES for the curated list.
+    WHERE association_type IN {_MATERIALIZED_ASSOCIATION_TYPES_SQL}
   """
 
   tables["ASSOCIATION_HAS_TO_ELEMENT"] = f"""
@@ -674,16 +676,8 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       id                              AS src,
       to_element_id                   AS dst
     FROM postgres_scan('{c}', '{s}', 'associations')
-    -- Materialize every association type that downstream graph queries
-    -- might need: presentation (rendering), mapping (CoA → rs-gaap projection),
-    -- calculation (XBRL rollups), general-special (IS-A inheritance),
-    -- equivalence (FAC ↔ rs-gaap bridge), definition (XBRL definition arcs),
-    -- derivation (derived-from). Originally limited to 'presentation' only,
-    -- which made CoA→rs-gaap mappings invisible to the renderer.
-    WHERE association_type IN (
-      'presentation', 'mapping', 'calculation',
-      'general-special', 'equivalence', 'definition', 'derivation'
-    )
+    -- See _MATERIALIZED_ASSOCIATION_TYPES for the curated list.
+    WHERE association_type IN {_MATERIALIZED_ASSOCIATION_TYPES_SQL}
   """
 
   tables["ELEMENT_HAS_TRAIT"] = f"""
