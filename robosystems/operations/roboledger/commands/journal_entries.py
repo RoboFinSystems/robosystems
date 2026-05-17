@@ -241,7 +241,7 @@ def create_journal_entry(
   transaction_id = body.transaction_id
   if not transaction_id:
     txn = Transaction(
-      type="journal_entry",
+      type=body.transaction_type,
       amount=total_debit,
       date=body.posting_date,
       description=body.memo,

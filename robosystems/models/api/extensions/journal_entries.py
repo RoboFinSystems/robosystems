@@ -103,6 +103,14 @@ class CreateJournalEntryRequest(BaseModel):
   # entries to their originating system.
   source: str | None = None
   connection_id: str | None = None
+  # Type of business event the Transaction represents (e.g. ``bill_paid``,
+  # ``cash_expense_recorded``, ``invoice_issued``). Defaults to
+  # ``"journal_entry"`` for native manual entries. Adapter handlers
+  # (bill_paid, payment_received, ...) pass the source event_type through
+  # so reporting can filter / group by business-event kind. Distinct from
+  # the entry-level ``type`` field, which captures accounting role
+  # (standard / adjusting / closing / reversing).
+  transaction_type: str = "journal_entry"
 
 
 # ── Update ────────────────────────────────────────────────────────────────

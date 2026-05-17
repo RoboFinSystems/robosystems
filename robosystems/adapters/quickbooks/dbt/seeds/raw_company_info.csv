@@ -1,2 +1,2 @@
-Id,CompanyName,LegalName,CompanyAddr_Line1,CompanyAddr_City,CompanyAddr_CountrySubDivisionCode,CompanyAddr_PostalCode,CompanyAddr_Country
-1,Acme Consulting,Acme Consulting LLC,100 Main Street,San Francisco,CA,94105,US
+Id,CompanyName,LegalName,CompanyAddr_Line1,CompanyAddr_City,CompanyAddr_CountrySubDivisionCode,CompanyAddr_PostalCode,CompanyAddr_Country,PrimaryPhone_FreeFormNumber,WebAddr_URI,FiscalYearStartMonth
+1,Acme Consulting,Acme Consulting LLC,100 Main Street,San Francisco,CA,94105,US,415-555-0100,https://acme.example.com,January

@@ -307,6 +307,10 @@ def _dispatch_flat(
     transaction_id=metadata.transaction_id,
     source=event.source,
     connection_id=metadata.connection_id,
+    # Propagate the business-event type so the Transaction row carries
+    # the originating kind (bill_paid, cash_expense_recorded, etc.)
+    # rather than collapsing to the generic ``journal_entry``.
+    transaction_type=event.event_type,
   )
   response = create_journal_entry(session, body, created_by)
 
@@ -368,6 +372,8 @@ def _dispatch_nested(
       # can scope deletes and reports can attribute provenance.
       source=event.source,
       connection_id=metadata.connection_id,
+      # Carry the business-event type through to the Transaction row.
+      transaction_type=event.event_type,
     )
     response = create_journal_entry(session, body, created_by)
     if shared_txn_id is None:

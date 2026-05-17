@@ -499,6 +499,8 @@ def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
   for info in company_info_list:
     data = info.to_dict() if hasattr(info, "to_dict") else info
     addr = data.get("CompanyAddr", {}) or {}
+    primary_phone = data.get("PrimaryPhone", {}) or {}
+    web_addr = data.get("WebAddr", {}) or {}
     rows.append(
       {
         "Id": str(data.get("Id", "")),
@@ -509,6 +511,16 @@ def flatten_company_info(company_info_list: list) -> list[dict[str, Any]]:
         "CompanyAddr_CountrySubDivisionCode": addr.get("CountrySubDivisionCode", ""),
         "CompanyAddr_PostalCode": addr.get("PostalCode", ""),
         "CompanyAddr_Country": addr.get("Country", "US"),
+        # Contact info — nested in QB API responses; flatten to top-level
+        # columns so the dbt staging model can read them directly.
+        # Missing nested keys collapse to empty string so the parquet
+        # schema stays stable across tenants.
+        "PrimaryPhone_FreeFormNumber": primary_phone.get("FreeFormNumber", ""),
+        "WebAddr_URI": web_addr.get("URI", ""),
+        # Reporting metadata — top-level scalars in QB CompanyInfo.
+        # FiscalYearStartMonth is the month *name* (January..December);
+        # the dbt model maps start-month → end-of-fiscal-year month.
+        "FiscalYearStartMonth": data.get("FiscalYearStartMonth", ""),
       }
     )
   return rows

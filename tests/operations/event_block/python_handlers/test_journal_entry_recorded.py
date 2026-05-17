@@ -27,6 +27,10 @@ def _make_event():
   event.status = "classified"
   event.source = "manual"
   event.occurred_at = datetime(2026, 3, 31, tzinfo=UTC)
+  # Explicit string so CreateJournalEntryRequest's str-typed
+  # transaction_type field accepts it (MagicMock attribute auto-mock
+  # otherwise produces a Mock, not a str).
+  event.event_type = "journal_entry_recorded"
   return event
 
 

@@ -75,18 +75,36 @@ class QBClient:
   def get_accounts(self):
     from quickbooks.objects.account import Account
 
-    count = Account.count(qb=self.client) or 0
-    all_accounts = []
-
-    # If count is 0, return empty list without making API calls
-    if count == 0:
-      return all_accounts
-
-    for i in range(0, count, 25):
-      accounts = Account.filter(max_results="25", start_position=str(i), qb=self.client)
-      for a in accounts:
-        if a.to_dict() not in all_accounts:
-          all_accounts.append(a.to_dict())
+    # QB Online's Account endpoint defaults to Active=true. Historical journal
+    # lines can reference accounts that were later deactivated, so we must
+    # pull both active and inactive — otherwise dbt's accounting-equation
+    # test fails on lines that hit accounts missing from the elements table.
+    # Paginate until empty rather than calling count() first (count() in this
+    # library version doesn't accept a where clause).
+    page_size = 100
+    start = 1
+    all_accounts: list[dict] = []
+    seen_ids: set[str] = set()
+    while True:
+      page = Account.query(
+        f"SELECT * FROM Account WHERE Active IN (true, false) "
+        f"STARTPOSITION {start} MAXRESULTS {page_size}",
+        qb=self.client,
+      )
+      if not page:
+        break
+      for a in page:
+        d = a.to_dict()
+        # Dedup by Id rather than full-dict membership (O(1) vs O(n))
+        # so tenants with thousands of accounts don't pay an O(n²)
+        # tax on the import path.
+        ext_id = str(d.get("Id", ""))
+        if ext_id and ext_id not in seen_ids:
+          seen_ids.add(ext_id)
+          all_accounts.append(d)
+      if len(page) < page_size:
+        break
+      start += page_size
     return all_accounts
 
   def get_accounts_df(self):

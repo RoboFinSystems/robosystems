@@ -33,7 +33,7 @@ _CURSOR_EXPIRY_SECONDS = 7200  # 2 hours
 @sensor(
   job=extensions_materialize_job,
   minimum_interval_seconds=60,
-  default_status=DefaultSensorStatus.STOPPED,
+  default_status=DefaultSensorStatus.RUNNING,
   description="Polls for stale graphs and submits materialization jobs",
 )
 def stale_graph_materialization_sensor(context: SensorEvaluationContext):

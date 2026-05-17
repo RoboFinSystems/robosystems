@@ -211,22 +211,31 @@ def suggest_mapping_candidates(
   session: Session,
   trait: str | None = None,
   element_id: str | None = None,
+  reporting_style_id: str | None = None,
 ) -> list[ElementResponse]:
   """Return rs-gaap candidates for a CoA element, narrowed by EFS trait.
 
   Filters active ``rs-gaap`` elements by the FASB
   elementsOfFinancialStatements trait (via element_traits), restricted
-  to concepts that appear in at least one rs-gaap-presentation Network
-  (so any picked target is guaranteed to render on the standard BS / IS
-  / CF / SE reports under the §3.2 Reporting Style picker). Subtotal
-  rollups whose value comes from rendering, not from a leaf fact, are
-  excluded via ``RS_GAAP_SUBTOTAL_DENYLIST``.
+  to concepts that **actually render** under the active Reporting Style
+  (via ``_load_renderable_concepts``). When ``reporting_style_id`` isn't
+  supplied, falls back to the wider rs-gaap-presentation set so the
+  function stays usable in test contexts and partial deployments.
+  Subtotal rollups whose value comes from rendering, not from a leaf
+  fact, are excluded via ``RS_GAAP_SUBTOTAL_DENYLIST``.
 
   Per §3.1.5 #3 (closed 2026-05-13): the prior behaviour returned FAC
   candidates, which made the MappingAgent surface inconsistent with
-  the renderer (rs-gaap is the only render target). Flipping the
-  suggester to rs-gaap-only aligns the typed-API and the renderer; no
-  ``target_taxonomy`` parameter needed.
+  the renderer. Flipping the suggester to rs-gaap-only aligned the
+  typed-API and the renderer.
+
+  Per real-data audit (2026-05-17): the previous filter against
+  rs-gaap-presentation (the full taxonomy) admitted concepts the
+  renderer never walks — e.g. ``AccountsPayableCurrent`` is in
+  rs-gaap-presentation but the BS Classified rendering structure uses
+  the more aggregated ``AccountsPayableAndAccruedLiabilitiesCurrent``.
+  Narrowing the filter to ``reporting_style_networks`` makes the
+  docstring's "guaranteed to render" promise real.
 
   ``element_id`` is reserved for future per-element overrides but is
   currently unused — trait alone drives the filter.
@@ -240,7 +249,10 @@ def suggest_mapping_candidates(
     RS_GAAP_SUBTOTAL_DENYLIST,
   )
 
-  presentation_set = _load_rs_gaap_presentation_set(session)
+  if reporting_style_id:
+    presentation_set = _load_renderable_concepts(session, reporting_style_id)
+  else:
+    presentation_set = _load_rs_gaap_presentation_set(session)
 
   rows = (
     session.execute(
@@ -315,24 +327,82 @@ def list_unmapped_elements(
 
 
 _RS_GAAP_PRESENTATION_SET_ATTR = "_rs_gaap_presentation_set_cache"
+_RENDERABLE_CONCEPTS_ATTR_PREFIX = "_renderable_concepts_cache_"
+
+
+def _load_renderable_concepts(
+  session: Session,
+  reporting_style_id: str,
+) -> set[str]:
+  """Return element_ids that render under a given Reporting Style.
+
+  Walks ``reporting_style_networks`` to find each Statement-type rendering
+  structure attached to the Style (BS Classified, IS Multi-step, CF
+  Indirect, SE Roll Forward, etc.), then collects every concept that
+  appears as either parent or child of a ``presentation`` association on
+  those structures.
+
+  This is the **correct** "guaranteed-to-render" filter — semantically
+  matching what ``generate_report_facts`` actually traverses. The older
+  ``_load_rs_gaap_presentation_set`` used the rs-gaap-presentation
+  taxonomy as the filter set, which is a SUPERSET of what the renderer
+  actually walks (the rendering structures use a more aggregated
+  vocabulary like ``AccountsPayableAndAccruedLiabilitiesCurrent`` rather
+  than ``AccountsPayableCurrent``). MappingAgent suggestions made
+  against the wider set frequently landed on "unreachable" concepts.
+
+  Empty result = caller treats as "no filter" so a partially-provisioned
+  tenant (no reporting_style_networks rows yet) still gets candidates.
+
+  **Cached on the session** keyed by reporting_style_id since switching
+  Style mid-session is rare and the same Style id is queried repeatedly
+  inside a single auto-map run.
+  """
+  cache_attr = f"{_RENDERABLE_CONCEPTS_ATTR_PREFIX}{reporting_style_id}"
+  cached = getattr(session, cache_attr, None)
+  if isinstance(cached, set):
+    return cached
+
+  rows = session.execute(
+    text("""
+      SELECT DISTINCT a.to_element_id AS element_id
+      FROM reporting_style_networks rsn
+      JOIN associations a ON a.structure_id = rsn.network_id
+      WHERE rsn.reporting_style_id = :rsid
+        AND a.association_type = 'presentation'
+        AND a.to_element_id IS NOT NULL
+      UNION
+      SELECT DISTINCT a.from_element_id AS element_id
+      FROM reporting_style_networks rsn
+      JOIN associations a ON a.structure_id = rsn.network_id
+      WHERE rsn.reporting_style_id = :rsid
+        AND a.association_type = 'presentation'
+        AND a.from_element_id IS NOT NULL
+    """),
+    {"rsid": reporting_style_id},
+  ).fetchall()
+  result = {r.element_id for r in rows}
+  try:
+    setattr(session, cache_attr, result)
+  except (AttributeError, TypeError):
+    pass
+  return result
 
 
 def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
   """Return the set of element_ids that appear in any
   ``rs-gaap-presentation`` structure (as either parent or child).
 
-  Used by ``expand_to_rs_gaap_candidates`` and ``suggest_mapping_candidates``
-  to restrict mapping targets to concepts that will render on the
-  standard BS / IS / CF reports. Returns an empty set if the
+  Used as a **wider-net fallback** when a Reporting Style isn't
+  available — prefer ``_load_renderable_concepts(reporting_style_id)``
+  when the caller has graph context. Returns an empty set if the
   presentation taxonomy isn't seeded — caller treats empty as "no
   filter" so partial deployments still function.
 
   **Cached on the session** under a private attribute. The UNION query
   walks `associations → structures → taxonomies` twice and is invariant
   for the lifetime of a tenant session (rs-gaap-presentation is
-  library-seeded and immutable per-tenant). Mapping workflows that
-  invoke ``suggest-mapping`` repeatedly within one HTTP request would
-  otherwise re-execute the same query on each call.
+  library-seeded and immutable per-tenant).
   """
   # ``isinstance(..., set)`` guards against MagicMock sessions: a vanilla
   # ``getattr(mock, attr, None)`` returns a fresh MagicMock (not None),
@@ -370,6 +440,7 @@ def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
 def expand_to_rs_gaap_candidates(
   session: Session,
   fac_element_id: str,
+  reporting_style_id: str | None = None,
 ) -> dict | None:
   """Follow FAC → rs-gaap equivalence arcs, then surface specific filing candidates.
 
@@ -406,13 +477,16 @@ def expand_to_rs_gaap_candidates(
     RS_GAAP_SUBTOTAL_DENYLIST,
   )
 
-  # Pre-load the set of rs-gaap element_ids that appear in any
-  # rs-gaap-presentation structure. The auto-mapper restricts candidates
-  # to this set so any picked target is guaranteed to render on the
-  # standard BS/IS/CF reports. Manual mappings can still target the
+  # Pre-load the set of rs-gaap element_ids that the renderer actually
+  # walks under the active Reporting Style. Falls back to the wider
+  # rs-gaap-presentation taxonomy when no Style id is provided (test
+  # paths, partial deployments). Manual mappings can still target the
   # wider rs-gaap concept set; the renderer's ancestor-rollup will
   # walk up to an in-presentation ancestor at render time.
-  presentation_set = _load_rs_gaap_presentation_set(session)
+  if reporting_style_id:
+    presentation_set = _load_renderable_concepts(session, reporting_style_id)
+  else:
+    presentation_set = _load_rs_gaap_presentation_set(session)
 
   equiv_rows = session.execute(
     text("""

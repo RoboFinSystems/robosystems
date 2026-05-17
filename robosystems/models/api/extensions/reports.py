@@ -54,11 +54,14 @@ class CreateReportRequest(BaseModel):
     description="Human-readable report name shown in lists and headers.",
   )
   taxonomy_id: str = Field(
-    "tax_usgaap_reporting",
+    "rs-gaap",
     description=(
       "Taxonomy that defines the structures (BS / IS / CF / Equity / "
-      "Schedules) this report can render. Defaults to the platform "
-      "US GAAP reporting taxonomy."
+      "Schedules) this report can render. Accepts either an exact "
+      "tenant-specific taxonomy UUID or a standard name (e.g. 'rs-gaap'). "
+      "Standard names resolve to the latest reporting_standard taxonomy "
+      "with that name. Defaults to 'rs-gaap', the canonical reporting "
+      "vocabulary."
     ),
   )
   mapping_id: str = Field(

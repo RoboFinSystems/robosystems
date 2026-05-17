@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from robosystems.operations.roboledger.reports.fact_grid import (
+  _EQUITY_FLOW_REDUCER_QNAMES,
   PeriodSpec,
   ReportFact,
   _Balance,
@@ -21,6 +22,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _HierarchyNode,
   _infer_classification,
   _infer_period_type,
+  _is_equity_flow_reducer,
   _natural_sign,
   _synthesize_ppe_net_facts,
 )
@@ -587,6 +589,12 @@ class TestClosePriorPeriodsToRetainedEarnings:
     if revenue_cents:
       rows.append(
         SimpleNamespace(
+          # qname is required for the equity-flow-reducer check that
+          # runs ahead of the classification branch (per fix #11 — the
+          # close logic now inspects qname to detect dividend / buyback
+          # concepts). Synthetic test rows use canonical us-gaap qnames
+          # that the equity-flow-reducer check will not match.
+          qname="us-gaap:Revenues",
           classification="revenue",
           balance_type="credit",
           total_debits=0,
@@ -596,6 +604,7 @@ class TestClosePriorPeriodsToRetainedEarnings:
     if expense_cents:
       rows.append(
         SimpleNamespace(
+          qname="us-gaap:OperatingExpenses",
           classification="expense",
           balance_type="debit",
           total_debits=expense_cents,
@@ -963,6 +972,267 @@ class TestCloseToRetainedEarningsRsGaap:
     assert re.value == 192_500.0 - 157_950.0
     # No phantom legacy RE fact created.
     assert not any(f.element_id == "elem_gaap_retained_earnings" for f in facts)
+
+
+# ── _is_equity_flow_reducer + dividend handling in close ─────────────────
+
+
+class TestIsEquityFlowReducer:
+  """Boolean check for the curated equity-reduction qname set."""
+
+  def test_payments_of_dividends_recognized(self):
+    assert _is_equity_flow_reducer("rs-gaap:PaymentsOfDividends") is True
+
+  def test_payments_for_repurchase_recognized(self):
+    assert _is_equity_flow_reducer("rs-gaap:PaymentsForRepurchaseOfCommonStock") is True
+
+  def test_distributions_recognized(self):
+    assert _is_equity_flow_reducer("rs-gaap:DistributionsMade") is True
+    assert (
+      _is_equity_flow_reducer(
+        "rs-gaap:DistributionsMadeToLimitedLiabilityCompanyLlcMember"
+      )
+      is True
+    )
+
+  def test_revenues_not_recognized(self):
+    """Revenue concepts must not be picked up — they have their own
+    classification branch in the close logic."""
+    assert _is_equity_flow_reducer("rs-gaap:Revenues") is False
+    assert (
+      _is_equity_flow_reducer(
+        "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+      )
+      is False
+    )
+
+  def test_retained_earnings_not_recognized(self):
+    """RetainedEarnings is the close *target*, not a flow that reduces it."""
+    assert (
+      _is_equity_flow_reducer("rs-gaap:RetainedEarningsAccumulatedDeficit") is False
+    )
+
+  def test_apic_not_recognized(self):
+    """AdditionalPaidInCapital is a balance-sheet stock concept, not an
+    equity-reduction flow."""
+    assert _is_equity_flow_reducer("rs-gaap:AdditionalPaidInCapital") is False
+
+  def test_none_qname_safe(self):
+    """None must not crash the lookup."""
+    assert _is_equity_flow_reducer(None) is False
+
+  def test_set_is_frozenset(self):
+    """The constant is frozen — accidental mutations from caller side
+    would silently break the close logic for every tenant."""
+    assert isinstance(_EQUITY_FLOW_REDUCER_QNAMES, frozenset)
+
+
+class TestCloseToRetainedEarningsWithDividends:
+  """Dividend / distribution flows must reduce Retained Earnings on the BS.
+
+  Regression test for the live finding on Harbinger Consultants: when a
+  CoA Distributions account maps to rs-gaap:PaymentsOfDividends (correct
+  for SE/CF presentation), the close logic must net the dividend out of
+  RetainedEarnings or the balance sheet misbalances by the cumulative
+  dividend amount.
+  """
+
+  P_START = date(2025, 1, 1)
+  P_END = date(2025, 12, 31)
+
+  def _fact(
+    self,
+    *,
+    qname: str,
+    classification: str,
+    balance_type: str,
+    value: float,
+    element_id: str,
+    period_type: str = "duration",
+  ) -> ReportFact:
+    return ReportFact(
+      element_id=element_id,
+      element_qname=qname,
+      element_name=qname,
+      classification=classification,
+      balance_type=balance_type,
+      value=value,
+      period_start=self.P_START,
+      period_end=self.P_END,
+      period_type=period_type,
+    )
+
+  def _re_value(self, facts: list[ReportFact]) -> float:
+    re = next(
+      f
+      for f in facts
+      if f.element_qname == "rs-gaap:RetainedEarningsAccumulatedDeficit"
+    )
+    return re.value
+
+  def test_dividend_reduces_retained_earnings(self):
+    """NI = $40k revenue - $30k expenses = $10k; dividends -$2.5k;
+    RE should land at $7.5k, not $10k."""
+    facts = [
+      self._fact(
+        qname="rs-gaap:Revenues",
+        classification="revenue",
+        balance_type="credit",
+        value=40_000.0,
+        element_id="rev",
+      ),
+      self._fact(
+        qname="rs-gaap:OperatingExpenses",
+        classification="expense",
+        balance_type="debit",
+        value=30_000.0,
+        element_id="exp",
+      ),
+      self._fact(
+        qname="rs-gaap:PaymentsOfDividends",
+        # qname-based detection — classification/balance_type don't drive
+        # the equity-flow-reducer check (PaymentsOfDividends has no EFS
+        # trait in seed data and is balance_type=credit, so the older
+        # classification-based logic missed it entirely).
+        classification="equity",
+        balance_type="credit",
+        value=-2_500.0,  # natural-signed negative per _natural_sign
+        element_id="div",
+      ),
+      self._fact(
+        qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+        classification="equity",
+        balance_type="credit",
+        value=0.0,
+        element_id="re",
+        period_type="instant",
+      ),
+    ]
+
+    _close_to_retained_earnings(facts, self.P_START, self.P_END)
+
+    # Net income (10000) + dividend value (-2500) = 7500 net change to RE
+    assert self._re_value(facts) == 7_500.0
+
+  def test_dividend_alone_reduces_re_when_no_net_income(self):
+    """A pure dividend payment with no revenue/expense activity still
+    reduces RE. Guards against silently dropping the equity-reduction
+    branch when net_income is otherwise zero."""
+    facts = [
+      self._fact(
+        qname="rs-gaap:PaymentsOfDividends",
+        classification="equity",
+        balance_type="credit",
+        value=-1_000.0,
+        element_id="div",
+      ),
+      self._fact(
+        qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+        classification="equity",
+        balance_type="credit",
+        value=50_000.0,  # pre-existing RE from earlier closes
+        element_id="re",
+        period_type="instant",
+      ),
+    ]
+
+    _close_to_retained_earnings(facts, self.P_START, self.P_END)
+
+    # RE was 50000, dividend was -1000, so RE → 49000
+    assert self._re_value(facts) == 49_000.0
+
+  def test_buyback_also_reduces_re(self):
+    """PaymentsForRepurchaseOfCommonStock must net out of RE the same
+    way dividends do — it's the buyback variant of the same accounting
+    treatment."""
+    facts = [
+      self._fact(
+        qname="rs-gaap:PaymentsForRepurchaseOfCommonStock",
+        classification="equity",
+        balance_type="credit",
+        value=-5_000.0,
+        element_id="buy",
+      ),
+      self._fact(
+        qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+        classification="equity",
+        balance_type="credit",
+        value=10_000.0,
+        element_id="re",
+        period_type="instant",
+      ),
+    ]
+
+    _close_to_retained_earnings(facts, self.P_START, self.P_END)
+
+    assert self._re_value(facts) == 5_000.0
+
+  def test_no_dividend_no_change(self):
+    """Sanity check: revenue/expense-only close still produces the
+    correct RE (no double-counting from the new branch)."""
+    facts = [
+      self._fact(
+        qname="rs-gaap:Revenues",
+        classification="revenue",
+        balance_type="credit",
+        value=20_000.0,
+        element_id="rev",
+      ),
+      self._fact(
+        qname="rs-gaap:OperatingExpenses",
+        classification="expense",
+        balance_type="debit",
+        value=8_000.0,
+        element_id="exp",
+      ),
+      self._fact(
+        qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+        classification="equity",
+        balance_type="credit",
+        value=0.0,
+        element_id="re",
+        period_type="instant",
+      ),
+    ]
+
+    _close_to_retained_earnings(facts, self.P_START, self.P_END)
+
+    assert self._re_value(facts) == 12_000.0
+
+  def test_equity_stock_concept_does_not_reduce_re(self):
+    """A non-flow equity fact (CommonStockValue, AdditionalPaidInCapital)
+    must not be treated as an equity reducer. These are balance-sheet
+    stock concepts whose value is the period-end balance, not a flow."""
+    facts = [
+      self._fact(
+        qname="rs-gaap:Revenues",
+        classification="revenue",
+        balance_type="credit",
+        value=10_000.0,
+        element_id="rev",
+      ),
+      self._fact(
+        qname="rs-gaap:AdditionalPaidInCapital",
+        classification="equity",
+        balance_type="credit",
+        value=50_000.0,  # cumulative stock contributions
+        element_id="apic",
+        period_type="instant",
+      ),
+      self._fact(
+        qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+        classification="equity",
+        balance_type="credit",
+        value=0.0,
+        element_id="re",
+        period_type="instant",
+      ),
+    ]
+
+    _close_to_retained_earnings(facts, self.P_START, self.P_END)
+
+    # APIC must not affect RE — only net income should flow.
+    assert self._re_value(facts) == 10_000.0
 
 
 # ── _emit_net_income_facts ───────────────────────────────────────────────

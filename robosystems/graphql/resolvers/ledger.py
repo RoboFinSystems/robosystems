@@ -414,11 +414,23 @@ class LedgerQuery:
     return AccountList.from_pydantic(response)
 
   @strawberry.field
-  def account_tree(self, info: Info[GraphQLContext, None]) -> AccountTree | None:
-    """Chart of Accounts as a recursive tree."""
+  def account_tree(
+    self,
+    info: Info[GraphQLContext, None],
+    include_inactive: bool = False,
+  ) -> AccountTree | None:
+    """Chart of Accounts as a recursive tree.
+
+    ``include_inactive`` defaults to ``False`` so deleted source-system
+    accounts (still kept in OLTP for historical journal-line FK integrity)
+    don't clutter the standard CoA view. Set ``True`` for admin / cleanup
+    contexts.
+    """
     try:
       with _open_session(info, "roboledger") as session:
-        response = reads_accounts.get_account_tree(session)
+        response = reads_accounts.get_account_tree(
+          session, include_inactive=include_inactive
+        )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return AccountTree(
