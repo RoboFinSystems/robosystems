@@ -165,6 +165,8 @@ For additional sandboxes (e.g. to test on a clean book), use [developer.intuit.c
 
 Required for connecting your own real QuickBooks Online companies. Intuit's Production OAuth flow rejects `localhost` callbacks, so we need a public HTTPS hostname that proxies to your local frontend.
 
+> **ngrok is only needed for the OAuth handshake itself.** Once the connection is established and tokens are stored, all subsequent work — syncing, mapping, reports, close-period — runs against `localhost:3001` directly. You can shut down the tunnel after each successful connect; only spin it up again when adding another QB company or re-authenticating.
+
 ### Why ngrok specifically
 
 Intuit's redirect URI must be:
@@ -246,7 +248,7 @@ The stack runs in your terminals — counts depend on path:
 | --- | --- | --- |
 | 1 | `cd robosystems && just start` | same |
 | 2 | `cd roboledger-app && npm run dev` | same |
-| 3 | _(not needed)_ | `cd roboledger-app && npm run tunnel:ngrok` |
+| 3 | _(not needed)_ | `cd roboledger-app && npm run tunnel:ngrok` — **only during OAuth establishment**; shut down after each successful connect |
 
 Wait for `just start` to bring up Postgres, Valkey, LadybugDB, the API, and Dagster (the dashboard at [localhost:8002](http://localhost:8002) is a useful sign the stack is up).
 
@@ -547,16 +549,19 @@ The URI you sent in the OAuth init request doesn't match anything registered in 
 
 ### Chrome `Permission was denied for this request to access the 'loopback' address space`
 
-Chrome 146+ enforces Private Network Access. The backend grants it in dev mode via `allow_private_network=is_development()` on the CORS middleware, but Chrome caches preflight responses for up to 1 hour, so a failed preflight from before a backend fix is still cached.
+Symptom: login fails silently when you open the ngrok URL in Chrome, console shows:
 
-Fixes, in order of how thorough they are:
+```
+Access to fetch at 'http://localhost:8000/v1/auth/...' from origin
+'https://<your-domain>.ngrok-free.dev' has been blocked by CORS policy:
+Permission was denied for this request to access the `loopback` address space.
+```
 
-1. **DevTools → Network → check "Disable cache"** → hard reload (Cmd+Shift+R)
-2. **chrome://settings/content/all** → search `ngrok-free.dev` → **Delete data** for the site
-3. **Incognito window** — no preflight cache to begin with
-4. **Firefox** — doesn't enforce PNA the same way; useful for confirming the backend is correct (then go back to Chrome once you've cleared its cache)
+Chrome 146+ enforces Private Network Access on cross-origin calls to localhost. The backend grants it via `allow_private_network=is_development()` on the CORS middleware, but Chrome caches the preflight result aggressively and the usual cache-clearing tricks (DevTools "Disable cache", site-data delete, incognito) often don't actually flush the PNA preflight cache. Chrome 146 also removed the `chrome://flags` override that used to disable PNA.
 
-This only affects Path B (ngrok → localhost). Path A is same-origin (localhost only) and bypasses PNA entirely.
+**Pragmatic workaround:** **use Firefox for the OAuth connect step**, then go back to Chrome for normal use. Firefox doesn't enforce PNA the same way, so the OAuth callback completes cleanly. Once the connection is established, day-to-day use against `http://localhost:3001` (Path A — same-origin localhost) doesn't trigger PNA and Chrome works fine.
+
+Only affects Path B (ngrok → localhost) during the OAuth callback moment. Path A is same-origin localhost and bypasses PNA entirely.
 
 ### `Invalid email or password` on login (Puppeteer / automation)
 
