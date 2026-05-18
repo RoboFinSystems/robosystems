@@ -82,6 +82,10 @@ EVENT_ACTIONS: frozenset[str] = frozenset(
   }
 )
 
+# sorted() is load-bearing: the migration's hardcoded IN clause is in
+# alphabetical order, and Alembic's autogenerate compares constraint
+# expressions textually. Any reordering here produces spurious "alter
+# check_event_action" diffs on every `just migrate-create`. Keep sorted.
 _EVENT_ACTION_CHECK = (
   "event_action IS NULL OR event_action IN ("
   + ", ".join(f"'{v}'" for v in sorted(EVENT_ACTIONS))

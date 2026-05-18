@@ -37,13 +37,20 @@ depends_on = None
 
 # Canonical 19-verb action vocabulary. MUST stay in sync with
 # EVENT_ACTIONS in robosystems/models/extensions/roboledger/event.py.
+#
+# **Ordering is load-bearing**: verbs are listed in ALPHABETICAL order to
+# match what SQLAlchemy emits — the model's CheckConstraint builds the
+# IN clause via `sorted(EVENT_ACTIONS)`. Alembic's autogenerate compares
+# constraint expressions textually, so any ordering mismatch produces
+# spurious "alter check_event_action" diffs on every subsequent
+# `just migrate-create`. If the vocabulary grows, append + re-sort here
+# and update the frozenset; do NOT group by semantic category.
 _EVENT_ACTION_CHECK = (
   "event_action IS NULL OR event_action IN ("
-  "'produce', 'raise', 'consume', 'lower', 'use', 'cite', "
-  "'work', 'deliverService', "
-  "'pickup', 'dropoff', 'accept', 'transferCustody', "
-  "'transferAllRights', 'transfer', 'move', "
-  "'modify', 'combine', 'separate', 'copy'"
+  "'accept', 'cite', 'combine', 'consume', 'copy', 'deliverService', "
+  "'dropoff', 'lower', 'modify', 'move', 'pickup', 'produce', 'raise', "
+  "'separate', 'transfer', 'transferAllRights', 'transferCustody', "
+  "'use', 'work'"
   ")"
 )
 
