@@ -121,15 +121,26 @@ def create_demo_graph(skeleton: bool = False) -> str:
     save_graph_id,
   )
 
-  context = CredentialContext(
-    base_url=BASE_URL,
-    credentials_path=CREDENTIALS_FILE,
-    force=False,
-    default_name_prefix="Cascade Demo",
-    default_email_prefix="cascade_demo",
-    api_key_prefix="Cascade Demo Key",
-    display_title="Cascade Advisory Demo Setup",
-  )
+  if skeleton:
+    context = CredentialContext(
+      base_url=BASE_URL,
+      credentials_path=CREDENTIALS_FILE,
+      force=False,
+      default_name_prefix="RoboLedger Demo",
+      default_email_prefix="roboledger_demo",
+      api_key_prefix="RoboLedger Demo Key",
+      display_title="RoboLedger Skeleton Demo Setup",
+    )
+  else:
+    context = CredentialContext(
+      base_url=BASE_URL,
+      credentials_path=CREDENTIALS_FILE,
+      force=False,
+      default_name_prefix="Cascade Demo",
+      default_email_prefix="cascade_demo",
+      api_key_prefix="Cascade Demo Key",
+      display_title="Cascade Advisory Demo Setup",
+    )
   credentials = ensure_user_credentials(context)
   api_key = credentials["api_key"]
 
@@ -163,9 +174,11 @@ def create_demo_graph(skeleton: bool = False) -> str:
     )
     request = CreateGraphRequest(
       metadata=metadata,
+      # `name` + `uri` are required by InitialEntityData. QB CompanyInfo
+      # overwrites these on first sync, so placeholders are fine.
       initial_entity={
         "name": SKELETON_ENTITY_NAME,
-        "entity_type": "llc",
+        "uri": "https://example.com",
       },
       tags=["demo", "skeleton", "roboledger", "qb-sandbox"],
     )
@@ -188,8 +201,12 @@ def create_demo_graph(skeleton: bool = False) -> str:
     )
     print(f"\nCreating graph: {COMPANY_NAME}")
   response = api_create_graph(client=client, body=request)
+  if response.status_code >= 400:
+    body = response.content.decode() if response.content else "(no body)"
+    print(f"Failed to create graph: HTTP {response.status_code}\n  {body}")
+    sys.exit(1)
   if not response.parsed:
-    print(f"Failed to create graph: {response.status_code}")
+    print(f"Failed to create graph: empty response (HTTP {response.status_code})")
     sys.exit(1)
 
   parsed = response.parsed

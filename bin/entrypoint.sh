@@ -135,8 +135,9 @@ run_db_init() {
     if [[ "$roboledger_enabled" == "true" || "$roboinvestor_enabled" == "true" ]]; then
         echo "Extensions enabled — running extensions migrations..."
         # Alembic cannot CREATE DATABASE; ensure the extensions DB exists first.
-        # Locally this is handled by docker/postgres-init.sh; in staging/prod
-        # nothing else creates it on RDS.
+        # Locally this is handled by bin/setup/postgres-init.sh (mounted at
+        # /docker-entrypoint-initdb.d/init-db.sh in the postgres container);
+        # in staging/prod nothing else creates it on RDS.
         ensure_database_exists "extensions" || {
             echo "✗ Failed to ensure extensions database exists"
             return 1
