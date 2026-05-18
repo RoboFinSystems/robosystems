@@ -19,7 +19,7 @@ Two rules govern how the base schema and extensions are organized. These are loa
 
 **Base contains concepts that are universally applicable to the ontology, regardless of current consumer count.**
 
-Period, Unit, Element, Taxonomy, Dimension, Association, Structure are declared in `base.py` even though only roboledger currently populates most of them. This is intentional: roboinvestor, roboscm, robohrm, robofo, roboepm will grow into them, and retrofitting "promote this concept to base when a second consumer shows up" is a breaking schema change against already-materialized databases.
+Period, Unit, Element, Taxonomy, Dimension, Association, Structure are declared in `base.py` even though only roboledger currently populates most of them. This is intentional: roboinvestor and future RoboX products (when their design and OLTP actually land) will grow into them, and retrofitting "promote this concept to base when a second consumer shows up" is a breaking schema change against already-materialized databases.
 
 **Rule**: When deciding whether a new concept belongs in base or an extension, ask *"is it universally applicable to the ontology?"* — NOT *"do multiple extensions use it today?"*. Waiting for a second consumer turns every promotion into a migration.
 
@@ -68,16 +68,13 @@ Not every extension has all of these layers today. Some are schema-only (graph s
 | `roboledger` | RoboLedger | [roboledger.ai](https://roboledger.ai) | Accounting, financial reporting, general ledger |
 | `roboinvestor` | RoboInvestor | [roboinvestor.ai](https://roboinvestor.ai) | Portfolio management, investment tracking |
 
-**Current schema-only extensions:**
+**Non-product extensions:**
 
 | Extension | Domain |
 |-----------|--------|
-| `roboscm` | Supply chain management |
-| `robofo` | Front office & CRM |
-| `roboepm` | Enterprise performance management |
-| `robohrm` | Human resources management |
-| `roboreport` | Regulatory compliance |
 | `memory` | AI memory (concepts, observations, sessions) |
+
+Other RoboX products (RoboFO, RoboSCM, RoboHRM, RoboEPM, RoboWorkflow, …) are planned but unbuilt — their schemas land alongside OLTP + adapters when the product is designed and prioritized, not as speculative placeholders.
 
 ### URL Shape and Feature Flags
 
@@ -133,11 +130,6 @@ robosystems/schemas/
 ├── extensions/              # Per-extension declarations
 │   ├── roboledger.py        #   Financial reporting & accounting
 │   ├── roboinvestor.py      #   Portfolio & investment management
-│   ├── roboscm.py           #   Supply chain management
-│   ├── robofo.py            #   Front office & CRM
-│   ├── roboepm.py           #   Enterprise performance management
-│   ├── robohrm.py           #   Human resources management
-│   ├── roboreport.py        #   Regulatory compliance
 │   └── memory.py            #   AI memory schema
 │
 └── # ── Runtime layer (builders, validators, parsers) ─────────────────
@@ -431,7 +423,7 @@ config_standard = {
 
 # Large tier — multiple product extensions with subgraph support
 config_large = {
-    "extensions": ["roboledger", "roboinvestor", "roboepm"],
+    "extensions": ["roboledger", "roboinvestor"],
     "tier": "large"
 }
 ```
@@ -456,7 +448,7 @@ loader = get_contextual_schema_loader("application", "roboledger")
 # Multi-product deployment
 config = {
     "name": "XLarge Suite",
-    "extensions": ["roboledger", "roboinvestor", "roboscm"]
+    "extensions": ["roboledger", "roboinvestor"]
 }
 ```
 

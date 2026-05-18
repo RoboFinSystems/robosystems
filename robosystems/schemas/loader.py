@@ -361,28 +361,6 @@ def get_sec_schema_loader() -> LadybugSchemaLoader:
   return get_contextual_schema_loader("repository", "sec")
 
 
-def get_entity_schema_loader(entity_type: str | None = None) -> LadybugSchemaLoader:
-  """
-  Get schema loader configured for entity databases based on entity type.
-
-  Args:
-      entity_type: Type of entity to determine which extensions to load.
-                   If None, loads all extensions for maximum compatibility.
-
-  Returns:
-      Schema loader with appropriate extensions for the entity type
-  """
-  if entity_type == "financial_services":
-    return get_schema_loader(extensions=["roboledger", "roboinvestor"])
-  elif entity_type == "manufacturing":
-    return get_schema_loader(extensions=["roboledger", "roboscm", "roboepm"])
-  elif entity_type == "tech_startup":
-    return get_schema_loader(extensions=["roboledger", "robohrm"])
-  else:
-    # Default: load all extensions
-    return get_schema_loader()
-
-
 def get_contextual_schema_loader(
   context_type: str,
   context_name: str,

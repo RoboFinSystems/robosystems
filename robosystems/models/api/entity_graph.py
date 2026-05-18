@@ -26,7 +26,7 @@ class EntityCreate(BaseModel):
   )
   extensions: list[str] | None = Field(
     default=None,
-    description="Schema extensions to enable in the entity graph. If not specified, base schema only will be loaded for stability. Available extensions: roboledger, roboinvestor, roboscm, robofo, robohrm, roboepm, roboreport",
+    description="Schema extensions to enable in the entity graph. If not specified, base schema only will be loaded for stability. Available extensions: roboledger, roboinvestor",
     examples=[["roboledger", "roboinvestor"]],
   )
 
@@ -49,11 +49,6 @@ class EntityCreate(BaseModel):
     available_extensions = {
       "roboledger",
       "roboinvestor",
-      "roboscm",
-      "robofo",
-      "robohrm",
-      "roboepm",
-      "roboreport",
     }
 
     # Check for unknown extensions

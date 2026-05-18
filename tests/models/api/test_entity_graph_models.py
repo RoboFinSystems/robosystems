@@ -86,25 +86,20 @@ class TestEntityCreate:
     )
     assert model.extensions == ["roboledger", "roboinvestor"]
 
-  def test_all_valid_extensions(self):
-    all_extensions = [
-      "roboledger",
-      "roboinvestor",
-      "roboscm",
-      "robofo",
-      "robohrm",
-      "roboepm",
-      "roboreport",
-    ]
-    model = EntityCreate(name="Test", extensions=all_extensions)
-    assert model.extensions == all_extensions
-
   def test_unknown_extension_rejected(self):
     with pytest.raises(ValidationError) as exc_info:
       EntityCreate(name="Test", extensions=["roboledger", "unknown_ext"])
     errors = exc_info.value.errors()
     assert any(e["loc"] == ("extensions",) for e in errors)
     assert any("Unknown extensions" in str(e.get("msg", "")) for e in errors)
+
+  @pytest.mark.parametrize(
+    "removed",
+    ["roboscm", "robofo", "robohrm", "roboepm", "roboreport"],
+  )
+  def test_removed_extensions_rejected(self, removed: str):
+    with pytest.raises(ValidationError):
+      EntityCreate(name="Test", extensions=[removed])
 
   def test_empty_extensions_list(self):
     model = EntityCreate(name="Test", extensions=[])

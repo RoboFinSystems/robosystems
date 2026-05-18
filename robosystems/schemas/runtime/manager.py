@@ -21,11 +21,6 @@ class SchemaType(Enum):
   BASE = "base"
   ROBOLEDGER = "roboledger"
   ROBOINVESTOR = "roboinvestor"
-  ROBOSCM = "roboscm"
-  ROBOFO = "robofo"
-  ROBOREPORT = "roboreport"
-  ROBOHRM = "robohrm"
-  ROBOEPM = "roboepm"
   MEMORY = "memory"
 
 
@@ -262,23 +257,6 @@ class SchemaManager:
     self._compatibility_cache[cache_key] = compatibility
     return compatibility
 
-  def get_optimal_schema_groups(self) -> dict[str, list[str]]:
-    """
-    Get predefined optimal schema groupings for instance placement.
-
-    Returns:
-        Dictionary of group name to list of compatible extensions
-    """
-    return {
-      "financial_core": ["roboledger", "roboepm", "roboreport"],
-      "operations_hub": ["roboscm", "robohrm", "roboepm"],
-      "sales_engine": ["robofo", "robohrm", "roboinvestor"],
-      "compliance_center": ["roboreport", "roboledger", "robohrm"],
-      "standalone_investment": ["roboinvestor"],
-      "standalone_scm": ["roboscm"],
-      "standalone_fo": ["robofo"],
-    }
-
   def generate_cypher_ddl(self, schema: Schema) -> str:
     """
     Generate complete Cypher DDL for schema.
@@ -399,9 +377,3 @@ def create_multi_app_schema(extensions: list[str]) -> Schema:
     extensions=extensions,
   )
   return manager.load_and_compile_schema(config)
-
-
-def get_recommended_schema_groups() -> dict[str, list[str]]:
-  """Get recommended schema groupings for optimal performance."""
-  manager = SchemaManager()
-  return manager.get_optimal_schema_groups()

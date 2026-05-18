@@ -7,7 +7,8 @@ Separate from the platform database (database.py) because:
 
 The extensions database stores domain data (entities, elements, transactions,
 positions, trades, etc.) shared across all extension modules (roboledger,
-roboinvestor, robofo, robohrm, roboepm) with schema-per-graph tenancy.
+roboinvestor; future RoboX modules to be added when their design and OLTP
+land) with schema-per-graph tenancy.
 """
 
 import re
