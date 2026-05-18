@@ -36,6 +36,58 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
+# Canonical 19-verb action vocabulary refining `event_category` per
+# `ontology-alignment.md` §4.6. Vocabulary converges with Valueflows
+# (Foster / Pavlik / Haugen v1.0) — we treat that as inspiration, not
+# provenance. Canonical home is here. The 19 verbs disambiguate
+# concepts ERPs typically conflate (custody-only vs. rights-transfer
+# is the load-bearing distinction for consignment, drop-shipping,
+# marketplace settlement, escrow).
+#
+# MUST stay in sync with:
+#   - the CHECK constraint in
+#     `migrations/extensions/versions/0012_event_action.py`
+#   - the Pydantic `EventAction` Literal in
+#     `robosystems/models/api/event_block.py`
+EVENT_ACTIONS: frozenset[str] = frozenset(
+  {
+    # Resource creation
+    "produce",
+    "raise",
+    # Resource destruction
+    "consume",
+    "lower",
+    # Resource use without consumption
+    "use",
+    "cite",
+    # Work
+    "work",
+    "deliverService",
+    # Custody only (physical possession, no rights transfer)
+    "pickup",
+    "dropoff",
+    "accept",
+    "transferCustody",
+    # Rights only (ownership transfer, no physical movement)
+    "transferAllRights",
+    # Both (rights + custody together)
+    "transfer",
+    "move",
+    # Transformation
+    "modify",
+    "combine",
+    "separate",
+    # Copy (new resource without removing source)
+    "copy",
+  }
+)
+
+_EVENT_ACTION_CHECK = (
+  "event_action IS NULL OR event_action IN ("
+  + ", ".join(f"'{v}'" for v in sorted(EVENT_ACTIONS))
+  + ")"
+)
+
 
 class Event(ExtensionsBase):
   __tablename__ = "events"
@@ -83,6 +135,12 @@ class Event(ExtensionsBase):
       "source IN ('manual', 'system', 'schedule', 'quickbooks', 'xero', 'plaid')",
       name="check_event_source",
     ),
+    CheckConstraint(_EVENT_ACTION_CHECK, name="check_event_action"),
+    Index(
+      "idx_events_action",
+      "event_action",
+      postgresql_where="event_action IS NOT NULL",
+    ),
   )
 
   # Identity
@@ -92,6 +150,9 @@ class Event(ExtensionsBase):
   event_type = Column(String, nullable=False)
   event_category = Column(String, nullable=False)
   event_class = Column(String, nullable=False, default="economic")
+
+  # Canonical action verb — finer-grained than event_category. See EVENT_ACTIONS.
+  event_action = Column(String, nullable=True)
 
   # REA primitives. agent_id FK to agents(id) enforced at the DB level.
   agent_id = Column(String, nullable=True)

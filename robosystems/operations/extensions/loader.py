@@ -910,6 +910,11 @@ class OLTPLoader:
       # the optional agent_external_id from the per-class header join.
       event_type = str(txn.get("event_type") or "journal_entry_recorded")
       event_category = str(txn.get("event_category") or "adjustment")
+      # Canonical action verb (ontology-alignment.md §4.6). Nullable —
+      # the dbt mart falls back to NULL for unmapped QB tx_types, and
+      # the DB CHECK accepts NULL.
+      event_action_raw = txn.get("event_action")
+      event_action: str | None = str(event_action_raw) if event_action_raw else None
       agent_ext_id_raw = txn.get("agent_external_id")
       agent_ext_id = str(agent_ext_id_raw).strip() if agent_ext_id_raw else ""
       agent_id: str | None = None
@@ -1039,6 +1044,7 @@ class OLTPLoader:
         if evt.status in ("captured", "classified"):
           evt.event_type = event_type
           evt.event_category = event_category
+          evt.event_action = event_action
           evt.agent_id = agent_id
           evt.occurred_at = occurred_at
           evt.amount = amount
@@ -1053,6 +1059,7 @@ class OLTPLoader:
             event_type=event_type,
             event_category=event_category,
             event_class="economic",
+            event_action=event_action,
             agent_id=agent_id,
             occurred_at=occurred_at,
             status="captured",

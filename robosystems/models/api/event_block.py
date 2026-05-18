@@ -35,6 +35,34 @@ ResourceType = Literal[
   "labor",
 ]
 
+# Canonical 19-verb action vocabulary refining `event_category`. The verbs
+# disambiguate concepts `event_category` collapses (custody-only vs rights-
+# transfer, work vs deliverService, etc.). Vocabulary converges with
+# Valueflows; the canonical home is
+# `robosystems.models.extensions.roboledger.event.EVENT_ACTIONS` — keep this
+# Literal in sync with that frozenset and the DB CHECK constraint.
+EventAction = Literal[
+  "produce",
+  "raise",
+  "consume",
+  "lower",
+  "use",
+  "cite",
+  "work",
+  "deliverService",
+  "pickup",
+  "dropoff",
+  "accept",
+  "transferCustody",
+  "transferAllRights",
+  "transfer",
+  "move",
+  "modify",
+  "combine",
+  "separate",
+  "copy",
+]
+
 
 class CreateEventBlockRequest(BaseModel):
   """Write surface for a single business event."""
@@ -139,6 +167,17 @@ class CreateEventBlockRequest(BaseModel):
       "REA event class. 'economic' events change resources and drive GL "
       "postings; 'support' events are audit-trail / value-chain primitives "
       "(typically captured with apply_handlers=False)."
+    ),
+  )
+  event_action: EventAction | None = Field(
+    None,
+    description=(
+      "Canonical action verb refining `event_category`. Disambiguates "
+      "concepts ERPs collapse: `transferAllRights` (ownership transfer, "
+      "no physical movement) vs `transferCustody` (physical only, no "
+      "rights transfer) — load-bearing for consignment, drop-shipping, "
+      "marketplace settlement, escrow. Optional; null is valid for "
+      "legacy events and during adapter rollout."
     ),
   )
 
@@ -352,6 +391,13 @@ class EventBlockEnvelope(BaseModel):
       "(audit-trail / value-chain primitive, no GL impact)."
     ),
   )
+  event_action: EventAction | None = Field(
+    None,
+    description=(
+      "Canonical action verb refining `event_category`. Null when the "
+      "source adapter or capture path didn't supply one."
+    ),
+  )
 
   agent_id: str | None = Field(
     None, description="Counterparty agent ID, when the event involves one."
@@ -510,6 +556,14 @@ class UpdateEventBlockRequest(BaseModel):
   metadata_patch: dict[str, Any] = Field(
     default_factory=dict,
     description="Key-value pairs merged into existing metadata (additive patch, not replace).",
+  )
+  event_action: EventAction | None = Field(
+    None,
+    description=(
+      "Set or correct the canonical action verb. Unset = unchanged. "
+      "Useful when an adapter improvement makes a previously-NULL verb "
+      "fillable, or when reclassifying after the fact."
+    ),
   )
 
   # Duality late-binding (e.g. mark a payment as discharging an invoice

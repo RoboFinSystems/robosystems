@@ -116,6 +116,63 @@ class TestStagingSql:
     assert "ChartOfAccounts" in tables["Structure"]
 
 
+class TestREAStaging:
+  """Phase 1 REA primitives — Agent + Event nodes + 7 base edges + the
+  EVENT_TRIGGERS_TRANSACTION McCarthy bridge edge.
+  """
+
+  def test_agent_table_sources_from_agents(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    assert "Agent" in tables
+    assert "'agents'" in tables["Agent"]
+    # JSONB columns intentionally NOT materialized to the graph.
+    assert "address" not in tables["Agent"]
+    assert "metadata" not in tables["Agent"]
+
+  def test_event_table_sources_from_events_with_event_action(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    assert "Event" in tables
+    assert "'events'" in tables["Event"]
+    assert "event_action" in tables["Event"]
+
+  def test_event_amount_converted_from_cents(self):
+    """Event.amount mirrors Transaction.amount — BigInteger cents → DOUBLE
+    currency-major."""
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    assert "CAST(amount AS DOUBLE) / 100.0" in tables["Event"]
+
+  def test_entity_has_agent_and_event_fan_out_from_entity_id(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    assert ENTITY_ID in tables["ENTITY_HAS_AGENT"]
+    assert ENTITY_ID in tables["ENTITY_HAS_EVENT"]
+
+  def test_event_involves_agent_filters_null_agent_id(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    sql = tables["EVENT_INVOLVES_AGENT"]
+    assert "agent_id IS NOT NULL" in sql
+
+  def test_event_self_ref_edges_filter_nulls(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    for edge, col in (
+      ("EVENT_OBLIGATED_BY_EVENT", "obligated_by_event_id"),
+      ("EVENT_DISCHARGES_EVENT", "discharges_event_id"),
+      ("EVENT_REPLACES_EVENT", "replaces_event_id"),
+    ):
+      sql = tables[edge]
+      assert f"{col} IS NOT NULL" in sql, f"{edge} should filter on {col}"
+
+  def test_event_triggers_transaction_uses_triggered_by_event_id(self):
+    """McCarthy bridge — `transactions.triggered_by_event_id` is the src;
+    transaction id is the dst. Only populated for transactions originating
+    from an Event (manual-only transactions have no event)."""
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    sql = tables["EVENT_TRIGGERS_TRANSACTION"]
+    assert "triggered_by_event_id" in sql
+    assert "AS src" in sql
+    assert "transactions" in sql
+    assert "triggered_by_event_id IS NOT NULL" in sql
+
+
 class TestMaterializeResult:
   def test_defaults(self):
     result = MaterializeResult(graph_id=GRAPH_ID)
@@ -165,6 +222,9 @@ class TestTableOrdering:
       "Taxonomy",
       "Period",
       "Unit",
+      # REA primitives — universal across RoboX extensions (ontology-alignment §4)
+      "Agent",
+      "Event",
     }
     # RoboLedger-specific: the three-level ledger + reporting layer nodes
     assert set(by_extension["roboledger"]) == {
@@ -194,7 +254,7 @@ class TestTableOrdering:
       ext = TABLE_EXTENSIONS.get(name, "base")
       by_extension[ext].append(name)
 
-    # Base ontology edges (taxonomy infrastructure + entity↔taxonomy)
+    # Base ontology edges (taxonomy infrastructure + entity↔taxonomy + REA)
     assert set(by_extension["base"]) == {
       "ENTITY_HAS_TAXONOMY",
       "TAXONOMY_EXTENDS_TAXONOMY",
@@ -203,10 +263,19 @@ class TestTableOrdering:
       "ASSOCIATION_HAS_FROM_ELEMENT",
       "ASSOCIATION_HAS_TO_ELEMENT",
       "ELEMENT_HAS_TRAIT",
+      # REA edges (ontology-alignment §4.2-§4.3)
+      "ENTITY_HAS_AGENT",
+      "ENTITY_HAS_EVENT",
+      "EVENT_INVOLVES_AGENT",
+      "EVENT_AFFECTS_RESOURCE",
+      "EVENT_OBLIGATED_BY_EVENT",
+      "EVENT_DISCHARGES_EVENT",
+      "EVENT_REPLACES_EVENT",
     }
     # RoboLedger edges: three-level ledger + dimensional tags + reporting
     assert set(by_extension["roboledger"]) == {
       "ENTITY_HAS_TRANSACTION",
+      "EVENT_TRIGGERS_TRANSACTION",  # McCarthy bridge
       "TRANSACTION_HAS_ENTRY",
       "ENTRY_HAS_LINE_ITEM",
       "LINE_ITEM_RELATES_TO_ELEMENT",

@@ -38,6 +38,7 @@ def _to_envelope(event: Event, dimension_ids: list[str]) -> EventBlockEnvelope:
     event_type=event.event_type,
     event_category=event.event_category,
     event_class=event.event_class,
+    event_action=event.event_action,
     status=event.status,
     occurred_at=event.occurred_at,
     effective_at=event.effective_at,

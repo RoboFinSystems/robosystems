@@ -24,6 +24,7 @@ def _event(event_id: str, status: str = "classified") -> SimpleNamespace:
     event_type="invoice_issued",
     event_category="sales",
     event_class="economic",
+    event_action=None,
     status=status,
     occurred_at=datetime(2026, 3, 1, tzinfo=UTC),
     effective_at=None,
