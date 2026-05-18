@@ -90,11 +90,6 @@ class TestEntityCreate:
     all_extensions = [
       "roboledger",
       "roboinvestor",
-      "roboscm",
-      "robofo",
-      "robohrm",
-      "roboepm",
-      "roboreport",
     ]
     model = EntityCreate(name="Test", extensions=all_extensions)
     assert model.extensions == all_extensions

@@ -385,11 +385,6 @@ async def get_available_extensions(
         display_names = {
           "roboledger": "RoboLedger - Accounting & Financial Reporting",
           "roboinvestor": "RoboInvestor - Investment Management",
-          "roboscm": "RoboSCM - Supply Chain Management",
-          "robofo": "RoboFO - Front Office Operations",
-          "robohrm": "RoboHRM - Human Resources Management",
-          "roboepm": "RoboEPM - Enterprise Performance Management",
-          "roboreport": "RoboReport - Business Intelligence & Reporting",
         }
 
         # Try to get actual node/relationship counts

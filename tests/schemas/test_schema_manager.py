@@ -9,7 +9,6 @@ from robosystems.schemas.runtime.manager import (
   SchemaType,
   create_accounting_schema,
   create_roboledger_schema,
-  get_recommended_schema_groups,
 )
 
 
@@ -168,22 +167,6 @@ class TestCheckSchemaCompatibility:
     assert len(result.conflicts) > 0
 
 
-class TestGetOptimalSchemaGroups:
-  """Tests for get_optimal_schema_groups."""
-
-  def test_returns_groups(self, manager):
-    groups = manager.get_optimal_schema_groups()
-    assert isinstance(groups, dict)
-    assert "financial_core" in groups
-    assert "standalone_investment" in groups
-
-  def test_groups_contain_lists(self, manager):
-    groups = manager.get_optimal_schema_groups()
-    for name, extensions in groups.items():
-      assert isinstance(extensions, list)
-      assert len(extensions) > 0
-
-
 class TestGenerateCypherDDL:
   """Tests for DDL generation."""
 
@@ -258,8 +241,3 @@ class TestConvenienceFunctions:
   def test_create_accounting_schema(self):
     schema = create_accounting_schema()
     assert len(schema.nodes) > 0
-
-  def test_get_recommended_schema_groups(self):
-    groups = get_recommended_schema_groups()
-    assert isinstance(groups, dict)
-    assert len(groups) > 0

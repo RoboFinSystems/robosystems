@@ -6,7 +6,6 @@ from robosystems.schemas.loader import (
   ContextAwareSchemaLoader,
   LadybugSchemaLoader,
   get_contextual_schema_loader,
-  get_entity_schema_loader,
   get_schema_loader,
   get_sec_schema_loader,
 )
@@ -197,22 +196,6 @@ class TestGlobalLoaderFunctions:
 
   def test_get_sec_schema_loader(self):
     loader = get_sec_schema_loader()
-    assert isinstance(loader, LadybugSchemaLoader)
-
-  def test_get_entity_schema_loader_default(self):
-    loader = get_entity_schema_loader()
-    assert isinstance(loader, LadybugSchemaLoader)
-
-  def test_get_entity_schema_loader_financial(self):
-    loader = get_entity_schema_loader("financial_services")
-    assert isinstance(loader, LadybugSchemaLoader)
-
-  def test_get_entity_schema_loader_manufacturing(self):
-    loader = get_entity_schema_loader("manufacturing")
-    assert isinstance(loader, LadybugSchemaLoader)
-
-  def test_get_entity_schema_loader_tech(self):
-    loader = get_entity_schema_loader("tech_startup")
     assert isinstance(loader, LadybugSchemaLoader)
 
 

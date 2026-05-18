@@ -12,12 +12,12 @@ from .models import Node, Property, Relationship
 # INVARIANT 1 (Aspirational base): Base contains concepts that are universally
 # applicable to the ontology regardless of current consumer count. Period, Unit,
 # Element, Taxonomy, Dimension, Association, Structure are declared here even
-# though only roboledger currently populates most of them, because the other
-# planned extensions (roboinvestor, roboscm, robohrm, robofo, roboepm) will
-# grow into them. The rule for promoting a concept into base is "is it
-# universally applicable" — NOT "do two extensions use it today." Waiting for a
-# second consumer before promoting turns every promotion into a breaking
-# refactor against materialized data.
+# though only roboledger currently populates most of them, because future
+# extensions (roboinvestor, plus the planned RoboX operational suite when each
+# product's design and OLTP land) will grow into them. The rule for promoting a
+# concept into base is "is it universally applicable" — NOT "do two extensions
+# use it today." Waiting for a second consumer before promoting turns every
+# promotion into a breaking refactor against materialized data.
 #
 # INVARIANT 2 (Aspects attach only to measured events): Period, Unit, and
 # Dimension are aspects that qualify measured observations (Fact in reporting,
