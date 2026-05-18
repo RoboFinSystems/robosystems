@@ -148,7 +148,7 @@ class Element(ExtensionsBase):
   # carries alternate spellings and qname variants (e.g. us-gaap-2024 vs
   # us-gaap-2020) that agents should treat as the same concept.
   # ``embedding`` holds a 1024-dimensional sentence embedding the
-  # MappingAgent + classifier use for similarity lookups; nullable
+  # MappingOperator + classifier use for similarity lookups; nullable
   # because the seed content lands incrementally.
   agent_id = Column(String, nullable=True)
   aliases = Column(ARRAY(String), nullable=False, default=list)

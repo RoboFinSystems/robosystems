@@ -225,7 +225,7 @@ def suggest_mapping_candidates(
   fact, are excluded via ``RS_GAAP_SUBTOTAL_DENYLIST``.
 
   Per §3.1.5 #3 (closed 2026-05-13): the prior behaviour returned FAC
-  candidates, which made the MappingAgent surface inconsistent with
+  candidates, which made the MappingOperator surface inconsistent with
   the renderer. Flipping the suggester to rs-gaap-only aligned the
   typed-API and the renderer.
 
@@ -245,7 +245,7 @@ def suggest_mapping_candidates(
     return []
 
   # Lazy import to avoid pulling agent constants into every read path.
-  from robosystems.operations.agents.implementations.mapping.constants import (
+  from robosystems.operations.operators.implementations.mapping.constants import (
     RS_GAAP_SUBTOTAL_DENYLIST,
   )
 
@@ -348,7 +348,7 @@ def _load_renderable_concepts(
   taxonomy as the filter set, which is a SUPERSET of what the renderer
   actually walks (the rendering structures use a more aggregated
   vocabulary like ``AccountsPayableAndAccruedLiabilitiesCurrent`` rather
-  than ``AccountsPayableCurrent``). MappingAgent suggestions made
+  than ``AccountsPayableCurrent``). MappingOperator suggestions made
   against the wider set frequently landed on "unreachable" concepts.
 
   Empty result = caller treats as "no filter" so a partially-provisioned
@@ -473,7 +473,7 @@ def expand_to_rs_gaap_candidates(
   fac_qname = fac_row.qname if fac_row else fac_element_id
 
   # Lazy import to avoid pulling agent constants into every read path.
-  from robosystems.operations.agents.implementations.mapping.constants import (
+  from robosystems.operations.operators.implementations.mapping.constants import (
     RS_GAAP_SUBTOTAL_DENYLIST,
   )
 

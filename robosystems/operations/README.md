@@ -36,7 +36,7 @@ The directory layout below mirrors these shapes — cross-domain Block
 envelopes sit at the top level (`information_block/`,
 `taxonomy_block/`, `event_block/`); domain kernels (`roboledger/`,
 `roboinvestor/`) hold reads + commands + services; cross-cutting
-infrastructure (`graph/`, `library/`, `providers/`, `agents/`, `aws/`)
+infrastructure (`graph/`, `library/`, `providers/`, `operators/`, `aws/`)
 lives at the top level too.
 
 When designing a new op, the first question is *which shape am I
@@ -76,7 +76,7 @@ operations/
 ├── roboinvestor/              # RoboInvestor domain kernel (CQRS subtree)
 │   ├── reads/                 # portfolios, securities, positions, holdings
 │   └── commands/              # portfolios, securities, positions
-├── agents/                    # AI agent system (CloseAgent, MappingAgent, CypherAgent)
+├── operators/                 # AI Operator system (MappingOperator, CypherOperator, future CloseOperator)
 ├── graph/                     # Platform graph database operations
 │   ├── graph_creation_service.py        # Unified graph creation (entity + generic)
 │   ├── subscription_service.py          # Graph subscription management

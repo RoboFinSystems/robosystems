@@ -44,8 +44,8 @@ class TestSubscriptionRateLimits:
       == EndpointCategory.GRAPH_MCP
     )
     assert (
-      get_endpoint_category("/v1/graphs/kg1a2b3c/agent/query")
-      == EndpointCategory.GRAPH_AGENT
+      get_endpoint_category("/v1/graphs/kg1a2b3c/operator/query")
+      == EndpointCategory.GRAPH_OPERATOR
     )
     assert (
       get_endpoint_category("/v1/graphs/kg1a2b3c/graph/query/cypher")

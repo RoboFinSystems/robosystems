@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from robosystems.operations.agents.implementations.mapping.constants import (
+from robosystems.operations.operators.implementations.mapping.constants import (
   RS_GAAP_SUBTOTAL_DENYLIST,
 )
 from robosystems.operations.roboledger.reads.taxonomies import (

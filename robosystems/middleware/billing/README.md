@@ -152,10 +152,10 @@ from robosystems.operations.graph import CreditService
 
 router = APIRouter()
 
-@router.post("/v1/graphs/{graph_id}/agent")
+@router.post("/v1/graphs/{graph_id}/operator")
 async def agent_endpoint(
     graph_id: str,
-    request: AgentRequest,
+    request: OperatorRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session)
 ):

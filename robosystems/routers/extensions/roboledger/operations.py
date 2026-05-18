@@ -951,9 +951,9 @@ async def delete_mapping_association_op(
 
 
 class AutoMapElementsOperation(BaseModel):
-  """Run the MappingAgent over a mapping structure (async).
+  """Run the MappingOperator over a mapping structure (async).
 
-  The MappingAgent walks every unmapped CoA element and proposes
+  The MappingOperator walks every unmapped CoA element and proposes
   associations to reporting concepts. Confidence thresholds: ≥0.90
   auto-approved (association created), 0.70-0.89 flagged for review
   (created with `confidence` set; surface it in your UI), <0.70 skipped.
@@ -1015,10 +1015,10 @@ async def auto_map_elements_op(
     return replay
 
   task_response = await enqueue_task(
-    task_type="agent",
+    task_type="operator",
     graph_id=graph_id,
     user_id=user_id,
-    params={"agent_type": "mapping", "mapping_id": body.mapping_id},
+    params={"operator_type": "mapping", "mapping_id": body.mapping_id},
   )
 
   envelope = wrap_pending(

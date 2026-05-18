@@ -243,9 +243,9 @@ class EnvValidator:
     Returns:
         Dict with configuration summary
     """
-    from robosystems.config import AgentConfig
+    from robosystems.config import OperatorConfig
 
-    agent_validation = AgentConfig.validate_configuration()
+    operator_validation = OperatorConfig.validate_configuration()
 
     return {
       "environment": env_config.ENVIRONMENT,
@@ -268,11 +268,11 @@ class EnvValidator:
         "email_verification": env_config.EMAIL_VERIFICATION_ENABLED,
         "captcha": env_config.CAPTCHA_ENABLED,
       },
-      "agents": {
-        "config_valid": agent_validation["valid"],
-        "default_model": AgentConfig.DEFAULT_MODEL_CONFIG.default_model.value,
-        "fallback_agent": AgentConfig.ORCHESTRATOR_CONFIG["fallback_agent"],
-        "available_models": len(AgentConfig.BEDROCK_MODELS),
-        "execution_modes": len(AgentConfig.EXECUTION_PROFILES),
+      "operators": {
+        "config_valid": operator_validation["valid"],
+        "default_model": OperatorConfig.DEFAULT_MODEL_CONFIG.default_model.value,
+        "fallback_operator": OperatorConfig.ORCHESTRATOR_CONFIG["fallback_operator"],
+        "available_models": len(OperatorConfig.BEDROCK_MODELS),
+        "execution_modes": len(OperatorConfig.EXECUTION_PROFILES),
       },
     }

@@ -75,7 +75,7 @@ def test_multiplier_can_be_skipped(monkeypatch):
     ("/v1/graphs/abc/tables/files/f123", "PATCH", EndpointCategory.TABLE_MANAGEMENT),
     # Other graph endpoints
     ("/v1/graphs/abc/mcp/execute", "POST", EndpointCategory.GRAPH_MCP),
-    ("/v1/graphs/abc/agent/run", "POST", EndpointCategory.GRAPH_AGENT),
+    ("/v1/graphs/abc/operator/run", "POST", EndpointCategory.GRAPH_OPERATOR),
     # Search endpoints (OpenSearch)
     ("/v1/graphs/abc/search", "POST", EndpointCategory.GRAPH_SEARCH),
     ("/v1/graphs/abc/search/doc123", "GET", EndpointCategory.GRAPH_SEARCH),

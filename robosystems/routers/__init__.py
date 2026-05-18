@@ -58,9 +58,11 @@ from .graphs import (
 from .graphs import (
   subscriptions_router as graph_subscriptions_router,
 )
-from .graphs.agent import router as agent_router  # Agent module with modular structure
 from .graphs.mcp import router as mcp_router
 from .graphs.operations import router as graph_operations_router
+from .graphs.operator import (
+  router as operator_router,
+)  # AI Operator module with modular structure
 from .offering import offering_router
 from .operations import router as operations_router
 from .orgs import router as orgs_router
@@ -78,7 +80,9 @@ if env.CONNECTIONS_ENABLED:
   from .graphs.connections import router as connections_router
 
   router.include_router(connections_router, prefix="/connections")
-router.include_router(agent_router)  # No prefix - handled in the agent module itself
+router.include_router(
+  operator_router
+)  # No prefix - handled in the operator module itself
 router.include_router(mcp_router, prefix="/mcp")
 router.include_router(backups_router, prefix="/backups")
 router.include_router(usage_router, prefix="/analytics")

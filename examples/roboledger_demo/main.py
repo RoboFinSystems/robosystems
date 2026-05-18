@@ -20,7 +20,7 @@ Usage:
     uv run python -m examples.roboledger_demo.main                        # Create new graph + load
     uv run python -m examples.roboledger_demo.main <graph_id>             # Load into existing graph
     uv run python -m examples.roboledger_demo.main --dry-run              # Validate data only
-    uv run python -m examples.roboledger_demo.main --ai                    # Use MappingAgent instead of hardcoded mappings (requires Bedrock)
+    uv run python -m examples.roboledger_demo.main --ai                    # Use MappingOperator instead of hardcoded mappings (requires Bedrock)
 
 Requires: Docker stack running (just start)
 """
@@ -623,7 +623,7 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
 
 
 def run_ai_mapping(graph_id: str) -> None:
-  """Trigger the MappingAgent via the auto-map-elements operation.
+  """Trigger the MappingOperator via the auto-map-elements operation.
 
   Requires Bedrock to be configured (BEDROCK_REGION + IAM role with
   bedrock:InvokeModel). Skipped when --ai is not passed.
@@ -1029,7 +1029,7 @@ def main() -> None:
 
   # Create CoA → GAAP mappings — hardcoded or AI-powered
   if with_ai_mapping:
-    print("\nRunning AI mapping (MappingAgent)...")
+    print("\nRunning AI mapping (MappingOperator)...")
     run_ai_mapping(graph_id)
   else:
     print("\nCreating CoA → GAAP mappings...")

@@ -596,8 +596,8 @@ class TestGraphOperationFeatureFlags:
         assert get_bool_env("BACKUP_CREATION_ENABLED", False) == expected
 
 
-class TestAgentPostFeatureFlags:
-  """Test agent POST operation feature flags."""
+class TestOperatorPostFeatureFlags:
+  """Test operator POST operation feature flags."""
 
   @pytest.fixture
   def mock_user(self):
@@ -612,7 +612,7 @@ class TestAgentPostFeatureFlags:
     """Create a mock database session."""
     return MagicMock(spec=Session)
 
-  def test_agent_auto_disabled(self, client: TestClient, mock_user, mock_db):
+  def test_operator_auto_disabled(self, client: TestClient, mock_user, mock_db):
     """Test auto agent endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_db_session
@@ -624,8 +624,8 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
-        mock_env.AGENT_POST_ENABLED = False
+      with patch("robosystems.routers.graphs.operator.execute.env") as mock_env:
+        mock_env.OPERATOR_POST_ENABLED = False
 
         # Mock request data
         request_data = {
@@ -635,15 +635,17 @@ class TestAgentPostFeatureFlags:
           "history": [],
         }
 
-        response = client.post("/v1/graphs/kg1a2b3c4d5e6f7a8b/agent", json=request_data)
+        response = client.post(
+          "/v1/graphs/kg1a2b3c4d5e6f7a8b/operator", json=request_data
+        )
 
         assert response.status_code == 403
         data = response.json()
-        assert "Agent POST operations are currently disabled" in data["detail"]
+        assert "Operator POST operations are currently disabled" in data["detail"]
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_specific_disabled(self, client: TestClient, mock_user, mock_db):
+  def test_operator_specific_disabled(self, client: TestClient, mock_user, mock_db):
     """Test specific agent endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_db_session
@@ -655,8 +657,8 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
-        mock_env.AGENT_POST_ENABLED = False
+      with patch("robosystems.routers.graphs.operator.execute.env") as mock_env:
+        mock_env.OPERATOR_POST_ENABLED = False
 
         # Mock request data
         request_data = {
@@ -667,16 +669,16 @@ class TestAgentPostFeatureFlags:
         }
 
         response = client.post(
-          "/v1/graphs/kg1a2b3c4d5e6f7a8b/agent/financial", json=request_data
+          "/v1/graphs/kg1a2b3c4d5e6f7a8b/operator/financial", json=request_data
         )
 
         assert response.status_code == 403
         data = response.json()
-        assert "Agent POST operations are currently disabled" in data["detail"]
+        assert "Operator POST operations are currently disabled" in data["detail"]
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_batch_disabled(self, client: TestClient, mock_user, mock_db):
+  def test_operator_batch_disabled(self, client: TestClient, mock_user, mock_db):
     """Test batch agent endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_db_session
@@ -688,8 +690,8 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
-        mock_env.AGENT_POST_ENABLED = False
+      with patch("robosystems.routers.graphs.operator.execute.env") as mock_env:
+        mock_env.OPERATOR_POST_ENABLED = False
 
         # Mock request data
         request_data = {
@@ -708,18 +710,18 @@ class TestAgentPostFeatureFlags:
         }
 
         response = client.post(
-          "/v1/graphs/kg1a2b3c4d5e6f7a8b/agent/batch", json=request_data
+          "/v1/graphs/kg1a2b3c4d5e6f7a8b/operator/batch", json=request_data
         )
 
         # Due to route precedence issues in test environment, this may return either:
         # - 403 if routed to correct /batch endpoint (feature flag check)
-        # - 422 if routed to /{agent_type} endpoint due to "batch" being treated as agent_type
+        # - 422 if routed to /{operator_type} endpoint due to "batch" being treated as operator_type
         if response.status_code == 403:
           # Correctly routed to batch endpoint, feature flag working
           data = response.json()
-          assert "Agent POST operations are currently disabled" in data["detail"]
+          assert "Operator POST operations are currently disabled" in data["detail"]
         elif response.status_code == 422:
-          # Incorrectly routed to /{agent_type} endpoint, but this confirms the test setup
+          # Incorrectly routed to /{operator_type} endpoint, but this confirms the test setup
           # The feature flag functionality is verified by the other 3 endpoint tests
           data = response.json()
           assert "Field required" in str(data["detail"])
@@ -730,8 +732,8 @@ class TestAgentPostFeatureFlags:
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_recommend_disabled(self, client: TestClient, mock_user, mock_db):
-    """Test agent recommendation endpoint when feature flag is disabled."""
+  def test_operator_recommend_disabled(self, client: TestClient, mock_user, mock_db):
+    """Test operator recommendation endpoint when feature flag is disabled."""
     from main import app
     from robosystems.database import get_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -742,23 +744,25 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
-        mock_env.AGENT_POST_ENABLED = False
+      with patch("robosystems.routers.graphs.operator.execute.env") as mock_env:
+        mock_env.OPERATOR_POST_ENABLED = False
 
         # Mock request data
         request_data = {"message": "Help me analyze financial data", "context": None}
 
         response = client.post(
-          "/v1/graphs/kg1a2b3c4d5e6f7a8b/agent/recommend", json=request_data
+          "/v1/graphs/kg1a2b3c4d5e6f7a8b/operator/recommend", json=request_data
         )
 
         assert response.status_code == 403
         data = response.json()
-        assert "Agent POST operations are currently disabled" in data["detail"]
+        assert "Operator POST operations are currently disabled" in data["detail"]
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_get_endpoints_still_work(self, client: TestClient, mock_user, mock_db):
+  def test_operator_get_endpoints_still_work(
+    self, client: TestClient, mock_user, mock_db
+  ):
     """Test that GET endpoints still work when POST endpoints are disabled."""
     from main import app
     from robosystems.database import get_db_session
@@ -770,23 +774,23 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
-        mock_env.AGENT_POST_ENABLED = False
+      with patch("robosystems.routers.graphs.operator.execute.env") as mock_env:
+        mock_env.OPERATOR_POST_ENABLED = False
 
-        # Test list agents endpoint (GET)
-        response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/agent")
+        # Test list operators endpoint (GET)
+        response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/operator")
         # Should not return 403 - GET endpoints are not affected by this flag
         assert response.status_code != 403
 
-        # Test agent metadata endpoint (GET)
-        response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/agent/financial")
+        # Test operator metadata endpoint (GET)
+        response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/operator/financial")
         # Should not return 403 - GET endpoints are not affected by this flag
         assert response.status_code != 403
     finally:
       app.dependency_overrides.clear()
 
-  def test_agent_post_feature_flag_environment_variables(self):
-    """Test that AGENT_POST_ENABLED flag can be controlled via environment variables."""
+  def test_operator_post_feature_flag_environment_variables(self):
+    """Test that OPERATOR_POST_ENABLED flag can be controlled via environment variables."""
     from robosystems.config.env import get_bool_env
 
     test_cases = [
@@ -797,8 +801,8 @@ class TestAgentPostFeatureFlags:
     ]
 
     for value, expected in test_cases:
-      with patch.dict("os.environ", {"AGENT_POST_ENABLED": value}, clear=True):
-        assert get_bool_env("AGENT_POST_ENABLED", False) == expected
+      with patch.dict("os.environ", {"OPERATOR_POST_ENABLED": value}, clear=True):
+        assert get_bool_env("OPERATOR_POST_ENABLED", False) == expected
 
 
 class TestLoadSheddingFeatureFlags:
