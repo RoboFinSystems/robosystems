@@ -575,7 +575,7 @@ class EnvConfig:
   )
   MCP_VECTOR_SEARCH_ENABLED = get_bool_env(
     "MCP_VECTOR_SEARCH_ENABLED",
-    get_parameter_value("MCP_VECTOR_SEARCH_ENABLED", "false").lower() == "true",
+    get_parameter_value("MCP_VECTOR_SEARCH_ENABLED", "true").lower() == "true",
   )
   MCP_GRAPHQL_ENABLED = get_bool_env(
     "MCP_GRAPHQL_ENABLED",
@@ -583,7 +583,7 @@ class EnvConfig:
   )
   SEMANTIC_SEARCH_ENABLED = get_bool_env(
     "SEMANTIC_SEARCH_ENABLED",
-    get_parameter_value("SEMANTIC_SEARCH_ENABLED", "false").lower() == "true",
+    get_parameter_value("SEMANTIC_SEARCH_ENABLED", "true").lower() == "true",
   )
 
   # --- OpenSearch ---
@@ -610,8 +610,11 @@ class EnvConfig:
   SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
   # --- Connection Providers ---
-  # CONNECTIONS_ENABLED controls whether the /connections router is included
-  # Individual provider flags below require CONNECTIONS_ENABLED=true to function
+  # CONNECTIONS_ENABLED controls whether the /connections router is included.
+  # Code defaults to TRUE — the fully-featured platform exposes connection
+  # providers. Prod and staging currently override to `false` via SSM during
+  # the staged rollout (flipped at the same time as the extensions). Individual
+  # provider flags below require CONNECTIONS_ENABLED=true to function.
   CONNECTIONS_ENABLED = get_bool_env(
     "CONNECTIONS_ENABLED",
     get_parameter_value("CONNECTIONS_ENABLED", "true").lower() == "true",
@@ -642,25 +645,30 @@ class EnvConfig:
   # the extensions PostgreSQL connection without at least one domain
   # enabled, so it's not a separate user-facing flag.
   #
+  # Code defaults to TRUE — the fully-featured platform exposes both
+  # product surfaces. Prod and staging currently override to `false` via
+  # SSM during the staged extensions rollout; flip the SSM values to `true`
+  # when each domain is ready to ship to that environment.
   ROBOLEDGER_ENABLED = get_bool_env(
     "ROBOLEDGER_ENABLED",
-    get_parameter_value("ROBOLEDGER_ENABLED", "false").lower() == "true",
+    get_parameter_value("ROBOLEDGER_ENABLED", "true").lower() == "true",
   )
 
   ROBOINVESTOR_ENABLED = get_bool_env(
     "ROBOINVESTOR_ENABLED",
-    get_parameter_value("ROBOINVESTOR_ENABLED", "false").lower() == "true",
+    get_parameter_value("ROBOINVESTOR_ENABLED", "true").lower() == "true",
   )
 
   # --- Extensions GraphQL Endpoint ---
   # Controls the /extensions/{graph_id}/graphql endpoint (Strawberry).
   #
-  # Defaults to TRUE: GraphQL is the only read surface for the extensions
-  # subsystem now that the legacy /v1/ledger/* and /v1/investor/* routers
-  # have been deleted. A deployment with either domain enabled must have
-  # GraphQL mounted, otherwise reads are gone. Kept as an explicit kill
-  # switch in case GraphQL needs to be disabled in production for a
-  # specific incident response (e.g. lock down introspection).
+  # Defaults to TRUE alongside the per-domain ROBOLEDGER/ROBOINVESTOR flags
+  # so a fresh deployment with extensions on automatically gets the read
+  # surface (legacy /v1/ledger/* and /v1/investor/* routers are gone — this
+  # GraphQL endpoint is the only way to read extensions data). Kept as an
+  # independent kill switch for incident response (e.g. lock down
+  # introspection without disabling write operations). Prod/staging
+  # currently override to `false` via SSM during the staged rollout.
   EXTENSIONS_GRAPHQL_ENABLED = get_bool_env(
     "EXTENSIONS_GRAPHQL_ENABLED",
     get_parameter_value("EXTENSIONS_GRAPHQL_ENABLED", "true").lower() == "true",

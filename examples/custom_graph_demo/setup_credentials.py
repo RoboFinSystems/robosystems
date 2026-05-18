@@ -6,14 +6,15 @@ This script creates a user account and API key, then saves the credentials
 to a local file for reuse. Run this once to set up authentication.
 
 Usage:
-    uv run 01_setup_credentials.py                    # Auto-generate credentials
-    uv run 01_setup_credentials.py --name "John Doe"  # Specify user name
-    uv run 01_setup_credentials.py --email custom@example.com
+    uv run setup_credentials.py                    # Auto-generate credentials
+    uv run setup_credentials.py --name "John Doe"  # Specify user name
+    uv run setup_credentials.py --email custom@example.com
 
 After running, credentials are saved to .local/config.json
 """
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
@@ -36,8 +37,8 @@ def main():
   )
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   parser.add_argument(
     "--name",
@@ -84,7 +85,7 @@ def main():
     )
 
     if credentials_path == DEFAULT_CREDENTIALS_FILE:
-      print("   You can now run: uv run 02_create_graph.py")
+      print("   You can now run: uv run create_graph.py")
     else:
       print(
         f"\nℹ️  Remember to pass --credentials-file {credentials_path} to other demo scripts"

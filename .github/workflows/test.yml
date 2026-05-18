@@ -73,9 +73,6 @@ jobs:
       MCP_AUTO_LIMIT_ENABLED: "true"
       MCP_WORKSPACE_ENABLED: "true"
       FACT_GRID_ENABLED: "true"
-      CONNECTIONS_ENABLED: "true"
-      CONNECTION_SEC_ENABLED: "true"
-      CONNECTION_QUICKBOOKS_ENABLED: "true"
       BILLING_ENABLED: "true"
       SECURITY_AUDIT_ENABLED: "true"
       LBUG_CIRCUIT_BREAKERS_ENABLED: "true"
@@ -84,7 +81,6 @@ jobs:
       LBUG_HEALTH_CHECKS_ENABLED: "true"
       SUBGRAPH_CREATION_ENABLED: "true"
       BACKUP_CREATION_ENABLED: "true"
-      AGENT_POST_ENABLED: "true"
       EMAIL_VERIFICATION_ENABLED: "true"
       CAPTCHA_ENABLED: "false"
     services:

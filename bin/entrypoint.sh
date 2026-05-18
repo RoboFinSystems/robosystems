@@ -130,8 +130,8 @@ run_db_init() {
     # ROBOLEDGER_ENABLED or ROBOINVESTOR_ENABLED is true), so the shell
     # must check the underlying domain flags directly.
     local roboledger_enabled roboinvestor_enabled
-    roboledger_enabled=$(resolve_feature_flag "ROBOLEDGER_ENABLED" "false")
-    roboinvestor_enabled=$(resolve_feature_flag "ROBOINVESTOR_ENABLED" "false")
+    roboledger_enabled=$(resolve_feature_flag "ROBOLEDGER_ENABLED" "true")
+    roboinvestor_enabled=$(resolve_feature_flag "ROBOINVESTOR_ENABLED" "true")
     if [[ "$roboledger_enabled" == "true" || "$roboinvestor_enabled" == "true" ]]; then
         echo "Extensions enabled — running extensions migrations..."
         # Alembic cannot CREATE DATABASE; ensure the extensions DB exists first.

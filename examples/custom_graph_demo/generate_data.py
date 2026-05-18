@@ -15,10 +15,10 @@ Relationship tables (written to data/relationships):
   - COMPANY_SPONSORS_PROJECT.parquet
 
 Usage:
-    uv run 03_generate_data.py
-    uv run 03_generate_data.py --count 120
-    uv run 03_generate_data.py --regenerate
-    uv run 03_generate_data.py --seed 1234
+    uv run generate_data.py
+    uv run generate_data.py --count 120
+    uv run generate_data.py --regenerate
+    uv run generate_data.py --seed 1234
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ class CustomGraphDataGenerator:
     self.graph_id = get_graph_id(self.credentials_path, DEMO_NAME)
     if not self.graph_id:
       raise RuntimeError(
-        "Graph ID not found. Run 02_create_graph.py before generating data."
+        "Graph ID not found. Run create_graph.py before generating data."
       )
 
     if seed is None:
@@ -129,7 +129,7 @@ class CustomGraphDataGenerator:
     if not self.credentials_path.exists():
       raise RuntimeError(
         f"Credentials not found at {self.credentials_path}. "
-        "Run 01_setup_credentials.py and 02_create_graph.py first."
+        "Run setup_credentials.py and create_graph.py first."
       )
     with self.credentials_path.open() as fh:
       return json.load(fh)

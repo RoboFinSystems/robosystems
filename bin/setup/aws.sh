@@ -194,7 +194,6 @@ function create_ssm_feature_flags() {
     # Define all feature flag parameters
     # Format: KEY=VALUE (all other flags are same for staging/prod)
     local params=(
-        "AGENT_POST_ENABLED=true"
         "BACKUP_CREATION_ENABLED=true"
         "BILLING_ENABLED=false"
         "CAPTCHA_ENABLED=false"

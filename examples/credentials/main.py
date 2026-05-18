@@ -13,11 +13,16 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from robosystems_client.client import AuthenticatedClient
-from utils import ensure_user_credentials, grant_repository_access, CredentialContext
+from examples.credentials.utils import (
+  ensure_user_credentials,
+  grant_repository_access,
+  CredentialContext,
+)
 
 CREDENTIALS_FILE = Path(__file__).resolve().parents[2] / ".local" / "config.json"
 
@@ -28,8 +33,8 @@ def main():
   )
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   parser.add_argument("--email", help="Email address (default: auto-generated)")
   parser.add_argument(

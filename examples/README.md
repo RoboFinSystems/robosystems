@@ -14,7 +14,7 @@ just demo
 # Or run individual demos
 just demo-roboledger
 just demo-custom-graph
-just demo-sec NVDA 2025
+just demo-sec --ticker NVDA --year 2025
 ```
 
 ## Available Demos
@@ -34,16 +34,16 @@ Query real SEC XBRL financial data from public companies.
 
 ```bash
 # Load and query NVIDIA 2025 financials (includes queries)
-just demo-sec NVDA 2025
+just demo-sec --ticker NVDA --year 2025
 
 # Load NVIDIA data without running queries
-just demo-sec NVDA 2025 true
+just demo-sec --ticker NVDA --year 2025 --skip-queries
 
 # Query SEC data with specific examples
 just demo-sec-query
 
 # Run all available query examples
-just demo-sec-query true
+just demo-sec-query --all
 ```
 
 **Available Tickers:**
@@ -78,10 +78,10 @@ Demonstrates custom schema creation with people, companies, and projects.
 just demo-custom-graph
 
 # Create new user and graph
-just demo-custom-graph new-user,new-graph
+just demo-custom-graph --new-user --new-graph
 
 # Skip verification queries
-just demo-custom-graph skip-queries
+just demo-custom-graph --skip-queries
 ```
 
 **What It Creates:**
@@ -130,13 +130,13 @@ just demo-user --force
 
 ## Demo Flags
 
-Most demos accept comma-separated flags to control behavior. Default behavior reuses existing credentials and graph.
+All demo recipes pass flags through to the underlying script. Default behavior reuses existing credentials and graph.
 
-**Available Flags:**
+**Custom Graph Demo flags:**
 
-- `new-user` - Create a new user (implies `new-graph`)
-- `new-graph` - Create a new graph
-- `skip-queries` - Skip verification queries after ingestion
+- `--new-user` - Create a new user (implies `--new-graph`)
+- `--new-graph` - Create a new graph
+- `--skip-queries` - Skip verification queries after ingestion
 
 **Examples:**
 
@@ -145,13 +145,13 @@ Most demos accept comma-separated flags to control behavior. Default behavior re
 just demo-custom-graph
 
 # Create new graph for existing user
-just demo-custom-graph new-graph
+just demo-custom-graph --new-graph
 
 # Create new user and graph
-just demo-custom-graph new-user,new-graph
+just demo-custom-graph --new-user --new-graph
 
 # Skip queries
-just demo-custom-graph skip-queries
+just demo-custom-graph --skip-queries
 ```
 
 ## Running Individual Steps
@@ -162,11 +162,11 @@ Each demo has a `main.py` that runs all steps automatically. For manual control,
 
 ```bash
 cd examples/custom_graph_demo
-uv run 01_setup_credentials.py
-uv run 02_create_graph.py
-uv run 03_generate_data.py
-uv run 04_upload_ingest.py
-uv run 05_query_graph.py --all
+uv run setup_credentials.py
+uv run create_graph.py
+uv run generate_data.py
+uv run upload_ingest.py
+uv run query_graph.py --all
 ```
 
 **Note:** The just commands are the recommended way to run demos as they handle all setup automatically.
@@ -204,8 +204,8 @@ Example Query Results:
 
 **Common Issues:**
 
-- "User already exists" - Default behavior reuses existing user, or use `new-user` flag
-- "Graph already exists" - Default behavior reuses existing graph, or use `new-graph` flag
+- "User already exists" - Default behavior reuses existing user, or use `--new-user` flag
+- "Graph already exists" - Default behavior reuses existing graph, or use `--new-graph` flag
 - "API connection failed" - Ensure RoboSystems is running (`just start`)
 - "Permission denied" - Check credentials in config.json
 

@@ -18,6 +18,7 @@ Usage:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -159,8 +160,8 @@ def main():
   )
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   parser.add_argument(
     "--plan",

@@ -14,10 +14,10 @@ Usage:
     uv run main.py --new-user             # Create new user + graph, regenerate data
     uv run main.py --new-graph            # Create new graph for existing user, regenerate data
     uv run main.py --skip-queries         # Skip verification queries after ingestion
-    uv run main.py --flags new-user,new-graph  # Legacy comma-separated flags (no spaces)
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -52,13 +52,8 @@ def main():
   )
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
-  )
-  parser.add_argument(
-    "--flags",
-    default="",
-    help="Comma-separated flags: new-user,new-graph,skip-queries (legacy compatibility)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   parser.add_argument(
     "--new-user",
@@ -80,32 +75,8 @@ def main():
     default=str(DEFAULT_CREDENTIALS_FILE),
     help="Path to credentials file shared across demo scripts",
   )
-  parser.add_argument(
-    "--real-s3",
-    action="store_true",
-    help="Use real AWS S3 instead of LocalStack (for fork/production deployments)",
-  )
-
   args = parser.parse_args()
   credentials_path = Path(args.credentials_file).expanduser()
-
-  if args.flags:
-    for flag in args.flags.split(","):
-      flag = flag.strip()
-      if not flag:
-        continue
-      if flag == "new-user":
-        args.new_user = True
-      elif flag == "new-graph":
-        args.new_graph = True
-      elif flag == "skip-queries":
-        args.skip_queries = True
-      else:
-        print(
-          f"⚠️  Warning: Unknown flag '{flag}' "
-          "(valid options: new-user,new-graph,skip-queries)"
-        )
-        sys.exit(1)
 
   # Creating a new user always implies provisioning a fresh graph.
   if args.new_user:
@@ -117,7 +88,7 @@ def main():
     args.new_graph = True
 
   step1_args.extend(["--credentials-file", str(credentials_path)])
-  run_script("01_setup_credentials.py", step1_args)
+  run_script("setup_credentials.py", step1_args)
 
   print("\n" + "=" * 70)
   print("📊 Custom Graph Demo - Complete Workflow")
@@ -125,7 +96,6 @@ def main():
   print(f"Base URL: {args.base_url}")
   print(f"Create new user: {args.new_user}")
   print(f"Create new graph: {args.new_graph}")
-  print(f"S3: {'AWS S3' if args.real_s3 else 'LocalStack'}")
   print("Regenerate data: True (always)")
   print("=" * 70)
 
@@ -137,11 +107,11 @@ def main():
   ]
   if not args.new_graph:
     step2_args.append("--reuse")
-  run_script("02_create_graph.py", step2_args)
+  run_script("create_graph.py", step2_args)
 
   # Regenerate data every run to align parquet identifiers with the current graph.
   step3_args = ["--regenerate", "--credentials-file", str(credentials_path)]
-  run_script("03_generate_data.py", step3_args)
+  run_script("generate_data.py", step3_args)
 
   step4_args = [
     "--base-url",
@@ -149,9 +119,7 @@ def main():
     "--credentials-file",
     str(credentials_path),
   ]
-  if args.real_s3:
-    step4_args.append("--real-s3")
-  run_script("04_upload_ingest.py", step4_args)
+  run_script("upload_ingest.py", step4_args)
 
   if not args.skip_queries:
     step5_args = [
@@ -161,13 +129,13 @@ def main():
       "--credentials-file",
       str(credentials_path),
     ]
-    run_script("05_query_graph.py", step5_args)
+    run_script("query_graph.py", step5_args)
 
   # Step 6: Upload project management documents (if documents/ directory exists)
   docs_dir = DEMO_DIR / "documents"
   if docs_dir.exists() and list(docs_dir.glob("*.md")):
     step6_args = ["--base-url", args.base_url]
-    run_script("06_upload_documents.py", step6_args)
+    run_script("upload_documents.py", step6_args)
 
   # Step 7: Create memory subgraph
   step7_args = [
@@ -176,16 +144,16 @@ def main():
     "--credentials-file",
     str(credentials_path),
   ]
-  run_script("07_memory_subgraph.py", step7_args)
+  run_script("memory_subgraph.py", step7_args)
 
   print("\n" + "=" * 70)
   print("✅ Custom Graph Demo - Complete!")
   print("=" * 70)
   print("\n💡 Next steps:")
-  print("   - Run custom queries: uv run 05_query_graph.py")
-  print("   - Interactive mode: uv run 05_query_graph.py")
-  print("   - Search documents: uv run 06_upload_documents.py")
-  print("   - Memory subgraph: uv run 07_memory_subgraph.py")
+  print("   - Run custom queries: uv run query_graph.py")
+  print("   - Interactive mode: uv run query_graph.py")
+  print("   - Search documents: uv run upload_documents.py")
+  print("   - Memory subgraph: uv run memory_subgraph.py")
   print("   - Create another graph: uv run main.py --new-graph")
   print("=" * 70 + "\n")
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -52,7 +53,7 @@ def load_credentials(credentials_path: Path) -> dict:
   """Load saved credentials for the demo user."""
   if not credentials_path.exists():
     print(f"\n❌ No credentials found at {credentials_path}")
-    print("   Run: uv run 01_setup_credentials.py first")
+    print("   Run: uv run setup_credentials.py first")
     sys.exit(1)
 
   with credentials_path.open() as fh:
@@ -238,18 +239,13 @@ def main() -> None:
   )
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   parser.add_argument(
     "--credentials-file",
     default=str(DEFAULT_CREDENTIALS_FILE),
     help="Path to credentials file (default: .local/config.json)",
-  )
-  parser.add_argument(
-    "--real-s3",
-    action="store_true",
-    help="Use real AWS S3 instead of LocalStack (for fork/production deployments)",
   )
   args = parser.parse_args()
   credentials_path = Path(args.credentials_file).expanduser()
@@ -266,7 +262,7 @@ def main() -> None:
 
     if not NODES_DIR.exists() or not RELATIONSHIPS_DIR.exists():
       print("\n❌ Generated data not found.")
-      print("   Run: uv run 03_generate_data.py")
+      print("   Run: uv run generate_data.py")
       sys.exit(1)
   except Exception as exc:  # noqa: BLE001
     print(f"\n❌ Setup failed: {exc}")
@@ -275,15 +271,18 @@ def main() -> None:
   node_files = _list_parquet_files(NODES_DIR, EXPECTED_NODE_TABLES)
   relationship_files = _list_parquet_files(RELATIONSHIPS_DIR, EXPECTED_REL_TABLES)
 
-  # Use LocalStack for local dev, real AWS S3 for fork/production
-  s3_endpoint = None if args.real_s3 else "http://localhost:4566"
+  # Auto-detect LocalStack vs real AWS S3 from base_url: any localhost /
+  # 127.0.0.1 base_url implies the local dev stack (LocalStack on :4566);
+  # anything else (staging, prod, a fork's API) implies real AWS S3.
+  is_local = "localhost" in args.base_url or "127.0.0.1" in args.base_url
+  s3_endpoint = "http://localhost:4566" if is_local else None
 
   print("\n" + "=" * 70)
   print("📊 Custom Graph Demo - Upload & Ingest")
   print("=" * 70)
   print(f"Graph ID: {graph_id}")
   print(f"Base URL: {args.base_url}")
-  print(f"S3: {'AWS S3' if args.real_s3 else 'LocalStack (' + s3_endpoint + ')'}")
+  print(f"S3: {'LocalStack (' + s3_endpoint + ')' if is_local else 'AWS S3'}")
   print(f"Credentials: {credentials_path}")
   print("=" * 70)
 

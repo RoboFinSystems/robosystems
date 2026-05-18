@@ -7,12 +7,13 @@ OpenSearch index via the RoboSystems SDK. Then runs sample searches
 to demonstrate document search alongside graph data.
 
 Usage:
-    uv run 06_upload_documents.py
-    uv run 06_upload_documents.py --base-url http://localhost:8000
+    uv run upload_documents.py
+    uv run upload_documents.py --base-url http://localhost:8000
 """
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -40,7 +41,7 @@ SAMPLE_SEARCHES = [
 
 def load_credentials() -> dict:
   if not CREDENTIALS_FILE.exists():
-    print("❌ Credentials not found. Run 01_setup_credentials.py first.")
+    print("❌ Credentials not found. Run setup_credentials.py first.")
     sys.exit(1)
   with CREDENTIALS_FILE.open() as f:
     return json.load(f)
@@ -100,8 +101,8 @@ def main():
   )
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   args = parser.parse_args()
 

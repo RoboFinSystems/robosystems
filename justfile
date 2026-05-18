@@ -17,6 +17,7 @@
 _env := ".env"
 _local_env := ".env.local"
 
+# Default recipe (runs when `just` is invoked with no args) — lists all recipes
 default:
     @just --list
 
@@ -169,6 +170,39 @@ cf-lint-all:
     @uv run cfn-lint -t cloudformation/*.yaml
 
 
+## Demo Scripts ##
+
+# Run all demos
+demo:
+    @just demo-roboledger
+    @just demo-custom-graph
+    @just demo-sec
+
+# Create or reuse demo user (uses shared .local/config.json)
+demo-user *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.credentials.main {{args}}
+
+# Setup SEC repository demo (pass any flags: --ticker NVDA, --year 2025, --skip-queries, --subscribe-only, --plan starter)
+demo-sec *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.sec_demo.main {{args}}
+
+# Create SEC subscription only (no data loading) - plan: sec-starter (default) | sec-advanced (5x rate limits, more credits)
+demo-sec-subscribe plan="sec-starter":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.sec_demo.main --subscribe-only --plan {{plan}}
+
+# Run SEC demo preset queries (pass any args: --all, --preset NAME, --search "query", --list)
+demo-sec-query *args:
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.sec_demo.query_examples {{args}}
+
+# Run RoboLedger demo (flags: --skeleton (empty graph, no data), --ai (MappingOperator; needs Bedrock), --dry-run, [graph_id])
+demo-roboledger *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.roboledger_demo.main {{args}}
+
+# Run custom graph demo end-to-end (pass any flags: --new-user, --new-graph, --skip-queries)
+demo-custom-graph *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.custom_graph_demo.main {{args}}
+
+
 ## CI/CD ##
 
 # Create a feature branch
@@ -285,12 +319,12 @@ gha-list-org filter="":
 
 ## Admin CLI ##
 
-# Admin CLI for remote administration via admin API
 # For staging/prod: start tunnel first with ./bin/tools/tunnels.sh <env> all
 # Examples: just admin dev stats                    (local dev, no tunnel needed)
 #           just admin prod stats                   (requires tunnel running)
 #           just admin prod subscriptions list
 #           just admin prod credits health
+# Admin CLI for remote administration via admin API — environment: dev | staging | prod
 admin environment="dev" *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.admin.cli -e {{environment}} {{args}}
 
@@ -299,114 +333,75 @@ admin environment="dev" *args="":
 # Usage: just migrate-up [db] — db is "platform" (default) or "extensions"
 
 # Create new migration
-migrate-create message db="platform" env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini revision --autogenerate -m "{{message}}"
+migrate-create message db="platform":
+    UV_ENV_FILE={{_local_env}} uv run alembic -c migrations/{{db}}.ini revision --autogenerate -m "{{message}}"
 
 # Run migrations
-migrate-up db="platform" env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini upgrade head
+migrate-up db="platform":
+    UV_ENV_FILE={{_local_env}} uv run alembic -c migrations/{{db}}.ini upgrade head
 
 # Rollback migration
-migrate-down db="platform" env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini downgrade -1
+migrate-down db="platform":
+    UV_ENV_FILE={{_local_env}} uv run alembic -c migrations/{{db}}.ini downgrade -1
 
 # Show migration history
-migrate-history db="platform" env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini history
+migrate-history db="platform":
+    UV_ENV_FILE={{_local_env}} uv run alembic -c migrations/{{db}}.ini history
 
 # Show current migration
-migrate-current db="platform" env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini current
+migrate-current db="platform":
+    UV_ENV_FILE={{_local_env}} uv run alembic -c migrations/{{db}}.ini current
 
 # Reset database
-migrate-reset db="platform" env=_local_env:
-    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini downgrade base
-    UV_ENV_FILE={{env}} uv run alembic -c migrations/{{db}}.ini upgrade head
-
-
-## Demo Scripts ##
-
-# Run all demos
-demo:
-    @just demo-roboledger
-    @just demo-custom-graph
-    @just demo-sec
-
-# Create or reuse demo user (uses shared .local/config.json)
-demo-user *args="":
-    uv run examples/credentials/main.py {{args}}
-
-# Setup SEC repository demo - loads data, grants access, updates config
-demo-sec ticker="NVDA" year="2025" skip_queries="false":
-    uv run examples/sec_demo/main.py \
-        --ticker {{ticker}} \
-        --year {{year}} \
-        {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
-
-# Create SEC subscription only (no data loading) - for connecting to existing SEC graph
-demo-sec-subscribe plan="sec-starter":
-    uv run examples/sec_demo/main.py --subscribe-only --plan {{plan}}
-
-# Run SEC demo preset queries (pass any args: --all, --preset NAME, --search "query", --list)
-demo-sec-query *args:
-    uv run examples/sec_demo/query_examples.py {{ args }}
-
-# Run RoboLedger end-to-end demo — synthetic consulting company, schedules, mappings, policies, FY 2025 filed report, and a queued period for AI close
-demo-roboledger *args="":
-    ROBOLEDGER_ENABLED=true UV_ENV_FILE={{_local_env}} uv run python -m examples.roboledger_demo.main {{args}}
-
-# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
-demo-custom-graph flags="new-graph" real_s3="false" base_url="http://localhost:8000":
-    uv run examples/custom_graph_demo/main.py \
-        --base-url {{base_url}} \
-        {{ if flags != "" { "--flags " + flags } else { "" } }} \
-        {{ if real_s3 == "true" { "--real-s3" } else { "" } }}
+migrate-reset db="platform":
+    UV_ENV_FILE={{_local_env}} uv run alembic -c migrations/{{db}}.ini downgrade base
+    UV_ENV_FILE={{_local_env}} uv run alembic -c migrations/{{db}}.ini upgrade head
 
 
 ## Graph API ##
 
 # Graph API - health check
-graph-health url="http://localhost:8001" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query \
+graph-health url="http://localhost:8001":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.graph_query \
         --url {{url}} \
         --command health
 
 # Graph API - get database info
-graph-info graph_id url="http://localhost:8001" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query \
+graph-info graph_id url="http://localhost:8001":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.graph_query \
         --url {{url}} \
         --graph-id {{graph_id}} \
         --command info
 
-# Graph API - execute Cypher query (single quotes auto-converted to double quotes for Cypher)
 # Examples:
 #   just graph-query sec "MATCH (e:Entity {ticker: 'AAPL'}) RETURN e.name"
 #   just graph-query sec "MATCH (e:Entity) WHERE e.ticker IN ['AAPL', 'MSFT'] RETURN e.name"
-graph-query graph_id query format="table" url="http://localhost:8001" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query \
+# Graph API - execute Cypher query (single quotes auto-converted to double quotes for Cypher)
+graph-query graph_id query format="table" url="http://localhost:8001":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.graph_query \
         --url {{url}} \
         --graph-id {{graph_id}} \
         --query "{{query}}" \
         --format {{format}}
 
 # Graph API - execute SQL query on staging tables (DuckDB-based)
-tables-query graph_id query format="table" url="http://localhost:8001" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.tables_query \
+tables-query graph_id query format="table" url="http://localhost:8001":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.tables_query \
         --url {{url}} \
         --graph-id {{graph_id}} \
         --query "{{query}}" \
         --format {{format}}
 
 # LadybugDB embedded database direct query (bypasses API)
-lbug-query graph_id query format="table" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.lbug_query \
+lbug-query graph_id query format="table":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.lbug_query \
         --db-path ./data/lbug-dbs/{{graph_id}}.lbug \
         --query "{{query}}" \
         --format {{format}}
 
 # DuckDB staging database direct query (bypasses API)
-duckdb-query graph_id query format="table" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query \
+duckdb-query graph_id query format="table":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.duckdb_query \
         --db-path ./data/staging/{{graph_id}}.duckdb \
         --query "{{query}}" \
         --format {{format}}
@@ -429,65 +424,63 @@ sec-pipeline count="10" year="":
     @just sec-materialize
 
 # Load single ticker end-to-end (download + process + materialize)
-sec-load ticker year="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run \
+sec-load ticker year="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline run \
         --tickers {{ticker}} \
         {{ if year != "" { "--year " + year } else { "" } }}
 
 # --- Phase 1: Download ---
 
 # Download raw XBRL ZIPs to S3 (top N companies by market cap)
-sec-download count="10" year="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline download \
+sec-download count="10" year="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline download \
         --count {{count}} \
         {{ if year != "" { "--year " + year } else { "" } }}
 
 # --- Phase 2: Process ---
 
-# Process pending filings by quarter (sensor-driven in prod)
-# In local dev, this triggers sec_process runs for each quarter with pending files.
-# In prod, enable the sec_processing_sensor. Use --reset-errors to retry failed files.
-sec-process reset_errors="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline process \
+# Triggers sec_process runs for each quarter with pending files. Use --reset-errors to retry failed files.
+# Process pending SEC filings by quarter
+sec-process reset_errors="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline process \
         {{ if reset_errors != "" { "--reset-errors" } else { "" } }}
 
 # --- Phase 3: Materialize ---
 
 # Materialize processed parquet files to graph (combined: staging + ingestion)
-sec-materialize env=_local_env:
-    @just sec-stage "" {{env}}
-    @just sec-materialize-graph {{env}}
+sec-materialize:
+    @just sec-stage ""
+    @just sec-materialize-graph
 
-# Stage to persistent DuckDB only (decoupled Stage 1)
 # Use this to save 2+ hours of work that persists if materialization fails
-sec-stage year="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline stage \
+# Stage to persistent DuckDB only (decoupled Stage 1)
+sec-stage year="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline stage \
         --graph-id sec \
         {{ if year != "" { "--year " + year } else { "" } }}
 
-# Materialize graph from existing DuckDB staging (decoupled Stage 2)
 # Use this to retry materialization without re-staging
-sec-materialize-graph env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize-graph \
+# Materialize graph from existing DuckDB staging (decoupled Stage 2)
+sec-materialize-graph:
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline materialize-graph \
         --graph-id sec
 
 # --- Phase 4: Text Search Indexing ---
 
 # Index text blocks + narratives into OpenSearch (partitioned by quarter)
-sec-index quarter env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline index {{quarter}} \
+sec-index quarter:
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline index {{quarter}} \
         --graph-id sec
 
 # --- Phase 5: Text Search Query ---
 
-# Search OpenSearch for filing text content (semantic search enabled by default)
 # Examples:
 #   just search sec "revenue growth"
 #   just search sec "risk factors" --entity NVDA
 #   just search sec "inventory" --form-type 10-K --fiscal-year 2025
 #   just search sec "revenue" --size 3
 #   just search sec "revenue" --no-semantic
-#   just search-count sec
+# Search OpenSearch for filing text content (semantic search enabled by default)
 search graph_id query *flags:
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.search_query \
         --graph-id {{graph_id}} \
@@ -496,20 +489,20 @@ search graph_id query *flags:
         "{{query}}"
 
 # Show OpenSearch document count and breakdown
-search-count graph_id="sec" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.search_query \
+search-count graph_id="sec":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.search_query \
         --graph-id {{graph_id}} --count
 
 # --- Utilities ---
 
 # Reset SEC database and S3 data (use clear_s3="" to skip S3/SourceFiles cleanup)
-sec-reset clear_s3="true" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline reset \
+sec-reset clear_s3="true":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.sec_pipeline reset \
         {{ if clear_s3 != "" { "--clear-s3" } else { "" } }}
 
 # Validate SEC repository integrity
-sec-health verbose="" json="" api_url="http://localhost:8001" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_health sec \
+sec-health verbose="" json="" api_url="http://localhost:8001":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.graph_health sec \
         --api-url {{api_url}} \
         {{ if verbose != "" { "--verbose" } else { "" } }} \
         {{ if json != "" { "--json" } else { "" } }}
@@ -549,6 +542,7 @@ clean-data:
     rm -rf ./data/valkey
     rm -rf ./.local/config.json
 
+# Full local reset — tears down containers, wipes local data (artifacts + lbug-dbs), then rebuilds the stack from scratch
 reset-local:
     @just teardown
     @just clean-data

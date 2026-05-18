@@ -6,15 +6,16 @@ This script creates a new generic graph for the custom graph demo. It uses saved
 credentials from step 01.
 
 Usage:
-    uv run 02_create_graph.py                           # Auto-generate graph name
-    uv run 02_create_graph.py --name "My Custom Graph"
-    uv run 02_create_graph.py --reuse                   # Reuse existing graph
+    uv run create_graph.py                           # Auto-generate graph name
+    uv run create_graph.py --name "My Custom Graph"
+    uv run create_graph.py --reuse                   # Reuse existing graph
 
 After running, graph_id is saved to .local/config.json
 """
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -173,7 +174,7 @@ def load_credentials(credentials_path: Path):
   """Load saved credentials."""
   if not credentials_path.exists():
     print(f"\n❌ No credentials found at {credentials_path}")
-    print("   Run: uv run 01_setup_credentials.py first")
+    print("   Run: uv run setup_credentials.py first")
     sys.exit(1)
 
   with open(credentials_path) as f:
@@ -249,9 +250,9 @@ def create_custom_graph(
   print(f"\nGraph ID: {graph_id}")
   print(f"Graph Name: {graph_name}")
   print("\n💡 Next steps:")
-  print("   1. Generate data: uv run 03_generate_data.py")
-  print("   2. Upload & ingest: uv run 04_upload_ingest.py")
-  print("   3. Run queries: uv run 05_query_graph.py")
+  print("   1. Generate data: uv run generate_data.py")
+  print("   2. Upload & ingest: uv run upload_ingest.py")
+  print("   3. Run queries: uv run query_graph.py")
   print("=" * 70 + "\n")
 
   return graph_id
@@ -261,8 +262,8 @@ def main():
   parser = argparse.ArgumentParser(description="Create custom graph")
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   parser.add_argument(
     "--name",
@@ -288,7 +289,7 @@ def main():
 
     if not api_key:
       print("\n❌ No API key found in credentials")
-      print("   Run: uv run 01_setup_credentials.py first")
+      print("   Run: uv run setup_credentials.py first")
       sys.exit(1)
 
     create_custom_graph(

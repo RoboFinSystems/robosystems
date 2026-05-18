@@ -15,14 +15,14 @@ This demo showcases RoboSystems' graph database capabilities for generic graph d
 # Make sure RoboSystems is running
 just start
 
-# Run the complete demo (all steps automatically)
+# Run the complete demo (all steps automatically — reuses existing graph if available)
 just demo-custom-graph
 
-# Or create a new graph explicitly
-just demo-custom-graph "new-graph"
+# Force a fresh graph
+just demo-custom-graph --new-graph
 
-# Or reuse an existing graph
-just demo-custom-graph "reuse-graph"
+# Skip the verification queries at the end
+just demo-custom-graph --skip-queries
 ```
 
 ## What The Demo Does
@@ -49,7 +49,7 @@ just demo-user
 
 # Or run directly with options
 cd examples/custom_graph_demo
-uv run 01_setup_credentials.py --name "Your Name" --email your@email.com
+uv run setup_credentials.py --name "Your Name" --email your@email.com
 ```
 
 **Output**: User created, API key generated, credentials saved to `.local/config.json`
@@ -59,13 +59,13 @@ uv run 01_setup_credentials.py --name "Your Name" --email your@email.com
 ```bash
 # Run the main demo script
 cd examples/custom_graph_demo
-uv run main.py --flags "new-graph"
+uv run main.py --new-graph
 
 # Or run each step individually
-uv run 02_create_graph.py
-uv run 03_generate_data.py
-uv run 04_upload_ingest.py
-uv run 05_query_graph.py --all
+uv run create_graph.py
+uv run generate_data.py
+uv run upload_ingest.py
+uv run query_graph.py --all
 ```
 
 **Output**: Graph created with custom data, example queries executed
@@ -184,7 +184,7 @@ The `schema.json` file is the **official template** for creating custom graph sc
 
 1. Copy the schema file: `cp schema.json my_schema.json`
 2. Modify the nodes, properties, and relationships for your use case
-3. Update `02_create_graph.py` to load your custom schema file
+3. Update `create_graph.py` to load your custom schema file
 4. Generate data matching your schema structure
 
 **Schema Format:**
@@ -237,11 +237,11 @@ cp schema.json my_custom_schema.json
 #    - Properties (e.g., price, quantity, status)
 #    - Relationships (e.g., CUSTOMER_PLACED_ORDER)
 
-# 3. Update 02_create_graph.py to load your schema:
+# 3. Update create_graph.py to load your schema:
 #    Change: schema_file = Path(__file__).parent / "my_custom_schema.json"
 
 # 4. Generate matching data and run the demo
-just demo-custom-graph "new-graph"
+just demo-custom-graph --new-graph
 ```
 
 **Example: Adding a new node type**
@@ -268,7 +268,7 @@ just graph-query <graph_id> "MATCH (p:Person) WHERE p.interests ILIKE '%AI%' RET
 
 # Or use the query script
 cd examples/custom_graph_demo
-uv run 05_query_graph.py --query "MATCH (p:Person) RETURN count(p)"
+uv run query_graph.py --query "MATCH (p:Person) RETURN count(p)"
 ```
 
 ### Generate More Data
@@ -277,8 +277,8 @@ To generate more entities than the default:
 
 ```bash
 cd examples/custom_graph_demo
-uv run 03_generate_data.py --count 200 --regenerate
-uv run 04_upload_ingest.py
+uv run generate_data.py --count 200 --regenerate
+uv run upload_ingest.py
 ```
 
 ### Interactive Mode
@@ -287,7 +287,7 @@ Enter interactive mode for ad-hoc queries:
 
 ```bash
 cd examples/custom_graph_demo
-uv run 05_query_graph.py
+uv run query_graph.py
 
 # Then type preset names or custom queries
 > presets
@@ -338,9 +338,9 @@ just demo-user --force
 ```
 
 **Problem:** Want to start fresh with a new graph
-**Solution:** Use the new-graph flag:
+**Solution:** Use the `--new-graph` flag:
 ```bash
-just demo-custom-graph "new-graph"
+just demo-custom-graph --new-graph
 ```
 
 ## Tips
