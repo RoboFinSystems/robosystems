@@ -21,6 +21,7 @@ Usage:
     uv run python -m examples.roboledger_demo.main <graph_id>             # Load into existing graph
     uv run python -m examples.roboledger_demo.main --dry-run              # Validate data only
     uv run python -m examples.roboledger_demo.main --ai                    # Use MappingOperator instead of hardcoded mappings (requires Bedrock)
+    uv run python -m examples.roboledger_demo.main --skeleton              # Create user + empty roboledger graph only; skip synthetic data load (use for manual QB sandbox connect via UI)
 
 Requires: Docker stack running (just start)
 """
@@ -44,6 +45,14 @@ CREDENTIALS_FILE = Path(".local/config.json")
 DEMO_NAME = "cascade_demo"
 BASE_URL = "http://localhost:8000"
 COMPANY_NAME = "Cascade Advisory Group LLC"
+
+# Skeleton mode: creates an empty roboledger graph for manual QB sandbox
+# connect via the UI. Different DEMO_NAME slot so it doesn't collide with
+# the full Cascade demo in .local/config.json. The placeholder Entity name
+# is overwritten by QB CompanyInfo on first sync.
+SKELETON_DEMO_NAME = "roboledger_skeleton"
+SKELETON_GRAPH_NAME = "RoboLedger Skeleton"
+SKELETON_ENTITY_NAME = "Skeleton Demo Tenant"
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +102,14 @@ def _get_operation_client():
 # ---------------------------------------------------------------------------
 
 
-def create_demo_graph() -> str:
-  """Create user + roboledger graph via the API."""
+def create_demo_graph(skeleton: bool = False) -> str:
+  """Create user + roboledger graph via the API.
+
+  When ``skeleton=True``, provisions an empty graph (placeholder Entity,
+  no synthetic data) under a separate ``.local/config.json`` slot so it
+  doesn't collide with the full Cascade demo. The placeholder Entity is
+  overwritten by QB CompanyInfo on first sync.
+  """
   project_root = Path(__file__).resolve().parents[2]
   if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
@@ -118,7 +133,8 @@ def create_demo_graph() -> str:
   credentials = ensure_user_credentials(context)
   api_key = credentials["api_key"]
 
-  existing = get_graph_id(CREDENTIALS_FILE, DEMO_NAME)
+  demo_slot = SKELETON_DEMO_NAME if skeleton else DEMO_NAME
+  existing = get_graph_id(CREDENTIALS_FILE, demo_slot)
   if existing:
     print(f"\nReusing existing graph: {existing}")
     return existing
@@ -139,24 +155,38 @@ def create_demo_graph() -> str:
     auth_header_name="X-API-Key",
   )
 
-  metadata = GraphMetadata(
-    graph_name=COMPANY_NAME,
-    description="Boutique management consulting firm — close workflow demo",
-    schema_extensions=["roboledger"],
-  )
-
-  request = CreateGraphRequest(
-    metadata=metadata,
-    initial_entity={
-      "name": COMPANY_NAME,
-      "uri": "https://cascadeadvisory.com",
-      "entity_type": "llc",
-      "ticker": "CAG",
-    },
-    tags=["demo", "cascade", "roboledger", "close-workflow"],
-  )
-
-  print(f"\nCreating graph: {COMPANY_NAME}")
+  if skeleton:
+    metadata = GraphMetadata(
+      graph_name=SKELETON_GRAPH_NAME,
+      description="Empty roboledger graph for manual QB sandbox connect via UI",
+      schema_extensions=["roboledger"],
+    )
+    request = CreateGraphRequest(
+      metadata=metadata,
+      initial_entity={
+        "name": SKELETON_ENTITY_NAME,
+        "entity_type": "llc",
+      },
+      tags=["demo", "skeleton", "roboledger", "qb-sandbox"],
+    )
+    print(f"\nCreating graph: {SKELETON_GRAPH_NAME}")
+  else:
+    metadata = GraphMetadata(
+      graph_name=COMPANY_NAME,
+      description="Boutique management consulting firm — close workflow demo",
+      schema_extensions=["roboledger"],
+    )
+    request = CreateGraphRequest(
+      metadata=metadata,
+      initial_entity={
+        "name": COMPANY_NAME,
+        "uri": "https://cascadeadvisory.com",
+        "entity_type": "llc",
+        "ticker": "CAG",
+      },
+      tags=["demo", "cascade", "roboledger", "close-workflow"],
+    )
+    print(f"\nCreating graph: {COMPANY_NAME}")
   response = api_create_graph(client=client, body=request)
   if not response.parsed:
     print(f"Failed to create graph: {response.status_code}")
@@ -202,7 +232,7 @@ def create_demo_graph() -> str:
     sys.exit(1)
 
   save_graph_id(
-    CREDENTIALS_FILE, DEMO_NAME, graph_id, time.strftime("%Y-%m-%d %H:%M:%S")
+    CREDENTIALS_FILE, demo_slot, graph_id, time.strftime("%Y-%m-%d %H:%M:%S")
   )
   print(f"  Graph created: {graph_id}")
   return graph_id
@@ -964,12 +994,34 @@ def generate_fy2025_report(graph_id: str) -> str | None:
 def main() -> None:
   dry_run = "--dry-run" in sys.argv
   with_ai_mapping = "--ai" in sys.argv
+  skeleton = "--skeleton" in sys.argv
   args = [a for a in sys.argv[1:] if not a.startswith("--")]
 
   # Add project root to path
   project_root = Path(__file__).resolve().parents[2]
   if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+
+  if skeleton:
+    print(f"\n{SKELETON_GRAPH_NAME} — RoboLedger Skeleton Setup")
+    print("=" * 60)
+    print("  Mode:         skeleton (user + empty graph only)")
+    print("  Data load:    skipped")
+    graph_id = args[0] if args else create_demo_graph(skeleton=True)
+    print("\n" + "=" * 60)
+    print(f"  Graph ID: {graph_id}")
+    if CREDENTIALS_FILE.exists():
+      print(f"  API Key:  (saved to {CREDENTIALS_FILE})")
+    print("\n  Empty roboledger graph ready for QB sandbox connect.")
+    print("\n  Next steps:")
+    print("    1. Open the roboledger-app UI (typically http://localhost:3001)")
+    print(f"    2. Sign in with the credentials in {CREDENTIALS_FILE}")
+    print(f"    3. Switch to the workspace: {graph_id}")
+    print("    4. Connect QuickBooks (sandbox flow — Path A in")
+    print("       Connecting-QuickBooks-Locally.md)")
+    print("    5. Run initial sync; fiscal calendar bootstraps from QB CompanyInfo.")
+    print("=" * 60)
+    return
 
   from .data import ACCOUNTS, get_all_transactions, validate_transactions
 

@@ -18,21 +18,21 @@ This demo showcases RoboSystems' integration with the SEC (Securities and Exchan
 just start
 
 # Load and query NVIDIA's 2025 SEC data (includes example queries)
-just demo-sec NVDA 2025
+just demo-sec --ticker NVDA --year 2025
 
 # Load data without running queries
-just demo-sec NVDA 2025 true
+just demo-sec --ticker NVDA --year 2025 --skip-queries
 
 # Query SEC data with examples
 just demo-sec-query
 
 # Run all available query examples
-just demo-sec-query true
+just demo-sec-query --all
 ```
 
 ## What The Demo Does
 
-When you run `just demo-sec NVDA 2025`, it automatically:
+When you run `just demo-sec --ticker NVDA --year 2025`, it automatically:
 
 1. **Sets up credentials** - Creates a user account and API key (or reuses existing)
 2. **Loads SEC data** - Fetches NVIDIA's 2025 10-K/10-Q filings from EDGAR
@@ -77,13 +77,13 @@ Use the company's ticker symbol with the `just demo-sec` command.
 
 ```bash
 # Load Apple's 2024 financials
-just demo-sec AAPL 2024
+just demo-sec --ticker AAPL --year 2024
 
 # Load Microsoft's 2023 financials
-just demo-sec MSFT 2023
+just demo-sec --ticker MSFT --year 2023
 
 # Skip the query examples (faster)
-just demo-sec TSLA 2025 true
+just demo-sec --ticker TSLA --year 2025 --skip-queries
 ```
 
 ### Run Query Examples
@@ -93,7 +93,7 @@ just demo-sec TSLA 2025 true
 just demo-sec-query
 
 # Run all preset queries
-just demo-sec-query true
+just demo-sec-query --all
 
 # Or run directly with Python
 cd examples/sec_demo

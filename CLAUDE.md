@@ -160,9 +160,11 @@ just sec-reset             # Reset SEC database
 ### Demo Scripts
 
 ```bash
-just demo-user             # Create/reuse demo user credentials
-just demo-custom-graph     # Run custom graph demo
-just demo-sec NVDA 2025    # Run SEC demo
+just demo-user                            # Create/reuse demo user credentials
+just demo-custom-graph                    # Run custom graph demo
+just demo-sec --ticker NVDA --year 2025   # Run SEC demo
+just demo-roboledger                      # Full RoboLedger demo (synthetic data)
+just demo-roboledger --skeleton           # Skeleton: user + empty roboledger graph for manual QB sandbox connect
 ```
 
 ## Code Standards

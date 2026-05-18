@@ -20,9 +20,16 @@ just demo-roboledger <graph_id>
 
 # Dry run (validate data only)
 just demo-roboledger --dry-run
+
+# Skeleton mode: create user + empty roboledger graph only, then exit.
+# Use this to log into the UI and connect a real QuickBooks sandbox manually.
+just demo-roboledger --skeleton
+
+# Use the MappingOperator instead of hardcoded mappings (requires Bedrock)
+just demo-roboledger --ai
 ```
 
-The `just demo-roboledger` recipe sets `ROBOLEDGER_ENABLED=true` and `UV_ENV_FILE` for you. Running `uv run python -m examples.roboledger_demo.main` directly raises `RuntimeError: Extensions database access attempted but no extension domain is enabled` — the extensions DB session is gated behind the per-domain flag.
+The `just demo-roboledger` recipe sets `UV_ENV_FILE={{_local_env}}` so the script picks up `ROBOSYSTEMS_API_URL` and other settings from `.env.local`. `ROBOLEDGER_ENABLED=true` lives in `.env`/`env.local` and is read by the API container at startup — the script doesn't need it set on its own process.
 
 ## What Gets Created
 

@@ -9,15 +9,16 @@ The memory schema extension provides AI agents with a structured knowledge graph
 for storing concepts, observations, and session context.
 
 Usage:
-    uv run 07_memory_subgraph.py
-    uv run 07_memory_subgraph.py --base-url http://localhost:8000
-    uv run 07_memory_subgraph.py --name mymemory
+    uv run memory_subgraph.py
+    uv run memory_subgraph.py --base-url http://localhost:8000
+    uv run memory_subgraph.py --name mymemory
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -60,7 +61,7 @@ def make_params(params: dict) -> CypherQueryRequestParametersType0:
 
 def load_credentials(path: Path = CREDENTIALS_FILE) -> dict:
   if not path.exists():
-    print(f"❌ Credentials not found at {path}. Run 01_setup_credentials.py first.")
+    print(f"❌ Credentials not found at {path}. Run setup_credentials.py first.")
     sys.exit(1)
   with path.open() as f:
     return json.load(f)
@@ -491,8 +492,8 @@ def main():
   parser = argparse.ArgumentParser(description="Create and seed a memory subgraph")
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   parser.add_argument(
     "--name",
@@ -543,7 +544,7 @@ def main():
   print(f"\nParent Graph: {graph_id}")
   print(f"Memory Subgraph: {subgraph_id}")
   print("\n💡 The memory subgraph ID can be used with all /v1/graphs/{graph_id}/* endpoints")
-  print("   Example: uv run 05_query_graph.py --query \"MATCH (c:Concept) RETURN c.name\"")
+  print("   Example: uv run query_graph.py --query \"MATCH (c:Concept) RETURN c.name\"")
   print("=" * 70 + "\n")
 
 

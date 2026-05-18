@@ -6,16 +6,17 @@ Provides preset queries and interactive exploration for the generic custom
 graph demo (people, companies, projects).
 
 Usage:
-    uv run 05_query_graph.py                      # Interactive mode
-    uv run 05_query_graph.py --all                # Run all preset queries
-    uv run 05_query_graph.py --preset teams       # Run a specific preset
-    uv run 05_query_graph.py --query "MATCH (n) RETURN count(n)"
+    uv run query_graph.py                      # Interactive mode
+    uv run query_graph.py --all                # Run all preset queries
+    uv run query_graph.py --preset teams       # Run a specific preset
+    uv run query_graph.py --query "MATCH (n) RETURN count(n)"
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -140,7 +141,7 @@ def load_credentials(credentials_path: Path) -> dict:
   if not credentials_path.exists():
     raise FileNotFoundError(
       f"No credentials found at {credentials_path}. "
-      "Run 01_setup_credentials.py first."
+      "Run setup_credentials.py first."
     )
   with credentials_path.open() as fh:
     return json.load(fh)
@@ -249,8 +250,8 @@ def parse_args() -> argparse.Namespace:
   )
   parser.add_argument(
     "--base-url",
-    default="http://localhost:8000",
-    help="API base URL (default: http://localhost:8000)",
+    default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
+    help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
   parser.add_argument(
     "--all",
