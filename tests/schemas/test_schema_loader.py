@@ -232,3 +232,72 @@ class TestContextAwareSchemaLoader:
       "application", "robosystems", additional_extensions=["memory"]
     )
     assert isinstance(loader, LadybugSchemaLoader)
+
+
+class TestREAPrimitives:
+  """Phase 1 ontology alignment: Agent + Event in base, EVENT_TRIGGERS_TRANSACTION
+  bridge in roboledger TRANSACTION layer.
+
+  Validates that the spec §4.5 placement decision actually holds in the loader:
+  REA primitives reach every consumer (including SEC) as base nodes, while the
+  McCarthy bridge edge is correctly scoped to roboledger TRANSACTION_RELATIONSHIPS
+  and absent from SEC.
+  """
+
+  def test_agent_and_event_in_default_loader(self):
+    loader = get_schema_loader()
+    assert "Agent" in loader.nodes
+    assert "Event" in loader.nodes
+
+  def test_agent_and_event_in_roboledger_application(self):
+    loader = get_contextual_schema_loader("application", "roboledger")
+    assert "Agent" in loader.nodes
+    assert "Event" in loader.nodes
+
+  def test_agent_and_event_in_sec_repository(self):
+    """Base nodes flow through to SEC. Tables stay empty (no rows
+    loaded), but the schema includes them per spec §4.5 Option A."""
+    loader = ContextAwareSchemaLoader(extension="roboledger", context="sec_repository")
+    assert "Agent" in loader.nodes
+    assert "Event" in loader.nodes
+
+  def test_rea_edges_in_default_loader(self):
+    loader = get_schema_loader()
+    for edge in (
+      "ENTITY_HAS_AGENT",
+      "ENTITY_HAS_EVENT",
+      "EVENT_INVOLVES_AGENT",
+      "EVENT_AFFECTS_RESOURCE",
+      "EVENT_OBLIGATED_BY_EVENT",
+      "EVENT_DISCHARGES_EVENT",
+      "EVENT_REPLACES_EVENT",
+    ):
+      assert edge in loader.relationships, f"missing base edge: {edge}"
+
+  def test_event_action_property_on_event_node(self):
+    """The canonical action verb refinement is materialized as a graph property."""
+    loader = get_schema_loader()
+    event = loader.nodes["Event"]
+    prop_names = {p.name for p in event.properties}
+    assert "event_action" in prop_names
+
+  def test_event_triggers_transaction_in_roboledger(self):
+    loader = get_contextual_schema_loader("application", "roboledger")
+    assert "EVENT_TRIGGERS_TRANSACTION" in loader.relationships
+    edge = loader.relationships["EVENT_TRIGGERS_TRANSACTION"]
+    assert edge.from_node == "Event"
+    assert edge.to_node == "Transaction"
+
+  def test_event_triggers_transaction_absent_from_sec(self):
+    """Bridge edge is roboledger TRANSACTION-scoped; SEC uses REPORTING_ONLY
+    context so the bridge is correctly excluded."""
+    loader = ContextAwareSchemaLoader(extension="roboledger", context="sec_repository")
+    assert "EVENT_TRIGGERS_TRANSACTION" not in loader.relationships
+
+  def test_fiscal_nodes_not_in_graph_layer(self):
+    """FiscalCalendar / FiscalPeriod stay OLTP-only per the §2.1 test
+    (operational state, not curated business truth). Guards against
+    accidental re-introduction during future graph work."""
+    loader = get_contextual_schema_loader("application", "roboledger")
+    assert "FiscalCalendar" not in loader.nodes
+    assert "FiscalPeriod" not in loader.nodes

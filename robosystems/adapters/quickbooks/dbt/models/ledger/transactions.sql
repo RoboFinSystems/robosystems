@@ -124,6 +124,33 @@ select
       when e.tx_type = 'Inventory Adjustment'       then 'adjustment'
       else 'adjustment'
     end                                                as event_category,
+    -- Canonical action verb — finer-grained than event_category. Must
+    -- stay in sync with QB_TXTYPE_TO_EVENT_ACTION in
+    -- adapters/quickbooks/pipeline/event_action_mapping.py. The
+    -- test_event_action_mapping parity tests enforce this. NULL falls
+    -- through the DB CHECK (event_action is nullable).
+    case
+      when e.tx_type = 'Invoice'                    then 'transferAllRights'
+      when e.tx_type = 'SalesReceipt'               then 'transferAllRights'
+      when e.tx_type = 'Sales Receipt'              then 'transferAllRights'
+      when e.tx_type = 'Bill'                       then 'accept'
+      when e.tx_type = 'Payment'                    then 'transfer'
+      when e.tx_type = 'BillPayment'                then 'transfer'
+      when e.tx_type = 'Bill Payment'               then 'transfer'
+      when e.tx_type = 'Bill Payment (Credit Card)' then 'transfer'
+      when e.tx_type = 'Bill Payment (Check)'       then 'transfer'
+      when e.tx_type = 'Expense'                    then 'transfer'
+      when e.tx_type = 'Cash Expense'               then 'transfer'
+      when e.tx_type = 'Check'                      then 'transfer'
+      when e.tx_type = 'Credit Card Expense'        then 'transfer'
+      when e.tx_type = 'Credit Card Credit'         then 'transfer'
+      when e.tx_type = 'Deposit'                    then 'transfer'
+      when e.tx_type = 'JournalEntry'               then 'modify'
+      when e.tx_type = 'Journal Entry'              then 'modify'
+      when e.tx_type = 'Inventory Qty Adjust'       then 'modify'
+      when e.tx_type = 'Inventory Adjustment'       then 'modify'
+      else null
+    end                                                as event_action,
     h.agent_external_id                                as agent_external_id,
     h.agent_type                                       as agent_type,
     -- linked_txns is a JSON-stringified [{txn_id, txn_type}] list,

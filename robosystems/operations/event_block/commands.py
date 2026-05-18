@@ -98,6 +98,7 @@ def _build_event_row(
     event_type=body.event_type,
     event_category=body.event_category,
     event_class=body.event_class,
+    event_action=body.event_action,
     agent_id=body.agent_id,
     resource_type=body.resource_type,
     resource_element_id=body.resource_element_id,
@@ -312,6 +313,9 @@ def update_event_block(
 
   if body.discharges_event_id is not None:
     event.discharges_event_id = body.discharges_event_id
+
+  if body.event_action is not None:
+    event.event_action = body.event_action
 
   if fire_handler:
     # Handler runs after metadata patches so it sees the final shape.

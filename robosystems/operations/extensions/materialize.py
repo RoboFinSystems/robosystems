@@ -69,6 +69,12 @@ class MaterializeResult:
 NODE_TABLES = [
   "Entity",
   "Element",
+  # REA primitives (base ontology — ontology-alignment.md §4.2-§4.3).
+  # Agent before Event so EVENT_INVOLVES_AGENT can reference it. Event
+  # before Entry so EVENT_TRIGGERS_TRANSACTION (Event→Transaction) and
+  # the entry-side audit chain land in the right order.
+  "Agent",
+  "Event",
   "Transaction",
   "Entry",
   "LineItem",
@@ -91,7 +97,17 @@ NODE_TABLES = [
 
 # Relationship tables in materialization order (nodes must exist first)
 RELATIONSHIP_TABLES = [
+  # REA edges (base ontology — Entity, Agent, Event, Element all exist by here)
+  "ENTITY_HAS_AGENT",
+  "ENTITY_HAS_EVENT",
+  "EVENT_INVOLVES_AGENT",
+  "EVENT_AFFECTS_RESOURCE",
+  "EVENT_OBLIGATED_BY_EVENT",
+  "EVENT_DISCHARGES_EVENT",
+  "EVENT_REPLACES_EVENT",
+  # roboledger transaction edges
   "ENTITY_HAS_TRANSACTION",
+  "EVENT_TRIGGERS_TRANSACTION",
   "TRANSACTION_HAS_ENTRY",
   "ENTRY_HAS_LINE_ITEM",
   "LINE_ITEM_RELATES_TO_ELEMENT",
@@ -147,6 +163,9 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "Taxonomy": "base",
   "Period": "base",
   "Unit": "base",
+  # REA primitives (base — universal across RoboX extensions)
+  "Agent": "base",
+  "Event": "base",
   # roboledger nodes
   "Transaction": "roboledger",
   "Entry": "roboledger",
@@ -167,8 +186,17 @@ TABLE_EXTENSIONS: dict[str, str] = {
   "ASSOCIATION_HAS_FROM_ELEMENT": "base",
   "ASSOCIATION_HAS_TO_ELEMENT": "base",
   "ELEMENT_HAS_TRAIT": "base",
+  # REA edges (base — Entity/Agent/Event/Element all in base)
+  "ENTITY_HAS_AGENT": "base",
+  "ENTITY_HAS_EVENT": "base",
+  "EVENT_INVOLVES_AGENT": "base",
+  "EVENT_AFFECTS_RESOURCE": "base",
+  "EVENT_OBLIGATED_BY_EVENT": "base",
+  "EVENT_DISCHARGES_EVENT": "base",
+  "EVENT_REPLACES_EVENT": "base",
   # roboledger edges
   "ENTITY_HAS_TRANSACTION": "roboledger",
+  "EVENT_TRIGGERS_TRANSACTION": "roboledger",
   "TRANSACTION_HAS_ENTRY": "roboledger",
   "ENTRY_HAS_LINE_ITEM": "roboledger",
   "LINE_ITEM_RELATES_TO_ELEMENT": "roboledger",
@@ -450,6 +478,59 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'traits')
   """
 
+  # ── REA primitives (base ontology — ontology-alignment.md §4) ────────
+  # Agent + Event are universal across RoboX extensions. Skip JSONB
+  # columns (Agent.address, Agent.metadata_, Event.metadata_) — graph
+  # layer is a curated knowledge surface. Event.amount converts cents to
+  # currency-major (matches Transaction.amount convention).
+
+  tables["Agent"] = f"""
+    CREATE OR REPLACE TABLE "Agent" AS
+    SELECT
+      id                              AS identifier,
+      NULL::VARCHAR                   AS uri,
+      agent_type,
+      name,
+      legal_name,
+      tax_id,
+      registration_number,
+      duns,
+      lei,
+      email,
+      phone,
+      source,
+      external_id,
+      is_active,
+      is_1099_recipient,
+      CAST(created_at AS VARCHAR)     AS created_at,
+      CAST(updated_at AS VARCHAR)     AS updated_at
+    FROM postgres_scan('{c}', '{s}', 'agents')
+  """
+
+  tables["Event"] = f"""
+    CREATE OR REPLACE TABLE "Event" AS
+    SELECT
+      id                              AS identifier,
+      NULL::VARCHAR                   AS uri,
+      event_type,
+      event_category,
+      event_class,
+      event_action,
+      resource_type,
+      CAST(occurred_at AS VARCHAR)    AS occurred_at,
+      CAST(effective_at AS VARCHAR)   AS effective_at,
+      status,
+      source,
+      external_id,
+      external_url,
+      CAST(amount AS DOUBLE) / 100.0  AS amount,
+      currency,
+      description,
+      CAST(created_at AS VARCHAR)     AS created_at,
+      created_by
+    FROM postgres_scan('{c}', '{s}', 'events')
+  """
+
   tables["Transaction"] = f"""
     CREATE OR REPLACE TABLE "Transaction" AS
     SELECT
@@ -720,6 +801,84 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       source_structure_id             AS dst
     FROM postgres_scan('{c}', '{s}', 'entries')
     WHERE source_structure_id IS NOT NULL
+  """
+
+  # ── REA edges (ontology-alignment.md §4.2-§4.3) ──────────────────────
+  # Entity is the per-graph singleton; fan it out to every Agent / Event.
+  # Sibling edges populated only when the OLTP column is non-null.
+
+  tables["ENTITY_HAS_AGENT"] = f"""
+    CREATE OR REPLACE TABLE ENTITY_HAS_AGENT AS
+    SELECT
+      '{entity_id}'                   AS src,
+      id                              AS dst
+    FROM postgres_scan('{c}', '{s}', 'agents')
+  """
+
+  tables["ENTITY_HAS_EVENT"] = f"""
+    CREATE OR REPLACE TABLE ENTITY_HAS_EVENT AS
+    SELECT
+      '{entity_id}'                   AS src,
+      id                              AS dst
+    FROM postgres_scan('{c}', '{s}', 'events')
+  """
+
+  tables["EVENT_INVOLVES_AGENT"] = f"""
+    CREATE OR REPLACE TABLE EVENT_INVOLVES_AGENT AS
+    SELECT
+      id                              AS src,
+      agent_id                        AS dst
+    FROM postgres_scan('{c}', '{s}', 'events')
+    WHERE agent_id IS NOT NULL
+  """
+
+  tables["EVENT_AFFECTS_RESOURCE"] = f"""
+    CREATE OR REPLACE TABLE EVENT_AFFECTS_RESOURCE AS
+    SELECT
+      id                              AS src,
+      resource_element_id             AS dst
+    FROM postgres_scan('{c}', '{s}', 'events')
+    WHERE resource_element_id IS NOT NULL
+  """
+
+  tables["EVENT_OBLIGATED_BY_EVENT"] = f"""
+    CREATE OR REPLACE TABLE EVENT_OBLIGATED_BY_EVENT AS
+    SELECT
+      id                              AS src,
+      obligated_by_event_id           AS dst
+    FROM postgres_scan('{c}', '{s}', 'events')
+    WHERE obligated_by_event_id IS NOT NULL
+  """
+
+  tables["EVENT_DISCHARGES_EVENT"] = f"""
+    CREATE OR REPLACE TABLE EVENT_DISCHARGES_EVENT AS
+    SELECT
+      id                              AS src,
+      discharges_event_id             AS dst
+    FROM postgres_scan('{c}', '{s}', 'events')
+    WHERE discharges_event_id IS NOT NULL
+  """
+
+  tables["EVENT_REPLACES_EVENT"] = f"""
+    CREATE OR REPLACE TABLE EVENT_REPLACES_EVENT AS
+    SELECT
+      id                              AS src,
+      replaces_event_id               AS dst
+    FROM postgres_scan('{c}', '{s}', 'events')
+    WHERE replaces_event_id IS NOT NULL
+  """
+
+  # McCarthy bridge — the GL Transaction this Event triggered. OLTP
+  # source is transactions.triggered_by_event_id (audit column from
+  # migration 0005). Edge exists only for transactions originating from
+  # an Event; manual-only transactions have no event.
+  tables["EVENT_TRIGGERS_TRANSACTION"] = f"""
+    CREATE OR REPLACE TABLE EVENT_TRIGGERS_TRANSACTION AS
+    SELECT
+      triggered_by_event_id           AS src,
+      id                              AS dst
+    FROM postgres_scan('{c}', '{s}', 'transactions')
+    WHERE triggered_by_event_id IS NOT NULL
   """
 
   # ── Reporting Layer ────────────────────────────────────────────────────

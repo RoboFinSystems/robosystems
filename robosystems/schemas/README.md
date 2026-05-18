@@ -180,6 +180,8 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 | **GraphMetadata** | Database metadata and configuration    | identifier, graph_id, tier, schema_type        |
 | **User**          | System users with authentication       | identifier, email, is_active                   |
 | **Entity**        | Organizations, companies, subsidiaries | identifier, cik, ticker, name, entity_type     |
+| **Agent**         | REA counterparty (customer, vendor, …) | identifier, agent_type, name, source           |
+| **Event**         | REA business event with canonical action verb | identifier, event_type, event_action, status   |
 | **Period**        | Time periods for data                  | start_date, end_date, fiscal_year, period_type |
 | **Unit**          | Measurement units                      | measure, value, numerator_uri                  |
 | **Element**       | XBRL taxonomy elements                 | qname, period_type, is_numeric                 |
@@ -187,11 +189,21 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 | **Reference**     | Authoritative element references       | value, type                                    |
 | **Taxonomy**      | Global XBRL taxonomies                 | name, version, namespace                       |
 
+`Agent` and `Event` are universal REA primitives (`ontology-alignment.md` §4.2-§4.3) — every planned RoboX extension needs them. `Event.event_action` carries the canonical 19-verb action vocabulary (`models/extensions/roboledger/event.py:EVENT_ACTIONS`) refining the coarser `event_category`. The vocabulary converges with Valueflows v1.0; canonical naming is RoboSystems-native. SEC-flavored repositories get the schema with empty tables (no rows loaded), per spec §4.5 Option A.
+
 ### Core Relationships
 
 - **ENTITY_OWNS_ENTITY** → Entity: Hierarchical ownership
 - **ELEMENT_HAS_LABEL** → Label: Human-readable descriptions
 - **ELEMENT_IN_TAXONOMY** → Taxonomy: Taxonomy membership
+- **ENTITY_HAS_AGENT / ENTITY_HAS_EVENT** → Agent/Event: Entity owns its REA records
+- **EVENT_INVOLVES_AGENT** → Agent: Counterparty participating in an event
+- **EVENT_AFFECTS_RESOURCE** → Element: REA stockflow — element playing the Resource role
+- **EVENT_OBLIGATED_BY_EVENT** → Event: REA forward-materialization (commitment → fulfillment)
+- **EVENT_DISCHARGES_EVENT** → Event: REA settlement / reciprocity
+- **EVENT_REPLACES_EVENT** → Event: Correction chain (this event supersedes another)
+
+Fiscal calendar / fiscal period stays OLTP-only — operational state (rolling close pointers, status mutations) rather than curated graph content. Operators query period membership via `Entry.posting_date` ranges; named-period lookup deferred until a concrete operator query demands it.
 
 ## Extension Schemas
 
@@ -213,6 +225,7 @@ The RoboLedger extension models the full accounting domain: financial reporting 
 - **Use Cases**: Entity accounting, journal entries, trial balances
 - **Key Features**: Three-level model (Transaction → Entry → LineItem), dimensional tagging (department, class, location)
 - **Note**: Chart of accounts is represented via Element/Association pattern (shared with Reporting Section)
+- **McCarthy bridge edge**: `EVENT_TRIGGERS_TRANSACTION` (Event → Transaction) realizes McCarthy 1982's REA vision at the graph layer — every GL Transaction is traceable to the originating Event when one exists. Materialized from `transactions.triggered_by_event_id`; manual-only Transactions have no edge.
 
 #### Context-Aware Loading
 

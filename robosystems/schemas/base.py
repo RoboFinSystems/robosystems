@@ -263,6 +263,83 @@ BASE_NODES = [
       Property(name="confidence", type="DOUBLE"),
     ],
   ),
+  # ── REA primitives (ontology-alignment.md §4.2, §4.3) ────────────────
+  # Agent + Event are universal across every planned RoboX extension.
+  # Promoted to base per INVARIANT 1. Today only roboledger populates
+  # them; future extensions (RoboFO, RoboSCM, RoboHRM, RoboEPM,
+  # RoboWorkflow) will use the same primitives. Shared-repository graphs
+  # (e.g. SEC) get empty node tables — harmless, materialization writes
+  # no rows.
+  Node(
+    name="Agent",
+    description="REA counterparty — the external actor a business event is exchanged with "
+    "(customer, vendor, employee, bank, regulator, …). Distinct from Entity, which is "
+    "the reporting entity that owns the graph. Mirrored from the extensions OLTP "
+    "agents table; JSONB columns (address, metadata) and connection scoping are not "
+    "materialized.",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),  # ULID "agt_*"
+      Property(name="uri", type="STRING"),  # canonical URI for cross-graph reference
+      Property(
+        name="agent_type", type="STRING"
+      ),  # customer | vendor | employee | owner | supplier | government | lender | self | other
+      Property(name="name", type="STRING"),
+      Property(name="legal_name", type="STRING"),
+      Property(name="tax_id", type="STRING"),
+      Property(name="registration_number", type="STRING"),
+      Property(name="duns", type="STRING"),
+      Property(name="lei", type="STRING"),
+      Property(name="email", type="STRING"),
+      Property(name="phone", type="STRING"),
+      Property(
+        name="source", type="STRING"
+      ),  # native | quickbooks | xero | plaid | ...
+      Property(name="external_id", type="STRING"),
+      Property(name="is_active", type="BOOLEAN"),
+      Property(name="is_1099_recipient", type="BOOLEAN"),
+      Property(name="created_at", type="STRING"),
+      Property(name="updated_at", type="STRING"),
+    ],
+  ),
+  Node(
+    name="Event",
+    description="REA economic or support event — 'something happened in the real world'. "
+    "The canonical record from which GL postings (Transaction → Entry → LineItem) are "
+    "derived. Carries canonical action verb refinement (event_action) plus the duality "
+    "and correction chains as graph edges. Mirrored from the extensions OLTP events "
+    "table; JSONB metadata is not materialized. amount is converted from BigInteger "
+    "cents to DOUBLE currency-major (matches Transaction.amount convention).",
+    properties=[
+      Property(name="identifier", type="STRING", is_primary_key=True),  # ULID "evt_*"
+      Property(name="uri", type="STRING"),
+      Property(name="event_type", type="STRING"),  # open vocabulary
+      Property(
+        name="event_category", type="STRING"
+      ),  # economic: sales|purchase|... ; support: control|approval|...
+      Property(name="event_class", type="STRING"),  # economic | support
+      Property(
+        name="event_action", type="STRING"
+      ),  # Canonical 19-verb action vocabulary (see EVENT_ACTIONS in models)
+      Property(
+        name="resource_type", type="STRING"
+      ),  # goods | services | money | right | obligation | information | labor
+      Property(name="occurred_at", type="STRING"),  # ISO 8601
+      Property(name="effective_at", type="STRING"),
+      Property(
+        name="status", type="STRING"
+      ),  # captured | classified | committed | pending | fulfilled | voided | superseded
+      Property(
+        name="source", type="STRING"
+      ),  # manual|system|schedule|quickbooks|xero|plaid
+      Property(name="external_id", type="STRING"),
+      Property(name="external_url", type="STRING"),
+      Property(name="amount", type="DOUBLE"),  # currency-major; OLTP cents / 100
+      Property(name="currency", type="STRING"),  # ISO 4217
+      Property(name="description", type="STRING"),
+      Property(name="created_at", type="STRING"),
+      Property(name="created_by", type="STRING"),
+    ],
+  ),
 ]
 
 # Base Relationships - Common Foundation
@@ -447,5 +524,70 @@ BASE_RELATIONSHIPS = [
       ),  # version | entity_extension | industry | jurisdiction
       Property(name="effective_date", type="STRING"),
     ],
+  ),
+  # ── REA edges (ontology-alignment.md §4.2, §4.3) ─────────────────────
+  # Entity owns its Agent/Event records. REA duality + correction chains
+  # are self-referential on Event.
+  Relationship(
+    name="ENTITY_HAS_AGENT",
+    from_node="Entity",
+    to_node="Agent",
+    description="Entity owns this counterparty agent record. Materialized as a "
+    "single-Entity-per-graph fanout — every Agent row is owned by the graph's "
+    "reporting entity.",
+    properties=[],
+  ),
+  Relationship(
+    name="ENTITY_HAS_EVENT",
+    from_node="Entity",
+    to_node="Event",
+    description="Entity owns this business event record. Materialized as a "
+    "single-Entity-per-graph fanout — every Event row is owned by the graph's "
+    "reporting entity.",
+    properties=[],
+  ),
+  Relationship(
+    name="EVENT_INVOLVES_AGENT",
+    from_node="Event",
+    to_node="Agent",
+    description="REA agent participation — the counterparty involved in this event. "
+    "Nullable in OLTP; the edge exists only for events with a populated agent_id.",
+    properties=[],
+  ),
+  Relationship(
+    name="EVENT_AFFECTS_RESOURCE",
+    from_node="Event",
+    to_node="Element",
+    description="REA stockflow link — the specific resource (Element plays the "
+    "Resource Specification role) this event affects. Nullable in OLTP; the edge "
+    "exists only for events with a populated resource_element_id.",
+    properties=[],
+  ),
+  Relationship(
+    name="EVENT_OBLIGATED_BY_EVENT",
+    from_node="Event",
+    to_node="Event",
+    description="REA forward-materialization — this event was scheduled or obligated "
+    "by an upstream event (e.g. depreciation entries point at the asset_acquired event). "
+    "Self-referential; application-validated.",
+    properties=[],
+  ),
+  Relationship(
+    name="EVENT_DISCHARGES_EVENT",
+    from_node="Event",
+    to_node="Event",
+    description="REA settlement / reciprocity — this event discharges the obligation "
+    "raised by another (e.g. cash_received points at the originating sale_invoiced). "
+    "Self-referential; application-validated.",
+    properties=[],
+  ),
+  Relationship(
+    name="EVENT_REPLACES_EVENT",
+    from_node="Event",
+    to_node="Event",
+    description="Correction chain — this event supersedes the one it points at. "
+    "Mirror of Event.replaces_event_id; the backward link (Event.replaced_by_event_id) "
+    "is derived from the same edge in the reverse direction.",
+    properties=[],
   ),
 ]
