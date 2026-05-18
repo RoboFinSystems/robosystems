@@ -54,24 +54,25 @@ just demo-custom-graph
 
 **Subsequent runs**: Reuses credentials and graph (~20 seconds).
 
-**Command syntax**: `just demo-custom-graph [flags] [base_url]`
-- Flags are comma-separated: `new-user,new-graph,skip-queries`
-- Base URL defaults to `http://localhost:8000`
+**Command syntax**: `just demo-custom-graph [--flags]`
+- All flags pass through to the underlying script
+- Base URL is read from `ROBOSYSTEMS_API_URL` in `.env.local` (defaults to `http://localhost:8000`)
+- LocalStack vs real S3 is auto-detected from the base URL (any localhost / 127.0.0.1 → LocalStack)
 
 ### Quick Start Options
 
 ```bash
 # Start fresh with new user and graph
-just demo-custom-graph new-user,new-graph
+just demo-custom-graph --new-user --new-graph
 
 # Create new graph (keep existing user)
-just demo-custom-graph new-graph
+just demo-custom-graph --new-graph
 
 # Skip verification queries
-just demo-custom-graph skip-queries
+just demo-custom-graph --skip-queries
 
 # Combine multiple flags
-just demo-custom-graph new-user,new-graph,skip-queries
+just demo-custom-graph --new-user --new-graph --skip-queries
 ```
 
 ## The Schema Template: `schema.json`
@@ -135,7 +136,7 @@ Supported data types in your schema:
 
 The `just demo-custom-graph` command runs all 5 steps automatically. This section explains what happens during each step.
 
-### Step 1: Setup Credentials (`01_setup_credentials.py`)
+### Step 1: Setup Credentials (`setup_credentials.py`)
 
 **What happens automatically:**
 - Creates new user in PostgreSQL database
@@ -144,16 +145,16 @@ The `just demo-custom-graph` command runs all 5 steps automatically. This sectio
 
 **Control via flags:**
 ```bash
-just demo-custom-graph new-user  # Force new credentials
+just demo-custom-graph --new-user  # Force new credentials
 ```
 
 **Manual execution (if needed):**
 ```bash
-uv run examples/custom_graph_demo/01_setup_credentials.py
-uv run examples/custom_graph_demo/01_setup_credentials.py --force  # Force new
+uv run examples/custom_graph_demo/setup_credentials.py
+uv run examples/custom_graph_demo/setup_credentials.py --force  # Force new
 ```
 
-### Step 2: Create Graph Database (`02_create_graph.py`)
+### Step 2: Create Graph Database (`create_graph.py`)
 
 **What happens automatically:**
 - Reads `schema.json` from the demo directory
@@ -163,13 +164,13 @@ uv run examples/custom_graph_demo/01_setup_credentials.py --force  # Force new
 
 **Control via flags:**
 ```bash
-just demo-custom-graph new-graph  # Force new graph
+just demo-custom-graph --new-graph  # Force new graph
 ```
 
 **Manual execution (if needed):**
 ```bash
-uv run examples/custom_graph_demo/02_create_graph.py
-uv run examples/custom_graph_demo/02_create_graph.py --reuse  # Reuse existing
+uv run examples/custom_graph_demo/create_graph.py
+uv run examples/custom_graph_demo/create_graph.py --reuse  # Reuse existing
 ```
 
 **Customizing the Schema:**
@@ -177,13 +178,13 @@ uv run examples/custom_graph_demo/02_create_graph.py --reuse  # Reuse existing
 The script loads `schema.json` from the same directory. To use your own schema:
 
 ```python
-# In 02_create_graph.py:
+# In create_graph.py:
 def build_custom_schema_definition() -> CustomSchemaDefinition:
   schema_file = Path(__file__).parent / "schema.json"
   # Change to: schema_file = Path(__file__).parent / "my_schema.json"
 ```
 
-### Step 3: Generate Data (`03_generate_data.py`)
+### Step 3: Generate Data (`generate_data.py`)
 
 **What happens automatically:**
 - Generates sample data matching the schema structure
@@ -201,12 +202,12 @@ def build_custom_schema_definition() -> CustomSchemaDefinition:
 
 **Manual execution (if needed):**
 ```bash
-uv run examples/custom_graph_demo/03_generate_data.py
-uv run examples/custom_graph_demo/03_generate_data.py --count 100  # More data
-uv run examples/custom_graph_demo/03_generate_data.py --regenerate  # Force regenerate
+uv run examples/custom_graph_demo/generate_data.py
+uv run examples/custom_graph_demo/generate_data.py --count 100  # More data
+uv run examples/custom_graph_demo/generate_data.py --regenerate  # Force regenerate
 ```
 
-### Step 4: Upload and Ingest (`04_upload_ingest.py`)
+### Step 4: Upload and Ingest (`upload_ingest.py`)
 
 **What happens automatically:**
 
@@ -218,10 +219,10 @@ uv run examples/custom_graph_demo/03_generate_data.py --regenerate  # Force rege
 
 **Manual execution (if needed):**
 ```bash
-uv run examples/custom_graph_demo/04_upload_ingest.py
+uv run examples/custom_graph_demo/upload_ingest.py
 ```
 
-### Step 5: Query the Graph (`05_query_graph.py`)
+### Step 5: Query the Graph (`query_graph.py`)
 
 **What happens automatically:**
 - Executes all preset queries
@@ -230,19 +231,19 @@ uv run examples/custom_graph_demo/04_upload_ingest.py
 
 **Control via flags:**
 ```bash
-just demo-custom-graph skip-queries  # Skip this step
+just demo-custom-graph --skip-queries  # Skip this step
 ```
 
 **Manual execution (if needed):**
 ```bash
 # Run all presets
-uv run examples/custom_graph_demo/05_query_graph.py --all
+uv run examples/custom_graph_demo/query_graph.py --all
 
 # Run specific preset
-uv run examples/custom_graph_demo/05_query_graph.py --preset people
+uv run examples/custom_graph_demo/query_graph.py --preset people
 
 # Interactive query mode
-uv run examples/custom_graph_demo/05_query_graph.py
+uv run examples/custom_graph_demo/query_graph.py
 ```
 
 ## Available Preset Queries
@@ -254,7 +255,7 @@ The demo includes 10 preset queries demonstrating common graph patterns:
 View the overall graph structure:
 
 ```bash
-uv run examples/custom_graph_demo/05_query_graph.py --preset summary
+uv run examples/custom_graph_demo/query_graph.py --preset summary
 ```
 
 **Output:**
@@ -379,7 +380,7 @@ ORDER BY cross_company_pairs DESC
 After running the demo, explore your graph data interactively:
 
 ```bash
-uv run examples/custom_graph_demo/05_query_graph.py
+uv run examples/custom_graph_demo/query_graph.py
 ```
 
 This launches an interactive session where you can:
@@ -557,7 +558,7 @@ Add relationships between your nodes:
 
 ### Step 4: Update the Graph Creation Script
 
-Edit `02_create_graph.py` to use your schema:
+Edit `create_graph.py` to use your schema:
 
 ```python
 def build_custom_schema_definition() -> CustomSchemaDefinition:
@@ -574,7 +575,7 @@ def build_custom_schema_definition() -> CustomSchemaDefinition:
 
 ### Step 5: Generate Matching Data
 
-Update `03_generate_data.py` to generate data matching your schema:
+Update `generate_data.py` to generate data matching your schema:
 
 ```python
 # Generate Product nodes
@@ -596,10 +597,10 @@ df.to_parquet("data/nodes/Product.parquet")
 ### Step 6: Run Your Custom Pipeline
 
 ```bash
-uv run examples/custom_graph_demo/02_create_graph.py
-uv run examples/custom_graph_demo/03_generate_data.py
-uv run examples/custom_graph_demo/04_upload_ingest.py
-uv run examples/custom_graph_demo/05_query_graph.py --all
+uv run examples/custom_graph_demo/create_graph.py
+uv run examples/custom_graph_demo/generate_data.py
+uv run examples/custom_graph_demo/upload_ingest.py
+uv run examples/custom_graph_demo/query_graph.py --all
 ```
 
 ## Schema Design Best Practices
@@ -807,7 +808,7 @@ ls examples/custom_graph_demo/schema.json
 **Solution:** Let the demo create credentials automatically, or force new:
 
 ```bash
-just demo-custom-graph new-user
+just demo-custom-graph --new-user
 ```
 
 ### Demo Fails: "Invalid schema"

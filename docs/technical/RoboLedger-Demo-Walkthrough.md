@@ -88,6 +88,18 @@ To validate the data without writing anything:
 just demo-roboledger --dry-run
 ```
 
+To provision a user + empty roboledger graph **without** the synthetic data (for connecting a real QuickBooks sandbox via the UI — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md)):
+
+```bash
+just demo-roboledger --skeleton
+```
+
+To swap the hardcoded CoA → GAAP mappings for AI-driven mapping via the MappingOperator (requires Bedrock):
+
+```bash
+just demo-roboledger --ai
+```
+
 ## What Gets Created
 
 | Component | Count | Detail |
@@ -313,14 +325,14 @@ The full prompt for the AI close workflow lives at `examples/roboledger_demo/pro
 To re-run cleanly:
 
 ```bash
-# Reset the demo's graph (preserves user + auth)
-just demo-roboledger --reset
+# Re-run — the demo is idempotent and always wipes prior state on the tenant before loading
+just demo-roboledger
 
 # Or fully reset everything (drops local data + auth)
 just reset-local
 ```
 
-`--reset` clears the demo's events, transactions, line items, mappings, schedules, documents, fiscal calendar, and reports from the tenant, then re-runs the load. Useful for getting back to a known-good state after experimenting with the close workflow or breaking something with manual entries.
+`just demo-roboledger` always runs the demo's `_reset.py` first to clear prior events, transactions, line items, mappings, schedules, documents, fiscal calendar, and reports from the tenant, then re-loads the full data set. Useful for getting back to a known-good state after experimenting with the close workflow or breaking something with manual entries.
 
 `reset-local` is heavier — drops the entire local stack's data including all users, graphs, and credentials. Use when you want a fresh slate.
 
@@ -333,7 +345,7 @@ The demo's content lives in `examples/roboledger_demo/`:
 - `policies.py` — the four policy documents loaded as searchable content.
 - `agents.py` — the 17 parties (customers, vendors, employees, government).
 - `validate.py` — the 38 rules. Add or modify checks to demo different validation scenarios.
-- `main.py` — the orchestration script. Idempotent (`--reset` clears prior state); re-running picks up your edits.
+- `main.py` — the orchestration script. Idempotent (unconditionally clears prior tenant state before loading); re-running picks up your edits.
 
 Common customizations:
 
@@ -350,7 +362,7 @@ Common customizations:
 | External dependencies | None | Intuit Developer + ngrok + QBO subscription |
 | Data shape | Designed for the product — clean, 100% mappable, balanced | Real-world messy — partial mapping coverage, edge-case transaction types |
 | Use for | Product evaluation, regression testing, agent demos, learning the feature set | Real-data smoke testing, your own books, adapter debugging |
-| Iteration speed | Fast — `--reset` for clean re-runs | Slow — re-sync takes minutes, data isn't deterministic |
+| Iteration speed | Fast — re-running the recipe wipes and reloads | Slow — re-sync takes minutes, data isn't deterministic |
 | Mapping coverage | 100% renderable on first run | Variable — auto-map agent runs, partial coverage typical, manual remap for edge cases |
 
 Both paths produce the same OLTP shape, the same materialized graph, and the same Report-Block lifecycle. The demo is for showing the product; QB is for using it on your own books. See the [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally) guide for the QB workflow.

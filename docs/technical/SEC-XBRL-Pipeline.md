@@ -29,14 +29,14 @@ Before starting, ensure you have:
 The fastest way to get started is with the `demo-sec` command, which handles everything automatically:
 
 ```bash
-# Load NVIDIA 2025 data with automatic setup and example queries
+# Load NVIDIA 2025 data with automatic setup and example queries (defaults)
 just demo-sec
 
 # Load specific company and year
-just demo-sec AAPL 2024
+just demo-sec --ticker AAPL --year 2024
 
 # Skip running example queries after setup
-just demo-sec TSLA 2023 true
+just demo-sec --ticker TSLA --year 2023 --skip-queries
 ```
 
 **What happens automatically:**
@@ -538,7 +538,7 @@ just sec-reset && just sec-load NVDA 2025
 
 ```bash
 # First company with automatic setup
-just demo-sec NVDA 2025
+just demo-sec --ticker NVDA --year 2025
 
 # Load additional companies (user already created)
 just sec-load AMD 2025
