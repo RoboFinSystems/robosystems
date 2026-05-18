@@ -12,7 +12,15 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Operator",
-    "description": "🤖 AI Operators - The API surface for AI agents (Claude-driven MCP tool executors)",
+    "description": "🤖 AI Operators - AI agent orchestration and execution",
+  },
+  {
+    "name": "Documents",
+    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
+  },
+  {
+    "name": "Search",
+    "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
   },
   {
     "name": "Query",
@@ -25,14 +33,6 @@ MAIN_API_TAGS = [
   {
     "name": "Files",
     "description": "📄 File management - Upload, track, and manage data files for generic graphs",
-  },
-  {
-    "name": "Documents",
-    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
-  },
-  {
-    "name": "Search",
-    "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
   },
   {
     "name": "Extensions: GraphQL",
