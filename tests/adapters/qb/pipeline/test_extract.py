@@ -426,6 +426,8 @@ class TestQbExtractSuccess:
     MockQBClient.assert_called_once_with(
       realm_id="realm_abc",
       qb_credentials=credentials_dict,
+      # Phase 3 A1 — connection_id enables rotated-token persistence
+      connection_id="conn_abc",
     )
 
 
@@ -539,6 +541,7 @@ class TestQbExtractErrors:
     MockQBClient.assert_called_once_with(
       realm_id="realm_9876",
       qb_credentials=credentials_dict,
+      connection_id="conn_abc",
     )
 
 
@@ -692,3 +695,65 @@ class TestQbExtractMetadata:
     assert result.metadata["journal_entries"] == 0
     assert result.metadata["journal_lines"] == 0
     assert result.metadata["accounts"] == 0
+
+
+@pytest.mark.unit
+class TestMultiCurrencyGuard:
+  """Phase 3 A4 — non-USD realms fail loudly at extract time."""
+
+  def test_assert_usd_only_passes_when_all_rows_are_usd(self):
+    """Mixed empty + USD rows pass through silently."""
+    from robosystems.adapters.quickbooks.pipeline.extract import _assert_usd_only
+
+    _assert_usd_only(
+      [{"currency": "USD", "tx_id": "1"}, {"currency": "USD", "tx_id": "2"}],
+      [],
+      realm_id="9999",
+    )  # no exception
+
+  def test_assert_usd_only_raises_on_single_non_usd_row(self):
+    """A single CAD row in a sea of USD rows still triggers the guard."""
+    from robosystems.adapters.quickbooks.pipeline.extract import (
+      MultiCurrencyNotSupportedError,
+      _assert_usd_only,
+    )
+
+    with pytest.raises(MultiCurrencyNotSupportedError) as exc_info:
+      _assert_usd_only(
+        [
+          {"currency": "USD", "tx_id": "1"},
+          {"currency": "CAD", "tx_id": "2"},
+          {"currency": "USD", "tx_id": "3"},
+        ],
+        realm_id="9999",
+      )
+    assert "CAD" in str(exc_info.value)
+    assert "9999" in str(exc_info.value)
+
+  def test_assert_usd_only_lists_all_non_usd_currencies(self):
+    """The error message includes every non-USD currency encountered,
+    sorted alphabetically, so the operator knows the full surface."""
+    from robosystems.adapters.quickbooks.pipeline.extract import (
+      MultiCurrencyNotSupportedError,
+      _assert_usd_only,
+    )
+
+    with pytest.raises(MultiCurrencyNotSupportedError) as exc_info:
+      _assert_usd_only(
+        [{"currency": "GBP"}, {"currency": "CAD"}],
+        [{"currency": "EUR"}],
+        realm_id="9999",
+      )
+    # Sorted: CAD, EUR, GBP
+    msg = str(exc_info.value)
+    assert "CAD, EUR, GBP" in msg
+
+  def test_assert_usd_only_handles_missing_currency_field(self):
+    """Rows missing the `currency` field (legacy fixtures) are skipped
+    rather than raising — guard only catches QB-confirmed non-USD."""
+    from robosystems.adapters.quickbooks.pipeline.extract import _assert_usd_only
+
+    _assert_usd_only(
+      [{"tx_id": "1"}, {"currency": None, "tx_id": "2"}],
+      realm_id="9999",
+    )  # no exception

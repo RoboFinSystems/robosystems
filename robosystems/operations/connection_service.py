@@ -358,6 +358,44 @@ class ConnectionService:
         session.close()
 
   @staticmethod
+  def mark_connection_needs_reauth_sync(
+    connection_id: str,
+    db_session: Session | None = None,
+  ) -> bool:
+    """Mark connection as needing operator re-authorization (sync path).
+
+    Distinct from `mark_connection_error`: surfaces a "reconnect" CTA in
+    the UI rather than a generic failure message. Called from the QB
+    auth-refresh wrapper (`adapters/quickbooks/client/api.py`) which
+    runs inside a sync Dagster asset and can't await the async
+    `mark_connection_error` counterpart.
+
+    Idempotent: a second call on an already-needs_reauth connection is
+    a no-op.
+    """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
+    try:
+      conn = Connection.get_by_id(connection_id, session)
+      if conn:
+        if conn.status != "needs_reauth":
+          conn.update_status("needs_reauth", session)
+          logger.warning(f"Marked connection {connection_id} as needs_reauth")
+        return True
+      return False
+    except Exception:
+      logger.error(
+        "Failed to mark connection needs_reauth for %s",
+        connection_id,
+        exc_info=True,
+      )
+      return False
+    finally:
+      if session_created:
+        session.close()
+
+  @staticmethod
   async def mark_connection_connected(
     connection_id: str,
     graph_id: str | None = None,

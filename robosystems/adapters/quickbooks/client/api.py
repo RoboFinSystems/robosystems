@@ -1,12 +1,94 @@
+import logging
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import requests
 from intuitlib.client import AuthClient
+from intuitlib.exceptions import AuthClientError
 from quickbooks import QuickBooks
+from quickbooks.exceptions import AuthorizationException, QuickbooksException
+from tenacity import (
+  before_sleep_log,
+  retry,
+  retry_if_exception,
+  stop_after_attempt,
+  wait_exponential_jitter,
+)
 
 from robosystems.config import env
 from robosystems.logger import logger
+
+
+class QBAuthFailedError(Exception):
+  """QB auth refresh failed in a way that's worth surfacing cleanly.
+
+  Wraps both `AuthClientError` (Intuit-side credential rejection — bad,
+  revoked, scope-insufficient) and transient network failures, so the
+  Dagster job logs a single typed error rather than a stack-trace dump
+  from the underlying intuitlib / requests stack.
+
+  When `recoverable=True` the caller should leave the connection state
+  alone (e.g., transient network blip — retry next sync). When False the
+  connection has been marked `needs_reauth` and the operator must
+  reconnect via OAuth.
+  """
+
+  def __init__(self, message: str, *, recoverable: bool) -> None:
+    super().__init__(message)
+    self.recoverable = recoverable
+
+
+def _is_retryable_qb_error(exc: BaseException) -> bool:
+  """Predicate for tenacity — decides whether a QB API exception is
+  worth retrying.
+
+  Retry on:
+  - Network/transport errors (`ConnectionError`, `Timeout`, generic
+    `RequestException`) — always transient.
+  - QuickbooksException variants whose underlying HTTP status was 429
+    or 5xx. The QB SDK wraps non-200/non-Fault responses as
+    ``QuickbooksException(error_code=10000)`` and embeds the original
+    status in the message (`"Error returned with status code '429': ..."`).
+    Match on that pattern.
+
+  Don't retry on:
+  - ``AuthorizationException`` (HTTP 401 from Intuit — auth-side,
+    won't get better with retry).
+  - Other ``QuickbooksException`` variants (validation, object not
+    found, fault-payload application errors).
+  """
+  if isinstance(exc, AuthorizationException):
+    return False
+  if isinstance(exc, requests.exceptions.RequestException):
+    # HTTPError carries response.status_code; everything else is
+    # network-side and worth retrying outright.
+    if isinstance(exc, requests.exceptions.HTTPError):
+      status = getattr(exc.response, "status_code", None) if exc.response else None
+      return status in (429, 500, 502, 503, 504)
+    return True
+  if isinstance(exc, QuickbooksException):
+    # SDK wraps non-200 responses as `error_code=10000` with the HTTP
+    # status embedded in the message text. Pattern-match because the
+    # SDK doesn't surface the status code as a typed attribute.
+    msg = str(exc)
+    return (
+      "status code '429'" in msg
+      or "status code '500'" in msg
+      or "status code '502'" in msg
+      or "status code '503'" in msg
+      or "status code '504'" in msg
+    )
+  return False
+
+
+_QB_RETRY = retry(
+  retry=retry_if_exception(_is_retryable_qb_error),
+  stop=stop_after_attempt(5),
+  wait=wait_exponential_jitter(initial=1, max=60),
+  before_sleep=before_sleep_log(logger, logging.WARNING),
+  reraise=True,
+)
 
 
 class QBClient:
@@ -14,6 +96,7 @@ class QBClient:
     self,
     realm_id: str,
     qb_credentials: dict[str, Any],
+    connection_id: str | None = None,
   ):
     """
     Initializes the QuickBooks client using the new connection credentials system.
@@ -21,11 +104,17 @@ class QBClient:
     Args:
       realm_id: The QuickBooks realm ID.
       qb_credentials: A dictionary containing 'refresh_token' and 'access_token'.
+      connection_id: Optional connection ID used to persist rotated tokens
+        back to ``ConnectionCredentials`` after Intuit rotates them on
+        refresh (Phase 3 A1). Without it, rotated tokens die with the
+        QBClient instance and the next sync uses pre-rotation tokens —
+        eventually failing once Intuit's grace window expires.
     """
     if not realm_id or not qb_credentials:
       raise ValueError("realm_id and qb_credentials are required.")
 
     self.realm_id = realm_id
+    self.connection_id = connection_id
     refresh_token = qb_credentials.get("refresh_token")
     access_token = qb_credentials.get("access_token")
 
@@ -50,7 +139,37 @@ class QBClient:
 
     if not refresh_token.startswith("mock_"):
       logger.info(f"Refreshing QuickBooks token for realm {self.realm_id}")
-      self.auth_client.refresh(refresh_token=refresh_token)
+      # Phase 3 A2: wrap refresh in typed error handling. AuthClientError
+      # is auth-side (revoked / expired-beyond-grace / scope-insufficient)
+      # and flips the connection to needs_reauth so the operator sees a
+      # "Reconnect" CTA instead of a generic "sync failed". Transient
+      # network errors don't flip state — they retry next sync.
+      try:
+        self.auth_client.refresh(refresh_token=refresh_token)
+      except AuthClientError as e:
+        logger.warning(
+          f"QB AuthClient.refresh raised AuthClientError for realm "
+          f"{self.realm_id} (status={getattr(e, 'status_code', '?')}): {e}"
+        )
+        self._mark_needs_reauth()
+        raise QBAuthFailedError(
+          f"QuickBooks rejected the credential refresh for realm "
+          f"{self.realm_id}. Reconnect the account from the connections "
+          f"page to re-issue tokens.",
+          recoverable=False,
+        ) from e
+      except requests.exceptions.RequestException as e:
+        # Transient — network failure between us and Intuit. Don't flip
+        # connection state; the next sync will retry the refresh.
+        logger.warning(
+          f"Transient network error during QB token refresh for realm "
+          f"{self.realm_id}: {e}"
+        )
+        raise QBAuthFailedError(
+          f"Transient network error reaching Intuit for realm "
+          f"{self.realm_id}; the next sync will retry.",
+          recoverable=True,
+        ) from e
 
     # Capture updated tokens after refresh
     self.refresh_token = self.auth_client.refresh_token
@@ -60,6 +179,16 @@ class QBClient:
       f"refresh_token={'yes' if self.refresh_token else 'no'}"
     )
 
+    # Phase 3 A1: persist rotated tokens back to ConnectionCredentials.
+    # Intuit rotates the refresh_token on every refresh; without this,
+    # the rotated value dies when the QBClient instance goes out of
+    # scope and the next sync uses the pre-rotation token. Eventually
+    # the rotation grace window expires and the connection locks out.
+    if connection_id and (
+      self.refresh_token != refresh_token or self.access_token != access_token
+    ):
+      self._persist_rotated_tokens(qb_credentials)
+
     self.client = QuickBooks(
       auth_client=self.auth_client,
       refresh_token=self.refresh_token,
@@ -67,14 +196,93 @@ class QBClient:
       minorversion=75,
     )
 
+  def _mark_needs_reauth(self) -> None:
+    """Flip the connection's status to ``needs_reauth`` (A2 + B5).
+
+    Best-effort: a failure to update the status row is logged but
+    swallowed — the QBAuthFailedError raised by the caller is the
+    operator-visible signal even if this side effect didn't land.
+    """
+    if not self.connection_id:
+      return
+    try:
+      from robosystems.operations.connection_service import ConnectionService
+
+      ConnectionService.mark_connection_needs_reauth_sync(self.connection_id)
+    except Exception as e:
+      logger.warning(
+        f"Failed to mark connection {self.connection_id} as needs_reauth "
+        f"(non-fatal): {e}"
+      )
+
+  def _persist_rotated_tokens(self, prior_credentials: dict[str, Any]) -> None:
+    """Write rotated tokens back to ``ConnectionCredentials`` (A1).
+
+    Scoped session lifecycle — opens a fresh platform-DB session just
+    for this update and closes it immediately. Don't hold the session
+    open for the whole sync.
+
+    Best-effort: persistence failure is logged but swallowed. The
+    QBClient still has the rotated tokens in-memory for this run; the
+    next sync will refresh again and either re-rotate (and re-persist)
+    or hit the rotation grace window.
+    """
+    if not self.connection_id:
+      return
+    try:
+      from robosystems.database import SessionFactory
+      from robosystems.models.core.connection.connection_credentials import (
+        ConnectionCredentials,
+      )
+
+      session = SessionFactory()
+      try:
+        cred = ConnectionCredentials.get_by_connection_id(self.connection_id, session)
+        if cred is None:
+          logger.warning(
+            f"Cannot persist rotated tokens — ConnectionCredentials not "
+            f"found for connection {self.connection_id}"
+          )
+          return
+        # Pull the live bundle from the DB rather than `prior_credentials`
+        # (the QBClient caller may have passed only refresh/access). Extra
+        # keys (realm_id, scope, ...) that the DB carries survive the
+        # rotation write.
+        live = cred.get_credentials()
+        updated = {
+          **live,
+          "refresh_token": self.refresh_token,
+          "access_token": self.access_token,
+        }
+        cred.update_credentials(updated, session)
+        logger.info(f"Persisted rotated QB tokens for connection {self.connection_id}")
+      finally:
+        session.close()
+    except Exception as e:
+      logger.warning(
+        f"Failed to persist rotated QB tokens for connection "
+        f"{self.connection_id} (non-fatal): {e}"
+      )
+
+  @_QB_RETRY
   def get_entity_info(self):
     from quickbooks.objects.company_info import CompanyInfo
 
     return CompanyInfo.all(qb=self.client)
 
-  def get_accounts(self):
+  @_QB_RETRY
+  def _fetch_accounts_page(self, start: int, page_size: int):
+    """Single page of accounts — decorated so 429/5xx retry doesn't redo
+    the whole paginated walk."""
     from quickbooks.objects.account import Account
 
+    return Account.query(
+      f"SELECT * FROM Account WHERE Active IN (true, false) "
+      f"STARTPOSITION {start} MAXRESULTS {page_size}",
+      qb=self.client,
+    )
+
+  def get_accounts(self):
     # QB Online's Account endpoint defaults to Active=true. Historical journal
     # lines can reference accounts that were later deactivated, so we must
     # pull both active and inactive — otherwise dbt's accounting-equation
@@ -86,11 +294,7 @@ class QBClient:
     all_accounts: list[dict] = []
     seen_ids: set[str] = set()
     while True:
-      page = Account.query(
-        f"SELECT * FROM Account WHERE Active IN (true, false) "
-        f"STARTPOSITION {start} MAXRESULTS {page_size}",
-        qb=self.client,
-      )
+      page = self._fetch_accounts_page(start, page_size)
       if not page:
         break
       for a in page:
@@ -179,15 +383,40 @@ class QBClient:
       seq_cnt += 1
     return accounts_df
 
+  @_QB_RETRY
   def get_account_by_id(self, account_id):
     from quickbooks.objects.account import Account
 
     return Account.get(account_id, qb=self.client).to_dict()
 
+  @_QB_RETRY
   def get_account_by_name(self, account_name):
     from quickbooks.objects.account import Account
 
     return Account.filter(Name=account_name, qb=self.client)[0].to_dict()
+
+  @_QB_RETRY
+  def _paginate_one_page(
+    self,
+    entity_class,
+    start_position: int,
+    page_size: int,
+    where_clause: str | None,
+  ):
+    """Single page fetch for `_paginate` — decorated so 429/5xx retry
+    doesn't redo the whole paginated walk."""
+    if where_clause:
+      return entity_class.where(
+        where_clause,
+        max_results=str(page_size),
+        start_position=str(start_position),
+        qb=self.client,
+      )
+    return entity_class.all(
+      max_results=page_size,
+      start_position=str(start_position),
+      qb=self.client,
+    )
 
   def _paginate(self, entity_class, where_clause: str | None = None):
     """Paginate over a QB entity, returning a list of dicts.
@@ -201,19 +430,9 @@ class QBClient:
     all_rows: list[dict] = []
     while True:
       start_position = page * page_size + 1
-      if where_clause:
-        results = entity_class.where(
-          where_clause,
-          max_results=str(page_size),
-          start_position=str(start_position),
-          qb=self.client,
-        )
-      else:
-        results = entity_class.all(
-          max_results=page_size,
-          start_position=str(start_position),
-          qb=self.client,
-        )
+      results = self._paginate_one_page(
+        entity_class, start_position, page_size, where_clause
+      )
       if not results:
         break
       for row in results:
@@ -290,6 +509,7 @@ class QBClient:
       return self._paginate(JournalEntry, where_clause=where)
     return self._paginate(JournalEntry)
 
+  @_QB_RETRY
   def get_transactions(self, start_date=None, end_date=None):
     """Fetch JournalReport — retired in Phase 2 as the transactional source.
 

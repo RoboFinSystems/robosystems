@@ -24,6 +24,48 @@ from .utils import (
 )
 
 
+class MultiCurrencyNotSupportedError(Exception):
+  """QB returned non-USD data and the dbt mart can't preserve it (A4).
+
+  Phase 3 A4 fail-loud guard: the dbt mart at
+  `dbt/models/ledger/transactions.sql:66` + `elements.sql:35` hardcodes
+  `'USD'` even though `pipeline/utils.py` correctly extracts
+  `CurrencyRef.value` into the flattened header rows. A non-USD realm
+  would silently corrupt — reports would render numbers as if they were
+  USD. Refuse to load until full currency thread-through ships.
+  """
+
+
+def _assert_usd_only(
+  *header_groups: list[dict],
+  realm_id: str,
+) -> None:
+  """Raise MultiCurrencyNotSupportedError if any extracted header row
+  carries a non-USD currency.
+
+  Scans every header dict's `currency` field across all groups
+  (invoices / bills / payments / etc.). The flatten helpers at
+  `pipeline/utils.py:393,476` default to `'USD'` when CurrencyRef is
+  missing, so the only non-USD rows here are intentional QB-side
+  multi-currency entries.
+  """
+  offending: set[str] = set()
+  for rows in header_groups:
+    for row in rows:
+      currency = row.get("currency")
+      if currency and currency != "USD":
+        offending.add(currency)
+  if offending:
+    codes = ", ".join(sorted(offending))
+    raise MultiCurrencyNotSupportedError(
+      f"QuickBooks realm {realm_id} contains transactions in non-USD "
+      f"currencies ({codes}). Multi-currency is not yet supported by the "
+      f"dbt mart pipeline; the data would silently coerce to USD and "
+      f"corrupt your reports. Contact RoboSystems to enable multi-currency "
+      f"support before re-syncing this realm."
+    )
+
+
 @asset(
   group_name="qb_pipeline",
   description="Extract data from QuickBooks API to parquet files",
@@ -76,7 +118,11 @@ def qb_extract(
   if not realm_id:
     raise ValueError("realm_id is required for QuickBooks extraction")
 
-  client = QBClient(realm_id=realm_id, qb_credentials=credentials)
+  client = QBClient(
+    realm_id=realm_id,
+    qb_credentials=credentials,
+    connection_id=config.connection_id,
+  )
   context.log.info("QBClient initialized, fetching data...")
 
   # Fetch company info (always full, 1 API call)
@@ -146,6 +192,24 @@ def qb_extract(
     f"{len(payment_headers)} payments, {len(bill_payment_headers)} bill payments, "
     f"{len(sales_receipt_headers)} sales receipts, "
     f"{len(purchase_headers)} purchases"
+  )
+
+  # Phase 3 A4: multi-currency fail-loud guard. The dbt mart at
+  # `dbt/models/ledger/transactions.sql:66` and `elements.sql:35`
+  # hardcodes `'USD'`, silently dropping any non-USD `CurrencyRef`
+  # captured at extract time. Until currency is threaded through the
+  # full pipeline, refuse to load non-USD data — a Canadian/UK customer
+  # would otherwise get silent corruption (reports showing USD values
+  # for CAD/GBP amounts). Surfaces as a clean MultiCurrencyNotSupportedError
+  # on the Dagster run; operator must work with us to enable.
+  _assert_usd_only(
+    invoice_headers,
+    bill_headers,
+    payment_headers,
+    bill_payment_headers,
+    sales_receipt_headers,
+    purchase_headers,
+    realm_id=realm_id,
   )
 
   # Write parquet to shared pipeline directory

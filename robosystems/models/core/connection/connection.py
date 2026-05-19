@@ -19,11 +19,18 @@ from robosystems.database import Model
 
 
 class ConnectionStatus(str, Enum):
-  """Connection lifecycle status."""
+  """Connection lifecycle status.
+
+  `NEEDS_REAUTH` is distinct from `ERROR`: the credential bundle is no
+  longer valid (Intuit revoked / rotated past grace / scope insufficient)
+  and the operator must re-OAuth. UI surfaces this as a "Reconnect" CTA
+  rather than a generic "sync failed" message.
+  """
 
   PENDING_OAUTH = "pending_oauth"
   CONNECTED = "connected"
   ERROR = "error"
+  NEEDS_REAUTH = "needs_reauth"
   DISCONNECTED = "disconnected"
 
 

@@ -569,3 +569,334 @@ class TestQBClient:
     assert pd.notna(parent_row["Sequence"])
     assert pd.notna(child_row["Sequence"])
     assert pd.notna(grandchild_row["Sequence"])
+
+
+class TestTokenPersistence:
+  """Phase 3 A1 — rotated refresh tokens persist to ConnectionCredentials.
+
+  Intuit rotates the refresh_token on every refresh(). Without the
+  persistence path, the rotated value dies with the QBClient instance
+  and the next sync fails once Intuit's rotation grace window expires.
+  """
+
+  @patch("robosystems.adapters.quickbooks.client.api.QuickBooks")
+  @patch("robosystems.adapters.quickbooks.client.api.AuthClient")
+  @patch(
+    "robosystems.models.core.connection.connection_credentials.ConnectionCredentials"
+  )
+  @patch("robosystems.database.SessionFactory")
+  def test_rotated_tokens_persisted_when_connection_id_set(
+    self,
+    mock_session_factory,
+    mock_credentials_cls,
+    mock_auth_client_class,
+    mock_qb_class,
+  ):
+    """When AuthClient rotates the tokens during refresh, QBClient writes
+    the new values back to ConnectionCredentials via update_credentials.
+
+    AuthClient.refresh() mutates `self.refresh_token` + `self.access_token`
+    in-place when Intuit returns rotated values. We simulate that by
+    side-effect.
+    """
+    mock_auth = Mock(spec=AuthClient)
+    mock_auth.refresh_token = "OLD_REFRESH"
+    mock_auth.access_token = "OLD_ACCESS"
+
+    def rotate_on_refresh(refresh_token):
+      mock_auth.refresh_token = "ROTATED_REFRESH"
+      mock_auth.access_token = "ROTATED_ACCESS"
+
+    mock_auth.refresh.side_effect = rotate_on_refresh
+    mock_auth_client_class.return_value = mock_auth
+    mock_qb_class.return_value = Mock(spec=QuickBooks)
+
+    mock_session = Mock()
+    mock_session_factory.return_value = mock_session
+
+    mock_cred = Mock()
+    mock_cred.get_credentials.return_value = {
+      "refresh_token": "OLD_REFRESH",
+      "access_token": "OLD_ACCESS",
+      "extra": "preserved",
+    }
+    mock_credentials_cls.get_by_connection_id.return_value = mock_cred
+
+    with patch("robosystems.adapters.quickbooks.client.api.env"):
+      QBClient(
+        realm_id="9999",
+        qb_credentials={
+          "refresh_token": "OLD_REFRESH",
+          "access_token": "OLD_ACCESS",
+        },
+        connection_id="conn_test_a1",
+      )
+
+    # ConnectionCredentials.update_credentials called with rotated values
+    # and the prior bundle preserved (the "extra" key survives the merge).
+    mock_cred.update_credentials.assert_called_once()
+    call_args = mock_cred.update_credentials.call_args
+    updated_dict = call_args[0][0]
+    assert updated_dict["refresh_token"] == "ROTATED_REFRESH"
+    assert updated_dict["access_token"] == "ROTATED_ACCESS"
+    assert updated_dict["extra"] == "preserved"
+    # Session is closed after the scoped write — don't hold it open
+    # for the whole sync.
+    mock_session.close.assert_called_once()
+
+  @patch("robosystems.adapters.quickbooks.client.api.QuickBooks")
+  @patch("robosystems.adapters.quickbooks.client.api.AuthClient")
+  @patch("robosystems.database.SessionFactory")
+  def test_no_persistence_without_connection_id(
+    self,
+    mock_session_factory,
+    mock_auth_client_class,
+    mock_qb_class,
+  ):
+    """Callers without a connection_id (legacy callsites, tests) don't
+    trigger the persistence path — no session is opened."""
+    mock_auth = Mock(spec=AuthClient)
+    mock_auth.refresh_token = "ROTATED_REFRESH"
+    mock_auth.access_token = "ROTATED_ACCESS"
+    mock_auth_client_class.return_value = mock_auth
+    mock_qb_class.return_value = Mock(spec=QuickBooks)
+
+    with patch("robosystems.adapters.quickbooks.client.api.env"):
+      QBClient(
+        realm_id="9999",
+        qb_credentials={
+          "refresh_token": "OLD_REFRESH",
+          "access_token": "OLD_ACCESS",
+        },
+        # No connection_id
+      )
+
+    mock_session_factory.assert_not_called()
+
+  @patch("robosystems.adapters.quickbooks.client.api.QuickBooks")
+  @patch("robosystems.adapters.quickbooks.client.api.AuthClient")
+  @patch("robosystems.database.SessionFactory")
+  def test_no_persistence_when_tokens_unchanged(
+    self,
+    mock_session_factory,
+    mock_auth_client_class,
+    mock_qb_class,
+  ):
+    """If AuthClient returned the SAME tokens (no rotation this cycle),
+    skip the persistence write entirely — no point burning a DB roundtrip."""
+    mock_auth = Mock(spec=AuthClient)
+    mock_auth.refresh_token = "SAME_REFRESH"
+    mock_auth.access_token = "SAME_ACCESS"
+    mock_auth_client_class.return_value = mock_auth
+    mock_qb_class.return_value = Mock(spec=QuickBooks)
+
+    with patch("robosystems.adapters.quickbooks.client.api.env"):
+      QBClient(
+        realm_id="9999",
+        qb_credentials={
+          "refresh_token": "SAME_REFRESH",
+          "access_token": "SAME_ACCESS",
+        },
+        connection_id="conn_test_a1",
+      )
+
+    mock_session_factory.assert_not_called()
+
+
+class TestAuthFailureHandling:
+  """Phase 3 A2 — AuthClientError + transient network errors get clean
+  QBAuthFailedError surfaces. AuthClientError additionally flips the
+  connection to needs_reauth (B5)."""
+
+  @patch(
+    "robosystems.operations.connection_service.ConnectionService."
+    "mark_connection_needs_reauth_sync"
+  )
+  @patch("robosystems.adapters.quickbooks.client.api.QuickBooks")
+  @patch("robosystems.adapters.quickbooks.client.api.AuthClient")
+  def test_authclient_error_marks_needs_reauth(
+    self,
+    mock_auth_client_class,
+    mock_qb_class,
+    mock_mark_needs_reauth,
+  ):
+    """An AuthClientError from Intuit (revoked / scope-insufficient)
+    flips the connection to needs_reauth and raises QBAuthFailedError
+    with recoverable=False."""
+    from intuitlib.exceptions import AuthClientError
+
+    from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
+
+    mock_auth = Mock(spec=AuthClient)
+    # Construct the error with the response shape intuitlib expects.
+    fake_response = Mock()
+    fake_response.status_code = 401
+    fake_response.text = "Unauthorized"
+    fake_response.headers = {"intuit_tid": "tid_x"}
+    mock_auth.refresh.side_effect = AuthClientError(fake_response)
+    mock_auth_client_class.return_value = mock_auth
+    mock_qb_class.return_value = Mock(spec=QuickBooks)
+
+    with patch("robosystems.adapters.quickbooks.client.api.env"):
+      with pytest.raises(QBAuthFailedError) as exc_info:
+        QBClient(
+          realm_id="9999",
+          qb_credentials={"refresh_token": "BAD", "access_token": "BAD"},
+          connection_id="conn_bad_auth",
+        )
+
+    assert exc_info.value.recoverable is False
+    mock_mark_needs_reauth.assert_called_once_with("conn_bad_auth")
+
+  @patch(
+    "robosystems.operations.connection_service.ConnectionService."
+    "mark_connection_needs_reauth_sync"
+  )
+  @patch("robosystems.adapters.quickbooks.client.api.QuickBooks")
+  @patch("robosystems.adapters.quickbooks.client.api.AuthClient")
+  def test_transient_network_error_does_not_flip_state(
+    self,
+    mock_auth_client_class,
+    mock_qb_class,
+    mock_mark_needs_reauth,
+  ):
+    """A network-level failure (DNS, connection refused, timeout) raises
+    QBAuthFailedError with recoverable=True and does NOT mark the
+    connection as needs_reauth — credentials are presumed valid."""
+    import requests
+
+    from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
+
+    mock_auth = Mock(spec=AuthClient)
+    mock_auth.refresh.side_effect = requests.exceptions.ConnectionError(
+      "Intuit unreachable"
+    )
+    mock_auth_client_class.return_value = mock_auth
+    mock_qb_class.return_value = Mock(spec=QuickBooks)
+
+    with patch("robosystems.adapters.quickbooks.client.api.env"):
+      with pytest.raises(QBAuthFailedError) as exc_info:
+        QBClient(
+          realm_id="9999",
+          qb_credentials={"refresh_token": "VALID", "access_token": "VALID"},
+          connection_id="conn_transient",
+        )
+
+    assert exc_info.value.recoverable is True
+    mock_mark_needs_reauth.assert_not_called()
+
+
+class TestRetryBehavior:
+  """Phase 3 A3 — tenacity retries 429/5xx on every QB API call."""
+
+  def test_retry_on_429_then_succeeds(self):
+    """A 429 followed by a 200 should retry transparently and return
+    the 200 result."""
+    from quickbooks.exceptions import QuickbooksException
+
+    from robosystems.adapters.quickbooks.client.api import QBClient
+
+    client = QBClient.__new__(QBClient)
+    client.client = Mock()
+
+    # First call: 429 (wrapped as QuickbooksException by the SDK).
+    # Second call: success.
+    error_429 = QuickbooksException(
+      "Error returned with status code '429': rate limited", 10000
+    )
+    success = [Mock(to_dict=lambda: {"Id": "1"})]
+    page_call_count = {"n": 0}
+
+    def page_side_effect(*args, **kwargs):
+      page_call_count["n"] += 1
+      if page_call_count["n"] == 1:
+        raise error_429
+      return success
+
+    with patch.object(client, "_paginate_one_page", side_effect=page_side_effect) as _:
+      # _paginate is undecorated; the inner _paginate_one_page is what
+      # carries @_QB_RETRY. But since we patched _paginate_one_page
+      # directly, the retry doesn't apply here — so we test the
+      # decorator on a fresh decorated function instead.
+      pass
+
+    # Direct test of the retry predicate + decorator behavior.
+    from robosystems.adapters.quickbooks.client.api import (
+      _QB_RETRY,
+      _is_retryable_qb_error,
+    )
+
+    assert _is_retryable_qb_error(error_429) is True
+
+    call_count = {"n": 0}
+
+    @_QB_RETRY
+    def flaky():
+      call_count["n"] += 1
+      if call_count["n"] < 3:
+        raise error_429
+      return "ok"
+
+    assert flaky() == "ok"
+    assert call_count["n"] == 3
+
+  def test_no_retry_on_authorization_exception(self):
+    """A 401 from QB (AuthorizationException) should NOT retry — auth
+    errors won't get better with a retry."""
+    from quickbooks.exceptions import AuthorizationException
+
+    from robosystems.adapters.quickbooks.client.api import (
+      _QB_RETRY,
+      _is_retryable_qb_error,
+    )
+
+    auth_error = AuthorizationException("forbidden", error_code=401)
+    assert _is_retryable_qb_error(auth_error) is False
+
+    call_count = {"n": 0}
+
+    @_QB_RETRY
+    def always_401():
+      call_count["n"] += 1
+      raise auth_error
+
+    with pytest.raises(AuthorizationException):
+      always_401()
+    assert call_count["n"] == 1  # No retries
+
+  def test_no_retry_on_validation_exception(self):
+    """Application-level QB validation errors (4xx-style) should NOT
+    retry — they're permanent until the payload is fixed."""
+    from quickbooks.exceptions import ValidationException
+
+    from robosystems.adapters.quickbooks.client.api import _is_retryable_qb_error
+
+    # ValidationException's __str__ doesn't include "status code '4xx'".
+    validation_error = ValidationException("bad input", error_code=2000)
+    assert _is_retryable_qb_error(validation_error) is False
+
+  def test_retry_exhausts_after_5_attempts(self):
+    """A persistent 5xx exhausts retry budget after 5 attempts."""
+    from quickbooks.exceptions import QuickbooksException
+
+    from robosystems.adapters.quickbooks.client.api import _QB_RETRY
+
+    error_503 = QuickbooksException(
+      "Error returned with status code '503': service unavailable", 10000
+    )
+
+    call_count = {"n": 0}
+
+    @_QB_RETRY
+    def always_503():
+      call_count["n"] += 1
+      raise error_503
+
+    with patch(
+      "robosystems.adapters.quickbooks.client.api.wait_exponential_jitter",
+      return_value=lambda *a, **k: 0,
+    ):
+      with pytest.raises(QuickbooksException):
+        always_503()
+    # Bounded by stop_after_attempt(5).
+    assert call_count["n"] == 5

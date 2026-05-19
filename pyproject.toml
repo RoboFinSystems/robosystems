@@ -99,6 +99,7 @@ dependencies = [
     "pyyaml>=6.0.0,<7.0",
     "requests>=2.32.0,<3.0",
     "retrying>=1.4.0,<2.0",
+    "tenacity>=8.0.0,<10.0",
     "uuid6>=2025.0.0",
 ]
 
