@@ -199,11 +199,28 @@ class UpdateRollforwardRequest(BaseModel):
   validation_mode. The BS source is fixed once the block is created
   (changing it would invalidate every previously rendered period); to
   change BS source, delete and re-create.
+
+  **Partial-update semantics**: omitted (``None``) fields mean "leave
+  unchanged" — there is no wire-level way to *clear* a previously set
+  default change tag or empty the attribution_filters list via this
+  endpoint. To remove the default tag entirely, delete and re-create
+  the rollforward block. The asymmetry is deliberate: an explicit
+  clear-sentinel adds wire-shape complexity for a use case that rarely
+  arises in practice (default tags are typically set during initial
+  authoring and only swapped, not removed).
   """
 
   structure_id: str = Field(..., description="Structure ID of the rollforward block.")
   name: str | None = None
-  default_change_tag_qname: str | None = None
+  default_change_tag_qname: str | None = Field(
+    None,
+    description=(
+      "New default change tag qname. Pass a value to *change* the "
+      "default; omit (``None``) to leave unchanged. There is no "
+      "wire-level way to clear a previously set default — see the "
+      "class docstring."
+    ),
+  )
   attribution_filters: list[AttributionFilter] | None = None
   validation_mode: Literal["strict", "residual_as_default", "warn_only"] | None = None
 

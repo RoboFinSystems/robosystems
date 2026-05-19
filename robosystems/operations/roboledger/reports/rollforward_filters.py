@@ -121,6 +121,15 @@ def evaluate_attribution_filters(
 
   Returns the full fact list in declaration order, with the residual
   (if any) appended last.
+
+  **Phase 3 note (N+1)**: this implementation emits 1 (BS delta) + N
+  (one per filter) SQL queries per period evaluation. Fine at Phase 2
+  MVP scope — manually-authored filters typically run 5-15 per block,
+  and the reconciliation harness calls this once per (BS leaf, period)
+  pair. When wiring into the multi-period ``fact_grid`` rendering
+  pipeline in Phase 3, batch across periods with a single windowed
+  ``GROUP BY (target_qname, period)`` pass — eliminates the per-period
+  round trips that would otherwise dominate render time.
   """
   facts: list[AttributedFact] = []
   bs_element_id = mechanics.bs_source_element_id
@@ -141,9 +150,14 @@ def evaluate_attribution_filters(
       period_end=period_end,
     )
     if matched is None:
-      # Filter matched no LineItems; skip emitting a zero-value fact.
-      # The renderer treats absent facts as "no activity" — cleaner
-      # than facts with value=0 cluttering the rendered output.
+      # Filter matched zero LineItems — no activity in this period to
+      # attribute. We deliberately do NOT suppress facts where lines
+      # matched but the signed amount sums to zero (e.g. 3 DR + 2 CR
+      # cancelling): activity-happened-but-netted-to-zero is a real
+      # audit signal that downstream renderers may want to surface
+      # (think: a covenant test that watches gross volume, not net).
+      # Suppression here only kicks in for "no rows touched" → the
+      # cleanest skip condition.
       continue
     sum_matched += matched.value_cents
     facts.append(matched)

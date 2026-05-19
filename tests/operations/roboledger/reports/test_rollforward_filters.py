@@ -130,8 +130,10 @@ class TestSingleFilterMatch:
     assert f.is_residual is False
 
   def test_zero_match_count_returns_no_fact(self) -> None:
-    """Filter that matches no LineItems should NOT emit a zero-value fact —
-    cleaner rendered output."""
+    """Filter that matches zero LineItems → no fact emitted. The "no
+    activity in this period" case is the only suppression path; see
+    the docstring for the rationale on the alternate "lines matched
+    but signed sum is zero" case (which DOES emit a fact)."""
     mechanics = _make_mechanics(
       filters=[
         _filter("mini:ProceedsFromInvestmentsByOwner", "elem_p", "mini:Foo"),
@@ -145,6 +147,32 @@ class TestSingleFilterMatch:
     facts = evaluate_attribution_filters(session, mechanics, PERIOD_START, PERIOD_END)
 
     assert facts == []
+
+  def test_matched_lines_netting_to_zero_still_emits_fact(self) -> None:
+    """Lines matched but signed sum nets to zero (e.g. 3 DR + 2 CR
+    cancelling) → fact IS emitted with ``value_cents=0`` and the
+    matched event_ids. The activity happened; downstream renderers
+    decide whether to surface it. This is the audit-trail guarantee
+    documented in ``evaluate_attribution_filters``'s docstring."""
+    mechanics = _make_mechanics(
+      filters=[
+        _filter("mini:Flow", "elem_flow", "mini:F"),
+      ]
+    )
+    # 5 matched lines, signed sum = 0. BS delta also 0 → no residual.
+    session = _session(
+      bs_delta_cents=0,
+      filter_results=[(0, 5, ["evt_a", "evt_b"])],
+    )
+
+    facts = evaluate_attribution_filters(session, mechanics, PERIOD_START, PERIOD_END)
+
+    assert len(facts) == 1
+    f = facts[0]
+    assert f.value_cents == 0
+    assert f.matched_line_count == 5
+    assert f.event_ids == ["evt_a", "evt_b"]
+    assert f.is_residual is False
 
 
 class TestMultipleFilters:

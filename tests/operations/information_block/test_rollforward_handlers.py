@@ -134,6 +134,13 @@ class TestCreate:
 
     mech = RollforwardMechanics.model_validate(added[0].artifact_mechanics)
     assert mech.default_change_tag_element_id == "elem_default"
+    # Round-trip: qname is persisted alongside the resolved element_id
+    # so envelope readers can display the operator-readable form without
+    # a separate Element table lookup.
+    assert (
+      mech.default_change_tag_qname
+      == "rs-gaap:IncreaseDecreaseInCashAndCashEquivalents"
+    )
 
 
 class TestUpdate:

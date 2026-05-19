@@ -124,6 +124,7 @@ def create(
     default_change_tag_element_id=(
       default_tag_element.id if default_tag_element else None
     ),
+    default_change_tag_qname=payload.default_change_tag_qname,
     attribution_filters=resolved_filters,
     validation_mode=payload.validation_mode,
   )
@@ -177,12 +178,18 @@ def update(
   if payload.name is not None:
     structure.name = payload.name
 
+  # Partial-update semantics: an absent (None) ``default_change_tag_qname``
+  # means "leave unchanged" — there's no wire-level way to clear the
+  # default tag via update. To remove it, delete and re-create the
+  # rollforward block. See UpdateRollforwardRequest's field doc.
   default_tag_element_id = current.default_change_tag_element_id
+  default_tag_qname = current.default_change_tag_qname
   if payload.default_change_tag_qname is not None:
     default_tag_el = _resolve_qname(
       session, payload.default_change_tag_qname, what="default_change_tag"
     )
     default_tag_element_id = default_tag_el.id
+    default_tag_qname = payload.default_change_tag_qname
 
   attribution_filters = current.attribution_filters
   if payload.attribution_filters is not None:
@@ -198,6 +205,7 @@ def update(
     bs_source_element_id=current.bs_source_element_id,
     bs_source_qname=current.bs_source_qname,
     default_change_tag_element_id=default_tag_element_id,
+    default_change_tag_qname=default_tag_qname,
     attribution_filters=attribution_filters,
     validation_mode=validation_mode,
   )
