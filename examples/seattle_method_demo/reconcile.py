@@ -34,9 +34,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -50,7 +51,9 @@ from robosystems.operations.roboledger.reports.rollforward_filters import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_REPORT_PATH = REPO_ROOT / "local" / "reports" / "seattle-method-case-1.md"
+DEMO_ROOT = REPO_ROOT / "examples" / "seattle_method_demo"
+DEFAULT_REPORT_PATH = DEMO_ROOT / "output" / "seattle-method-case-1.md"
+EXPECTED_FACTS_PATH = DEMO_ROOT / "fixtures" / "expected_facts_mini.csv"
 EXTENSIONS_DB_URL = "postgresql://postgres:postgres@localhost:5432/extensions"
 SAFE_GRAPH_ID = re.compile(r"^kg[a-zA-Z0-9_]+$")
 
@@ -79,12 +82,43 @@ class RollforwardResult:
 
 
 @dataclass
+class ExpectedFact:
+  """One concept value from Charlie's published luca.pacioli.ai export."""
+
+  concept: str  # e.g. "mini:CashAndCashEquivalents"
+  period_label: str  # raw "12/31/24" or "2024-01-01 | 2024-12-31"
+  value_cents: int  # dollars from CSV × 100
+  fact_id: str
+
+
+@dataclass
+class ReconciliationLine:
+  """One line of the automated diff against Charlie's published facts."""
+
+  concept: str
+  our_cents: int
+  expected_cents: int
+
+  @property
+  def delta_cents(self) -> int:
+    return self.our_cents - self.expected_cents
+
+  @property
+  def status(self) -> str:
+    if self.delta_cents == 0:
+      return "match"
+    return "delta"
+
+
+@dataclass
 class ReconciliationReport:
   graph_id: str
   period_start: date
   period_end: date
   concept_totals: list[ConceptTotal]
   rollforward_results: list[RollforwardResult]
+  diff_lines: list[ReconciliationLine] = field(default_factory=list)
+  diff_summary: dict[str, int] = field(default_factory=dict)
 
 
 # ── DB queries ───────────────────────────────────────────────────────────
@@ -155,6 +189,105 @@ def _load_concept_totals(
     )
     for r in rows
   ]
+
+
+def _load_expected_facts(csv_path: Path) -> list[ExpectedFact]:
+  """Parse Charlie's luca.pacioli.ai export → list of ExpectedFact.
+
+  The CSV ships with a UTF-8 BOM and uses pipe-separated multi-value
+  columns for the entity identifier and the calendar period aspect.
+  We only care about ``Concept``, ``FactValue``, ``CalendarPeriodAspect``,
+  and ``FactID`` — the rest is irrelevant for the anchor-total diff.
+
+  Values come in whole dollars in the export (rounding=INF means
+  no decimal places); we multiply by 100 for cents-internal storage
+  so comparison against our LineItem.amount_cents (already in cents)
+  is direct.
+  """
+  out: list[ExpectedFact] = []
+  with csv_path.open(encoding="utf-8-sig") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+      raw_value = (row.get("FactValue") or "").strip()
+      if not raw_value:
+        continue
+      try:
+        dollars = float(raw_value)
+      except ValueError:
+        # Non-numeric facts (text blocks, etc.) — skip for diff.
+        continue
+      out.append(
+        ExpectedFact(
+          concept=row["Concept"],
+          period_label=row["CalendarPeriodAspect"],
+          value_cents=int(round(dollars * 100)),
+          fact_id=row["FactID"],
+        )
+      )
+  return out
+
+
+def _build_diff(
+  ours: list[ConceptTotal],
+  expected: list[ExpectedFact],
+  period_label_for_instants: str,
+  period_label_for_durations: str,
+) -> list[ReconciliationLine]:
+  """Diff our concept totals against Charlie's expected facts.
+
+  Charlie publishes both instant (e.g. ``12/31/24`` BS positions)
+  and duration (e.g. ``2024-01-01 | 2024-12-31`` IS / CF flows)
+  facts. We pick the matching period label per concept based on
+  ``period_type`` so we compare apples-to-apples.
+
+  Our debit-positive convention means we need to sign-flip credit-
+  balance instant concepts (liabilities, equity) and credit-balance
+  duration concepts (revenues) to match Charlie's presentation
+  values, which are always positive when the concept is naturally
+  growing.
+  """
+  expected_by_concept_period: dict[tuple[str, str], int] = {}
+  for f in expected:
+    expected_by_concept_period.setdefault((f.concept, f.period_label), f.value_cents)
+
+  diff_lines: list[ReconciliationLine] = []
+  for c in ours:
+    period_label = (
+      period_label_for_instants
+      if c.period_type == "instant"
+      else period_label_for_durations
+    )
+    key = (c.qname, period_label)
+    if key not in expected_by_concept_period:
+      continue
+
+    # Sign convention: Charlie's published values are
+    # presentation-positive (assets positive when grown, liabilities
+    # positive when grown). Ours are debit-positive (credit-balance
+    # concepts come in negative). Sign-flip credit-balance concepts
+    # so the diff is meaningful.
+    our_signed = (
+      c.debit_positive_cents
+      if c.balance_type == "debit"
+      else -c.debit_positive_cents
+    )
+    diff_lines.append(
+      ReconciliationLine(
+        concept=c.qname,
+        our_cents=our_signed,
+        expected_cents=expected_by_concept_period[key],
+      )
+    )
+  return diff_lines
+
+
+def _summarize_diff(lines: list[ReconciliationLine]) -> dict[str, int]:
+  return {
+    "lines_compared": len(lines),
+    "exact_match": sum(1 for ln in lines if ln.status == "match"),
+    "delta": sum(1 for ln in lines if ln.status == "delta"),
+    "total_abs_delta_cents": sum(abs(ln.delta_cents) for ln in lines),
+  }
 
 
 def _derive_trait_from_concept(
@@ -311,6 +444,31 @@ def render_markdown(report: ReconciliationReport) -> str:
   out.append("---")
   out.append("")
 
+  # Auto-diff against Charlie's published facts
+  if report.diff_lines:
+    summary = report.diff_summary
+    out.append("## Automated Diff vs. Charlie's Published Facts")
+    out.append("")
+    out.append(
+      f"Compared **{summary['lines_compared']}** concept(s) against "
+      f"Charlie's luca.pacioli.ai export "
+      f"(`fixtures/expected_facts_mini.csv`). "
+      f"**{summary['exact_match']} exact match** • "
+      f"**{summary['delta']} delta**. "
+      f"Total absolute delta: **{_fmt_cents(summary['total_abs_delta_cents'])}**."
+    )
+    out.append("")
+    out.append("| Concept | Our value | Charlie's value | Δ | |")
+    out.append("|---|---:|---:|---:|---|")
+    for ln in report.diff_lines:
+      mark = "✓" if ln.status == "match" else "⚠️"
+      out.append(
+        f"| `{ln.concept}` | {_fmt_cents(ln.our_cents)} | "
+        f"{_fmt_cents(ln.expected_cents)} | "
+        f"{_fmt_cents(ln.delta_cents)} | {mark} |"
+      )
+    out.append("")
+
   # Anchor totals
   out.append("## Four Anchor Totals")
   out.append("")
@@ -460,6 +618,17 @@ def main() -> None:
     default=DEFAULT_REPORT_PATH,
     help="Output markdown report path.",
   )
+  parser.add_argument(
+    "--expected-facts",
+    type=Path,
+    default=EXPECTED_FACTS_PATH,
+    help="Charlie's luca.pacioli.ai mini facts export (CSV). Skip with --no-diff.",
+  )
+  parser.add_argument(
+    "--no-diff",
+    action="store_true",
+    help="Skip the automated diff against Charlie's expected facts.",
+  )
   args = parser.parse_args()
 
   print(f"Reconciling graph {args.graph_id} for {args.period_start}..{args.period_end}")
@@ -491,6 +660,52 @@ def main() -> None:
     concept_totals=concepts,
     rollforward_results=results,
   )
+
+  if not args.no_diff and args.expected_facts.exists():
+    expected = _load_expected_facts(args.expected_facts)
+    print(f"\nLoaded {len(expected)} expected fact(s) from {args.expected_facts.name}")
+    # Charlie's BS facts use "12/31/24" (period-end) and IS/CF flows
+    # use "2024-01-01 | 2024-12-31" (full-year duration). Match
+    # our instant concepts to the first, duration concepts to the
+    # second.
+    report.diff_lines = _build_diff(
+      ours=concepts,
+      expected=expected,
+      period_label_for_instants="12/31/24",
+      period_label_for_durations="2024-01-01 | 2024-12-31",
+    )
+    # Also compare our computed anchor totals to Charlie's published
+    # aggregates. These are concepts Charlie publishes as facts but
+    # our pipeline computes as scalars (no direct LineItem activity).
+    totals = _anchor_totals(concepts)
+    expected_by_key = {(f.concept, f.period_label): f.value_cents for f in expected}
+    anchor_pairs = [
+      ("mini:Assets", "12/31/24", totals["Total Assets"]),
+      ("mini:LiabilitiesAndEquity", "12/31/24", totals["Total Liabilities & Equity"]),
+      ("mini:NetIncomeLoss", "2024-01-01 | 2024-12-31", totals["Net Income"]),
+      ("mini:NetCashFlow", "2024-01-01 | 2024-12-31", totals["Net Cash Change"]),
+    ]
+    for concept, period_label, our_value in anchor_pairs:
+      key = (concept, period_label)
+      if key in expected_by_key:
+        report.diff_lines.append(
+          ReconciliationLine(
+            concept=concept,
+            our_cents=our_value,
+            expected_cents=expected_by_key[key],
+          )
+        )
+    report.diff_summary = _summarize_diff(report.diff_lines)
+    print(
+      f"  Diff: {report.diff_summary['exact_match']}/"
+      f"{report.diff_summary['lines_compared']} exact match • "
+      f"{report.diff_summary['delta']} delta • "
+      f"|Δ|={_fmt_cents(report.diff_summary['total_abs_delta_cents'])}"
+    )
+  elif args.no_diff:
+    print("\nSkipping diff (--no-diff)")
+  else:
+    print(f"\nExpected facts CSV not found at {args.expected_facts}; skipping diff")
 
   args.out.parent.mkdir(parents=True, exist_ok=True)
   args.out.write_text(render_markdown(report))
