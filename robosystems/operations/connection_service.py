@@ -294,7 +294,13 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """Delete a connection and deactivate its credentials.
+    """Soft-delete a connection and deactivate its credentials (B6).
+
+    The connection row is preserved with ``deleted_at`` stamped — the
+    tenant-side events/agents/elements scoped to its ``connection_id``
+    stay attached. Re-OAuthing to the same QB realm later revives this
+    row in place via the OAuth callback's reuse path
+    (`routers/graphs/connections/oauth.py`).
 
     Args:
         connection_id: Connection identifier
@@ -314,14 +320,15 @@ class ConnectionService:
         logger.warning(f"Connection {connection_id} not found for deletion")
         return False
 
-      # Deactivate credentials (soft delete for audit trail)
+      # Deactivate credentials (already soft-deletion via is_active=False)
       cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
       if cred:
         cred.deactivate(session)
 
-      # Delete connection record
-      conn.delete(session)
-      logger.info(f"Deleted connection {connection_id}")
+      # Soft-delete connection record (B6). Hard-delete would orphan
+      # connection_id-scoped tenant rows.
+      conn.soft_delete(session)
+      logger.info(f"Soft-deleted connection {connection_id}")
       return True
 
     except Exception:

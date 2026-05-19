@@ -136,6 +136,41 @@ async def sync_connection(
     # Validate provider is enabled before any sync operations
     provider_registry.get_provider(provider)
 
+    # Phase 3 B7: per-connection sync lock. Two concurrent qb_sync runs
+    # against the same connection_id race on Wave 1's UPSERT path; the
+    # lock serializes them. 30-min TTL bounds the longest expected
+    # sync runtime (Harbinger-class first sync). Lock is intentionally
+    # NOT explicitly released — TTL is the bound. If the same operator
+    # mashes "Sync Now" or the OAuth callback races a scheduler, the
+    # second attempt returns 409 with the holder's lock_id.
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+    from robosystems.middleware.auth.distributed_lock import DistributedLock
+
+    sync_lock = None
+    try:
+      redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+      sync_lock = DistributedLock(
+        redis_client, f"qb_sync:{connection_id}", ttl_seconds=1800
+      )
+      lock_result = sync_lock.acquire(blocking=False)
+      if not lock_result.acquired:
+        raise create_error_response(
+          status_code=status.HTTP_409_CONFLICT,
+          detail=(
+            f"Sync already in progress for connection {connection_id} "
+            f"(held by {lock_result.holder_id}, "
+            f"expires in {lock_result.ttl_remaining}s)"
+          ),
+          code=ErrorCode.OPERATION_FAILED,
+        )
+    except HTTPException:
+      raise
+    except Exception as e:
+      logger.warning(
+        f"Could not acquire sync lock for connection {connection_id}: {e}; "
+        f"proceeding without lock (concurrent-sync race still possible)"
+      )
+
     effective_options: dict[str, object] = dict(request.sync_options or {})
     if request.full_rebuild:
       effective_options["full_rebuild"] = True

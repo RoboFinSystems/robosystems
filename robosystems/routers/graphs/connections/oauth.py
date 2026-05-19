@@ -182,25 +182,68 @@ async def oauth_callback(
       provider_data = quickbooks_oauth_provider.extract_provider_data(
         {"realmId": request.realm_id}
       )
+      returned_realm_id = provider_data.get("realm_id")
+
+      # Phase 3 B6 reuse-on-re-OAuth: if a soft-deleted connection exists
+      # for this graph+provider+realm, revive it in place rather than
+      # leaving the pending connection as a brand-new row. Preserves
+      # connection_id so the tenant-side events / agents / elements
+      # scoped to it stay attached (avoids the orphan-data footgun the
+      # old hard-delete path created).
+      revived_id: str | None = None
+      if returned_realm_id:
+        from robosystems.models.core.connection.connection import Connection
+
+        prior = Connection.find_soft_deleted_for_realm(
+          graph_id=graph_id,
+          provider="quickbooks",
+          realm_id=returned_realm_id,
+          session=db,
+        )
+        if prior is not None and prior.id != connection_id:
+          logger.info(
+            "Re-OAuth reuse: reviving soft-deleted connection %s for "
+            "realm %s; discarding freshly-created pending %s",
+            prior.id,
+            returned_realm_id,
+            connection_id,
+          )
+          # Hard-delete the pending Connection — it has no tenant data
+          # attached and no credentials stored yet (store_tokens fires
+          # after this branch).
+          pending = Connection.get_by_id(connection_id, db)
+          if pending is not None:
+            pending.delete(db)
+          # Revive the prior connection.
+          prior.restore(db)
+          revived_id = str(prior.id)
+          # Pull the refreshed dict for downstream auto-sync.
+          connection = await ConnectionService.get_connection(
+            revived_id, current_user.id, db_session=db
+          )
+
+      # Route subsequent writes at the revived id if reuse happened,
+      # else at the freshly-created pending id.
+      target_connection_id = revived_id or connection_id
 
       # Store tokens
       quickbooks_oauth_handler.store_tokens(
-        connection_id, tokens, provider_data, db, user_id=str(current_user.id)
+        target_connection_id, tokens, provider_data, db, user_id=str(current_user.id)
       )
 
       # Update connection metadata
-      metadata = connection["metadata"]
+      metadata = (connection or {}).get("metadata") or {}
       metadata.update(
         {
           "status": "connected",
-          "realm_id": provider_data.get("realm_id"),
+          "realm_id": returned_realm_id,
           "last_auth": datetime.now(UTC).isoformat(),
         }
       )
 
       # Update connection in database
       await ConnectionService.update(
-        connection_id=connection_id,
+        connection_id=target_connection_id,
         user_id=str(current_user.id),
         metadata=metadata,
         status="connected",
@@ -244,7 +287,7 @@ async def oauth_callback(
         return {
           "success": True,
           "message": "QuickBooks connection established successfully",
-          "connection_id": connection_id,
+          "connection_id": target_connection_id,
           "auto_sync_task_id": task_id,
         }
       else:

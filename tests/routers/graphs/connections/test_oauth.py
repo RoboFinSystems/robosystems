@@ -346,6 +346,14 @@ class TestOAuthCallback:
         f"{OAUTH_MODULE}.ConnectionService.update",
         new_callable=AsyncMock,
       ),
+      # Phase 3 B6: the OAuth callback now checks for a soft-deleted
+      # prior connection matching the returned realm. Happy path: no
+      # prior match, proceed with the freshly-created connection_id.
+      patch(
+        "robosystems.models.core.connection.connection.Connection."
+        "find_soft_deleted_for_realm",
+        return_value=None,
+      ),
       patch(
         "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
         mock_oauth_handler,
@@ -369,6 +377,109 @@ class TestOAuthCallback:
     assert "QuickBooks" in result["message"]
     assert result["connection_id"] == CONNECTION_ID
     assert result["auto_sync_task_id"] == "task_123"
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_oauth_callback_revives_soft_deleted_connection(self):
+    """Phase 3 B6: re-OAuthing to a realm that has a soft-deleted prior
+    connection revives the prior in place rather than minting a new
+    connection_id. Preserves the tenant-side events/agents/elements."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    request = _make_oauth_callback_request()
+    connection_dict = _make_connection_dict(provider="quickbooks")
+
+    state_data = {
+      "user_id": USER_ID,
+      "connection_id": CONNECTION_ID,
+      "redirect_uri": "http://localhost:3001/connections/qb-callback",
+    }
+    tokens = {
+      "access_token": "access_abc",
+      "refresh_token": "refresh_xyz",
+    }
+
+    # Soft-deleted prior connection with a different ID that we'll
+    # revive on this OAuth callback.
+    prior_conn = MagicMock()
+    prior_conn.id = "conn_prior_soft_deleted"
+    prior_conn.restore = MagicMock()
+
+    # The pending freshly-created connection that will be hard-deleted.
+    pending_conn = MagicMock()
+    pending_conn.id = CONNECTION_ID
+    pending_conn.delete = MagicMock()
+
+    revived_connection_dict = _make_connection_dict(provider="quickbooks")
+    revived_connection_dict["connection_id"] = "conn_prior_soft_deleted"
+
+    mock_oauth_handler = MagicMock()
+    mock_oauth_handler.exchange_code_for_tokens = AsyncMock(return_value=tokens)
+    mock_oauth_handler.store_tokens = MagicMock()
+
+    mock_oauth_provider = MagicMock()
+    mock_oauth_provider.extract_provider_data = MagicMock(
+      return_value={"realm_id": "9341452700148642"}
+    )
+    mock_oauth_provider.validate_connection = AsyncMock(return_value=True)
+
+    mock_provider_registry = MagicMock()
+    mock_provider_registry.sync_connection = AsyncMock(return_value="task_revived")
+
+    with (
+      patch(
+        "robosystems.operations.providers.oauth_handler.OAuthState.validate",
+        return_value=state_data,
+      ),
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.get_connection",
+        new_callable=AsyncMock,
+        side_effect=[connection_dict, revived_connection_dict],
+      ),
+      patch(
+        f"{OAUTH_MODULE}.ConnectionService.update",
+        new_callable=AsyncMock,
+      ),
+      patch(
+        "robosystems.models.core.connection.connection.Connection."
+        "find_soft_deleted_for_realm",
+        return_value=prior_conn,
+      ),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=pending_conn,
+      ),
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_handler",
+        mock_oauth_handler,
+      ),
+      patch(
+        "robosystems.operations.providers.quickbooks_provider.quickbooks_oauth_provider",
+        mock_oauth_provider,
+      ),
+      patch(f"{OAUTH_MODULE}.provider_registry", mock_provider_registry),
+    ):
+      result = await oauth_callback(
+        provider="quickbooks",
+        graph_id=GRAPH_ID,
+        request=request,
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert result["success"] is True
+    # Result reports the revived connection_id, not the discarded pending one.
+    assert result["connection_id"] == "conn_prior_soft_deleted"
+    # Prior soft-deleted row was restored.
+    prior_conn.restore.assert_called_once_with(mock_db)
+    # Freshly-created pending row was hard-deleted (it had no tenant data).
+    pending_conn.delete.assert_called_once_with(mock_db)
+    # store_tokens routed at the revived id.
+    mock_oauth_handler.store_tokens.assert_called_once()
+    assert (
+      mock_oauth_handler.store_tokens.call_args.args[0] == "conn_prior_soft_deleted"
+    )
 
   @pytest.mark.unit
   @pytest.mark.asyncio

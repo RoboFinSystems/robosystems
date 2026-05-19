@@ -814,6 +814,66 @@ class TestCaptureAutoCommit:
     assert result.dispatch_failed == 1
     evt = session.add_all.call_args.args[0][0]
     assert evt.status == "captured"
+    # Phase 3 B8: dispatch error metadata stamped on the event so the
+    # inbox UI can show typed remediation prompts.
+    assert evt.metadata_["dispatch_error"] == "unknown_error"
+    assert "element_external_id not resolved" in evt.metadata_["dispatch_error_message"]
+    assert "dispatch_error_at" in evt.metadata_
+    assert evt.metadata_["dispatch_attempts"] == 1
+
+  def test_dispatch_error_classifier_maps_known_exception_types(self):
+    """The classifier maps known exception type names to typed codes
+    that the inbox UI uses for remediation prompts (Phase 3 B8)."""
+    from robosystems.operations.extensions.loader import _classify_dispatch_error
+
+    class ElementResolutionError(Exception):
+      pass
+
+    class ClosedPeriodError(Exception):
+      pass
+
+    class UnbalancedJournalEntryError(Exception):
+      pass
+
+    assert _classify_dispatch_error(ElementResolutionError("x")) == "element_unmapped"
+    assert _classify_dispatch_error(ClosedPeriodError("x")) == "closed_period"
+    assert (
+      _classify_dispatch_error(UnbalancedJournalEntryError("x")) == "unbalanced_entry"
+    )
+    assert _classify_dispatch_error(RuntimeError("x")) == "unknown_error"
+
+  def test_dispatch_attempts_increments_on_repeated_failure(self):
+    """A second failed dispatch attempt bumps dispatch_attempts to 2."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    # Existing captured event with prior dispatch_attempts=1 set.
+    prior_event = MagicMock()
+    prior_event.external_id = "JE_100"
+    prior_event.status = "captured"
+    prior_event.id = "evt_prior"
+    prior_event.metadata_ = {"dispatch_attempts": 1, "dispatch_error": "unknown_error"}
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [prior_event]
+
+    loader = OLTPLoader()
+    with patch(
+      "robosystems.operations.extensions.loader.fire_handler_on_commit",
+      side_effect=RuntimeError("still broken"),
+    ):
+      result = loader._capture_transactions_as_events(
+        session,
+        self._dbt_data(),
+        source="quickbooks",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    assert result.dispatch_failed == 1
+    assert prior_event.metadata_["dispatch_attempts"] == 2
 
   def test_native_source_does_not_auto_commit(self):
     """Manual / schedule / system / AI sources go through the inbox —

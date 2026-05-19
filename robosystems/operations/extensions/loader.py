@@ -91,6 +91,50 @@ def _parse_metadata(raw) -> dict:
   return {}
 
 
+def _classify_dispatch_error(exc: BaseException) -> str:
+  """Map a dispatch exception to a typed error code (Phase 3 B8).
+
+  The inbox UI uses this code to surface "fix and retry" prompts —
+  ``element_unmapped`` → "map account X in the CoA mapping",
+  ``closed_period`` → "reopen the period or change the posting date",
+  default ``unknown_error`` → generic retry button.
+
+  Classification stays in this module to avoid the inbox UI needing
+  to import the handler-side exception types.
+  """
+  exc_type = type(exc).__name__
+  # Pattern-match on the exception name rather than importing the
+  # handler types — keeps loader.py decoupled from
+  # operations/event_block/python_handlers/.
+  if exc_type == "ElementResolutionError":
+    return "element_unmapped"
+  if exc_type == "ClosedPeriodError":
+    return "closed_period"
+  if exc_type == "UnbalancedJournalEntryError":
+    return "unbalanced_entry"
+  return "unknown_error"
+
+
+def _stamp_dispatch_error(evt, exc: BaseException, now: datetime) -> None:
+  """Capture dispatch failure detail on the event's metadata blob (B8).
+
+  Mutates ``evt.metadata_`` as a new dict so SQLAlchemy detects the
+  JSONB change. The error metadata lives alongside the live payload
+  rather than mutating it — committed/fulfilled events are immutable;
+  captured events get a side-channel error trail the UI can read
+  without losing the original adapter-supplied payload.
+
+  Increments ``dispatch_attempts`` so the UI can show "this has failed
+  3 times" and decide whether to surface a stronger remediation prompt.
+  """
+  meta = dict(evt.metadata_ or {})
+  meta["dispatch_error"] = _classify_dispatch_error(exc)
+  meta["dispatch_error_message"] = str(exc)[:500]
+  meta["dispatch_error_at"] = now.isoformat()
+  meta["dispatch_attempts"] = int(meta.get("dispatch_attempts", 0)) + 1
+  evt.metadata_ = meta
+
+
 @dataclass
 class LoadResult:
   """Result of an OLTP load operation.
@@ -1143,7 +1187,16 @@ class OLTPLoader:
           evt.amount = amount
           evt.currency = txn.get("currency", "USD")
           evt.description = description
-          evt.metadata_ = metadata_blob
+          # Preserve loader bookkeeping keys (dispatch_* counters from
+          # prior failed-dispatch attempts, B8) across UPSERT. The
+          # adapter payload supersedes everything else, but counters
+          # that track "this has failed N times" must accumulate so the
+          # inbox UI can surface "this is stuck — needs attention"
+          # remediation prompts.
+          preserved = {
+            k: v for k, v in (evt.metadata_ or {}).items() if k.startswith("dispatch_")
+          }
+          evt.metadata_ = {**metadata_blob, **preserved}
           out.updated += 1
         elif evt.status in ("committed", "fulfilled"):
           # Wave 1 G4 — adapter resurfaced a payload for an
@@ -1234,13 +1287,22 @@ class OLTPLoader:
               evt.status = "committed"
           out.handler_dispatched += 1
         except Exception as e:
+          # Phase 3 B8: stamp typed error metadata on the event so the
+          # operator inbox can render "fix and retry" prompts. The
+          # metadata write happens OUTSIDE the SAVEPOINT — the nested
+          # transaction's rollback wipes any in-flight handler mutations
+          # but the parent session is still live, so this assignment
+          # commits with the outer transaction.
+          _stamp_dispatch_error(evt, e, now)
           logger.warning(
             "Auto-commit failed for event %s (type=%s, ext_id=%s): %s — "
-            "event left at status='captured' for inbox review",
+            "event left at status='captured' with dispatch_error stamped "
+            "for inbox review (attempt %d)",
             evt.id,
             evt.event_type,
             evt.external_id,
             e,
+            (evt.metadata_ or {}).get("dispatch_attempts", 1),
           )
           out.dispatch_failed += 1
 
