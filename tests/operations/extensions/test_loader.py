@@ -228,13 +228,17 @@ class TestOLTPLoader:
   @patch("robosystems.db.extensions.provision_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
-  def test_load_deletes_before_insert(
+  def test_load_full_rebuild_wipes_then_inserts(
     self,
     mock_duckdb_connect,
     mock_ext_session,
     mock_provision,
   ):
-    """Loader deletes existing data for source + connection_id."""
+    """`full_rebuild=True` triggers the pre-sync wipe per Wave 1 contract.
+
+    The wipe is scoped to captured/classified events plus GL cascade.
+    Voided/committed/fulfilled events survive the wipe.
+    """
     from robosystems.operations.extensions.loader import OLTPLoader
 
     mock_duckdb_connect.return_value = _make_duckdb_mock({})
@@ -250,10 +254,57 @@ class TestOLTPLoader:
       connection_id="conn_123",
       duckdb_path="/tmp/test.duckdb",
       created_by="user_123",
+      full_rebuild=True,
     )
 
     assert mock_session.query.called
     assert mock_session.flush.called
+
+  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.extensions_session")
+  @patch("duckdb.connect")
+  def test_load_incremental_skips_pre_sync_wipe(
+    self,
+    mock_duckdb_connect,
+    mock_ext_session,
+    mock_provision,
+  ):
+    """Default (incremental) sync skips the pre-sync DELETE per Wave 1 G2.
+
+    Only operator-explicit `full_rebuild=True` triggers the wipe.
+    Without it, neither `since_date` nor the default lookback should
+    fire the wipe — history outside the sync window must survive.
+    """
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    mock_duckdb_connect.return_value = _make_duckdb_mock({})
+
+    mock_session = MagicMock()
+    mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+    mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
+
+    loader = OLTPLoader()
+    loader.load(
+      graph_id="kg0123456789abcdef",
+      source="quickbooks",
+      connection_id="conn_123",
+      duckdb_path="/tmp/test.duckdb",
+      created_by="user_123",
+      # No full_rebuild — should skip the wipe.
+    )
+
+    # `.delete()` calls on the session indicate the wipe ran. The
+    # incremental path uses pure UPSERT (lookup + mutate or insert);
+    # session.query() is called for the UPSERT lookups but
+    # .filter(...).delete() should NEVER be called for events/GL/elements
+    # because the wipe is gated on full_rebuild=True.
+    delete_call_count = sum(
+      1 for c in mock_session.mock_calls if c[0].endswith(".delete")
+    )
+    assert delete_call_count == 0, (
+      f"Incremental sync invoked .delete() {delete_call_count} times — "
+      "Wave 1 G2 contract violated. Only full_rebuild=True should wipe."
+    )
 
   @patch("robosystems.db.extensions.provision_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
@@ -500,18 +551,32 @@ class TestCaptureTransactionsAsEvents:
     # No new Event was added
     session.add_all.assert_not_called()
 
-  def test_capture_leaves_committed_event_alone(self):
+  def test_capture_flags_drift_on_committed_event(self):
     """A handler-approved event (status='committed' / 'fulfilled') must
-    not be overwritten by a re-sync — that would silently undo the
-    user's approval and detach the resulting GL rows."""
+    not have its live payload overwritten by a re-sync — that would
+    silently undo the user's approval and detach the resulting GL rows.
+
+    Wave 1 G4 (`quickbooks-adapter.md` §4.6.0): when the adapter
+    re-surfaces a different payload for a committed event, we set
+    `payload_drift=True` and stash the incoming payload under
+    `metadata_['drift_payload']` for the reconciliation queue. The
+    live fields (`evt.metadata_['entries']`, etc.) stay unchanged.
+    """
     from robosystems.operations.extensions.loader import OLTPLoader
 
     committed_event = MagicMock()
     committed_event.external_id = "JE_100"
     committed_event.status = "fulfilled"  # handler ran already
     committed_event.id = "evt_committed"
-    original_metadata = {"frozen": "by-approval"}
-    committed_event.metadata_ = original_metadata
+    # The live payload reflects what the handler approved. Drift
+    # detection should NOT touch any of these keys.
+    original_metadata = {
+      "status": "posted",
+      "entries": [{"frozen": "by-approval"}],
+      "qb_doc_number": "100",
+    }
+    committed_event.metadata_ = dict(original_metadata)
+    committed_event.payload_drift = False
 
     session = MagicMock()
     session.query.return_value.filter.return_value.all.return_value = [committed_event]
@@ -529,7 +594,16 @@ class TestCaptureTransactionsAsEvents:
     # Neither inserted nor counted as updated — the row is frozen.
     assert _capture_result.inserted == 0
     assert _capture_result.updated == 0
-    assert committed_event.metadata_ is original_metadata
+    # Drift was detected (the dbt fixture's payload differs from the
+    # frozen `original_metadata` we seeded).
+    assert _capture_result.drift_detected == 1
+    assert committed_event.payload_drift is True
+    # Live payload fields are untouched.
+    for key, value in original_metadata.items():
+      assert committed_event.metadata_[key] == value
+    # Drift bookkeeping landed on the side.
+    assert "drift_payload" in committed_event.metadata_
+    assert "drift_detected_at" in committed_event.metadata_
     session.add_all.assert_not_called()
 
   def test_capture_drops_orphan_entries_and_line_items(self):

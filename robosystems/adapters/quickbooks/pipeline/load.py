@@ -52,6 +52,12 @@ def qb_load(
     connection_id=config.connection_id,
     duckdb_path=duckdb_path,
     created_by=config.user_id,
+    # Wave 1 G2: only operator-explicit full rebuilds trigger the
+    # pre-sync wipe. Incremental window syncs (since_date set) and
+    # default lookback (neither set) skip the wipe entirely and rely
+    # on the UPSERT path.
+    full_rebuild=config.full_rebuild,
+    since_date=config.since_date or None,
   )
 
   # Update last sync timestamp
@@ -89,7 +95,8 @@ def qb_load(
   context.log.info(
     f"Load complete: {result.elements} elements, {result.dimensions} dimensions, "
     f"{result.agents_inserted} agents inserted, {result.agents_updated} agents updated, "
-    f"{result.events_captured} events captured, {result.events_updated} events updated "
+    f"{result.events_captured} events captured, {result.events_updated} events updated, "
+    f"{result.events_drift_detected} drift flagged "
     f"({result.total_rows} total rows). "
     f"Dropped {result.dropped_unbalanced_entries} unbalanced entries, "
     f"{result.dropped_empty_transactions} empty transactions."
@@ -104,6 +111,7 @@ def qb_load(
       "agents_updated": result.agents_updated,
       "events_captured": result.events_captured,
       "events_updated": result.events_updated,
+      "events_drift_detected": result.events_drift_detected,
       "dropped_unbalanced_entries": result.dropped_unbalanced_entries,
       "dropped_empty_transactions": result.dropped_empty_transactions,
       "total_rows": result.total_rows,

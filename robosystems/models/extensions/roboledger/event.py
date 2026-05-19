@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
   BigInteger,
+  Boolean,
   CheckConstraint,
   Column,
   DateTime,
@@ -145,6 +146,14 @@ class Event(ExtensionsBase):
       "event_action",
       postgresql_where="event_action IS NOT NULL",
     ),
+    # Reconciliation queue read path — surfaces committed/fulfilled events
+    # whose adapter-side payload changed under us. Partial because the
+    # vast majority of rows have drift=false at all times.
+    Index(
+      "idx_events_payload_drift",
+      "payload_drift",
+      postgresql_where="payload_drift = true",
+    ),
   )
 
   # Identity
@@ -194,6 +203,13 @@ class Event(ExtensionsBase):
 
   # Event-type-specific payload
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
+
+  # Drift flag: set true when an adapter re-sync surfaces a payload diff
+  # against a `committed`/`fulfilled` event. The live `metadata_` payload
+  # stays unchanged (committed entries are immutable to re-sync per
+  # `quickbooks-adapter.md` §2.5); the incoming payload is stashed at
+  # `metadata_['drift_payload']` for the reconciliation queue.
+  payload_drift = Column(Boolean, nullable=False, default=False, server_default="false")
 
   # Timestamps
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))

@@ -130,6 +130,10 @@ class LoadResult:
   events_dispatch_failed: int = 0
   agents_inserted: int = 0
   agents_updated: int = 0
+  # Wave 1 G4: counts events whose QB-side payload changed under a
+  # committed/fulfilled row. Live payload stays unchanged; drift flag +
+  # drift_payload land on the event for the reconciliation queue.
+  events_drift_detected: int = 0
   # Drop counters surface data-quality issues that the loader masks with
   # defaults — visible in logs and dagster results so a sync that quietly
   # eats half of QB's data doesn't pass unnoticed.
@@ -165,6 +169,10 @@ class _CaptureResult:
   updated: int = 0
   handler_dispatched: int = 0
   dispatch_failed: int = 0
+  # Wave 1 G4 — events where the incoming payload diffs from an
+  # already-committed/fulfilled local row. Stamped on the event metadata
+  # for reconciliation rather than mutating the live payload.
+  drift_detected: int = 0
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
 
@@ -196,8 +204,27 @@ class OLTPLoader:
     connection_id: str,
     duckdb_path: str | Path,
     created_by: str,
+    *,
+    full_rebuild: bool = False,
+    since_date: str | None = None,
   ) -> LoadResult:
     """Load dbt OLTP output into the extensions tenant schema.
+
+    Wave 1 re-sync semantics (`quickbooks-adapter.md` §2.5.1):
+
+    - ``full_rebuild=True``: pre-sync DELETE wipes
+      ``captured``/``classified`` rows for ``(source, connection_id)``
+      (voided/committed/fulfilled survive), then UPSERTs from dbt.
+      Operator-explicit reset path — used by the OAuth-callback first
+      sync and the user's "rebuild from scratch" Resync action.
+    - ``since_date`` set (incremental window): pre-sync DELETE is
+      skipped entirely; UPSERT path mutates ``captured``/``classified``
+      rows in place and inserts new ones. Existing committed/fulfilled
+      events get drift-flagged if the incoming payload changed.
+    - Neither set (default lookback): treated as incremental — same as
+      ``since_date``. The wipe was historically unconditional; the
+      Wave 1 fix scopes it to operator-explicit full rebuilds only,
+      eliminating G2 (since_date wipes all history).
 
     Args:
         graph_id: The graph ID (maps to a PostgreSQL schema).
@@ -205,6 +232,13 @@ class OLTPLoader:
         connection_id: The connection ID for data isolation.
         duckdb_path: Path to the dbt output DuckDB database.
         created_by: User ID for audit trail.
+        full_rebuild: When True, run the pre-sync DELETE before UPSERT.
+            Wipes only ``captured``/``classified`` events (voided +
+            committed + fulfilled survive). Default False = incremental.
+        since_date: When set, signals an incremental window sync;
+            advisory only on the loader (the dbt mart is already
+            window-scoped) but documented for symmetry with
+            ``QBSyncConfig``. Does not enable the pre-sync DELETE.
 
     Returns:
         LoadResult with row counts per table.
@@ -252,33 +286,26 @@ class OLTPLoader:
     now = datetime.now(UTC)
 
     with extensions_session(graph_id) as session:
-      # ── Pre-sync deletes ───────────────────────────────────────────
+      # ── Pre-sync deletes (full_rebuild only) ───────────────────────
       #
-      # Transaction / Entry / LineItem are NOT deleted any more. Phase 2
-      # moved transactional ingestion to the event-block pattern: each
-      # QB transaction is captured as an Event row with
-      # ``status='captured'`` and ``apply_handlers=False``. GL rows
-      # (Transaction / Entry / LineItem) are produced post-approval by
-      # the registered handler. Deleting them here would destroy
-      # legitimate handler-approved entries on every re-sync.
+      # Wave 1 (`quickbooks-adapter.md` §2.5.1) constrains this block:
       #
-      # Element / Dimension paths stay direct (structural data, not
-      # transactional events).
-
-      # Multi-connection-safe: scope element deletes by connection_id so a
-      # re-sync of one QB connection doesn't stomp another's CoA.
-      # Library-origin elements (rs-gaap / us-gaap / FAC) have
-      # connection_id NULL and are never touched by this delete.
+      # - Runs ONLY on operator-explicit ``full_rebuild=True`` (G2 fix —
+      #   incremental syncs never wipe history outside their window).
+      # - Wipes only ``captured`` / ``classified`` events for
+      #   ``(source, connection_id)``. Voided / committed / fulfilled
+      #   events survive — operator rejections and handler-approved
+      #   entries are immutable to re-sync (G1 fix).
+      # - GL cascade (LineItem / Entry / Transaction) scopes to the
+      #   captured/classified events being wiped via
+      #   ``triggered_by_event_id``. Surviving fulfilled events keep
+      #   their GL rows; only orphan GL from never-completed dispatches
+      #   gets cleaned.
+      # - Element + Dimension wipe stays here as a structural reset
+      #   (full rebuild only). Wave 1 W4 elsewhere switches the element
+      #   INSERT path to UPSERT, but on full_rebuild we still want the
+      #   reset because that's the operator-explicit "start over" mode.
       #
-      # For auto-commit sources (QB-authoritative), the previous sync
-      # produced GL rows (Transaction / Entry / LineItem) via the
-      # handler. These reference the elements we're about to delete,
-      # so we have to wipe them first (FKs have no ON DELETE CASCADE).
-      # This is consistent with the qb-authoritative model: QB is the
-      # source of truth, our GL is a mirror, full re-sync replaces the
-      # mirror. Native-mode sources (manual / schedule / AI) skip this
-      # cascade — their GL rows are user-curated and must not be lost
-      # to a re-sync.
       # Local imports: hoisting these to module top would pull the
       # roboledger model package eagerly, which in turn drags Strawberry
       # GraphQL types and the entire extensions schema graph into every
@@ -290,118 +317,179 @@ class OLTPLoader:
       from robosystems.models.extensions.roboledger.line_item import LineItem
       from robosystems.models.extensions.roboledger.transaction import Transaction
 
-      if _SOURCE_AUTO_COMMITS.get(source, False):
-        txn_subq = session.query(Transaction.id).filter(
-          Transaction.source == source,
-          Transaction.connection_id == connection_id,
+      if full_rebuild and _SOURCE_AUTO_COMMITS.get(source, False):
+        # Subquery of events about to be wiped — captured/classified rows
+        # for this (source, connection_id). The GL cascade scopes via
+        # triggered_by_event_id to this subquery so fulfilled events'
+        # GL rows survive.
+        events_to_wipe_subq = session.query(Event.id).filter(
+          Event.source == source,
+          Event.metadata_["connection_id"].astext == connection_id,
+          Event.status.in_(("captured", "classified")),
         )
-        entry_subq = session.query(Entry.id).filter(Entry.transaction_id.in_(txn_subq))
+        entry_subq = session.query(Entry.id).filter(
+          Entry.triggered_by_event_id.in_(events_to_wipe_subq)
+        )
         session.query(LineItem).filter(LineItem.entry_id.in_(entry_subq)).delete(
           synchronize_session=False
         )
-        session.query(Entry).filter(Entry.transaction_id.in_(txn_subq)).delete(
-          synchronize_session=False
-        )
-        session.query(Transaction).filter(
-          Transaction.source == source,
-          Transaction.connection_id == connection_id,
+        session.query(Entry).filter(
+          Entry.triggered_by_event_id.in_(events_to_wipe_subq)
         ).delete(synchronize_session=False)
-        # Event has no top-level connection_id column — the value lives in
-        # metadata_["connection_id"] (set by _capture_transactions_as_events).
-        # Filter on the JSONB path so a re-sync of one QB connection doesn't
-        # wipe events from a sibling connection on the same graph.
+        session.query(Transaction).filter(
+          Transaction.triggered_by_event_id.in_(events_to_wipe_subq)
+        ).delete(synchronize_session=False)
+        # Now the events themselves. JSONB connection_id filter (the column
+        # lives in metadata_, not as a top-level FK) keeps sibling QB
+        # connections on the same graph untouched.
         session.query(Event).filter(
           Event.source == source,
           Event.metadata_["connection_id"].astext == connection_id,
+          Event.status.in_(("captured", "classified")),
         ).delete(synchronize_session=False)
         session.flush()
 
-      # Drop element_traits and associations before elements — the FKs have
-      # no ON DELETE CASCADE, and re-syncs that previously seeded these
-      # would otherwise hit a FK violation. Library-seeded rows are
-      # protected by the immutability trigger; the only rows touched
-      # here are adapter-derived (created_by != 'library-seeder').
-      from robosystems.models.extensions.association import Association
+      # Element + Dimension structural reset — only on full_rebuild.
+      # ElementTrait cascade lives here too: traits are adapter-derived
+      # and re-derived idempotently from QB AccountType on insert
+      # (loader.py ``_apply_source_element_traits`` via ON CONFLICT
+      # DO NOTHING at the upsert site). Library-seeded rows are
+      # protected by the immutability trigger.
+      #
+      # Wave 1 W4 NOTE: Association cascade was removed (was previously
+      # wiping user-curated CoA → us-gaap mappings). On full_rebuild we
+      # now ALSO keep associations alive — the element UPSERT below
+      # preserves elem_* ULIDs so the FK targets remain valid.
+      from robosystems.models.extensions.association import Association  # noqa: F401
 
-      element_subq = session.query(Element.id).filter(
-        Element.external_source == source,
-        Element.connection_id == connection_id,
-      )
-      session.query(ElementTrait).filter(
-        ElementTrait.element_id.in_(element_subq)
-      ).delete(synchronize_session=False)
-      # Associations are bidirectional (from_element_id / to_element_id);
-      # a CoA→us-gaap mapping has the CoA element on the `from` side and
-      # the us-gaap library element on the `to` side. Only need to scope
-      # by the from side since QB elements never appear as `to`.
-      session.query(Association).filter(
-        Association.from_element_id.in_(element_subq)
-      ).delete(synchronize_session=False)
+      if full_rebuild:
+        element_subq = session.query(Element.id).filter(
+          Element.external_source == source,
+          Element.connection_id == connection_id,
+        )
+        session.query(ElementTrait).filter(
+          ElementTrait.element_id.in_(element_subq)
+        ).delete(synchronize_session=False)
 
-      session.query(Element).filter(
-        Element.external_source == source,
-        Element.connection_id == connection_id,
-      ).delete(synchronize_session=False)
+        session.query(Dimension).filter(
+          Dimension.metadata_.contains({"source": source}),
+        ).delete(synchronize_session=False)
 
-      session.query(Dimension).filter(
-        Dimension.metadata_.contains({"source": source}),
-      ).delete(synchronize_session=False)
+        session.flush()
+        logger.info(
+          f"Full-rebuild pre-sync cleanup complete for source={source}, "
+          f"connection_id={connection_id} "
+          f"(voided/committed/fulfilled events + user mappings survive)"
+        )
+      elif since_date:
+        logger.info(
+          f"Incremental sync (since_date={since_date}, full_rebuild=False) — "
+          f"skipping pre-sync DELETE; UPSERT path will handle the window."
+        )
+      else:
+        logger.info(
+          "Default lookback sync (full_rebuild=False) — "
+          "skipping pre-sync DELETE; UPSERT path will handle changed rows."
+        )
 
-      session.flush()
-      logger.info(
-        f"Refreshed Element + Dimension rows for source={source}, "
-        f"connection_id={connection_id}"
-      )
-
-      # --- INSERT elements (from dbt "elements" table) ---
+      # --- UPSERT elements (from dbt "elements" table) ---
+      #
+      # Wave 1 W4 (`quickbooks-adapter.md` §4.6.0): lookup-then-update or
+      # insert, matching the Agent UPSERT pattern at
+      # ``_capture_agents_from_qb``. Preserves ``elem_*`` ULIDs across
+      # syncs — downstream Associations / IB Fact references hold their
+      # FK targets stable. Defended at the DB level by
+      # ``idx_elements_upsert_key`` (partial UNIQUE on
+      # ``(external_source, connection_id, external_id)``).
       element_lookup: dict[str, str] = {}  # external_id → oltp_id
       external_parent_map: dict[str, str] = {}  # oltp_id → external_parent_id
 
       if "elements" in dbt_data:
         rows = dbt_data["elements"]
-        element_objects = []
-        for row in rows:
-          oltp_id = generate_prefixed_ulid("elem")
-          ext_id = str(row["external_id"])
-          element_lookup[ext_id] = oltp_id
-
-          ext_parent = row.get("external_parent_id")
-          if ext_parent and str(ext_parent) not in ("", "None", "nan"):
-            external_parent_map[oltp_id] = str(ext_parent)
-
-          element_objects.append(
-            Element(
-              id=oltp_id,
-              code=str(row["code"]),
-              name=str(row["name"]),
-              description=str(row["description"]) if row.get("description") else None,
-              balance_type=str(row["balance_type"]),
-              parent_id=None,  # resolved in second pass
-              depth=int(row.get("depth", 0)),
-              path=str(row.get("path", "")),
-              currency=str(row.get("currency", "USD")),
-              is_active=bool(row.get("is_active", True)),
-              is_placeholder=bool(row.get("is_placeholder", False)),
-              source=source,
-              period_type="duration",
-              element_type="concept",
-              is_abstract=False,
-              is_monetary=True,
-              external_id=ext_id,
-              external_source=str(row["external_source"]),
-              connection_id=connection_id,
-              metadata_=_parse_metadata(row.get("metadata")),
-              version=1,
-              created_at=now,
-              updated_at=now,
-              created_by=created_by,
+        external_ids = [str(row["external_id"]) for row in rows]
+        existing_elements: dict[str, Element] = {}
+        if external_ids:
+          for el in (
+            session.query(Element)
+            .filter(
+              Element.external_source == source,
+              Element.connection_id == connection_id,
+              Element.external_id.in_(external_ids),
             )
+            .all()
+          ):
+            existing_elements[str(el.external_id)] = el
+
+        new_element_objects: list[Element] = []
+        updated_count = 0
+        for row in rows:
+          ext_id = str(row["external_id"])
+          ext_parent = row.get("external_parent_id")
+          parent_external = (
+            str(ext_parent)
+            if ext_parent and str(ext_parent) not in ("", "None", "nan")
+            else None
           )
 
-        session.add_all(element_objects)
+          if ext_id in existing_elements:
+            # UPDATE in place — preserve elem_* ULID.
+            el = existing_elements[ext_id]
+            el.code = str(row["code"])
+            el.name = str(row["name"])
+            el.description = str(row["description"]) if row.get("description") else None
+            el.balance_type = str(row["balance_type"])
+            el.depth = int(row.get("depth", 0))
+            el.path = str(row.get("path", ""))
+            el.currency = str(row.get("currency", "USD"))
+            el.is_active = bool(row.get("is_active", True))
+            el.is_placeholder = bool(row.get("is_placeholder", False))
+            el.metadata_ = _parse_metadata(row.get("metadata"))
+            el.updated_at = now
+            element_lookup[ext_id] = el.id
+            if parent_external:
+              external_parent_map[el.id] = parent_external
+            updated_count += 1
+          else:
+            # INSERT new — mint fresh ULID.
+            oltp_id = generate_prefixed_ulid("elem")
+            element_lookup[ext_id] = oltp_id
+            if parent_external:
+              external_parent_map[oltp_id] = parent_external
+            new_element_objects.append(
+              Element(
+                id=oltp_id,
+                code=str(row["code"]),
+                name=str(row["name"]),
+                description=str(row["description"]) if row.get("description") else None,
+                balance_type=str(row["balance_type"]),
+                parent_id=None,  # resolved in second pass
+                depth=int(row.get("depth", 0)),
+                path=str(row.get("path", "")),
+                currency=str(row.get("currency", "USD")),
+                is_active=bool(row.get("is_active", True)),
+                is_placeholder=bool(row.get("is_placeholder", False)),
+                source=source,
+                period_type="duration",
+                element_type="concept",
+                is_abstract=False,
+                is_monetary=True,
+                external_id=ext_id,
+                external_source=str(row["external_source"]),
+                connection_id=connection_id,
+                metadata_=_parse_metadata(row.get("metadata")),
+                version=1,
+                created_at=now,
+                updated_at=now,
+                created_by=created_by,
+              )
+            )
+
+        if new_element_objects:
+          session.add_all(new_element_objects)
         session.flush()
 
-        # Second pass: resolve parent_id
+        # Second pass: resolve parent_id (works for both inserted and
+        # updated rows — both populate external_parent_map above).
         for oltp_id, ext_parent_id in external_parent_map.items():
           parent_oltp_id = element_lookup.get(ext_parent_id)
           if parent_oltp_id:
@@ -411,7 +499,10 @@ class OLTPLoader:
 
         session.flush()
         result.elements = len(rows)
-        logger.info(f"Inserted {result.elements} elements")
+        logger.info(
+          f"UPSERTed {result.elements} elements "
+          f"({len(new_element_objects)} new, {updated_count} updated)"
+        )
 
         # --- Apply trait classifications from source-system metadata ---
         #
@@ -481,14 +572,16 @@ class OLTPLoader:
       result.events_updated = capture_result.updated
       result.events_handler_dispatched = capture_result.handler_dispatched
       result.events_dispatch_failed = capture_result.dispatch_failed
+      result.events_drift_detected = capture_result.drift_detected
       result.dropped_unbalanced_entries = capture_result.dropped_unbalanced_entries
       result.dropped_empty_transactions = capture_result.dropped_empty_transactions
       logger.info(
-        "Captured %d new event_blocks, updated %d existing "
-        "(dropped %d unbalanced entries, %d empty transactions; "
-        "capture-only — no GL writes)",
+        "Captured %d new event_blocks, updated %d existing, "
+        "flagged %d drift (dropped %d unbalanced entries, "
+        "%d empty transactions; capture-only — no GL writes)",
         capture_result.inserted,
         capture_result.updated,
+        capture_result.drift_detected,
         capture_result.dropped_unbalanced_entries,
         capture_result.dropped_empty_transactions,
       )
@@ -1052,6 +1145,28 @@ class OLTPLoader:
           evt.description = description
           evt.metadata_ = metadata_blob
           out.updated += 1
+        elif evt.status in ("committed", "fulfilled"):
+          # Wave 1 G4 — adapter resurfaced a payload for an
+          # already-approved entry. Compare incoming `metadata_blob`
+          # against the live `evt.metadata_` minus drift bookkeeping.
+          # If different, flag drift + stash the incoming payload
+          # without mutating the live payload (handler-approved
+          # entries are immutable to re-sync per §2.5).
+          live_payload = {
+            k: v
+            for k, v in (evt.metadata_ or {}).items()
+            if k not in ("drift_payload", "drift_detected_at")
+          }
+          if live_payload != metadata_blob:
+            evt.payload_drift = True
+            # Mutate as a new dict so SQLAlchemy detects the JSONB
+            # change (in-place mutation of mutable columns is unsafe
+            # without a MutableDict wrapper).
+            new_meta = dict(evt.metadata_ or {})
+            new_meta["drift_payload"] = metadata_blob
+            new_meta["drift_detected_at"] = now.isoformat()
+            evt.metadata_ = new_meta
+            out.drift_detected += 1
         # else: leave it alone — handler already ran or user voided it
       else:
         new_events.append(
