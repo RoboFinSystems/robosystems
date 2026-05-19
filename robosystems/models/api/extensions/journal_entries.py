@@ -16,7 +16,7 @@ etc.).
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,6 +40,19 @@ class JournalEntryLineItemInput(BaseModel):
   )
   description: str | None = Field(
     None, description="Per-line memo (overrides the entry-level memo on this line)."
+  )
+  metadata: dict[str, Any] | None = Field(
+    None,
+    description=(
+      "Optional per-line metadata stamped on ``LineItem.metadata_``. "
+      "Used to carry source-system fields the standard columns don't "
+      "cover — e.g. an external flow-tag code that drives rollforward "
+      "attribution (``transaction_description_code``), an external "
+      "memo, or a cost-center hint. Pass-through is non-validating; "
+      "the renderer / filter engine reads keys it knows about and "
+      "ignores the rest. ``None`` is normalized to ``{}`` at persist "
+      "time."
+    ),
   )
 
 

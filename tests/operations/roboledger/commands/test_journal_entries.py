@@ -183,6 +183,88 @@ class TestValidateAndNormalizeLines:
     assert len(normalized) == 6
 
 
+class TestLineMetadataPassthrough:
+  """Per-line ``metadata`` rides through the normalization layer onto
+  ``LineItem.metadata_`` — the field that rollforward filter predicates
+  match against.
+  """
+
+  def test_metadata_normalizes_to_dict_when_present(self):
+    lines = [
+      JournalEntryLineItemInput(
+        element_id="elem_cash",
+        debit_amount=10000,
+        metadata={
+          "transaction_description_code": "mini:ProceedsFromInvestmentsByOwner"
+        },
+      ),
+      JournalEntryLineItemInput(
+        element_id="elem_paidin",
+        credit_amount=10000,
+        metadata={"transaction_description_code": "mini:InvestmentsByOwner"},
+      ),
+    ]
+    normalized, _dr, _cr = validate_and_normalize_lines(lines)
+    assert (
+      normalized[0]["metadata"]["transaction_description_code"]
+      == "mini:ProceedsFromInvestmentsByOwner"
+    )
+    assert (
+      normalized[1]["metadata"]["transaction_description_code"]
+      == "mini:InvestmentsByOwner"
+    )
+
+  def test_metadata_defaults_to_empty_dict_when_absent(self):
+    """Backward compatibility: existing callers that don't pass
+    metadata get an empty dict, never None — matches LineItem.metadata_
+    NOT NULL with default {}."""
+    normalized, _dr, _cr = validate_and_normalize_lines(_balanced_lines())
+    assert normalized[0]["metadata"] == {}
+    assert normalized[1]["metadata"] == {}
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_create_journal_entry_persists_line_metadata(self, _mock_guard, _mock_resp):
+    """A metadata-bearing line creates a LineItem with metadata_ stamped."""
+    from robosystems.models.extensions.roboledger.line_item import LineItem
+
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE,
+      memo="Owner investment",
+      line_items=[
+        JournalEntryLineItemInput(
+          element_id="elem_cash",
+          debit_amount=10000,
+          metadata={
+            "transaction_description_code": "mini:ProceedsFromInvestmentsByOwner"
+          },
+        ),
+        JournalEntryLineItemInput(
+          element_id="elem_paidin",
+          credit_amount=10000,
+          metadata={"transaction_description_code": "mini:InvestmentsByOwner"},
+        ),
+      ],
+    )
+    create_journal_entry(session, body, "usr_1")
+
+    line_adds = [
+      call[0][0]
+      for call in session.add.call_args_list
+      if isinstance(call[0][0], LineItem)
+    ]
+    assert len(line_adds) == 2
+    assert (
+      line_adds[0].metadata_["transaction_description_code"]
+      == "mini:ProceedsFromInvestmentsByOwner"
+    )
+    assert (
+      line_adds[1].metadata_["transaction_description_code"]
+      == "mini:InvestmentsByOwner"
+    )
+
+
 # ── create_journal_entry ──────────────────────────────────────────────────
 
 

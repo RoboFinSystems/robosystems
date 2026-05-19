@@ -74,6 +74,13 @@ class NestedJournalEntryLineItem(BaseModel):
   Accepts either ``element_id`` (already resolved) or
   ``element_external_id`` (resolved at dispatch time against the
   Element table). Exactly one must be present.
+
+  ``metadata`` is an optional pass-through dict stamped on the
+  resulting ``LineItem.metadata_``. Used to carry source-system fields
+  the standard columns don't cover — e.g. mini's
+  ``transaction_description_code`` for rollforward attribution. The
+  renderer / filter engine reads keys it knows about and ignores the
+  rest.
   """
 
   element_id: str | None = None
@@ -81,6 +88,7 @@ class NestedJournalEntryLineItem(BaseModel):
   debit_amount: int = 0
   credit_amount: int = 0
   description: str | None = None
+  metadata: dict[str, Any] | None = None
 
   @model_validator(mode="after")
   def _exactly_one_element_ref(self) -> NestedJournalEntryLineItem:
@@ -262,6 +270,7 @@ def _resolve_nested_line_items(
           debit_amount=line.debit_amount,
           credit_amount=line.credit_amount,
           description=line.description,
+          metadata=line.metadata,
         )
       )
     out.append(line_items)
