@@ -559,7 +559,11 @@ Permission was denied for this request to access the `loopback` address space.
 
 Chrome 146+ enforces Private Network Access on cross-origin calls to localhost. The backend grants it via `allow_private_network=is_development()` on the CORS middleware, but Chrome caches the preflight result aggressively and the usual cache-clearing tricks (DevTools "Disable cache", site-data delete, incognito) often don't actually flush the PNA preflight cache. Chrome 146 also removed the `chrome://flags` override that used to disable PNA.
 
-**Pragmatic workaround:** **use Firefox for the OAuth connect step**, then go back to Chrome for normal use. Firefox doesn't enforce PNA the same way, so the OAuth callback completes cleanly. Once the connection is established, day-to-day use against `http://localhost:3001` (Path A — same-origin localhost) doesn't trigger PNA and Chrome works fine.
+`roboledger-app`'s `next.config.js` handles this automatically when `NGROK_DOMAIN` is set in `roboledger-app/.env`: rewrites under `/v1/*` and `/extensions/*` proxy through the Next dev server to `http://localhost:8000`, and `NEXT_PUBLIC_ROBOSYSTEMS_API_URL` is overridden to the ngrok origin so the browser only ever talks to one host. From the browser's perspective every request is same-origin, so PNA never fires.
+
+This is **dev-server-only** — it works because `next dev` re-reads `next.config.js` at startup and the `env` override is applied to the bundle in dev mode. Running `roboledger-app` from inside Docker (`docker compose` with the `roboledger-app` service) uses `next start` against a pre-built bundle where `NEXT_PUBLIC_*` is baked at build time, so the override has no effect. **Run the frontend with `npm run dev` on the host for the OAuth connect step.**
+
+**Fallback workaround:** if `npm run dev` isn't an option, **use Firefox for the OAuth connect step**, then go back to Chrome for normal use. Firefox doesn't enforce PNA the same way, so the OAuth callback completes cleanly. Once the connection is established, day-to-day use against `http://localhost:3001` (Path A — same-origin localhost) doesn't trigger PNA and Chrome works fine.
 
 Only affects Path B (ngrok → localhost) during the OAuth callback moment. Path A is same-origin localhost and bypasses PNA entirely.
 
