@@ -19,7 +19,7 @@ JE-208,30810137d58f76b84afd,1/21/24,000-2150-00,mini:AccountsPayable,mini:Decrea
 JE-208,30810137d58f76b84afd,1/21/24,000-1100-00,mini:CashAndCashEquivalents,mini:PaymentOfAccountsPayable,7000,iso4217:USD,2,C,-7000,2,Payment of accounts payable.,,No,193
 JE-209,30810137d58f76b84afd,1/25/24,000-2300-00,mini:LongtermDebt,mini:RepaymentLongtermBorrowings,1000,iso4217:USD,2,D,1000,1,Payment of long term debt including accrued interest.,,No,194
 JE-209,30810137d58f76b84afd,1/25/24,000-1100-00,mini:CashAndCashEquivalents,mini:PaymentForReductionOfLongtermBorrowings,1000,iso4217:USD,2,C,-1000,2,Payment of long term debt including accrued interest.,,No,195
-JE-209,30810137d58f76b84afd,1/25/24,000-1100-00,mini:CashAndCashEquivalents,mini:PaymentOfInterest,150,iso4217:USD,2,C,-150,3,Payment of long term debt including accrued interest.,,No,211
+JE-209,30810137d58f76b84afd,1/25/24,000-1100-00,mini:CashAndCashEquivalents,mini:PaymentInterest,150,iso4217:USD,2,C,-150,3,Payment of long term debt including accrued interest.,,No,211
 JE-209,30810137d58f76b84afd,1/25/24,000-2160-00,mini:AccruedExpenses,mini:DecreaseFromPaymentOfInterest,150,iso4217:USD,2,D,150,4,Payment of long term debt including accrued interest.,,No,196
 JE-210,30810137d58f76b84afd,1/24/24,000-5400-00,mini:InterestExpense,mini:NetIncomeLoss,150,iso4217:USD,2,D,150,1,Accrual of interest on debt.,,No,197
 JE-210,30810137d58f76b84afd,1/24/24,000-2160-00,mini:AccruedExpenses,mini:InterestAccrued,150,iso4217:USD,2,C,-150,2,Accrual of interest on debt.,,No,198

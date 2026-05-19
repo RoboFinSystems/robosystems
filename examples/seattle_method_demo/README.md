@@ -64,7 +64,8 @@ introduced by the reconciliation. They become part of the report's
 | JE | Issue |
 |---|---|
 | **JE-205** | Description "Payment for contractor"; TDC on the AP line is `mini:PurchasesInventoryForSaleOnAccount` — but contractor services aren't inventory. Vocabulary misuse. |
-| **JE-225** | Nil-amount placeholder (`Amount = 0` on both lines) — likely a boundary test for nil handling. |
+| **JE-209** | TDC `mini:PaymentOfInterest` on the Cash line was a typo — mini.xsd's canonical concept is `mini:PaymentInterest` (no "Of"). Fixed at source in `fixtures/transactions.csv`; note that the sibling concept `mini:DecreaseFromPaymentOfInterest` on the AccruedExpenses line *does* keep the "Of" (Charlie's own naming is internally inconsistent). |
+| **JE-225** | Boundary test case: "Write off of PPE" with `Amount = 0` on both lines — an entry with no economic substance. Our GL handler correctly rejects it (`must have non-zero D or C`); Charlie's system likely creates $0 facts. The reconciliation delta is $0 either way (no economic activity to attribute), so the four anchor totals are unaffected. Classified as **Methodology gap** (neither side has a bug — both correctly handle a nil entry under their respective semantics). |
 | **JE-226** | Income tax accrual ($400). TDC on the AccruedExpenses line is `mini:InterestAccrued` — should be `IncomeTaxAccrued`. Copy-paste-style bug from the JE-210 interest accrual pattern. |
 
 ## Methodology
