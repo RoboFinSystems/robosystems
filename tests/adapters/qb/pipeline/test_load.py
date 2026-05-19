@@ -98,6 +98,11 @@ class TestQbLoadAsset:
       connection_id=config.connection_id,
       duckdb_path=work_dir / "quickbooks.duckdb",
       created_by=config.user_id,
+      # Wave 1 G2 — incremental sync passes the empty-string since_date as
+      # None (the asset translates the QBSyncConfig default) and the
+      # explicit full_rebuild=False so the loader skips the pre-sync wipe.
+      full_rebuild=False,
+      since_date=None,
     )
 
   def test_load_returns_row_counts_in_metadata(self, tmp_path):

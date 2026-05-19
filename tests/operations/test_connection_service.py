@@ -378,7 +378,10 @@ class TestUpdateConnectionCredentials:
 class TestDeleteConnection:
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_deletes_connection_and_deactivates_creds(self):
+  async def test_soft_deletes_connection_and_deactivates_creds(self):
+    """Phase 3 B6: delete_connection now soft-deletes (preserves the row
+    with deleted_at stamped) rather than hard-deleting. Tenant-side
+    events/agents/elements scoped to the connection_id stay attached."""
     mock_session = MagicMock()
     mock_conn = _make_mock_connection()
     mock_cred = _make_mock_credentials()
@@ -398,7 +401,9 @@ class TestDeleteConnection:
 
     assert result is True
     mock_cred.deactivate.assert_called_once()
-    mock_conn.delete.assert_called_once()
+    mock_conn.soft_delete.assert_called_once()
+    # Hard-delete is NOT called — that would orphan tenant data.
+    mock_conn.delete.assert_not_called()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -839,7 +844,7 @@ class TestConnectionServiceErrorHandling:
       )
 
     assert result is True
-    mock_conn.delete.assert_called_once()
+    mock_conn.soft_delete.assert_called_once()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -926,3 +931,51 @@ class TestConnectionServiceSessionManagement:
       )
 
     mock_session.close.assert_called_once()
+
+
+class TestMarkNeedsReauthSync:
+  """Phase 3 B5 — sync helper flips the connection to needs_reauth."""
+
+  @pytest.mark.unit
+  def test_helper_flips_status(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(status="connected")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = ConnectionService.mark_connection_needs_reauth_sync(
+        connection_id="conn_1",
+        db_session=mock_session,
+      )
+
+    assert result is True
+    mock_conn.update_status.assert_called_once_with("needs_reauth", mock_session)
+
+  @pytest.mark.unit
+  def test_helper_idempotent_when_already_needs_reauth(self):
+    """Second call when status is already needs_reauth is a no-op."""
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(status="needs_reauth")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = ConnectionService.mark_connection_needs_reauth_sync(
+        connection_id="conn_1",
+        db_session=mock_session,
+      )
+
+    assert result is True
+    mock_conn.update_status.assert_not_called()
+
+  @pytest.mark.unit
+  def test_helper_returns_false_when_connection_missing(self):
+    mock_session = MagicMock()
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = None
+      result = ConnectionService.mark_connection_needs_reauth_sync(
+        connection_id="missing",
+        db_session=mock_session,
+      )
+    assert result is False

@@ -34,10 +34,24 @@ def qb_load(
      when the user approves the event in the inbox, which is when
      transactions/entries/line_items rows actually get created.
 
+  Releases the B7 sync lock on completion (or on exception) so the
+  next sync can fire immediately without waiting for the 30-min TTL.
+
   Returns:
       MaterializeResult with element/dimension/event counts and
       data-quality drop counters.
   """
+
+  try:
+    return _run_qb_load(context, config)
+  finally:
+    _release_sync_lock(context, config)
+
+
+def _run_qb_load(
+  context: AssetExecutionContext,
+  config: QBSyncConfig,
+) -> MaterializeResult:
   from robosystems.operations.extensions.loader import OLTPLoader
 
   work_dir = get_pipeline_work_dir(config.graph_id)
@@ -52,6 +66,12 @@ def qb_load(
     connection_id=config.connection_id,
     duckdb_path=duckdb_path,
     created_by=config.user_id,
+    # Wave 1 G2: only operator-explicit full rebuilds trigger the
+    # pre-sync wipe. Incremental window syncs (since_date set) and
+    # default lookback (neither set) skip the wipe entirely and rely
+    # on the UPSERT path.
+    full_rebuild=config.full_rebuild,
+    since_date=config.since_date or None,
   )
 
   # Update last sync timestamp
@@ -89,7 +109,8 @@ def qb_load(
   context.log.info(
     f"Load complete: {result.elements} elements, {result.dimensions} dimensions, "
     f"{result.agents_inserted} agents inserted, {result.agents_updated} agents updated, "
-    f"{result.events_captured} events captured, {result.events_updated} events updated "
+    f"{result.events_captured} events captured, {result.events_updated} events updated, "
+    f"{result.events_drift_detected} drift flagged "
     f"({result.total_rows} total rows). "
     f"Dropped {result.dropped_unbalanced_entries} unbalanced entries, "
     f"{result.dropped_empty_transactions} empty transactions."
@@ -104,12 +125,48 @@ def qb_load(
       "agents_updated": result.agents_updated,
       "events_captured": result.events_captured,
       "events_updated": result.events_updated,
+      "events_drift_detected": result.events_drift_detected,
       "dropped_unbalanced_entries": result.dropped_unbalanced_entries,
       "dropped_empty_transactions": result.dropped_empty_transactions,
       "total_rows": result.total_rows,
       "errors": len(result.errors),
     }
   )
+
+
+def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> None:
+  """Release the Phase 3 B7 per-connection sync lock on qb_load
+  completion (success or failure).
+
+  Best-effort: any error here is logged and swallowed — the lock will
+  expire via its 30-min TTL if the explicit release fails. The lock
+  token (`config.sync_lock_id`) is empty when Valkey was unavailable
+  at acquire time; that path is a no-op too.
+  """
+  if not config.sync_lock_id:
+    return
+  try:
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+    from robosystems.middleware.auth.distributed_lock import release_lock_by_id
+
+    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+    released = release_lock_by_id(
+      redis_client,
+      lock_key=f"qb_sync:{config.connection_id}",
+      lock_id=config.sync_lock_id,
+    )
+    if released:
+      context.log.info(f"Released B7 sync lock for connection {config.connection_id}")
+    else:
+      context.log.info(
+        f"B7 sync lock release no-op for connection {config.connection_id} "
+        f"(lock already expired or held by someone else)"
+      )
+  except Exception as e:
+    context.log.warning(
+      f"Failed to release B7 sync lock for connection {config.connection_id} "
+      f"(non-fatal — TTL is the fallback): {e}"
+    )
 
 
 def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> None:
@@ -156,6 +213,7 @@ def _bootstrap_fiscal_calendar_if_needed(
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.roboledger.fiscal_calendar import (
     FiscalCalendarService,
+    add_months,
     current_month_period,
     previous_period,
   )
@@ -168,10 +226,32 @@ def _bootstrap_fiscal_calendar_if_needed(
     with extensions_session(config.graph_id) as session:
       existing = service.get(session, config.graph_id)
       if existing is not None and existing.initialized_at is not None:
-        context.log.info(
-          "Fiscal calendar already initialized "
-          f"(closed_through={existing.closed_through_period}); skipping bootstrap"
+        # Self-heal: earlier bootstrap revisions seeded the calendar pointer
+        # state but skipped FiscalPeriod row creation, leaving close-period
+        # to fail with `period_not_found`. Run ensure_fiscal_periods over the
+        # canonical window so existing tenants converge on re-sync.
+        current = current_month_period()
+        start = add_months(current, -23)
+        if existing.closed_through_period and existing.closed_through_period < start:
+          start = existing.closed_through_period
+        inserted = service.ensure_fiscal_periods(
+          session,
+          config.graph_id,
+          start_period=start,
+          end_period=current,
+          closed_through=existing.closed_through_period,
         )
+        if inserted:
+          session.commit()
+          context.log.info(
+            f"Backfilled {inserted} FiscalPeriod rows "
+            f"({start} → {current}, closed_through={existing.closed_through_period})"
+          )
+        else:
+          context.log.info(
+            "Fiscal calendar already initialized "
+            f"(closed_through={existing.closed_through_period}); skipping bootstrap"
+          )
         return
 
       closed_through = previous_period(previous_period(current_month_period()))
@@ -183,9 +263,21 @@ def _bootstrap_fiscal_calendar_if_needed(
         actor_type="system",
         note="Auto-initialized on first QB sync",
       )
+      current = current_month_period()
+      start = add_months(current, -23)
+      if closed_through < start:
+        start = closed_through
+      inserted = service.ensure_fiscal_periods(
+        session,
+        config.graph_id,
+        start_period=start,
+        end_period=current,
+        closed_through=closed_through,
+      )
       session.commit()
       context.log.info(
-        f"Initialized fiscal calendar on first sync: closed_through={closed_through}"
+        f"Initialized fiscal calendar on first sync: closed_through={closed_through} "
+        f"({inserted} FiscalPeriod rows seeded {start} → {current})"
       )
   except CalendarAlreadyInitializedError:
     context.log.info("Fiscal calendar already initialized (race); skipping bootstrap")
@@ -254,9 +346,6 @@ def _trigger_auto_map_if_needed(
       mapping_id = str(structure.id)
   except Exception as e:
     context.log.warning(f"Failed to inspect mapping structure (non-fatal): {e}")
-    return
-
-  if mapping_id is None:
     return
 
   try:

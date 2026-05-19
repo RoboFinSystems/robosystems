@@ -529,3 +529,111 @@ class TestCloseAutoRunsRules:
     # close succeeded — only the good schedule's results land in the summary
     assert result.rule_summary == {"pass": 1, "fail": 0, "error": 0, "skipped": 0}
     assert result.evaluated_structure_ids == ("struct_ok", "struct_bad")
+
+
+class TestClosePrePublishWriteback:
+  """Phase 4 §4.2 — `_publish_drafts_to_qb` runs between BS pre-flight
+  and draft→posted. QB rejections raise `WritebackFailed` and roll
+  back the entire close."""
+
+  def test_no_qb_authoritative_connection_skips_pre_publish(self):
+    """Graph has no QB connection in qb_authoritative mode → no work
+    done, close proceeds as today (existing behavior preserved)."""
+    from unittest.mock import patch
+
+    from robosystems.operations.roboledger.fiscal_calendar.close_service import (
+      PeriodCloseService,
+    )
+
+    svc = PeriodCloseService()
+    session = MagicMock()
+    mock_platform_session = MagicMock()
+    mock_platform_session.__enter__ = MagicMock(return_value=mock_platform_session)
+    mock_platform_session.__exit__ = MagicMock(return_value=False)
+    # No qb_authoritative connection.
+    mock_platform_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+
+    with patch(
+      "robosystems.database.SessionFactory", return_value=mock_platform_session
+    ):
+      # Should return without touching the extensions session.
+      svc._publish_drafts_to_qb(
+        session,
+        graph_id=GRAPH_ID,
+        period_start=datetime(2026, 5, 1).date(),
+        period_end=datetime(2026, 5, 31).date(),
+        actor_id="usr_1",
+      )
+
+    # No drafts queried — we returned at the no-connection branch.
+    session.query.assert_not_called()
+
+  def test_qb_rejection_raises_writeback_failed(self):
+    """A single QB rejection in the batch collects into WritebackFailed
+    and rolls back the close (rest of close.flow not executed)."""
+    from unittest.mock import patch
+
+    from robosystems.models.api.event_block import ExecuteEventBlockResponse
+    from robosystems.operations.roboledger.fiscal_calendar.close_service import (
+      PeriodCloseService,
+      WritebackFailed,
+    )
+
+    svc = PeriodCloseService()
+    session = MagicMock()
+
+    # Two draft entries triggered by manual events.
+    entry1 = MagicMock(id="ent_1", memo="Test 1", posting_date="2026-05-10")
+    event1 = MagicMock(id="evt_1", source="manual")
+    entry2 = MagicMock(id="ent_2", memo="Test 2", posting_date="2026-05-15")
+    event2 = MagicMock(id="evt_2", source="schedule")
+
+    session.query.return_value.join.return_value.filter.return_value.all.return_value = [
+      (entry1, event1),
+      (entry2, event2),
+    ]
+
+    # Mock the platform-DB connection lookup.
+    mock_conn = MagicMock(id="conn_qb_1")
+    mock_platform_session = MagicMock()
+    mock_platform_session.__enter__ = MagicMock(return_value=mock_platform_session)
+    mock_platform_session.__exit__ = MagicMock(return_value=False)
+    mock_platform_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_conn
+
+    def fake_execute(_sess, body, created_by):
+      # First event accepts, second rejects.
+      if body.event_id == "evt_1":
+        return ExecuteEventBlockResponse(
+          event_id="evt_1",
+          status="fulfilled",
+          qb_external_id="QB_TXN_AA",
+          qb_error=None,
+        )
+      return ExecuteEventBlockResponse(
+        event_id="evt_2",
+        status="pending",
+        qb_external_id=None,
+        qb_error={"code": "validation", "message": "Closed in QB"},
+      )
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_platform_session),
+      patch(
+        "robosystems.operations.event_block.commands.execute_event_block",
+        side_effect=fake_execute,
+      ),
+    ):
+      with pytest.raises(WritebackFailed) as exc_info:
+        svc._publish_drafts_to_qb(
+          session,
+          graph_id=GRAPH_ID,
+          period_start=datetime(2026, 5, 1).date(),
+          period_end=datetime(2026, 5, 31).date(),
+          actor_id="usr_1",
+        )
+
+    # The failure carries both offenders' detail (only evt_2 failed,
+    # but the structure shows the failure trail).
+    assert len(exc_info.value.failed_events) == 1
+    assert exc_info.value.failed_events[0]["event_id"] == "evt_2"
+    assert exc_info.value.failed_events[0]["qb_error"]["code"] == "validation"

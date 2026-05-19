@@ -46,6 +46,18 @@ class Element(ExtensionsBase):
       "connection_id",
       postgresql_where="connection_id IS NOT NULL",
     ),
+    # UPSERT key for the OLTPLoader: lookup-then-update on re-sync keeps
+    # `elem_*` ULIDs stable across syncs (downstream Associations point at
+    # these IDs). Partial — library-origin elements have connection_id NULL
+    # and aren't subject to this constraint.
+    Index(
+      "idx_elements_upsert_key",
+      "external_source",
+      "connection_id",
+      "external_id",
+      unique=True,
+      postgresql_where="external_id IS NOT NULL AND connection_id IS NOT NULL",
+    ),
     Index(
       "idx_elements_active",
       "is_active",

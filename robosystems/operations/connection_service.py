@@ -71,6 +71,15 @@ class ConnectionService:
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
       )
 
+      # Phase 4 §4.2 — default new QuickBooks connections to
+      # `qb_authoritative` so the loader's auto-commit branch fires
+      # (matches pre-Phase-4 behavior, the customer pitch for "QB is
+      # source-of-truth, RoboSystems is the review layer"). Other
+      # providers stay on the column default `'native'`.
+      if provider.lower() == "quickbooks":
+        conn.write_policy = "qb_authoritative"
+        session.flush()
+
       # Store credentials if provided
       if credentials:
         ConnectionCredentials.create(
@@ -294,7 +303,13 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """Delete a connection and deactivate its credentials.
+    """Soft-delete a connection and deactivate its credentials (B6).
+
+    The connection row is preserved with ``deleted_at`` stamped — the
+    tenant-side events/agents/elements scoped to its ``connection_id``
+    stay attached. Re-OAuthing to the same QB realm later revives this
+    row in place via the OAuth callback's reuse path
+    (`routers/graphs/connections/oauth.py`).
 
     Args:
         connection_id: Connection identifier
@@ -314,14 +329,15 @@ class ConnectionService:
         logger.warning(f"Connection {connection_id} not found for deletion")
         return False
 
-      # Deactivate credentials (soft delete for audit trail)
+      # Deactivate credentials (already soft-deletion via is_active=False)
       cred = ConnectionCredentials.get_by_connection_id(connection_id, session)
       if cred:
         cred.deactivate(session)
 
-      # Delete connection record
-      conn.delete(session)
-      logger.info(f"Deleted connection {connection_id}")
+      # Soft-delete connection record (B6). Hard-delete would orphan
+      # connection_id-scoped tenant rows.
+      conn.soft_delete(session)
+      logger.info(f"Soft-deleted connection {connection_id}")
       return True
 
     except Exception:
@@ -351,6 +367,44 @@ class ConnectionService:
     except Exception:
       logger.error(
         "Failed to mark connection error for %s", connection_id, exc_info=True
+      )
+      return False
+    finally:
+      if session_created:
+        session.close()
+
+  @staticmethod
+  def mark_connection_needs_reauth_sync(
+    connection_id: str,
+    db_session: Session | None = None,
+  ) -> bool:
+    """Mark connection as needing operator re-authorization (sync path).
+
+    Distinct from `mark_connection_error`: surfaces a "reconnect" CTA in
+    the UI rather than a generic failure message. Called from the QB
+    auth-refresh wrapper (`adapters/quickbooks/client/api.py`) which
+    runs inside a sync Dagster asset and can't await the async
+    `mark_connection_error` counterpart.
+
+    Idempotent: a second call on an already-needs_reauth connection is
+    a no-op.
+    """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
+    try:
+      conn = Connection.get_by_id(connection_id, session)
+      if conn:
+        if conn.status != "needs_reauth":
+          conn.update_status("needs_reauth", session)
+          logger.warning(f"Marked connection {connection_id} as needs_reauth")
+        return True
+      return False
+    except Exception:
+      logger.error(
+        "Failed to mark connection needs_reauth for %s",
+        connection_id,
+        exc_info=True,
       )
       return False
     finally:

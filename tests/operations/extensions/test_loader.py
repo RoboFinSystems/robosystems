@@ -228,13 +228,17 @@ class TestOLTPLoader:
   @patch("robosystems.db.extensions.provision_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
   @patch("duckdb.connect")
-  def test_load_deletes_before_insert(
+  def test_load_full_rebuild_wipes_then_inserts(
     self,
     mock_duckdb_connect,
     mock_ext_session,
     mock_provision,
   ):
-    """Loader deletes existing data for source + connection_id."""
+    """`full_rebuild=True` triggers the pre-sync wipe per Wave 1 contract.
+
+    The wipe is scoped to captured/classified events plus GL cascade.
+    Voided/committed/fulfilled events survive the wipe.
+    """
     from robosystems.operations.extensions.loader import OLTPLoader
 
     mock_duckdb_connect.return_value = _make_duckdb_mock({})
@@ -250,10 +254,57 @@ class TestOLTPLoader:
       connection_id="conn_123",
       duckdb_path="/tmp/test.duckdb",
       created_by="user_123",
+      full_rebuild=True,
     )
 
     assert mock_session.query.called
     assert mock_session.flush.called
+
+  @patch("robosystems.db.extensions.provision_tenant_schema")
+  @patch("robosystems.db.extensions.extensions_session")
+  @patch("duckdb.connect")
+  def test_load_incremental_skips_pre_sync_wipe(
+    self,
+    mock_duckdb_connect,
+    mock_ext_session,
+    mock_provision,
+  ):
+    """Default (incremental) sync skips the pre-sync DELETE per Wave 1 G2.
+
+    Only operator-explicit `full_rebuild=True` triggers the wipe.
+    Without it, neither `since_date` nor the default lookback should
+    fire the wipe — history outside the sync window must survive.
+    """
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    mock_duckdb_connect.return_value = _make_duckdb_mock({})
+
+    mock_session = MagicMock()
+    mock_ext_session.return_value.__enter__ = MagicMock(return_value=mock_session)
+    mock_ext_session.return_value.__exit__ = MagicMock(return_value=False)
+
+    loader = OLTPLoader()
+    loader.load(
+      graph_id="kg0123456789abcdef",
+      source="quickbooks",
+      connection_id="conn_123",
+      duckdb_path="/tmp/test.duckdb",
+      created_by="user_123",
+      # No full_rebuild — should skip the wipe.
+    )
+
+    # `.delete()` calls on the session indicate the wipe ran. The
+    # incremental path uses pure UPSERT (lookup + mutate or insert);
+    # session.query() is called for the UPSERT lookups but
+    # .filter(...).delete() should NEVER be called for events/GL/elements
+    # because the wipe is gated on full_rebuild=True.
+    delete_call_count = sum(
+      1 for c in mock_session.mock_calls if c[0].endswith(".delete")
+    )
+    assert delete_call_count == 0, (
+      f"Incremental sync invoked .delete() {delete_call_count} times — "
+      "Wave 1 G2 contract violated. Only full_rebuild=True should wipe."
+    )
 
   @patch("robosystems.db.extensions.provision_tenant_schema")
   @patch("robosystems.db.extensions.extensions_session")
@@ -500,18 +551,32 @@ class TestCaptureTransactionsAsEvents:
     # No new Event was added
     session.add_all.assert_not_called()
 
-  def test_capture_leaves_committed_event_alone(self):
+  def test_capture_flags_drift_on_committed_event(self):
     """A handler-approved event (status='committed' / 'fulfilled') must
-    not be overwritten by a re-sync — that would silently undo the
-    user's approval and detach the resulting GL rows."""
+    not have its live payload overwritten by a re-sync — that would
+    silently undo the user's approval and detach the resulting GL rows.
+
+    Wave 1 G4 (`quickbooks-adapter.md` §4.6.0): when the adapter
+    re-surfaces a different payload for a committed event, we set
+    `payload_drift=True` and stash the incoming payload under
+    `metadata_['drift_payload']` for the reconciliation queue. The
+    live fields (`evt.metadata_['entries']`, etc.) stay unchanged.
+    """
     from robosystems.operations.extensions.loader import OLTPLoader
 
     committed_event = MagicMock()
     committed_event.external_id = "JE_100"
     committed_event.status = "fulfilled"  # handler ran already
     committed_event.id = "evt_committed"
-    original_metadata = {"frozen": "by-approval"}
-    committed_event.metadata_ = original_metadata
+    # The live payload reflects what the handler approved. Drift
+    # detection should NOT touch any of these keys.
+    original_metadata = {
+      "status": "posted",
+      "entries": [{"frozen": "by-approval"}],
+      "qb_doc_number": "100",
+    }
+    committed_event.metadata_ = dict(original_metadata)
+    committed_event.payload_drift = False
 
     session = MagicMock()
     session.query.return_value.filter.return_value.all.return_value = [committed_event]
@@ -529,7 +594,16 @@ class TestCaptureTransactionsAsEvents:
     # Neither inserted nor counted as updated — the row is frozen.
     assert _capture_result.inserted == 0
     assert _capture_result.updated == 0
-    assert committed_event.metadata_ is original_metadata
+    # Drift was detected (the dbt fixture's payload differs from the
+    # frozen `original_metadata` we seeded).
+    assert _capture_result.drift_detected == 1
+    assert committed_event.payload_drift is True
+    # Live payload fields are untouched.
+    for key, value in original_metadata.items():
+      assert committed_event.metadata_[key] == value
+    # Drift bookkeeping landed on the side.
+    assert "drift_payload" in committed_event.metadata_
+    assert "drift_detected_at" in committed_event.metadata_
     session.add_all.assert_not_called()
 
   def test_capture_drops_orphan_entries_and_line_items(self):
@@ -740,6 +814,66 @@ class TestCaptureAutoCommit:
     assert result.dispatch_failed == 1
     evt = session.add_all.call_args.args[0][0]
     assert evt.status == "captured"
+    # Phase 3 B8: dispatch error metadata stamped on the event so the
+    # inbox UI can show typed remediation prompts.
+    assert evt.metadata_["dispatch_error"] == "unknown_error"
+    assert "element_external_id not resolved" in evt.metadata_["dispatch_error_message"]
+    assert "dispatch_error_at" in evt.metadata_
+    assert evt.metadata_["dispatch_attempts"] == 1
+
+  def test_dispatch_error_classifier_maps_known_exception_types(self):
+    """The classifier maps known exception type names to typed codes
+    that the inbox UI uses for remediation prompts (Phase 3 B8)."""
+    from robosystems.operations.extensions.loader import _classify_dispatch_error
+
+    class ElementResolutionError(Exception):
+      pass
+
+    class ClosedPeriodError(Exception):
+      pass
+
+    class UnbalancedJournalEntryError(Exception):
+      pass
+
+    assert _classify_dispatch_error(ElementResolutionError("x")) == "element_unmapped"
+    assert _classify_dispatch_error(ClosedPeriodError("x")) == "closed_period"
+    assert (
+      _classify_dispatch_error(UnbalancedJournalEntryError("x")) == "unbalanced_entry"
+    )
+    assert _classify_dispatch_error(RuntimeError("x")) == "unknown_error"
+
+  def test_dispatch_attempts_increments_on_repeated_failure(self):
+    """A second failed dispatch attempt bumps dispatch_attempts to 2."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    # Existing captured event with prior dispatch_attempts=1 set.
+    prior_event = MagicMock()
+    prior_event.external_id = "JE_100"
+    prior_event.status = "captured"
+    prior_event.id = "evt_prior"
+    prior_event.metadata_ = {"dispatch_attempts": 1, "dispatch_error": "unknown_error"}
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [prior_event]
+
+    loader = OLTPLoader()
+    with patch(
+      "robosystems.operations.extensions.loader.fire_handler_on_commit",
+      side_effect=RuntimeError("still broken"),
+    ):
+      result = loader._capture_transactions_as_events(
+        session,
+        self._dbt_data(),
+        source="quickbooks",
+        connection_id="conn_1",
+        created_by="user_1",
+        now=datetime.now(UTC),
+      )
+
+    assert result.dispatch_failed == 1
+    assert prior_event.metadata_["dispatch_attempts"] == 2
 
   def test_native_source_does_not_auto_commit(self):
     """Manual / schedule / system / AI sources go through the inbox —
@@ -828,6 +962,132 @@ class TestCaptureAutoCommit:
     assert _SOURCE_AUTO_COMMITS.get("xero") is None
     assert _SOURCE_AUTO_COMMITS.get("netsuite") is None
     assert _SOURCE_AUTO_COMMITS.get("manual") is None
+
+
+class TestResolveAutoCommitWritePolicy:
+  """Phase 4 §4.2 — per-connection `write_policy` governs auto-commit
+  on inbound sync. The legacy `_SOURCE_AUTO_COMMITS` hardcode is the
+  fallback (preserves behavior when the platform-DB lookup fails or
+  no connection_id is supplied)."""
+
+  def test_qb_authoritative_policy_auto_commits(self):
+    """A QB connection with write_policy='qb_authoritative' triggers
+    auto-commit (the customer-pitch default)."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
+
+    mock_conn = MagicMock()
+    mock_conn.write_policy = "qb_authoritative"
+
+    # Context-manager-shaped session mock — `_resolves_to_auto_commit`
+    # uses `with SessionFactory() as session:` so __enter__ / __exit__
+    # need to be wired explicitly on MagicMock.
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_session),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=mock_conn,
+      ),
+    ):
+      assert _resolves_to_auto_commit("quickbooks", "conn_1") is True
+
+    # The `with` block invokes __exit__ — that's the context-manager
+    # version of "the session got cleaned up."
+    mock_session.__exit__.assert_called_once()
+
+  def test_native_policy_routes_to_inbox(self):
+    """A QB connection with write_policy='native' does NOT auto-commit
+    — events stay captured for inbox review."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
+
+    mock_conn = MagicMock()
+    mock_conn.write_policy = "native"
+
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_session),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=mock_conn,
+      ),
+    ):
+      assert _resolves_to_auto_commit("quickbooks", "conn_1") is False
+
+  def test_hybrid_policy_auto_commits(self):
+    """Hybrid mode auto-commits like qb_authoritative on inbound (the
+    exception-flagging heuristic fires at a different layer)."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
+
+    mock_conn = MagicMock()
+    mock_conn.write_policy = "hybrid"
+
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_session),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=mock_conn,
+      ),
+    ):
+      assert _resolves_to_auto_commit("quickbooks", "conn_1") is True
+
+  def test_no_connection_id_falls_back_to_hardcode(self):
+    """Direct loader callers without a connection_id (legacy / test
+    paths) use the `_SOURCE_AUTO_COMMITS` hardcode — quickbooks=True,
+    everything else False."""
+    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
+
+    assert _resolves_to_auto_commit("quickbooks", None) is True
+    assert _resolves_to_auto_commit("manual", None) is False
+    assert _resolves_to_auto_commit("xero", None) is False
+
+  def test_lookup_failure_falls_back_to_hardcode(self):
+    """If the platform-DB lookup raises (DB down, transient), fall back
+    to the hardcode — don't break a sync over policy resolution."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
+
+    with patch(
+      "robosystems.database.SessionFactory",
+      side_effect=RuntimeError("DB unavailable"),
+    ):
+      assert _resolves_to_auto_commit("quickbooks", "conn_1") is True
+
+  def test_missing_connection_falls_back_to_hardcode(self):
+    """If Connection.get_by_id returns None (deleted connection still
+    referenced by a sync in flight), fall back to the hardcode."""
+    from unittest.mock import patch
+
+    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
+
+    mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
+
+    with (
+      patch("robosystems.database.SessionFactory", return_value=mock_session),
+      patch(
+        "robosystems.models.core.connection.connection.Connection.get_by_id",
+        return_value=None,
+      ),
+    ):
+      assert _resolves_to_auto_commit("quickbooks", "conn_missing") is True
 
 
 class TestApplySourceElementTraits:

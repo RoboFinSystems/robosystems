@@ -8,6 +8,7 @@ from .commands import (
   EventNotFoundError,
   InvalidEventTransitionError,
   create_event_block,
+  execute_event_block,
   preview_event_block,
   update_event_block,
 )
@@ -16,6 +17,7 @@ __all__ = [
   "EventNotFoundError",
   "InvalidEventTransitionError",
   "create_event_block",
+  "execute_event_block",
   "preview_event_block",
   "update_event_block",
 ]

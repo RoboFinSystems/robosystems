@@ -80,6 +80,24 @@ class UnbalancedLedgerError(PeriodCloseError):
     self.total_credit = total_credit
 
 
+class WritebackFailed(PeriodCloseError):
+  """Raised when the close-period pre-publish step (Phase 4 §4.2) fails
+  to write one or more in-period drafts to QuickBooks.
+
+  Atomic: a single QB rejection rolls back the entire close — no
+  half-published periods. The exception carries the offending event
+  IDs and their per-event error payloads so the operator can fix the
+  underlying issue (mapping, balance, closed-in-QB-already) and retry.
+  """
+
+  def __init__(self, failed_events: list[dict]):
+    super().__init__(
+      f"Cannot close: {len(failed_events)} draft(s) failed to publish to "
+      f"QuickBooks. Fix the offending entries and retry the close."
+    )
+    self.failed_events = failed_events
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # Result
 # ────────────────────────────────────────────────────────────────────────────
@@ -164,6 +182,16 @@ class PeriodCloseService:
     # so we know the ledger will still balance after the transition — no
     # state is mutated yet, so a mismatch just raises cleanly.
     self._preflight_bs_check(session, period_start, period_end)
+
+    # 2b. Phase 4 §4.2 pre-publish step. For graphs with a QB connection
+    # in `write_policy='qb_authoritative'` / `'hybrid'`, batch-publish
+    # every in-period draft Entry whose triggering Event has
+    # `source IN ('schedule', 'manual')`. Atomic: any QB rejection
+    # raises `WritebackFailed` before the draft→posted transition
+    # below, rolling back the entire close.
+    self._publish_drafts_to_qb(
+      session, graph_id, period_start, period_end, actor_id=actor_id
+    )
 
     # Find the FiscalPeriod row before mutating anything so we can detect
     # the re-close path (status='closing' means a prior reopen).
@@ -272,6 +300,152 @@ class PeriodCloseService:
     )
 
   # ── Private helpers ────────────────────────────────────────────────────
+
+  def _publish_drafts_to_qb(
+    self,
+    session: Session,
+    graph_id: str,
+    period_start,
+    period_end,
+    *,
+    actor_id: str,
+  ) -> None:
+    """Phase 4 §4.2 close-period pre-publish step.
+
+    For graphs with at least one QB connection in
+    ``write_policy='qb_authoritative'`` / ``'hybrid'``, batch-publish
+    every in-period draft Entry whose triggering Event has
+    ``source IN ('schedule', 'manual')`` to that QB connection.
+
+    Atomic: any per-event QB rejection collects into a list and raises
+    `WritebackFailed` BEFORE the close's draft→posted transition,
+    rolling back the entire close transaction. The operator fixes the
+    offending entries (mapping issue, balance error, period closed
+    in QB) and retries.
+
+    Skipped silently when:
+    - No QB connection on the graph has qb_authoritative / hybrid policy
+      (operator hasn't opted into write-back).
+    - Period has no draft entries from RL-originated sources (no work
+      to do — handler-approved drafts already wrote-back, or it's a
+      native-only graph).
+    """
+    from robosystems.database import SessionFactory as _PlatformSessionFactory
+    from robosystems.models.api.event_block import ExecuteEventBlockRequest
+    from robosystems.models.core.connection.connection import Connection
+    from robosystems.models.extensions.roboledger.event import Event
+    from robosystems.operations.event_block.commands import execute_event_block
+
+    # Find the first QB connection in qb_authoritative / hybrid mode on
+    # this graph. Most graphs have at most one QB connection; if a
+    # graph has multiple, v1 picks the first by created_at desc.
+    qb_connection_id: str | None = None
+    with _PlatformSessionFactory() as platform_session:
+      candidate = (
+        platform_session.query(Connection)
+        .filter(
+          Connection.graph_id == graph_id,
+          Connection.provider == "quickbooks",
+          Connection.write_policy.in_(("qb_authoritative", "hybrid")),
+          Connection.deleted_at.is_(None),
+        )
+        .order_by(Connection.created_at.desc())
+        .first()
+      )
+      if candidate is None:
+        logger.debug(
+          f"No qb_authoritative QB connection on graph {graph_id}; "
+          f"skipping close-period pre-publish step"
+        )
+        return
+      qb_connection_id = str(candidate.id)
+
+    # Find in-period draft entries from RL-originated events.
+    drafts_to_publish = (
+      session.query(Entry, Event)
+      .join(Event, Event.id == Entry.triggered_by_event_id)
+      .filter(
+        Entry.posting_date >= period_start,
+        Entry.posting_date <= period_end,
+        Entry.status == "draft",
+        Event.source.in_(("schedule", "manual")),
+        # Skip events that already have a QB-side id (a previous
+        # close-period attempt or operator-triggered execute-event-block
+        # already published this event — re-attempt would create
+        # duplicate QB entries even with RequestId dedup if the
+        # request_id differs).
+        Event.metadata_["qb_external_id"].astext.is_(None),
+      )
+      .all()
+    )
+
+    if not drafts_to_publish:
+      logger.debug(
+        f"Graph {graph_id}: no RL-originated drafts in period to publish "
+        f"({period_start} → {period_end})"
+      )
+      return
+
+    logger.info(
+      f"Graph {graph_id}: pre-publishing {len(drafts_to_publish)} draft "
+      f"event(s) to QB connection {qb_connection_id} before close"
+    )
+
+    # Heads-up: each publish does a synchronous QB API round-trip
+    # (~1-3s) inside the open extensions session. A large batch holds
+    # the extensions transaction open + consumes connection-pool
+    # capacity for the duration. A two-pass refactor (collect QB
+    # results without the session, then commit metadata mutations in
+    # a second pass) is the right v2 — until then, flag visible
+    # batches so the operational signal is in the logs.
+    if len(drafts_to_publish) > 5:
+      logger.warning(
+        f"Graph {graph_id}: pre-publishing {len(drafts_to_publish)} drafts in "
+        f"sequence — extensions transaction held open ~{len(drafts_to_publish) * 2}s "
+        f"during the close. Consider batching the period (close in smaller "
+        f"windows) or filing follow-up to refactor _publish_drafts_to_qb to "
+        f"two-pass."
+      )
+
+    # Publish each, collecting failures rather than failing fast — the
+    # operator wants to see ALL offenders, not the first.
+    failed_events: list[dict] = []
+    for entry, event in drafts_to_publish:
+      try:
+        result = execute_event_block(
+          session,
+          ExecuteEventBlockRequest(
+            event_id=str(event.id),
+            connection_id=qb_connection_id,
+          ),
+          created_by=actor_id,
+        )
+        if result.status == "pending":
+          # QB rejected — collect for the batch error.
+          failed_events.append(
+            {
+              "event_id": str(event.id),
+              "entry_id": str(entry.id),
+              "memo": entry.memo,
+              "posting_date": str(entry.posting_date),
+              "qb_error": result.qb_error,
+            }
+          )
+      except Exception as e:
+        # Unexpected (auth, network, ValueError). Capture and continue
+        # so the operator sees the full failure surface.
+        failed_events.append(
+          {
+            "event_id": str(event.id),
+            "entry_id": str(entry.id),
+            "memo": entry.memo,
+            "posting_date": str(entry.posting_date),
+            "qb_error": {"code": type(e).__name__, "message": str(e)},
+          }
+        )
+
+    if failed_events:
+      raise WritebackFailed(failed_events)
 
   def _preflight_bs_check(
     self,
@@ -397,4 +571,5 @@ __all__ = [
   "PeriodCloseService",
   "PeriodNotFoundError",
   "UnbalancedLedgerError",
+  "WritebackFailed",
 ]

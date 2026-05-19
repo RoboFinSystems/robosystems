@@ -74,6 +74,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
+from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
 from robosystems.database import get_db_session
 from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -102,6 +103,8 @@ from robosystems.models.api.common import OPERATION_ERROR_RESPONSES, DeleteResul
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
   EventBlockEnvelope,
+  ExecuteEventBlockRequest,
+  ExecuteEventBlockResponse,
   UpdateEventBlockRequest,
 )
 from robosystems.models.api.event_handler import (
@@ -181,6 +184,9 @@ from robosystems.operations.event_block import (
 )
 from robosystems.operations.event_block import (
   create_event_block as cmd_create_event_block,
+)
+from robosystems.operations.event_block import (
+  execute_event_block as cmd_execute_event_block,
 )
 from robosystems.operations.event_block import (
   preview_event_block as cmd_preview_event_block,
@@ -358,6 +364,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   PeriodCloseService,
+  WritebackFailed,
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
@@ -1254,6 +1261,45 @@ update_event_block_op = _registrar.register(
 )
 
 
+# Phase 4 §4.2 — `execute-event-block` publishes an event to the
+# source-of-truth system (QuickBooks for v1). For events on a
+# connection with `write_policy='qb_authoritative'` / `'hybrid'`,
+# this posts a JE to QB via the QB API with `request_id=event.id`
+# for idempotency, captures the returned `qb_txn_id` on
+# `event.metadata.qb_external_id`, transitions status to `'fulfilled'`
+# (or `'pending'` on QB rejection), and promotes linked draft GL
+# rows to `'posted'`. The cross-source matcher in the loader
+# recognises the round-tripped entry on the next sync.
+execute_event_block_op = _registrar.register(
+  OperationSpec(
+    name="execute-event-block",
+    summary="Execute Event Block (publish to source-of-truth system)",
+    description=(
+      "For events on a connection with write_policy='qb_authoritative' "
+      "or 'hybrid', publish the captured GL plan to the source-of-truth "
+      "system (QuickBooks). Captures qb_txn_id on "
+      "event.metadata.qb_external_id, transitions status to 'fulfilled' "
+      "(or 'pending' on rejection), and promotes draft GL rows to "
+      "'posted'. Native-policy events fast-path through with no QB "
+      "write — RoboSystems is the system of record."
+    ),
+    command=cmd_execute_event_block,
+    request_model=ExecuteEventBlockRequest,
+    result_type=ExecuteEventBlockResponse,
+    error_map={
+      EventNotFoundError: 404,
+      # Phase 3 A2: AuthClientError from Intuit (revoked / scope-
+      # insufficient / rotated past grace) surfaces as
+      # QBAuthFailedError. The connection has already been flipped to
+      # needs_reauth by the QBClient itself; 401 signals to the UI
+      # that the operator must reconnect via OAuth.
+      QBAuthFailedError: 401,
+      ValueError: 422,
+    },
+  )
+)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Event Handlers
 #
@@ -1554,6 +1600,19 @@ async def close_period_op(
           f"Difference={e.total_debit - e.total_credit}. "
           f"Review the ledger before closing."
         ),
+      )
+    except WritebackFailed as e:
+      # Phase 4 §4.2 close-period pre-publish failure. Surface the
+      # structured failed-events payload so operators can see exactly
+      # which drafts QB rejected (mapping issue, balance error,
+      # closed-in-QB period, etc.) and retry the close after fixing.
+      raise HTTPException(
+        status_code=422,
+        detail={
+          "message": str(e),
+          "failed_events": e.failed_events,
+          "code": "WRITE_BACK_FAILED",
+        },
       )
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))

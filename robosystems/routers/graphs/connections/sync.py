@@ -136,11 +136,69 @@ async def sync_connection(
     # Validate provider is enabled before any sync operations
     provider_registry.get_provider(provider)
 
+    # Phase 3 B7: per-connection sync lock. Two concurrent qb_sync runs
+    # against the same connection_id race on Wave 1's UPSERT path; the
+    # lock serializes them. 30-min TTL bounds a *stuck* job (Dagster
+    # crash mid-sync); the normal completion path releases the lock
+    # explicitly from `qb_load` via the `sync_lock_id` plumbed through
+    # `QBSyncConfig`. The 30-min number is a safety-net for failed
+    # syncs, not an "intentional cooldown."
+    #
+    # If the same operator mashes "Sync Now" or the OAuth callback
+    # races a scheduler, the second attempt returns 409 with the
+    # holder's lock_id.
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+    from robosystems.middleware.auth.distributed_lock import DistributedLock
+
+    sync_lock_id: str = ""
+    try:
+      redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+      sync_lock = DistributedLock(
+        redis_client, f"qb_sync:{connection_id}", ttl_seconds=1800
+      )
+      lock_result = sync_lock.acquire(blocking=False)
+      if not lock_result.acquired:
+        raise create_error_response(
+          status_code=status.HTTP_409_CONFLICT,
+          detail=(
+            f"Sync already in progress for connection {connection_id} "
+            f"(held by {lock_result.holder_id}, "
+            f"expires in {lock_result.ttl_remaining}s)"
+          ),
+          code=ErrorCode.OPERATION_FAILED,
+        )
+      # Capture the lock id so the Dagster job can release the lock
+      # on completion. `lock_result.lock_id` is the same value the
+      # holder stored under the lock key; `release_lock_by_id` does
+      # an atomic compare-and-delete against it.
+      sync_lock_id = lock_result.lock_id or ""
+    except HTTPException:
+      raise
+    except Exception as e:
+      # Dashboards watch for `lock_skipped=true` to detect Valkey-
+      # degraded sync runs (we proceed unlocked rather than fail
+      # closed, so the silent race risk is real and worth surfacing).
+      logger.warning(
+        "Could not acquire sync lock for connection %s: %s; "
+        "proceeding without lock (concurrent-sync race still possible)",
+        connection_id,
+        e,
+        extra={
+          "connection_id": connection_id,
+          "lock_skipped": True,
+          "lock_skip_reason": type(e).__name__,
+        },
+      )
+
     effective_options: dict[str, object] = dict(request.sync_options or {})
     if request.full_rebuild:
       effective_options["full_rebuild"] = True
     if request.since_date is not None:
       effective_options["since_date"] = request.since_date.isoformat()
+    # B7 lock release: pass the acquired lock_id through to QBSyncConfig
+    # so `qb_load` can release it on completion.
+    if sync_lock_id:
+      effective_options["sync_lock_id"] = sync_lock_id
 
     # Sync using provider registry with timeout coordination
     task_id = await asyncio.wait_for(

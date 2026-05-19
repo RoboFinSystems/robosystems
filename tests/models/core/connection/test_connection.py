@@ -16,6 +16,7 @@ class TestConnectionStatus:
     assert ConnectionStatus.PENDING_OAUTH == "pending_oauth"
     assert ConnectionStatus.CONNECTED == "connected"
     assert ConnectionStatus.ERROR == "error"
+    assert ConnectionStatus.NEEDS_REAUTH == "needs_reauth"
     assert ConnectionStatus.DISCONNECTED == "disconnected"
 
   def test_is_string_enum(self):
@@ -90,9 +91,12 @@ class TestConnectionCreate:
 @pytest.mark.unit
 class TestConnectionGetById:
   def test_returns_connection(self):
+    """The lookup chain is `.filter(id).filter(deleted_at IS NULL).first()`
+    by default — Phase 3 B6 added the deleted_at filter."""
     session = MagicMock()
     mock_conn = MagicMock(spec=Connection)
-    session.query.return_value.filter.return_value.first.return_value = mock_conn
+    # Chain: query → filter (id) → filter (deleted_at) → first
+    session.query.return_value.filter.return_value.filter.return_value.first.return_value = mock_conn
 
     result = Connection.get_by_id("conn_abc", session)
 
@@ -100,7 +104,7 @@ class TestConnectionGetById:
 
   def test_returns_none_when_not_found(self):
     session = MagicMock()
-    session.query.return_value.filter.return_value.first.return_value = None
+    session.query.return_value.filter.return_value.filter.return_value.first.return_value = None
 
     result = Connection.get_by_id("nonexistent", session)
 
@@ -110,9 +114,11 @@ class TestConnectionGetById:
 @pytest.mark.unit
 class TestConnectionGetByGraphAndProvider:
   def test_returns_connections(self):
+    """Chain: query → filter (graph_id+provider) → filter (deleted_at)
+    → order_by → all."""
     session = MagicMock()
     mock_conns = [MagicMock(spec=Connection), MagicMock(spec=Connection)]
-    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_conns
+    session.query.return_value.filter.return_value.filter.return_value.order_by.return_value.all.return_value = mock_conns
 
     result = Connection.get_by_graph_and_provider("kg_test", "quickbooks", session)
 
@@ -120,7 +126,7 @@ class TestConnectionGetByGraphAndProvider:
 
   def test_returns_empty_list(self):
     session = MagicMock()
-    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+    session.query.return_value.filter.return_value.filter.return_value.order_by.return_value.all.return_value = []
 
     result = Connection.get_by_graph_and_provider("kg_test", "quickbooks", session)
 
@@ -132,7 +138,7 @@ class TestConnectionGetAllForGraph:
   def test_returns_all_connections(self):
     session = MagicMock()
     mock_conns = [MagicMock(spec=Connection)]
-    session.query.return_value.filter.return_value.order_by.return_value.all.return_value = mock_conns
+    session.query.return_value.filter.return_value.filter.return_value.order_by.return_value.all.return_value = mock_conns
 
     result = Connection.get_all_for_graph("kg_test", session)
 
@@ -142,9 +148,12 @@ class TestConnectionGetAllForGraph:
 @pytest.mark.unit
 class TestConnectionListFiltered:
   def test_no_filters(self):
+    """Even with no explicit filters, the deleted_at IS NULL filter
+    runs by default (Phase 3 B6)."""
     session = MagicMock()
     query = session.query.return_value
-    query.order_by.return_value.all.return_value = []
+    # query.filter(deleted_at IS NULL) → order_by → all
+    query.filter.return_value.order_by.return_value.all.return_value = []
 
     result = Connection.list_filtered(session=session)
 
@@ -411,3 +420,103 @@ class TestConnectionRepr:
     conn.id = "conn_abc"
 
     assert repr(conn) == "<Connection conn_abc quickbooks graph=kg_test>"
+
+
+@pytest.mark.unit
+class TestSoftDelete:
+  """Phase 3 B6 — soft_delete + restore preserve the row, lookups
+  filter `deleted_at IS NULL` by default."""
+
+  def test_soft_delete_sets_deleted_at(self):
+    conn = Connection(
+      graph_id="kg_test",
+      user_id="usr_1",
+      provider="quickbooks",
+    )
+    conn.id = "conn_abc"
+    conn.deleted_at = None
+    session = MagicMock()
+
+    conn.soft_delete(session)
+
+    assert conn.deleted_at is not None
+    session.commit.assert_called_once()
+    session.refresh.assert_called_once_with(conn)
+
+  def test_restore_clears_deleted_at(self):
+    conn = Connection(
+      graph_id="kg_test",
+      user_id="usr_1",
+      provider="quickbooks",
+    )
+    conn.id = "conn_abc"
+    conn.deleted_at = datetime.now(UTC)
+    session = MagicMock()
+
+    conn.restore(session)
+
+    assert conn.deleted_at is None
+    session.commit.assert_called_once()
+
+  def test_get_by_id_filters_soft_deleted_by_default(self):
+    session = MagicMock()
+    query = session.query.return_value
+    filter1 = query.filter.return_value  # WHERE id = ...
+    filter2 = filter1.filter.return_value  # WHERE deleted_at IS NULL
+    filter2.first.return_value = None
+
+    Connection.get_by_id("conn_x", session)
+
+    # Two .filter() calls expected — id match + deleted_at IS NULL.
+    assert query.filter.called
+    assert filter1.filter.called
+
+  def test_get_by_id_include_deleted_skips_deleted_at_filter(self):
+    session = MagicMock()
+    query = session.query.return_value
+    filter1 = query.filter.return_value
+    filter1.first.return_value = None
+
+    Connection.get_by_id("conn_x", session, include_deleted=True)
+
+    # Only the id filter — no chained deleted_at filter.
+    assert query.filter.called
+    filter1.filter.assert_not_called()
+
+  def test_find_soft_deleted_for_realm(self):
+    """The reuse-on-re-OAuth lookup keys on (graph_id, provider, realm_id)
+    AND deleted_at IS NOT NULL, ordered by deleted_at desc."""
+    session = MagicMock()
+
+    Connection.find_soft_deleted_for_realm(
+      graph_id="kg_test",
+      provider="quickbooks",
+      realm_id="9130355906016526",
+      session=session,
+    )
+
+    # Confirm the query chain is what we expect.
+    session.query.assert_called_once_with(Connection)
+    # The filter chain ends with .order_by().first().
+    query = session.query.return_value
+    assert query.filter.called
+    assert query.filter.return_value.order_by.called
+
+
+@pytest.mark.unit
+class TestConnectionToDictWithSoftDelete:
+  def test_to_dict_includes_deleted_at(self):
+    conn = Connection(
+      graph_id="kg_test",
+      user_id="usr_1",
+      provider="quickbooks",
+      created_at=datetime.now(UTC),
+      updated_at=datetime.now(UTC),
+    )
+    conn.id = "conn_xyz"
+    conn.deleted_at = None
+
+    result = conn.to_dict()
+
+    assert "deleted_at" in result
+    assert result["deleted_at"] is None

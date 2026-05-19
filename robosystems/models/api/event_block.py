@@ -574,3 +574,74 @@ class UpdateEventBlockRequest(BaseModel):
   discharges_event_id: str | None = Field(
     None, description="Set/update the settlement link."
   )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# execute-event-block (Phase 4 §4.2 — publish event to source-of-truth)
+# ───────────────────────────────────────────────────────────────────────────
+
+
+class ExecuteEventBlockRequest(BaseModel):
+  """Request to publish an event to the source-of-truth system.
+
+  For events on a connection with `write_policy='qb_authoritative'`
+  (or `'hybrid'`), this triggers a synchronous write to QuickBooks
+  via the QB API. The returned `qb_txn_id` lands on
+  `event.metadata.qb_external_id` and the event transitions to
+  `committed` (in flight) → `fulfilled` (QB accepted) or `pending`
+  (QB rejected).
+
+  `'native'`-policy events fast-path through with no QB write —
+  RoboSystems IS the source of truth, no outbound publish needed.
+  """
+
+  event_id: str = Field(
+    ...,
+    description=(
+      "Event ID (`evt_*` ULID) to publish. The event's "
+      "`metadata.connection_id` determines which QB connection to write "
+      "to; the connection's `write_policy` governs whether a write fires."
+    ),
+  )
+  connection_id: str | None = Field(
+    None,
+    description=(
+      "Override for the connection to route the write through. Used by "
+      "the close-period batch path where schedule-originated events "
+      "don't carry `connection_id` in their metadata. When unset, the "
+      "command reads `event.metadata.connection_id`."
+    ),
+  )
+
+
+class ExecuteEventBlockResponse(BaseModel):
+  """Outcome of an `execute-event-block` call."""
+
+  event_id: str = Field(..., description="Echo of the event ID.")
+  status: str = Field(
+    ...,
+    description=(
+      "Post-execute event status. `'classified'` when no write fired "
+      "(native policy or no-op). `'committed'` when the QB write was "
+      "in flight (intermediate state). `'fulfilled'` when QB accepted "
+      "and local GL drafts were promoted to posted. `'pending'` when "
+      "QB rejected — see `qb_error` for the rejection detail; retry "
+      "after fixing the underlying issue."
+    ),
+  )
+  qb_external_id: str | None = Field(
+    None,
+    description=(
+      "QB-side transaction ID returned by the JournalEntry API. Null "
+      "when no write fired (native policy) or when the write was "
+      "rejected before getting an ID."
+    ),
+  )
+  qb_error: dict | None = Field(
+    None,
+    description=(
+      "QB rejection detail when status='pending'. Shape: "
+      "`{code, message, qb_response_at}`. Operator retries after "
+      "fixing CoA mapping / amount validation / closed-period."
+    ),
+  )
