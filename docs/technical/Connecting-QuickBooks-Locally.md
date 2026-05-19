@@ -107,7 +107,7 @@ ngrok config add-authtoken <your-token>
 #    add: https://<your-domain>.ngrok-free.dev/connections/qb-callback
 
 # 4. Fill in robosystems/.env (production keys + ngrok URL + CORS allowlist)
-# 5. Fill in roboledger-app/.env (NGROK_DOMAIN + NEXT_ALLOWED_DEV_ORIGINS)
+# 5. Fill in roboledger-app/.env (NGROK_DOMAIN)
 
 # 6. Start the stack (three terminals: backend, frontend, tunnel)
 just start                                        # terminal 1
@@ -233,12 +233,9 @@ In `roboledger-app/.env`:
 ```bash
 # ngrok tunnel target — read by npm run tunnel:ngrok
 NGROK_DOMAIN=<your-domain>.ngrok-free.dev
-
-# Next.js 16+ cross-origin allowlist for HMR / dev resources
-NEXT_ALLOWED_DEV_ORIGINS=<your-domain>.ngrok-free.dev
 ```
 
-`NGROK_DOMAIN` is the hostname only (no `https://`). `NEXT_ALLOWED_DEV_ORIGINS` is comma-separated if you need multiple.
+`NGROK_DOMAIN` is the hostname only (no `https://`).
 
 ## Running the Stack
 
