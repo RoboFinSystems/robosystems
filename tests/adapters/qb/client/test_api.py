@@ -878,8 +878,9 @@ class TestRetryBehavior:
   def test_retry_exhausts_after_5_attempts(self):
     """A persistent 5xx exhausts retry budget after 5 attempts."""
     from quickbooks.exceptions import QuickbooksException
+    from retrying import retry
 
-    from robosystems.adapters.quickbooks.client.api import _QB_RETRY
+    from robosystems.adapters.quickbooks.client.api import _is_retryable_qb_error
 
     error_503 = QuickbooksException(
       "Error returned with status code '503': service unavailable", 10000
@@ -887,16 +888,19 @@ class TestRetryBehavior:
 
     call_count = {"n": 0}
 
-    @_QB_RETRY
+    # Use a zero-wait retry config to keep the test fast while still
+    # exercising the same predicate + stop_max_attempt_number semantics
+    # as the production `_QB_RETRY` (which would burn ~30s of backoff).
+    @retry(
+      retry_on_exception=_is_retryable_qb_error,
+      stop_max_attempt_number=5,
+      wait_fixed=0,
+    )
     def always_503():
       call_count["n"] += 1
       raise error_503
 
-    with patch(
-      "robosystems.adapters.quickbooks.client.api.wait_exponential_jitter",
-      return_value=lambda *a, **k: 0,
-    ):
-      with pytest.raises(QuickbooksException):
-        always_503()
-    # Bounded by stop_after_attempt(5).
+    with pytest.raises(QuickbooksException):
+      always_503()
+    # Bounded by stop_max_attempt_number=5.
     assert call_count["n"] == 5

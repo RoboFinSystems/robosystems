@@ -1,4 +1,3 @@
-import logging
 from typing import Any
 
 import numpy as np
@@ -8,13 +7,7 @@ from intuitlib.client import AuthClient
 from intuitlib.exceptions import AuthClientError
 from quickbooks import QuickBooks
 from quickbooks.exceptions import AuthorizationException, QuickbooksException
-from tenacity import (
-  before_sleep_log,
-  retry,
-  retry_if_exception,
-  stop_after_attempt,
-  wait_exponential_jitter,
-)
+from retrying import retry
 
 from robosystems.config import env
 from robosystems.logger import logger
@@ -40,7 +33,7 @@ class QBAuthFailedError(Exception):
 
 
 def _is_retryable_qb_error(exc: BaseException) -> bool:
-  """Predicate for tenacity — decides whether a QB API exception is
+  """Predicate for `retrying` — decides whether a QB API exception is
   worth retrying.
 
   Retry on:
@@ -82,12 +75,15 @@ def _is_retryable_qb_error(exc: BaseException) -> bool:
   return False
 
 
+# Exponential backoff capped at 60s with up to 1s of jitter to spread
+# concurrent syncs against the same realm. 5 attempts ≈ worst case
+# 1+2+4+8+16 = 31s of backoff plus jitter before giving up.
 _QB_RETRY = retry(
-  retry=retry_if_exception(_is_retryable_qb_error),
-  stop=stop_after_attempt(5),
-  wait=wait_exponential_jitter(initial=1, max=60),
-  before_sleep=before_sleep_log(logger, logging.WARNING),
-  reraise=True,
+  retry_on_exception=_is_retryable_qb_error,
+  stop_max_attempt_number=5,
+  wait_exponential_multiplier=1000,
+  wait_exponential_max=60_000,
+  wait_jitter_max=1000,
 )
 
 
