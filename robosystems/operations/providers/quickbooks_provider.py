@@ -153,7 +153,10 @@ async def sync_quickbooks_connection(
   if not realm_id:
     raise ValueError("QuickBooks realm_id not found in connection metadata")
 
-  # Build config for all assets in the pipeline (they share QBSyncConfig)
+  # Build config for all assets in the pipeline (they share QBSyncConfig).
+  # `sync_lock_id` is plumbed through so `qb_load` can release the
+  # B7 sync lock on completion rather than waiting for the TTL.
+  sync_lock_id = options.get("sync_lock_id", "") or ""
   sync_config = {
     "graph_id": graph_id,
     "connection_id": connection_id,
@@ -162,6 +165,7 @@ async def sync_quickbooks_connection(
     "full_rebuild": full_rebuild,
     "lookback_days": lookback_days,
     "since_date": since_date,
+    "sync_lock_id": sync_lock_id,
   }
 
   run_config = {

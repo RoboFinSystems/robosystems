@@ -195,7 +195,10 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
       ),
       patch(
         "robosystems.operations.event_block.qb_writeback.post_event_to_qb",
-        return_value=["QB_TXN_99001"],
+        # Prefixed format matching QB importer's external_id convention
+        # (qb_writeback returns these prefixed so the cross-source
+        # matcher sees the same `JournalEntry_<id>` shape).
+        return_value=["JournalEntry_99001"],
       ),
     ):
       result = execute_event_block(
@@ -205,10 +208,11 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
       )
 
     assert result.status == "fulfilled"
-    assert result.qb_external_id == "QB_TXN_99001"
+    assert result.qb_external_id == "JournalEntry_99001"
     assert result.qb_error is None
-    # Metadata stamped.
-    assert evt.metadata_["qb_external_id"] == "QB_TXN_99001"
+    # Metadata stamped with the prefixed form so the cross-source
+    # matcher recognises round-tripped entries on the next sync.
+    assert evt.metadata_["qb_external_id"] == "JournalEntry_99001"
     assert evt.metadata_["routed_via"]["connection_id"] == "conn_qb_1"
     assert evt.metadata_["routed_via"]["qb_request_id"] == "evt_test_abc"
     # Status on the event row.
@@ -270,7 +274,7 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
       patch("robosystems.adapters.quickbooks.client.api.QBClient"),
       patch(
         "robosystems.operations.event_block.qb_writeback.post_event_to_qb",
-        return_value=["QB_TXN_AA", "QB_TXN_BB"],
+        return_value=["JournalEntry_AA", "JournalEntry_BB"],
       ),
     ):
       result = execute_event_block(
@@ -280,10 +284,10 @@ class TestExecuteEventBlockQBAuthoritativeAccept:
       )
 
     # Response surfaces the primary (first) qb_txn_id.
-    assert result.qb_external_id == "QB_TXN_AA"
+    assert result.qb_external_id == "JournalEntry_AA"
     # Metadata stores the comma-joined list for cross-source matching
     # against either round-tripped entry.
-    assert evt.metadata_["qb_external_id"] == "QB_TXN_AA,QB_TXN_BB"
+    assert evt.metadata_["qb_external_id"] == "JournalEntry_AA,JournalEntry_BB"
 
 
 @pytest.mark.unit

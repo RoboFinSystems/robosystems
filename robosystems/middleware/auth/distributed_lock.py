@@ -323,6 +323,55 @@ class DistributedLock:
     self.release()
 
 
+def release_lock_by_id(
+  redis_client: redis.Redis,
+  lock_key: str,
+  lock_id: str,
+) -> bool:
+  """Release a distributed lock from a different process than the one
+  that acquired it.
+
+  `DistributedLock.release()` is instance-bound — it requires the same
+  Python object that acquired the lock (the `self.acquired` flag
+  doesn't survive process boundaries). For locks that span processes
+  (e.g., API endpoint acquires, Dagster job releases), pass the
+  `lock_id` from the acquirer's `LockAcquisitionResult` and call this
+  module-level helper.
+
+  Returns True if the lock was released, False if it was already gone
+  or held by a different lock_id (someone else's lock; safe to ignore).
+
+  Atomic compare-and-delete via Lua — same primitive as
+  `DistributedLock.release()`.
+  """
+  # The lock_key the API endpoint constructed lives at `f"lock:{key}"`
+  # per DistributedLock.__init__; the caller passes the unprefixed key
+  # and we apply the same prefix here.
+  full_key = f"lock:{lock_key}"
+  lua_script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+  try:
+    result = redis_client.eval(lua_script, 1, full_key, lock_id)
+    if result:
+      from ...logger import logger as _logger
+
+      _logger.debug(f"Released distributed lock {full_key} via release_lock_by_id")
+      return True
+    return False
+  except RedisError as e:
+    from ...logger import logger as _logger
+
+    _logger.warning(
+      f"release_lock_by_id failed for {full_key}: {e}; lock will expire via TTL"
+    )
+    return False
+
+
 class SSOTokenLockManager:
   """
   Specialized lock manager for SSO token operations.

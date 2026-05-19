@@ -194,7 +194,8 @@ def post_event_to_qb(
       # Suffix per-entry so multi-entry events have distinct request_ids
       # but the per-call write is still retry-safe via QB's dedup window.
       request_id = f"{event.id}-e{idx}"
-      qb_txn_ids.append(_save_with_retry(je, qb_client, request_id, event.id))
+      qb_id = _save_with_retry(je, qb_client, request_id, event.id)
+      qb_txn_ids.append(f"JournalEntry_{qb_id}")
   else:
     # Flat shape — single QB JE.
     je = _build_qb_journal_entry(
@@ -203,8 +204,15 @@ def post_event_to_qb(
       memo=metadata.get("memo"),
       line_items=metadata.get("line_items") or [],
     )
-    qb_txn_ids.append(_save_with_retry(je, qb_client, event.id, event.id))
+    qb_id = _save_with_retry(je, qb_client, event.id, event.id)
+    qb_txn_ids.append(f"JournalEntry_{qb_id}")
 
+  # Prefix the bare QB Id with the entity type ("JournalEntry_") so the
+  # stamped value matches the format the QB importer uses for incoming
+  # rows (`utils.py:389` builds `f"{qb_class}_{tx_id}"` as the
+  # external_id). The cross-source matcher in `loader.py` compares
+  # incoming external_ids against `metadata.qb_external_id`, so the
+  # two must use the same convention.
   return qb_txn_ids
 
 

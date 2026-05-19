@@ -457,17 +457,21 @@ class TestSyncConnection:
         cache=_make_mock_cache(),
       )
 
-    sync_mock.assert_awaited_once_with(
-      "quickbooks",
-      connection_dict,
-      {
-        "lookback_days": 90,
-        "form_types": ["10-K"],
-        "full_rebuild": True,
-        "since_date": "2024-01-01",
-      },
-      GRAPH_ID,
-    )
+    # The autouse `_bypass_sync_lock` fixture stamps a mock-acquired
+    # lock_id into `effective_options` as `sync_lock_id`. Assert on
+    # the subset of keys the test cares about, then verify the lock id
+    # was passed through (Phase 3 B7 release-on-completion plumbing).
+    sync_mock.assert_awaited_once()
+    call_args = sync_mock.await_args
+    assert call_args.args[0] == "quickbooks"
+    assert call_args.args[1] == connection_dict
+    assert call_args.args[3] == GRAPH_ID
+    options_passed = call_args.args[2]
+    assert options_passed["lookback_days"] == 90
+    assert options_passed["form_types"] == ["10-K"]
+    assert options_passed["full_rebuild"] is True
+    assert options_passed["since_date"] == "2024-01-01"
+    assert "sync_lock_id" in options_passed
 
   @pytest.mark.unit
   @pytest.mark.asyncio
@@ -508,7 +512,18 @@ class TestSyncConnection:
         cache=_make_mock_cache(),
       )
 
-    sync_mock.assert_awaited_once_with("quickbooks", connection_dict, None, GRAPH_ID)
+    # Phase 3 B7: even with no caller-supplied sync_options, the
+    # endpoint plumbs a `sync_lock_id` through to the registry so
+    # qb_load can release the B7 lock on completion. Assert the
+    # options dict contains exactly that one key.
+    sync_mock.assert_awaited_once()
+    call_args = sync_mock.await_args
+    assert call_args.args[0] == "quickbooks"
+    assert call_args.args[1] == connection_dict
+    assert call_args.args[3] == GRAPH_ID
+    options_passed = call_args.args[2]
+    assert options_passed is not None
+    assert set(options_passed.keys()) == {"sync_lock_id"}
 
   @pytest.mark.unit
   @pytest.mark.asyncio

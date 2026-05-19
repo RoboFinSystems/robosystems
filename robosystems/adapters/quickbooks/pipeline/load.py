@@ -34,10 +34,24 @@ def qb_load(
      when the user approves the event in the inbox, which is when
      transactions/entries/line_items rows actually get created.
 
+  Releases the B7 sync lock on completion (or on exception) so the
+  next sync can fire immediately without waiting for the 30-min TTL.
+
   Returns:
       MaterializeResult with element/dimension/event counts and
       data-quality drop counters.
   """
+
+  try:
+    return _run_qb_load(context, config)
+  finally:
+    _release_sync_lock(context, config)
+
+
+def _run_qb_load(
+  context: AssetExecutionContext,
+  config: QBSyncConfig,
+) -> MaterializeResult:
   from robosystems.operations.extensions.loader import OLTPLoader
 
   work_dir = get_pipeline_work_dir(config.graph_id)
@@ -118,6 +132,41 @@ def qb_load(
       "errors": len(result.errors),
     }
   )
+
+
+def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> None:
+  """Release the Phase 3 B7 per-connection sync lock on qb_load
+  completion (success or failure).
+
+  Best-effort: any error here is logged and swallowed — the lock will
+  expire via its 30-min TTL if the explicit release fails. The lock
+  token (`config.sync_lock_id`) is empty when Valkey was unavailable
+  at acquire time; that path is a no-op too.
+  """
+  if not config.sync_lock_id:
+    return
+  try:
+    from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+    from robosystems.middleware.auth.distributed_lock import release_lock_by_id
+
+    redis_client = create_redis_client(ValkeyDatabase.LOCKS)
+    released = release_lock_by_id(
+      redis_client,
+      lock_key=f"qb_sync:{config.connection_id}",
+      lock_id=config.sync_lock_id,
+    )
+    if released:
+      context.log.info(f"Released B7 sync lock for connection {config.connection_id}")
+    else:
+      context.log.info(
+        f"B7 sync lock release no-op for connection {config.connection_id} "
+        f"(lock already expired or held by someone else)"
+      )
+  except Exception as e:
+    context.log.warning(
+      f"Failed to release B7 sync lock for connection {config.connection_id} "
+      f"(non-fatal — TTL is the fallback): {e}"
+    )
 
 
 def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> None:
