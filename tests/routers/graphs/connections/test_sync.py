@@ -97,6 +97,37 @@ def _make_robustness_components():
 class TestSyncConnection:
   """Tests for the sync_connection endpoint."""
 
+  @pytest.fixture(autouse=True)
+  def _bypass_sync_lock(self):
+    """Phase 3 B7 — the sync endpoint acquires a `DistributedLock`
+    against the real Valkey LOCKS database. Unit tests run sequentially
+    against shared Valkey state, so the first test's lock for
+    `conn_test456` would 409 every subsequent test for the same
+    connection_id (TTL is 30 min). Patch the lock to always acquire.
+
+    Tests that specifically cover the 409 contention path mock this
+    differently per-test.
+    """
+    mock_lock_instance = MagicMock()
+    mock_lock_result = MagicMock()
+    mock_lock_result.acquired = True
+    mock_lock_instance.acquire.return_value = mock_lock_result
+
+    mock_lock_class = MagicMock(return_value=mock_lock_instance)
+    mock_create_redis = MagicMock(return_value=MagicMock())
+
+    with (
+      patch(
+        "robosystems.middleware.auth.distributed_lock.DistributedLock",
+        mock_lock_class,
+      ),
+      patch(
+        "robosystems.config.valkey_registry.create_redis_client",
+        mock_create_redis,
+      ),
+    ):
+      yield
+
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_sync_connection_success_quickbooks(self):

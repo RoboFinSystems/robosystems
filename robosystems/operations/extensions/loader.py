@@ -40,6 +40,46 @@ _SOURCE_AUTO_COMMITS: dict[str, bool] = {
 }
 
 
+def _resolves_to_auto_commit(source: str, connection_id: str | None) -> bool:
+  """Decide whether captured events for ``source`` should auto-commit on
+  sync (Phase 4 §4.2 — per-connection ``write_policy`` lookup).
+
+  For QB connections, the per-connection ``write_policy`` is the
+  per-row truth:
+  - ``'qb_authoritative'`` / ``'hybrid'``: QB is source-of-truth →
+    auto-commit on sync (pre-Phase-4 behavior — every QB row was
+    already booked in QB so we mirror it directly).
+  - ``'native'``: RoboSystems is source-of-truth → drop to inbox
+    review path (operator approves before posting).
+
+  Falls back to the legacy ``_SOURCE_AUTO_COMMITS`` hardcode when
+  ``connection_id`` is None (defensive — keeps direct loader callers
+  that bypass the connection registry working). Also falls back if the
+  platform-DB lookup fails for any reason (don't break a sync over
+  policy resolution).
+  """
+  if connection_id:
+    try:
+      from robosystems.database import SessionFactory
+      from robosystems.models.core.connection.connection import Connection
+
+      session = SessionFactory()
+      try:
+        conn = Connection.get_by_id(connection_id, session)
+        if conn is not None:
+          # `WritePolicy.QB_AUTHORITATIVE` + `HYBRID` → auto-commit;
+          # `NATIVE` → inbox path.
+          return conn.write_policy in ("qb_authoritative", "hybrid")
+      finally:
+        session.close()
+    except Exception as e:
+      logger.warning(
+        f"Failed to resolve write_policy for connection {connection_id}: {e}; "
+        f"falling back to _SOURCE_AUTO_COMMITS hardcode"
+      )
+  return _SOURCE_AUTO_COMMITS.get(source, False)
+
+
 # QuickBooks AccountType → FASB elementsOfFinancialStatements trait
 # identifier. QB classifies every account into one of ~14 types;
 # every type maps cleanly to one of the 5 EFS traits the rest of the
@@ -178,6 +218,10 @@ class LoadResult:
   # committed/fulfilled row. Live payload stays unchanged; drift flag +
   # drift_payload land on the event for the reconciliation queue.
   events_drift_detected: int = 0
+  # Phase 4 §4.2: counts QB-inbound rows that matched a previously
+  # write-backed RL event (round-trip recognition). Each one represents
+  # a "no duplicate created" event the cross-source matcher caught.
+  events_cross_source_matched: int = 0
   # Drop counters surface data-quality issues that the loader masks with
   # defaults — visible in logs and dagster results so a sync that quietly
   # eats half of QB's data doesn't pass unnoticed.
@@ -217,6 +261,12 @@ class _CaptureResult:
   # already-committed/fulfilled local row. Stamped on the event metadata
   # for reconciliation rather than mutating the live payload.
   drift_detected: int = 0
+  # Phase 4 §4.2 — incoming QB rows that match a previously-written
+  # RL-originated event via metadata.qb_external_id. The matcher skips
+  # the INSERT + handler re-fire and stamps qb_sync_confirmed_at on
+  # the existing event. Counter surfaces in the sync log so we can
+  # confirm the round-trip is being recognised.
+  cross_source_matched: int = 0
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
 
@@ -361,7 +411,7 @@ class OLTPLoader:
       from robosystems.models.extensions.roboledger.line_item import LineItem
       from robosystems.models.extensions.roboledger.transaction import Transaction
 
-      if full_rebuild and _SOURCE_AUTO_COMMITS.get(source, False):
+      if full_rebuild and _resolves_to_auto_commit(source, connection_id):
         # Subquery of events about to be wiped — captured/classified rows
         # for this (source, connection_id). The GL cascade scopes via
         # triggered_by_event_id to this subquery so fulfilled events'
@@ -617,15 +667,18 @@ class OLTPLoader:
       result.events_handler_dispatched = capture_result.handler_dispatched
       result.events_dispatch_failed = capture_result.dispatch_failed
       result.events_drift_detected = capture_result.drift_detected
+      result.events_cross_source_matched = capture_result.cross_source_matched
       result.dropped_unbalanced_entries = capture_result.dropped_unbalanced_entries
       result.dropped_empty_transactions = capture_result.dropped_empty_transactions
       logger.info(
         "Captured %d new event_blocks, updated %d existing, "
-        "flagged %d drift (dropped %d unbalanced entries, "
-        "%d empty transactions; capture-only — no GL writes)",
+        "flagged %d drift, matched %d cross-source round-trips "
+        "(dropped %d unbalanced entries, %d empty transactions; "
+        "capture-only — no GL writes)",
         capture_result.inserted,
         capture_result.updated,
         capture_result.drift_detected,
+        capture_result.cross_source_matched,
         capture_result.dropped_unbalanced_entries,
         capture_result.dropped_empty_transactions,
       )
@@ -1007,6 +1060,9 @@ class OLTPLoader:
     if not txns_by_ext:
       return _CaptureResult()
 
+    out = _CaptureResult()
+    new_events = []
+
     # 2) Look up existing events for the (source, external_id) pairs
     existing: dict[str, Event] = {
       e.external_id: e
@@ -1018,10 +1074,53 @@ class OLTPLoader:
       .all()
     }
 
-    out = _CaptureResult()
-    new_events = []
+    # 2b) Phase 4 §4.2 cross-source matcher — for each incoming QB
+    # external_id, look for an RL-originated event whose
+    # `metadata.qb_external_id` mentions it (either exact match or as
+    # an element in the comma-joined multi-entry form). These are
+    # round-trips of our own write-back; we stamp confirmation and
+    # skip the INSERT + handler re-fire for those external_ids.
+    #
+    # Index support: `idx_events_qb_external_id` (migration 0014) is a
+    # partial expression index on `metadata->>'qb_external_id'`. The
+    # multi-entry case (comma-joined IDs in the column) doesn't hit the
+    # index efficiently for substring matching; for v1 we accept the
+    # seq-scan fallback because multi-entry write-backs are rare.
+    cross_source_external_ids: set[str] = set()
+    if source == "quickbooks":
+      incoming_ext_ids = list(txns_by_ext.keys())
+      cross_candidates = (
+        session.query(Event)
+        .filter(Event.metadata_["qb_external_id"].astext.isnot(None))
+        .filter(Event.source.in_(("manual", "schedule", "system")))
+        .all()
+      )
+      for cand in cross_candidates:
+        cand_meta = cand.metadata_ or {}
+        cand_qb_ids = str(cand_meta.get("qb_external_id", "")).split(",")
+        matched_ids = [qid for qid in cand_qb_ids if qid and qid in incoming_ext_ids]
+        if matched_ids:
+          # Stamp confirmation timestamp on the RL-originated event.
+          new_meta = dict(cand_meta)
+          new_meta["qb_sync_confirmed_at"] = now.isoformat()
+          cand.metadata_ = new_meta
+          for qid in matched_ids:
+            cross_source_external_ids.add(qid)
+          out.cross_source_matched += 1
+      if cross_source_external_ids:
+        logger.info(
+          f"Cross-source matcher recognised {len(cross_source_external_ids)} "
+          f"round-tripped event(s); skipping INSERT for those external_ids"
+        )
 
     for ext_id, txn in txns_by_ext.items():
+      # Phase 4 §4.2 — skip rows that matched the cross-source pass
+      # (round-trips of our own write-back). Confirmation stamp already
+      # landed on the RL-originated event; no twin needed in the events
+      # table.
+      if ext_id in cross_source_external_ids:
+        continue
+
       occurred_at = txn.get("date") or now
       # dbt sometimes returns dates rather than datetimes — normalize.
       if hasattr(occurred_at, "isoformat") and not hasattr(occurred_at, "hour"):
@@ -1119,7 +1218,9 @@ class OLTPLoader:
       # Entry rows with ``status='posted'`` (vs. the default 'draft').
       # Trial balance / reports filter on posted entries; without this,
       # QB-synced data would silently disappear from the read side.
-      jeh_status = "posted" if _SOURCE_AUTO_COMMITS.get(source, False) else "draft"
+      jeh_status = (
+        "posted" if _resolves_to_auto_commit(source, connection_id) else "draft"
+      )
 
       # ``metadata_blob["status"]`` is the JOURNAL-ENTRY status consumed
       # by the journal_entry_recorded handler's metadata_schema (see
@@ -1263,7 +1364,7 @@ class OLTPLoader:
     # under the existing idempotency rule: only ``captured`` /
     # ``classified`` events are touched, so previously-committed events
     # don't get re-fired.
-    if _SOURCE_AUTO_COMMITS.get(source, False):
+    if _resolves_to_auto_commit(source, connection_id):
       events_to_commit: list[Event] = list(new_events)
       # Re-include updated captured events — covers two cases:
       # (1) old captured events left over from before auto-commit was

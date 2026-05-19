@@ -150,6 +150,104 @@ class TestG2IncrementalSkipsWipe:
     assert sig.parameters["since_date"].default is None
 
 
+class TestCrossSourceMatcher:
+  """Phase 4 §4.2 step 4 — cross-source matcher recognises QB rows
+  that are round-trips of a previously write-backed RL-originated
+  event. Stamps confirmation, skips INSERT + handler re-fire."""
+
+  def _dbt_data(self):
+    """One QB transaction whose external_id was already write-backed
+    to QB from an RL-originated event."""
+    return {
+      "transactions": [
+        {
+          "external_id": "QB_TXN_99001",
+          "external_source": "quickbooks",
+          "number": "1",
+          "type": "JournalEntry",
+          "amount": 10000,
+          "currency": "USD",
+          "date": __import__("datetime").date(2026, 5, 19),
+          "source_id": "QB_TXN_99001",
+        }
+      ],
+      "entries": [],
+      "line_items": [],
+    }
+
+  def test_match_skips_insert_and_stamps_confirmation(self):
+    from unittest.mock import MagicMock
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    # Pre-existing RL event that wrote-back to QB; matches the incoming
+    # external_id via metadata.qb_external_id.
+    rl_event = MagicMock()
+    rl_event.id = "evt_rl_origin"
+    rl_event.source = "manual"
+    rl_event.external_id = "evt_rl_origin"  # local UUID
+    rl_event.metadata_ = {"qb_external_id": "QB_TXN_99001"}
+
+    # Two consecutive query chains:
+    #  1. existing-lookup: session.query(Event).filter(...).all() → []
+    #  2. cross-source:    session.query(Event).filter(...).filter(...).all() → [rl_event]
+    existing_chain = MagicMock()
+    existing_chain.filter.return_value.all.return_value = []
+    cross_chain = MagicMock()
+    cross_chain.filter.return_value.filter.return_value.all.return_value = [rl_event]
+
+    session = MagicMock()
+    session.query.side_effect = [existing_chain, cross_chain]
+
+    loader = OLTPLoader()
+    result = loader._capture_transactions_as_events(
+      session,
+      self._dbt_data(),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # The cross-source matcher fired: confirmation stamped, no INSERT.
+    assert result.cross_source_matched == 1
+    assert result.inserted == 0
+    assert "qb_sync_confirmed_at" in rl_event.metadata_
+    assert rl_event.metadata_["qb_external_id"] == "QB_TXN_99001"  # unchanged
+
+  def test_no_match_falls_through_to_normal_insert(self):
+    """An incoming QB row with NO RL-originated counterpart goes
+    through the normal INSERT path — cross_source_matched stays 0."""
+    from unittest.mock import MagicMock
+
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    # Both query chains return empty.
+    existing_chain = MagicMock()
+    existing_chain.filter.return_value.all.return_value = []
+    cross_chain = MagicMock()
+    cross_chain.filter.return_value.filter.return_value.all.return_value = []
+
+    session = MagicMock()
+    session.query.side_effect = [existing_chain, cross_chain]
+
+    loader = OLTPLoader()
+    result = loader._capture_transactions_as_events(
+      session,
+      self._dbt_data(),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert result.cross_source_matched == 0
+    # Normal path fires — the fixture has no line_items so the entry
+    # is dropped (dropped_empty_transactions=1 by the existing
+    # min-2-lines hardening, not the matcher).
+    assert result.dropped_empty_transactions == 1
+
+
 class TestG3ElementUpsertPreservesUlid:
   """G3 — Element UPSERT keeps `elem_*` ULIDs stable across syncs.
 

@@ -20,9 +20,12 @@ from datetime import UTC, datetime
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
   EventBlockEnvelope,
+  ExecuteEventBlockRequest,
+  ExecuteEventBlockResponse,
   UpdateEventBlockRequest,
 )
 from robosystems.models.api.event_handler import (
@@ -494,4 +497,201 @@ def preview_event_block(
     planned_transactions=planned,
     validation_errors=errors,
     would_succeed=len(errors) == 0,
+  )
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# execute-event-block (Phase 4 §4.2 — publish to source-of-truth)
+# ───────────────────────────────────────────────────────────────────────────
+
+
+def execute_event_block(
+  session: Session,
+  body: ExecuteEventBlockRequest,
+  created_by: str,
+) -> ExecuteEventBlockResponse:
+  """Publish an event to its connection's source-of-truth system
+  (Phase 4 §4.2).
+
+  Flow:
+  1. Load Event by id. Read `metadata.connection_id`.
+  2. Resolve the connection's `write_policy` from the platform DB.
+  3. If `'native'`: fast-path return — no QB write, status unchanged.
+  4. If `'qb_authoritative'` / `'hybrid'`:
+     - Build a `quickbooks.objects.JournalEntry` from `event.metadata`
+       via `qb_writeback.post_event_to_qb`.
+     - On success: stamp `metadata.qb_external_id`,
+       `metadata.routed_via`, transition status to `'fulfilled'` (QB
+       acknowledged synchronously), promote linked draft Entry +
+       Transaction rows to `'posted'`.
+     - On rejection (`QBWritebackError`): stamp
+       `metadata.last_outbound_error`, transition status to
+       `'pending'`. Drafts stay draft for retry.
+
+  Idempotency: the QB POST carries `request_id=event.id`. QB's
+  ~5-minute RequestId dedup window means our retry-after-network-blip
+  path is safe at the API layer.
+  """
+  # Local imports to avoid pulling QB SDK + platform-DB session into
+  # callers that only need create/update/preview.
+  from robosystems.adapters.quickbooks.client.api import QBAuthFailedError, QBClient
+  from robosystems.database import SessionFactory as _PlatformSessionFactory
+  from robosystems.models.core.connection.connection import Connection
+  from robosystems.models.core.connection.connection_credentials import (
+    ConnectionCredentials,
+  )
+  from robosystems.models.extensions.roboledger.entry import Entry
+  from robosystems.models.extensions.roboledger.transaction import Transaction
+
+  from .qb_writeback import QBWritebackError, post_event_to_qb
+
+  event = session.query(Event).filter(Event.id == body.event_id).first()
+  if event is None:
+    raise EventNotFoundError(f"Event {body.event_id} not found")
+
+  metadata = dict(event.metadata_ or {})
+  # Caller can override the connection (used by the close-period batch
+  # where schedule events don't carry connection_id in metadata).
+  connection_id = body.connection_id or metadata.get("connection_id")
+
+  # Native fast-path: event isn't bound to a source-of-truth connection
+  # OR the connection's policy is native (RoboSystems is system of
+  # record). No QB write fires.
+  if not connection_id:
+    logger.debug(
+      f"Event {event.id} has no connection_id in metadata — native path, no QB write."
+    )
+    return ExecuteEventBlockResponse(
+      event_id=str(event.id),
+      status=str(event.status),
+      qb_external_id=None,
+      qb_error=None,
+    )
+
+  # Platform-DB lookup for the connection's write_policy + credentials.
+  with _PlatformSessionFactory() as platform_session:
+    connection = Connection.get_by_id(connection_id, platform_session)
+    if connection is None:
+      logger.warning(
+        f"Event {event.id} references connection {connection_id} which is "
+        f"missing or soft-deleted — skipping QB write."
+      )
+      return ExecuteEventBlockResponse(
+        event_id=str(event.id),
+        status=str(event.status),
+        qb_external_id=None,
+        qb_error=None,
+      )
+
+    if connection.write_policy == "native":
+      return ExecuteEventBlockResponse(
+        event_id=str(event.id),
+        status=str(event.status),
+        qb_external_id=None,
+        qb_error=None,
+      )
+
+    if connection.provider != "quickbooks":
+      # Phase 4 v1 ships QB write-back only. Other providers fast-path.
+      logger.debug(
+        f"Event {event.id} on non-QB provider {connection.provider} — "
+        f"write-back not implemented; status unchanged."
+      )
+      return ExecuteEventBlockResponse(
+        event_id=str(event.id),
+        status=str(event.status),
+        qb_external_id=None,
+        qb_error=None,
+      )
+
+    cred = ConnectionCredentials.get_by_connection_id(connection_id, platform_session)
+    if cred is None:
+      raise ValueError(
+        f"Connection {connection_id} has no credentials — cannot write to QB."
+      )
+    realm_id = connection.realm_id
+    credentials = cred.get_credentials()
+
+  if not realm_id:
+    raise ValueError(
+      f"Connection {connection_id} has no realm_id — cannot write to QB."
+    )
+
+  # Instantiate the QBClient — this triggers the A1/A2/A3 path: token
+  # rotation gets persisted, AuthClientError flips the connection to
+  # needs_reauth, transient errors raise QBAuthFailedError.
+  try:
+    qb_client = QBClient(
+      realm_id=str(realm_id),
+      qb_credentials=credentials,
+      connection_id=str(connection_id),
+    )
+  except QBAuthFailedError:
+    # Surface to the caller — the operator must reconnect via OAuth.
+    raise
+
+  # Build + post. On QB rejection, stamp the error onto event.metadata
+  # and transition status='pending' for retry without raising.
+  try:
+    qb_txn_ids = post_event_to_qb(session, event, qb_client.client)
+  except QBWritebackError as e:
+    new_meta = dict(event.metadata_ or {})
+    new_meta["last_outbound_error"] = e.payload
+    event.metadata_ = new_meta
+    event.status = "pending"
+    session.flush()
+    return ExecuteEventBlockResponse(
+      event_id=str(event.id),
+      status="pending",
+      qb_external_id=None,
+      qb_error=e.payload,
+    )
+
+  # Success path. Multi-entry events get a list of qb_txn_ids; flatten
+  # to a single string (comma-joined) for the metadata stamp and
+  # take the first for the response field — the multi-entry case is
+  # rare today (QB ingest only) and the comma-joined form preserves
+  # the round-trip mapping for the cross-source matcher.
+  primary_qb_id = qb_txn_ids[0]
+  joined_qb_id = ",".join(qb_txn_ids)
+  new_meta = dict(event.metadata_ or {})
+  new_meta["qb_external_id"] = joined_qb_id
+  new_meta["routed_via"] = {
+    "connection_id": str(connection_id),
+    "qb_request_id": str(event.id),
+    "sent_at": datetime.now(UTC).isoformat(),
+  }
+  # Clear any prior error from a retry succeeding.
+  new_meta.pop("last_outbound_error", None)
+  event.metadata_ = new_meta
+  event.status = "fulfilled"
+
+  # Promote linked draft Entry + Transaction rows to posted. Wave 1's
+  # split between Event lifecycle and Entry/Transaction status means
+  # we promote ledger-row status here (not in the handler — the
+  # handler stamps Entry.status='draft' at create, and execute
+  # promotes after QB confirms).
+  session.query(Entry).filter(Entry.triggered_by_event_id == event.id).update(
+    {Entry.status: "posted", Entry.posted_at: datetime.now(UTC)},
+    synchronize_session=False,
+  )
+  session.query(Transaction).filter(
+    Transaction.triggered_by_event_id == event.id
+  ).update(
+    {Transaction.status: "posted", Transaction.posted_at: datetime.now(UTC)},
+    synchronize_session=False,
+  )
+
+  session.flush()
+  logger.info(
+    f"Event {event.id} published to QB via connection {connection_id}: "
+    f"qb_external_id={joined_qb_id}, status=fulfilled, "
+    f"drafts promoted"
+  )
+
+  return ExecuteEventBlockResponse(
+    event_id=str(event.id),
+    status="fulfilled",
+    qb_external_id=primary_qb_id,
+    qb_error=None,
   )

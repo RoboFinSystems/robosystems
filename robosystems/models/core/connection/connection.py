@@ -34,6 +34,32 @@ class ConnectionStatus(str, Enum):
   DISCONNECTED = "disconnected"
 
 
+class WritePolicy(str, Enum):
+  """Connection source-of-truth policy (Phase 4 §4.2).
+
+  Governs whether RoboSystems-originated entries (manual JE, schedule
+  drafts) flow into the source-of-truth system on the way to posted GL.
+
+  - ``NATIVE``: RoboSystems IS the source of truth. RL-originated events
+    write GL rows locally on dispatch; no outbound publish. The
+    connection's inbound sync (if any) captures-to-inbox per
+    event-driven-ledger.md.
+  - ``QB_AUTHORITATIVE``: QuickBooks IS the source of truth. RL-originated
+    events publish to QB via ``execute-event-block``; local GL holds as
+    DRAFT until QB accepts. Inbound QB sync auto-commits (preserves
+    pre-Phase-4 behavior). The cross-source matcher recognises round-
+    tripped entries by ``metadata.qb_external_id`` and skips re-creation.
+  - ``HYBRID``: QB authoritative with exception-flagging heuristics
+    (low-confidence mapping, manual JE source class, amount-over-
+    threshold). v1 ships only NATIVE + QB_AUTHORITATIVE; HYBRID lands
+    when a real customer needs it.
+  """
+
+  NATIVE = "native"
+  QB_AUTHORITATIVE = "qb_authoritative"
+  HYBRID = "hybrid"
+
+
 class Connection(Model):
   """Data source connection metadata."""
 
@@ -73,6 +99,15 @@ class Connection(Model):
   # Sync tracking
   auto_sync_enabled = Column(Boolean, default=True, nullable=False)
   last_sync = Column(DateTime, nullable=True)
+
+  # Phase 4 §4.2 — source-of-truth policy. Default `'native'` preserves
+  # pre-Phase-4 behavior for all existing connections (no outbound writes
+  # without explicit operator opt-in via UI / API). The loader's
+  # auto-commit branch reads this column instead of the legacy
+  # `_SOURCE_AUTO_COMMITS` hardcode.
+  write_policy = Column(
+    String, default=WritePolicy.NATIVE.value, server_default="native", nullable=False
+  )
 
   # Soft-delete marker (B6). When non-null the row is invisible to the
   # default lookup helpers below. Re-OAuth to the same realm revives the
@@ -336,6 +371,7 @@ class Connection(Model):
       "entity_id": self.graph_id,  # backward compat
       "graph_id": self.graph_id,
       "user_id": self.user_id,
+      "write_policy": self.write_policy,
       "metadata": {
         "realm_id": self.realm_id,
         "item_id": self.item_id,

@@ -71,6 +71,15 @@ class ConnectionService:
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
       )
 
+      # Phase 4 §4.2 — default new QuickBooks connections to
+      # `qb_authoritative` so the loader's auto-commit branch fires
+      # (matches pre-Phase-4 behavior, the customer pitch for "QB is
+      # source-of-truth, RoboSystems is the review layer"). Other
+      # providers stay on the column default `'native'`.
+      if provider.lower() == "quickbooks":
+        conn.write_policy = "qb_authoritative"
+        session.flush()
+
       # Store credentials if provided
       if credentials:
         ConnectionCredentials.create(

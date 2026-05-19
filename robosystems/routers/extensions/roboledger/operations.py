@@ -102,6 +102,8 @@ from robosystems.models.api.common import OPERATION_ERROR_RESPONSES, DeleteResul
 from robosystems.models.api.event_block import (
   CreateEventBlockRequest,
   EventBlockEnvelope,
+  ExecuteEventBlockRequest,
+  ExecuteEventBlockResponse,
   UpdateEventBlockRequest,
 )
 from robosystems.models.api.event_handler import (
@@ -181,6 +183,9 @@ from robosystems.operations.event_block import (
 )
 from robosystems.operations.event_block import (
   create_event_block as cmd_create_event_block,
+)
+from robosystems.operations.event_block import (
+  execute_event_block as cmd_execute_event_block,
 )
 from robosystems.operations.event_block import (
   preview_event_block as cmd_preview_event_block,
@@ -1249,6 +1254,39 @@ update_event_block_op = _registrar.register(
       ElementResolutionError: 422,
       ClosedPeriodError: 422,
       UnbalancedJournalEntryError: 422,
+    },
+  )
+)
+
+
+# Phase 4 §4.2 — `execute-event-block` publishes an event to the
+# source-of-truth system (QuickBooks for v1). For events on a
+# connection with `write_policy='qb_authoritative'` / `'hybrid'`,
+# this posts a JE to QB via the QB API with `request_id=event.id`
+# for idempotency, captures the returned `qb_txn_id` on
+# `event.metadata.qb_external_id`, transitions status to `'fulfilled'`
+# (or `'pending'` on QB rejection), and promotes linked draft GL
+# rows to `'posted'`. The cross-source matcher in the loader
+# recognises the round-tripped entry on the next sync.
+execute_event_block_op = _registrar.register(
+  OperationSpec(
+    name="execute-event-block",
+    summary="Execute Event Block (publish to source-of-truth system)",
+    description=(
+      "For events on a connection with write_policy='qb_authoritative' "
+      "or 'hybrid', publish the captured GL plan to the source-of-truth "
+      "system (QuickBooks). Captures qb_txn_id on "
+      "event.metadata.qb_external_id, transitions status to 'fulfilled' "
+      "(or 'pending' on rejection), and promotes draft GL rows to "
+      "'posted'. Native-policy events fast-path through with no QB "
+      "write — RoboSystems is the system of record."
+    ),
+    command=cmd_execute_event_block,
+    request_model=ExecuteEventBlockRequest,
+    result_type=ExecuteEventBlockResponse,
+    error_map={
+      EventNotFoundError: 404,
+      ValueError: 422,
     },
   )
 )
