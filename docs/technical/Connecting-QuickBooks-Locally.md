@@ -9,10 +9,19 @@ There are two ways to develop against QuickBooks data locally. Pick the path tha
 | Path | Companies | Setup | When to use |
 | --- | --- | --- | --- |
 | **A. Sandbox + localhost** | Intuit Sample Company (pre-populated canned data) | Minutes — no tunnel, no production keys | Validating the OAuth handshake, exploring the sync flow, demoing the close/report UX without your own books |
-| **B. Production + ngrok tunnel** | Your own real QB Online companies | ~15 minutes — ngrok install + static domain + Intuit production setup | Real-data smoke tests, customer-facing demos against your own QB, debugging adapter edge cases that only surface in messy real data |
+| **B. Production + public tunnel** | Your own real QB Online companies | ~15 minutes — tunnel install + Intuit production setup | Real-data smoke tests, customer-facing demos against your own QB, debugging adapter edge cases that only surface in messy real data |
 | _Neither_ — synthetic data only | N/A | One command | When you don't need Intuit at all — see the synthetic demo walkthrough (separate guide) for the `just demo-roboledger` workflow which generates fake books for testing close-period, reports, and rules without OAuth |
 
-Both QB paths use the same RoboSystems stack, the same sync pipeline, and the same reporting surface. The only differences are which Intuit OAuth credentials you use and whether the redirect URI points at localhost or an ngrok tunnel.
+Both QB paths use the same RoboSystems stack, the same sync pipeline, and the same reporting surface. The only differences are which Intuit OAuth credentials you use and whether the redirect URI points at localhost or a public tunnel.
+
+Path B has two interchangeable tunnel implementations:
+
+| Tunnel | Setup | When to use |
+| --- | --- | --- |
+| **ngrok** | Free; reserve one `*.ngrok-free.dev` static domain | You don't already own a domain; want the lowest-friction first run |
+| **cloudflared** | Requires a domain managed by Cloudflare (cloudflared login, named tunnel, DNS route) | You already own a Cloudflare-managed domain; want your own branded hostname with no interstitial warning |
+
+Pick whichever you prefer — Intuit and the RoboSystems backend don't care which produced the public HTTPS URL.
 
 ## Table of Contents
 
@@ -20,7 +29,9 @@ Both QB paths use the same RoboSystems stack, the same sync pipeline, and the sa
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Path A — Sandbox + Localhost](#path-a--sandbox--localhost)
-- [Path B — Production + ngrok](#path-b--production--ngrok)
+- [Path B — Production + public tunnel](#path-b--production--public-tunnel)
+  - [Option B.1 — ngrok](#option-b1--ngrok)
+  - [Option B.2 — cloudflared](#option-b2--cloudflared)
 - [Running the Stack](#running-the-stack)
 - [Connecting Your First Company](#connecting-your-first-company)
 - [What Happens Under the Hood](#what-happens-under-the-hood)
@@ -59,7 +70,7 @@ Intuit treats Development and Production as separate environments with their own
 | Path | Additional requirements |
 | --- | --- |
 | **A. Sandbox** | A QB sandbox company (Intuit auto-creates a "Sample Company" for new developer accounts; additional sandboxes via [developer.intuit.com/app/developer/sandbox](https://developer.intuit.com/app/developer/sandbox)) |
-| **B. Production** | An [ngrok](https://dashboard.ngrok.com/signup) account (free tier sufficient), a reserved static domain, and a real QB Online company you own |
+| **B. Production** | A public tunnel — either an [ngrok](https://dashboard.ngrok.com/signup) account + reserved static domain, OR a Cloudflare-managed domain + `cloudflared` — and a real QB Online company you own |
 
 ## Quick Start
 
@@ -97,24 +108,33 @@ The sandbox company comes pre-populated with synthetic QB data. After connect, t
 # 1. Get production credentials
 #    Intuit Developer Portal → your app → Keys & OAuth → Production Keys
 
-# 2. Install ngrok + reserve static domain
+# 2. Set up a public tunnel (pick one):
+#    a) ngrok:
 brew install ngrok
 ngrok config add-authtoken <your-token>
 # Then visit dashboard.ngrok.com/domains and reserve a free static domain
+#    b) cloudflared (requires a Cloudflare-managed domain):
+brew install cloudflared
+cloudflared tunnel login
+cloudflared tunnel create roboledger-local
+cloudflared tunnel route dns roboledger-local qb.your-domain.com
 
-# 3. Register the ngrok callback URL in Intuit Developer Portal
+# 3. Register the public callback URL in Intuit Developer Portal
 #    App Settings → Redirect URIs → Production tab →
-#    add: https://<your-domain>.ngrok-free.dev/connections/qb-callback
+#    add: https://<your-domain>/connections/qb-callback
 
-# 4. Fill in robosystems/.env (production keys + ngrok URL + CORS allowlist)
-# 5. Fill in roboledger-app/.env (NGROK_DOMAIN)
+# 4. Fill in robosystems/.env (production keys + tunnel URL + CORS allowlist)
+# 5. Fill in roboledger-app/.env:
+#       PUBLIC_TUNNEL_DOMAIN=<your-domain>
+#       (cloudflared also needs CLOUDFLARED_TUNNEL_NAME)
 
 # 6. Start the stack (three terminals: backend, frontend, tunnel)
-just start                                        # terminal 1
-cd ../roboledger-app && npm run dev                 # terminal 2
-cd ../roboledger-app && npm run tunnel:ngrok      # terminal 3
+just start                                              # terminal 1
+cd ../roboledger-app && npm run dev                       # terminal 2
+cd ../roboledger-app && npm run tunnel:ngrok            # terminal 3 (or)
+cd ../roboledger-app && npm run tunnel:cloudflared      # terminal 3
 
-# 7. Open the *ngrok URL* (not localhost) → log in → Connections → Connect
+# 7. Open the *tunnel URL* (not localhost) → log in → Connections → Connect
 #    QuickBooks → pick your real company.
 ```
 
@@ -161,13 +181,13 @@ Each Intuit developer account gets one "Sample Company" sandbox auto-provisioned
 
 For additional sandboxes (e.g. to test on a clean book), use [developer.intuit.com/app/developer/sandbox](https://developer.intuit.com/app/developer/sandbox) → **Add a sandbox company**. Free tier allows up to 5.
 
-## Path B — Production + ngrok
+## Path B — Production + public tunnel
 
 Required for connecting your own real QuickBooks Online companies. Intuit's Production OAuth flow rejects `localhost` callbacks, so we need a public HTTPS hostname that proxies to your local frontend.
 
-> **ngrok is only needed for the OAuth handshake itself.** Once the connection is established and tokens are stored, all subsequent work — syncing, mapping, reports, close-period — runs against `localhost:3001` directly. You can shut down the tunnel after each successful connect; only spin it up again when adding another QB company or re-authenticating.
+> **The tunnel is only needed for the OAuth handshake itself.** Once the connection is established and tokens are stored, all subsequent work — syncing, mapping, reports, close-period — runs against `localhost:3001` directly. You can shut down the tunnel after each successful connect; only spin it up again when adding another QB company or re-authenticating.
 
-### Why ngrok specifically
+### What the tunnel needs to provide
 
 Intuit's redirect URI must be:
 
@@ -175,9 +195,13 @@ Intuit's redirect URI must be:
 - Registered in advance in the Developer Portal
 - Stable across sessions (otherwise you re-register every time)
 
-Free ngrok meets all three: static domain reservation gives you a stable hostname, and ngrok's edge handles HTTPS termination.
+Both options below satisfy these requirements. They're interchangeable — pick one and follow that sub-section.
 
-### One-time ngrok setup
+### Option B.1 — ngrok
+
+The lowest-friction option if you don't already own a domain. Free tier includes a single static `*.ngrok-free.dev` hostname. Browsers see a one-time interstitial warning page (per session, per browser); paid plans remove it.
+
+#### One-time ngrok setup
 
 ```bash
 brew install ngrok
@@ -191,7 +215,7 @@ ngrok config add-authtoken <YOUR_TOKEN>
 
 Get the token from [dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken).
 
-### Reserve a static domain
+#### Reserve a static domain
 
 Free tier includes one static domain. Without it, ngrok randomizes the URL on each restart and you'd re-register the redirect URI in Intuit every session.
 
@@ -200,7 +224,7 @@ Free tier includes one static domain. Without it, ngrok randomizes the URL on ea
 3. ngrok auto-assigns something like `cuddly-otter-1234.ngrok-free.dev`
 4. Copy the exact hostname (no `https://` prefix)
 
-### Path B — Intuit Developer Portal setup
+#### ngrok — Intuit Developer Portal setup
 
 1. **App Settings → Redirect URIs → Production** tab → add:
 
@@ -214,7 +238,7 @@ Free tier includes one static domain. Without it, ngrok randomizes the URL on ea
    - Client ID
    - Client Secret
 
-### Path B — Environment configuration
+#### ngrok — environment configuration
 
 In `robosystems/.env`:
 
@@ -231,11 +255,75 @@ EXTRA_CORS_ORIGINS=https://<your-domain>.ngrok-free.dev
 In `roboledger-app/.env`:
 
 ```bash
-# ngrok tunnel target — read by npm run tunnel:ngrok
-NGROK_DOMAIN=<your-domain>.ngrok-free.dev
+# Public hostname — read by `npm run tunnel:ngrok` (to know what static domain
+# to forward to) and by next.config.js (to wire the dev-server API proxy).
+PUBLIC_TUNNEL_DOMAIN=<your-domain>.ngrok-free.dev
 ```
 
-`NGROK_DOMAIN` is the hostname only (no `https://`).
+`PUBLIC_TUNNEL_DOMAIN` is the hostname only (no `https://`).
+
+### Option B.2 — cloudflared
+
+Use this option if you already own a domain managed by Cloudflare (e.g. `robofinsystems.com`). You get a stable, branded hostname (e.g. `qb.robofinsystems.com`), no interstitial warning page, and free DNS routing through Cloudflare's edge.
+
+#### One-time cloudflared setup
+
+```bash
+brew install cloudflared
+cloudflared tunnel login
+```
+
+The login command opens a browser to the Cloudflare dashboard; pick the zone (`robofinsystems.com`) you want to attach the tunnel to. This drops a cert into `~/.cloudflared/cert.pem`.
+
+#### Create a named tunnel and route DNS
+
+```bash
+cloudflared tunnel create roboledger-local
+cloudflared tunnel route dns roboledger-local qb.robofinsystems.com
+```
+
+`tunnel create` provisions a new tunnel + credentials file in `~/.cloudflared/<tunnel-id>.json`. `tunnel route dns` creates a proxied CNAME in your Cloudflare zone so the public hostname resolves to the tunnel.
+
+#### cloudflared — Intuit Developer Portal setup
+
+1. **App Settings → Redirect URIs → Production** tab → add:
+
+   ```text
+   https://qb.robofinsystems.com/connections/qb-callback
+   ```
+
+   Save.
+
+2. **Keys & OAuth → Production** tab → copy Client ID + Client Secret.
+
+#### cloudflared — environment configuration
+
+In `robosystems/.env`:
+
+```bash
+INTUIT_CLIENT_ID=<production client id>
+INTUIT_CLIENT_SECRET=<production client secret>
+INTUIT_ENVIRONMENT=production
+INTUIT_REDIRECT_URI=https://qb.robofinsystems.com/connections/qb-callback
+
+# CORS allowlist for the public origin
+EXTRA_CORS_ORIGINS=https://qb.robofinsystems.com
+```
+
+`EXTRA_CORS_ORIGINS` is a comma-separated list, so if you keep ngrok configured too, just add the cloudflared host alongside it.
+
+In `roboledger-app/.env`:
+
+```bash
+# The public hostname next.config.js uses to set up the dev-server API proxy.
+PUBLIC_TUNNEL_DOMAIN=qb.robofinsystems.com
+
+# The cloudflared tunnel name from `cloudflared tunnel create` —
+# read by npm run tunnel:cloudflared.
+CLOUDFLARED_TUNNEL_NAME=roboledger-local
+```
+
+`PUBLIC_TUNNEL_DOMAIN` is the hostname only (no `https://`).
 
 ## Running the Stack
 
@@ -245,7 +333,7 @@ The stack runs in your terminals — counts depend on path:
 | --- | --- | --- |
 | 1 | `cd robosystems && just start` | same |
 | 2 | `cd roboledger-app && npm run dev` | same |
-| 3 | _(not needed)_ | `cd roboledger-app && npm run tunnel:ngrok` — **only during OAuth establishment**; shut down after each successful connect |
+| 3 | _(not needed)_ | `npm run tunnel:ngrok` (Option B.1) or `npm run tunnel:cloudflared` (Option B.2) — **only during OAuth establishment**; shut down after each successful connect |
 
 Wait for `just start` to bring up Postgres, Valkey, LadybugDB, the API, and Dagster (the dashboard at [localhost:8002](http://localhost:8002) is a useful sign the stack is up).
 
@@ -254,9 +342,14 @@ Wait for `just start` to bring up Postgres, Valkey, LadybugDB, the API, and Dags
 For Path B, verify the tunnel is reachable:
 
 ```bash
+# ngrok (Option B.1) — the header skips the interstitial for the curl probe
 curl -s -o /dev/null -w "%{http_code}\n" \
   -H "ngrok-skip-browser-warning: true" \
   https://<your-domain>.ngrok-free.dev/login
+# Expect: 200
+
+# cloudflared (Option B.2) — no interstitial header needed
+curl -s -o /dev/null -w "%{http_code}\n" https://qb.your-domain.com/login
 # Expect: 200
 ```
 
@@ -265,9 +358,9 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 Open the app:
 
 - **Path A**: [http://localhost:3001](http://localhost:3001)
-- **Path B**: `https://<your-domain>.ngrok-free.dev` (the ngrok URL, **not** localhost — the OAuth redirect URI has to match the user-facing origin)
+- **Path B**: the tunnel URL — `https://<your-domain>.ngrok-free.dev` or `https://qb.your-domain.com`, **not** localhost (the OAuth redirect URI has to match the user-facing origin)
 
-On Path B's first ngrok visit, click through the ngrok interstitial warning page once per browser session.
+On Path B with ngrok, click through the interstitial warning page once per browser session on first visit. Cloudflared has no equivalent interstitial.
 
 1. Log in (run `just demo-user` from `robosystems/` for fresh credentials; they're written to `.local/config.json`)
 2. Create or select an entity / graph
@@ -556,13 +649,13 @@ Permission was denied for this request to access the `loopback` address space.
 
 Chrome 146+ enforces Private Network Access on cross-origin calls to localhost. The backend grants it via `allow_private_network=is_development()` on the CORS middleware, but Chrome caches the preflight result aggressively and the usual cache-clearing tricks (DevTools "Disable cache", site-data delete, incognito) often don't actually flush the PNA preflight cache. Chrome 146 also removed the `chrome://flags` override that used to disable PNA.
 
-`roboledger-app`'s `next.config.js` handles this automatically when `NGROK_DOMAIN` is set in `roboledger-app/.env`: rewrites under `/v1/*` and `/extensions/*` proxy through the Next dev server to `http://localhost:8000`, and `NEXT_PUBLIC_ROBOSYSTEMS_API_URL` is overridden to the ngrok origin so the browser only ever talks to one host. From the browser's perspective every request is same-origin, so PNA never fires.
+`roboledger-app`'s `next.config.js` handles this automatically when `PUBLIC_TUNNEL_DOMAIN` is set in `roboledger-app/.env`: rewrites under `/v1/*` and `/extensions/*` proxy through the Next dev server to `http://localhost:8000`, and `NEXT_PUBLIC_ROBOSYSTEMS_API_URL` is overridden to the tunnel origin so the browser only ever talks to one host. From the browser's perspective every request is same-origin, so PNA never fires.
 
 This is **dev-server-only** — it works because `next dev` re-reads `next.config.js` at startup and the `env` override is applied to the bundle in dev mode. Running `roboledger-app` from inside Docker (`docker compose` with the `roboledger-app` service) uses `next start` against a pre-built bundle where `NEXT_PUBLIC_*` is baked at build time, so the override has no effect. **Run the frontend with `npm run dev` on the host for the OAuth connect step.**
 
 **Fallback workaround:** if `npm run dev` isn't an option, **use Firefox for the OAuth connect step**, then go back to Chrome for normal use. Firefox doesn't enforce PNA the same way, so the OAuth callback completes cleanly. Once the connection is established, day-to-day use against `http://localhost:3001` (Path A — same-origin localhost) doesn't trigger PNA and Chrome works fine.
 
-Only affects Path B (ngrok → localhost) during the OAuth callback moment. Path A is same-origin localhost and bypasses PNA entirely.
+Only affects Path B (public tunnel → localhost) during the OAuth callback moment. Path A is same-origin localhost and bypasses PNA entirely.
 
 ### `Invalid email or password` on login (Puppeteer / automation)
 
@@ -609,15 +702,16 @@ Common causes:
 - A CoA account mapped to a calculated subtotal (denylisted concept). The renderer ignores these to prevent double-counting; the account's facts won't show up at all.
 - Manual journal entries that don't balance (one debit without matching credit). The trial balance test should catch this in dbt; if it leaked through, query line_items for the offending entry.
 
-### ngrok `endpoint already online` error
+### `endpoint already online` / `tunnel already in use` error
 
 A previous tunnel session is still running. Find and kill:
 
 ```bash
-pkill -f 'ngrok http'
+pkill -f 'ngrok http'         # ngrok
+pkill -f 'cloudflared tunnel' # cloudflared
 ```
 
-Re-launch with `npm run tunnel:ngrok`.
+Re-launch with `npm run tunnel:ngrok` or `npm run tunnel:cloudflared`.
 
 ### Sandbox keys + production redirect URI (or vice versa)
 
@@ -636,13 +730,15 @@ Both halves of the OAuth handshake have to come from the same environment tab.
 | Intuit sandbox companies | Free (up to 5) |
 | ngrok free tier | $0/month, 1 static domain, occasional browser interstitial |
 | ngrok paid plans | ~$10/month, removes interstitial, more domains |
+| Cloudflare Tunnel (cloudflared) | $0/month for the tunnel itself; you bring your own domain (~$10/yr) |
 | QuickBooks Online subscription | Paid (whatever you already pay for QBO) |
 
 To clean up:
 
 ```bash
-# Stop the tunnel
+# Stop the tunnel (whichever you ran)
 pkill -f 'ngrok http'
+pkill -f 'cloudflared tunnel'
 
 # Stop the stack (preserves data)
 cd robosystems && just stop
