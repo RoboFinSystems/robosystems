@@ -1,0 +1,33 @@
+﻿JournalEntryID,EconomicEntityIdentifier,TransactionPeriod,Account,GeneralLedgerAccountCode,TransactionDescriptionCode,Amount,Units,Rounding,Balance,EffectiveValue,Sequence,TransactionDescription,DocumentID,Flag,Key
+JE-201,30810137d58f76b84afd,1/1/24,000-1100-00,mini:CashAndCashEquivalents,mini:ProceedsFromInvestmentsByOwner,10000,iso4217:USD,2,D,10000,1,Investment by owner to open a lemonade stand.,,No,176
+JE-201,30810137d58f76b84afd,1/1/24,000-3100-00,mini:PaidInCapital,mini:InvestmentsByOwner,10000,iso4217:USD,2,C,-10000,2,Investment by owner to open a lemonade stand.,,No,177
+JE-202,30810137d58f76b84afd,1/2/24,000-1100-00,mini:CashAndCashEquivalents,mini:ProceedsFromAdditionalLongtermBorrowings,2000,iso4217:USD,2,D,2000,1,Long term borrowing to purchase refrigerator.,,No,178
+JE-202,30810137d58f76b84afd,1/2/24,000-2300-00,mini:LongtermDebt,mini:AdditionalLongtermBorrowings,2000,iso4217:USD,2,C,-2000,2,Long term borrowing to purchase refrigerator.,,No,179
+JE-203,30810137d58f76b84afd,1/5/24,000-1500-00,mini:PropertyPlantAndEquipment,mini:CapitalAdditionsPropertyPlantAndEquipment,1000,iso4217:USD,2,D,1000,1,Purchase of refrigerator using cash from additional borrowings.,,No,180
+JE-203,30810137d58f76b84afd,1/5/24,000-1100-00,mini:CashAndCashEquivalents,mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment,1000,iso4217:USD,2,C,-1000,2,Purchase of refrigerator using cash from additional borrowings.,,No,181
+JE-204,30810137d58f76b84afd,1/10/24,000-1300-00,mini:Inventories,mini:PurchasesOfInventoryForSale,5000,iso4217:USD,2,D,5000,1,Purchase of lemons to put intoinventory on account.,,No,182
+JE-204,30810137d58f76b84afd,1/10/24,000-2150-00,mini:AccountsPayable,mini:PurchasesInventoryForSaleOnAccount,5000,iso4217:USD,2,C,-5000,2,Purchase of lemons to put intoinventory on account.,,No,183
+JE-205,30810137d58f76b84afd,1/15/24,000-5100-00,mini:CostsOfSales,mini:NetIncomeLoss,3000,iso4217:USD,2,D,3000,1,Payment for contractor to work the lemonade stand.,,No,184
+JE-205,30810137d58f76b84afd,1/15/24,000-2150-00,mini:AccountsPayable,mini:PurchasesInventoryForSaleOnAccount,3000,iso4217:USD,2,C,-3000,2,Payment for contractor to work the lemonade stand.,,No,185
+JE-206,30810137d58f76b84afd,1/16/24,000-1200-00,mini:Receivables,mini:IncreaseInReceivablesFromSalesOnAccount,8000,iso4217:USD,2,D,8000,1,Sales on account.,,No,186
+JE-206,30810137d58f76b84afd,1/16/24,000-4100-00,mini:Sales,mini:NetIncomeLoss,8000,iso4217:USD,2,C,-8000,2,Sales on account.,,No,187
+JE-206,30810137d58f76b84afd,1/16/24,000-5100-00,mini:CostsOfSales,mini:NetIncomeLoss,2000,iso4217:USD,2,D,2000,3,Costs related to sales on account.,,No,188
+JE-206,30810137d58f76b84afd,1/16/24,000-1300-00,mini:Inventories,mini:DecreaseInInventoriesFromSales,2000,iso4217:USD,2,C,-2000,4,Costs related to sales on account.,,No,189
+JE-207,30810137d58f76b84afd,1/20/24,000-1100-00,mini:CashAndCashEquivalents,mini:ProceedsFromCollectionOfReceivables,8000,iso4217:USD,2,D,8000,1,Collection of accounts receivable.,,No,190
+JE-207,30810137d58f76b84afd,1/20/24,000-1200-00,mini:Receivables,mini:CollectionOfReceivables,8000,iso4217:USD,2,C,-8000,2,Collection of accounts receivable.,,No,191
+JE-208,30810137d58f76b84afd,1/21/24,000-2150-00,mini:AccountsPayable,mini:DecreaseFromPaymentAccountsPayable,7000,iso4217:USD,2,D,7000,1,Payment of accounts payable.,,No,192
+JE-208,30810137d58f76b84afd,1/21/24,000-1100-00,mini:CashAndCashEquivalents,mini:PaymentOfAccountsPayable,7000,iso4217:USD,2,C,-7000,2,Payment of accounts payable.,,No,193
+JE-209,30810137d58f76b84afd,1/25/24,000-2300-00,mini:LongtermDebt,mini:RepaymentLongtermBorrowings,1000,iso4217:USD,2,D,1000,1,Payment of long term debt including accrued interest.,,No,194
+JE-209,30810137d58f76b84afd,1/25/24,000-1100-00,mini:CashAndCashEquivalents,mini:PaymentForReductionOfLongtermBorrowings,1000,iso4217:USD,2,C,-1000,2,Payment of long term debt including accrued interest.,,No,195
+JE-209,30810137d58f76b84afd,1/25/24,000-1100-00,mini:CashAndCashEquivalents,mini:PaymentOfInterest,150,iso4217:USD,2,C,-150,3,Payment of long term debt including accrued interest.,,No,211
+JE-209,30810137d58f76b84afd,1/25/24,000-2160-00,mini:AccruedExpenses,mini:DecreaseFromPaymentOfInterest,150,iso4217:USD,2,D,150,4,Payment of long term debt including accrued interest.,,No,196
+JE-210,30810137d58f76b84afd,1/24/24,000-5400-00,mini:InterestExpense,mini:NetIncomeLoss,150,iso4217:USD,2,D,150,1,Accrual of interest on debt.,,No,197
+JE-210,30810137d58f76b84afd,1/24/24,000-2160-00,mini:AccruedExpenses,mini:InterestAccrued,150,iso4217:USD,2,C,-150,2,Accrual of interest on debt.,,No,198
+JE-223,30810137d58f76b84afd,1/28/24,000-5100-00,mini:CostsOfSales,mini:NetIncomeLoss,300,iso4217:USD,2,D,300,1,"Closing entry. Inventory write offs, adjust to physical.",,No,203
+JE-223,30810137d58f76b84afd,1/28/24,000-1300-00,mini:Inventories,mini:InventoryWrittenOff,300,iso4217:USD,2,C,-300,2,"Closing entry. Inventory write offs, adjust to physical.",,No,204
+JE-224,30810137d58f76b84afd,1/28/24,000-5200-00,mini:DepreciationAndAmortization,mini:NetIncomeLoss,100,iso4217:USD,2,D,100,1,Closing entry. Depreciation and amortization expensed.,,No,205
+JE-224,30810137d58f76b84afd,1/28/24,000-1500-00,mini:PropertyPlantAndEquipment,mini:DecreaseFromDepreciationAndAmortization,100,iso4217:USD,2,C,-100,2,Closing entry. Depreciation and amortization expensed.,,No,206
+JE-225,30810137d58f76b84afd,1/28/24,000-1500-00,mini:PropertyPlantAndEquipment,mini:PropertyPlantAndEquipmentWrittenOff,0,iso4217:USD,2,D,0,1,Closing entry. Write of of PPE.,,No,207
+JE-225,30810137d58f76b84afd,1/28/24,000-5500-00,mini:NonoperatingIncomeExpenses,mini:NetIncomeLoss,0,iso4217:USD,2,C,0,2,Closing entry. Write of of PPE.,,No,208
+JE-226,30810137d58f76b84afd,1/29/24,000-6100-00,mini:IncomeTaxExpenseBenefit,mini:NetIncomeLoss,400,iso4217:USD,2,D,400,1,Closing entry. Book taxes.,,No,209
+JE-226,30810137d58f76b84afd,1/29/24,000-2160-00,mini:AccruedExpenses,mini:InterestAccrued,400,iso4217:USD,2,C,-400,2,Closing entry. Book taxes.,,No,210
