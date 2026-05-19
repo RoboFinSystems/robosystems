@@ -111,13 +111,23 @@ class DistributedLock:
 
         # Lock is held by another process
         if not blocking:
-          current_holder = cast(bytes | None, self.redis.get(self.lock_key))
+          # `redis.get()` returns `bytes` when the client is constructed
+          # with `decode_responses=False` (legacy default) and `str` when
+          # `decode_responses=True` (the registry's modern default).
+          # Handle both — calling `.decode()` on a str raises AttributeError.
+          raw_holder = self.redis.get(self.lock_key)
+          if isinstance(raw_holder, bytes):
+            holder = raw_holder.decode("utf-8")
+          elif isinstance(raw_holder, str):
+            holder = raw_holder
+          else:
+            holder = None
           ttl = cast(int | None, self.redis.ttl(self.lock_key))
 
           return LockAcquisitionResult(
             acquired=False,
             lock_id=None,
-            holder_id=current_holder.decode("utf-8") if current_holder else None,
+            holder_id=holder,
             ttl_remaining=ttl if ttl and ttl > 0 else None,
             error_message="Lock is currently held by another process",
           )
