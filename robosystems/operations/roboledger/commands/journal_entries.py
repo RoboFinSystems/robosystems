@@ -147,6 +147,7 @@ def validate_and_normalize_lines(
         "debit_amount": debit,
         "credit_amount": credit,
         "description": li.description,
+        "metadata": li.metadata or {},
       }
     )
 
@@ -277,6 +278,7 @@ def create_journal_entry(
         credit_amount=li["credit_amount"],
         description=li["description"],
         line_order=order,
+        metadata_=li.get("metadata") or {},
       )
     )
   session.flush()
@@ -345,6 +347,7 @@ def update_journal_entry(
           credit_amount=li["credit_amount"],
           description=li["description"],
           line_order=order,
+          metadata_=li.get("metadata") or {},
         )
       )
 
@@ -434,6 +437,11 @@ def reverse_journal_entry(
         # Flip: original debit → reversal credit, and vice versa.
         debit_amount=int(li.credit_amount),
         credit_amount=int(li.debit_amount),
+        # Preserve per-line metadata on the reversal — flow tags (e.g.
+        # transaction_description_code) need to ride through so the
+        # rollforward filter engine sees the offsetting flow on the
+        # reversal period. Shallow copy is sufficient (JSON-shaped dict).
+        metadata_=dict(li.metadata_ or {}),
         description=(
           f"Reversal of line {li.line_order}"
           + (f": {li.description}" if li.description else "")

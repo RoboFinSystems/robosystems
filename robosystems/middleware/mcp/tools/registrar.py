@@ -60,6 +60,16 @@ def derive_input_schema(request_model: type[BaseModel]) -> dict[str, Any]:
   `$defs` for nested models. MCP clients read plain JSON Schema, so the
   `$ref` pointers are inlined and Pydantic-specific metadata (`title` on
   leaf fields) is dropped for readability.
+
+  Discriminated-union ``RootModel`` request bodies (e.g.
+  ``CreateInformationBlockRequest``) emit a schema with top-level
+  ``oneOf`` / ``anyOf``. Anthropic's tool-call API rejects top-level
+  unions in tool ``input_schema``; we flatten those into a permissive
+  object envelope here. Strict validation still happens at dispatch
+  time (the registrar re-parses the payload through the original
+  ``request_model``), so the API contract is unchanged — only the
+  MCP-side schema readability is reduced. See
+  ``_flatten_top_level_union`` below for the envelope shape.
   """
   schema = request_model.model_json_schema(mode="serialization")
   defs = schema.pop("$defs", {}) or schema.pop("definitions", {}) or {}
@@ -71,6 +81,16 @@ def derive_input_schema(request_model: type[BaseModel]) -> dict[str, Any]:
   # Drop top-level "title" (Pydantic adds the class name; MCP clients get
   # the tool name from the surrounding envelope).
   resolved.pop("title", None)
+
+  # Anthropic's tool-call API forbids ``oneOf`` / ``anyOf`` / ``allOf`` at
+  # the top level of a tool's ``input_schema``. Pydantic discriminated-union
+  # ``RootModel`` bodies emit exactly that shape, so flatten before
+  # returning. The fallback envelope keeps the discriminator visible while
+  # leaving the payload open — dispatch-time Pydantic validation enforces
+  # the real contract.
+  if any(key in resolved for key in ("oneOf", "anyOf", "allOf")):
+    return _flatten_top_level_union(resolved)
+
   resolved.setdefault("type", "object")
   # MCP tools are strict — reject arguments not in the schema. This matches
   # the REST handler's FastAPI behavior where unknown body fields are
@@ -78,6 +98,66 @@ def derive_input_schema(request_model: type[BaseModel]) -> dict[str, Any]:
   # don't mutate the command's view of the world.
   resolved.setdefault("additionalProperties", False)
   return resolved
+
+
+def _flatten_top_level_union(schema: dict[str, Any]) -> dict[str, Any]:
+  """Collapse a top-level ``oneOf`` / ``anyOf`` / ``allOf`` schema into
+  a permissive object envelope that Anthropic's tool API accepts.
+
+  The output shape:
+
+  - When a discriminator is present (Pydantic's standard pattern):
+    ``{type: object, properties: {<discriminator>: {type: string,
+    enum: [...]}, payload: {type: object, additionalProperties: True}},
+    required: [<discriminator>], additionalProperties: True}``
+
+  - When no discriminator is declared: a permissive object envelope
+    (``additionalProperties: True``) with the original ``description``
+    preserved.
+
+  Dispatch-time Pydantic validation still enforces the per-arm shape,
+  so callers passing an invalid payload get a clean ValidationError at
+  the boundary — same behavior as a non-union request model.
+  """
+  description = schema.get("description")
+  flattened: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": True,
+  }
+  if description:
+    flattened["description"] = description
+
+  discriminator = schema.get("discriminator")
+  if isinstance(discriminator, dict):
+    prop_name = discriminator.get("propertyName")
+    mapping = discriminator.get("mapping") or {}
+    if prop_name:
+      enum_values = sorted(mapping.keys()) if mapping else None
+      discriminator_schema: dict[str, Any] = {
+        "type": "string",
+        "description": (
+          f"Discriminator — selects the variant. Allowed values: "
+          f"{', '.join(enum_values)}."
+          if enum_values
+          else "Discriminator value selecting the request variant."
+        ),
+      }
+      if enum_values:
+        discriminator_schema["enum"] = enum_values
+      flattened["properties"] = {
+        prop_name: discriminator_schema,
+        "payload": {
+          "type": "object",
+          "description": (
+            "Variant payload. Shape depends on the discriminator value; "
+            "validated against the corresponding Pydantic arm at "
+            "dispatch time."
+          ),
+          "additionalProperties": True,
+        },
+      }
+      flattened["required"] = [prop_name]
+  return flattened
 
 
 def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:

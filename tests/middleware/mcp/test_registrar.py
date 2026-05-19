@@ -78,6 +78,66 @@ class TestDeriveInputSchema:
     schema = derive_input_schema(WithDict)
     assert schema["additionalProperties"] is False
 
+  def test_top_level_discriminated_union_is_flattened(self) -> None:
+    """Pydantic discriminated-union ``RootModel`` request bodies (e.g.
+    ``CreateInformationBlockRequest``) emit a schema with top-level
+    ``oneOf``. Anthropic's tool API rejects top-level oneOf/anyOf/allOf,
+    so the registrar must flatten the schema into a permissive object
+    envelope. Regression test for the 2026-05-19 MCP-tool registration
+    failure.
+    """
+    from typing import Annotated, Literal
+
+    from pydantic import Discriminator, RootModel
+
+    class _AArm(BaseModel):
+      kind: Literal["a"]
+      payload: dict[str, Any] = Field(default_factory=dict)
+
+    class _BArm(BaseModel):
+      kind: Literal["b"]
+      payload: dict[str, Any] = Field(default_factory=dict)
+
+    class _DiscriminatedRequest(
+      RootModel[Annotated[_AArm | _BArm, Discriminator("kind")]]
+    ):
+      """A discriminated-union RootModel."""
+
+    schema = derive_input_schema(_DiscriminatedRequest)
+
+    # No top-level union — Anthropic API constraint.
+    assert "oneOf" not in schema
+    assert "anyOf" not in schema
+    assert "allOf" not in schema
+
+    # Flattened envelope: object with discriminator as enum + payload.
+    assert schema["type"] == "object"
+    assert "kind" in schema["properties"]
+    assert schema["properties"]["kind"]["type"] == "string"
+    assert set(schema["properties"]["kind"]["enum"]) == {"a", "b"}
+    assert schema["properties"]["payload"]["type"] == "object"
+    assert schema["required"] == ["kind"]
+    # Permissive payload — strict validation happens at dispatch time.
+    assert schema["additionalProperties"] is True
+
+  def test_create_information_block_schema_has_no_top_level_union(self) -> None:
+    """Regression check for the production case that triggered the
+    Anthropic API rejection — ``CreateInformationBlockRequest`` is a
+    3-arm discriminated union after the rollforward block-type landed.
+    """
+    from robosystems.models.api.information_block import (
+      CreateInformationBlockRequest,
+    )
+
+    schema = derive_input_schema(CreateInformationBlockRequest)
+    assert "oneOf" not in schema
+    assert "anyOf" not in schema
+    assert "allOf" not in schema
+    assert schema["type"] == "object"
+    # block_type enum covers every registered block type
+    assert "rollforward" in schema["properties"]["block_type"]["enum"]
+    assert "schedule" in schema["properties"]["block_type"]["enum"]
+
 
 # ── Error translation ─────────────────────────────────────────────────────
 

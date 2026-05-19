@@ -183,6 +183,88 @@ class TestValidateAndNormalizeLines:
     assert len(normalized) == 6
 
 
+class TestLineMetadataPassthrough:
+  """Per-line ``metadata`` rides through the normalization layer onto
+  ``LineItem.metadata_`` — the field that rollforward filter predicates
+  match against.
+  """
+
+  def test_metadata_normalizes_to_dict_when_present(self):
+    lines = [
+      JournalEntryLineItemInput(
+        element_id="elem_cash",
+        debit_amount=10000,
+        metadata={
+          "transaction_description_code": "mini:ProceedsFromInvestmentsByOwner"
+        },
+      ),
+      JournalEntryLineItemInput(
+        element_id="elem_paidin",
+        credit_amount=10000,
+        metadata={"transaction_description_code": "mini:InvestmentsByOwner"},
+      ),
+    ]
+    normalized, _dr, _cr = validate_and_normalize_lines(lines)
+    assert (
+      normalized[0]["metadata"]["transaction_description_code"]
+      == "mini:ProceedsFromInvestmentsByOwner"
+    )
+    assert (
+      normalized[1]["metadata"]["transaction_description_code"]
+      == "mini:InvestmentsByOwner"
+    )
+
+  def test_metadata_defaults_to_empty_dict_when_absent(self):
+    """Backward compatibility: existing callers that don't pass
+    metadata get an empty dict, never None — matches LineItem.metadata_
+    NOT NULL with default {}."""
+    normalized, _dr, _cr = validate_and_normalize_lines(_balanced_lines())
+    assert normalized[0]["metadata"] == {}
+    assert normalized[1]["metadata"] == {}
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_create_journal_entry_persists_line_metadata(self, _mock_guard, _mock_resp):
+    """A metadata-bearing line creates a LineItem with metadata_ stamped."""
+    from robosystems.models.extensions.roboledger.line_item import LineItem
+
+    session = MagicMock()
+    body = CreateJournalEntryRequest(
+      posting_date=_DATE,
+      memo="Owner investment",
+      line_items=[
+        JournalEntryLineItemInput(
+          element_id="elem_cash",
+          debit_amount=10000,
+          metadata={
+            "transaction_description_code": "mini:ProceedsFromInvestmentsByOwner"
+          },
+        ),
+        JournalEntryLineItemInput(
+          element_id="elem_paidin",
+          credit_amount=10000,
+          metadata={"transaction_description_code": "mini:InvestmentsByOwner"},
+        ),
+      ],
+    )
+    create_journal_entry(session, body, "usr_1")
+
+    line_adds = [
+      call[0][0]
+      for call in session.add.call_args_list
+      if isinstance(call[0][0], LineItem)
+    ]
+    assert len(line_adds) == 2
+    assert (
+      line_adds[0].metadata_["transaction_description_code"]
+      == "mini:ProceedsFromInvestmentsByOwner"
+    )
+    assert (
+      line_adds[1].metadata_["transaction_description_code"]
+      == "mini:InvestmentsByOwner"
+    )
+
+
 # ── create_journal_entry ──────────────────────────────────────────────────
 
 
@@ -541,6 +623,54 @@ class TestReverseJournalEntry:
     # line2 was DR=0/CR=1000 → becomes DR=1000/CR=0
     assert reversal_lines[1].debit_amount == 1000
     assert reversal_lines[1].credit_amount == 0
+
+  @patch(f"{MODULE}._entry_to_response")
+  @patch(f"{MODULE}.assert_period_not_closed")
+  def test_line_items_metadata_preserved_on_reversal(self, mock_guard, mock_resp):
+    """Per-line ``metadata_`` (e.g. ``transaction_description_code``)
+    must survive the reversal so the rollforward filter engine sees
+    the offsetting flow on the reversing period. A lost flow tag
+    would break filter aggregation — the reversal'd appear as
+    untagged residual instead of the cancelling flow."""
+    from robosystems.models.extensions.roboledger.line_item import LineItem
+
+    mock_resp.return_value = MagicMock()
+    original = _mock_entry(status="posted", entry_id="entry_orig")
+    line1 = _mock_line("elem_cash", debit=1000, credit=0, order=1)
+    line1.metadata_ = {
+      "transaction_description_code": "mini:ProceedsFromInvestmentsByOwner"
+    }
+    line2 = _mock_line("elem_paidin", debit=0, credit=1000, order=2)
+    line2.metadata_ = {"transaction_description_code": "mini:InvestmentsByOwner"}
+
+    added_objects: list = []
+    session = MagicMock()
+    session.execute.side_effect = [
+      _scalar_exec(original),
+      _scalars_exec([line1, line2]),
+      _scalars_exec([]),
+    ]
+    session.add.side_effect = lambda obj: added_objects.append(obj)
+
+    reverse_journal_entry(session, self._body(), "usr_1")
+
+    reversal_lines = [obj for obj in added_objects if isinstance(obj, LineItem)]
+    assert len(reversal_lines) == 2
+    # Original DR Cash with ProceedsFromInvestmentsByOwner TDC →
+    # reversal CR Cash, SAME TDC. Filter engine sees both lines on
+    # the same flow concept; the cancellation is visible to it.
+    assert (
+      reversal_lines[0].metadata_["transaction_description_code"]
+      == "mini:ProceedsFromInvestmentsByOwner"
+    )
+    assert (
+      reversal_lines[1].metadata_["transaction_description_code"]
+      == "mini:InvestmentsByOwner"
+    )
+    # Defensive copy: mutating the reversal metadata_ shouldn't bleed
+    # back into the original line's metadata_ (and vice versa).
+    reversal_lines[0].metadata_["mutated"] = "yes"
+    assert "mutated" not in line1.metadata_
 
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
