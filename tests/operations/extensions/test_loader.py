@@ -980,8 +980,12 @@ class TestResolveAutoCommitWritePolicy:
     mock_conn = MagicMock()
     mock_conn.write_policy = "qb_authoritative"
 
+    # Context-manager-shaped session mock — `_resolves_to_auto_commit`
+    # uses `with SessionFactory() as session:` so __enter__ / __exit__
+    # need to be wired explicitly on MagicMock.
     mock_session = MagicMock()
-    mock_session.close = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
 
     with (
       patch("robosystems.database.SessionFactory", return_value=mock_session),
@@ -992,7 +996,9 @@ class TestResolveAutoCommitWritePolicy:
     ):
       assert _resolves_to_auto_commit("quickbooks", "conn_1") is True
 
-    mock_session.close.assert_called_once()
+    # The `with` block invokes __exit__ — that's the context-manager
+    # version of "the session got cleaned up."
+    mock_session.__exit__.assert_called_once()
 
   def test_native_policy_routes_to_inbox(self):
     """A QB connection with write_policy='native' does NOT auto-commit
@@ -1005,6 +1011,8 @@ class TestResolveAutoCommitWritePolicy:
     mock_conn.write_policy = "native"
 
     mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
 
     with (
       patch("robosystems.database.SessionFactory", return_value=mock_session),
@@ -1026,6 +1034,8 @@ class TestResolveAutoCommitWritePolicy:
     mock_conn.write_policy = "hybrid"
 
     mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
 
     with (
       patch("robosystems.database.SessionFactory", return_value=mock_session),
@@ -1067,6 +1077,8 @@ class TestResolveAutoCommitWritePolicy:
     from robosystems.operations.extensions.loader import _resolves_to_auto_commit
 
     mock_session = MagicMock()
+    mock_session.__enter__ = MagicMock(return_value=mock_session)
+    mock_session.__exit__ = MagicMock(return_value=False)
 
     with (
       patch("robosystems.database.SessionFactory", return_value=mock_session),
