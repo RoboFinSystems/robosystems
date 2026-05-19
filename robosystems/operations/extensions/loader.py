@@ -63,15 +63,15 @@ def _resolves_to_auto_commit(source: str, connection_id: str | None) -> bool:
       from robosystems.database import SessionFactory
       from robosystems.models.core.connection.connection import Connection
 
-      session = SessionFactory()
-      try:
+      # Context manager handles cleanup even if `SessionFactory()`
+      # raises (the prior bare assignment + try/finally hit
+      # UnboundLocalError in that case).
+      with SessionFactory() as session:
         conn = Connection.get_by_id(connection_id, session)
         if conn is not None:
           # `WritePolicy.QB_AUTHORITATIVE` + `HYBRID` → auto-commit;
           # `NATIVE` → inbox path.
           return conn.write_policy in ("qb_authoritative", "hybrid")
-      finally:
-        session.close()
     except Exception as e:
       logger.warning(
         f"Failed to resolve write_policy for connection {connection_id}: {e}; "

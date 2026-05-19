@@ -208,15 +208,21 @@ async def oauth_callback(
             returned_realm_id,
             connection_id,
           )
+          # Order matters — `restore` commits before `delete` commits.
+          # If the process crashes between, BOTH connections are alive
+          # (a retry sees the restored prior and skips the no-op
+          # delete on the pending). Reversing this order would leave
+          # the pending deleted but the prior still soft-deleted on
+          # crash — neither would be visible to the user and recovery
+          # would require manual intervention.
+          prior.restore(db)
+          revived_id = str(prior.id)
           # Hard-delete the pending Connection — it has no tenant data
           # attached and no credentials stored yet (store_tokens fires
           # after this branch).
           pending = Connection.get_by_id(connection_id, db)
           if pending is not None:
             pending.delete(db)
-          # Revive the prior connection.
-          prior.restore(db)
-          revived_id = str(prior.id)
           # Pull the refreshed dict for downstream auto-sync.
           connection = await ConnectionService.get_connection(
             revived_id, current_user.id, db_session=db

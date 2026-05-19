@@ -358,15 +358,11 @@ def release_lock_by_id(
   try:
     result = redis_client.eval(lua_script, 1, full_key, lock_id)
     if result:
-      from ...logger import logger as _logger
-
-      _logger.debug(f"Released distributed lock {full_key} via release_lock_by_id")
+      logger.debug(f"Released distributed lock {full_key} via release_lock_by_id")
       return True
     return False
   except RedisError as e:
-    from ...logger import logger as _logger
-
-    _logger.warning(
+    logger.warning(
       f"release_lock_by_id failed for {full_key}: {e}; lock will expire via TTL"
     )
     return False

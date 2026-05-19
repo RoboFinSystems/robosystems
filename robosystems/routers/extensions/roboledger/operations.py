@@ -74,6 +74,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
+from robosystems.adapters.quickbooks.client.api import QBAuthFailedError
 from robosystems.database import get_db_session
 from robosystems.db.extensions import extensions_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -363,6 +364,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.close_service import (
   PeriodCloseService,
+  WritebackFailed,
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
@@ -1286,6 +1288,12 @@ execute_event_block_op = _registrar.register(
     result_type=ExecuteEventBlockResponse,
     error_map={
       EventNotFoundError: 404,
+      # Phase 3 A2: AuthClientError from Intuit (revoked / scope-
+      # insufficient / rotated past grace) surfaces as
+      # QBAuthFailedError. The connection has already been flipped to
+      # needs_reauth by the QBClient itself; 401 signals to the UI
+      # that the operator must reconnect via OAuth.
+      QBAuthFailedError: 401,
       ValueError: 422,
     },
   )
@@ -1592,6 +1600,19 @@ async def close_period_op(
           f"Difference={e.total_debit - e.total_credit}. "
           f"Review the ledger before closing."
         ),
+      )
+    except WritebackFailed as e:
+      # Phase 4 §4.2 close-period pre-publish failure. Surface the
+      # structured failed-events payload so operators can see exactly
+      # which drafts QB rejected (mapping issue, balance error,
+      # closed-in-QB period, etc.) and retry the close after fixing.
+      raise HTTPException(
+        status_code=422,
+        detail={
+          "message": str(e),
+          "failed_events": e.failed_events,
+          "code": "WRITE_BACK_FAILED",
+        },
       )
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))

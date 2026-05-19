@@ -175,9 +175,19 @@ async def sync_connection(
     except HTTPException:
       raise
     except Exception as e:
+      # Dashboards watch for `lock_skipped=true` to detect Valkey-
+      # degraded sync runs (we proceed unlocked rather than fail
+      # closed, so the silent race risk is real and worth surfacing).
       logger.warning(
-        f"Could not acquire sync lock for connection {connection_id}: {e}; "
-        f"proceeding without lock (concurrent-sync race still possible)"
+        "Could not acquire sync lock for connection %s: %s; "
+        "proceeding without lock (concurrent-sync race still possible)",
+        connection_id,
+        e,
+        extra={
+          "connection_id": connection_id,
+          "lock_skipped": True,
+          "lock_skip_reason": type(e).__name__,
+        },
       )
 
     effective_options: dict[str, object] = dict(request.sync_options or {})

@@ -33,6 +33,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+import requests
 from quickbooks.exceptions import QuickbooksException
 from quickbooks.objects.base import Ref
 from quickbooks.objects.journalentry import (
@@ -44,6 +45,7 @@ from quickbooks.objects.journalentry import (
 )
 from sqlalchemy.orm import Session
 
+from robosystems.adapters.quickbooks.client.api import _QB_RETRY
 from robosystems.logger import logger
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger.event import Event
@@ -59,6 +61,35 @@ class QBWritebackError(Exception):
   def __init__(self, payload: dict[str, Any]) -> None:
     super().__init__(payload.get("message", "QB JE write rejected"))
     self.payload = payload
+
+
+def _validated_cents(value: Any, field: str) -> int:
+  """Coerce a line-item amount field to an integer cent value, raising
+  `QBWritebackError` if the value isn't already an `int` (or `None`).
+
+  RL stores amounts as integer cents end-to-end. A float would lose
+  precision via `int(125.50)` → `125` (50 cents silently dropped). A
+  string would coerce to a different surface bug entirely. Either is
+  a contract violation we'd rather surface than swallow.
+
+  ``bool`` is treated as invalid even though `isinstance(bool, int)`
+  is True in Python — a True / False sneaking in as an amount is
+  almost certainly a caller bug.
+  """
+  if value is None:
+    return 0
+  if isinstance(value, bool) or not isinstance(value, int):
+    raise QBWritebackError(
+      {
+        "code": "invalid_amount_type",
+        "message": (
+          f"{field} must be an integer (cents); got "
+          f"{type(value).__name__}: {value!r}. Floats and strings are "
+          f"rejected to prevent silent precision loss."
+        ),
+      }
+    )
+  return value
 
 
 def _resolve_qb_account_id(session: Session, element_id: str) -> str:
@@ -98,10 +129,12 @@ def _build_qb_line(
 
   RL line shape: `{element_id, debit_amount, credit_amount, description}`.
   Exactly one of debit_amount / credit_amount is non-zero (validated by
-  the JE handler upstream).
+  the JE handler upstream). Amounts are integer cents — a float would
+  silently lose precision via `int()` truncation, so we fail loud on
+  any non-integer type.
   """
-  debit = int(line_item.get("debit_amount") or 0)
-  credit = int(line_item.get("credit_amount") or 0)
+  debit = _validated_cents(line_item.get("debit_amount"), "debit_amount")
+  credit = _validated_cents(line_item.get("credit_amount"), "credit_amount")
   if debit > 0 and credit > 0:
     raise QBWritebackError(
       {
@@ -216,35 +249,55 @@ def post_event_to_qb(
   return qb_txn_ids
 
 
+@_QB_RETRY
+def _qb_save_with_retry(je: QBJournalEntry, qb_client, request_id: str):
+  """Inner save call — decorated with `_QB_RETRY` so transient
+  transport errors retry per `_is_retryable_qb_error` (network +
+  429/5xx). Lets exceptions propagate raw so the decorator can decide
+  whether to retry; the outer `_save_with_retry` wrapper catches what
+  the decorator re-raises (after retry exhaustion or for non-retryable
+  errors) and converts to `QBWritebackError`.
+  """
+  return je.save(qb=qb_client, request_id=request_id)
+
+
 def _save_with_retry(
   je: QBJournalEntry,
   qb_client,
   request_id: str,
   event_id: str,
 ) -> str:
-  """Wrap `je.save(qb=client, request_id=...)` in QBWritebackError
-  conversion.
+  """Wrap `_qb_save_with_retry` in `QBWritebackError` conversion.
 
-  The underlying QB SDK call inherits `_QB_RETRY` retry semantics
-  automatically when called against a `QBClient` whose `client` is
-  the patched instance — but the SDK itself doesn't wrap save() in
-  the retry decorator (only our pull-side methods do). Network blips
-  on save() therefore surface here; QB's RequestId dedup keeps the
-  retry safe.
+  `_QB_RETRY` (applied to the inner function) retries on transient
+  transport errors. QB's RequestId dedup window (`request_id`
+  parameter forwarded into the API call) keeps the retry safe —
+  repeated POSTs with the same RequestId return the prior result
+  rather than creating a new entry.
+
+  Caught exception types (after retry decisions):
+  - `requests.exceptions.RequestException` (network / timeout /
+    transport): tenacity retries; if it exhausts attempts the
+    exception comes out here and we wrap as `qb_transport_error`.
+  - `QuickbooksException` (QB API error envelope — validation,
+    balance, closed-period in QB, auth): non-retryable per the
+    predicate; surfaces immediately. Wrap as `qb_validation_error`.
   """
   try:
-    saved = je.save(qb=qb_client, request_id=request_id)
-  except QuickbooksException as e:
+    saved = _qb_save_with_retry(je, qb_client, request_id)
+  except (QuickbooksException, requests.exceptions.RequestException) as e:
+    is_network = isinstance(e, requests.exceptions.RequestException)
     payload = {
-      "code": "qb_validation_error",
+      "code": "qb_transport_error" if is_network else "qb_validation_error",
       "message": str(e),
-      "qb_error_code": getattr(e, "error_code", None),
+      "qb_error_code": getattr(e, "error_code", None) if not is_network else None,
       "qb_response_at": datetime.now().isoformat(),
       "event_id": event_id,
       "request_id": request_id,
     }
     logger.warning(
-      f"QB rejected journal entry for event {event_id} (request_id={request_id}): {e}"
+      f"QB rejected journal entry for event {event_id} "
+      f"(request_id={request_id}, transport_error={is_network}): {e}"
     )
     raise QBWritebackError(payload) from e
   if not getattr(saved, "Id", None):

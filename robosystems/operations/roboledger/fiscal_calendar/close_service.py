@@ -391,6 +391,22 @@ class PeriodCloseService:
       f"event(s) to QB connection {qb_connection_id} before close"
     )
 
+    # Heads-up: each publish does a synchronous QB API round-trip
+    # (~1-3s) inside the open extensions session. A large batch holds
+    # the extensions transaction open + consumes connection-pool
+    # capacity for the duration. A two-pass refactor (collect QB
+    # results without the session, then commit metadata mutations in
+    # a second pass) is the right v2 — until then, flag visible
+    # batches so the operational signal is in the logs.
+    if len(drafts_to_publish) > 5:
+      logger.warning(
+        f"Graph {graph_id}: pre-publishing {len(drafts_to_publish)} drafts in "
+        f"sequence — extensions transaction held open ~{len(drafts_to_publish) * 2}s "
+        f"during the close. Consider batching the period (close in smaller "
+        f"windows) or filing follow-up to refactor _publish_drafts_to_qb to "
+        f"two-pass."
+      )
+
     # Publish each, collecting failures rather than failing fast — the
     # operator wants to see ALL offenders, not the first.
     failed_events: list[dict] = []
@@ -555,4 +571,5 @@ __all__ = [
   "PeriodCloseService",
   "PeriodNotFoundError",
   "UnbalancedLedgerError",
+  "WritebackFailed",
 ]

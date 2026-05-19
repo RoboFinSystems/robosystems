@@ -295,6 +295,29 @@ class TestExecuteEventBlockQBReject:
   """QB-authoritative connection + QB rejects → pending status,
   drafts stay draft, last_outbound_error captured."""
 
+  def test_invalid_amount_type_raises_qbwritebackerror(self):
+    """H2 — non-int amounts (e.g., float) raise QBWritebackError
+    instead of silently truncating via int()."""
+    from unittest.mock import MagicMock
+
+    from robosystems.operations.event_block.qb_writeback import (
+      QBWritebackError,
+      _build_qb_line,
+    )
+
+    session = MagicMock()
+    with pytest.raises(QBWritebackError) as exc_info:
+      _build_qb_line(
+        session,
+        {
+          "element_id": "elem_x",
+          "debit_amount": 125.50,  # float — would silently truncate to 125 cents
+          "credit_amount": 0,
+        },
+      )
+    assert exc_info.value.payload["code"] == "invalid_amount_type"
+    assert "debit_amount" in exc_info.value.payload["message"]
+
   def test_qb_reject_path_stamps_error_and_stays_pending(self):
     from robosystems.models.api.event_block import ExecuteEventBlockRequest
     from robosystems.operations.event_block.commands import execute_event_block
@@ -349,3 +372,68 @@ class TestExecuteEventBlockQBReject:
     assert evt.metadata_["last_outbound_error"] == rejection
     # qb_external_id should NOT be stamped on rejection.
     assert "qb_external_id" not in evt.metadata_
+
+
+@pytest.mark.unit
+class TestSaveWithRetry:
+  """C1 — `_save_with_retry` retries transient transport errors and
+  wraps them as `QBWritebackError` rather than letting
+  `requests.exceptions.RequestException` propagate uncaught (which
+  would surface as a 500 instead of a typed write-back error)."""
+
+  def test_network_error_retries_then_wraps_as_qbwritebackerror(self):
+    """A persistent `requests.exceptions.ConnectionError` should be
+    wrapped, not propagated bare. tenacity should attempt several
+    retries before giving up via `_QB_RETRY`'s `stop_max_attempt_number=5`."""
+    import requests
+
+    from robosystems.operations.event_block.qb_writeback import (
+      QBWritebackError,
+      _save_with_retry,
+    )
+
+    call_count = {"n": 0}
+
+    fake_je = MagicMock()
+
+    def always_fail(*args, **kwargs):
+      call_count["n"] += 1
+      raise requests.exceptions.ConnectionError("Intuit unreachable")
+
+    fake_je.save.side_effect = always_fail
+
+    with pytest.raises(QBWritebackError) as exc_info:
+      _save_with_retry(fake_je, MagicMock(), "req_abc", "evt_abc")
+
+    # Wrapped as transport-error code.
+    assert exc_info.value.payload["code"] == "qb_transport_error"
+    # tenacity attempted multiple retries before giving up.
+    assert call_count["n"] >= 2
+
+  def test_quickbooks_exception_does_not_retry(self):
+    """A `QuickbooksException` (validation, balance, closed-period) is
+    NOT retryable — `_is_retryable_qb_error` returns False for it.
+    Should wrap into QBWritebackError on the first attempt without
+    retries."""
+    from quickbooks.exceptions import QuickbooksException
+
+    from robosystems.operations.event_block.qb_writeback import (
+      QBWritebackError,
+      _save_with_retry,
+    )
+
+    call_count = {"n": 0}
+    fake_je = MagicMock()
+
+    def reject(*args, **kwargs):
+      call_count["n"] += 1
+      raise QuickbooksException("validation error", error_code=2010)
+
+    fake_je.save.side_effect = reject
+
+    with pytest.raises(QBWritebackError) as exc_info:
+      _save_with_retry(fake_je, MagicMock(), "req_abc", "evt_abc")
+
+    assert exc_info.value.payload["code"] == "qb_validation_error"
+    # Non-retryable — exactly one attempt.
+    assert call_count["n"] == 1

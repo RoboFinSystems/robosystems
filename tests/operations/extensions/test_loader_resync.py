@@ -23,8 +23,6 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from unittest.mock import MagicMock, patch
 
-import pytest  # noqa: F401  (re-exported style consistency with sibling tests)
-
 
 def _dbt_data_single_je() -> dict:
   """One balanced QB JournalEntry, two line items."""
