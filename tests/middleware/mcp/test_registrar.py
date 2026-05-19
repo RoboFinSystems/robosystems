@@ -98,9 +98,9 @@ class TestDeriveInputSchema:
       kind: Literal["b"]
       payload: dict[str, Any] = Field(default_factory=dict)
 
-    _Arms = Annotated[_AArm | _BArm, Discriminator("kind")]
-
-    class _DiscriminatedRequest(RootModel[_Arms]):
+    class _DiscriminatedRequest(
+      RootModel[Annotated[_AArm | _BArm, Discriminator("kind")]]
+    ):
       """A discriminated-union RootModel."""
 
     schema = derive_input_schema(_DiscriminatedRequest)

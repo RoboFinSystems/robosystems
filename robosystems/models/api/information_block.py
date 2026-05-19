@@ -467,6 +467,16 @@ class RollforwardMechanics(BaseModel):
       "follows ``validation_mode``."
     ),
   )
+  default_change_tag_qname: str | None = Field(
+    None,
+    description=(
+      "QName of the Tier 1 default change tag (e.g. "
+      "``rs-gaap:IncreaseDecreaseInCashAndCashEquivalents``). "
+      "Round-tripped for caller convenience and operator-readable "
+      "envelopes; ``default_change_tag_element_id`` is authoritative. "
+      "Null iff ``default_change_tag_element_id`` is null."
+    ),
+  )
   attribution_filters: list[AttributionFilter] = Field(
     default_factory=list,
     description=(
