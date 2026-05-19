@@ -156,6 +156,7 @@ def _bootstrap_fiscal_calendar_if_needed(
   from robosystems.db.extensions import extensions_session
   from robosystems.operations.roboledger.fiscal_calendar import (
     FiscalCalendarService,
+    add_months,
     current_month_period,
     previous_period,
   )
@@ -168,10 +169,32 @@ def _bootstrap_fiscal_calendar_if_needed(
     with extensions_session(config.graph_id) as session:
       existing = service.get(session, config.graph_id)
       if existing is not None and existing.initialized_at is not None:
-        context.log.info(
-          "Fiscal calendar already initialized "
-          f"(closed_through={existing.closed_through_period}); skipping bootstrap"
+        # Self-heal: earlier bootstrap revisions seeded the calendar pointer
+        # state but skipped FiscalPeriod row creation, leaving close-period
+        # to fail with `period_not_found`. Run ensure_fiscal_periods over the
+        # canonical window so existing tenants converge on re-sync.
+        current = current_month_period()
+        start = add_months(current, -23)
+        if existing.closed_through_period and existing.closed_through_period < start:
+          start = existing.closed_through_period
+        inserted = service.ensure_fiscal_periods(
+          session,
+          config.graph_id,
+          start_period=start,
+          end_period=current,
+          closed_through=existing.closed_through_period,
         )
+        if inserted:
+          session.commit()
+          context.log.info(
+            f"Backfilled {inserted} FiscalPeriod rows "
+            f"({start} → {current}, closed_through={existing.closed_through_period})"
+          )
+        else:
+          context.log.info(
+            "Fiscal calendar already initialized "
+            f"(closed_through={existing.closed_through_period}); skipping bootstrap"
+          )
         return
 
       closed_through = previous_period(previous_period(current_month_period()))
@@ -183,9 +206,21 @@ def _bootstrap_fiscal_calendar_if_needed(
         actor_type="system",
         note="Auto-initialized on first QB sync",
       )
+      current = current_month_period()
+      start = add_months(current, -23)
+      if closed_through < start:
+        start = closed_through
+      inserted = service.ensure_fiscal_periods(
+        session,
+        config.graph_id,
+        start_period=start,
+        end_period=current,
+        closed_through=closed_through,
+      )
       session.commit()
       context.log.info(
-        f"Initialized fiscal calendar on first sync: closed_through={closed_through}"
+        f"Initialized fiscal calendar on first sync: closed_through={closed_through} "
+        f"({inserted} FiscalPeriod rows seeded {start} → {current})"
       )
   except CalendarAlreadyInitializedError:
     context.log.info("Fiscal calendar already initialized (race); skipping bootstrap")
@@ -254,9 +289,6 @@ def _trigger_auto_map_if_needed(
       mapping_id = str(structure.id)
   except Exception as e:
     context.log.warning(f"Failed to inspect mapping structure (non-fatal): {e}")
-    return
-
-  if mapping_id is None:
     return
 
   try:
