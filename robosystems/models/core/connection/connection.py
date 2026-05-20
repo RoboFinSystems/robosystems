@@ -109,6 +109,16 @@ class Connection(Model):
     String, default=WritePolicy.NATIVE.value, server_default="native", nullable=False
   )
 
+  # Phase 5 §4.3.4 — CDC watermark. Loader advances this ONLY after a
+  # successful batch commit; a mid-batch failure replays from the prior
+  # value on the next run (combined with SyncToken-gated UPSERT, replay
+  # of already-ingested rows is a no-op). NULL means "no CDC sync has
+  # succeeded yet for this connection" — extract layer falls back to
+  # full-window lookback or `full_rebuild=True` semantics until the
+  # first successful CDC batch advances it. Separate from `last_sync`,
+  # which is a display-facing "when did we last try" timestamp.
+  last_cdc_watermark = Column(DateTime, nullable=True)
+
   # Soft-delete marker (B6). When non-null the row is invisible to the
   # default lookup helpers below. Re-OAuth to the same realm revives the
   # row in place (preserves connection_id; downstream events/agents/
@@ -278,6 +288,27 @@ class Connection(Model):
   def update_last_sync(self, session: Session) -> None:
     """Update last sync timestamp."""
     self.last_sync = datetime.now(UTC)
+    self.updated_at = datetime.now(UTC)
+    try:
+      session.commit()
+      session.refresh(self)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+  def advance_cdc_watermark(self, watermark: datetime, session: Session) -> None:
+    """Phase 5 §4.3.4 — advance the CDC watermark after a successful batch
+    commit. Callers MUST only invoke this once load has succeeded; a
+    mid-batch failure should leave the prior watermark in place so the
+    next sync replays from there (combined with SyncToken-gated UPSERT,
+    replay of already-ingested rows is a no-op).
+
+    The watermark stores naive UTC (matches the other DateTime columns on
+    this table). Callers passing a tz-aware datetime get it stripped.
+    """
+    if watermark.tzinfo is not None:
+      watermark = watermark.astimezone(UTC).replace(tzinfo=None)
+    self.last_cdc_watermark = watermark
     self.updated_at = datetime.now(UTC)
     try:
       session.commit()

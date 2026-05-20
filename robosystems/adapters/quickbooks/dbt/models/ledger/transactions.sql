@@ -16,23 +16,23 @@ with entries as (
   select * from {{ ref('stg_qb_journal_entries') }}
 ),
 invoice_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
   from {{ ref('stg_qb_invoice_headers') }}
 ),
 bill_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
   from {{ ref('stg_qb_bill_headers') }}
 ),
 payment_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
   from {{ ref('stg_qb_payment_headers') }}
 ),
 bill_payment_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
   from {{ ref('stg_qb_bill_payment_headers') }}
 ),
 sales_receipt_headers as (
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
   from {{ ref('stg_qb_sales_receipt_headers') }}
 ),
 purchase_headers as (
@@ -40,7 +40,7 @@ purchase_headers as (
   -- The Python flattener emits multiple header rows per Purchase (one per
   -- candidate tx_type JournalReport might use for that PaymentType), so the
   -- LEFT JOIN below resolves to whichever flavor matched.
-  select tx_type, tx_id, agent_external_id, agent_type, linked_txns
+  select tx_type, tx_id, agent_external_id, agent_type, linked_txns, sync_token
   from {{ ref('stg_qb_purchase_headers') }}
 ),
 all_headers as (
@@ -158,7 +158,12 @@ select
     -- '[]' elsewhere. The loader forwards it to event metadata as
     -- qb_linked_txns; the payment_received / bill_paid handlers walk
     -- it to set discharges_event_id.
-    coalesce(h.linked_txns, '[]')                      as linked_txns
+    coalesce(h.linked_txns, '[]')                      as linked_txns,
+    -- Phase 5: per-entity SyncToken from QB. NULL for JournalReport-only
+    -- rows (JournalEntry / Deposit / Transfer) where we don't fetch a
+    -- header — these get backfilled via §4.3.2's NULL-token UPSERT branch
+    -- on the next sync that fetches the entity directly.
+    h.sync_token                                       as sync_token
 from entries e
 left join all_headers h
   on h.tx_type = e.tx_type and h.tx_id = e.tx_number

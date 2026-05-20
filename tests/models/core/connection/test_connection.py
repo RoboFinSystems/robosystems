@@ -253,6 +253,50 @@ class TestConnectionUpdateLastSync:
 
 
 @pytest.mark.unit
+class TestConnectionAdvanceCdcWatermark:
+  """Phase 5 §4.3.4 — CDC watermark advance helper."""
+
+  def test_advances_watermark_aware_to_naive_utc(self):
+    """A tz-aware datetime gets stripped to naive UTC before persisting."""
+    from datetime import UTC, datetime
+
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    aware = datetime(2026, 5, 19, 14, 30, 0, tzinfo=UTC)
+    conn.advance_cdc_watermark(aware, session)
+
+    assert conn.last_cdc_watermark is not None
+    assert conn.last_cdc_watermark.tzinfo is None
+    assert conn.last_cdc_watermark.hour == 14
+    assert conn.last_cdc_watermark.minute == 30
+    session.commit.assert_called_once()
+
+  def test_advances_watermark_naive_passthrough(self):
+    """A naive datetime is persisted as-is (assumed UTC)."""
+    from datetime import datetime
+
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    naive = datetime(2026, 5, 19, 14, 30, 0)
+    conn.advance_cdc_watermark(naive, session)
+
+    assert conn.last_cdc_watermark == naive
+
+  def test_rollback_on_error(self):
+    from datetime import UTC, datetime
+
+    session = MagicMock()
+    session.commit.side_effect = SQLAlchemyError("db error")
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    with pytest.raises(SQLAlchemyError):
+      conn.advance_cdc_watermark(datetime.now(UTC), session)
+    session.rollback.assert_called_once()
+
+
+@pytest.mark.unit
 class TestConnectionUpdateMetadata:
   def test_updates_all_fields(self):
     session = MagicMock()

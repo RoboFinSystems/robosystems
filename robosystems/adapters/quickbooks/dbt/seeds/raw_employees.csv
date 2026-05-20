@@ -1,2 +1,2 @@
-Id,agent_type,name,legal_name,email,phone,address,tax_id,is_1099_recipient,is_active
-qb_emp_1,employee,Alex Engineer,Alex Engineer,alex@company.example,+1-555-0500,{},,false,true
+Id,agent_type,name,legal_name,email,phone,address,tax_id,is_1099_recipient,is_active,sync_token
+qb_emp_1,employee,Alex Engineer,Alex Engineer,alex@company.example,+1-555-0500,{},,false,true,0

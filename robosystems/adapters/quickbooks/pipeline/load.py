@@ -4,6 +4,8 @@ Reads OLTP-shaped tables from the dbt DuckDB output and inserts
 them into the extensions PostgreSQL database via OLTPLoader.
 """
 
+from datetime import UTC, datetime
+
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
@@ -59,6 +61,27 @@ def _run_qb_load(
 
   context.log.info(f"Loading QB data for graph={config.graph_id}, duckdb={duckdb_path}")
 
+  # Phase 5 §4.3.4 — CDC watermark candidate. Captured at the START of
+  # load, NOT at extract start, by design: extract has already run by
+  # the time we get here, so any QB-side row touched between extract's
+  # finish and this moment isn't in this sync. Setting watermark =
+  # load-start means the next sync's `changedSince` will re-fetch
+  # anything that landed in that window — which the SyncToken gate
+  # then dedups as a no-op. The alternative (extract-start) would
+  # potentially skip late-landing rows; with the gate, slightly
+  # over-fetching is the safer trade. Advanced only after a successful
+  # load below — a raised exception or fatal `result.errors` leaves
+  # the prior watermark in place so the next sync replays from there.
+  #
+  # NOTE on `full_rebuild`: this advance fires unconditionally on a
+  # successful load, including full-rebuild syncs. That's intentional —
+  # a full rebuild definitively covers all history, so the next
+  # incremental should pick up from the rebuild's start, not from
+  # whatever stale watermark existed before. If you ever need the
+  # opposite (full rebuild preserves prior watermark), gate this call
+  # on `config.full_rebuild` here.
+  sync_started_at = datetime.now(UTC)
+
   loader = OLTPLoader()
   result = loader.load(
     graph_id=config.graph_id,
@@ -76,6 +99,12 @@ def _run_qb_load(
 
   # Update last sync timestamp
   _update_last_sync(context, config)
+
+  # Phase 5 §4.3.4 — advance CDC watermark only after load success.
+  # `result.errors` carries non-fatal load warnings already; the truly
+  # fatal path raises before reaching here (and the watermark stays
+  # unchanged, so the next sync re-attempts from the prior watermark).
+  _advance_cdc_watermark(context, config, sync_started_at)
 
   # Bootstrap fiscal calendar on first sync. Idempotent: skips when the
   # calendar is already initialized (re-sync). Without this, a fresh QB
@@ -193,6 +222,46 @@ def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> N
       session.close()
   except Exception as e:
     context.log.warning(f"Failed to update last_sync (non-fatal): {e}")
+
+
+def _advance_cdc_watermark(
+  context: AssetExecutionContext, config: QBSyncConfig, watermark
+) -> None:
+  """Phase 5 §4.3.4 — advance the Connection's CDC watermark.
+
+  Called after a successful load. The watermark is the timestamp at the
+  START of this load run, so the next CDC fetch picks up from there. If
+  this helper itself fails (e.g., DB transient), we log and swallow:
+  worst case the next sync re-fetches the same window, and the SyncToken
+  gate (§4.3.2) skips already-ingested rows.
+  """
+  from robosystems.database import SessionFactory
+  from robosystems.models.core.connection.connection import Connection
+
+  try:
+    session = SessionFactory()
+    try:
+      conn = Connection.get_by_id(config.connection_id, session)
+      if conn:
+        conn.advance_cdc_watermark(watermark, session)
+        context.log.info(
+          "Advanced CDC watermark to %s for connection %s",
+          watermark.isoformat(),
+          config.connection_id,
+        )
+      else:
+        context.log.warning(
+          "Connection %s not found for CDC watermark advance",
+          config.connection_id,
+        )
+    finally:
+      session.close()
+  except Exception as e:
+    context.log.warning(
+      "Failed to advance CDC watermark (non-fatal; next sync will replay "
+      "from prior watermark + SyncToken gate dedups): %s",
+      e,
+    )
 
 
 def _bootstrap_fiscal_calendar_if_needed(
