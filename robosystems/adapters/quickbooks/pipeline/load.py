@@ -4,6 +4,8 @@ Reads OLTP-shaped tables from the dbt DuckDB output and inserts
 them into the extensions PostgreSQL database via OLTPLoader.
 """
 
+from datetime import UTC, datetime
+
 from dagster import AssetExecutionContext, MaterializeResult, asset
 
 from .configs import QBSyncConfig
@@ -52,8 +54,6 @@ def _run_qb_load(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:
-  from datetime import UTC, datetime
-
   from robosystems.operations.extensions.loader import OLTPLoader
 
   work_dir = get_pipeline_work_dir(config.graph_id)
@@ -62,11 +62,24 @@ def _run_qb_load(
   context.log.info(f"Loading QB data for graph={config.graph_id}, duckdb={duckdb_path}")
 
   # Phase 5 §4.3.4 — CDC watermark candidate. Captured at the START of
-  # load so we know we've successfully ingested all QB-side changes up
-  # to (at least) this moment. Advanced only after a successful load
-  # below — a raised exception or fatal `result.errors` leaves the
-  # prior watermark in place so the next sync replays from there
-  # (SyncToken gate makes already-ingested rows a no-op).
+  # load, NOT at extract start, by design: extract has already run by
+  # the time we get here, so any QB-side row touched between extract's
+  # finish and this moment isn't in this sync. Setting watermark =
+  # load-start means the next sync's `changedSince` will re-fetch
+  # anything that landed in that window — which the SyncToken gate
+  # then dedups as a no-op. The alternative (extract-start) would
+  # potentially skip late-landing rows; with the gate, slightly
+  # over-fetching is the safer trade. Advanced only after a successful
+  # load below — a raised exception or fatal `result.errors` leaves
+  # the prior watermark in place so the next sync replays from there.
+  #
+  # NOTE on `full_rebuild`: this advance fires unconditionally on a
+  # successful load, including full-rebuild syncs. That's intentional —
+  # a full rebuild definitively covers all history, so the next
+  # incremental should pick up from the rebuild's start, not from
+  # whatever stale watermark existed before. If you ever need the
+  # opposite (full rebuild preserves prior watermark), gate this call
+  # on `config.full_rebuild` here.
   sync_started_at = datetime.now(UTC)
 
   loader = OLTPLoader()

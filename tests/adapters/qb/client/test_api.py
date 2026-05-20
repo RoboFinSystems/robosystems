@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
+import requests
 from intuitlib.client import AuthClient
 from quickbooks import QuickBooks
 
@@ -526,6 +527,39 @@ class TestQBClient:
 
     assert too_old is True
     assert entities == {}
+
+  @patch("robosystems.adapters.quickbooks.client.api.requests.get")
+  @patch("robosystems.adapters.quickbooks.client.api.env")
+  def test_cdc_unrelated_400_raises_not_silent_fallback(self, mock_env, mock_get):
+    """A 400 Fault that ISN'T about changedSince must propagate as an
+    HTTPError, not silently become watermark_too_old=True. The old code
+    had a too-broad `or fault` clause that masked malformed-entity and
+    quota faults as a watermark fallback — operator would never see the
+    real bug.
+    """
+    mock_env.INTUIT_ENVIRONMENT = "sandbox"
+    mock_response = Mock(status_code=400)
+    mock_response.json.return_value = {
+      "Fault": {
+        "Error": [
+          {
+            "Message": "Invalid entity name",
+            "Detail": "Entity 'WidgetThing' is not a supported CDC entity",
+            "code": "400",
+          }
+        ]
+      }
+    }
+    mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+      "400 Client Error", response=mock_response
+    )
+    mock_get.return_value = mock_response
+
+    from datetime import UTC, datetime
+
+    client = self._make_cdc_client()
+    with pytest.raises(requests.exceptions.HTTPError):
+      client.cdc(datetime(2026, 5, 1, tzinfo=UTC), ["WidgetThing"])
 
   @patch("robosystems.adapters.quickbooks.client.api.requests.get")
   @patch("robosystems.adapters.quickbooks.client.api.env")

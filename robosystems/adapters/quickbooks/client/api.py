@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -533,13 +534,16 @@ class QBClient:
 
   @_QB_RETRY
   def cdc(
-    self, changed_since, entities: list[str]
+    self, changed_since: datetime | str, entities: list[str]
   ) -> tuple[dict[str, list[Any]], bool]:
     """Phase 5 §4.3.4 — fetch entity changes since ``changed_since`` via
     QB's CDC endpoint.
 
     Args:
-        changed_since: tz-aware or naive datetime (naive interpreted as UTC).
+        changed_since: tz-aware or naive datetime (naive interpreted as
+            UTC), or a pre-formatted ISO 8601 string. Datetime input is
+            the normal path; the string escape hatch exists for replay
+            of recorded fixtures.
         entities: list of QB entity names (Invoice, Bill, Payment,
                   BillPayment, JournalEntry, SalesReceipt, Customer,
                   Vendor, Employee, Account, ...).
@@ -549,19 +553,25 @@ class QBClient:
         - ``entities_by_type`` maps entity name → list of raw entity dicts
           (each dict carries the QB API's representation including
           ``Id`` and ``SyncToken``). Entity types with no changes return
-          empty lists. **NOTE**: CDC returns deletions as separate
-          objects with status='Deleted' — present in the list but
-          flagged via the ``status`` field on the QB record.
+          empty lists. **NOTE on deletions**: CDC returns deleted entities
+          with ``status='Deleted'`` in the same per-entity list. Handler
+          dispatch for these is **deferred** — the loader currently has
+          no soft-delete path for QB-side deletions. Until that lands,
+          a row that was deleted on the QB side after our initial sync
+          will remain present in our extensions DB until the next full
+          rebuild. Tracked alongside the JournalReport-retirement work
+          in ``quickbooks-adapter.md`` §4.3.4 status note.
         - ``watermark_too_old`` is True when QB rejects the
           ``changedSince`` value (typically > 30 days back). Callers
           should reset the watermark and fall through to full lookback.
 
     The retry decorator handles transient 429 / 5xx; the 400 ``too old``
     response surfaces here as a non-retryable signal so the caller can
-    fall through.
+    fall through. Other 400s (malformed entity name, invalid format,
+    quota faults, etc.) propagate as ``HTTPError`` rather than being
+    silently masked as a watermark fallback — those are real bugs the
+    operator needs to see.
     """
-    from datetime import UTC, datetime
-
     if isinstance(changed_since, datetime):
       if changed_since.tzinfo is None:
         ts = changed_since.replace(tzinfo=UTC)
@@ -593,8 +603,11 @@ class QBClient:
     if resp.status_code == 400:
       # QB returns 400 with a Fault payload when changedSince is older
       # than the supported window (~30 days). Detect by the structured
-      # error code if present; surface as watermark_too_old=True so the
-      # caller can reset and fall through.
+      # error message ONLY — we don't broadly treat all 400s as
+      # "watermark too old" because malformed entity names, invalid
+      # format, quota faults, etc. also surface as 400 and the caller
+      # would silently fall back to a full lookback while masking the
+      # real bug. Those propagate via raise_for_status() below.
       try:
         payload = resp.json()
       except ValueError:
@@ -603,16 +616,17 @@ class QBClient:
       messages = " | ".join(
         (e.get("Message") or "") + " " + (e.get("Detail") or "") for e in fault
       ).lower()
-      if "changedsince" in messages or "30 days" in messages or fault:
+      if "changedsince" in messages or "30 days" in messages:
         logger.warning(
-          "QB CDC rejected changedSince=%s for realm %s (too old or invalid). "
+          "QB CDC rejected changedSince=%s for realm %s (window too old). "
           "Falling back to full lookback. Response: %s",
           changed_since_iso,
           self.realm_id,
           messages[:200],
         )
         return {}, True
-      # 400 for some other reason — let it raise as an HTTPError.
+      # 400 for some other reason — let it raise as an HTTPError so the
+      # operator sees the actual fault instead of a silent watermark reset.
       resp.raise_for_status()
     resp.raise_for_status()
 
