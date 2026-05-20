@@ -34,7 +34,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 import re
 from dataclasses import dataclass, field
@@ -110,7 +109,7 @@ class ExpectedFact:
   concept: str  # e.g. "mini:CashAndCashEquivalents"
   period_kind: str  # "instant" or "duration"
   period_end: date  # the instant date OR the duration end_date
-  value_cents: int  # dollars from instance.xml × 100
+  value_cents: int  # dollars from instance.xml x 100
 
 
 @dataclass
@@ -356,7 +355,7 @@ def _load_concept_totals_via_graphql(
     # legitimate activity that the diff should compare.
     if dollars_dr == 0 and dollars_cr == 0:
       continue
-    debit_positive_cents = int(round((dollars_dr - dollars_cr) * 100))
+    debit_positive_cents = round((dollars_dr - dollars_cr) * 100)
     # trialBalance doesn't return period_type or balance_type
     # directly — they live on the Element row. Derive period_type
     # from trait (instant for asset/liability/equity, duration for
@@ -442,6 +441,10 @@ def _load_expected_facts_from_instance(instance_path: Path) -> list[ExpectedFact
   Values are stored as cents internally to match the rest of the
   reconciliation pipeline.
   """
+  # instance.xml is a trusted artifact pulled by pull_expected_report.sh
+  # from xbrlsite.com — not user-uploaded content — so the stdlib XML
+  # parser is appropriate. If the input source ever widens, swap to
+  # defusedxml.ElementTree.
   import xml.etree.ElementTree as ET
 
   ns_xbrli = "{http://www.xbrl.org/2003/instance}"
@@ -504,7 +507,7 @@ def _load_expected_facts_from_instance(instance_path: Path) -> list[ExpectedFact
         concept=qname,
         period_kind=kind,
         period_end=period_end,
-        value_cents=int(round(dollars * 100)),
+        value_cents=round(dollars * 100),
       )
     )
   return out
@@ -677,7 +680,7 @@ def _anchor_totals(concepts: list[ConceptTotal]) -> dict[str, int]:
     liability/equity concepts **plus implicit Retained Earnings**.
     The accounting equation requires ``Assets = Liabilities +
     Equity``, where Equity = PaidInCapital + RetainedEarnings, and
-    RetainedEarnings = opening RE + Net Income − Dividends. Charlie's
+    RetainedEarnings = opening RE + Net Income - Dividends. Charlie's
     lemonade-stand fixture starts from zero balances and posts no
     closing entry to RE during the period, so RE-ending = Net Income.
     We add Net Income to L&E to close the accounting equation
@@ -748,9 +751,11 @@ def render_markdown(report: ReconciliationReport) -> str:
   out.append("")
   out.append(f"**Graph**: `{report.graph_id}`")
   out.append(f"**Period**: {report.period_start} → {report.period_end}")
-  out.append(f"**Dataset**: Charlie Hoffman's lemonade-stand 14-JE Q1 2024 fixture")
-  out.append(f"**Expected output reference**: "
-             "[luca.pacioli.ai/luca/view/0f24fd35…](https://luca.pacioli.ai/luca/view/0f24fd35e961e167a727b663c75a4c5ec9fb7eb86730d6292f46e6e180fc2018980cd52e/index)")
+  out.append("**Dataset**: Charlie Hoffman's lemonade-stand 14-JE Q1 2024 fixture")
+  out.append(
+    "**Expected output reference**: "
+    "[luca.pacioli.ai/luca/view/0f24fd35…](https://luca.pacioli.ai/luca/view/0f24fd35e961e167a727b663c75a4c5ec9fb7eb86730d6292f46e6e180fc2018980cd52e/index)"
+  )
   out.append("")
   out.append("---")
   out.append("")
@@ -778,7 +783,7 @@ def render_markdown(report: ReconciliationReport) -> str:
     )
     out.append("")
     out.append(
-      f"Compared against Charlie's published XBRL instance "
+      "Compared against Charlie's published XBRL instance "
       "(`local/datasets/seattle_method/report/instance.xml`, fetched "
       "by `pull_expected_report.sh` from "
       "[`xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/`](http://www.xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/index.html))."
