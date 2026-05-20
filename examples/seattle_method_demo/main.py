@@ -42,6 +42,9 @@ PULL_TAXONOMY_SCRIPT = REPO_ROOT / "examples" / "seattle_method_demo" / "pull_mi
 PULL_JOURNAL_SCRIPT = (
   REPO_ROOT / "examples" / "seattle_method_demo" / "pull_general_journal.sh"
 )
+PULL_REPORT_SCRIPT = (
+  REPO_ROOT / "examples" / "seattle_method_demo" / "pull_expected_report.sh"
+)
 TAXONOMY_DIR = REPO_ROOT / "local" / "taxonomies" / "mini"
 CSV_PATH = (
   REPO_ROOT / "local" / "datasets" / "seattle_method" / "GeneralJournal.csv"
@@ -90,22 +93,28 @@ def _get_graph_client():
 def step_pull() -> None:
   """Step 1 — Pull Charlie's upstream artifacts.
 
-  Fetches two things from Charlie's published sources, so the demo
-  ingests from his canonical artifacts rather than committed copies:
+  Fetches three artifacts from Charlie's published sources so the
+  demo ingests AND validates against his canonical files rather than
+  committed copies:
 
   - **mini taxonomy** (xbrlsite.azurewebsites.net) → local/taxonomies/mini/
   - **GeneralJournal.csv** (github.com/seattlemethod/prototypes) →
     local/datasets/seattle_method/
+  - **Record-to-Report instance package** (xbrlsite.com/seattlemethod/
+    platinum-testcases/record-to-report/) → local/datasets/seattle_method/report/
+    — the XBRL ``instance.xml`` Charlie publishes is the reconciliation
+    reference (strictly stronger than the earlier hand-derived CSV)
 
-  Both destinations are gitignored under ``local/`` and idempotent
-  (re-runs overwrite). Aborts on either fetch failure.
+  All destinations are gitignored under ``local/`` and idempotent
+  (re-runs overwrite). Aborts on any fetch failure.
   """
   print("─" * 70)
-  print("Step 1 — pull mini taxonomy + GeneralJournal.csv from Charlie")
+  print("Step 1 — pull mini taxonomy + GeneralJournal.csv + instance.xml from Charlie")
   print("─" * 70)
   for label, script in (
     ("mini taxonomy", PULL_TAXONOMY_SCRIPT),
     ("GeneralJournal.csv", PULL_JOURNAL_SCRIPT),
+    ("Record-to-Report instance.xml", PULL_REPORT_SCRIPT),
   ):
     print(f"  → {label}")
     result = subprocess.run(

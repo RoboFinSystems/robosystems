@@ -151,8 +151,9 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
   ),
   # Operating — interest accruals.
   # NOTE: mini's canonical concept is ``PaymentInterest`` (not
-  # ``PaymentOfInterest``) — Charlie's CSV originally had the typo;
-  # we fixed it in fixtures/transactions.csv to match the taxonomy.
+  # ``PaymentOfInterest``); Charlie's CSV has the typo. We normalize
+  # at ingest time via ``ingest_transactions.py::_KNOWN_TDC_ALIASES``
+  # so the filter targets the canonical name here.
   # NOTE: rs-gaap doesn't carry a clean "InterestPaid" CF concept in
   # our currently-loaded library — the canonical
   # ``rs-gaap:InterestPaidNet`` is part of the broader rs-gaap corpus

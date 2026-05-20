@@ -1594,19 +1594,55 @@ def _load_reporting_structure(
 
   # Build trees from roots, ordered by the root-ordering associations
   # seeded as (structure → SFAC6 root) presentation associations.
-  # Roots that have an explicit order_value sort by that; others sort last.
+  # Roots that have an explicit order_value sort by that; others fall
+  # back to accounting convention (debit-balance roots first — Assets
+  # before L+E on the Balance Sheet) and finally qname for determinism.
+  #
+  # ``root_parent_ids`` is a set, so without the secondary keys the sort
+  # would preserve unstable hash-order: e.g. the rs-gaap BS Classified
+  # structure has no root_order rows, and the set happened to emit
+  # ``LiabilitiesAndStockholdersEquity`` before ``Assets``, producing a
+  # BS rendered Liabilities-first. Single-root statements (IS / CF / SE)
+  # are unaffected.
   root_order = _load_root_order(session, structure_id)
-
   roots: list[_HierarchyNode] = []
   for root_id in sorted(
     root_parent_ids,
-    key=lambda rid: root_order.get(rid, float("inf")),
+    key=lambda rid: _root_sort_key(rid, root_order, element_info),
   ):
     root_node = _build_tree(root_id, 0)
     if root_node is not None:
       roots.append(root_node)
 
   return structure_id, structure_name, concept_arrangement, roots
+
+
+def _root_sort_key(
+  root_id: str,
+  root_order: dict[str, float],
+  element_info: dict[str, dict[str, Any]],
+) -> tuple[float, int, str]:
+  """Sort key for multi-root presentation hierarchies.
+
+  Three-tier precedence:
+
+  1. ``root_order[root_id]`` — explicit ordering seeded as
+     ``(structure → root)`` presentation associations on the structure.
+     Wins when present (tenants can pin a specific layout per structure).
+  2. ``balance_type`` priority — debit-balance roots before credit-balance
+     roots. Produces conventional Assets-then-L+E on the Balance Sheet
+     and any other multi-root statement that follows accounting
+     convention, without requiring explicit root_order rows.
+  3. ``qname`` alphabetical — determinism tiebreak so identical-priority
+     roots always emit in the same order across runs.
+
+  Single-root statements (IS / CF / SE under most reporting styles)
+  never hit this path — there's nothing to sort.
+  """
+  explicit = root_order.get(root_id, float("inf"))
+  info = element_info.get(root_id, {})
+  bt_priority = 0 if info.get("balance_type") == "debit" else 1
+  return (explicit, bt_priority, info.get("qname") or "")
 
 
 def _load_root_order(

@@ -1,6 +1,6 @@
 # Seattle Method Cross-Taxonomy — Test Case 1 Reconciliation
 
-**Graph**: `kg19e468f7c281578a351d`
+**Graph**: `kg19e46c0855a126fb49f3`
 **Period**: 2024-01-01 → 2024-01-31
 **Dataset**: Charlie Hoffman's lemonade-stand 14-JE Q1 2024 fixture
 **Expected output reference**: [luca.pacioli.ai/luca/view/0f24fd35…](https://luca.pacioli.ai/luca/view/0f24fd35e961e167a727b663c75a4c5ec9fb7eb86730d6292f46e6e180fc2018980cd52e/index)
@@ -9,145 +9,196 @@
 
 ## Automated Diff vs. Charlie's Published Facts
 
-Compared **17** concept(s) against Charlie's luca.pacioli.ai export (`fixtures/expected_facts_mini.csv`). **17 exact match** • **0 delta**. Total absolute delta: **$0.00**.
+Compared **17** concept(s) against Charlie's published XBRL instance (`local/datasets/seattle_method/report/instance.xml`, fetched by `pull_expected_report.sh` from [`xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/`](http://www.xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/index.html)). **17 exact match** • **0 delta**. Total absolute delta: **$0.00**.
 
-| Concept                            |  Our value | Charlie's value |     Δ |     |
-| ---------------------------------- | ---------: | --------------: | ----: | --- |
-| `mini:AccountsPayable`             |  $1,000.00 |       $1,000.00 | $0.00 | ✓   |
-| `mini:AccruedExpenses`             |    $400.00 |         $400.00 | $0.00 | ✓   |
-| `mini:CashAndCashEquivalents`      | $10,850.00 |      $10,850.00 | $0.00 | ✓   |
-| `mini:CostsOfSales`                |  $5,300.00 |       $5,300.00 | $0.00 | ✓   |
-| `mini:DepreciationAndAmortization` |    $100.00 |         $100.00 | $0.00 | ✓   |
-| `mini:IncomeTaxExpenseBenefit`     |    $400.00 |         $400.00 | $0.00 | ✓   |
-| `mini:InterestExpense`             |    $150.00 |         $150.00 | $0.00 | ✓   |
-| `mini:Inventories`                 |  $2,700.00 |       $2,700.00 | $0.00 | ✓   |
-| `mini:LongtermDebt`                |  $1,000.00 |       $1,000.00 | $0.00 | ✓   |
-| `mini:PaidInCapital`               | $10,000.00 |      $10,000.00 | $0.00 | ✓   |
-| `mini:PropertyPlantAndEquipment`   |    $900.00 |         $900.00 | $0.00 | ✓   |
-| `mini:Receivables`                 |      $0.00 |           $0.00 | $0.00 | ✓   |
-| `mini:Sales`                       |  $8,000.00 |       $8,000.00 | $0.00 | ✓   |
-| `mini:Assets`                      | $14,450.00 |      $14,450.00 | $0.00 | ✓   |
-| `mini:LiabilitiesAndEquity`        | $14,450.00 |      $14,450.00 | $0.00 | ✓   |
-| `mini:NetIncomeLoss`               |  $2,050.00 |       $2,050.00 | $0.00 | ✓   |
-| `mini:NetCashFlow`                 | $10,850.00 |      $10,850.00 | $0.00 | ✓   |
+| Concept | Our value | Charlie's value | Δ | |
+|---|---:|---:|---:|---|
+| `mini:AccountsPayable` | $1,000.00 | $1,000.00 | $0.00 | ✓ |
+| `mini:AccruedExpenses` | $400.00 | $400.00 | $0.00 | ✓ |
+| `mini:CashAndCashEquivalents` | $10,850.00 | $10,850.00 | $0.00 | ✓ |
+| `mini:CostsOfSales` | $5,300.00 | $5,300.00 | $0.00 | ✓ |
+| `mini:DepreciationAndAmortization` | $100.00 | $100.00 | $0.00 | ✓ |
+| `mini:IncomeTaxExpenseBenefit` | $400.00 | $400.00 | $0.00 | ✓ |
+| `mini:InterestExpense` | $150.00 | $150.00 | $0.00 | ✓ |
+| `mini:Inventories` | $2,700.00 | $2,700.00 | $0.00 | ✓ |
+| `mini:LongtermDebt` | $1,000.00 | $1,000.00 | $0.00 | ✓ |
+| `mini:PaidInCapital` | $10,000.00 | $10,000.00 | $0.00 | ✓ |
+| `mini:PropertyPlantAndEquipment` | $900.00 | $900.00 | $0.00 | ✓ |
+| `mini:Receivables` | $0.00 | $0.00 | $0.00 | ✓ |
+| `mini:Sales` | $8,000.00 | $8,000.00 | $0.00 | ✓ |
+| `mini:Assets` | $14,450.00 | $14,450.00 | $0.00 | ✓ |
+| `mini:LiabilitiesAndEquity` | $14,450.00 | $14,450.00 | $0.00 | ✓ |
+| `mini:NetIncomeLoss` | $2,050.00 | $2,050.00 | $0.00 | ✓ |
+| `mini:NetCashFlow` | $10,850.00 | $10,850.00 | $0.00 | ✓ |
+
+## Methodology Gap — Concepts Charlie Publishes That We Don't Render
+
+Charlie's instance contains **44** additional non-zero current-period concept(s) that our pipeline doesn't emit. None of these block the reconciliation diff above (which iterates over our concepts and matches against his), but they represent the gap between our current render and full Record-to-Report parity. Each is a forward-work candidate.
+
+| Concept | Period | Charlie's value |
+|---|---|---:|
+| `mini:AccumulatedDepreciation` | instant | $100.00 |
+| `mini:AdditionalLongtermBorrowings` | duration | $2,000.00 |
+| `mini:CapitalAdditionsPropertyPlantAndEquipment` | duration | $1,000.00 |
+| `mini:Cash` | instant | $10,850.00 |
+| `mini:CollectionOfReceivables` | duration | $8,000.00 |
+| `mini:CurrentAssets` | instant | $13,550.00 |
+| `mini:CurrentLiabilities` | instant | $1,400.00 |
+| `mini:DecreaseFromDepreciationAndAmortization` | duration | $100.00 |
+| `mini:DecreaseFromPaymentAccountsPayable` | duration | $7,000.00 |
+| `mini:DecreaseFromPaymentOfInterest` | duration | $150.00 |
+| `mini:DecreaseInInventoriesFromSales` | duration | $2,000.00 |
+| `mini:Equipment` | instant | $1,000.00 |
+| `mini:Equity` | instant | $12,050.00 |
+| `mini:GrossProfitLoss` | duration | $2,700.00 |
+| `mini:IncomeLossFromContinuingOperationsBeforeTax` | duration | $2,450.00 |
+| `mini:IncreaseInReceivablesFromSalesOnAccount` | duration | $8,000.00 |
+| `mini:InterestAccrued` | duration | $550.00 |
+| `mini:InventoryWrittenOff` | duration | $300.00 |
+| `mini:InvestmentsByOwner` | duration | $10,000.00 |
+| `mini:Liabilities` | instant | $2,400.00 |
+| `mini:MaturesInOneYear` | instant | $1,000.00 |
+| `mini:NetCashFlowFinancingActivities` | duration | $10,850.00 |
+| `mini:NetCashFlowInvestingActivities` | duration | $(1,000.00) |
+| `mini:NetCashFlowOperatingActivities` | duration | $1,000.00 |
+| `mini:NoncurrentAssets` | instant | $900.00 |
+| `mini:NoncurrentLiabilities` | instant | $1,000.00 |
+| `mini:NonoperatingIncomeExpenses` | duration | $(150.00) |
+| `mini:OperatingExpenses` | duration | $100.00 |
+| `mini:OperatingIncomeLoss` | duration | $2,600.00 |
+| `mini:OtherSecuredLoans` | instant | $1,000.00 |
+| `mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment` | duration | $1,000.00 |
+| `mini:PaymentForReductionOfLongtermBorrowings` | duration | $1,000.00 |
+| `mini:PaymentInterest` | duration | $150.00 |
+| `mini:PaymentOfAccountsPayable` | duration | $7,000.00 |
+| `mini:ProceedsFromAdditionalLongtermBorrowings` | duration | $2,000.00 |
+| `mini:ProceedsFromCollectionOfReceivables` | duration | $8,000.00 |
+| `mini:ProceedsFromInvestmentsByOwner` | duration | $10,000.00 |
+| `mini:PropertyPlantAndEquipmentGross` | instant | $1,000.00 |
+| `mini:PurchasesInventoryForSaleOnAccount` | duration | $8,000.00 |
+| `mini:PurchasesOfInventoryForSale` | duration | $5,000.00 |
+| `mini:RawMaterial` | instant | $2,700.00 |
+| `mini:RepaymentLongtermBorrowings` | duration | $1,000.00 |
+| `mini:RetainedEarnings` | instant | $2,050.00 |
+| `mini:TradePayables` | instant | $1,000.00 |
 
 ## Four Anchor Totals
 
 Methodology spec §4.6 exit criterion: these four lines must match Charlie's PoC for the test to pass. All amounts are debit-positive cents internally; presentation flips signs per accounting convention.
 
-| Anchor                     |  Our value |
-| -------------------------- | ---------: |
-| Total Assets               | $14,450.00 |
+| Anchor | Our value |
+|---|---:|
+| Total Assets | $14,450.00 |
 | Total Liabilities & Equity | $14,450.00 |
-| Net Income                 |  $2,050.00 |
-| Net Cash Change            | $10,850.00 |
+| Net Income | $2,050.00 |
+| Net Cash Change | $10,850.00 |
 
 ## Concept-Level Period Totals
 
-Every mini concept with non-zero activity in the period. `Δ debit-positive` is the period flow (Σ DR − Σ CR). For instant/asset concepts this equals the period-ending balance (Charlie's data starts from zero). For duration concepts this is the period income/expense.
+Every mini concept with non-zero activity in the period. ``Δ debit-positive`` is the period flow (Σ DR − Σ CR). For instant/asset concepts this equals the period-ending balance (Charlie's data starts from zero). For duration concepts this is the period income/expense.
 
-| QName                              | Label                         | Trait     | Period   | Δ debit-positive |
-| ---------------------------------- | ----------------------------- | --------- | -------- | ---------------: |
-| `mini:AccountsPayable`             | Accounts Payable              | liability | instant  |      $(1,000.00) |
-| `mini:AccruedExpenses`             | Accrued Expenses              | liability | instant  |        $(400.00) |
-| `mini:CashAndCashEquivalents`      | Cash and Cash Equivalents     | asset     | instant  |       $10,850.00 |
-| `mini:CostsOfSales`                | Costs of Sales                | expense   | duration |        $5,300.00 |
-| `mini:DepreciationAndAmortization` | Depreciation and Amortization | expense   | duration |          $100.00 |
-| `mini:IncomeTaxExpenseBenefit`     | Income Tax Expense (Benefit)  | expense   | duration |          $400.00 |
-| `mini:InterestExpense`             | Interest Expense              | expense   | duration |          $150.00 |
-| `mini:Inventories`                 | Inventories                   | asset     | instant  |        $2,700.00 |
-| `mini:LongtermDebt`                | Long-term Debt                | liability | instant  |      $(1,000.00) |
-| `mini:PaidInCapital`               | Paid In Capital               | equity    | instant  |     $(10,000.00) |
-| `mini:PropertyPlantAndEquipment`   | Property, Plant and Equipment | asset     | instant  |          $900.00 |
-| `mini:Sales`                       | Sales                         | revenue   | duration |      $(8,000.00) |
+| QName | Label | Trait | Period | Δ debit-positive |
+|---|---|---|---|---:|
+| `mini:AccountsPayable` | Accounts Payable | liability | instant | $(1,000.00) |
+| `mini:AccruedExpenses` | Accrued Expenses | liability | instant | $(400.00) |
+| `mini:CashAndCashEquivalents` | Cash and Cash Equivalents | asset | instant | $10,850.00 |
+| `mini:CostsOfSales` | Costs of Sales | expense | duration | $5,300.00 |
+| `mini:DepreciationAndAmortization` | Depreciation and Amortization | expense | duration | $100.00 |
+| `mini:IncomeTaxExpenseBenefit` | Income Tax Expense (Benefit) | expense | duration | $400.00 |
+| `mini:InterestExpense` | Interest Expense | expense | duration | $150.00 |
+| `mini:Inventories` | Inventories | asset | instant | $2,700.00 |
+| `mini:LongtermDebt` | Long-term Debt | liability | instant | $(1,000.00) |
+| `mini:PaidInCapital` | Paid In Capital | equity | instant | $(10,000.00) |
+| `mini:PropertyPlantAndEquipment` | Property, Plant and Equipment | asset | instant | $900.00 |
+| `mini:Sales` | Sales | revenue | duration | $(8,000.00) |
 
 ## Rollforward Attribution (Phase 2 MVP Filter Engine)
 
-Each rollforward IB decomposes its BS source's period delta across declared TDC filters. Where `Σ filters == Δ BS`, the rollforward is balanced (residual = 0). A non-zero residual indicates either an unattributed flow or a phantom TDC in the source data (logged at author time).
+Each rollforward IB decomposes its BS source's period delta across declared TDC filters. Where ``Σ filters == Δ BS``, the rollforward is balanced (residual = 0). A non-zero residual indicates either an unattributed flow or a phantom TDC in the source data (logged at author time).
 
 ### Accounts Payable (mini:AccountsPayable)
 
 **Δ BS** (debit-positive): $(1,000.00)
 
-| Flow concept                              |       Value | Matched lines | Event ids                                                      |
-| ----------------------------------------- | ----------: | ------------: | -------------------------------------------------------------- |
-| `mini:PurchasesInventoryForSaleOnAccount` | $(8,000.00) |             2 | evt_01KS38Z3CVEQ4SXXYG1GR7G4G3, evt_01KS38Z3D85T6VJ54DQTWKQWFM |
-| `mini:DecreaseFromPaymentAccountsPayable` |   $7,000.00 |             1 | evt_01KS38Z3EKC1ANPWFNXC5CBCM3                                 |
+| Flow concept | Value | Matched lines | Event ids |
+|---|---:|---:|---|
+| `mini:PurchasesInventoryForSaleOnAccount` | $(8,000.00) | 2 | evt_01KS3C150C1TD3SC2Q413E7QJD, evt_01KS3C150TME9WAMJ4ESBZJQGA |
+| `mini:DecreaseFromPaymentAccountsPayable` | $7,000.00 | 1 | evt_01KS3C1525GSY7NAXMV2XF2EM4 |
 
 ### Accrued Expenses (mini:AccruedExpenses)
 
 **Δ BS** (debit-positive): $(400.00)
 
-| Flow concept                         |     Value | Matched lines | Event ids                                                      |
-| ------------------------------------ | --------: | ------------: | -------------------------------------------------------------- |
-| `mini:InterestAccrued`               | $(550.00) |             2 | evt_01KS38Z3FFD7T2NYKC3DPVW7WE, evt_01KS38Z3H4ZBVHQ69RFNH8MEWN |
-| `mini:DecreaseFromPaymentOfInterest` |   $150.00 |             1 | evt_01KS38Z3F02WDVKC42Z5NDMQWB                                 |
+| Flow concept | Value | Matched lines | Event ids |
+|---|---:|---:|---|
+| `mini:InterestAccrued` | $(550.00) | 2 | evt_01KS3C152Z2S5Q28XEPEPRX4Z9, evt_01KS3C154NKESZBA7BF9R3VH3T |
+| `mini:DecreaseFromPaymentOfInterest` | $150.00 | 1 | evt_01KS3C152J54YNB2NT2ZZPP3NF |
 
 ### Cash and Cash Equivalents (mini:CashAndCashEquivalents)
 
 **Δ BS** (debit-positive): $10,850.00
 
-| Flow concept                                              |       Value | Matched lines | Event ids                      |
-| --------------------------------------------------------- | ----------: | ------------: | ------------------------------ |
-| `mini:ProceedsFromInvestmentsByOwner`                     |  $10,000.00 |             1 | evt_01KS38Z3AQZ6RG3W208KJA658Y |
-| `mini:ProceedsFromAdditionalLongtermBorrowings`           |   $2,000.00 |             1 | evt_01KS38Z3BQ47YK0469Z2G7T413 |
-| `mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment` | $(1,000.00) |             1 | evt_01KS38Z3C99YC78W3EPXW1CABA |
-| `mini:PaymentInterest`                                    |   $(150.00) |             1 | evt_01KS38Z3F02WDVKC42Z5NDMQWB |
-| `mini:ProceedsFromCollectionOfReceivables`                |   $8,000.00 |             1 | evt_01KS38Z3E6W5BWVDS70S6VQZTP |
-| `mini:PaymentOfAccountsPayable`                           | $(7,000.00) |             1 | evt_01KS38Z3EKC1ANPWFNXC5CBCM3 |
-| `mini:PaymentForReductionOfLongtermBorrowings`            | $(1,000.00) |             1 | evt_01KS38Z3F02WDVKC42Z5NDMQWB |
+| Flow concept | Value | Matched lines | Event ids |
+|---|---:|---:|---|
+| `mini:ProceedsFromInvestmentsByOwner` | $10,000.00 | 1 | evt_01KS3C14YQPPVND2RMYRVWNKBP |
+| `mini:ProceedsFromAdditionalLongtermBorrowings` | $2,000.00 | 1 | evt_01KS3C14ZJ5M4RGW1ZJY92X6YF |
+| `mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment` | $(1,000.00) | 1 | evt_01KS3C14ZZQGP2D2WE6HX7S301 |
+| `mini:PaymentInterest` | $(150.00) | 1 | evt_01KS3C152J54YNB2NT2ZZPP3NF |
+| `mini:ProceedsFromCollectionOfReceivables` | $8,000.00 | 1 | evt_01KS3C151QCTQG75A8CEZ9V44X |
+| `mini:PaymentOfAccountsPayable` | $(7,000.00) | 1 | evt_01KS3C1525GSY7NAXMV2XF2EM4 |
+| `mini:PaymentForReductionOfLongtermBorrowings` | $(1,000.00) | 1 | evt_01KS3C152J54YNB2NT2ZZPP3NF |
 
 ### Inventories (mini:Inventories)
 
 **Δ BS** (debit-positive): $2,700.00
 
-| Flow concept                          |       Value | Matched lines | Event ids                      |
-| ------------------------------------- | ----------: | ------------: | ------------------------------ |
-| `mini:InventoryWrittenOff`            |   $(300.00) |             1 | evt_01KS38Z3G0GN1Y38K1NVJE722N |
-| `mini:PurchasesOfInventoryForSale`    |   $5,000.00 |             1 | evt_01KS38Z3CVEQ4SXXYG1GR7G4G3 |
-| `mini:DecreaseInInventoriesFromSales` | $(2,000.00) |             1 | evt_01KS38Z3DQBV8YHX9JPGJ8KFNR |
+| Flow concept | Value | Matched lines | Event ids |
+|---|---:|---:|---|
+| `mini:InventoryWrittenOff` | $(300.00) | 1 | evt_01KS3C153E2A77J4TTSWDRK7TV |
+| `mini:PurchasesOfInventoryForSale` | $5,000.00 | 1 | evt_01KS3C150C1TD3SC2Q413E7QJD |
+| `mini:DecreaseInInventoriesFromSales` | $(2,000.00) | 1 | evt_01KS3C15198RH9BVPMHNHJNFJD |
 
 ### Long-term Debt (mini:LongtermDebt)
 
 **Δ BS** (debit-positive): $(1,000.00)
 
-| Flow concept                        |       Value | Matched lines | Event ids                      |
-| ----------------------------------- | ----------: | ------------: | ------------------------------ |
-| `mini:AdditionalLongtermBorrowings` | $(2,000.00) |             1 | evt_01KS38Z3BQ47YK0469Z2G7T413 |
-| `mini:RepaymentLongtermBorrowings`  |   $1,000.00 |             1 | evt_01KS38Z3F02WDVKC42Z5NDMQWB |
+| Flow concept | Value | Matched lines | Event ids |
+|---|---:|---:|---|
+| `mini:AdditionalLongtermBorrowings` | $(2,000.00) | 1 | evt_01KS3C14ZJ5M4RGW1ZJY92X6YF |
+| `mini:RepaymentLongtermBorrowings` | $1,000.00 | 1 | evt_01KS3C152J54YNB2NT2ZZPP3NF |
 
 ### Paid In Capital (mini:PaidInCapital)
 
 **Δ BS** (debit-positive): $(10,000.00)
 
-| Flow concept              |        Value | Matched lines | Event ids                      |
-| ------------------------- | -----------: | ------------: | ------------------------------ |
-| `mini:InvestmentsByOwner` | $(10,000.00) |             1 | evt_01KS38Z3AQZ6RG3W208KJA658Y |
+| Flow concept | Value | Matched lines | Event ids |
+|---|---:|---:|---|
+| `mini:InvestmentsByOwner` | $(10,000.00) | 1 | evt_01KS3C14YQPPVND2RMYRVWNKBP |
 
 ### Property, Plant and Equipment (mini:PropertyPlantAndEquipment)
 
 **Δ BS** (debit-positive): $900.00
 
-| Flow concept                                     |     Value | Matched lines | Event ids                      |
-| ------------------------------------------------ | --------: | ------------: | ------------------------------ |
-| `mini:CapitalAdditionsPropertyPlantAndEquipment` | $1,000.00 |             1 | evt_01KS38Z3C99YC78W3EPXW1CABA |
-| `mini:DecreaseFromDepreciationAndAmortization`   | $(100.00) |             1 | evt_01KS38Z3GDSFX5N77AKBN6RF2K |
+| Flow concept | Value | Matched lines | Event ids |
+|---|---:|---:|---|
+| `mini:CapitalAdditionsPropertyPlantAndEquipment` | $1,000.00 | 1 | evt_01KS3C14ZZQGP2D2WE6HX7S301 |
+| `mini:DecreaseFromDepreciationAndAmortization` | $(100.00) | 1 | evt_01KS3C153XYY73SQ72WC29D5Q0 |
 
 ### Receivables (mini:Receivables)
 
 **Δ BS** (debit-positive): $0.00
 
-| Flow concept                                   |       Value | Matched lines | Event ids                      |
-| ---------------------------------------------- | ----------: | ------------: | ------------------------------ |
-| `mini:IncreaseInReceivablesFromSalesOnAccount` |   $8,000.00 |             1 | evt_01KS38Z3DQBV8YHX9JPGJ8KFNR |
-| `mini:CollectionOfReceivables`                 | $(8,000.00) |             1 | evt_01KS38Z3E6W5BWVDS70S6VQZTP |
+| Flow concept | Value | Matched lines | Event ids |
+|---|---:|---:|---|
+| `mini:IncreaseInReceivablesFromSalesOnAccount` | $8,000.00 | 1 | evt_01KS3C15198RH9BVPMHNHJNFJD |
+| `mini:CollectionOfReceivables` | $(8,000.00) | 1 | evt_01KS3C151QCTQG75A8CEZ9V44X |
 
 ## Findings — Classification per Methodology §3.2
 
 **Their data quality** (source CSV inconsistencies):
 
 - **JE-205** — Description "Payment for contractor" but TDC on the AP line is `mini:PurchasesInventoryForSaleOnAccount`. Contractor services aren't inventory; vocabulary misuse.
-- **JE-209** — TDC `mini:PaymentOfInterest` was a typo for `mini:PaymentInterest` (the canonical mini.xsd concept name). Fixed at source in `fixtures/transactions.csv` prior to ingest. Note that `mini:DecreaseFromPaymentOfInterest` (the AccruedExpenses-side TDC) keeps the "Of" — Charlie's naming is internally inconsistent.
+- **JE-209** — TDC `mini:PaymentOfInterest` on the Cash line is a typo for `mini:PaymentInterest` (the canonical mini.xsd concept name). `ingest_transactions.py::_KNOWN_TDC_ALIASES` normalizes it at ingest time so the rollforward filter engine matches; logged as a warning per JE so the substitution stays transparent. Note that `mini:DecreaseFromPaymentOfInterest` (the AccruedExpenses-side TDC) keeps the "Of" — Charlie's naming is internally inconsistent.
 - **JE-226** — Income tax accrual ($400) but TDC is `mini:InterestAccrued` instead of `IncomeTaxAccrued`. Copy-paste-style bug from the JE-210 interest pattern.
 
 **Methodology gap** (architecturally aligned, semantically distinct):
@@ -161,4 +212,4 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 ---
 
-_Reconciliation produced by `examples/seattle_method_demo/reconcile.py` against the Phase 2 MVP rollforward filter engine. See `examples/seattle_method_demo/README.md` for the full methodology and `local/docs/specs/cross-taxonomy-projection.md` for the architectural pattern this test validates._
+*Reconciliation produced by `examples/seattle_method_demo/reconcile.py` against the Phase 2 MVP rollforward filter engine. See `examples/seattle_method_demo/README.md` for the full methodology and `local/docs/specs/cross-taxonomy-projection.md` for the architectural pattern this test validates.*

@@ -70,12 +70,15 @@ faithful to his upstream as it evolves.
 | --- | --- | --- |
 | `GeneralJournal.csv` (14 JEs) | [github.com/seattlemethod/prototypes/.../journal-entries-csv](https://github.com/seattlemethod/prototypes/blob/main/record-to-report/journal-entries-csv/GeneralJournal.csv) | `local/datasets/seattle_method/GeneralJournal.csv` |
 | `mini` base taxonomy + linkbases | [xbrlsite.azurewebsites.net/.../mini/base-taxonomy](https://xbrlsite.azurewebsites.net/2026/reporting-framework/mini/base-taxonomy/mini_ModelStructure.html) | `local/taxonomies/mini/` |
-| `expected_facts_mini.csv` | derived from Charlie's `luca.pacioli.ai` published view | `examples/seattle_method_demo/fixtures/expected_facts_mini.csv` (committed — pinned reference for the reconciliation diff) |
+| Record-to-Report `instance.xml` (reconciliation reference) | [xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/report.zip](http://www.xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/) | `local/datasets/seattle_method/report/instance.xml` |
 
-`pull_general_journal.sh` and `pull_mini.sh` are idempotent
-(`step_pull` runs both); re-runs overwrite the local copy with the
-current upstream. Charlie's two XBRL formats — the
-[XBRL Global Ledger instance](https://github.com/seattlemethod/prototypes/tree/main/record-to-report/journal-entries-xbrl-global-ledger)
+`pull_mini.sh`, `pull_general_journal.sh`, and `pull_expected_report.sh`
+are idempotent (`step_pull` runs all three); re-runs overwrite the
+local copy with the current upstream. `reconcile.py` parses
+`instance.xml` directly as the source of truth — strictly stronger
+than the earlier hand-derived CSV fixture since it consumes the same
+artifact Arelle validates. Charlie's two alternative input formats —
+the [XBRL Global Ledger instance](https://github.com/seattlemethod/prototypes/tree/main/record-to-report/journal-entries-xbrl-global-ledger)
 and the [XBRL typed-members representation](https://github.com/seattlemethod/prototypes/tree/main/record-to-report/journal-entries-typed-members)
 — are forward work (new ingest adapters with the same downstream pipeline).
 

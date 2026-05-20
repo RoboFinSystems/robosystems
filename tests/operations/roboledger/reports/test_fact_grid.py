@@ -25,6 +25,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _infer_period_type,
   _is_equity_flow_reducer,
   _natural_sign,
+  _root_sort_key,
   _synthesize_ppe_net_facts,
 )
 
@@ -1152,6 +1153,96 @@ class TestAppendEmptyEquityFactsAutoRE:
     )
 
     assert facts == []
+
+
+class TestRootSortKey:
+  """Regression pin: multi-root presentation hierarchies sort
+  deterministically with conventional accounting order as the fallback.
+
+  Surfaced by the rs-gaap Balance Sheet — Classified structure rendering
+  Liabilities-first instead of Assets-first. Root cause: ``root_parent_ids``
+  is a Python set with hash-dependent iteration order; without a
+  deterministic secondary key the sort preserved that order. Single-root
+  statements (IS / CF / SE) don't hit this path so they were unaffected.
+  """
+
+  ASSETS_ID = "elem_assets"
+  L_AND_E_ID = "elem_liab_and_equity"
+  EQUITY_ID = "elem_equity"
+
+  ELEMENT_INFO = {
+    ASSETS_ID: {"qname": "rs-gaap:Assets", "balance_type": "debit"},
+    L_AND_E_ID: {
+      "qname": "rs-gaap:LiabilitiesAndStockholdersEquity",
+      "balance_type": "credit",
+    },
+    EQUITY_ID: {
+      "qname": "rs-gaap:StockholdersEquity",
+      "balance_type": "credit",
+    },
+  }
+
+  def _sort_ids(
+    self, ids: list[str], root_order: dict[str, float] | None = None
+  ) -> list[str]:
+    """Apply ``_root_sort_key`` and return the resulting id order."""
+    order = root_order or {}
+    return sorted(ids, key=lambda rid: _root_sort_key(rid, order, self.ELEMENT_INFO))
+
+  def test_debit_root_sorts_before_credit_root(self):
+    """Conventional BS order — Assets (debit) before
+    LiabilitiesAndStockholdersEquity (credit) — emerges from the
+    balance-type fallback when no explicit root_order rows exist."""
+    # Pass IDs in deliberately-wrong (credit-first) order so the test
+    # actually exercises the sort logic, not the input order.
+    result = self._sort_ids([self.L_AND_E_ID, self.ASSETS_ID])
+    assert result == [self.ASSETS_ID, self.L_AND_E_ID]
+
+  def test_explicit_root_order_wins_over_balance_type(self):
+    """Tenants who seed root_order rows override the balance-type
+    fallback — pin a Liabilities-first layout if that's what their
+    Reporting Style dictates."""
+    root_order = {self.L_AND_E_ID: 1.0, self.ASSETS_ID: 2.0}
+    result = self._sort_ids([self.ASSETS_ID, self.L_AND_E_ID], root_order)
+    assert result == [self.L_AND_E_ID, self.ASSETS_ID]
+
+  def test_qname_tiebreak_for_same_balance_type(self):
+    """Two credit-balance roots — sort by qname so the order is stable
+    across runs. ``StockholdersEquity`` < ``LiabilitiesAndStockholdersEquity``
+    lexicographically? Actually 'L' < 'S' — so L+E comes first."""
+    result = self._sort_ids([self.EQUITY_ID, self.L_AND_E_ID])
+    assert result == [self.L_AND_E_ID, self.EQUITY_ID]
+
+  def test_explicit_partial_order_doesnt_break_fallback(self):
+    """One root has explicit order, two don't. The explicit-ordered
+    root wins outright (its order_value < inf); the remaining two fall
+    back to balance-type and then qname."""
+    root_order = {self.EQUITY_ID: 0.0}  # Force equity first
+    result = self._sort_ids(
+      [self.ASSETS_ID, self.L_AND_E_ID, self.EQUITY_ID], root_order
+    )
+    assert result == [self.EQUITY_ID, self.ASSETS_ID, self.L_AND_E_ID]
+
+  def test_unknown_balance_type_treated_as_credit(self):
+    """A root whose element_info is missing (or balance_type is None)
+    must not crash. Default to credit-priority so unknown roots sort
+    after known debit roots — produces stable output without throwing."""
+    info = dict(self.ELEMENT_INFO)
+    info["elem_mystery"] = {"qname": "rs-gaap:MysteryRoot"}  # no balance_type
+    result = sorted(
+      [self.ASSETS_ID, "elem_mystery"],
+      key=lambda rid: _root_sort_key(rid, {}, info),
+    )
+    # Mystery has no balance_type → bt_priority=1 (credit-tier);
+    # Assets is debit → bt_priority=0 → wins.
+    assert result == [self.ASSETS_ID, "elem_mystery"]
+
+  def test_empty_element_info_doesnt_crash(self):
+    """Defensive: if element_info is empty for a given root_id (race
+    condition where the root was discovered but its row didn't load),
+    the key still returns a comparable tuple."""
+    key = _root_sort_key("elem_unknown", {}, {})
+    assert key == (float("inf"), 1, "")
 
 
 class TestCloseToRetainedEarningsWithDividends:

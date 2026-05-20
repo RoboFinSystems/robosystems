@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Author rollforward IBs for every BS leaf with activity.
 
-Reads ``fixtures/transactions.csv``, groups LineItems by BS-leaf
-account, derives the unique ``TransactionDescriptionCode`` set per
-account, and creates one ``block_type='rollforward'`` IB per BS leaf
-via ``create-information-block``. Each filter targets the
-corresponding mini flow concept.
+Reads the GeneralJournal.csv pulled from Charlie's
+``seattlemethod/prototypes`` GitHub repo into
+``local/datasets/seattle_method/`` (see ``pull_general_journal.sh``),
+groups LineItems by BS-leaf account, derives the unique
+``TransactionDescriptionCode`` set per account, and creates one
+``block_type='rollforward'`` IB per BS leaf via
+``create-information-block``. Each filter targets the corresponding
+mini flow concept (normalized via ``_KNOWN_TDC_ALIASES``).
 
 Pre-condition: ``load_taxonomy.py``, ``seed_mappings.py``, and
 ``ingest_transactions.py`` have all run against this graph.

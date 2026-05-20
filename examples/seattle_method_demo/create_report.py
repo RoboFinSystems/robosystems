@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
+import uuid
 from pathlib import Path
 
 import requests
@@ -77,7 +77,9 @@ def _post(base_url: str, api_key: str, path: str, body: dict) -> dict:
     headers={
       "X-API-Key": api_key,
       "Content-Type": "application/json",
-      "Idempotency-Key": f"sm-case-1-{int(time.time())}",
+      # uuid4 instead of timestamp so back-to-back runs in the same
+      # second don't collide on the idempotency-key cache.
+      "Idempotency-Key": f"sm-case-1-{uuid.uuid4()}",
     },
     json=body,
     timeout=60,
@@ -218,13 +220,31 @@ def find_value(rows: list[dict], qname: str) -> float | None:
   return None
 
 
+def _period_label(period: dict | None) -> str:
+  """Format a period dict as ``YYYY-MM-DD → YYYY-MM-DD`` for the header.
+
+  Returns ``"—"`` when the period is missing — defensive guard against
+  a single-period render where no comparative is returned.
+  """
+  if not period:
+    return "—"
+  return f"{period['start']} → {period['end']}"
+
+
 def render_report(
   graph_id: str, report: dict, statements: dict[str, dict]
 ) -> str:
-  bs = statements["balance_sheet"]["rows"]
+  bs_stmt = statements["balance_sheet"]
+  bs = bs_stmt["rows"]
   is_rows = statements["income_statement"]["rows"]
   cf_rows = statements["cash_flow_statement"]["rows"]
   se_rows = statements["equity_statement"]["rows"]
+
+  # Derive period labels from the actual response so the markdown stays
+  # honest if DEFAULT_PERIOD_* (or the prior-period computation) shifts.
+  periods = bs_stmt.get("periods") or []
+  current_period = periods[0] if periods else None
+  prior_period = periods[1] if len(periods) > 1 else None
 
   assets = find_value(bs, "rs-gaap:Assets")
   l_and_e = find_value(bs, "rs-gaap:LiabilitiesAndStockholdersEquity")
@@ -245,8 +265,8 @@ def render_report(
 **Graph**: `{graph_id}`
 **Report**: `{report["id"]}` ({report["generation_status"]})
 **Entity**: {report.get("entity_name") or "—"}
-**Period**: 2024-01-01 → 2024-03-31 (Q1 2024)
-**Comparative**: 2023-10-02 → 2023-12-31 (Prior — zero opening balances)
+**Period**: {_period_label(current_period)} (Current)
+**Comparative**: {_period_label(prior_period)} (Prior — zero opening balances)
 **Dataset**: Charlie Hoffman's lemonade-stand 14-JE Q1 2024 fixture
 **Source vocabulary**: `mini` (Seattle Method MINI base taxonomy)
 **Render vocabulary**: `rs-gaap` (RoboSystems canonical reporting taxonomy)
