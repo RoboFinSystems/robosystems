@@ -9,7 +9,11 @@
 
 ## Automated Diff vs. Charlie's Published Facts
 
-Compared **17** concept(s) against Charlie's published XBRL instance (`local/datasets/seattle_method/report/instance.xml`, fetched by `pull_expected_report.sh` from [`xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/`](http://www.xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/index.html)). **17 exact match** • **0 delta**. Total absolute delta: **$0.00**.
+**Correctness** (every concept we surface matches Charlie to the cent): **18/18 exact match**, |Δ| = **$0.00**.
+
+**Coverage** (concepts we surface vs. Charlie's published set): **18/60** (30%). The remaining 43 concept(s) are forward-work — see the Coverage Gap section below.
+
+Compared against Charlie's published XBRL instance (`local/datasets/seattle_method/report/instance.xml`, fetched by `pull_expected_report.sh` from [`xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/`](http://www.xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/index.html)).
 
 | Concept | Our value | Charlie's value | Δ | |
 |---|---:|---:|---:|---|
@@ -25,48 +29,70 @@ Compared **17** concept(s) against Charlie's published XBRL instance (`local/dat
 | `mini:PaidInCapital` | $10,000.00 | $10,000.00 | $0.00 | ✓ |
 | `mini:PropertyPlantAndEquipment` | $900.00 | $900.00 | $0.00 | ✓ |
 | `mini:Receivables` | $0.00 | $0.00 | $0.00 | ✓ |
+| `mini:RetainedEarnings` | $2,050.00 | $2,050.00 | $0.00 | ✓ |
 | `mini:Sales` | $8,000.00 | $8,000.00 | $0.00 | ✓ |
 | `mini:Assets` | $14,450.00 | $14,450.00 | $0.00 | ✓ |
 | `mini:LiabilitiesAndEquity` | $14,450.00 | $14,450.00 | $0.00 | ✓ |
 | `mini:NetIncomeLoss` | $2,050.00 | $2,050.00 | $0.00 | ✓ |
 | `mini:NetCashFlow` | $10,850.00 | $10,850.00 | $0.00 | ✓ |
 
-## Methodology Gap — Concepts Charlie Publishes That We Don't Render
+## Coverage Gap — Concepts Charlie Publishes We Don't Yet Surface
 
-Charlie's instance contains **44** additional non-zero current-period concept(s) that our pipeline doesn't emit. None of these block the reconciliation diff above (which iterates over our concepts and matches against his), but they represent the gap between our current render and full Record-to-Report parity. Each is a forward-work candidate.
+Charlie's instance contains **43** additional non-zero current-period concept(s) that our pipeline doesn't emit. **This is incompleteness, not incorrectness** — every concept we surface matches Charlie's value to the cent. These represent the gap between our current render and full Record-to-Report parity; each is bucketed below by the architectural lever that would close it.
+
+### Subtotals our pipeline computes but doesn't emit as named facts (13)
+
+**Low effort** — every input is already in our facts; walking the mini calc linkbase and emitting intermediate sums as named facts is a renderer change.
 
 | Concept | Period | Charlie's value |
 |---|---|---:|
-| `mini:AccumulatedDepreciation` | instant | $100.00 |
-| `mini:AdditionalLongtermBorrowings` | duration | $2,000.00 |
-| `mini:CapitalAdditionsPropertyPlantAndEquipment` | duration | $1,000.00 |
-| `mini:Cash` | instant | $10,850.00 |
-| `mini:CollectionOfReceivables` | duration | $8,000.00 |
 | `mini:CurrentAssets` | instant | $13,550.00 |
 | `mini:CurrentLiabilities` | instant | $1,400.00 |
-| `mini:DecreaseFromDepreciationAndAmortization` | duration | $100.00 |
-| `mini:DecreaseFromPaymentAccountsPayable` | duration | $7,000.00 |
-| `mini:DecreaseFromPaymentOfInterest` | duration | $150.00 |
-| `mini:DecreaseInInventoriesFromSales` | duration | $2,000.00 |
-| `mini:Equipment` | instant | $1,000.00 |
 | `mini:Equity` | instant | $12,050.00 |
 | `mini:GrossProfitLoss` | duration | $2,700.00 |
 | `mini:IncomeLossFromContinuingOperationsBeforeTax` | duration | $2,450.00 |
-| `mini:IncreaseInReceivablesFromSalesOnAccount` | duration | $8,000.00 |
-| `mini:InterestAccrued` | duration | $550.00 |
-| `mini:InventoryWrittenOff` | duration | $300.00 |
-| `mini:InvestmentsByOwner` | duration | $10,000.00 |
 | `mini:Liabilities` | instant | $2,400.00 |
-| `mini:MaturesInOneYear` | instant | $1,000.00 |
 | `mini:NetCashFlowFinancingActivities` | duration | $10,850.00 |
 | `mini:NetCashFlowInvestingActivities` | duration | $(1,000.00) |
 | `mini:NetCashFlowOperatingActivities` | duration | $1,000.00 |
 | `mini:NoncurrentAssets` | instant | $900.00 |
 | `mini:NoncurrentLiabilities` | instant | $1,000.00 |
-| `mini:NonoperatingIncomeExpenses` | duration | $(150.00) |
 | `mini:OperatingExpenses` | duration | $100.00 |
 | `mini:OperatingIncomeLoss` | duration | $2,600.00 |
+
+### Hierarchical leaf splits we don't model in our CoA (8)
+
+**Medium effort** — requires CoA element splits (e.g. gross PPE + AccumulatedDepreciation as separate accounts). Customer-facing accounting design decision, not just a renderer fix.
+
+| Concept | Period | Charlie's value |
+|---|---|---:|
+| `mini:AccumulatedDepreciation` | instant | $100.00 |
+| `mini:Cash` | instant | $10,850.00 |
+| `mini:Equipment` | instant | $1,000.00 |
+| `mini:MaturesInOneYear` | instant | $1,000.00 |
 | `mini:OtherSecuredLoans` | instant | $1,000.00 |
+| `mini:PropertyPlantAndEquipmentGross` | instant | $1,000.00 |
+| `mini:RawMaterial` | instant | $2,700.00 |
+| `mini:TradePayables` | instant | $1,000.00 |
+
+### Flow concepts (TDC values) Charlie publishes as standalone facts (22)
+
+**Medium-high effort** — architectural: our model stores TDC on ``LineItem.metadata['transaction_description_code']``; Charlie's model emits each TDC as a published fact. Closes with a materialize-time aggregator that groups by TDC per period.
+
+| Concept | Period | Charlie's value |
+|---|---|---:|
+| `mini:AdditionalLongtermBorrowings` | duration | $2,000.00 |
+| `mini:CapitalAdditionsPropertyPlantAndEquipment` | duration | $1,000.00 |
+| `mini:CollectionOfReceivables` | duration | $8,000.00 |
+| `mini:DecreaseFromDepreciationAndAmortization` | duration | $100.00 |
+| `mini:DecreaseFromPaymentAccountsPayable` | duration | $7,000.00 |
+| `mini:DecreaseFromPaymentOfInterest` | duration | $150.00 |
+| `mini:DecreaseInInventoriesFromSales` | duration | $2,000.00 |
+| `mini:IncreaseInReceivablesFromSalesOnAccount` | duration | $8,000.00 |
+| `mini:InterestAccrued` | duration | $550.00 |
+| `mini:InventoryWrittenOff` | duration | $300.00 |
+| `mini:InvestmentsByOwner` | duration | $10,000.00 |
+| `mini:NonoperatingIncomeExpenses` | duration | $(150.00) |
 | `mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment` | duration | $1,000.00 |
 | `mini:PaymentForReductionOfLongtermBorrowings` | duration | $1,000.00 |
 | `mini:PaymentInterest` | duration | $150.00 |
@@ -74,13 +100,9 @@ Charlie's instance contains **44** additional non-zero current-period concept(s)
 | `mini:ProceedsFromAdditionalLongtermBorrowings` | duration | $2,000.00 |
 | `mini:ProceedsFromCollectionOfReceivables` | duration | $8,000.00 |
 | `mini:ProceedsFromInvestmentsByOwner` | duration | $10,000.00 |
-| `mini:PropertyPlantAndEquipmentGross` | instant | $1,000.00 |
 | `mini:PurchasesInventoryForSaleOnAccount` | duration | $8,000.00 |
 | `mini:PurchasesOfInventoryForSale` | duration | $5,000.00 |
-| `mini:RawMaterial` | instant | $2,700.00 |
 | `mini:RepaymentLongtermBorrowings` | duration | $1,000.00 |
-| `mini:RetainedEarnings` | instant | $2,050.00 |
-| `mini:TradePayables` | instant | $1,000.00 |
 
 ## Four Anchor Totals
 
@@ -110,6 +132,7 @@ Every mini concept with non-zero activity in the period. ``Δ debit-positive`` i
 | `mini:LongtermDebt` | Long-term Debt | liability | instant | $(1,000.00) |
 | `mini:PaidInCapital` | Paid In Capital | equity | instant | $(10,000.00) |
 | `mini:PropertyPlantAndEquipment` | Property, Plant and Equipment | asset | instant | $900.00 |
+| `mini:RetainedEarnings` | Retained Earnings | equity | instant | $(2,050.00) |
 | `mini:Sales` | Sales | revenue | duration | $(8,000.00) |
 
 ## Rollforward Attribution (Phase 2 MVP Filter Engine)

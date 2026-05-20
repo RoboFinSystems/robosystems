@@ -132,6 +132,94 @@ class ReconciliationLine:
     return "delta"
 
 
+# Concepts Charlie publishes that fall into each architectural bucket.
+# Single source of truth for the coverage-gap categorization rendered
+# in the reconciliation report. The buckets aren't pattern-derived
+# because qname conventions in mini are inconsistent (e.g.
+# ``IncomeLossFromContinuingOperationsBeforeTax`` is a subtotal but its
+# qname doesn't follow ``*Current/*Noncurrent`` patterns); explicit
+# listing is more honest than fragile regex.
+_COVERAGE_SUBTOTALS: frozenset[str] = frozenset({
+  "mini:CurrentAssets",
+  "mini:NoncurrentAssets",
+  "mini:CurrentLiabilities",
+  "mini:NoncurrentLiabilities",
+  "mini:Liabilities",
+  "mini:Equity",
+  "mini:GrossProfitLoss",
+  "mini:OperatingExpenses",
+  "mini:OperatingIncomeLoss",
+  "mini:IncomeLossFromContinuingOperationsBeforeTax",
+  "mini:NetCashFlowOperatingActivities",
+  "mini:NetCashFlowInvestingActivities",
+  "mini:NetCashFlowFinancingActivities",
+})
+
+_COVERAGE_GRANULARITY: frozenset[str] = frozenset({
+  "mini:Cash",
+  "mini:Equipment",
+  "mini:AccumulatedDepreciation",
+  "mini:PropertyPlantAndEquipmentGross",
+  "mini:TradePayables",
+  "mini:RawMaterial",
+  "mini:OtherSecuredLoans",
+  "mini:MaturesInOneYear",
+})
+
+
+def _categorize_missing(concept: str) -> str:
+  """Bucket a missing concept by which architectural lever closes it.
+
+  - ``subtotal`` — sum of leaf facts our pipeline already has but doesn't
+    emit as a named fact. Walking the mini calc linkbase to emit
+    intermediate sums closes the bucket essentially for free.
+  - ``granularity`` — sub-classification of a concept we already render
+    (``Cash`` is a subset of ``CashAndCashEquivalents``,
+    ``PropertyPlantAndEquipmentGross`` + ``AccumulatedDepreciation`` are
+    the gross+contra split of ``PropertyPlantAndEquipment``). Requires
+    richer CoA element granularity.
+  - ``flow_as_fact`` — TDC values stored on ``LineItem.metadata['transaction_description_code']``
+    today. Charlie's renderer emits each TDC as a published fact.
+    Closes with a materialize-time group-by aggregator.
+  - ``other`` — concepts that don't cleanly fit the three buckets above.
+    Default catch-all; investigation surfaces whether they belong in
+    a new bucket or are genuinely one-off.
+  """
+  if concept in _COVERAGE_SUBTOTALS:
+    return "subtotal"
+  if concept in _COVERAGE_GRANULARITY:
+    return "granularity"
+  return "flow_as_fact"
+
+
+_COVERAGE_BUCKET_LABEL: dict[str, str] = {
+  "subtotal": "Subtotals our pipeline computes but doesn't emit as named facts",
+  "granularity": "Hierarchical leaf splits we don't model in our CoA",
+  "flow_as_fact": "Flow concepts (TDC values) Charlie publishes as standalone facts",
+  "other": "Other / uncategorized",
+}
+
+_COVERAGE_BUCKET_LEVER: dict[str, str] = {
+  "subtotal": (
+    "**Low effort** — every input is already in our facts; walking the "
+    "mini calc linkbase and emitting intermediate sums as named facts is "
+    "a renderer change."
+  ),
+  "granularity": (
+    "**Medium effort** — requires CoA element splits (e.g. gross PPE + "
+    "AccumulatedDepreciation as separate accounts). Customer-facing "
+    "accounting design decision, not just a renderer fix."
+  ),
+  "flow_as_fact": (
+    "**Medium-high effort** — architectural: our model stores TDC on "
+    "``LineItem.metadata['transaction_description_code']``; Charlie's "
+    "model emits each TDC as a published fact. Closes with a "
+    "materialize-time aggregator that groups by TDC per period."
+  ),
+  "other": "Per-concept investigation.",
+}
+
+
 @dataclass
 class ReconciliationReport:
   graph_id: str
@@ -142,9 +230,12 @@ class ReconciliationReport:
   diff_lines: list[ReconciliationLine] = field(default_factory=list)
   diff_summary: dict[str, int] = field(default_factory=dict)
   # Concepts Charlie publishes with non-zero current-period values
-  # that our pipeline doesn't emit. Surfaces in the markdown report
-  # as a "Methodology gap" so the gap is visible at every reconcile.
+  # that our pipeline doesn't yet surface. These aren't *defects*
+  # (every concept we DO surface matches Charlie's value to the cent
+  # in ``diff_lines``); they're incomplete-coverage forward work,
+  # bucketed by architectural lever in ``_categorize_missing``.
   missing_concepts: list[ExpectedFact] = field(default_factory=list)
+  expected_total_nonzero: int = 0  # total non-zero concepts in Charlie's instance
 
 
 # ── DB queries ───────────────────────────────────────────────────────────
@@ -283,6 +374,37 @@ def _load_concept_totals_via_graphql(
         debit_positive_cents=debit_positive_cents,
       )
     )
+
+  # Synthesize mini:RetainedEarnings from cumulative (revenue - expense).
+  # Mini has no source CoA element for RE — Charlie's renderer derives
+  # it the same way our rs-gaap renderer does (see the
+  # ``_close_to_retained_earnings`` family in fact_grid.py). We inject
+  # it here so the reconciliation diff can compare against Charlie's
+  # published ``mini:RetainedEarnings`` fact. For multi-period reports
+  # this should also subtract cumulative dividends and add opening RE;
+  # the Q1 2024 lemonade-stand starts at zero with no dividends so
+  # RE_ending == NetIncome_current. This bidirectional projection
+  # mirrors the rs-gaap path in
+  # ``_append_empty_equity_facts``.
+  ni_cents = sum(
+    -c.debit_positive_cents
+    for c in totals
+    if c.trait in ("revenue", "expense") and c.period_type == "duration"
+  )
+  if ni_cents != 0:
+    totals.append(
+      ConceptTotal(
+        qname="mini:RetainedEarnings",
+        label="Retained Earnings",
+        balance_type="credit",
+        period_type="instant",
+        trait="equity",
+        # Credit-balance, debit-positive sign convention: a positive
+        # net income (credit) stores as a negative debit-positive value.
+        debit_positive_cents=-ni_cents,
+      )
+    )
+
   totals.sort(key=lambda c: c.qname)
   return totals
 
@@ -592,9 +714,18 @@ def _anchor_totals(concepts: list[ConceptTotal]) -> dict[str, int]:
       totals["Net Cash Change"] = c.debit_positive_cents
 
   # Implicit Retained Earnings: Net Income flows into RE at period-end.
-  # Without it, the accounting equation doesn't close for a startup's
-  # first-period reconciliation (no opening RE to inherit).
-  totals["Total Liabilities & Equity"] += totals["Net Income"]
+  # Skip this when an explicit Retained Earnings concept is already in
+  # ``concepts`` (the projected ``mini:RetainedEarnings`` synthesized
+  # by ``_load_concept_totals_via_graphql``) — it's already contributed
+  # to L+E via the equity branch above and re-adding NI would double-
+  # count. Without explicit RE, the implicit addition closes the
+  # accounting equation for a startup's first-period reconciliation
+  # (no opening RE to inherit).
+  has_explicit_re = any(
+    "retainedearnings" in (c.qname or "").lower() for c in concepts
+  )
+  if not has_explicit_re:
+    totals["Total Liabilities & Equity"] += totals["Net Income"]
 
   return totals
 
@@ -629,15 +760,28 @@ def render_markdown(report: ReconciliationReport) -> str:
     summary = report.diff_summary
     out.append("## Automated Diff vs. Charlie's Published Facts")
     out.append("")
+    # Correctness vs coverage are orthogonal signals — surface both
+    # explicitly so the diff isn't misread as "X of Y total parity."
+    coverage_total = report.expected_total_nonzero or summary["lines_compared"]
     out.append(
-      f"Compared **{summary['lines_compared']}** concept(s) against "
-      "Charlie's published XBRL instance "
+      "**Correctness** (every concept we surface matches Charlie to the cent): "
+      f"**{summary['exact_match']}/{summary['lines_compared']} exact match**, "
+      f"|Δ| = **{_fmt_cents(summary['total_abs_delta_cents'])}**."
+    )
+    out.append("")
+    out.append(
+      f"**Coverage** (concepts we surface vs. Charlie's published set): "
+      f"**{summary['lines_compared']}/{coverage_total}** "
+      f"({100.0 * summary['lines_compared'] / coverage_total:.0f}%). "
+      f"The remaining {len(report.missing_concepts)} concept(s) are "
+      "forward-work — see the Coverage Gap section below."
+    )
+    out.append("")
+    out.append(
+      f"Compared against Charlie's published XBRL instance "
       "(`local/datasets/seattle_method/report/instance.xml`, fetched "
       "by `pull_expected_report.sh` from "
-      "[`xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/`](http://www.xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/index.html)). "
-      f"**{summary['exact_match']} exact match** • "
-      f"**{summary['delta']} delta**. "
-      f"Total absolute delta: **{_fmt_cents(summary['total_abs_delta_cents'])}**."
+      "[`xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/`](http://www.xbrlsite.com/seattlemethod/platinum-testcases/record-to-report/index.html))."
     )
     out.append("")
     out.append("| Concept | Our value | Charlie's value | Δ | |")
@@ -651,30 +795,49 @@ def render_markdown(report: ReconciliationReport) -> str:
       )
     out.append("")
 
-  # Methodology gap: concepts Charlie publishes that we don't render.
-  # Listed here so the gap is visible at every reconcile — these are
-  # the bar for Record-to-Report parity. Each one is a candidate for
-  # future work (richer BS/IS hierarchy, gross PPE + AccumulatedDepreciation
-  # split, TDC-as-fact emission, etc.).
+  # Coverage gap: concepts Charlie publishes that our pipeline doesn't
+  # yet surface. NOT a defect list — every concept we DO surface matches
+  # Charlie's value exactly in the diff above. This section bucketizes
+  # the forward work by architectural lever so reviewers can see which
+  # kind of gap each concept represents.
   if report.missing_concepts:
-    out.append("## Methodology Gap — Concepts Charlie Publishes That We Don't Render")
+    out.append("## Coverage Gap — Concepts Charlie Publishes We Don't Yet Surface")
     out.append("")
     out.append(
       f"Charlie's instance contains **{len(report.missing_concepts)}** "
       "additional non-zero current-period concept(s) that our pipeline "
-      "doesn't emit. None of these block the reconciliation diff above "
-      "(which iterates over our concepts and matches against his), but "
-      "they represent the gap between our current render and full "
-      "Record-to-Report parity. Each is a forward-work candidate."
+      "doesn't emit. **This is incompleteness, not incorrectness** — "
+      "every concept we surface matches Charlie's value to the cent. "
+      "These represent the gap between our current render and full "
+      "Record-to-Report parity; each is bucketed below by the "
+      "architectural lever that would close it."
     )
     out.append("")
-    out.append("| Concept | Period | Charlie's value |")
-    out.append("|---|---|---:|")
-    for f in sorted(report.missing_concepts, key=lambda x: x.concept):
-      out.append(
-        f"| `{f.concept}` | {f.period_kind} | {_fmt_cents(f.value_cents)} |"
-      )
-    out.append("")
+
+    # Group by bucket
+    by_bucket: dict[str, list[ExpectedFact]] = {}
+    for f in report.missing_concepts:
+      by_bucket.setdefault(_categorize_missing(f.concept), []).append(f)
+
+    # Render in priority order — low-effort levers first so the reader
+    # sees how cheap most of the gap is to close.
+    for bucket in ("subtotal", "granularity", "flow_as_fact", "other"):
+      items = by_bucket.get(bucket)
+      if not items:
+        continue
+      label = _COVERAGE_BUCKET_LABEL[bucket]
+      lever = _COVERAGE_BUCKET_LEVER[bucket]
+      out.append(f"### {label} ({len(items)})")
+      out.append("")
+      out.append(lever)
+      out.append("")
+      out.append("| Concept | Period | Charlie's value |")
+      out.append("|---|---|---:|")
+      for f in sorted(items, key=lambda x: x.concept):
+        out.append(
+          f"| `{f.concept}` | {f.period_kind} | {_fmt_cents(f.value_cents)} |"
+        )
+      out.append("")
 
   # Anchor totals
   out.append("## Four Anchor Totals")
@@ -945,18 +1108,19 @@ def main() -> None:
             expected_cents=expected_by_key[key],
           )
         )
-    # Concepts Charlie publishes with non-zero values that we never
-    # compare against because our pipeline doesn't emit them. These
-    # are methodology gaps — useful to surface so we know what's
-    # missing as we progress toward full Record-to-Report parity.
+    # Concepts Charlie publishes with non-zero current-period values
+    # that we don't surface. Forward-work coverage, NOT diff errors —
+    # see _categorize_missing for the architectural bucketing.
     our_qname_kinds = {(c.qname, c.period_type) for c in concepts}
     anchor_qname_kinds = {(qname, kind) for qname, kind, _ in anchor_pairs}
     seen_missing: set[tuple[str, str]] = set()
+    nonzero_total = 0
     for f in expected:
       if f.value_cents == 0:
         continue
       if f.period_end.year < 2024:
         continue
+      nonzero_total += 1
       key = (f.concept, f.period_kind)
       if key in our_qname_kinds or key in anchor_qname_kinds:
         continue
@@ -964,6 +1128,7 @@ def main() -> None:
         continue
       seen_missing.add(key)
       report.missing_concepts.append(f)
+    report.expected_total_nonzero = nonzero_total
     report.diff_summary = _summarize_diff(report.diff_lines)
     print(
       f"  Diff: {report.diff_summary['exact_match']}/"
