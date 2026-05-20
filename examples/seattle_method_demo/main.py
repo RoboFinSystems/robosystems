@@ -38,9 +38,17 @@ from . import load_taxonomy as load_mod
 from . import seed_mappings as seed_mod
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PULL_SCRIPT = REPO_ROOT / "examples" / "seattle_method_demo" / "pull_mini.sh"
+PULL_TAXONOMY_SCRIPT = REPO_ROOT / "examples" / "seattle_method_demo" / "pull_mini.sh"
+PULL_JOURNAL_SCRIPT = (
+  REPO_ROOT / "examples" / "seattle_method_demo" / "pull_general_journal.sh"
+)
+PULL_REPORT_SCRIPT = (
+  REPO_ROOT / "examples" / "seattle_method_demo" / "pull_expected_report.sh"
+)
 TAXONOMY_DIR = REPO_ROOT / "local" / "taxonomies" / "mini"
-CSV_PATH = REPO_ROOT / "examples" / "seattle_method_demo" / "fixtures" / "transactions.csv"
+CSV_PATH = (
+  REPO_ROOT / "local" / "datasets" / "seattle_method" / "GeneralJournal.csv"
+)
 
 BASE_URL = "http://localhost:8000"
 CREDENTIALS_FILE = Path(".local/config.json")
@@ -83,15 +91,37 @@ def _get_graph_client():
 
 
 def step_pull() -> None:
-  """Step 1 — Pull mini taxonomy from xbrlsite into local/taxonomies/mini/."""
+  """Step 1 — Pull Charlie's upstream artifacts.
+
+  Fetches three artifacts from Charlie's published sources so the
+  demo ingests AND validates against his canonical files rather than
+  committed copies:
+
+  - **mini taxonomy** (xbrlsite.azurewebsites.net) → local/taxonomies/mini/
+  - **GeneralJournal.csv** (github.com/seattlemethod/prototypes) →
+    local/datasets/seattle_method/
+  - **Record-to-Report instance package** (xbrlsite.com/seattlemethod/
+    platinum-testcases/record-to-report/) → local/datasets/seattle_method/report/
+    — the XBRL ``instance.xml`` Charlie publishes is the reconciliation
+    reference (strictly stronger than the earlier hand-derived CSV)
+
+  All destinations are gitignored under ``local/`` and idempotent
+  (re-runs overwrite). Aborts on any fetch failure.
+  """
   print("─" * 70)
-  print("Step 1 — pull mini taxonomy")
+  print("Step 1 — pull mini taxonomy + GeneralJournal.csv + instance.xml from Charlie")
   print("─" * 70)
-  result = subprocess.run(
-    ["bash", str(PULL_SCRIPT)], cwd=str(REPO_ROOT), check=False
-  )
-  if result.returncode != 0:
-    raise SystemExit(f"pull_mini.sh exited with code {result.returncode}")
+  for label, script in (
+    ("mini taxonomy", PULL_TAXONOMY_SCRIPT),
+    ("GeneralJournal.csv", PULL_JOURNAL_SCRIPT),
+    ("Record-to-Report instance.xml", PULL_REPORT_SCRIPT),
+  ):
+    print(f"  → {label}")
+    result = subprocess.run(
+      ["bash", str(script)], cwd=str(REPO_ROOT), check=False
+    )
+    if result.returncode != 0:
+      raise SystemExit(f"{script.name} exited with code {result.returncode}")
 
 
 def step_provision_graph() -> str:
@@ -286,6 +316,66 @@ def step_author_rollforwards(graph_id: str, dry_run: bool = False) -> None:
   print(f"  {action} {created} rollforward IB(s)")
 
 
+def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
+  """Step 7 — Reconcile against Charlie Hoffman's published mini facts.
+
+  Produces ``output/seattle-method-case-1.md`` — the source-vocabulary
+  cross-check (17/17 exact match against `luca.pacioli.ai`). Subprocess
+  invocation to keep reconcile.py's argparse + GraphQL plumbing isolated.
+  """
+  print("─" * 70)
+  print(f"Step 7 — reconcile mini facts → graph {graph_id}")
+  print("─" * 70)
+  if dry_run:
+    print("  (dry-run — skipping reconcile)")
+    return
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples.seattle_method_demo.reconcile",
+      graph_id,
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if result.returncode != 0:
+    raise SystemExit(f"reconcile exited with code {result.returncode}")
+
+
+def step_create_report(graph_id: str, dry_run: bool = False) -> None:
+  """Step 8 — Materialize the 4-IB rs-gaap Report + render markdown.
+
+  Produces ``output/seattle-method-case-1-four-statements.md`` — the
+  rs-gaap projection of the same 14 JEs, materialized through the
+  Report architecture (create-report + reportPackage / statement
+  GraphQL queries). Subprocess invocation for the same isolation reason
+  as step_reconcile.
+  """
+  print("─" * 70)
+  print(f"Step 8 — create-report 4-IB rs-gaap Report → graph {graph_id}")
+  print("─" * 70)
+  if dry_run:
+    print("  (dry-run — skipping create-report)")
+    return
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples.seattle_method_demo.create_report",
+      graph_id,
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if result.returncode != 0:
+    raise SystemExit(f"create_report exited with code {result.returncode}")
+
+
 # ── Step registry ────────────────────────────────────────────────────────
 
 STEPS = {
@@ -297,6 +387,14 @@ STEPS = {
   "author-rollforwards": (
     "Author rollforward IBs for every BS leaf with activity",
     step_author_rollforwards,
+  ),
+  "reconcile": (
+    "Reconcile against Charlie Hoffman's published mini facts",
+    step_reconcile,
+  ),
+  "create-report": (
+    "Materialize the 4-IB rs-gaap Report + render markdown",
+    step_create_report,
   ),
 }
 
@@ -363,7 +461,7 @@ def main() -> None:
     graph_id = step_provision_graph()
     print()
 
-  # Step 3-6 — sequential
+  # Step 3-8 — sequential
   step_load_taxonomy(graph_id, dry_run=args.dry_run)
   print()
   step_seed_mappings(graph_id, dry_run=args.dry_run)
@@ -372,12 +470,18 @@ def main() -> None:
   print()
   step_author_rollforwards(graph_id, dry_run=args.dry_run)
   print()
+  step_reconcile(graph_id, dry_run=args.dry_run)
+  print()
+  step_create_report(graph_id, dry_run=args.dry_run)
+  print()
 
   print("─" * 70)
   print(f"✓ End-to-end demo run complete against graph {graph_id}")
   print("─" * 70)
   print()
-  print("Next: uv run python -m examples.seattle_method_demo.reconcile " + graph_id)
+  print("Artifacts in examples/seattle_method_demo/output/:")
+  print("  - seattle-method-case-1.md                  (mini reconciliation)")
+  print("  - seattle-method-case-1-four-statements.md  (rs-gaap 4-statement Report)")
 
 
 if __name__ == "__main__":

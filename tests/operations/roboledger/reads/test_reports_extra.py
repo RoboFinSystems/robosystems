@@ -14,9 +14,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.operations.roboledger.reads.reports import (
+  VALID_BLOCK_TYPES,
   CoaMappingNotFoundError,
   build_current_and_prior_periods,
   get_live_financial_statement,
+  get_statement,
   resolve_reporting_window,
 )
 
@@ -245,3 +247,107 @@ class TestGetLiveFinancialStatement:
           period_start=date(2026, 4, 1),
           period_end=date(2026, 4, 30),
         )
+
+
+class TestGetStatementBlockTypeFilter:
+  """Regression pin: ``get_statement`` filters facts by the owning
+  structure's ``block_type``.
+
+  Without this filter, elements persisted into multiple FactSets
+  (``rs-gaap:NetIncomeLoss`` lives in IS + CF + SE per the
+  ``_persist_report_facts`` design) all flow into
+  ``_facts_to_balance_dict``, which sums them - inflating the rendered
+  value 2x / 3x.
+
+  Surfaced by the Seattle Method demo when ``create-report`` rendered
+  the IS with NetIncomeLoss = $6,150 ($2,050 x 3) instead of $2,050.
+  """
+
+  @pytest.mark.unit
+  def test_sql_filters_by_block_type(self):
+    """The SQL query passed to ``session.execute`` must bind a
+    ``block_type`` param and filter on ``s.block_type``. We assert on
+    the bind params directly — they're the contract that prevents
+    cross-FactSet duplicate-summing."""
+    session = MagicMock()
+    # Report row exists so the function progresses to the SQL fact load.
+    report = MagicMock()
+    report.id = "rpt_01"
+    report.period_start = date(2024, 1, 1)
+    report.period_end = date(2024, 3, 31)
+    report.comparative = False
+    report.periods = None
+    session.get.return_value = report
+    # SQL returns no rows → renderer short-circuits before touching
+    # the structure picker; we don't care about the render output here,
+    # only that the query was bound with block_type.
+    session.execute.return_value = iter([])
+
+    resp = get_statement(
+      session,
+      graph_id="kg_test",
+      report_id="rpt_01",
+      block_type="income_statement",
+      reporting_style_id="style_01",
+    )
+
+    assert resp is not None
+    # Inspect the SQL call: bind params must include block_type.
+    call = session.execute.call_args
+    sql_text = str(call.args[0])
+    params = call.args[1]
+    assert "s.block_type = :block_type" in sql_text, (
+      "SQL must filter by block_type to avoid cross-FactSet summing"
+    )
+    assert params["block_type"] == "income_statement"
+    assert params["report_id"] == "rpt_01"
+
+
+class TestGetStatementValidBlockTypes:
+  """Regression pin: every statement type accepted by
+  ``live-financial-statement`` must also be accepted by ``get_statement``.
+
+  Pre-fix, ``cash_flow_statement`` was missing from ``VALID_BLOCK_TYPES``
+  so ``get_statement(blockType: 'cash_flow_statement')`` raised
+  ``ValueError`` that the GraphQL resolver translated into a misleading
+  ``LEDGER_NOT_INITIALIZED`` error.
+  """
+
+  @pytest.mark.unit
+  def test_cash_flow_statement_is_valid(self):
+    """The canonical four-statement set must all be accepted —
+    cash_flow_statement included."""
+    assert "cash_flow_statement" in VALID_BLOCK_TYPES
+    assert "balance_sheet" in VALID_BLOCK_TYPES
+    assert "income_statement" in VALID_BLOCK_TYPES
+    assert "equity_statement" in VALID_BLOCK_TYPES
+
+  @pytest.mark.unit
+  def test_cash_flow_statement_passes_validation(self):
+    """Concrete: a CF call doesn't raise ``ValueError``. Without the
+    fix, this raised ``Invalid block_type 'cash_flow_statement'``."""
+    session = MagicMock()
+    session.get.return_value = None  # Report missing → returns None gracefully
+
+    # Must not raise. If VALID_BLOCK_TYPES regresses to omit CF, this
+    # line throws before reaching session.get.
+    result = get_statement(
+      session,
+      graph_id="kg_test",
+      report_id="rpt_missing",
+      block_type="cash_flow_statement",
+    )
+    assert result is None  # Missing Report returns None, but no exception
+
+  @pytest.mark.unit
+  def test_invalid_block_type_still_rejected(self):
+    """Tighten: unknown block types still get rejected. Loosening the
+    validator past the canonical set would let bad inputs through."""
+    session = MagicMock()
+    with pytest.raises(ValueError, match="Invalid block_type"):
+      get_statement(
+        session,
+        graph_id="kg_test",
+        report_id="rpt_01",
+        block_type="not_a_real_block_type",
+      )

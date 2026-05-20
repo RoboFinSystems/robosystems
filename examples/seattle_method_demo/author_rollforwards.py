@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Author rollforward IBs for every BS leaf with activity.
 
-Reads ``fixtures/transactions.csv``, groups LineItems by BS-leaf
-account, derives the unique ``TransactionDescriptionCode`` set per
-account, and creates one ``block_type='rollforward'`` IB per BS leaf
-via ``create-information-block``. Each filter targets the
-corresponding mini flow concept.
+Reads the GeneralJournal.csv pulled from Charlie's
+``seattlemethod/prototypes`` GitHub repo into
+``local/datasets/seattle_method/`` (see ``pull_general_journal.sh``),
+groups LineItems by BS-leaf account, derives the unique
+``TransactionDescriptionCode`` set per account, and creates one
+``block_type='rollforward'`` IB per BS leaf via
+``create-information-block``. Each filter targets the corresponding
+mini flow concept (normalized via ``_KNOWN_TDC_ALIASES``).
 
 Pre-condition: ``load_taxonomy.py``, ``seed_mappings.py``, and
 ``ingest_transactions.py`` have all run against this graph.
@@ -132,7 +135,19 @@ def _collect_tdcs_per_bs_leaf(csv_path: Path) -> dict[str, list[str]]:
     reader = csv.DictReader(f)
     for row in reader:
       account = row["GeneralLedgerAccountCode"]
-      tdc = row["TransactionDescriptionCode"]
+      raw_tdc = row["TransactionDescriptionCode"]
+      # Apply the same normalization that ingest_transactions.py uses
+      # (``_KNOWN_TDC_ALIASES``) so rollforward filters target the same
+      # TDC values that get stamped on LineItem metadata. Without this,
+      # filter targets like ``mini:PaymentOfInterest`` (Charlie's CSV
+      # typo) won't match the normalized ``mini:PaymentInterest`` value
+      # stored on LineItems, and the rollforward residual swallows the
+      # attribution.
+      from examples.seattle_method_demo.ingest_transactions import (
+        _KNOWN_TDC_ALIASES,
+      )
+
+      tdc = _KNOWN_TDC_ALIASES.get(raw_tdc, raw_tdc)
       if account in BS_LEAVES and tdc and tdc not in seen[account]:
         tdcs_per_account[account].append(tdc)
         seen[account].add(tdc)

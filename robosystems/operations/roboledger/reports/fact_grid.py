@@ -764,6 +764,47 @@ def _append_empty_equity_facts(
       )
     )
 
+  # Always materialize rs-gaap:RetainedEarningsAccumulatedDeficit at $0
+  # even when no source CoA element maps to it. This is the QuickBooks /
+  # Xero pattern: RE is a *derived* concept, computed from cumulative
+  # (revenue - expense - dividends) at render time, not a posted GL
+  # balance from period-end closing journal entries. Without this, mini
+  # / FAC / simple CoAs that omit an explicit RE concept can't carry
+  # net income onto the BS - `_close_to_retained_earnings` falls back
+  # to an anonymous fact whose element_id isn't in any presentation
+  # network and silently disappears from the rendered statement.
+  re_row = session.execute(
+    text(
+      """
+      SELECT id, qname, name, balance_type
+      FROM elements
+      WHERE qname = 'rs-gaap:RetainedEarningsAccumulatedDeficit'
+      LIMIT 1
+      """
+    )
+  ).fetchone()
+  if re_row is not None and re_row.id not in existing_ids:
+    already_present = any(
+      f.element_id == re_row.id
+      and f.period_start == period_start
+      and f.period_end == period_end
+      for f in facts
+    )
+    if not already_present:
+      facts.append(
+        ReportFact(
+          element_id=re_row.id,
+          element_qname=re_row.qname,
+          element_name=re_row.name or "Retained Earnings (Accumulated Deficit)",
+          classification="equity",
+          balance_type=re_row.balance_type or "credit",
+          value=0.0,
+          period_start=period_start,
+          period_end=period_end,
+          period_type="instant",
+        )
+      )
+
 
 def _emit_net_income_facts(
   session: Session,
@@ -1553,19 +1594,55 @@ def _load_reporting_structure(
 
   # Build trees from roots, ordered by the root-ordering associations
   # seeded as (structure → SFAC6 root) presentation associations.
-  # Roots that have an explicit order_value sort by that; others sort last.
+  # Roots that have an explicit order_value sort by that; others fall
+  # back to accounting convention (debit-balance roots first — Assets
+  # before L+E on the Balance Sheet) and finally qname for determinism.
+  #
+  # ``root_parent_ids`` is a set, so without the secondary keys the sort
+  # would preserve unstable hash-order: e.g. the rs-gaap BS Classified
+  # structure has no root_order rows, and the set happened to emit
+  # ``LiabilitiesAndStockholdersEquity`` before ``Assets``, producing a
+  # BS rendered Liabilities-first. Single-root statements (IS / CF / SE)
+  # are unaffected.
   root_order = _load_root_order(session, structure_id)
-
   roots: list[_HierarchyNode] = []
   for root_id in sorted(
     root_parent_ids,
-    key=lambda rid: root_order.get(rid, float("inf")),
+    key=lambda rid: _root_sort_key(rid, root_order, element_info),
   ):
     root_node = _build_tree(root_id, 0)
     if root_node is not None:
       roots.append(root_node)
 
   return structure_id, structure_name, concept_arrangement, roots
+
+
+def _root_sort_key(
+  root_id: str,
+  root_order: dict[str, float],
+  element_info: dict[str, dict[str, Any]],
+) -> tuple[float, int, str]:
+  """Sort key for multi-root presentation hierarchies.
+
+  Three-tier precedence:
+
+  1. ``root_order[root_id]`` — explicit ordering seeded as
+     ``(structure → root)`` presentation associations on the structure.
+     Wins when present (tenants can pin a specific layout per structure).
+  2. ``balance_type`` priority — debit-balance roots before credit-balance
+     roots. Produces conventional Assets-then-L+E on the Balance Sheet
+     and any other multi-root statement that follows accounting
+     convention, without requiring explicit root_order rows.
+  3. ``qname`` alphabetical — determinism tiebreak so identical-priority
+     roots always emit in the same order across runs.
+
+  Single-root statements (IS / CF / SE under most reporting styles)
+  never hit this path — there's nothing to sort.
+  """
+  explicit = root_order.get(root_id, float("inf"))
+  info = element_info.get(root_id, {})
+  bt_priority = 0 if info.get("balance_type") == "debit" else 1
+  return (explicit, bt_priority, info.get("qname") or "")
 
 
 def _load_root_order(

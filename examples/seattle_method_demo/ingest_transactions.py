@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
 """Ingest Charlie Hoffman's 14-JE lemonade-stand dataset.
 
-Reads ``fixtures/transactions.csv``, groups by ``JournalEntryID``,
-and posts one event per JE via ``create-event-block`` with
-``apply_handlers=True``. Each line carries its ``TransactionDescriptionCode``
-on ``metadata['transaction_description_code']`` — the field the
-rollforward filter engine matches against (Phase 2 MVP per-line
-metadata plumbing).
+Reads the GeneralJournal.csv pulled from Charlie's
+``seattlemethod/prototypes`` GitHub repo into
+``local/datasets/seattle_method/`` (see ``pull_general_journal.sh``),
+groups by ``JournalEntryID``, and posts one event per JE via
+``create-event-block`` with ``apply_handlers=True``. Each line carries
+its ``TransactionDescriptionCode`` on
+``metadata['transaction_description_code']`` — the field the rollforward
+filter engine matches against (Phase 2 MVP per-line metadata plumbing).
 
 Pre-condition: ``load_taxonomy.py`` + ``seed_mappings.py`` have run
 against this graph (the JE lines reference mini concepts by
 element_external_id, which the journal_entry_recorded handler
 resolves against the Element table).
 
-CSV column convention (Charlie's format):
+CSV column convention (Charlie's format — read by header name via
+``csv.DictReader``, so column order is tolerant):
 
 - ``JournalEntryID``: e.g. "JE-201"
 - ``EconomicEntityIdentifier``: ignored (single entity in this dataset)
-- ``TransactionPeriod``: posting date in ``M/D/YY`` format
+- ``TransactionPeriod``: posting date — handles ISO ``YYYY-MM-DD`` (Charlie's
+  GitHub format) and the legacy ``M/D/YY`` shape from earlier exports
 - ``Account``: legacy CoA code (e.g. "000-1100-00"); preserved on
   ``LineItem.metadata['source_account_code']`` for audit but not used
   for element resolution
@@ -26,7 +30,10 @@ CSV column convention (Charlie's format):
   reference
 - ``TransactionDescriptionCode``: the flow concept (e.g.
   "mini:ProceedsFromInvestmentsByOwner") — stamped on
-  LineItem.metadata for rollforward attribution
+  LineItem.metadata for rollforward attribution; passed through a small
+  alias map (``_KNOWN_TDC_ALIASES``) to repair known typos against the
+  canonical mini.xsd vocabulary (e.g. ``mini:PaymentOfInterest`` →
+  ``mini:PaymentInterest``)
 - ``Amount``: whole dollars (multiply by 100 for cents)
 - ``Balance``: "D" for debit, "C" for credit
 - ``Sequence``: line order within the JE
@@ -47,10 +54,30 @@ from datetime import date, datetime
 from pathlib import Path
 
 # Resolve relative to this file so the script works regardless of the
-# caller's CWD — matches the pattern ``main.py`` uses.
+# caller's CWD — matches the pattern ``main.py`` uses. Points at the
+# gitignored ``local/datasets/seattle_method/`` location populated by
+# ``pull_general_journal.sh``; Charlie's GitHub repo is the canonical
+# source.
 CSV_PATH = (
-  Path(__file__).resolve().parent / "fixtures" / "transactions.csv"
+  Path(__file__).resolve().parents[2]
+  / "local"
+  / "datasets"
+  / "seattle_method"
+  / "GeneralJournal.csv"
 )
+
+
+# Known TDC typos / vocabulary mismatches in Charlie's upstream CSV.
+# We normalize at ingest time so the rollforward filter engine matches
+# against the canonical mini.xsd concepts. Logged as warnings when
+# applied so the substitution is transparent — also surfaces in the
+# reconciliation report as a "Their data quality" classification.
+_KNOWN_TDC_ALIASES: dict[str, str] = {
+  # JE-209: Cash-line TDC. mini.xsd's canonical name has no "Of"; the
+  # sibling AccruedExpenses line uses ``mini:DecreaseFromPaymentOfInterest``
+  # which DOES keep the "Of" — Charlie's naming is internally inconsistent.
+  "mini:PaymentOfInterest": "mini:PaymentInterest",
+}
 
 
 def _get_ledger_client():
@@ -70,15 +97,36 @@ def _get_ledger_client():
 
 
 def _parse_date(raw: str) -> date:
-  """Parse Charlie's ``M/D/YY`` format → date.
+  """Parse a TransactionPeriod value → date.
 
-  Two-digit years are assumed to be 20YY (the dataset is Q1 2024).
+  Accepts two shapes:
+  - ISO ``YYYY-MM-DD`` — Charlie's current GitHub CSV format
+  - ``M/D/YY`` or ``M/D/YYYY`` — legacy short-date shape from earlier
+    exports; two-digit years are assumed to be 20YY (the dataset is
+    Q1 2024)
+
+  Raises ``ValueError`` on any other shape so the demo fails loudly
+  rather than silently mis-dating events.
   """
+  raw = raw.strip()
+  if "-" in raw:
+    return date.fromisoformat(raw)
   m, d, y = raw.split("/")
   year = int(y)
   if year < 100:
     year += 2000
   return date(year, int(m), int(d))
+
+
+def _normalize_tdc(tdc: str, je_id: str, warnings: list[str]) -> str:
+  """Apply ``_KNOWN_TDC_ALIASES`` and log when a substitution happens."""
+  canonical = _KNOWN_TDC_ALIASES.get(tdc)
+  if canonical is None:
+    return tdc
+  warnings.append(
+    f"{je_id}: normalized TDC {tdc!r} → {canonical!r} (mini.xsd canonical name)"
+  )
+  return canonical
 
 
 def _read_csv_grouped(csv_path: Path) -> dict[str, list[dict]]:
@@ -143,7 +191,10 @@ def _build_qname_to_element_id_map(client, graph_id: str) -> dict[str, str]:
 
 
 def _build_event_payload(
-  je_id: str, rows: list[dict], qname_to_id: dict[str, str]
+  je_id: str,
+  rows: list[dict],
+  qname_to_id: dict[str, str],
+  warnings: list[str] | None = None,
 ) -> dict:
   """Build a single ``create-event-block`` request from a JE's rows.
 
@@ -172,7 +223,11 @@ def _build_event_payload(
     credit = amount_cents if balance == "C" else 0
 
     mini_qname = row["GeneralLedgerAccountCode"]
-    tdc = row["TransactionDescriptionCode"]
+    tdc = _normalize_tdc(
+      row["TransactionDescriptionCode"],
+      je_id,
+      warnings if warnings is not None else [],
+    )
     legacy_code = row["Account"]
 
     element_id = qname_to_id.get(mini_qname)
@@ -263,6 +318,7 @@ def ingest(
   grouped = _read_csv_grouped(csv_path)
   print(f"Found {len(grouped)} JournalEntry(ies) in {csv_path.name}")
 
+  warnings: list[str] = []
   if dry_run:
     # Build payloads with a fake mapping so dry-run validates shape.
     fake_map = {
@@ -271,24 +327,23 @@ def ingest(
       for row in rows
     }
     for je_id, rows in sorted(grouped.items()):
-      payload = _build_event_payload(je_id, rows, fake_map)
+      payload = _build_event_payload(je_id, rows, fake_map, warnings)
       print(
         f"  {je_id}: {len(payload['metadata']['line_items'])} line(s), "
         f"posting_date={payload['metadata']['posting_date']}, "
         f"category={payload['event_category']}, "
         f"type={payload['metadata']['type']}"
       )
-    return len(grouped), []
+    return len(grouped), warnings
 
   client = _get_ledger_client()
   print("Resolving mini qnames to element_ids on the graph…")
   qname_to_id = _build_qname_to_element_id_map(client, graph_id)
   print(f"  {len(qname_to_id)} mini element(s) found")
 
-  warnings: list[str] = []
   created = 0
   for je_id, rows in sorted(grouped.items()):
-    payload = _build_event_payload(je_id, rows, qname_to_id)
+    payload = _build_event_payload(je_id, rows, qname_to_id, warnings)
     try:
       response = client.create_event_block(graph_id, payload)
       created += 1

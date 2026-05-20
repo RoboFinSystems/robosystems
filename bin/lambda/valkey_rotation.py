@@ -43,6 +43,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
   Returns:
       Success response or raises exception on failure
   """
+  # Pre-initialize ``step`` so the ``except`` block can log even if the
+  # ``event`` lookups below raise. Without this, a missing
+  # ``event['Step']`` raises KeyError → except clause references unbound
+  # ``step`` → UnboundLocalError masks the real failure.
+  step = "<unknown>"
   try:
     secret_arn = event["SecretId"]
     step = event["Step"]

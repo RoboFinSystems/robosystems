@@ -31,14 +31,22 @@ from __future__ import annotations
 # BS concepts; mini's duration concepts (IS) → rs-gaap IS concepts.
 
 BS_IS_MAPPINGS: list[tuple[str, str]] = [
-  # Balance sheet — instant / monetary
-  ("mini:CashAndCashEquivalents", "rs-gaap:CashAndCashEquivalentsAtCarryingValue"),
-  ("mini:Receivables", "rs-gaap:AccountsReceivableNetCurrent"),
-  ("mini:Inventories", "rs-gaap:InventoryNet"),
+  # Balance sheet — instant / monetary. Targets must be leaves in the
+  # rs-gaap BS-Classified presentation network used by the Default
+  # Reporting Style. The earlier set targeted leaf-cousins (e.g.
+  # rs-gaap:AccountsPayableCurrent) that the renderer rolled up to a
+  # parent NOT in the BS path — producing facts that displayed but
+  # didn't aggregate into Assets / L+E subtotals.
+  ("mini:CashAndCashEquivalents", "rs-gaap:CashCashEquivalentsAndShortTermInvestments"),
+  ("mini:Receivables", "rs-gaap:ReceivablesNetCurrent"),
+  ("mini:Inventories", "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"),
   ("mini:PropertyPlantAndEquipment", "rs-gaap:PropertyPlantAndEquipmentNet"),
-  ("mini:AccountsPayable", "rs-gaap:AccountsPayableCurrent"),
-  ("mini:AccruedExpenses", "rs-gaap:AccruedLiabilitiesCurrent"),
-  ("mini:LongtermDebt", "rs-gaap:LongTermDebt"),
+  # AP and Accrued both roll into the same combined BS-Classified leaf
+  # (the rs-gaap presentation network doesn't expose them separately
+  # at the visible-leaf layer).
+  ("mini:AccountsPayable", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),
+  ("mini:AccruedExpenses", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),
+  ("mini:LongtermDebt", "rs-gaap:LongTermDebtAndCapitalLeaseObligations"),
   ("mini:PaidInCapital", "rs-gaap:AdditionalPaidInCapital"),
   # Income statement — duration / monetary
   ("mini:Sales", "rs-gaap:Revenues"),
@@ -77,16 +85,26 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
   # the equity-side of an issuance (mini does).
   ("mini:ProceedsFromInvestmentsByOwner", "rs-gaap:ProceedsFromIssuanceOfCommonStock"),
   ("mini:InvestmentsByOwner", "rs-gaap:ProceedsFromIssuanceOfCommonStock"),
-  # Financing — debt
+  # Financing — debt. CF-Indirect's only debt-financing leaf is
+  # ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet — a signed
+  # net concept that absorbs both issuances and repayments. Mapping both
+  # mini concepts to it loses the signed split but lands on a leaf that
+  # actually renders.
   (
     "mini:ProceedsFromAdditionalLongtermBorrowings",
-    "rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
+    "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
   ),
-  ("mini:AdditionalLongtermBorrowings", "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"),
-  ("mini:RepaymentLongtermBorrowings", "rs-gaap:RepaymentsOfLongTermDebt"),
+  (
+    "mini:AdditionalLongtermBorrowings",
+    "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+  ),
+  (
+    "mini:RepaymentLongtermBorrowings",
+    "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+  ),
   (
     "mini:PaymentForReductionOfLongtermBorrowings",
-    "rs-gaap:RepaymentsOfLongTermDebt",
+    "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
   ),
   # Investing — PP&E
   (
@@ -107,19 +125,35 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
   # Operating — inventory
   ("mini:PurchasesOfInventoryForSale", "rs-gaap:IncreaseDecreaseInInventories"),
   # NOTE: mini:PurchasesInventoryForSaleOnAccount is the AP-side TDC
-  # for an inventory purchase on account. rs-gaap collapses this with
-  # IncreaseDecreaseInAccountsPayable since the AP delta IS the
-  # operating-activity adjustment.
-  ("mini:PurchasesInventoryForSaleOnAccount", "rs-gaap:IncreaseDecreaseInAccountsPayable"),
+  # for an inventory purchase on account — handled below in the AP
+  # operating-flow block alongside other AP-impacting TDCs (all target
+  # the combined AP+Accrued leaf).
   ("mini:DecreaseInInventoriesFromSales", "rs-gaap:IncreaseDecreaseInInventories"),
   ("mini:InventoryWrittenOff", "rs-gaap:InventoryWriteDown"),
-  # Operating — AP
-  ("mini:DecreaseFromPaymentAccountsPayable", "rs-gaap:IncreaseDecreaseInAccountsPayable"),
-  ("mini:PaymentOfAccountsPayable", "rs-gaap:IncreaseDecreaseInAccountsPayable"),
+  # Operating — AP. CF-Indirect's leaf is the combined AP+Accrued change
+  # (IncreaseDecreaseInAccountsPayableAndAccruedLiabilities); the
+  # finer-grained IncreaseDecreaseInAccountsPayable isn't on the BS-Classified
+  # CF path, so it never renders.
+  (
+    "mini:DecreaseFromPaymentAccountsPayable",
+    "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
+  ),
+  (
+    "mini:PaymentOfAccountsPayable",
+    "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
+  ),
+  # PurchasesInventoryForSaleOnAccount above was also targeting the
+  # legacy AP-only concept — re-aim it at the combined leaf for the same
+  # reason.
+  (
+    "mini:PurchasesInventoryForSaleOnAccount",
+    "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
+  ),
   # Operating — interest accruals.
   # NOTE: mini's canonical concept is ``PaymentInterest`` (not
-  # ``PaymentOfInterest``) — Charlie's CSV originally had the typo;
-  # we fixed it in fixtures/transactions.csv to match the taxonomy.
+  # ``PaymentOfInterest``); Charlie's CSV has the typo. We normalize
+  # at ingest time via ``ingest_transactions.py::_KNOWN_TDC_ALIASES``
+  # so the filter targets the canonical name here.
   # NOTE: rs-gaap doesn't carry a clean "InterestPaid" CF concept in
   # our currently-loaded library — the canonical
   # ``rs-gaap:InterestPaidNet`` is part of the broader rs-gaap corpus

@@ -261,7 +261,7 @@ robosystems/
 │   │   ├── reads/                # portfolios, securities, positions, holdings
 │   │   └── commands/             # portfolios, securities, positions
 │   ├── graph/                    # Graph services (credit, entity, subscription)
-│   ├── lbug/                     # LadybugDB operations (backup, ingest)
+│   ├── extensions/               # OLTP→OLAP materialization (materialize.py, loader.py, staleness.py)
 │   ├── operators/                # AI Operator operations (Claude/MCP executors — distinct from REA Agent counterparty model)
 │   └── providers/                # Provider registry and implementations
 ├── middleware/                   # Cross-cutting concerns
