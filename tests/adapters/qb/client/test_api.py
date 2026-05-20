@@ -425,6 +425,135 @@ class TestQBClient:
       "JournalReport", {"start_date": "2023-01-01"}
     )
 
+  # ---- Phase 5 §4.3.4 — CDC endpoint -----------------------------------
+
+  def _make_cdc_client(self, realm_id="1234567890123456789"):
+    """Construct a QBClient with just enough state to call cdc()."""
+    client = QBClient.__new__(QBClient)
+    client.realm_id = realm_id
+    client.access_token = "test_access_token"
+    return client
+
+  @patch("robosystems.adapters.quickbooks.client.api.requests.get")
+  @patch("robosystems.adapters.quickbooks.client.api.env")
+  def test_cdc_sandbox_url(self, mock_env, mock_get):
+    """CDC URL switches between sandbox + production per env."""
+    mock_env.INTUIT_ENVIRONMENT = "sandbox"
+    mock_response = Mock(status_code=200)
+    mock_response.json.return_value = {"CDCResponse": []}
+    mock_get.return_value = mock_response
+
+    from datetime import UTC, datetime
+
+    client = self._make_cdc_client(realm_id="rlm_42")
+    client.cdc(datetime(2026, 5, 1, tzinfo=UTC), ["Invoice"])
+
+    url = mock_get.call_args[0][0]
+    assert url == "https://sandbox-quickbooks.api.intuit.com/v3/company/rlm_42/cdc"
+
+  @patch("robosystems.adapters.quickbooks.client.api.requests.get")
+  @patch("robosystems.adapters.quickbooks.client.api.env")
+  def test_cdc_production_url(self, mock_env, mock_get):
+    mock_env.INTUIT_ENVIRONMENT = "production"
+    mock_response = Mock(status_code=200)
+    mock_response.json.return_value = {"CDCResponse": []}
+    mock_get.return_value = mock_response
+
+    from datetime import UTC, datetime
+
+    client = self._make_cdc_client(realm_id="rlm_42")
+    client.cdc(datetime(2026, 5, 1, tzinfo=UTC), ["Invoice"])
+
+    url = mock_get.call_args[0][0]
+    assert url == "https://quickbooks.api.intuit.com/v3/company/rlm_42/cdc"
+
+  @patch("robosystems.adapters.quickbooks.client.api.requests.get")
+  @patch("robosystems.adapters.quickbooks.client.api.env")
+  def test_cdc_parses_query_response_block(self, mock_env, mock_get):
+    """CDC payload's nested QueryResponse arrays get split by entity type."""
+    mock_env.INTUIT_ENVIRONMENT = "sandbox"
+    mock_response = Mock(status_code=200)
+    mock_response.json.return_value = {
+      "CDCResponse": [
+        {
+          "QueryResponse": [
+            {"Customer": [{"Id": "1", "SyncToken": "3"}]},
+            {"Invoice": [{"Id": "42", "SyncToken": "1"}]},
+            {"Vendor": [{"Id": "9", "SyncToken": "0"}]},
+          ]
+        }
+      ]
+    }
+    mock_get.return_value = mock_response
+
+    from datetime import UTC, datetime
+
+    client = self._make_cdc_client()
+    entities, too_old = client.cdc(
+      datetime(2026, 5, 1, tzinfo=UTC), ["Customer", "Vendor", "Invoice"]
+    )
+
+    assert too_old is False
+    assert len(entities["Customer"]) == 1
+    assert entities["Customer"][0]["Id"] == "1"
+    assert entities["Vendor"][0]["SyncToken"] == "0"
+    assert entities["Invoice"][0]["Id"] == "42"
+
+  @patch("robosystems.adapters.quickbooks.client.api.requests.get")
+  @patch("robosystems.adapters.quickbooks.client.api.env")
+  def test_cdc_30_day_window_returns_too_old_signal(self, mock_env, mock_get):
+    """A QB 400 Fault about changedSince out-of-range returns
+    ``watermark_too_old=True`` so the caller can reset + fall back."""
+    mock_env.INTUIT_ENVIRONMENT = "sandbox"
+    mock_response = Mock(status_code=400)
+    mock_response.json.return_value = {
+      "Fault": {
+        "Error": [
+          {
+            "Message": "ChangedSince invalid",
+            "Detail": "changedSince must be within 30 days",
+            "code": "400",
+          }
+        ]
+      }
+    }
+    mock_get.return_value = mock_response
+
+    from datetime import UTC, datetime
+
+    client = self._make_cdc_client()
+    entities, too_old = client.cdc(datetime(2025, 1, 1, tzinfo=UTC), ["Customer"])
+
+    assert too_old is True
+    assert entities == {}
+
+  @patch("robosystems.adapters.quickbooks.client.api.requests.get")
+  @patch("robosystems.adapters.quickbooks.client.api.env")
+  def test_cdc_passes_changed_since_header_and_query(self, mock_env, mock_get):
+    """Auth header carries Bearer token; changedSince + entities go in
+    the query string."""
+    mock_env.INTUIT_ENVIRONMENT = "sandbox"
+    mock_response = Mock(status_code=200)
+    mock_response.json.return_value = {"CDCResponse": []}
+    mock_get.return_value = mock_response
+
+    from datetime import UTC, datetime
+
+    client = self._make_cdc_client()
+    client.access_token = "tok_phase5"
+    client.cdc(
+      datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC),
+      ["Invoice", "Bill", "Payment"],
+    )
+
+    headers = mock_get.call_args.kwargs["headers"]
+    params = mock_get.call_args.kwargs["params"]
+    assert headers["Authorization"] == "Bearer tok_phase5"
+    assert headers["Accept"] == "application/json"
+    assert params["entities"] == "Invoice,Bill,Payment"
+    # changedSince is ISO 8601 with the time component preserved.
+    assert params["changedSince"].startswith("2026-05-01T12:00:00")
+
   @patch("robosystems.adapters.quickbooks.client.api.AuthClient")
   @patch("robosystems.adapters.quickbooks.client.api.QuickBooks")
   def test_token_refresh_called_for_non_mock_tokens(

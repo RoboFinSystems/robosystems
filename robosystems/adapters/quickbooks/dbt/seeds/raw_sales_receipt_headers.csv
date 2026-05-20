@@ -1,2 +1,2 @@
-tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type,linked_txns
-SalesReceipt,88,SalesReceipt_88,2026-02-20,SR-200,250.00,USD,Cash sale,qb_cust_2,customer,[]
+tx_type,tx_id,external_id,txn_date,doc_number,total_amount,currency,memo,agent_external_id,agent_type,linked_txns,sync_token
+SalesReceipt,88,SalesReceipt_88,2026-02-20,SR-200,250.00,USD,Cash sale,qb_cust_2,customer,[],0

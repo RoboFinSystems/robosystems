@@ -16,5 +16,6 @@ select
   "address" as address,
   cast("tax_id" as varchar) as tax_id,
   cast("is_1099_recipient" as boolean) as is_1099_recipient,
-  cast("is_active" as boolean) as is_active
+  cast("is_active" as boolean) as is_active,
+  cast("sync_token" as varchar) as sync_token
 from source

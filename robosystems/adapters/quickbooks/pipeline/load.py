@@ -52,12 +52,22 @@ def _run_qb_load(
   context: AssetExecutionContext,
   config: QBSyncConfig,
 ) -> MaterializeResult:
+  from datetime import UTC, datetime
+
   from robosystems.operations.extensions.loader import OLTPLoader
 
   work_dir = get_pipeline_work_dir(config.graph_id)
   duckdb_path = work_dir / "quickbooks.duckdb"
 
   context.log.info(f"Loading QB data for graph={config.graph_id}, duckdb={duckdb_path}")
+
+  # Phase 5 §4.3.4 — CDC watermark candidate. Captured at the START of
+  # load so we know we've successfully ingested all QB-side changes up
+  # to (at least) this moment. Advanced only after a successful load
+  # below — a raised exception or fatal `result.errors` leaves the
+  # prior watermark in place so the next sync replays from there
+  # (SyncToken gate makes already-ingested rows a no-op).
+  sync_started_at = datetime.now(UTC)
 
   loader = OLTPLoader()
   result = loader.load(
@@ -76,6 +86,12 @@ def _run_qb_load(
 
   # Update last sync timestamp
   _update_last_sync(context, config)
+
+  # Phase 5 §4.3.4 — advance CDC watermark only after load success.
+  # `result.errors` carries non-fatal load warnings already; the truly
+  # fatal path raises before reaching here (and the watermark stays
+  # unchanged, so the next sync re-attempts from the prior watermark).
+  _advance_cdc_watermark(context, config, sync_started_at)
 
   # Bootstrap fiscal calendar on first sync. Idempotent: skips when the
   # calendar is already initialized (re-sync). Without this, a fresh QB
@@ -193,6 +209,46 @@ def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> N
       session.close()
   except Exception as e:
     context.log.warning(f"Failed to update last_sync (non-fatal): {e}")
+
+
+def _advance_cdc_watermark(
+  context: AssetExecutionContext, config: QBSyncConfig, watermark
+) -> None:
+  """Phase 5 §4.3.4 — advance the Connection's CDC watermark.
+
+  Called after a successful load. The watermark is the timestamp at the
+  START of this load run, so the next CDC fetch picks up from there. If
+  this helper itself fails (e.g., DB transient), we log and swallow:
+  worst case the next sync re-fetches the same window, and the SyncToken
+  gate (§4.3.2) skips already-ingested rows.
+  """
+  from robosystems.database import SessionFactory
+  from robosystems.models.core.connection.connection import Connection
+
+  try:
+    session = SessionFactory()
+    try:
+      conn = Connection.get_by_id(config.connection_id, session)
+      if conn:
+        conn.advance_cdc_watermark(watermark, session)
+        context.log.info(
+          "Advanced CDC watermark to %s for connection %s",
+          watermark.isoformat(),
+          config.connection_id,
+        )
+      else:
+        context.log.warning(
+          "Connection %s not found for CDC watermark advance",
+          config.connection_id,
+        )
+    finally:
+      session.close()
+  except Exception as e:
+    context.log.warning(
+      "Failed to advance CDC watermark (non-fatal; next sync will replay "
+      "from prior watermark + SyncToken gate dedups): %s",
+      e,
+    )
 
 
 def _bootstrap_fiscal_calendar_if_needed(

@@ -519,3 +519,115 @@ class QBClient:
       params["end_date"] = end_date
     transactions = self.client.get_report("JournalReport", params)
     return transactions
+
+  # -- Phase 5 §4.3.4 — CDC (Change Data Capture) -----------------------
+
+  def _cdc_base_url(self) -> str:
+    """QB CDC endpoint base URL — switches between sandbox + production
+    per ``INTUIT_ENVIRONMENT``."""
+    if env.INTUIT_ENVIRONMENT.lower() == "production":
+      host = "https://quickbooks.api.intuit.com"
+    else:
+      host = "https://sandbox-quickbooks.api.intuit.com"
+    return f"{host}/v3/company/{self.realm_id}/cdc"
+
+  @_QB_RETRY
+  def cdc(
+    self, changed_since, entities: list[str]
+  ) -> tuple[dict[str, list[Any]], bool]:
+    """Phase 5 §4.3.4 — fetch entity changes since ``changed_since`` via
+    QB's CDC endpoint.
+
+    Args:
+        changed_since: tz-aware or naive datetime (naive interpreted as UTC).
+        entities: list of QB entity names (Invoice, Bill, Payment,
+                  BillPayment, JournalEntry, SalesReceipt, Customer,
+                  Vendor, Employee, Account, ...).
+
+    Returns:
+        Tuple of ``(entities_by_type, watermark_too_old)``.
+        - ``entities_by_type`` maps entity name → list of raw entity dicts
+          (each dict carries the QB API's representation including
+          ``Id`` and ``SyncToken``). Entity types with no changes return
+          empty lists. **NOTE**: CDC returns deletions as separate
+          objects with status='Deleted' — present in the list but
+          flagged via the ``status`` field on the QB record.
+        - ``watermark_too_old`` is True when QB rejects the
+          ``changedSince`` value (typically > 30 days back). Callers
+          should reset the watermark and fall through to full lookback.
+
+    The retry decorator handles transient 429 / 5xx; the 400 ``too old``
+    response surfaces here as a non-retryable signal so the caller can
+    fall through.
+    """
+    from datetime import UTC, datetime
+
+    if isinstance(changed_since, datetime):
+      if changed_since.tzinfo is None:
+        ts = changed_since.replace(tzinfo=UTC)
+      else:
+        ts = changed_since.astimezone(UTC)
+      changed_since_iso = ts.strftime("%Y-%m-%dT%H:%M:%S%z")
+      # Intuit accepts ISO 8601 with offset; ensure formatting matches their
+      # docs (no colon in the offset is also fine, but we normalise to
+      # "+0000" form which the strftime gives us).
+    else:
+      changed_since_iso = str(changed_since)
+
+    headers = {
+      "Authorization": f"Bearer {self.access_token}",
+      "Accept": "application/json",
+    }
+    params = {
+      "entities": ",".join(entities),
+      "changedSince": changed_since_iso,
+    }
+    url = self._cdc_base_url()
+    logger.info(
+      "QB CDC fetch: realm=%s entities=[%s] changedSince=%s",
+      self.realm_id,
+      ",".join(entities),
+      changed_since_iso,
+    )
+    resp = requests.get(url, headers=headers, params=params, timeout=60)
+    if resp.status_code == 400:
+      # QB returns 400 with a Fault payload when changedSince is older
+      # than the supported window (~30 days). Detect by the structured
+      # error code if present; surface as watermark_too_old=True so the
+      # caller can reset and fall through.
+      try:
+        payload = resp.json()
+      except ValueError:
+        payload = {}
+      fault = (payload.get("Fault") or {}).get("Error", [])
+      messages = " | ".join(
+        (e.get("Message") or "") + " " + (e.get("Detail") or "") for e in fault
+      ).lower()
+      if "changedsince" in messages or "30 days" in messages or fault:
+        logger.warning(
+          "QB CDC rejected changedSince=%s for realm %s (too old or invalid). "
+          "Falling back to full lookback. Response: %s",
+          changed_since_iso,
+          self.realm_id,
+          messages[:200],
+        )
+        return {}, True
+      # 400 for some other reason — let it raise as an HTTPError.
+      resp.raise_for_status()
+    resp.raise_for_status()
+
+    data = resp.json()
+    # CDCResponse shape:
+    # {
+    #   "CDCResponse": [
+    #     { "QueryResponse": [ {"Customer": [...]}, {"Vendor": [...]}, ... ] }
+    #   ],
+    #   "time": "..."
+    # }
+    entities_by_type: dict[str, list[Any]] = {name: [] for name in entities}
+    for cdc_block in data.get("CDCResponse", []):
+      for query_resp in cdc_block.get("QueryResponse", []):
+        for key, value in query_resp.items():
+          if key in entities_by_type and isinstance(value, list):
+            entities_by_type[key].extend(value)
+    return entities_by_type, False

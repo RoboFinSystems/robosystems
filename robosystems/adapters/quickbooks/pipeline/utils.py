@@ -307,6 +307,10 @@ def _flatten_party(
         "tax_id": str(tax_id) if tax_id else "",
         "is_1099_recipient": bool(data.get("Vendor1099", False)),
         "is_active": bool(data.get("Active", True)),
+        # Phase 5: SyncToken — monotonic per-entity version counter. Empty
+        # string when absent so the parquet stays a non-null str column;
+        # loader treats "" same as missing.
+        "sync_token": str(data.get("SyncToken", "") or ""),
       }
     )
   return rows
@@ -395,6 +399,9 @@ def _flatten_txn_header(
         "agent_external_id": str(agent_ref.get("value", "")) if agent_ref else "",
         "agent_type": agent_type,
         "linked_txns": _extract_linked_txns(data) if extract_linked_txns else "[]",
+        # Phase 5: monotonic per-entity version counter — joined back to the
+        # JournalReport-derived event via tx_id LEFT JOIN in transactions.sql.
+        "sync_token": str(data.get("SyncToken", "") or ""),
       }
     )
   return rows
@@ -480,6 +487,10 @@ def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
       # Purchases (cash-side expenses) are not settlements; LinkedTxn
       # is empty.
       "linked_txns": "[]",
+      # Phase 5: same SyncToken on every emitted variant for this Purchase
+      # (the candidate_tx_types fan-out is just for the JOIN to match
+      # JournalReport's display label — the underlying entity version is one).
+      "sync_token": str(data.get("SyncToken", "") or ""),
     }
     for candidate in candidate_tx_types:
       rows.append({**base_row, "tx_type": candidate})
@@ -610,6 +621,7 @@ _PARTY_SCHEMA = {
   "tax_id": "str",
   "is_1099_recipient": "bool",
   "is_active": "bool",
+  "sync_token": "str",
 }
 _TXN_HEADER_SCHEMA = {
   "tx_type": "str",
@@ -625,6 +637,7 @@ _TXN_HEADER_SCHEMA = {
   # JSON-stringified [{txn_id, txn_type}] list — populated only for
   # Payment + BillPayment headers; other types emit "[]".
   "linked_txns": "str",
+  "sync_token": "str",
 }
 
 

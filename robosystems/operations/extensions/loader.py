@@ -155,6 +155,36 @@ def _classify_dispatch_error(exc: BaseException) -> str:
   return "unknown_error"
 
 
+def _compare_sync_tokens(existing: str | None, incoming: str | None) -> str:
+  """Phase 5 §4.3.2 — SyncToken freshness decision for the UPSERT gate.
+
+  Returns one of:
+  - ``"fresh"`` — incoming SyncToken is newer; proceed with UPSERT.
+  - ``"same"`` — incoming matches existing; idempotent re-sync, skip.
+  - ``"stale"`` — incoming is older (out-of-order replay / webhook race); skip.
+  - ``"no_info"`` — at least one side is NULL/non-numeric. Proceed without
+    gating (backfill path for pre-Phase-5 rows or JournalReport-only rows
+    that ship without SyncToken).
+
+  Compared as integers — QB SyncTokens are monotonic non-negative ints
+  serialized as strings.
+  """
+  if existing is None or incoming is None:
+    return "no_info"
+  try:
+    incoming_int = int(incoming)
+    existing_int = int(existing)
+  except (ValueError, TypeError):
+    # Defensive: if a SyncToken ever arrives non-numeric, fall through
+    # to the status-based branches rather than guess.
+    return "no_info"
+  if incoming_int > existing_int:
+    return "fresh"
+  if incoming_int == existing_int:
+    return "same"
+  return "stale"
+
+
 def _stamp_dispatch_error(evt, exc: BaseException, now: datetime) -> None:
   """Capture dispatch failure detail on the event's metadata blob (B8).
 
@@ -222,6 +252,13 @@ class LoadResult:
   # write-backed RL event (round-trip recognition). Each one represents
   # a "no duplicate created" event the cross-source matcher caught.
   events_cross_source_matched: int = 0
+  # Phase 5 §4.3.2: counts events skipped by the SyncToken freshness
+  # gate. ``skipped_stale`` = incoming SyncToken older than what we
+  # already have (out-of-order replay / future webhook race). ``skipped_same``
+  # = incoming matches current version (idempotent re-sync). Both surface
+  # in the sync log so we can see how much work the gate is saving.
+  events_skipped_stale_sync_token: int = 0
+  events_skipped_same_sync_token: int = 0
   # Drop counters surface data-quality issues that the loader masks with
   # defaults — visible in logs and dagster results so a sync that quietly
   # eats half of QB's data doesn't pass unnoticed.
@@ -267,6 +304,13 @@ class _CaptureResult:
   # the existing event. Counter surfaces in the sync log so we can
   # confirm the round-trip is being recognised.
   cross_source_matched: int = 0
+  # Phase 5 §4.3.2 — SyncToken freshness gate decisions. ``skipped_stale``
+  # is incoming.sync_token < existing (out-of-order CDC, replay, future
+  # webhook race); ``skipped_same`` is incoming == existing (idempotent
+  # re-sync of an already-current row). Both bypass the status branches
+  # below — no mutation, no drift check.
+  skipped_stale_sync_token: int = 0
+  skipped_same_sync_token: int = 0
   dropped_unbalanced_entries: int = 0
   dropped_empty_transactions: int = 0
 
@@ -668,17 +712,22 @@ class OLTPLoader:
       result.events_dispatch_failed = capture_result.dispatch_failed
       result.events_drift_detected = capture_result.drift_detected
       result.events_cross_source_matched = capture_result.cross_source_matched
+      result.events_skipped_stale_sync_token = capture_result.skipped_stale_sync_token
+      result.events_skipped_same_sync_token = capture_result.skipped_same_sync_token
       result.dropped_unbalanced_entries = capture_result.dropped_unbalanced_entries
       result.dropped_empty_transactions = capture_result.dropped_empty_transactions
       logger.info(
         "Captured %d new event_blocks, updated %d existing, "
-        "flagged %d drift, matched %d cross-source round-trips "
+        "flagged %d drift, matched %d cross-source round-trips, "
+        "skipped %d same-version + %d stale via SyncToken gate "
         "(dropped %d unbalanced entries, %d empty transactions; "
         "capture-only — no GL writes)",
         capture_result.inserted,
         capture_result.updated,
         capture_result.drift_detected,
         capture_result.cross_source_matched,
+        capture_result.skipped_same_sync_token,
+        capture_result.skipped_stale_sync_token,
         capture_result.dropped_unbalanced_entries,
         capture_result.dropped_empty_transactions,
       )
@@ -923,6 +972,12 @@ class OLTPLoader:
       agent_type = str(row.get("agent_type") or "other")
       is_1099 = bool(row.get("is_1099_recipient", False))
       is_active = bool(row.get("is_active", True))
+      # Phase 5: SyncToken capture — per spec §4.3.1, persisted as
+      # metadata_['qb_sync_token'] (JSONB-only). NULL/empty acceptable;
+      # backfilled on subsequent syncs. Step 2 (§4.3.2) will use this
+      # as the freshness gate.
+      qb_sync_token_raw = row.get("sync_token")
+      qb_sync_token = str(qb_sync_token_raw) if qb_sync_token_raw else None
 
       if ext_id in existing:
         agent = existing[ext_id]
@@ -936,6 +991,11 @@ class OLTPLoader:
         agent.is_1099_recipient = is_1099
         agent.is_active = is_active
         agent.updated_at = now
+        # Mutate as a new dict so SQLAlchemy detects the JSONB change.
+        new_meta = dict(agent.metadata_ or {})
+        if qb_sync_token is not None:
+          new_meta["qb_sync_token"] = qb_sync_token
+        agent.metadata_ = new_meta
         out.external_to_id[ext_id] = agent.id
         out.updated += 1
       else:
@@ -953,6 +1013,7 @@ class OLTPLoader:
           connection_id=connection_id,
           is_active=is_active,
           is_1099_recipient=is_1099,
+          metadata_={"qb_sync_token": qb_sync_token} if qb_sync_token else {},
           created_at=now,
           updated_at=now,
           created_by=created_by,
@@ -1257,6 +1318,14 @@ class OLTPLoader:
             e,
           )
 
+      # Phase 5: capture QB SyncToken (monotonic per-entity version) so the
+      # SyncToken-gated UPSERT in §4.3.2 can decide freshness. NULL for
+      # JournalReport-only rows (JournalEntry / Deposit / Transfer where we
+      # don't yet fetch a header) — those backfill on next sync that fetches
+      # the entity. Excluded from drift comparison below: a SyncToken bump
+      # without any other payload change is a no-op, not drift.
+      qb_sync_token_raw = txn.get("sync_token")
+      qb_sync_token = str(qb_sync_token_raw) if qb_sync_token_raw else None
       metadata_blob = {
         "status": jeh_status,
         "qb_txn_type": qb_txn_type,
@@ -1272,12 +1341,39 @@ class OLTPLoader:
         "qb_source_class": qb_txn_type,
         "qb_agent_external_id": agent_ext_id or None,
         "qb_linked_txns": qb_linked_txns,
+        "qb_sync_token": qb_sync_token,
         "connection_id": connection_id,
         "entries": hardened_entries,
       }
 
       if ext_id in existing:
         evt = existing[ext_id]
+        # Phase 5 §4.3.2 — SyncToken freshness gate. Runs BEFORE the
+        # status branches: a stale or same-version incoming row skips
+        # all further processing (no UPSERT, no drift check, no handler
+        # re-fire). The gate is the primary defense against
+        # out-of-order CDC delivery and replayed batches that Phase 5
+        # CDC integration (§4.3.4) introduces; status branching below
+        # only runs when the gate decides "fresh" or "no_info".
+        existing_token = (evt.metadata_ or {}).get("qb_sync_token")
+        freshness = _compare_sync_tokens(existing_token, qb_sync_token)
+        if freshness == "stale":
+          logger.info(
+            "QB SyncToken stale for event ext_id=%s: live=%s, incoming=%s "
+            "— skipping (out-of-order replay / webhook race expected; "
+            "not an error)",
+            ext_id,
+            existing_token,
+            qb_sync_token,
+          )
+          out.skipped_stale_sync_token += 1
+          continue
+        if freshness == "same":
+          # Idempotent re-sync of an already-current row — no work to do.
+          out.skipped_same_sync_token += 1
+          continue
+        # freshness in ("fresh", "no_info") → fall through to status branching.
+
         # Don't overwrite handler-approved or rejected events on re-sync.
         if evt.status in ("captured", "classified"):
           evt.event_type = event_type
@@ -1304,23 +1400,44 @@ class OLTPLoader:
           # already-approved entry. Compare incoming `metadata_blob`
           # against the live `evt.metadata_` minus drift bookkeeping.
           # If different, flag drift + stash the incoming payload
-          # without mutating the live payload (handler-approved
+          # without mutating the live business payload (handler-approved
           # entries are immutable to re-sync per §2.5).
+          #
+          # Phase 5: exclude `qb_sync_token` from the diff — a SyncToken
+          # bump alone is not drift, just a version increment. But DO
+          # persist the bumped SyncToken to the live event's metadata
+          # (bookkeeping field, not business payload) so the next
+          # sync's gate comparison stays accurate. Without this update
+          # the gate would re-fire indefinitely with the same comparison.
+          _drift_excluded = ("drift_payload", "drift_detected_at", "qb_sync_token")
           live_payload = {
-            k: v
-            for k, v in (evt.metadata_ or {}).items()
-            if k not in ("drift_payload", "drift_detected_at")
+            k: v for k, v in (evt.metadata_ or {}).items() if k not in _drift_excluded
           }
-          if live_payload != metadata_blob:
+          incoming_payload = {
+            k: v for k, v in metadata_blob.items() if k not in _drift_excluded
+          }
+          new_meta = dict(evt.metadata_ or {})
+          meta_changed = False
+          if live_payload != incoming_payload:
             evt.payload_drift = True
             # Mutate as a new dict so SQLAlchemy detects the JSONB
             # change (in-place mutation of mutable columns is unsafe
             # without a MutableDict wrapper).
-            new_meta = dict(evt.metadata_ or {})
             new_meta["drift_payload"] = metadata_blob
             new_meta["drift_detected_at"] = now.isoformat()
-            evt.metadata_ = new_meta
             out.drift_detected += 1
+            meta_changed = True
+          # Advance the live SyncToken regardless of drift outcome —
+          # the gate above only proceeded because incoming is fresh
+          # (or no_info, in which case incoming==None and the .get()
+          # below leaves the live token alone).
+          if (
+            qb_sync_token is not None and new_meta.get("qb_sync_token") != qb_sync_token
+          ):
+            new_meta["qb_sync_token"] = qb_sync_token
+            meta_changed = True
+          if meta_changed:
+            evt.metadata_ = new_meta
         # else: leave it alone — handler already ran or user voided it
       else:
         new_events.append(

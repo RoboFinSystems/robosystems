@@ -17,5 +17,6 @@ select
   cast("memo" as varchar) as memo,
   cast("agent_external_id" as varchar) as agent_external_id,
   cast("agent_type" as varchar) as agent_type,
-  cast("linked_txns" as varchar) as linked_txns
+  cast("linked_txns" as varchar) as linked_txns,
+  cast("sync_token" as varchar) as sync_token
 from source

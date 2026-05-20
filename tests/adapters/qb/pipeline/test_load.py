@@ -87,6 +87,9 @@ class TestQbLoadAsset:
       patch(
         "robosystems.adapters.quickbooks.pipeline.load._update_last_sync",
       ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._advance_cdc_watermark",
+      ),
     ):
       context = build_asset_context()
       result = qb_load(context, config)
@@ -131,6 +134,9 @@ class TestQbLoadAsset:
       patch(
         "robosystems.adapters.quickbooks.pipeline.load._update_last_sync",
       ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._advance_cdc_watermark",
+      ),
     ):
       context = build_asset_context()
       result = qb_load(context, config)
@@ -168,11 +174,47 @@ class TestQbLoadAsset:
       patch(
         "robosystems.adapters.quickbooks.pipeline.load._update_last_sync",
       ) as mock_sync,
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._advance_cdc_watermark",
+      ),
     ):
       context = build_asset_context()
       qb_load(context, config)
 
     mock_sync.assert_called_once()
+
+  def test_load_advances_cdc_watermark(self, tmp_path):
+    """Phase 5 §4.3.4 — _advance_cdc_watermark is called after a successful
+    load, with a datetime captured at load start."""
+    from datetime import datetime
+
+    from robosystems.adapters.quickbooks.pipeline.load import qb_load
+
+    config = _make_config(connection_id="conn_cdc_test")
+    work_dir = tmp_path / "qb_pipeline" / config.graph_id
+    work_dir.mkdir(parents=True)
+
+    mock_loader = MagicMock()
+    mock_loader.load.return_value = _make_load_result()
+
+    with (
+      patch(_PATCH_LOAD_WORK_DIR, return_value=work_dir),
+      patch(_PATCH_OLTP_LOADER, return_value=mock_loader),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._update_last_sync",
+      ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._advance_cdc_watermark",
+      ) as mock_advance,
+    ):
+      context = build_asset_context()
+      qb_load(context, config)
+
+    mock_advance.assert_called_once()
+    # Third positional arg is the watermark datetime captured at load start.
+    args = mock_advance.call_args[0]
+    assert len(args) == 3
+    assert isinstance(args[2], datetime)
 
   def test_load_reports_errors_in_metadata(self, tmp_path):
     """Test that FK resolution errors are counted in metadata."""
@@ -193,6 +235,9 @@ class TestQbLoadAsset:
       patch(_PATCH_OLTP_LOADER, return_value=mock_loader),
       patch(
         "robosystems.adapters.quickbooks.pipeline.load._update_last_sync",
+      ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._advance_cdc_watermark",
       ),
     ):
       context = build_asset_context()
@@ -216,6 +261,9 @@ class TestQbLoadAsset:
       patch(_PATCH_OLTP_LOADER, return_value=mock_loader),
       patch(
         "robosystems.adapters.quickbooks.pipeline.load._update_last_sync",
+      ),
+      patch(
+        "robosystems.adapters.quickbooks.pipeline.load._advance_cdc_watermark",
       ),
     ):
       context = build_asset_context()

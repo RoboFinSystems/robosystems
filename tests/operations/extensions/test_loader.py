@@ -1560,6 +1560,132 @@ class TestCaptureAgentsFromQB:
     # connection_id, source, and external_id.
     session.query.assert_called_with(Agent)
 
+  def test_sync_token_persists_on_insert(self):
+    """Phase 5 step 1 (§4.3.1) — Agent insert path stamps
+    metadata_['qb_sync_token'] when the dbt row carries a SyncToken."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    dbt = {
+      "agents": [
+        {
+          "id": "qb_cust_42",
+          "agent_type": "customer",
+          "name": "Synctoken Customer",
+          "legal_name": "",
+          "email": "",
+          "phone": "",
+          "address": "{}",
+          "tax_id": "",
+          "is_1099_recipient": False,
+          "is_active": True,
+          "sync_token": "7",
+        }
+      ],
+    }
+
+    OLTPLoader()._capture_agents_from_qb(
+      session,
+      dbt,
+      source="quickbooks",
+      connection_id="conn_a",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    new_agents = session.add_all.call_args_list[0][0][0]
+    assert len(new_agents) == 1
+    assert new_agents[0].metadata_["qb_sync_token"] == "7"
+
+  def test_sync_token_refreshes_on_existing_agent(self):
+    """Phase 5 step 1 — re-sync of an existing agent merges new SyncToken
+    into metadata_ in-place without dropping other JSONB keys."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    existing = MagicMock()
+    existing.external_id = "qb_cust_42"
+    existing.id = "agt_existing"
+    existing.metadata_ = {"qb_sync_token": "5", "custom_field": "preserved"}
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [existing]
+
+    dbt = {
+      "agents": [
+        {
+          "id": "qb_cust_42",
+          "agent_type": "customer",
+          "name": "Synctoken Customer",
+          "legal_name": "",
+          "email": "",
+          "phone": "",
+          "address": "{}",
+          "tax_id": "",
+          "is_1099_recipient": False,
+          "is_active": True,
+          "sync_token": "9",
+        }
+      ],
+    }
+
+    OLTPLoader()._capture_agents_from_qb(
+      session,
+      dbt,
+      source="quickbooks",
+      connection_id="conn_a",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # SyncToken bumped; pre-existing JSONB keys preserved.
+    assert existing.metadata_["qb_sync_token"] == "9"
+    assert existing.metadata_["custom_field"] == "preserved"
+
+  def test_missing_sync_token_leaves_existing_metadata_untouched(self):
+    """Phase 5 step 1 — when a row carries no SyncToken (e.g. pre-Phase-5
+    backfill), we don't overwrite the live metadata with a None value."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    existing = MagicMock()
+    existing.external_id = "qb_cust_42"
+    existing.id = "agt_existing"
+    existing.metadata_ = {"qb_sync_token": "5"}
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [existing]
+
+    dbt = {
+      "agents": [
+        {
+          "id": "qb_cust_42",
+          "agent_type": "customer",
+          "name": "Synctoken Customer",
+          "legal_name": "",
+          "email": "",
+          "phone": "",
+          "address": "{}",
+          "tax_id": "",
+          "is_1099_recipient": False,
+          "is_active": True,
+          # no sync_token field — simulates a pre-Phase-5 backfill row
+        }
+      ],
+    }
+
+    OLTPLoader()._capture_agents_from_qb(
+      session,
+      dbt,
+      source="quickbooks",
+      connection_id="conn_a",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Live SyncToken preserved — we didn't clobber it with None.
+    assert existing.metadata_["qb_sync_token"] == "5"
+
 
 class TestCaptureWithEventTypeAndAgent:
   """Phase 2: source-class fidelity + agent linkage from the transactions mart."""

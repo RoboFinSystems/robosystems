@@ -333,3 +333,563 @@ class TestG3ElementUpsertPreservesUlid:
       "add_all should not be called when every incoming element matches an "
       "existing row — the UPSERT branch should mutate in place instead."
     )
+
+
+class TestPhase5SyncTokenCapture:
+  """Phase 5 step 1 (§4.3.1) — SyncToken flows from dbt transaction row
+  into Event.metadata_['qb_sync_token'].
+
+  Step 2 (§4.3.2) will add the freshness-gate UPSERT logic. This class
+  asserts the capture path only — that the value is persisted on insert
+  and on the captured/classified UPSERT branch, and that a SyncToken
+  bump on a committed event (with no other payload change) does NOT
+  trigger a false drift flag.
+  """
+
+  def _dbt_data_with_sync_token(self, sync_token: str | None) -> dict:
+    """Single QB JournalEntry row tagged with the given SyncToken."""
+    data = _dbt_data_single_je()
+    data["transactions"][0]["sync_token"] = sync_token
+    return data
+
+  def test_new_event_persists_sync_token(self):
+    """A first-sync event row with sync_token='3' lands as
+    metadata_['qb_sync_token'] = '3' on the new Event."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+    loader._capture_transactions_as_events(
+      session,
+      self._dbt_data_with_sync_token("3"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # The new Event was passed to session.add_all; pull it out and inspect.
+    add_all_call = session.add_all.call_args_list[0]
+    new_events = add_all_call[0][0]
+    assert len(new_events) == 1
+    assert new_events[0].metadata_["qb_sync_token"] == "3"
+
+  def test_upsert_path_refreshes_sync_token(self):
+    """An existing captured event sees its metadata_['qb_sync_token']
+    refreshed when a re-sync arrives with a newer SyncToken value."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    captured = MagicMock()
+    captured.external_id = "JE_500"
+    captured.status = "captured"
+    captured.id = "evt_captured"
+    captured.metadata_ = {"qb_sync_token": "3", "status": "posted"}
+    captured.payload_drift = False
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [captured]
+
+    loader = OLTPLoader()
+    loader._capture_transactions_as_events(
+      session,
+      self._dbt_data_with_sync_token("5"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # The full-replacement UPSERT path stamped metadata_; the new SyncToken
+    # carried through.
+    assert captured.metadata_["qb_sync_token"] == "5"
+
+  def test_sync_token_bump_alone_does_not_flag_drift(self):
+    """A SyncToken bump on a committed event WITHOUT any other payload
+    change must not trip the drift detector. Step 2's freshness gate
+    will turn this into an idempotent no-op; for step 1 we only require
+    that drift isn't false-fired."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    # Build the committed event's live metadata to match what the loader
+    # will compute as `metadata_blob` from `_dbt_data_with_sync_token` —
+    # everything identical except the sync_token field. Without the
+    # qb_sync_token exclusion from the drift comparison, this would fire.
+    committed = MagicMock()
+    committed.external_id = "JE_500"
+    committed.status = "committed"
+    committed.id = "evt_committed"
+    committed.payload_drift = False
+
+    # First run the loader with sync_token='3' to capture what the
+    # metadata_blob shape looks like at this code revision; reuse it
+    # for the live payload so the diff is exactly the sync_token field.
+    capture_session = MagicMock()
+    capture_session.query.return_value.filter.return_value.all.return_value = []
+    OLTPLoader()._capture_transactions_as_events(
+      capture_session,
+      self._dbt_data_with_sync_token("3"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+    initial_event = capture_session.add_all.call_args_list[0][0][0][0]
+    # Strip dispatch_* fields — they get stamped by the failed auto-commit
+    # in this test setup, but a real successfully-committed event wouldn't
+    # carry them. The drift comparison must remain clean.
+    committed.metadata_ = {
+      k: v for k, v in initial_event.metadata_.items() if not k.startswith("dispatch_")
+    }
+
+    # Now re-sync with a bumped SyncToken; no other field changed.
+    drift_session = MagicMock()
+    drift_session.query.return_value.filter.return_value.all.return_value = [committed]
+
+    result = OLTPLoader()._capture_transactions_as_events(
+      drift_session,
+      self._dbt_data_with_sync_token("4"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Drift NOT flagged — the SyncToken exclusion in the drift comparison
+    # is doing its job.
+    assert result.drift_detected == 0
+    assert committed.payload_drift is False
+    # Live payload untouched per §2.5 immutability.
+    assert "drift_payload" not in committed.metadata_
+
+
+class TestPhase5SyncTokenGate:
+  """Phase 5 step 2 (§4.3.2) — SyncToken freshness gate on the UPSERT path.
+
+  The gate runs BEFORE the status branches:
+
+  - incoming SyncToken older than live → skip stale (counter logged)
+  - incoming SyncToken matches live → skip same-version (counter logged)
+  - incoming SyncToken newer than live → proceed to status branch
+  - either side NULL/non-numeric → proceed (no_info / backfill)
+  """
+
+  def _dbt_data_with_sync_token(self, sync_token: str | None) -> dict:
+    data = _dbt_data_single_je()
+    data["transactions"][0]["sync_token"] = sync_token
+    return data
+
+  def test_stale_sync_token_skips_upsert(self):
+    """incoming SyncToken < existing → no UPSERT, counter increments."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    captured = MagicMock()
+    captured.external_id = "JE_500"
+    captured.status = "captured"
+    captured.id = "evt_captured"
+    captured.metadata_ = {"qb_sync_token": "7"}
+    captured.payload_drift = False
+    captured.event_type = "ORIGINAL_TYPE"
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [captured]
+
+    result = OLTPLoader()._capture_transactions_as_events(
+      session,
+      self._dbt_data_with_sync_token("3"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Stale skip — no update path fired, no drift, no insert.
+    assert result.skipped_stale_sync_token == 1
+    assert result.updated == 0
+    assert result.drift_detected == 0
+    # The captured event's fields were NOT touched by the UPSERT path.
+    assert captured.event_type == "ORIGINAL_TYPE"
+
+  def test_same_sync_token_skips_upsert(self):
+    """incoming SyncToken == existing → no UPSERT, no work."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    captured = MagicMock()
+    captured.external_id = "JE_500"
+    captured.status = "captured"
+    captured.id = "evt_captured"
+    captured.metadata_ = {"qb_sync_token": "5"}
+    captured.payload_drift = False
+    captured.event_type = "ORIGINAL_TYPE"
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [captured]
+
+    result = OLTPLoader()._capture_transactions_as_events(
+      session,
+      self._dbt_data_with_sync_token("5"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert result.skipped_same_sync_token == 1
+    assert result.updated == 0
+    assert captured.event_type == "ORIGINAL_TYPE"
+
+  def test_fresh_sync_token_proceeds_to_upsert(self):
+    """incoming SyncToken > existing → status branch fires (captured path
+    performs full payload replacement, including bumped SyncToken)."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    captured = MagicMock()
+    captured.external_id = "JE_500"
+    captured.status = "captured"
+    captured.id = "evt_captured"
+    captured.metadata_ = {"qb_sync_token": "3"}
+    captured.payload_drift = False
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [captured]
+
+    result = OLTPLoader()._capture_transactions_as_events(
+      session,
+      self._dbt_data_with_sync_token("7"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Fresh — the captured/classified UPSERT branch ran, no skip counter.
+    assert result.skipped_stale_sync_token == 0
+    assert result.skipped_same_sync_token == 0
+    assert result.updated == 1
+    assert captured.metadata_["qb_sync_token"] == "7"
+
+  def test_null_existing_token_proceeds_backfill(self):
+    """Pre-Phase-5 row with no SyncToken in metadata_ → 'no_info' decision,
+    proceeds to UPSERT, SyncToken gets backfilled."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    captured = MagicMock()
+    captured.external_id = "JE_500"
+    captured.status = "captured"
+    captured.id = "evt_captured"
+    captured.metadata_ = {}  # pre-Phase-5: no qb_sync_token key
+    captured.payload_drift = False
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [captured]
+
+    result = OLTPLoader()._capture_transactions_as_events(
+      session,
+      self._dbt_data_with_sync_token("4"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert result.skipped_stale_sync_token == 0
+    assert result.skipped_same_sync_token == 0
+    assert result.updated == 1
+    # Backfill: live event picks up the SyncToken on this sync.
+    assert captured.metadata_["qb_sync_token"] == "4"
+
+  def test_committed_event_with_fresh_token_advances_live_token(self):
+    """Phase 5 step 2 — even when a committed event sees no business-payload
+    drift, a bumped SyncToken still advances the live event's qb_sync_token
+    so the next sync's gate comparison stays accurate."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    # First, build what a normal capture's metadata would look like for
+    # SyncToken='3'.
+    capture_session = MagicMock()
+    capture_session.query.return_value.filter.return_value.all.return_value = []
+    OLTPLoader()._capture_transactions_as_events(
+      capture_session,
+      self._dbt_data_with_sync_token("3"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+    initial_event = capture_session.add_all.call_args_list[0][0][0][0]
+    live_meta = {
+      k: v for k, v in initial_event.metadata_.items() if not k.startswith("dispatch_")
+    }
+
+    committed = MagicMock()
+    committed.external_id = "JE_500"
+    committed.status = "committed"
+    committed.id = "evt_committed"
+    committed.metadata_ = live_meta
+    committed.payload_drift = False
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [committed]
+
+    result = OLTPLoader()._capture_transactions_as_events(
+      session,
+      self._dbt_data_with_sync_token("9"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Drift NOT flagged (only SyncToken differs), but live token advanced.
+    assert result.drift_detected == 0
+    assert committed.payload_drift is False
+    assert committed.metadata_["qb_sync_token"] == "9"
+    assert "drift_payload" not in committed.metadata_
+
+
+class TestCompareSyncTokens:
+  """Phase 5 §4.3.2 — pure-function freshness comparison."""
+
+  def test_decisions(self):
+    from robosystems.operations.extensions.loader import _compare_sync_tokens
+
+    assert _compare_sync_tokens(None, None) == "no_info"
+    assert _compare_sync_tokens(None, "3") == "no_info"
+    assert _compare_sync_tokens("3", None) == "no_info"
+    assert _compare_sync_tokens("3", "3") == "same"
+    assert _compare_sync_tokens("3", "5") == "fresh"
+    assert _compare_sync_tokens("5", "3") == "stale"
+    # Numeric comparison, not lexicographic — '10' > '9'.
+    assert _compare_sync_tokens("9", "10") == "fresh"
+    # Defensive: non-numeric input falls through to no_info.
+    assert _compare_sync_tokens("abc", "5") == "no_info"
+    assert _compare_sync_tokens("5", "abc") == "no_info"
+
+
+class TestPhase5IdempotentReingest:
+  """Phase 5 step 6 (§4.3.5) — idempotent re-ingest harness.
+
+  Five scenarios from the spec. Implementation: synthetic dbt-data
+  fixtures hit ``_capture_transactions_as_events`` directly (no live
+  QB sandbox required for the test harness — the gate semantics are
+  the contract being asserted). When a recorded-fixture set lands
+  later (§4.3.5 future work), this class is the shape the recorded
+  test would replace.
+  """
+
+  def _fixture(self, sync_token: str | None) -> dict:
+    """Single-JE QB-shape dbt data with a given SyncToken."""
+    data = _dbt_data_single_je()
+    data["transactions"][0]["sync_token"] = sync_token
+    return data
+
+  def _make_existing_event(
+    self,
+    *,
+    status: str,
+    sync_token: str,
+    payload_seed: dict | None = None,
+  ):
+    """Build a MagicMock standing in for an existing Event row.
+
+    ``payload_seed`` controls the live metadata blob; defaults to a
+    minimal-but-realistic shape including the SyncToken.
+    """
+    evt = MagicMock()
+    evt.external_id = "JE_500"
+    evt.id = "evt_existing"
+    evt.status = status
+    evt.payload_drift = False
+    base_meta = {"qb_sync_token": sync_token, "status": "posted"}
+    if payload_seed:
+      base_meta.update(payload_seed)
+    evt.metadata_ = base_meta
+    return evt
+
+  def test_scenario_2_resync_identical_is_noop(self):
+    """Spec §4.3.5 scenario 2 — re-sync of an already-current row is
+    a SyncToken-gate ``same`` skip; nothing mutates."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    captured = self._make_existing_event(status="captured", sync_token="5")
+    pre_meta = dict(captured.metadata_)
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [captured]
+
+    result = OLTPLoader()._capture_transactions_as_events(
+      session,
+      self._fixture("5"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert result.skipped_same_sync_token == 1
+    assert result.updated == 0
+    assert result.inserted == 0
+    assert captured.metadata_ == pre_meta
+    session.add_all.assert_not_called()
+
+  def test_scenario_4_out_of_order_replay_skipped_stale(self):
+    """Spec §4.3.5 scenario 4 — forged out-of-order CDC batch: live
+    token is newer than incoming. Gate flags ``stale``, nothing
+    mutates, no errors raised."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    captured = self._make_existing_event(status="captured", sync_token="12")
+    pre_meta = dict(captured.metadata_)
+    pre_event_type = "ORIGINAL"
+    captured.event_type = pre_event_type
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [captured]
+
+    result = OLTPLoader()._capture_transactions_as_events(
+      session,
+      self._fixture("7"),  # older than live=12
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert result.skipped_stale_sync_token == 1
+    # No mutation: metadata, fields, drift flag all untouched.
+    assert captured.metadata_ == pre_meta
+    assert captured.event_type == pre_event_type
+    assert captured.payload_drift is False
+    assert result.drift_detected == 0
+
+  def test_scenario_5_committed_drift_flagged_live_payload_immutable(self):
+    """Spec §4.3.5 scenario 5 — a ``committed`` event whose QB-side
+    payload changed gets ``payload_drift=True`` + ``drift_payload``
+    captured in metadata, but the live business payload is untouched.
+
+    The bumped SyncToken also advances the live ``qb_sync_token`` so
+    the next gate comparison reflects current state — bookkeeping
+    metadata, not business payload.
+    """
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    # Seed the live metadata to match what a captured + committed
+    # event's blob would look like — same shape as `metadata_blob`
+    # the loader will compute for the incoming fixture, except a
+    # field that differs (qb_doc_number).
+    captured_blob = self._make_existing_event(
+      status="committed",
+      sync_token="3",
+      payload_seed={
+        "qb_txn_type": "JournalEntry",
+        "qb_doc_number": "ORIGINAL_DOC",  # will diff from incoming
+        "qb_reference_number": "REF-500",
+        "qb_merchant_name": None,
+        "qb_due_date": None,
+        "qb_category": None,
+        "qb_source_class": "JournalEntry",
+        "qb_agent_external_id": None,
+        "qb_linked_txns": [],
+        "connection_id": "conn_1",
+        "entries": [],
+      },
+    )
+    pre_business_payload = {
+      k: v for k, v in captured_blob.metadata_.items() if k != "qb_sync_token"
+    }
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [captured_blob]
+
+    # Bumped SyncToken + payload diff (loader will compute a different
+    # qb_doc_number from the fixture's "number" field = "500").
+    result = OLTPLoader()._capture_transactions_as_events(
+      session,
+      self._fixture("9"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Drift flagged; live token advanced; drift_payload captured.
+    assert result.drift_detected == 1
+    assert captured_blob.payload_drift is True
+    assert captured_blob.metadata_["qb_sync_token"] == "9"
+    assert "drift_payload" in captured_blob.metadata_
+    assert "drift_detected_at" in captured_blob.metadata_
+    # The live business payload's qb_doc_number is unchanged (live
+    # remains ORIGINAL_DOC); the incoming version was stashed inside
+    # drift_payload for the reconciliation queue.
+    assert captured_blob.metadata_["qb_doc_number"] == "ORIGINAL_DOC"
+    # drift_payload carries the incoming view.
+    assert captured_blob.metadata_["drift_payload"]["qb_doc_number"] == "500"
+    # Pre-existing business fields outside qb_doc_number stayed put.
+    for key, value in pre_business_payload.items():
+      if key == "qb_doc_number":
+        continue
+      assert captured_blob.metadata_[key] == value
+
+  def test_two_consecutive_syncs_produce_same_state(self):
+    """Spec §4.3.5 scenario 2 — running the same dbt data through
+    ``_capture_transactions_as_events`` twice leaves the snapshot
+    tuple ``(external_id, qb_sync_token, status, payload_drift)``
+    unchanged on the second run. The SyncToken gate flags 'same' and
+    the UPSERT path is a no-op.
+
+    Note: ``dispatch_attempts`` (a bookkeeping counter on dispatch
+    re-tries for captured-but-stuck events) IS expected to advance
+    across re-syncs — that's the intentional inbox-retry mechanism
+    that lets a previously-failed event commit once mappings improve.
+    The spec's idempotency snapshot is the tuple above, not the full
+    metadata blob.
+    """
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    # First sync: new event inserted with sync_token='4'.
+    first_session = MagicMock()
+    first_session.query.return_value.filter.return_value.all.return_value = []
+
+    loader = OLTPLoader()
+    first_result = loader._capture_transactions_as_events(
+      first_session,
+      self._fixture("4"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+    new_event = first_session.add_all.call_args_list[0][0][0][0]
+    snapshot = {
+      "external_id": new_event.external_id,
+      "qb_sync_token": new_event.metadata_.get("qb_sync_token"),
+      "status": new_event.status,
+      "payload_drift": new_event.payload_drift,
+    }
+
+    # Second sync: same dbt row; gate flags 'same' and short-circuits.
+    second_session = MagicMock()
+    second_session.query.return_value.filter.return_value.all.return_value = [new_event]
+
+    second_result = loader._capture_transactions_as_events(
+      second_session,
+      self._fixture("4"),
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert first_result.inserted == 1
+    assert second_result.inserted == 0
+    assert second_result.updated == 0
+    assert second_result.skipped_same_sync_token == 1
+    assert second_result.drift_detected == 0
+    # The §4.3.5 snapshot tuple is unchanged across the re-sync.
+    second_snapshot = {
+      "external_id": new_event.external_id,
+      "qb_sync_token": new_event.metadata_.get("qb_sync_token"),
+      "status": new_event.status,
+      "payload_drift": new_event.payload_drift,
+    }
+    assert second_snapshot == snapshot
