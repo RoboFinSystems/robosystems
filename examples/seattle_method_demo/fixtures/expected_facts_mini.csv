@@ -1,0 +1,795 @@
+﻿ReportingEntityAspect,CalendarPeriodAspect,Concept,FactValue,Units,Rounding,FactID,Sequence
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,0,iso4217:USD,INF,FACT066cec9f,7
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:CashAndCashEquivalents,10850,iso4217:USD,INF,FACTede45aa0,1
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Receivables,0,iso4217:USD,INF,FACT368ed40a,2
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:PropertyPlantAndEquipment,900,iso4217:USD,INF,FACT95d65830,4
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Inventories,2700,iso4217:USD,INF,FACT57459f21,3
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:AccountsPayable,1000,iso4217:USD,INF,FACT2d3b5016,5
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:AccruedExpenses,400,iso4217:USD,INF,FACT491741e2,6
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:LongtermDebt,1000,iso4217:USD,INF,FACTf1fa49c4,7
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:PropertyPlantAndEquipment,0,iso4217:USD,INF,FACT8080a2d1,13
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:RetainedEarnings,2050,iso4217:USD,INF,FACT22a5a2b6,9
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:LongtermDebt,0,iso4217:USD,INF,FACT37f35857,16
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Receivables,0,iso4217:USD,INF,FACT5c41bb03,11
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:CheckSum,0,iso4217:USD,INF,FACTe4acb325,10
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:PaidInCapital,10000,iso4217:USD,INF,FACT9a48aa90,8
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:AccountsPayable,0,iso4217:USD,INF,FACTeb324185,14
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Inventories,0,iso4217:USD,INF,FACT386daaf7,12
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:AccruedExpenses,0,iso4217:USD,INF,FACTec99d6fd,15
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:CashAndCashEquivalents,0,iso4217:USD,INF,FACT4a260018,19
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:ProceedsFromAdditionalLongtermBorrowings,2000,iso4217:USD,INF,FACT421365c0,22
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:PaidInCapital,0,iso4217:USD,INF,FACT8f1e5071,17
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:CheckSum,0,iso4217:USD,INF,FACT914c8eb2,20
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:RetainedEarnings,0,iso4217:USD,INF,FACT4d8d9760,18
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:NetIncomeLoss,2050,iso4217:USD,INF,FACTfafe6de6,23
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:DistributionsToOwner,0,iso4217:USD,INF,FACTb6effbaf,26
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:ProceedsFromCollectionOfReceivables,8000,iso4217:USD,INF,FACT29a18694,21
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:InvestmentsByOwner,10000,iso4217:USD,INF,FACT263f7434,25
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:ProceedsFromInvestmentsByOwner,10000,iso4217:USD,INF,FACT47f43f1f,24
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:IncreaseInReceivablesFromSalesOnAccount,8000,iso4217:USD,INF,FACT0e02f389,27
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment,1000,iso4217:USD,INF,FACT68044f06,34
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:CollectionOfReceivables,8000,iso4217:USD,INF,FACTd0e94720,35
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:BadDebtsWrittenOff,0,iso4217:USD,INF,FACTaa978817,37
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PaymentForReductionOfLongtermBorrowings,1000,iso4217:USD,INF,FACTb36ec1ac,33
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:AdditionsToAllowanceForBadDebts,0,iso4217:USD,INF,FACT127a8031,36
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PaymentOfAccountsPayable,7000,iso4217:USD,INF,FACTb4c556d4,32
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:DecreaseFromPaymentOfInterest,150,iso4217:USD,INF,FACTdf77b580,31
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:InterestAccrued,550,iso4217:USD,INF,FACT679abda6,30
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PurchasesOfInventoryForSale,5000,iso4217:USD,INF,FACT6a2ee27d,28
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:CapitalAdditionsPropertyPlantAndEquipment,1000,iso4217:USD,INF,FACT6d857505,29
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PurchasesInventoryForSaleOnAccount,8000,iso4217:USD,INF,FACTbbe16b8a,46
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:DecreaseInInventoriesFromSales,2000,iso4217:USD,INF,FACT179ddaee,38
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:InventoryWrittenOff,300,iso4217:USD,INF,FACTc9100e9b,39
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PropertyPlantAndEquipmentWrittenOff,0,iso4217:USD,INF,FACT1a4fe5e9,41
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:DecreaseFromPaymentAccountsPayable,7000,iso4217:USD,INF,FACTb47f992a,42
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PaymentForDistributionsToOwner,0,iso4217:USD,INF,FACT68be80f8,44
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:DecreaseFromDepreciationAndAmortization,100,iso4217:USD,INF,FACTc4c2319c,40
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:RepaymentLongtermBorrowings,1000,iso4217:USD,INF,FACT6af24d5f,43
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:AdditionalLongtermBorrowings,2000,iso4217:USD,INF,FACTbc4afcf2,47
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PaymentInterest,150,iso4217:USD,INF,FACTb633548d,45
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:CheckSumChanges,0,iso4217:USD,INF,FACT67207258,48
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:Sales,8000,iso4217:USD,INF,FACTb9ada62d,49
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:OperatingExpenses,100,iso4217:USD,INF,FACT108c8268,57
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:IncomeTaxExpenseBenefit,400,iso4217:USD,INF,FACTcc4d9bba,55
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:SalesGeneralAndAdministrativeExpenses,0,iso4217:USD,INF,FACT1af52a17,51
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:CostsOfSales,5300,iso4217:USD,INF,FACTaa437c6b,50
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:InterestExpense,150,iso4217:USD,INF,FACTc63433c5,53
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:GrossProfitLoss,2700,iso4217:USD,INF,FACT791c9719,56
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:DepreciationAndAmortization,100,iso4217:USD,INF,FACT768265b9,52
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:GainLossOnSalePropertyPlantEquipment,0,iso4217:USD,INF,FACTa5dd8ecb,54
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:OperatingIncomeLoss,2600,iso4217:USD,INF,FACTe63cd1a0,58
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:IncomeLossFromContinuingOperationsBeforeTax,2450,iso4217:USD,INF,FACT3afdc872,60
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:IncreasesDecreasesFromTransfersFromLongterm,0,iso4217:USD,INF,FACT54a02aa7,65
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:CashEquivalents,0,iso4217:USD,INF,FACTdb4f8f74,602
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:CurrentPortionOfLongtermDebt,0,iso4217:USD,INF,FACT374997a9,62
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:CurrentPortionOfLongtermDebt,0,iso4217:USD,INF,FACT3d565f0a,61
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:NonoperatingIncomeExpenses,-150,iso4217:USD,INF,FACT38b105d5,59
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PaymentOfDividends,0,iso4217:USD,INF,FACT530bbddf,64
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:Dividends,0,iso4217:USD,INF,FACT30e200d1,63
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:TradeReceivables,0,iso4217:USD,INF,FACT6bf9d908,603
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:IncreasesDecreasesFromTransfersFromCurrentPortion,0,iso4217:USD,INF,FACT8fcaa40d,66
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Cash,10850,iso4217:USD,INF,FACTb8a6327a,601
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:WorkInProgress,0,iso4217:USD,INF,FACT7df05991,606
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:FinishedGoods,0,iso4217:USD,INF,FACTb738c0da,605
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Land,0,iso4217:USD,INF,FACTa1314043,608
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:TradePayables,1000,iso4217:USD,INF,FACT83c27240,613
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:PropertyPlantAndEquipmentGross,1000,iso4217:USD,INF,FACTc2d8fd4d,611
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Equipment,1000,iso4217:USD,INF,FACT726eab31,610
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Buildings,0,iso4217:USD,INF,FACT773eec2f,609
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:OtherReceivables,0,iso4217:USD,INF,FACT078e96a6,604
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:AccumulatedDepreciation,100,iso4217:USD,INF,FACTaeafb2e3,612
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:RawMaterial,2700,iso4217:USD,INF,FACTcd460fed,607
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:MaturesInOneYear,1000,iso4217:USD,INF,FACT52b73449,617
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:MaturesInFourYears,0,iso4217:USD,INF,FACT3905d71d,620
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:OtherSecuredLoans,1000,iso4217:USD,INF,FACTe7ee63b4,616
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:MaturesInThreeYears,0,iso4217:USD,INF,FACT81e8df3b,619
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:MortgageLoans,0,iso4217:USD,INF,FACT5f036b92,615
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:OtherPayables,0,iso4217:USD,INF,FACT3b2f7a66,614
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:MaturesInFiveYears,0,iso4217:USD,INF,FACT5d29c6e9,621
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:CashEquivalents,0,iso4217:USD,INF,FACT9fba01f8,624
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Cash,0,iso4217:USD,INF,FACT904ac8da,623
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:MaturesThereafter,0,iso4217:USD,INF,FACTe5c4cecf,622
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:MaturesInTwoYears,0,iso4217:USD,INF,FACT5d47fd6b,618
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Land,0,iso4217:USD,INF,FACT7cf42d5f,630
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:TradeReceivables,0,iso4217:USD,INF,FACTfb96100c,625
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Buildings,0,iso4217:USD,INF,FACT18d83cab,631
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:PropertyPlantAndEquipmentGross,0,iso4217:USD,INF,FACTcb87d7d9,633
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:WorkInProgress,0,iso4217:USD,INF,FACT9024f358,628
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Equipment,0,iso4217:USD,INF,FACTa035348d,632
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:FinishedGoods,0,iso4217:USD,INF,FACT9fd43a7a,627
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:OtherReceivables,0,iso4217:USD,INF,FACT437b182a,626
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:AccumulatedDepreciation,0,iso4217:USD,INF,FACT736adfff,634
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:RawMaterial,0,iso4217:USD,INF,FACTc4192579,629
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:MaturesInOneYear,0,iso4217:USD,INF,FACTb1f918ee,639
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:OtherSecuredLoans,0,iso4217:USD,INF,FACTd5d5091a,638
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:TradePayables,0,iso4217:USD,INF,FACT1746ce0b,635
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:MaturesInFiveYears,0,iso4217:USD,INF,FACTbe67ea4e,643
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:MaturesInFourYears,0,iso4217:USD,INF,FACTda4bfbba,642
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:MortgageLoans,0,iso4217:USD,INF,FACT6d38013c,637
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:MaturesInTwoYears,0,iso4217:USD,INF,FACT091410c8,640
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:NatureBusinessTextBlock,ABC Company operates a pop up lemonade stand.,,,FACT7f0284fd,700
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:MaturesThereafter,0,iso4217:USD,INF,FACT068ae268,644
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:OtherPayables,0,iso4217:USD,INF,FACTafabc62d,636
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:MaturesInThreeYears,0,iso4217:USD,INF,FACTd5bb3298,641
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:AccountsPayablePoliciesTextBlock,Accounts payable consists of invoices received from suppliers which have not been paid as of the ...,,,FACTb189ed77,707
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:NoncurrentAssets,900,iso4217:USD,INF,FACT45a22581,102
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:InventoriesPoliciesTextBlock,Inventory consists of lemons and is values at the lower of cost or market value using the FIFO me...,,,FACTd5a5fc83,704
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:CashAndCashEquivalentsPoliciesTextBlock,Cash and cash equivalents consists of a bank demand deposit.,,,FACT6fdd1f41,702
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:CurrentAssets,13550,iso4217:USD,INF,FACTf04434e3,101
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Assets,14450,iso4217:USD,INF,FACT9b98ec35,103
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:BasisReportingTextBlock,These financial statements are presented using the MINI financial reporting scheme using US dolla...,,,FACT68768839,701
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:LongtermDebtPoliciesTextBlock,Long term debt consists of a note payable with a local bank secured by the equipment financed.,,,FACT731a2a66,708
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:PropertyPlantAndEquipmentPoliciesTextBlock,Property plant  and equipment consists of refrigeration equipment that is depreciated over five …,,,FACT6d48f4a5,705
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:ReceivablesPoliciesTextBlock,Accounts receivable are extended to all customers. ¬†Bad debts are written off after 90 days.,,,FACT03aa50ef,703
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:RevenueRecognitionPoliciesTextBlock,Revenues is recognized when earned using accrual accounting.,,,FACT0964e551,706
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:CurrentLiabilities,1400,iso4217:USD,INF,FACT99633c53,104
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:CurrentAssets,0,iso4217:USD,INF,FACTe9d346da,110
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:CurrentLiabilities,0,iso4217:USD,INF,FACTfb4010c1,113
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:LiabilitiesAndEquity,14450,iso4217:USD,INF,FACT3fdceab6,108
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:NoncurrentLiabilities,1000,iso4217:USD,INF,FACTe1e62302,105
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Assets,0,iso4217:USD,INF,FACT92671871,112
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Equity,0,iso4217:USD,INF,FACTee78d1a2,109
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:NoncurrentAssets,0,iso4217:USD,INF,FACT909cc817,111
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Liabilities,2400,iso4217:USD,INF,FACTe64db47a,106
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Equity,12050,iso4217:USD,INF,FACT3d273ad0,107
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:PayrollImprest,9000,iso4217:USD,INF,FACT0d4a9c30,29
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Liabilities,0,iso4217:USD,INF,FACTf139b8be,115
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:NetCashFlowFinancingActivities,10850,iso4217:USD,INF,FACT4468b41d,118
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:PettyCash,850,iso4217:USD,INF,FACTba575d34,31
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:BankOfAmericaGeneralChecking,1000,iso4217:USD,INF,FACT081adb2e,27
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:NoncurrentLiabilities,0,iso4217:USD,INF,FACT4ea601a3,114
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:NetCashFlowInvestingActivities,-1000,iso4217:USD,INF,FACT57866e5b,119
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:NetCashFlowOperatingActivities,1000,iso4217:USD,INF,FACTf4dee261,117
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:LiabilitiesAndEquity,0,iso4217:USD,INF,FACT98a9adcf,116
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:NetCashFlow,10850,iso4217:USD,INF,FACT3e167b2a,120
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:RetainedEarnings,2050,iso4217:USD,INF,FACT8b5379f5,43
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:NotePayableToBankOfAmerica,1000,iso4217:USD,INF,FACTf74cb026,41
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:DepreciationAndAmortizationExpenses,100,iso4217:USD,INF,FACTc5290199,845
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:FurnitureAndFixtures,900,iso4217:USD,INF,FACT2b3ab435,37
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:AccountsPayable,1000,iso4217:USD,INF,FACT9977322f,39
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:OtherNonoperatingExpenses,150,iso4217:USD,INF,FACTcb36a0db,841
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:InventoriesOnHand,2700,iso4217:USD,INF,FACTdecc5101,35
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:AccountsReceivable,0,iso4217:USD,INF,FACTd46cdf3d,33
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:SalesOnAccount,8000,iso4217:USD,INF,FACT680e26bf,553
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,ekg:GeneralExpenses,0,iso4217:USD,INF,FACT316c3b47,837
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:CostsOfGoodsSold,5300,iso4217:USD,INF,FACT5de7b5e0,833
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:PropertyAndEquipmentWrittenOff,0,iso4217:USD,INF,FACT49e36964,849
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:PayrollImprest,0,iso4217:USD,INF,FACT1321042e,18313
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:NotePayableToBankOfAmerica,0,iso4217:USD,INF,FACT716ad39e,18319
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:BankOfAmericaGeneralChecking,0,iso4217:USD,INF,FACT06f70c56,18312
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:PettyCash,0,iso4217:USD,INF,FACTa4b69808,18314
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:FurnitureAndFixtures,0,iso4217:USD,INF,FACTe8ca973c,18317
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:InventoriesOnHand,0,iso4217:USD,INF,FACTc11f0521,18316
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:ProvisionForIncomeTaxes,400,iso4217:USD,INF,FACTc6b0eb6a,853
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:AccountsPayable,0,iso4217:USD,INF,FACT0aab6149,18318
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:AccountsReceivable,0,iso4217:USD,INF,FACT6fa98b73,18315
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:RetainedEarnings,0,iso4217:USD,INF,FACTb79f4381,18320
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-201,,,FACT24f40ddd,4632
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTc47cb167,4664
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTe0d5aadb,4665
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-201,,,FACT4189892d,4633
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTfca041d6,4666
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTeafa519b,4673
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT11cab363,4668
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTcf205a7d,4670
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTb618dc6b,4672
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT85383f1a,4667
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTc7257bf0,4669
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTf1e20510,4674
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT892284fd,4671
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT8d8d0a38,4677
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT814988a2,4681
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT05045e62,4676
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT4f3591f3,4675
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTf73ee40e,4682
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT02c4e715,4679
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT68f7a3ca,4678
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT3fb83655,4680
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTb6d21a14,4687
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT4451cf4a,4689
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT05ff9b64,4684
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT5de9d05a,4683
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT7a3cec56,4685
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTff8ca0ff,4688
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT9996fc06,4686
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT20cd7fd9,4690
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTd7166464,4692
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-202,,,FACT900a4abc,4634
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT6788b89f,4693
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACTc6556e04,4691
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT7a5b1bc7,4694
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEconomicEntity,30810137d58f76b84afd,,,FACT07ee1c73,4695
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-202,,,FACT8668b3a6,4635
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-203,,,FACTb0beeda2,4637
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-205,,,FACT871351d6,4640
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-204,,,FACT9bb7b968,4638
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-203,,,FACT648f5639,4636
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-206,,,FACT2c59afbd,4642
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-205,,,FACT25cd01ba,4641
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-206,,,FACT7dd72be8,4643
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-204,,,FACTb126a345,4639
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-209,,,FACT56dde9da,4650
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-208,,,FACT8d9562c2,4649
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-207,,,FACTc8e3ac3d,4647
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-206,,,FACTc47a3bbf,4644
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-209,,,FACTd53aab02,4651
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-206,,,FACT74850be7,4645
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-207,,,FACTabb9a781,4646
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-208,,,FACT1e2eebef,4648
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-209,,,FACT669844c4,4652
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-209,,,FACTe3588277,4653
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-223,,,FACT5413b79d,4656
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-223,,,FACTe3f7bd3a,4657
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-210,,,FACTf511e5d7,4654
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-224,,,FACTa51dfb52,4658
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-210,,,FACT998475e9,4655
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-224,,,FACTe9ed3d16,4659
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-226,,,FACT18970154,4662
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/1/24,,,FACTbdf0c331,4696
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-225,,,FACTbe459b2d,4660
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/1/24,,,FACTc7e38251,4697
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-226,,,FACT2620b7e9,4663
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCode,JE-225,,,FACT194a846e,4661
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/2/24,,,FACTa83b4383,4698
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/5/24,,,FACT1ba36482,4701
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/5/24,,,FACT491eedf1,4700
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/10/24,,,FACTd394d71d,4702
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/10/24,,,FACTf3657a47,4703
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/2/24,,,FACT925d76a0,4699
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/15/24,,,FACT2f6e04b3,4704
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/15/24,,,FACT3ec9fd21,4705
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/16/24,,,FACT160d8abb,4706
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/20/24,,,FACT95c460cf,4710
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/16/24,,,FACT997a36b2,4708
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/16/24,,,FACTb5525d26,4707
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/16/24,,,FACT2709b922,4709
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/25/24,,,FACT26a9a271,4717
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/24/24,,,FACTd282376b,4718
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/20/24,,,FACT05fda608,4711
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/21/24,,,FACTce9ece35,4713
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/28/24,,,FACTe940d373,4720
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/25/24,,,FACT4b80898c,4715
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/28/24,,,FACT8747590f,4721
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/24/24,,,FACTac5bc978,4719
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/21/24,,,FACT47f6511d,4712
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/25/24,,,FACT0ef19d39,4714
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/25/24,,,FACT852d5ce0,4716
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/28/24,,,FACT310b8754,4722
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:PaidInCapital,,,FACT6cb5e1dc,17471
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/29/24,,,FACTdf42e833,4727
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/28/24,,,FACT0605feae,4723
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/29/24,,,FACT1ac9cb8a,4726
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/28/24,,,FACT290f1c7d,4724
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CashAndCashEquivalents,,,FACT9b3faea3,17470
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDate,1/28/24,,,FACT9d987c58,4725
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CashAndCashEquivalents,,,FACT099fee60,17472
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:AccountsPayable,,,FACTc18dc918,17477
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CostsOfSales,,,FACTb377a481,17478
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:Inventories,,,FACTfa77c6d3,17476
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:LongtermDebt,,,FACT0feeb078,17473
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CashAndCashEquivalents,,,FACTd051e11b,17475
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:PropertyPlantAndEquipment,,,FACTf89288d5,17474
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:AccountsPayable,,,FACT6c2ae928,17479
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:Receivables,,,FACT81860ed2,17480
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CashAndCashEquivalents,,,FACTac3ba1c3,17489
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:Inventories,,,FACTe6fef751,17483
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:InterestExpense,,,FACT285060d4,17492
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CostsOfSales,,,FACT383089e1,17482
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:AccruedExpenses,,,FACT7f9e1914,17493
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CashAndCashEquivalents,,,FACT99507afe,17487
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:Sales,,,FACT24f720db,17481
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CashAndCashEquivalents,,,FACT9b5212fc,17484
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:AccountsPayable,,,FACT1df24dbf,17486
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CashAndCashEquivalents,,,FACTf43a7583,17490
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:AccruedExpenses,,,FACTd57d8a42,17491
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:CostsOfSales,,,FACT39971a81,17494
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:LongtermDebt,,,FACT3abf1524,17488
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:Receivables,,,FACT1e56355f,17485
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:Inventories,,,FACT54f7b7dd,17495
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:AccruedExpenses,,,FACT14dd98ee,17501
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:NonoperatingIncomeExpenses,,,FACT72880dc7,17499
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:PropertyPlantAndEquipment,,,FACTac0cdaeb,17497
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:DepreciationAndAmortization,,,FACT0f7d97e4,17496
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:IncomeTaxExpenseBenefit,,,FACT3bde0873,17500
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryConcept,mini:PropertyPlantAndEquipment,,,FACTb91d18b6,17498
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:ProceedsFromInvestmentsByOwner,,,FACTb5329057,17502
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:PurchasesOfInventoryForSale,,,FACTab533899,17508
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:InvestmentsByOwner,,,FACTe8d6c1e7,17503
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:PurchasesInventoryForSaleOnAccount,,,FACT704f5e55,17509
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:ProceedsFromAdditionalLongtermBorrowings,,,FACT00f6fe08,17504
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:CapitalAdditionsPropertyPlantAndEquipment,,,FACTd4ccc948,17506
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:AdditionalLongtermBorrowings,,,FACT0a24fca8,17505
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:NetIncomeLoss,,,FACTe5e1f7b1,17510
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment,,,FACTd5fe7806,17507
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:NetIncomeLoss,,,FACT44169066,17513
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:ProceedsFromCollectionOfReceivables,,,FACT2bacd5ec,17516
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:NetIncomeLoss,,,FACT9098d708,17514
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:PurchasesInventoryForSaleOnAccount,,,FACTea4ce800,17511
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:IncreaseInReceivablesFromSalesOnAccount,,,FACTda029914,17512
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:DecreaseInInventoriesFromSales,,,FACT9d3800fa,17515
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:DecreaseFromPaymentAccountsPayable,,,FACT10177083,17518
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:CollectionOfReceivables,,,FACT2f23ae90,17517
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:NetIncomeLoss,,,FACT685b0903,17524
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:PaymentForReductionOfLongtermBorrowings,,,FACT15cb6daa,17521
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:RepaymentLongtermBorrowings,,,FACTa507f59c,17520
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:DecreaseFromPaymentOfInterest,,,FACT67aba4ae,17523
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:PaymentOfAccountsPayable,,,FACT4cc38729,17519
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:PaymentOfInterest,,,FACT309b2d1d,17522
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:NetIncomeLoss,,,FACT41bb4914,17526
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:InventoryWrittenOff,,,FACT6e5f046e,17527
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:InterestAccrued,,,FACT7b9438c7,17525
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:NetIncomeLoss,,,FACT28a8634a,17531
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:PropertyPlantAndEquipmentWrittenOff,,,FACT877f4fac,17530
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:NetIncomeLoss,,,FACT454c520b,17528
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:DecreaseFromDepreciationAndAmortization,,,FACT67fd19dc,17529
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-10000,iso4217:USD,INF,FACT82d75b84,17567
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-2000,iso4217:USD,INF,FACTa9a6da83,17569
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:InterestAccrued,,,FACTbcbd75af,17533
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryEventTypeCode,mini:NetIncomeLoss,,,FACT5d4b9406,17532
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-1000,iso4217:USD,INF,FACT698d669c,17571
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,10000,iso4217:USD,INF,FACT496b3c38,17566
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,1000,iso4217:USD,INF,FACT7877599e,17570
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,2000,iso4217:USD,INF,FACTd773d5ad,17568
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-3000,iso4217:USD,INF,FACT92fe835c,17575
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-5000,iso4217:USD,INF,FACT0d6c452c,17573
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,5000,iso4217:USD,INF,FACTac60e97f,17572
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-2000,iso4217:USD,INF,FACT510167c3,17579
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,3000,iso4217:USD,INF,FACT660586ac,17574
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,2000,iso4217:USD,INF,FACT189bf623,17578
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,8000,iso4217:USD,INF,FACTe23dc2bb,17576
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-8000,iso4217:USD,INF,FACTb2895afe,17577
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-1000,iso4217:USD,INF,FACT8aa27ce2,17585
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,1000,iso4217:USD,INF,FACT6dc89314,17584
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,8000,iso4217:USD,INF,FACT0813e484,17580
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-7000,iso4217:USD,INF,FACT140e5570,17583
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-150,iso4217:USD,INF,FACTe15773b2,17586
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-8000,iso4217:USD,INF,FACTb13d1b5d,17581
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,7000,iso4217:USD,INF,FACT5fa319c5,17582
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,100,iso4217:USD,INF,FACTbae91b1f,17592
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,150,iso4217:USD,INF,FACTdc3e18e5,17588
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-150,iso4217:USD,INF,FACT5e89653e,17589
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-300,iso4217:USD,INF,FACT04466ddb,17591
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-100,iso4217:USD,INF,FACT4a2fd0ae,17593
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,150,iso4217:USD,INF,FACTdaefc386,17587
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,300,iso4217:USD,INF,FACTa848ce1a,17590
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,-400,iso4217:USD,INF,FACT271ca2f9,17597
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,0,iso4217:USD,INF,FACTb0c739ed,17595
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT06f2b9b9,17599
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,400,iso4217:USD,INF,FACTcf5d0e5d,17596
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT92dd935e,17598
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryAmount,0,iso4217:USD,INF,FACTa07b55e6,17594
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT3f1cce41,17601
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT39b5a220,17600
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT782b96da,17602
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT31a49912,17604
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT61d83199,17607
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACTa677b561,17603
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT63530141,17606
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACTe28dd10d,17609
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT045fef61,17605
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT9071ad5f,17608
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT6a58a6e6,17610
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT64124a29,17612
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACTad192e48,17614
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT4000f59f,17615
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT35d8ecec,17616
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT86250ef8,17611
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT32c33b07,17613
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACTd6f8ce9a,17617
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT656a32de,17618
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACTd244c2e6,17620
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT3047c502,17619
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT99095965,17622
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT1bf3f0ac,17621
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACTcd86040f,17624
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACTb34caeee,17623
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Investment by owner to open a lemonade stand.,,,FACT6f184573,17535
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACTe483a6d3,17629
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT70fe2656,17626
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT266bd87b,17625
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT07d9f604,17628
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryCurrency,iso4217:USD,,,FACT467f5b3d,17627
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Investment by owner to open a lemonade stand.,,,FACTd94fb272,17534
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Sales on account.,,,FACT935f46af,17544
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Payment for  contractor to work the lemonade stand.,,,FACT9d11d5fc,17543
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Purchase of lemons to put intoinventory on account.,,,FACTa7d2f94b,17540
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Long term borrowing to purchase refrigerator.,,,FACT1991cb54,17536
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Purchase of refrigerator  using cash from additional borrowings.,,,FACT0bf4b0e7,17538
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Long term borrowing to purchase refrigerator.,,,FACT590d36ce,17537
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Purchase of lemons to put intoinventory on account.,,,FACTc067d8f9,17541
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Purchase of refrigerator  using cash from additional borrowings.,,,FACT73439c24,17539
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Payment for  contractor to work the lemonade stand.,,,FACTdba6cc30,17542
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Sales on account.,,,FACTcce98bcd,17545
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Payment of accounts payable.,,,FACT89f75a0c,17550
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Costs related to sales on account.,,,FACT7d39fd3a,17546
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Payment of accounts payable.,,,FACTc364b2b0,17551
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Collection of accounts receivable.,,,FACTaa0c72c1,17548
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Costs related to sales on account.,,,FACTc326a8e2,17547
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Collection of accounts receivable.,,,FACTe2b60232,17549
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Closing entry. Inventory write offs, adjust to physical.,,FACT2dc03ba1,17558
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Payment of long term debt including accrued interest.,,,FACT001ede2b,17554
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Payment of long term debt including accrued interest.,,,FACT4ca93b3c,17553
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Accrual of interest on debt.,,,FACT19b46033,17556
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Payment of long term debt including accrued interest.,,,FACTda06685f,17552
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Payment of long term debt including accrued interest.,,,FACTec1cc5bb,17555
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Accrual of interest on debt.,,,FACTbfb2dad9,17557
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Closing entry. Depreciation and amortization expensed.,,,FACT95c7304b,17560
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Closing entry.  Book taxes.,,,FACT1ae4cbef,17565
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Closing entry.  Book taxes.,,,FACT3e3cd3f4,17564
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Closing entry. Inventory write offs, adjust to physical.,,FACTebf8c88f,17559
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Closing entry. Depreciation and amortization expensed.,,,FACTe00082f1,17561
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Closing entry. Write of of PPE.,,,FACT4563ae32,17562
+30810137d58f76b84afd | http://xbrlsite.com/id,2024-01-01 | 2024-12-31,gl:EntryDescription,Closing entry. Write of of PPE.,,,FACT7c86f38f,17563
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:CostsOfSales,0,iso4217:USD,INF,FACT288dabb3,18015
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:Sales,8000,iso4217:USD,INF,FACTa0d07b03,18010
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:SalesOnAccount,8000,iso4217:USD,INF,FACT418f0a8e,18008
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:SalesOnAccount,0,iso4217:USD,INF,FACTbc0e6533,18009
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:Sales,0,iso4217:USD,INF,FACT55a7aa5a,18011
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,ekg:GeneralExpenses,0,iso4217:USD,INF,FACT540bb633,18016
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:CostsOfSales,5300,iso4217:USD,INF,FACTc87ec59a,18014
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:CostsOfGoodsSold,0,iso4217:USD,INF,FACTe99ec235,18013
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:CostsOfGoodsSold,5300,iso4217:USD,INF,FACTa1aa4bec,18012
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,ekg:GeneralExpenses,0,iso4217:USD,INF,FACT44d0b061,18017
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:SalesGeneralAndAdministrativeExpenses,0,iso4217:USD,INF,FACT0d3d6960,18018
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:InterestExpense,150,iso4217:USD,INF,FACT0bd02f46,18022
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:DepreciationAndAmortizationExpenses,100,iso4217:USD,INF,FACTc86b9deb,18024
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:OtherNonoperatingExpenses,0,iso4217:USD,INF,FACT57a19f29,18021
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:DepreciationAndAmortization,100,iso4217:USD,INF,FACT7fcb250c,18026
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:InterestExpense,0,iso4217:USD,INF,FACT33cd574e,18023
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:SalesGeneralAndAdministrativeExpenses,0,iso4217:USD,INF,FACTe2a19be3,18019
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:OtherNonoperatingExpenses,150,iso4217:USD,INF,FACTc6d6ed83,18020
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:DepreciationAndAmortizationExpenses,0,iso4217:USD,INF,FACTd7fca738,18025
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:DepreciationAndAmortization,0,iso4217:USD,INF,FACT96cfe679,18027
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:ProvisionForIncomeTaxes,0,iso4217:USD,INF,FACT0a7c5883,18033
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:ProvisionForIncomeTaxes,400,iso4217:USD,INF,FACT8483c071,18032
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:PropertyAndEquipmentWrittenOff,0,iso4217:USD,INF,FACT113e0f12,18028
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:GainLossOnSalePropertyPlantEquipment,0,iso4217:USD,INF,FACTa377e616,18030
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:GainLossOnSalePropertyPlantEquipment,0,iso4217:USD,INF,FACTef63496f,18031
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,coa:PropertyAndEquipmentWrittenOff,0,iso4217:USD,INF,FACTe2891dc0,18029
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:IncomeTaxExpenseBenefit,400,iso4217:USD,INF,FACT50dc7d33,18034
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,mini:IncomeTaxExpenseBenefit,0,iso4217:USD,INF,FACTa4a53478,18035
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:CashAndCashEquivalents,10850,iso4217:USD,INF,FACTb0d66b46,18070
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:BankOfAmericaGeneralChecking,1000,iso4217:USD,INF,FACT2f26506c,18064
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:PettyCash,850,iso4217:USD,INF,FACT41c0f1ce,18068
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:PayrollImprest,9000,iso4217:USD,INF,FACTfc9f88bb,18066
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:CashAndCashEquivalents,0,iso4217:USD,INF,FACT42686bc4,18071
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:BankOfAmericaGeneralChecking,0,iso4217:USD,INF,FACT23ad8cf6,18065
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:PettyCash,0,iso4217:USD,INF,FACT54133798,18069
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:PayrollImprest,0,iso4217:USD,INF,FACTcce64f49,18067
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:AccountsReceivable,0,iso4217:USD,INF,FACT84411685,18108
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:InventoriesOnHand,2700,iso4217:USD,INF,FACTbc5f7f59,18112
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:InventoriesOnHand,0,iso4217:USD,INF,FACT37859de2,18113
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:AccountsReceivable,0,iso4217:USD,INF,FACTf167049f,18109
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:TradeReceivables,0,iso4217:USD,INF,FACTdb153877,18111
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Inventories,0,iso4217:USD,INF,FACT88f42baf,18115
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:TradeReceivables,0,iso4217:USD,INF,FACT971db80c,18110
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:FurnitureAndFixtures,900,iso4217:USD,INF,FACTf5884622,18260
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:Inventories,2700,iso4217:USD,INF,FACT05bde895,18114
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:PropertyPlantAndEquipment,900,iso4217:USD,INF,FACTa59cd98b,18262
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:PropertyPlantAndEquipment,0,iso4217:USD,INF,FACT13c95371,18263
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:AccountsPayable,1000,iso4217:USD,INF,FACTfb8b39a4,18264
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:LongtermDebt,1000,iso4217:USD,INF,FACTcc6b22be,18270
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:FurnitureAndFixtures,0,iso4217:USD,INF,FACT66f2eb81,18261
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:TradePayables,1000,iso4217:USD,INF,FACT35e3623b,18266
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:AccountsPayable,0,iso4217:USD,INF,FACTf58b1be5,18265
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:TradePayables,0,iso4217:USD,INF,FACT3a2bfa41,18267
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:NotePayableToBankOfAmerica,1000,iso4217:USD,INF,FACT6780d932,18268
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:RetainedEarnings,2050,iso4217:USD,INF,FACT9c327b48,18272
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:BankOfAmericaGeneralChecking,0,iso4217:USD,INF,FACT21617198,18815
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:RetainedEarnings,2050,iso4217:USD,INF,FACTe0da513d,18274
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:LongtermDebt,0,iso4217:USD,INF,FACTcf802afb,18271
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:PayrollImprest,0,iso4217:USD,INF,FACT3f598ea5,18817
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:NotePayableToBankOfAmerica,0,iso4217:USD,INF,FACTbdd5096c,18269
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,coa:RetainedEarnings,0,iso4217:USD,INF,FACT69c0bb28,18273
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:BankOfAmericaGeneralChecking,0,iso4217:USD,INF,FACT95b2cd66,18814
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:RetainedEarnings,0,iso4217:USD,INF,FACT8ac7c7d9,18275
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:PayrollImprest,0,iso4217:USD,INF,FACT9f559c6c,18816
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:PettyCash,0,iso4217:USD,INF,FACT83c6c3b0,18818
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:TradeReceivables,0,iso4217:USD,INF,FACT202ff4e6,18825
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:TradeReceivables,0,iso4217:USD,INF,FACTab1cb0d9,18824
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:CashAndCashEquivalents,0,iso4217:USD,INF,FACT819dd9d8,18820
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:PettyCash,0,iso4217:USD,INF,FACTc1129458,18819
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:InventoriesOnHand,0,iso4217:USD,INF,FACT5c0cc019,18826
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:AccountsReceivable,0,iso4217:USD,INF,FACTe8e46ea7,18823
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:CashAndCashEquivalents,0,iso4217:USD,INF,FACTf32c6401,18821
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:AccountsReceivable,0,iso4217:USD,INF,FACT23fe1652,18822
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Inventories,0,iso4217:USD,INF,FACTcf6b2ecf,18829
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:FurnitureAndFixtures,0,iso4217:USD,INF,FACT90c9b2cc,18831
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:FurnitureAndFixtures,0,iso4217:USD,INF,FACTb2a17889,18830
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:PropertyPlantAndEquipment,0,iso4217:USD,INF,FACT599c8826,18832
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:InventoriesOnHand,0,iso4217:USD,INF,FACT40c4a836,18827
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:AccountsPayable,0,iso4217:USD,INF,FACT812d9299,18834
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:Inventories,0,iso4217:USD,INF,FACTb74b4521,18828
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:TradePayables,0,iso4217:USD,INF,FACT24621ade,18836
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:PropertyPlantAndEquipment,0,iso4217:USD,INF,FACTde6afcbc,18833
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:RetainedEarnings,0,iso4217:USD,INF,FACTcfae830d,18843
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:AccountsPayable,0,iso4217:USD,INF,FACT857912e1,18835
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:TradePayables,0,iso4217:USD,INF,FACT85774951,18837
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:LongtermDebt,0,iso4217:USD,INF,FACTa9ba43a2,18841
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:LongtermDebt,0,iso4217:USD,INF,FACT4d9e937b,18840
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:NotePayableToBankOfAmerica,0,iso4217:USD,INF,FACT69ff88dc,18838
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:RetainedEarnings,0,iso4217:USD,INF,FACT76dc3c19,18844
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:NotePayableToBankOfAmerica,0,iso4217:USD,INF,FACT2c9aa11a,18839
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,coa:RetainedEarnings,0,iso4217:USD,INF,FACT6137c585,18842
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:RetainedEarnings,0,iso4217:USD,INF,FACT9c760c40,18845
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,ekg:RealAccountsCheckSum,0,iso4217:USD,INF,FACTefae0bd0,18265
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,ekg:TemporaryAccountsCheckSum,-2050,iso4217:USD,INF,FACTe434ccec,18266
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,ekg:AccruedExpenses,400,iso4217:USD,INF,FACT4bd6b0dc,18270
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,ekg:PaidInCapital,10000,iso4217:USD,INF,FACT4ec72e61,18268
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,ekg:AccruedExpenses,0,iso4217:USD,INF,,18849
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,ekg:PaidInCapital,0,iso4217:USD,INF,,18850
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,ekg:RealAccountsCheckSum,0,iso4217:USD,INF,,18851
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,ekg:AccruedExpenses,400,iso4217:USD,INF,FACTdd016c4f,18880
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,ekg:AccruedExpenses,0,iso4217:USD,INF,FACT18efde08,18881
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,ekg:AccruedExpenses,0,iso4217:USD,INF,FACTf4c5a103,18882
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,ekg:AccruedExpenses,0,iso4217:USD,INF,FACT726357d9,18883
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:AccruedExpenses,400,iso4217:USD,INF,FACT13604187,18884
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:AccruedExpenses,0,iso4217:USD,INF,FACTb902f58a,18885
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:AccruedExpenses,0,iso4217:USD,INF,FACT656f15d7,18886
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:AccruedExpenses,0,iso4217:USD,INF,FACTa1ee7271,18887
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,ekg:PaidInCapital,10000,iso4217:USD,INF,FACTa1cf1da3,18916
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,ekg:PaidInCapital,0,iso4217:USD,INF,FACT6c793f01,18917
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,ekg:PaidInCapital,0,iso4217:USD,INF,FACT07ae8930,18918
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,ekg:PaidInCapital,0,iso4217:USD,INF,FACT76697b6e,18919
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:PaidInCapital,10000,iso4217:USD,INF,FACTb9a4eb65,18920
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,mini:PaidInCapital,0,iso4217:USD,INF,FACT813bbec8,18921
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:PaidInCapital,0,iso4217:USD,INF,FACT4e6410ab,18922
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,mini:PaidInCapital,0,iso4217:USD,INF,FACTec4b5020,18923
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:Assets,14450,iso4217:USD,INF,FACTa8a60099,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:NoncurrentAssets,900,iso4217:USD,INF,FACT18a74b24,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:Liabilities,2400,iso4217:USD,INF,FACTc1810829,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:CurrentAssets,13550,iso4217:USD,INF,FACT1fbbc19d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:CurrentLiabilities,1400,iso4217:USD,INF,FACTc4d14f37,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:EquityAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT1f0cdc5c,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:GrossProfit,2700,iso4217:USD,INF,FACT7ce56152,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:Revenues,8000,iso4217:USD,INF,FACTc37ad84f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:LiabilitiesAndEquity,14450,iso4217:USD,INF,FACT71375e55,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:NoncurrentLiabilities,1000,iso4217:USD,INF,FACT1df70c3a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:Equity,12050,iso4217:USD,INF,FACTc62a9f51,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:CostOfRevenue,5300,iso4217:USD,INF,FACT1a5c9b42,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/24,fac:EquityAttributableToControllingInterest,12050,iso4217:USD,INF,FACT17578206,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:IncomeTaxExpenseBenefit,400,iso4217:USD,INF,FACTcc53372e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:ProfitLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACTce1ffa89,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NonoperatingIncomeLossIncludingInterestAndDebtExpense,-150,iso4217:USD,INF,FACT79b5264c,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:OperatingExpenses,100,iso4217:USD,INF,FACT12dee35b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:OtherOperatingIncomeExpenses,0,iso4217:USD,INF,FACTa0936541,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:IncomeLossFromContinuingOperationsBeforeTax,2450,iso4217:USD,INF,FACTc4086974,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:ProfitLoss,2050,iso4217:USD,INF,FACT1025333d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:OperatingIncomeLoss,2600,iso4217:USD,INF,FACTcea8e748,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:IncomeLossFromDiscontinuedOperationsNetOfTax,0,iso4217:USD,INF,FACTa738f239,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:IncomeLossFromContinuingOperationsAfterTax,2050,iso4217:USD,INF,FACT15757423,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:ProfitLossAttributableToControllingInterests,2050,iso4217:USD,INF,FACTa0247880,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:ProfitLossAvailableToControllingInterestsBasic,2050,iso4217:USD,INF,FACT7c527c93,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:PreferenceSharesDividendsOtherAdjustments,0,iso4217:USD,INF,FACT79023b8d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:OtherComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT1269fe9a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:ComprehensiveIncomeLossAttributableToParent,2050,iso4217:USD,INF,FACT18c970a6,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:ComprehensiveIncomeLoss,2050,iso4217:USD,INF,FACTa5743f9e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACTafd4b1a2,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromOperatingActivitiesContinuing,1000,iso4217:USD,INF,FACTc9b46df1,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromOperatingActivities,1000,iso4217:USD,INF,FACT15c269e2,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromOperatingActivitiesDiscontinued,0,iso4217:USD,INF,FACT7bf9ebeb,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromInvestingActivitiesContinuing,-1000,iso4217:USD,INF,FACTda5ab7b7,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromInvestingActivitiesDiscontinued,0,iso4217:USD,INF,FACT6d4776b3,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromInvestingActivities,-1000,iso4217:USD,INF,FACT037cf4ba,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromFinancingActivitiesDiscontinued,0,iso4217:USD,INF,FACTb13172a0,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromFinancingActivitiesContinuing,10850,iso4217:USD,INF,FACT062cb3a4,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowFromFinancingActivities,10850,iso4217:USD,INF,FACT681731ad,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowContinuing,10850,iso4217:USD,INF,FACT62b7bf91,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlowDiscontinued,0,iso4217:USD,INF,FACT6aece1cb,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:NetCashFlow,10850,iso4217:USD,INF,FACT04d763c2,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2024-01-01 | 2024-12-31,fac:ExchangeGainsLosses,0,iso4217:USD,INF,FACTb3caa2c6,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:Assets,0,iso4217:USD,INF,FACT018724dc,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:CurrentAssets,0,iso4217:USD,INF,FACTb69ae5d8,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:NoncurrentAssets,0,iso4217:USD,INF,FACT6fbca6d5,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:Liabilities,0,iso4217:USD,INF,FACT069bae65,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:NoncurrentLiabilities,0,iso4217:USD,INF,FACT68a02c6c,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:CurrentLiabilities,0,iso4217:USD,INF,FACTb1866f61,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:EquityAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACTdaedaa76,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:EquityAttributableToControllingInterest,0,iso4217:USD,INF,FACTdfbded68,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:Equity,0,iso4217:USD,INF,FACT03cbe97b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/23,fac:LiabilitiesAndEquity,0,iso4217:USD,INF,FACTbe76a643,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:CostOfRevenue,0,iso4217:USD,INF,FACTb62df819,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:Revenues,0,iso4217:USD,INF,FACT096b6747,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:OtherOperatingIncomeExpenses,0,iso4217:USD,INF,FACT6a5bfc0a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:OperatingExpenses,0,iso4217:USD,INF,FACTd8167a10,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:GrossProfit,0,iso4217:USD,INF,FACT6f0bbb14,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NonoperatingIncomeLossIncludingInterestAndDebtExpense,0,iso4217:USD,INF,FACTd5c44517,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:OperatingIncomeLoss,0,iso4217:USD,INF,FACTb37dbf07,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:IncomeTaxExpenseBenefit,0,iso4217:USD,INF,FACT0ce2061a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:IncomeLossFromContinuingOperationsBeforeTax,0,iso4217:USD,INF,FACTbbffc71e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:IncomeLossFromContinuingOperationsAfterTax,0,iso4217:USD,INF,FACT09b24104,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:IncomeLossFromDiscontinuedOperationsNetOfTax,0,iso4217:USD,INF,FACTbeaf8000,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:ProfitLossAttributableToControllingInterests,0,iso4217:USD,INF,FACT6d294d31,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:ProfitLoss,0,iso4217:USD,INF,FACTd0940209,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:ProfitLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACTda348c35,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:PreferenceSharesDividendsOtherAdjustments,0,iso4217:USD,INF,FACT6572136b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:OtherComprehensiveIncomeLoss,0,iso4217:USD,INF,FACTb9041778,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:ProfitLossAvailableToControllingInterestsBasic,0,iso4217:USD,INF,FACT0b499162,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:ComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT09055cc5,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT673edecc,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:ComprehensiveIncomeLossAttributableToParent,0,iso4217:USD,INF,FACTbe189dc1,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromOperatingActivitiesDiscontinued,0,iso4217:USD,INF,FACT626e99d2,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromOperatingActivitiesContinuing,0,iso4217:USD,INF,FACTd57358d6,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromOperatingActivities,0,iso4217:USD,INF,FACT0c551bdb,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromInvestingActivitiesContinuing,0,iso4217:USD,INF,FACTb1e854e3,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromInvestingActivitiesDiscontinued,0,iso4217:USD,INF,FACT06f595e7,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromFinancingActivitiesContinuing,0,iso4217:USD,INF,FACTd2d8cfae,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromInvestingActivities,0,iso4217:USD,INF,FACTd78888b0,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromFinancingActivitiesDiscontinued,0,iso4217:USD,INF,FACTbce34da7,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowFromFinancingActivities,0,iso4217:USD,INF,FACT96251a7c,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowContinuing,0,iso4217:USD,INF,FACT4f035971,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:ExchangeGainsLosses,0,iso4217:USD,INF,FACT4a531e6f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlowDiscontinued,0,iso4217:USD,INF,FACTf81e9875,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:Assets,0,iso4217:USD,INF,FACT2ec8125a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2023-01-01 | 2023-12-31,fac:NetCashFlow,0,iso4217:USD,INF,FACT93755d62,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:CurrentAssets,0,iso4217:USD,INF,FACT918e8d04,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:NoncurrentAssets,0,iso4217:USD,INF,FACT48a8ce09,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:CurrentLiabilities,0,iso4217:USD,INF,FACTfae54813,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:Liabilities,0,iso4217:USD,INF,FACTffb50f0d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:NoncurrentLiabilities,0,iso4217:USD,INF,FACT4df88917,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:EquityAttributableToControllingInterest,0,iso4217:USD,INF,FACTfdf9c2aa,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:EquityAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT4ae403ae,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:Equity,0,iso4217:USD,INF,FACT93c240a3,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/22,fac:LiabilitiesAndEquity,0,iso4217:USD,INF,FACT969207bd,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:CostOfRevenue,0,iso4217:USD,INF,FACTf2090b88,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:Revenues,0,iso4217:USD,INF,FACT4fb444b0,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:OtherOperatingIncomeExpenses,0,iso4217:USD,INF,FACT913990c5,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:GrossProfit,0,iso4217:USD,INF,FACT4d4f94d6,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:OperatingExpenses,0,iso4217:USD,INF,FACT262451c1,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:OperatingIncomeLoss,0,iso4217:USD,INF,FACT9e761f78,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:IncomeLossFromContinuingOperationsBeforeTax,0,iso4217:USD,INF,FACT42001b6b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NonoperatingIncomeLossIncludingInterestAndDebtExpense,0,iso4217:USD,INF,FACT2c3b9962,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:IncomeTaxExpenseBenefit,0,iso4217:USD,INF,FACTffbd5453,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:IncomeLossFromContinuingOperationsAfterTax,0,iso4217:USD,INF,FACT99dd8800,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:ProfitLoss,0,iso4217:USD,INF,FACT23127603,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:IncomeLossFromDiscontinuedOperationsNetOfTax,0,iso4217:USD,INF,FACT9c8dcf1e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromFinancingActivitiesDiscontinued,0,iso4217:USD,INF,FACT80fde7f8,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:ProfitLossAttributableToControllingInterests,0,iso4217:USD,INF,FACTfa34350e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT23a56bc2,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromInvestingActivities,0,iso4217:USD,INF,FACTeb9622ef,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:OtherComprehensiveIncomeLoss,0,iso4217:USD,INF,FACTfd9fa276,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromInvestingActivitiesContinuing,0,iso4217:USD,INF,FACT240efcba,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:ProfitLossAvailableToControllingInterestsBasic,0,iso4217:USD,INF,FACT93a4207f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromOperatingActivitiesContinuing,0,iso4217:USD,INF,FACT4d9ee9cb,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromFinancingActivities,0,iso4217:USD,INF,FACT8a5d69c4,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:ProfitLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT4879b314,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromOperatingActivitiesDiscontinued,0,iso4217:USD,INF,FACTf023a6f3,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:ComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT96f46761,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromFinancingActivitiesContinuing,0,iso4217:USD,INF,FACTeec665f1,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromOperatingActivities,0,iso4217:USD,INF,FACT96437aa0,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowFromInvestingActivitiesDiscontinued,0,iso4217:USD,INF,FACT85ada0e6,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:PreferenceSharesDividendsOtherAdjustments,0,iso4217:USD,INF,FACT2642311d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:ComprehensiveIncomeLossAttributableToParent,0,iso4217:USD,INF,FACT48ceaed5,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlow,0,iso4217:USD,INF,FACT851abd27,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:CurrentAssets,0,iso4217:USD,INF,FACT569c7016,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:Assets,0,iso4217:USD,INF,FACTeb213f2e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowContinuing,0,iso4217:USD,INF,FACT5b207493,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:CurrentLiabilities,0,iso4217:USD,INF,FACT8a335246,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:ExchangeGainsLosses,0,iso4217:USD,INF,FACT37573b3d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:NoncurrentAssets,0,iso4217:USD,INF,FACT30fcac45,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2022-01-01 | 2022-12-31,fac:NetCashFlowDiscontinued,0,iso4217:USD,INF,FACTe96df289,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:Liabilities,0,iso4217:USD,INF,FACT35aceb5b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:NoncurrentLiabilities,0,iso4217:USD,INF,FACTe408d04f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:EquityAttributableToControllingInterest,0,iso4217:USD,INF,FACTe1589751,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:LiabilitiesAndEquity,0,iso4217:USD,INF,FACT54be8633,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:Revenues,0,iso4217:USD,INF,FACTe6f30029,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:Equity,0,iso4217:USD,INF,FACT3a85043a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:GrossProfit,0,iso4217:USD,INF,FACT022e59ea,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:OperatingExpenses,0,iso4217:USD,INF,FACT6c15dbe3,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:OperatingIncomeLoss,0,iso4217:USD,INF,FACTb7c84888,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/21,fac:EquityAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT8f631558,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:CostOfRevenue,0,iso4217:USD,INF,FACT69459cfd,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:OtherOperatingIncomeExpenses,0,iso4217:USD,INF,FACT66b555df,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:IncomeLossFromContinuingOperationsBeforeTax,0,iso4217:USD,INF,FACT0299442b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:ProfitLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT6e591644,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NonoperatingIncomeLossIncludingInterestAndDebtExpense,0,iso4217:USD,INF,FACT0585ce92,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:IncomeLossFromContinuingOperationsAfterTax,0,iso4217:USD,INF,FACTdeef4038,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:PreferenceSharesDividendsOtherAdjustments,0,iso4217:USD,INF,FACT66db6e5d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:IncomeLossFromDiscontinuedOperationsNetOfTax,0,iso4217:USD,INF,FACT07c90335,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:IncomeTaxExpenseBenefit,0,iso4217:USD,INF,FACT6ca2c622,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:ProfitLoss,0,iso4217:USD,INF,FACT0d698d09,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:ProfitLossAttributableToControllingInterests,0,iso4217:USD,INF,FACTdc14905e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:ComprehensiveIncomeLossAttributableToParent,0,iso4217:USD,INF,FACT6170f925,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:OtherComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT638b2943,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromOperatingActivitiesContinuing,0,iso4217:USD,INF,FACT6420be3b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromOperatingActivities,0,iso4217:USD,INF,FACTd171b298,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT0a1b3c32,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromInvestingActivitiesContinuing,0,iso4217:USD,INF,FACT0857f195,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:ProfitLossAvailableToControllingInterestsBasic,0,iso4217:USD,INF,FACT08e0ec54,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:ComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT692ba77f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromOperatingActivitiesDiscontinued,0,iso4217:USD,INF,FACT633c3482,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowDiscontinued,0,iso4217:USD,INF,FACT72293ea2,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromFinancingActivitiesContinuing,0,iso4217:USD,INF,FACT61c7e4e4,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:ExchangeGainsLosses,0,iso4217:USD,INF,FACTc7cf2fc0,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromInvestingActivities,0,iso4217:USD,INF,FACT6497a3fa,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromFinancingActivities,0,iso4217:USD,INF,FACT1942fbb5,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowContinuing,0,iso4217:USD,INF,FACT1c12bcab,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromInvestingActivitiesDiscontinued,0,iso4217:USD,INF,FACT02f77fa9,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlowFromFinancingActivitiesDiscontinued,0,iso4217:USD,INF,FACT777979bc,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:Assets,0,iso4217:USD,INF,FACTc29f68de,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:CurrentAssets,0,iso4217:USD,INF,FACT1ca5a16a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2021-01-01 | 2021-12-31,fac:NetCashFlow,0,iso4217:USD,INF,FACTa9f4adc9,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:NoncurrentAssets,0,iso4217:USD,INF,FACT729e2363,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:EquityAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT1e5e710c,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:CurrentLiabilities,0,iso4217:USD,INF,FACT13556848,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:Liabilities,0,iso4217:USD,INF,FACT19f5e674,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:NoncurrentLiabilities,0,iso4217:USD,INF,FACT1b0e3612,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:EquityAttributableToControllingInterest,0,iso4217:USD,INF,FACT7065f305,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:OperatingIncomeLoss,0,iso4217:USD,INF,FACTca1d10c7,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:GrossProfit,0,iso4217:USD,INF,FACT11779e6d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:OtherOperatingIncomeExpenses,0,iso4217:USD,INF,FACTa42692ce,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:Revenues,0,iso4217:USD,INF,FACTcaaa0d06,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:LiabilitiesAndEquity,0,iso4217:USD,INF,FACTa4918f0f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NonoperatingIncomeLossIncludingInterestAndDebtExpense,0,iso4217:USD,INF,FACTcf4d57d9,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/20,fac:Equity,0,iso4217:USD,INF,FACT16dc0915,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:CostOfRevenue,0,iso4217:USD,INF,FACT7717423e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:OperatingExpenses,0,iso4217:USD,INF,FACT1427d973,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:IncomeTaxExpenseBenefit,0,iso4217:USD,INF,FACT1490c4b2,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:PreferenceSharesDividendsOtherAdjustments,0,iso4217:USD,INF,FACT34f61d55,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:ProfitLossAvailableToControllingInterestsBasic,0,iso4217:USD,INF,FACT3cad430f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:IncomeLossFromContinuingOperationsAfterTax,0,iso4217:USD,INF,FACT7aab46bb,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:IncomeLossFromDiscontinuedOperationsNetOfTax,0,iso4217:USD,INF,FACTc8e6c0a1,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:ProfitLossAttributableToControllingInterests,0,iso4217:USD,INF,FACT553d567e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:ProfitLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACTe770d064,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:ProfitLoss,0,iso4217:USD,INF,FACT3b06d477,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:IncomeLossFromContinuingOperationsBeforeTax,0,iso4217:USD,INF,FACTa176d5d0,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:ComprehensiveIncomeLossAttributableToParent,0,iso4217:USD,INF,FACTe7c7cda5,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromOperatingActivitiesDiscontinued,0,iso4217:USD,INF,FACTe8370487,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:OtherComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT5296c106,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromInvestingActivities,0,iso4217:USD,INF,FACT3355d173,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromInvestingActivitiesContinuing,0,iso4217:USD,INF,FACT8b079fca,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT89fc4fac,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:ComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT39fd0411,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromOperatingActivitiesContinuing,0,iso4217:USD,INF,FACTe2978abb,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromOperatingActivities,0,iso4217:USD,INF,FACTe06c5add,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromInvestingActivitiesDiscontinued,0,iso4217:USD,INF,FACTe53c1dc3,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowContinuing,0,iso4217:USD,INF,FACT34fe460b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlow,0,iso4217:USD,INF,FACTe00a3a01,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:Assets,0,iso4217:USD,INF,FACT3c7c3e12,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:CurrentAssets,0,iso4217:USD,INF,FACT36dcb02e,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:EquityAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACTea1da9fc,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:Equity,0,iso4217:USD,INF,FACTe246f7a6,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromFinancingActivitiesDiscontinued,0,iso4217:USD,INF,FACTef23d560,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromFinancingActivitiesContinuing,0,iso4217:USD,INF,FACT81185769,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:NoncurrentAssets,0,iso4217:USD,INF,FACTe7a1ad79,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:CurrentLiabilities,0,iso4217:USD,INF,FACTe5ed60de,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:LiabilitiesAndEquity,0,iso4217:USD,INF,FACT8c7d75af,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:EquityAttributableToControllingInterest,0,iso4217:USD,INF,FACT399b64cd,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:Liabilities,0,iso4217:USD,INF,FACT55ec2b63,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,12/31/19,fac:NoncurrentLiabilities,0,iso4217:USD,INF,FACT8bd6e2d7,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:Revenues,0,iso4217:USD,INF,FACTe716b0b8,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowFromFinancingActivities,0,iso4217:USD,INF,FACT529e9a58,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:NetCashFlowDiscontinued,0,iso4217:USD,INF,FACT31ae0115,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2020-01-01 | 2020-12-31,fac:ExchangeGainsLosses,0,iso4217:USD,INF,FACT8e31b808,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:CostOfRevenue,0,iso4217:USD,INF,FACT9f93afe9,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:IncomeTaxExpenseBenefit,0,iso4217:USD,INF,FACT9a74f536,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NonoperatingIncomeLossIncludingInterestAndDebtExpense,0,iso4217:USD,INF,FACTf353fd86,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:GrossProfit,0,iso4217:USD,INF,FACTf4f86afe,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:OperatingIncomeLoss,0,iso4217:USD,INF,FACT411e7b9c,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:IncomeLossFromContinuingOperationsBeforeTax,0,iso4217:USD,INF,FACTf44f773f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:OtherOperatingIncomeExpenses,0,iso4217:USD,INF,FACT906366cb,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:OperatingExpenses,0,iso4217:USD,INF,FACT9ac3e8f7,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:IncomeLossFromContinuingOperationsAfterTax,0,iso4217:USD,INF,FACT2839732c,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:IncomeLossFromDiscontinuedOperationsNetOfTax,0,iso4217:USD,INF,FACTf11f3021,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:ProfitLossAttributableToControllingInterests,0,iso4217:USD,INF,FACT2ac2a34a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:ComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT9ffd946b,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:ProfitLossAvailableToControllingInterestsBasic,0,iso4217:USD,INF,FACTfe36df40,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:PreferenceSharesDividendsOtherAdjustments,0,iso4217:USD,INF,FACT900d5d49,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:ComprehensiveIncomeLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACTfccd0f26,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:ComprehensiveIncomeLossAttributableToParent,0,iso4217:USD,INF,FACT97a6ca31,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:ProfitLossAttributableToNoncontrollingInterest,0,iso4217:USD,INF,FACT988f2550,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:ProfitLoss,0,iso4217:USD,INF,FACTfbbfbe1d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromOperatingActivitiesContinuing,0,iso4217:USD,INF,FACT92f68d2f,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:OtherComprehensiveIncomeLoss,0,iso4217:USD,INF,FACT955d1a57,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromFinancingActivities,0,iso4217:USD,INF,FACT5c13df27,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromOperatingActivitiesDiscontinued,0,iso4217:USD,INF,FACT37cf07f1,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromOperatingActivities,0,iso4217:USD,INF,FACT858281eb,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromInvestingActivities,0,iso4217:USD,INF,FACT8779518d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowContinuing,0,iso4217:USD,INF,FACTee5e593d,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromInvestingActivitiesContinuing,0,iso4217:USD,INF,FACT5ca4c2e6,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromFinancingActivitiesDiscontinued,0,iso4217:USD,INF,FACT85359c2a,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromFinancingActivitiesContinuing,0,iso4217:USD,INF,FACT3534d797,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowFromInvestingActivitiesDiscontinued,0,iso4217:USD,INF,FACT56044cda,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:ExchangeGainsLosses,0,iso4217:USD,INF,FACT3583ca56,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlow,0,iso4217:USD,INF,FACT5ee80f41,
+30810137d58f76b84afd | http://standards.iso.org/iso/17442,2019-01-01 | 2019-12-31,fac:NetCashFlowDiscontinued,0,iso4217:USD,INF,FACT3dd8940c,

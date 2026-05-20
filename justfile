@@ -202,6 +202,14 @@ demo-roboledger *args="":
 demo-custom-graph *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.custom_graph_demo.main {{args}}
 
+# Run Seattle Method cross-taxonomy demo (Test Case 1 — Charlie Hoffman's mini, 14 JEs). Flags: --dry-run, --step <name>, --graph <id>
+demo-seattle-method *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.main {{args}}
+
+# Render the Seattle Method reconciliation report for a graph after the main demo has run
+demo-seattle-method-reconcile *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.reconcile {{args}}
+
 
 ## CI/CD ##
 
