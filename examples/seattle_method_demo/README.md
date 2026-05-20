@@ -1,9 +1,9 @@
 # Seattle Method Cross-Taxonomy Demo
 
 End-to-end exercise of the **cross-taxonomy projection** methodology
-(Test Case 1 in [`METHODOLOGY.md`](METHODOLOGY.md)) using
-Charlie Hoffman's *Seattle Method* `mini` reporting framework and his
-published 14-transaction Q1 2024 lemonade-stand dataset.
+(Test Case 1) using Charlie Hoffman's _Seattle Method_ `mini`
+reporting framework and his published 14-transaction Q1 2024
+lemonade-stand dataset.
 
 The demo proves that the RoboSystems three-block architecture
 (TaxonomyBlock + EventBlock + InformationBlock) can ingest an external
@@ -42,15 +42,15 @@ just demo-seattle-method-reconcile <graph_id>
 
 ## What Gets Created
 
-| Step | Artifact |
-|---|---|
-| `pull` | `local/taxonomies/mini/` — 30 XBRL artifacts curled from `xbrlsite.azurewebsites.net` (gitignored — re-fetched on demand) |
-| `provision` | A dedicated test graph (e.g. `kg_seattle_method_<timestamp>`) — isolated from real customer data |
-| `load` | 239 mini concepts as Elements + presentation/calculation/definition/formula linkbase arcs as Associations |
-| `seed-mappings` | ~36 mini→rs-gaap derivation Associations (BS/IS/CF/SE leaves touched by the 14-JE dataset) |
-| `ingest` | 14 Events (one per JournalEntryID), 14 Entries, ~32 LineItems — each LineItem.metadata_['transaction_description_code'] stamped from CSV |
-| `author-rollforwards` | 8 rollforward IBs (one per BS leaf with activity) — Cash, Receivables, Inventories, PP&E, AP, Accrued, LTD, PaidInCapital |
-| `reconcile` | `local/reports/seattle-method-case-1.md` — line-by-line comparison of our output vs. Charlie's PoC, classified per the methodology spec §3.2 |
+| Step                  | Artifact                                                                                                                                     |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pull`                | `local/taxonomies/mini/` — 30 XBRL artifacts curled from `xbrlsite.azurewebsites.net` (gitignored — re-fetched on demand)                    |
+| `provision`           | A dedicated test graph (e.g. `kg_seattle_method_<timestamp>`) — isolated from real customer data                                             |
+| `load`                | 239 mini concepts as Elements + presentation/calculation/definition/formula linkbase arcs as Associations                                    |
+| `seed-mappings`       | ~36 mini→rs-gaap derivation Associations (BS/IS/CF/SE leaves touched by the 14-JE dataset)                                                   |
+| `ingest`              | 14 Events (one per JournalEntryID), 14 Entries, ~32 LineItems — each LineItem.metadata\_['transaction_description_code'] stamped from CSV    |
+| `author-rollforwards` | 8 rollforward IBs (one per BS leaf with activity) — Cash, Receivables, Inventories, PP&E, AP, Accrued, LTD, PaidInCapital                    |
+| `reconcile`           | `local/reports/seattle-method-case-1.md` — line-by-line comparison of our output vs. Charlie's PoC, classified per the methodology spec §3.2 |
 
 ## Fixtures
 
@@ -58,25 +58,34 @@ just demo-seattle-method-reconcile <graph_id>
 
 The mini taxonomy artifacts themselves are NOT committed — `pull_mini.sh` fetches them on demand from `xbrlsite.azurewebsites.net` into `local/taxonomies/mini/` (gitignored). This keeps the repo small and lets us pick up upstream taxonomy changes without re-vendoring.
 
+## Reconciliation Classification
+
+Every delta in a reconciliation report is classified into one of four
+categories. The classification is what makes the report actionable —
+it tells the reader who needs to act on what.
+
+| Category               | Definition                                                                                          | Owner                       |
+| ---------------------- | --------------------------------------------------------------------------------------------------- | --------------------------- |
+| **Matching**           | Our output equals expected output.                                                                  | —                           |
+| **Methodology gap**    | Architectural feature not yet shipped; documented in a known spec.                                  | RoboSystems (forward queue) |
+| **Our bug**            | Implementation error in shipped code. Needs a fix.                                                  | RoboSystems (fix)           |
+| **Their data quality** | Source data has a tagging error, vocabulary misuse, or inconsistency. Not a defect in our pipeline. | Source author               |
+
+A reconciliation report with all four categories represented is more
+informative than an all-green one — it surfaces what each party owns.
+
 ## Known Data-Quality Findings (Pre-Reconciliation)
 
 These are identified during input review on 2026-05-19, NOT
-introduced by the reconciliation. They become part of the report's
-"Their data quality" section per the methodology classification.
+introduced by the reconciliation. They land in the report's
+**Their data quality** category per the classification above.
 
-| JE | Issue |
-|---|---|
-| **JE-205** | Description "Payment for contractor"; TDC on the AP line is `mini:PurchasesInventoryForSaleOnAccount` — but contractor services aren't inventory. Vocabulary misuse. |
-| **JE-209** | TDC `mini:PaymentOfInterest` on the Cash line was a typo — mini.xsd's canonical concept is `mini:PaymentInterest` (no "Of"). Fixed at source in `fixtures/transactions.csv`; note that the sibling concept `mini:DecreaseFromPaymentOfInterest` on the AccruedExpenses line *does* keep the "Of" (Charlie's own naming is internally inconsistent). |
+| JE         | Issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **JE-205** | Description "Payment for contractor"; TDC on the AP line is `mini:PurchasesInventoryForSaleOnAccount` — but contractor services aren't inventory. Vocabulary misuse.                                                                                                                                                                                                                                                                                                                 |
+| **JE-209** | TDC `mini:PaymentOfInterest` on the Cash line was a typo — mini.xsd's canonical concept is `mini:PaymentInterest` (no "Of"). Fixed at source in `fixtures/transactions.csv`; note that the sibling concept `mini:DecreaseFromPaymentOfInterest` on the AccruedExpenses line _does_ keep the "Of" (Charlie's own naming is internally inconsistent).                                                                                                                                  |
 | **JE-225** | Boundary test case: "Write off of PPE" with `Amount = 0` on both lines — an entry with no economic substance. Our GL handler correctly rejects it (`must have non-zero D or C`); Charlie's system likely creates $0 facts. The reconciliation delta is $0 either way (no economic activity to attribute), so the four anchor totals are unaffected. Classified as **Methodology gap** (neither side has a bug — both correctly handle a nil entry under their respective semantics). |
-| **JE-226** | Income tax accrual ($400). TDC on the AccruedExpenses line is `mini:InterestAccrued` — should be `IncomeTaxAccrued`. Copy-paste-style bug from the JE-210 interest accrual pattern. |
-
-## Methodology
-
-See [`METHODOLOGY.md`](METHODOLOGY.md) for the full methodology spec —
-the 5-step pipeline, reconciliation report format, finding
-classification rubric (matching / methodology gap / our bug / their
-data quality), and forward queue of future test cases.
+| **JE-226** | Income tax accrual ($400). TDC on the AccruedExpenses line is `mini:InterestAccrued` — should be `IncomeTaxAccrued`. Copy-paste-style bug from the JE-210 interest accrual pattern.                                                                                                                                                                                                                                                                                                  |
 
 ## Architectural Dependencies
 
@@ -100,5 +109,7 @@ data quality), and forward queue of future test cases.
   enrichment layer is the load-bearing piece.
 - Manual attribution (Tier 3) — this dataset is fully
   transaction-attributable.
-- Test Cases 1.1 (1-transaction), 1.2 (22k-transaction), 2 (SEC us-gaap),
-  3 (IFRS), 4 (FDTA) — queued in [`METHODOLOGY.md`](METHODOLOGY.md) §5.
+
+The methodology is the durable artifact; specific test cases are
+scheduled by external forcing functions (a customer, a published
+reference, a regulatory deadline).
