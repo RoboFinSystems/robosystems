@@ -11,10 +11,10 @@ fac-presentation Structure role URI.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
+from robosystems.taxonomy.loaders.discovery import framework_root
 from robosystems.taxonomy.loaders.jsonld_loader import (
   RULE_CATEGORY_VALUES,
   RULE_PATTERN_VALUES,
@@ -23,13 +23,7 @@ from robosystems.taxonomy.loaders.jsonld_loader import (
 from robosystems.taxonomy.model import RuleSpec, TaxonomyPackage
 
 SEED_PATH = (
-  Path(__file__).resolve().parents[2]
-  / "robosystems"
-  / "taxonomy"
-  / "packages"
-  / "fac-rules"
-  / "v1"
-  / "taxonomy.jsonld"
+  framework_root("fac", "v1") / "packages" / "fac-rules" / "v1" / "taxonomy.jsonld"
 )
 
 VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")

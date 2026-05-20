@@ -237,7 +237,7 @@ def _widen_library_checks(conn, schema: str) -> None:
     "source IN ("
     "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
     "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-    # rs-gaap-base framework extension packages (Phase C) anchored to
+    # rs-gaap framework extension packages (Phase C) anchored to
     # sibling namespaces of rs-gaap.
     "'disclosures', 'checklist', 'styles'"
     ")"

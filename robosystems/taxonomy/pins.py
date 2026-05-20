@@ -6,7 +6,7 @@ holds the pin and accepts three polymorphic shapes:
 
 1. ``null`` — fall back to the default framework
    (:data:`DEFAULT_FRAMEWORK`).
-2. ``{"framework": "rs-gaap-base@v1"}`` — pin a named framework. The
+2. ``{"framework": "rs-gaap@v1"}`` — pin a named framework. The
    resolver looks up the framework manifest at
    ``frameworks/{name}/{version}.json`` and expands it to a flat
    ``{standard: version}`` dict. An optional ``"overrides"`` sub-dict
@@ -43,17 +43,17 @@ if TYPE_CHECKING:
   from robosystems.models.core.graph.graph import Graph
 
 
-DEFAULT_FRAMEWORK = "rs-gaap-base@v1"
+DEFAULT_FRAMEWORK = "rs-gaap@v1"
 """The framework every graph falls back to when ``taxonomy_pin`` is
 unset. Encoded as ``name@version`` for ergonomic admin overrides."""
 
 
 def _parse_framework_ref(ref: str) -> tuple[str, str]:
-  """Split ``"rs-gaap-base@v1"`` into ``("rs-gaap-base", "v1")``."""
+  """Split ``"rs-gaap@v1"`` into ``("rs-gaap", "v1")``."""
   if "@" not in ref:
     raise ValueError(
       f"Framework reference {ref!r} must be in 'name@version' format "
-      f"(e.g. 'rs-gaap-base@v1')."
+      f"(e.g. 'rs-gaap@v1')."
     )
   name, _, version = ref.partition("@")
   if not name or not version:

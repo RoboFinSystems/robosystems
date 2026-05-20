@@ -1,0 +1,15 @@
+{
+  "framework": "fac",
+  "version": "v1",
+  "title": "Fundamental Accounting Concepts (FAC)",
+  "description": "Charlie Hoffman's universal accounting concept substrate (Assets, Liabilities, Equity, Revenues, Expenses, Income, Cash Flow) plus its presentation hierarchies, calculation identities, and verification rules. Designed to be the shared foundation that every accounting reporting framework (rs-gaap, rs-ifrs, rs-call-report, rs-statutory, rs-irs, rs-ferc) maps onto via a per-framework bridge. Forked from Seattle Method publications and now maintained natively as JSON-LD.",
+  "framework_type": "reporting",
+  "depends_on": [],
+  "packages": [
+    {"standard": "fac",              "version": "v1", "ordinal": 0, "is_required": true},
+    {"standard": "fac-presentation", "version": "v1", "ordinal": 1, "is_required": true},
+    {"standard": "fac-calculations", "version": "v1", "ordinal": 2, "is_required": true},
+    {"standard": "fac-rules",        "version": "v1", "ordinal": 3, "is_required": true}
+  ],
+  "bridges": []
+}

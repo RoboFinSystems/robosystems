@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from robosystems.taxonomy.loaders.discovery import (
-  BRIDGES_DIR,
   FRAMEWORKS_DIR,
-  PACKAGES_DIR,
   TAXONOMY_ROOT,
   bridge_path,
   expand_framework_to_pin,
+  framework_root,
   list_bridges,
+  list_framework_manifests,
   list_framework_seed_paths,
   list_packages,
   load_framework_manifest,
@@ -18,13 +18,13 @@ from robosystems.taxonomy.loaders.discovery import (
 from robosystems.taxonomy.loaders.jsonld_loader import load_taxonomy_package
 
 __all__ = [
-  "BRIDGES_DIR",
   "FRAMEWORKS_DIR",
-  "PACKAGES_DIR",
   "TAXONOMY_ROOT",
   "bridge_path",
   "expand_framework_to_pin",
+  "framework_root",
   "list_bridges",
+  "list_framework_manifests",
   "list_framework_seed_paths",
   "list_packages",
   "load_framework_manifest",

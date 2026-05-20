@@ -1,9 +1,10 @@
 """Taxonomy library — XBRL-faithful model.
 
 Replaces the Python-dict seed (``seed_reporting_taxonomy``) with JSON-LD
-artifacts loaded from ``robosystems/taxonomy/packages/`` and
-``robosystems/taxonomy/bridges/`` (composed via the framework manifest
-at ``robosystems/taxonomy/frameworks/rs-gaap-base/v1.json``), aligned with
+artifacts loaded from ``taxonomy/frameworks/rs-gaap/v1/packages/``
+and ``taxonomy/frameworks/rs-gaap/v1/bridges/`` (composed via the
+framework manifest at ``taxonomy/frameworks/rs-gaap/v1/manifest.json``),
+aligned with
 XBRL's association model: elements carry only XBRL-intrinsic attributes
 (balance, periodType, abstract, monetary, elementType,
 substitutionGroup). FASB metamodel trait assignments (asset, current,
@@ -67,10 +68,10 @@ from sqlalchemy.dialects import postgresql
 
 from migrations.extensions.helpers import TenantOps, for_each_tenant_schema
 from robosystems.taxonomy.loaders.discovery import (
-  PACKAGES_DIR as _PACKAGES_DIR,
+  TAXONOMY_ROOT as _TAXONOMY_ROOT,
 )
 from robosystems.taxonomy.loaders.discovery import (
-  TAXONOMY_ROOT as _TAXONOMY_ROOT,
+  framework_root as _framework_root,
 )
 from robosystems.taxonomy.loaders.discovery import (
   list_framework_seed_paths as _list_framework_seed_paths,
@@ -121,7 +122,7 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   "source IN ("
   "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
   "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-  # rs-gaap-base framework extension packages (Phase C). Each declares
+  # rs-gaap framework extension packages (Phase C). Each declares
   # a sibling namespace anchored to the rs-gaap framework. See
   # migration 0007 for the same widen applied to already-deployed
   # tenant schemas.
@@ -845,7 +846,7 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
 
 
 # Seed files are derived from the default framework manifest at
-# ``frameworks/rs-gaap-base/v1.json``. The manifest pins specific
+# ``frameworks/rs-gaap/v1.json``. The manifest pins specific
 # (package, version) and (bridge, version) tuples in load order via
 # the ``ordinal`` field; the discovery helper resolves them to absolute
 # paths and skips entries marked ``is_required: false`` whose seeds
@@ -857,13 +858,14 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
 # importers; their values now come from the manifest.
 
 # Kept for backward compat with importers that referenced the old name.
-SEEDS_DIR = _PACKAGES_DIR
+# Now points at the default framework's packages directory.
+SEEDS_DIR = _framework_root("rs-gaap", "v1") / "packages"
 
 
 def _framework_seed_files() -> list[Path]:
   """Resolve the default framework's pinned packages + bridges to the
   on-disk taxonomy.jsonld paths the loader should walk in order."""
-  manifest = _load_framework_manifest("rs-gaap-base", "v1")
+  manifest = _load_framework_manifest("rs-gaap", "v1")
   return _list_framework_seed_paths(manifest, skip_missing_optional=True)
 
 

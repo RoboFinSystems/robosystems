@@ -180,6 +180,10 @@ COPY robosystems/ /app/robosystems/
 RUN rm -rf /app/robosystems/adapters/sec/arelle
 # Copy builder's complete arelle directory (includes EDGAR + cache + bundles)
 COPY --from=builder /build/robosystems/adapters/sec/arelle/ /app/robosystems/adapters/sec/arelle/
+# Copy taxonomy library (top-level, peer to robosystems/; loaded by
+# extensions migrations at provision time). Resolved via TAXONOMY_ROOT
+# in robosystems/taxonomy/loaders/discovery.py.
+COPY taxonomy/ /app/taxonomy/
 COPY main.py ./
 COPY bin/ /app/bin/
 # Copy static files for serving directly from container
