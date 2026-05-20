@@ -46,7 +46,11 @@ from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 
-CSV_PATH = Path("examples/seattle_method_demo/fixtures/transactions.csv")
+# Resolve relative to this file so the script works regardless of the
+# caller's CWD — matches the pattern ``main.py`` uses.
+CSV_PATH = (
+  Path(__file__).resolve().parent / "fixtures" / "transactions.csv"
+)
 
 
 def _get_ledger_client():

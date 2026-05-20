@@ -34,7 +34,10 @@ just demo-seattle-method --step load
 just demo-seattle-method --step seed-mappings
 just demo-seattle-method --step ingest
 just demo-seattle-method --step author-rollforwards
-just demo-seattle-method --step reconcile
+
+# Reconcile (not a --step of the orchestrator; runs separately
+# because it consumes the graph the orchestrator just built).
+just demo-seattle-method-reconcile <graph_id>
 ```
 
 ## What Gets Created

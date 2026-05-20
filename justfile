@@ -206,6 +206,10 @@ demo-custom-graph *args="":
 demo-seattle-method *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.main {{args}}
 
+# Render the Seattle Method reconciliation report for a graph after the main demo has run
+demo-seattle-method-reconcile *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.reconcile {{args}}
+
 
 ## CI/CD ##
 

@@ -35,8 +35,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import re
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -54,7 +54,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEMO_ROOT = REPO_ROOT / "examples" / "seattle_method_demo"
 DEFAULT_REPORT_PATH = DEMO_ROOT / "output" / "seattle-method-case-1.md"
 EXPECTED_FACTS_PATH = DEMO_ROOT / "fixtures" / "expected_facts_mini.csv"
-EXTENSIONS_DB_URL = "postgresql://postgres:postgres@localhost:5432/extensions"
+# Filter engine needs a direct SQLAlchemy session (Phase 2 MVP boundary
+# per ``information-block.md`` §4.5; Phase 3 wires it into
+# ``build_envelope`` so we can drop this entirely). Reads
+# ``EXTENSIONS_DATABASE_URL`` from the process env — the
+# ``just demo-seattle-method-reconcile`` recipe loads ``.env.local``
+# which sets this. If you invoke ``reconcile.py`` outside the justfile,
+# export the var yourself.
+EXTENSIONS_DB_URL = os.environ.get("EXTENSIONS_DATABASE_URL")
 SAFE_GRAPH_ID = re.compile(r"^kg[a-zA-Z0-9_]+$")
 
 
@@ -124,6 +131,27 @@ class ReconciliationReport:
 # ── DB queries ───────────────────────────────────────────────────────────
 
 
+def _read_graph_id_from_credentials() -> str | None:
+  """Read the ``seattle_method_test`` graph slot from ``.local/config.json``.
+
+  Returns ``None`` if the file or slot doesn't exist — caller surfaces
+  a friendly "run the orchestrator first" message. The slot is saved
+  by ``main.step_provision_graph`` via
+  ``examples.credentials.utils.save_graph_id``.
+  """
+  import json
+
+  config_path = Path(".local/config.json")
+  if not config_path.exists():
+    return None
+  try:
+    cfg = json.loads(config_path.read_text())
+  except (OSError, json.JSONDecodeError):
+    return None
+  slot = (cfg.get("graphs") or {}).get("seattle_method_test") or {}
+  return slot.get("graph_id")
+
+
 def _get_ledger_client():
   """Construct a LedgerClient from saved credentials.
 
@@ -160,6 +188,12 @@ def _open_session(graph_id: str) -> Session:
   if not SAFE_GRAPH_ID.match(graph_id):
     raise SystemExit(
       f"Refusing to use graph_id {graph_id!r} — must match {SAFE_GRAPH_ID.pattern}"
+    )
+  if not EXTENSIONS_DB_URL:
+    raise SystemExit(
+      "EXTENSIONS_DATABASE_URL is not set. Run via "
+      "`just demo-seattle-method-reconcile <graph_id>` (which loads "
+      ".env.local), or export the env var manually."
     )
   engine = create_engine(EXTENSIONS_DB_URL)
   session_factory = sessionmaker(bind=engine)
@@ -669,7 +703,16 @@ def main() -> None:
     description="Reconcile the Seattle Method Test Case 1 demo against "
     "Charlie Hoffman's expected output. Produces a markdown report.",
   )
-  parser.add_argument("graph_id", help="The seattle_method_test graph id.")
+  parser.add_argument(
+    "graph_id",
+    nargs="?",
+    default=None,
+    help=(
+      "The graph id to reconcile. If omitted, reads the "
+      "``seattle_method_test`` slot from ``.local/config.json`` "
+      "(populated by ``just demo-seattle-method``)."
+    ),
+  )
   parser.add_argument(
     "--period-start",
     type=date.fromisoformat,
@@ -681,6 +724,32 @@ def main() -> None:
     type=date.fromisoformat,
     default=date(2024, 1, 31),
     help="Period end (default 2024-01-31).",
+  )
+  # The diff-period labels are deliberately separate from
+  # --period-start/--period-end because Charlie's PoC reports BS
+  # positions at his calendar-year-end ("12/31/24") and IS/CF flows
+  # across the full calendar year ("2024-01-01 | 2024-12-31") even
+  # though the underlying JEs are only in January. Other test cases
+  # (us-gaap, IFRS) will publish facts with different period labels;
+  # they need their own values here. Defaults match Charlie's mini
+  # CSV export format for Test Case 1.
+  parser.add_argument(
+    "--diff-label-instant",
+    default="12/31/24",
+    help=(
+      "Period label expected on Charlie's instant facts (BS positions). "
+      "Default matches his mini CSV export for Test Case 1; override for "
+      "other test cases."
+    ),
+  )
+  parser.add_argument(
+    "--diff-label-duration",
+    default="2024-01-01 | 2024-12-31",
+    help=(
+      "Period label expected on Charlie's duration facts (IS / CF flows). "
+      "Default matches his mini CSV export for Test Case 1; override for "
+      "other test cases."
+    ),
   )
   parser.add_argument(
     "--out",
@@ -701,7 +770,19 @@ def main() -> None:
   )
   args = parser.parse_args()
 
-  print(f"Reconciling graph {args.graph_id} for {args.period_start}..{args.period_end}")
+  # Fall back to the orchestrator's saved graph slot if not passed
+  # explicitly — mirrors how ``just demo-roboledger`` reads from
+  # ``.local/config.json`` without requiring the caller to remember
+  # the graph id.
+  graph_id = args.graph_id or _read_graph_id_from_credentials()
+  if not graph_id:
+    raise SystemExit(
+      "No graph_id provided and no ``seattle_method_test`` slot found "
+      "in ``.local/config.json``. Run ``just demo-seattle-method`` first "
+      "(to provision a graph + save the slot), then re-run reconcile."
+    )
+
+  print(f"Reconciling graph {graph_id} for {args.period_start}..{args.period_end}")
 
   client = _get_ledger_client()
 
@@ -711,18 +792,18 @@ def main() -> None:
   # the engine into ``build_envelope`` so the IB envelope returns
   # populated facts and this script becomes pure-API.
   concepts = _load_concept_totals_via_graphql(
-    client, args.graph_id, args.period_start, args.period_end
+    client, graph_id, args.period_start, args.period_end
   )
   print(f"  Loaded {len(concepts)} concept(s) with period activity (via GraphQL trialBalance)")
   bs_label_by_qname = {c.qname: c.label for c in concepts}
 
-  rollforwards = _load_rollforward_ibs_via_graphql(client, args.graph_id)
+  rollforwards = _load_rollforward_ibs_via_graphql(client, graph_id)
   print(
     f"  Loaded {len(rollforwards)} rollforward IB(s) (via GraphQL informationBlocks)"
   )
 
   # Filter engine still runs against a direct session — Phase 2 MVP.
-  session = _open_session(args.graph_id)
+  session = _open_session(graph_id)
   try:
     results = _evaluate_all_rollforwards(
       session, rollforwards, args.period_start, args.period_end, bs_label_by_qname
@@ -736,7 +817,7 @@ def main() -> None:
     session.close()
 
   report = ReconciliationReport(
-    graph_id=args.graph_id,
+    graph_id=graph_id,
     period_start=args.period_start,
     period_end=args.period_end,
     concept_totals=concepts,
@@ -746,15 +827,15 @@ def main() -> None:
   if not args.no_diff and args.expected_facts.exists():
     expected = _load_expected_facts(args.expected_facts)
     print(f"\nLoaded {len(expected)} expected fact(s) from {args.expected_facts.name}")
-    # Charlie's BS facts use "12/31/24" (period-end) and IS/CF flows
-    # use "2024-01-01 | 2024-12-31" (full-year duration). Match
-    # our instant concepts to the first, duration concepts to the
-    # second.
+    # Match our instant concepts to Charlie's instant-period label;
+    # duration concepts to his duration-period label. Defaults match
+    # Charlie's mini CSV export for Test Case 1; CLI override the
+    # labels for other test cases.
     report.diff_lines = _build_diff(
       ours=concepts,
       expected=expected,
-      period_label_for_instants="12/31/24",
-      period_label_for_durations="2024-01-01 | 2024-12-31",
+      period_label_for_instants=args.diff_label_instant,
+      period_label_for_durations=args.diff_label_duration,
     )
     # Also compare our computed anchor totals to Charlie's published
     # aggregates. These are concepts Charlie publishes as facts but
@@ -762,10 +843,14 @@ def main() -> None:
     totals = _anchor_totals(concepts)
     expected_by_key = {(f.concept, f.period_label): f.value_cents for f in expected}
     anchor_pairs = [
-      ("mini:Assets", "12/31/24", totals["Total Assets"]),
-      ("mini:LiabilitiesAndEquity", "12/31/24", totals["Total Liabilities & Equity"]),
-      ("mini:NetIncomeLoss", "2024-01-01 | 2024-12-31", totals["Net Income"]),
-      ("mini:NetCashFlow", "2024-01-01 | 2024-12-31", totals["Net Cash Change"]),
+      ("mini:Assets", args.diff_label_instant, totals["Total Assets"]),
+      (
+        "mini:LiabilitiesAndEquity",
+        args.diff_label_instant,
+        totals["Total Liabilities & Equity"],
+      ),
+      ("mini:NetIncomeLoss", args.diff_label_duration, totals["Net Income"]),
+      ("mini:NetCashFlow", args.diff_label_duration, totals["Net Cash Change"]),
     ]
     for concept, period_label, our_value in anchor_pairs:
       key = (concept, period_label)

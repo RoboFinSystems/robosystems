@@ -39,7 +39,11 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-CSV_PATH = Path("examples/seattle_method_demo/fixtures/transactions.csv")
+# Resolve relative to this file so the script works regardless of the
+# caller's CWD — matches the pattern ``main.py`` uses.
+CSV_PATH = (
+  Path(__file__).resolve().parent / "fixtures" / "transactions.csv"
+)
 
 # The eight balance-sheet leaves in mini that have activity in Charlie's
 # 14-JE dataset. Each gets its own rollforward IB.
