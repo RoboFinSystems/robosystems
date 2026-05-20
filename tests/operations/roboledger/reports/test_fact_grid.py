@@ -10,6 +10,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _EQUITY_FLOW_REDUCER_QNAMES,
   PeriodSpec,
   ReportFact,
+  _append_empty_equity_facts,
   _Balance,
   _build_rows,
   _close_prior_periods_to_retained_earnings,
@@ -1025,6 +1026,132 @@ class TestIsEquityFlowReducer:
     """The constant is frozen — accidental mutations from caller side
     would silently break the close logic for every tenant."""
     assert isinstance(_EQUITY_FLOW_REDUCER_QNAMES, frozenset)
+
+
+class TestAppendEmptyEquityFactsAutoRE:
+  """Regression pin: `_append_empty_equity_facts` always materializes
+  ``rs-gaap:RetainedEarningsAccumulatedDeficit`` at $0 — even when no
+  source CoA element maps to it.
+
+  The QuickBooks / Xero / mini pattern: RE is *derived* from cumulative
+  (revenue - expense - dividends) at render time, not a posted GL
+  balance. Without this seed fact, `_close_to_retained_earnings` falls
+  back to an anonymous fact whose element_id isn't in any presentation
+  network and silently disappears from the rendered BS.
+
+  Surfaced by the Seattle Method demo (mini has no source RE concept;
+  cumulative NI must still close onto the BS for Assets = L+E).
+  """
+
+  MAPPING_ID = "struct_coa_mapping"
+  PERIOD_START = date(2024, 1, 1)
+  PERIOD_END = date(2024, 3, 31)
+  RE_ELEMENT_ID = "elem_re_canonical"
+
+  def _mock_session(self, mapped_equity_rows: list[SimpleNamespace]) -> MagicMock:
+    """Two session.execute calls in order:
+
+    1. Mapped-equity-target query (returns ``mapped_equity_rows``)
+    2. Canonical RE lookup (returns the rs-gaap RE element row)
+    """
+    re_row = SimpleNamespace(
+      id=self.RE_ELEMENT_ID,
+      qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+      name="Retained Earnings (Accumulated Deficit)",
+      balance_type="credit",
+    )
+    re_lookup = MagicMock()
+    re_lookup.fetchone.return_value = re_row
+
+    session = MagicMock()
+    session.execute.side_effect = [iter(mapped_equity_rows), re_lookup]
+    return session
+
+  def test_materializes_re_when_no_source_mapping(self):
+    """mini-shape graph: no CoA element maps to RE. The auto-seed
+    injects the canonical rs-gaap:RetainedEarningsAccumulatedDeficit
+    at $0 so `_close_to_retained_earnings` has a real (not anonymous)
+    close target."""
+    session = self._mock_session(mapped_equity_rows=[])
+    facts: list[ReportFact] = []
+
+    _append_empty_equity_facts(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    assert len(facts) == 1
+    re = facts[0]
+    assert re.element_qname == "rs-gaap:RetainedEarningsAccumulatedDeficit"
+    assert re.element_id == self.RE_ELEMENT_ID
+    assert re.classification == "equity"
+    assert re.balance_type == "credit"
+    assert re.value == 0.0
+    assert re.period_type == "instant"
+    assert re.period_start == self.PERIOD_START
+    assert re.period_end == self.PERIOD_END
+
+  def test_does_not_duplicate_when_re_already_mapped(self):
+    """Tenant maps a CoA element directly to rs-gaap RE. The mapped
+    target gets materialized in the first loop; the auto-seed must NOT
+    add a second copy (would create two equity facts at the same qname
+    and confuse the close target picker)."""
+    mapped_re = SimpleNamespace(
+      id=self.RE_ELEMENT_ID,
+      qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+      name="Retained Earnings (Accumulated Deficit)",
+      balance_type="credit",
+      classification="equity",
+    )
+    session = self._mock_session(mapped_equity_rows=[mapped_re])
+    facts: list[ReportFact] = []
+
+    _append_empty_equity_facts(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    re_facts = [
+      f
+      for f in facts
+      if f.element_qname == "rs-gaap:RetainedEarningsAccumulatedDeficit"
+    ]
+    assert len(re_facts) == 1, "Auto-seed must not double up on mapped RE"
+
+  def test_coexists_with_other_mapped_equity(self):
+    """APIC mapped (typical), RE not mapped. Both APIC and the
+    auto-seeded RE should land in the facts list."""
+    mapped_apic = SimpleNamespace(
+      id="elem_apic",
+      qname="rs-gaap:AdditionalPaidInCapital",
+      name="Additional Paid In Capital",
+      balance_type="credit",
+      classification="equity",
+    )
+    session = self._mock_session(mapped_equity_rows=[mapped_apic])
+    facts: list[ReportFact] = []
+
+    _append_empty_equity_facts(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    qnames = {f.element_qname for f in facts}
+    assert "rs-gaap:AdditionalPaidInCapital" in qnames
+    assert "rs-gaap:RetainedEarningsAccumulatedDeficit" in qnames
+    assert len(facts) == 2
+
+  def test_no_re_when_element_missing_from_taxonomy(self):
+    """Defensive: if the rs-gaap taxonomy isn't loaded
+    (``elements`` lookup returns None), don't add a phantom fact."""
+    re_lookup = MagicMock()
+    re_lookup.fetchone.return_value = None
+    session = MagicMock()
+    session.execute.side_effect = [iter([]), re_lookup]
+    facts: list[ReportFact] = []
+
+    _append_empty_equity_facts(
+      session, self.MAPPING_ID, facts, self.PERIOD_START, self.PERIOD_END
+    )
+
+    assert facts == []
 
 
 class TestCloseToRetainedEarningsWithDividends:
