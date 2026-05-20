@@ -1,34 +1,34 @@
 #!/usr/bin/env python3
 """Reconciliation harness — Step 7 of the Seattle Method demo.
 
-Reads the rollforward IBs + ledger LineItems on the test graph,
-invokes the Phase 2 MVP filter engine for each rollforward to
-produce attributed facts, computes the four anchor totals (Total
-Assets, Total Liabilities & Equity, Net Income, Net Cash Change),
-and emits a markdown report to ``local/reports/seattle-method-case-1.md``.
+Reads concept totals + rollforward IBs via the **GraphQL facade**
+(`LedgerClient.get_trial_balance`, `LedgerClient.list_information_blocks`),
+parses the rollforward IB's typed mechanics, invokes the Phase 2
+MVP filter engine for each rollforward against a direct DB session,
+computes the four anchor totals (Total Assets, Total Liabilities &
+Equity, Net Income, Net Cash Change), and writes a markdown report
+to ``examples/seattle_method_demo/output/seattle-method-case-1.md``.
 
-The report follows the methodology-spec §3 structure:
+**Architecture note** — this is hand-written GraphQL consumption.
+Forward work in [`python-client-graphql.md`](../../local/docs/specs/python-client-graphql.md)
+replaces the hand-written Python GraphQL query strings + ``dict[str, Any]``
+returns with codegen-generated Pydantic models via ``ariadne-codegen``.
+The trigger condition the spec calls out ("a new GraphQL surface that
+the Python client genuinely needs to consume — e.g. rollforward
+RollforwardMechanics") has now fired. Phase 1 of that work
+(~1 day) replaces every ``client.list_information_blocks(...)
+→ dict`` hop here with a typed Pydantic response.
 
-1. **Test inputs** — graph id, period, pipeline metadata
-2. **Pipeline summary** — counts (concepts loaded, mappings seeded,
-   events ingested, rollforward IBs authored)
-3. **BS / IS / CF / SE totals** — our computed numbers per statement
-4. **Rollforward attribution details** — per BS leaf, the flow
-   decomposition the filter engine produced, with ``event_ids``
-   provenance
-5. **Findings classification** — matching / methodology gap / our
-   bug / their data quality, with line-cited rationale
-
-Connects to the extensions DB directly (host-side) rather than
-going through the API — the filter engine wants a SQLAlchemy
-``Session``, and computing BS positions / IS totals is straight SQL
-over ``line_items`` / ``entries``. This mirrors how a real
-reconciliation harness would run in a Dagster job or scheduled
-analytic — not a customer-facing API call.
+The filter engine itself still runs against a direct SQLAlchemy
+session — that's the Phase 2 MVP boundary documented in
+[`information-block.md`](../../local/docs/specs/information-block.md) §4.5.
+Phase 3 wires filter evaluation into ``build_envelope`` so the
+attributed facts arrive populated in the IB envelope; this script
+becomes purely API-driven at that point.
 
 Usage:
     uv run python -m examples.seattle_method_demo.reconcile <graph_id>
-    uv run python -m examples.seattle_method_demo.reconcile <graph_id> --period 2024-01
+    uv run python -m examples.seattle_method_demo.reconcile <graph_id> --no-diff
 """
 
 from __future__ import annotations
@@ -124,6 +124,30 @@ class ReconciliationReport:
 # ── DB queries ───────────────────────────────────────────────────────────
 
 
+def _get_ledger_client():
+  """Construct a LedgerClient from saved credentials.
+
+  Mirrors the helper used across the demo scripts. The GraphQL
+  facade methods (``get_trial_balance``, ``list_information_blocks``)
+  hang off this client.
+  """
+  import json
+
+  from robosystems_client.clients.ledger_client import LedgerClient
+
+  config_path = Path(".local/config.json")
+  if not config_path.exists():
+    raise SystemExit("Missing .local/config.json — run `just demo-user` first.")
+  with config_path.open() as f:
+    cfg = json.load(f)
+  return LedgerClient(
+    {
+      "base_url": cfg.get("base_url", "http://localhost:8000"),
+      "token": cfg["api_key"],
+    }
+  )
+
+
 def _open_session(graph_id: str) -> Session:
   """Open a SQLAlchemy session scoped to the graph's schema.
 
@@ -144,51 +168,84 @@ def _open_session(graph_id: str) -> Session:
   return session
 
 
-def _load_concept_totals(
-  session: Session, period_start: date, period_end: date
+def _load_concept_totals_via_graphql(
+  client, graph_id: str, period_start: date, period_end: date
 ) -> list[ConceptTotal]:
-  """Sum (debit - credit) per mini concept across the period.
+  """Load per-concept period totals via the GraphQL trialBalance query.
 
-  Joins line_items → entries (for posting_date filter + status) →
-  elements (for qname/label/balance_type/period_type/trait). Only
-  posted entries count.
+  Replaces the prior direct-DB query against ``line_items``. The
+  ``trialBalance`` resolver does the same aggregation server-side
+  (Σ DR, Σ CR, net per account) — which means this script consumes
+  the same query surface a frontend or MCP agent would.
+
+  Returns ``ConceptTotal`` shapes scoped to ``mini:`` qnames only;
+  rs-gaap and other taxonomies on the graph are filtered out
+  client-side (the GraphQL query returns every CoA account).
+
+  The trialBalance response shape per row:
+  ``{account_id, account_code (=qname), account_name, trait,
+  account_type, total_debits, total_credits, net_balance}``.
+  Values come back as floats in dollars; we multiply by 100 for
+  internal cents-precision.
+
+  TODO: replace with codegen-generated typed response model when
+  ``python-client-graphql.md`` Phase 1 lands.
   """
-  rows = session.execute(
-    text(
-      """
-      SELECT
-        e.qname,
-        e.name,
-        e.balance_type,
-        e.period_type,
-        COALESCE(SUM(li.debit_amount - li.credit_amount), 0) AS dr_pos_cents
-      FROM line_items li
-      JOIN entries en ON en.id = li.entry_id
-      JOIN elements e ON e.id = li.element_id
-      WHERE en.posting_date BETWEEN :start AND :end
-        AND en.status = 'posted'
-        AND e.qname LIKE 'mini:%'
-      GROUP BY e.qname, e.name, e.balance_type, e.period_type
-      ORDER BY e.qname
-      """
-    ),
-    {"start": period_start, "end": period_end},
-  ).fetchall()
-  return [
-    ConceptTotal(
-      qname=r[0],
-      label=r[1] or r[0],
-      balance_type=r[2],
-      period_type=r[3] or "duration",
-      # Trait isn't a direct column on elements (it lives via
-      # ``classifications`` row joins). For reconciliation we derive
-      # it inline from balance_type + period_type + name — same
-      # logic ``load_taxonomy._derive_trait`` used at load time.
-      trait=_derive_trait_from_concept(r[0], r[2], r[3]),
-      debit_positive_cents=int(r[4]),
+  data = client.get_trial_balance(
+    graph_id,
+    start_date=period_start.isoformat(),
+    end_date=period_end.isoformat(),
+  )
+  rows = (data or {}).get("rows", []) or []
+
+  totals: list[ConceptTotal] = []
+  for r in rows:
+    # ``account_code`` carries the mini qname (set at load time —
+    # see ``load_taxonomy.build_element_payloads``).
+    qname = r.get("account_code") or ""
+    if not qname.startswith("mini:"):
+      continue
+    dollars_dr = float(r.get("total_debits") or 0)
+    dollars_cr = float(r.get("total_credits") or 0)
+    # Filter on "had activity" not "non-zero net" — Charlie's
+    # Receivables has $8K DR + $8K CR netting to $0, but it's
+    # legitimate activity that the diff should compare.
+    if dollars_dr == 0 and dollars_cr == 0:
+      continue
+    debit_positive_cents = int(round((dollars_dr - dollars_cr) * 100))
+    # trialBalance doesn't return period_type or balance_type
+    # directly — they live on the Element row. Derive period_type
+    # from trait (instant for asset/liability/equity, duration for
+    # revenue/expense). For balance_type, infer from trait + sign.
+    trait = r.get("trait")
+    period_type = _period_type_from_trait(trait)
+    balance_type = _balance_type_from_trait(trait)
+    totals.append(
+      ConceptTotal(
+        qname=qname,
+        label=r.get("account_name") or qname,
+        balance_type=balance_type,
+        period_type=period_type,
+        trait=trait,
+        debit_positive_cents=debit_positive_cents,
+      )
     )
-    for r in rows
-  ]
+  totals.sort(key=lambda c: c.qname)
+  return totals
+
+
+def _period_type_from_trait(trait: str | None) -> str:
+  """Instant for BS concepts (asset/liability/equity), duration for IS."""
+  if trait in ("asset", "liability", "equity", "contraAsset", "contraLiability"):
+    return "instant"
+  return "duration"
+
+
+def _balance_type_from_trait(trait: str | None) -> str:
+  """Debit for asset/expense/loss; credit for liability/equity/revenue/income/gain."""
+  if trait in ("asset", "contraLiability", "contraEquity", "expense", "loss"):
+    return "debit"
+  return "credit"
 
 
 def _load_expected_facts(csv_path: Path) -> list[ExpectedFact]:
@@ -313,25 +370,38 @@ def _derive_trait_from_concept(
   return "revenue" if balance_type == "credit" else "expense"
 
 
-def _load_rollforward_ibs(session: Session) -> list[tuple[str, RollforwardMechanics]]:
-  """Return [(structure_id, RollforwardMechanics), …] for every
-  rollforward IB on the graph."""
-  rows = session.execute(
-    text(
-      """
-      SELECT id, name, artifact_mechanics
-      FROM structures
-      WHERE block_type = 'rollforward'
-      ORDER BY name
-      """
-    )
-  ).fetchall()
+def _load_rollforward_ibs_via_graphql(
+  client, graph_id: str
+) -> list[tuple[str, RollforwardMechanics]]:
+  """Return [(structure_id, RollforwardMechanics), …] via GraphQL.
+
+  Uses ``LedgerClient.list_information_blocks(block_type='rollforward')``
+  — the same query the frontend / MCP / any external client would
+  hit. The envelope's ``artifact.mechanics`` field carries the
+  typed ``RollforwardMechanics`` JSON; we re-validate it through
+  Pydantic to recover the typed shape (the hand-written GraphQL
+  parser returns ``dict[str, Any]``, the documented
+  ``python-client-graphql.md`` Phase 1 work replaces that with
+  typed Pydantic on the response).
+
+  Note: the IB envelope's ``facts`` field is empty in Phase 2 MVP
+  (see ``information_block/rollforward.py:build_envelope``). The
+  filter engine still runs separately to produce attributed facts —
+  Phase 3 wires that into the envelope so this script can drop the
+  direct-session step entirely.
+
+  TODO: replace with codegen-generated typed response model when
+  ``python-client-graphql.md`` Phase 1 lands.
+  """
+  blocks = client.list_information_blocks(graph_id, block_type="rollforward")
   out: list[tuple[str, RollforwardMechanics]] = []
-  for r in rows:
-    if not r[2]:
+  for block in blocks or []:
+    artifact = block.get("artifact") or {}
+    raw_mechanics = artifact.get("mechanics")
+    if not raw_mechanics:
       continue
-    mechanics = RollforwardMechanics.model_validate(r[2])
-    out.append((r[0], mechanics))
+    mechanics = RollforwardMechanics.model_validate(raw_mechanics)
+    out.append((block.get("id", ""), mechanics))
   return out
 
 
@@ -633,15 +703,27 @@ def main() -> None:
 
   print(f"Reconciling graph {args.graph_id} for {args.period_start}..{args.period_end}")
 
+  client = _get_ledger_client()
+
+  # Read paths go through GraphQL (the same surface a frontend or
+  # MCP agent would hit). The filter engine is still invoked
+  # against a direct session — Phase 2 MVP boundary; Phase 3 wires
+  # the engine into ``build_envelope`` so the IB envelope returns
+  # populated facts and this script becomes pure-API.
+  concepts = _load_concept_totals_via_graphql(
+    client, args.graph_id, args.period_start, args.period_end
+  )
+  print(f"  Loaded {len(concepts)} concept(s) with period activity (via GraphQL trialBalance)")
+  bs_label_by_qname = {c.qname: c.label for c in concepts}
+
+  rollforwards = _load_rollforward_ibs_via_graphql(client, args.graph_id)
+  print(
+    f"  Loaded {len(rollforwards)} rollforward IB(s) (via GraphQL informationBlocks)"
+  )
+
+  # Filter engine still runs against a direct session — Phase 2 MVP.
   session = _open_session(args.graph_id)
   try:
-    concepts = _load_concept_totals(session, args.period_start, args.period_end)
-    print(f"  Loaded {len(concepts)} concept(s) with period activity")
-    bs_label_by_qname = {c.qname: c.label for c in concepts}
-
-    rollforwards = _load_rollforward_ibs(session)
-    print(f"  Loaded {len(rollforwards)} rollforward IB(s)")
-
     results = _evaluate_all_rollforwards(
       session, rollforwards, args.period_start, args.period_end, bs_label_by_qname
     )
