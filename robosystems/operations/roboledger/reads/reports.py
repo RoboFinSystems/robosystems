@@ -51,6 +51,7 @@ from robosystems.operations.roboledger.reports.guard_rails import validate_repor
 VALID_BLOCK_TYPES = {
   "income_statement",
   "balance_sheet",
+  "cash_flow_statement",
   "equity_statement",
   "custom",
 }
@@ -448,6 +449,15 @@ def get_statement(
   # (e.g. an asset element marked primary in both EFS and liquidity
   # axes). Without the subquery, a single fact would emit one row per
   # primary trait and double-count downstream.
+  # Filter to FactSets whose owning structure matches the block_type
+  # being rendered. Without this filter, elements that the report
+  # persisted into multiple FactSets (e.g. ``rs-gaap:NetIncomeLoss``
+  # lives in IS + CF + SE per ``_persist_report_facts`` design) would
+  # all flow into ``_facts_to_balance_dict`` and get summed (its line-
+  # 505 ``net_balance += fact.value`` is intentional for ancestor
+  # rollup, but cross-structure duplicates inflate the value 2x/3x).
+  # Filtering on the FactSet's owning structure block_type isolates the
+  # render to the one statement's worth of facts.
   fact_rows = session.execute(
     text("""
       SELECT rf.element_id, rf.value, rf.period_start, rf.period_end,
@@ -455,6 +465,7 @@ def get_statement(
              trait_info.identifier AS trait, e.balance_type
       FROM facts rf
       JOIN fact_sets fs ON fs.id = rf.fact_set_id
+      JOIN structures s ON s.id = fs.structure_id
       JOIN elements e ON e.id = rf.element_id
       LEFT JOIN (
         SELECT et.element_id, t.identifier
@@ -464,8 +475,9 @@ def get_statement(
           AND t.category = 'elementsOfFinancialStatements'
       ) trait_info ON trait_info.element_id = e.id
       WHERE fs.report_id = :report_id
+        AND s.block_type = :block_type
     """),
-    {"report_id": report_id},
+    {"report_id": report_id, "block_type": block_type},
   )
 
   facts = [
@@ -511,6 +523,13 @@ def get_statement(
 
   validation = validate_report(block_type, grid.rows)
 
+  # Drop XBRL is_abstract rows (presentation scaffolding — *Abstract,
+  # *Table, *LineItems, *RollUp wrappers that aren't themselves
+  # reportable concepts). Mirrors the live-financial-statement filter
+  # (operations/roboledger/reads/reports.py::get_live_financial_statement
+  # line ~670). Without this, the IS root abstract surfaces as a row
+  # whose value is the sum of every descendant — confusing and
+  # double-counting visually.
   rows = [
     FactRowResponse(
       element_id=r.element_id,
@@ -522,6 +541,7 @@ def get_statement(
       depth=r.depth,
     )
     for r in grid.rows
+    if not r.is_abstract
   ]
 
   validation_resp = (

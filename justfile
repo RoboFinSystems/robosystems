@@ -210,6 +210,10 @@ demo-seattle-method *args="":
 demo-seattle-method-reconcile *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.reconcile {{args}}
 
+# Materialize the Seattle Method 4-IB rs-gaap Report (BS / IS / CF / SE) for a graph after the main demo has run
+demo-seattle-method-create-report *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.create_report {{args}}
+
 
 ## CI/CD ##
 

@@ -132,7 +132,19 @@ def _collect_tdcs_per_bs_leaf(csv_path: Path) -> dict[str, list[str]]:
     reader = csv.DictReader(f)
     for row in reader:
       account = row["GeneralLedgerAccountCode"]
-      tdc = row["TransactionDescriptionCode"]
+      raw_tdc = row["TransactionDescriptionCode"]
+      # Apply the same normalization that ingest_transactions.py uses
+      # (``_KNOWN_TDC_ALIASES``) so rollforward filters target the same
+      # TDC values that get stamped on LineItem metadata. Without this,
+      # filter targets like ``mini:PaymentOfInterest`` (Charlie's CSV
+      # typo) won't match the normalized ``mini:PaymentInterest`` value
+      # stored on LineItems, and the rollforward residual swallows the
+      # attribution.
+      from examples.seattle_method_demo.ingest_transactions import (
+        _KNOWN_TDC_ALIASES,
+      )
+
+      tdc = _KNOWN_TDC_ALIASES.get(raw_tdc, raw_tdc)
       if account in BS_LEAVES and tdc and tdc not in seen[account]:
         tdcs_per_account[account].append(tdc)
         seen[account].add(tdc)
