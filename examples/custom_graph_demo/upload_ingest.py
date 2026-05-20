@@ -282,7 +282,7 @@ def main() -> None:
   print("=" * 70)
   print(f"Graph ID: {graph_id}")
   print(f"Base URL: {args.base_url}")
-  print(f"S3: {'LocalStack (' + s3_endpoint + ')' if is_local else 'AWS S3'}")
+  print(f"S3: {f'LocalStack ({s3_endpoint})' if is_local else 'AWS S3'}")
   print(f"Credentials: {credentials_path}")
   print("=" * 70)
 
