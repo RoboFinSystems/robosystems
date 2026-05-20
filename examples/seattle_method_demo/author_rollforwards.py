@@ -71,43 +71,6 @@ def _get_ledger_client():
   )
 
 
-def _post_operation_raw(graph_id: str, op_name: str, payload: dict) -> dict:
-  """POST directly to the extensions operation endpoint via httpx.
-
-  Bypasses the typed SDK because ``rollforward`` was added to the
-  ``CreateInformationBlockRequest`` discriminated union AFTER the SDK
-  was last regenerated — the SDK still only knows ``CreateLegacyArm``
-  and ``CreateScheduleArm`` as valid body types. The operation
-  endpoint itself accepts JSON dicts and validates against the
-  current server-side Pydantic model, so we can author rollforward
-  IBs without an SDK regenerate.
-
-  TODO: drop this helper and call
-  ``client.create_information_block()`` once the SDK is regenerated
-  to include ``CreateRollforwardArm``.
-  """
-  import httpx
-
-  config_path = Path(".local/config.json")
-  with config_path.open() as f:
-    cfg = json.load(f)
-  base_url = cfg.get("base_url", "http://localhost:8000")
-  api_key = cfg["api_key"]
-
-  url = f"{base_url}/extensions/roboledger/{graph_id}/operations/{op_name}"
-  response = httpx.post(
-    url,
-    json=payload,
-    headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-    timeout=30.0,
-  )
-  if response.status_code >= 400:
-    raise RuntimeError(
-      f"POST {op_name} → {response.status_code}: {response.text[:500]}"
-    )
-  return response.json()
-
-
 def _find_mini_taxonomy_id(client, graph_id: str) -> str | None:
   """Find the mini CoA taxonomy_id on the graph by name."""
   taxonomies = client.list_taxonomies(graph_id) or []
@@ -172,38 +135,52 @@ def _collect_tdcs_per_bs_leaf(csv_path: Path) -> dict[str, list[str]]:
   return dict(tdcs_per_account)
 
 
-def _build_rollforward_payload(
-  bs_qname: str, tdcs: list[str]
-) -> dict:
-  """Build the ``create-information-block`` payload for one rollforward.
+def _build_rollforward_arm(bs_qname: str, tdcs: list[str]):
+  """Build a typed ``CreateRollforwardArm`` for one rollforward IB.
 
   No ``default_change_tag_qname`` — Charlie's TDCs cover every line,
   so the residual should be zero. If a residual appears at render
   time, ``validation_mode='residual_as_default'`` (the default) will
   surface it as a synthetic ``#residual`` fact, which becomes the
   signal of an untagged JE — a useful audit artifact.
+
+  Uses the typed SDK models (``CreateRollforwardArm``,
+  ``CreateRollforwardRequest``, ``AttributionFilter``,
+  ``LineItemMetadataPredicate``) shipped in
+  ``robosystems-client==0.3.30+``. Replaces the prior raw-dict
+  payload that went through ``httpx`` to bypass the SDK; the SDK
+  now has the typed arm available via ``client.create_information_block``.
   """
+  # Lazy imports — the SDK module is heavy and the script may dry-run.
+  from robosystems_client.models.attribution_filter import AttributionFilter
+  from robosystems_client.models.create_rollforward_arm import CreateRollforwardArm
+  from robosystems_client.models.create_rollforward_request import (
+    CreateRollforwardRequest,
+  )
+  from robosystems_client.models.line_item_metadata_predicate import (
+    LineItemMetadataPredicate,
+  )
+
   short = bs_qname.removeprefix("mini:")
-  return {
-    "block_type": "rollforward",
-    "payload": {
-      "name": f"{short} Rollforward (Seattle Method Test Case 1)",
-      "bs_source_qname": bs_qname,
-      "default_change_tag_qname": None,
-      "attribution_filters": [
-        {
-          "target_qname": tdc,
-          "predicate": {
-            "kind": "line_item_metadata_field",
-            "field": "transaction_description_code",
-            "values": [tdc],
-          },
-        }
-        for tdc in tdcs
-      ],
-      "validation_mode": "residual_as_default",
-    },
-  }
+  filters = [
+    AttributionFilter(
+      target_qname=tdc,
+      predicate=LineItemMetadataPredicate(
+        field="transaction_description_code",
+        values=[tdc],
+      ),
+    )
+    for tdc in tdcs
+  ]
+  payload = CreateRollforwardRequest(
+    name=f"{short} Rollforward (Seattle Method Test Case 1)",
+    bs_source_qname=bs_qname,
+    attribution_filters=filters,
+  )
+  return CreateRollforwardArm(
+    block_type="rollforward",
+    payload=payload,
+  )
 
 
 def author_rollforwards(
@@ -254,19 +231,16 @@ def author_rollforwards(
     if valid:
       filtered_per_account[bs_qname] = valid
 
-  # Bypass the typed SDK — see _post_operation_raw docstring.
+  # Typed SDK call — robosystems-client>=0.3.30 ships
+  # ``LedgerClient.create_information_block`` which accepts the
+  # discriminated-union arm directly. No raw httpx shim needed.
   created = 0
   for bs_qname, tdcs in filtered_per_account.items():
-    payload = _build_rollforward_payload(bs_qname, tdcs)
+    body = _build_rollforward_arm(bs_qname, tdcs)
     try:
-      response = _post_operation_raw(
-        graph_id, "create-information-block", payload
-      )
-      # OperationEnvelope shape: {result: {...envelope...}, operation_id, status}
-      envelope = response.get("result") or response
-      ib_id = envelope.get("id", "?")
+      envelope = client.create_information_block(graph_id, body)
       created += 1
-      print(f"  ✓ {bs_qname:<40} → IB {ib_id} ({len(tdcs)} filters)")
+      print(f"  ✓ {bs_qname:<40} → IB {envelope.id} ({len(tdcs)} filters)")
     except Exception as exc:  # noqa: BLE001
       warnings.append(f"{bs_qname}: {exc}")
       print(f"  ✗ {bs_qname}: {exc}")
