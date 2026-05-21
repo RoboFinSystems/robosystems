@@ -100,7 +100,7 @@ class TraitSpec(BaseModel):
     ..., description="Member name within the category, e.g. 'asset', 'current'."
   )
   source: str = Field(
-    ..., description="Provenance, e.g. 'us-gaap-metamodel', 'fac', 'system'."
+    ..., description="Provenance, e.g. 'fac-metamodel', 'fac', 'system'."
   )
   name: str | None = Field(None, description="Human-readable display name")
   description: str | None = Field(None)
@@ -113,10 +113,10 @@ class TraitAssignmentSpec(BaseModel):
   category: str = Field(..., description="Trait category")
   identifier: str = Field(..., description="Member identifier within the category")
   source: str = Field(
-    "us-gaap-metamodel",
+    "fac-metamodel",
     description=(
       "Provenance of the assignment — which seed/taxonomy declared the "
-      "(element → trait) arc. Defaults to us-gaap-metamodel since that's "
+      "(element → trait) arc. Defaults to fac-metamodel since that's "
       "where nearly all EFS assignments originate; future seeds from other "
       "metamodels (e.g. ifrs-metamodel) should set this explicitly so "
       "row provenance is preserved in element_traits.source."

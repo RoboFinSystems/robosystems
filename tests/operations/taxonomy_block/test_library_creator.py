@@ -182,7 +182,7 @@ class TestCreateLibraryTaxonomyElements:
     cls = TraitSpec(
       category="elementsOfFinancialStatements",
       identifier="asset",
-      source="us-gaap-metamodel",
+      source="fac-metamodel",
     )
     package = _make_package(traits=[cls])
     _, counts = create_library_taxonomy_elements(session, package)

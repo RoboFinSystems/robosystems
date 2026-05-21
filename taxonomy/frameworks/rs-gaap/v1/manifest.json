@@ -2,23 +2,22 @@
   "framework": "rs-gaap",
   "version": "v1",
   "title": "RoboSystems rs-gaap Reporting Framework",
-  "description": "Sovereign rs-gaap leaf catalog (curated from FASB us-gaap) with FAC categorization, named Disclosures, Disclosure Mechanics, presentation/rendering machinery, and Reporting Styles for vertical/filer-profile flavoring (Default, Small Private Company, Banking, Insurance, Mining, etc.). Depends on the universal FAC concept substrate via the fac-to-rs-gaap bridge. The default framework pinned by every tenant graph filing under US GAAP.",
+  "description": "Sovereign rs-gaap leaf catalog (curated from FASB us-gaap) with named Disclosures, Disclosure Mechanics, presentation/rendering machinery, and Reporting Styles for vertical/filer-profile flavoring (Default, Small Private Company, Banking, Insurance, Mining, etc.). Depends on the fac framework for the universal accounting concept substrate and the trait-vocabulary metamodel; rs-gaap-to-metamodel/v1 assigns those traits to rs-gaap elements. The default framework pinned by every tenant graph filing under US GAAP.",
   "framework_type": "reporting",
   "depends_on": [
     {"framework": "fac", "version": "v1"}
   ],
   "packages": [
-    {"standard": "us-gaap-metamodel",            "version": "v1", "ordinal": 0,  "is_required": true},
-    {"standard": "rs-gaap",                      "version": "v1", "ordinal": 1,  "is_required": true},
-    {"standard": "rs-gaap-to-metamodel",         "version": "v1", "ordinal": 2,  "is_required": true},
-    {"standard": "rs-gaap-hierarchy",            "version": "v1", "ordinal": 3,  "is_required": true},
-    {"standard": "rs-gaap-presentation",         "version": "v1", "ordinal": 4,  "is_required": true},
-    {"standard": "rs-gaap-calculations",         "version": "v1", "ordinal": 5,  "is_required": true},
-    {"standard": "type-subtype",                 "version": "v1", "ordinal": 6,  "is_required": true},
-    {"standard": "rs-gaap-disclosures",          "version": "v1", "ordinal": 7,  "is_required": true},
-    {"standard": "rs-gaap-disclosure-mechanics", "version": "v1", "ordinal": 8,  "is_required": true},
-    {"standard": "rs-gaap-reporting-checklist",  "version": "v1", "ordinal": 9,  "is_required": true},
-    {"standard": "rs-gaap-reporting-styles",     "version": "v1", "ordinal": 10, "is_required": true}
+    {"standard": "rs-gaap",                      "version": "v1", "ordinal": 0, "is_required": true},
+    {"standard": "rs-gaap-to-metamodel",         "version": "v1", "ordinal": 1, "is_required": true},
+    {"standard": "rs-gaap-hierarchy",            "version": "v1", "ordinal": 2, "is_required": true},
+    {"standard": "rs-gaap-presentation",         "version": "v1", "ordinal": 3, "is_required": true},
+    {"standard": "rs-gaap-calculations",         "version": "v1", "ordinal": 4, "is_required": true},
+    {"standard": "type-subtype",                 "version": "v1", "ordinal": 5, "is_required": true},
+    {"standard": "rs-gaap-disclosures",          "version": "v1", "ordinal": 6, "is_required": true},
+    {"standard": "rs-gaap-disclosure-mechanics", "version": "v1", "ordinal": 7, "is_required": true},
+    {"standard": "rs-gaap-reporting-checklist",  "version": "v1", "ordinal": 8, "is_required": true},
+    {"standard": "rs-gaap-reporting-styles",     "version": "v1", "ordinal": 9, "is_required": true}
   ],
   "bridges": [
     {"bridge": "fac-to-rs-gaap",                            "version": "v1", "ordinal": 0, "is_required": true},

@@ -11,7 +11,7 @@
     "xbrldt": "http://xbrl.org/2005/xbrldt#",
     "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
     "us-gaap": "http://fasb.org/us-gaap/2026#",
-    "metamodel": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/",
+    "metamodel": "https://robosystems.ai/taxonomy/fac-metamodel/v1/",
     "rs": "https://robosystems.ai/vocab/",
     "balance": {
       "@id": "https://robosystems.ai/vocab/balance"

@@ -49,10 +49,10 @@ A framework lives at `frameworks/{name}/{version}/manifest.json`:
     {"framework": "fac", "version": "v1"}
   ],
   "packages": [
-    {"standard": "us-gaap-metamodel",    "version": "v1", "ordinal": 0, "is_required": true},
-    {"standard": "rs-gaap",              "version": "v1", "ordinal": 1, "is_required": true},
-    {"standard": "rs-gaap-presentation", "version": "v1", "ordinal": 4, "is_required": true},
-    {"standard": "rs-gaap-reporting-styles", "version": "v1", "ordinal": 10, "is_required": true}
+    {"standard": "rs-gaap",                  "version": "v1", "ordinal": 0, "is_required": true},
+    {"standard": "rs-gaap-to-metamodel",     "version": "v1", "ordinal": 1, "is_required": true},
+    {"standard": "rs-gaap-presentation",     "version": "v1", "ordinal": 3, "is_required": true},
+    {"standard": "rs-gaap-reporting-styles", "version": "v1", "ordinal": 9, "is_required": true}
   ],
   "bridges": [
     {"bridge": "fac-to-rs-gaap", "version": "v1", "ordinal": 0, "is_required": true}
@@ -115,16 +115,17 @@ flat `{standard: version}` dict. Case 4 is returned as-is.
 ```
 frameworks/
 ├── fac/v1/
-│   ├── manifest.json    universal accounting-concept substrate
-│   └── packages/        fac, fac-presentation, fac-calculations, fac-rules
+│   ├── manifest.json    universal accounting substrate
+│   └── packages/        fac-metamodel (trait vocabulary),
+│                        fac, fac-presentation, fac-calculations, fac-rules
 │
 └── rs-gaap/v1/          default framework — what every tenant gets unless they opt in elsewhere
-    ├── manifest.json    depends_on: fac@v1
+    ├── manifest.json    depends_on: fac@v1 (inherits fac-metamodel + fac concepts)
     ├── packages/        rs-gaap, rs-gaap-presentation, rs-gaap-calculations,
     │                    rs-gaap-disclosures, rs-gaap-disclosure-mechanics,
     │                    rs-gaap-hierarchy, rs-gaap-reporting-checklist,
     │                    rs-gaap-reporting-styles, rs-gaap-to-metamodel,
-    │                    us-gaap-metamodel, type-subtype
+    │                    type-subtype
     └── bridges/         fac-to-rs-gaap, rs-gaap-disclosures-to-rs-gaap-textblocks
 ```
 

@@ -248,7 +248,7 @@ def copy_library_into_tenant(
     pin_params,
   )
 
-  # Traits — copy the full us-gaap-metamodel vocabulary (all rows with
+  # Traits — copy the full fac-metamodel vocabulary (all rows with
   # created_by='library-seeder'). Pin-independent: every tenant gets the
   # same trait catalog.
   trait_result = connection.execute(

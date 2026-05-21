@@ -347,7 +347,7 @@ def _extract_trait(graph: Graph, subject: URIRef) -> TraitSpec | None:
 
   category = _single(URIRef(f"{RS_NS}category"))
   identifier = _single(URIRef(f"{RS_NS}identifier"))
-  source = _single(URIRef(f"{RS_NS}source"), "us-gaap-metamodel")
+  source = _single(URIRef(f"{RS_NS}source"), "fac-metamodel")
   if not category or not identifier:
     return None
   labels = _extract_labels(graph, subject)
@@ -374,7 +374,7 @@ def _extract_trait_assignments(
 
   Each arc connects an element (subject) to a Trait IRI of the
   shape ``{namespace_uri}/{standard}/{version}/{category}/{identifier}``
-  — e.g. ``https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/
+  — e.g. ``https://robosystems.ai/taxonomy/fac-metamodel/v1/
   elementsOfFinancialStatements/asset``. We decode the last 4 IRI
   segments into (standard-as-source, version, category, identifier) so
   the assignment carries its vocabulary's provenance.

@@ -34,9 +34,10 @@ taxonomy/
 └── frameworks/
     ├── README.md                   (manifest schema, composition, dependency rules)
     │
-    ├── fac/v1/                     universal accounting-concept substrate
+    ├── fac/v1/                     universal accounting substrate
     │   ├── manifest.json
     │   └── packages/
+    │       ├── fac-metamodel/v1/   universal trait vocabulary (24 axes)
     │       ├── fac/v1/             FAC concepts (Assets, Liabilities, Equity, …)
     │       ├── fac-presentation/v1/
     │       ├── fac-calculations/v1/
@@ -54,8 +55,7 @@ taxonomy/
         │   ├── rs-gaap-hierarchy/v1/
         │   ├── rs-gaap-reporting-checklist/v1/
         │   ├── rs-gaap-reporting-styles/v1/    ★ vertical / filer-profile surface
-        │   ├── rs-gaap-to-metamodel/v1/
-        │   ├── us-gaap-metamodel/v1/           FASB trait vocabulary
+        │   ├── rs-gaap-to-metamodel/v1/        trait assignments for rs-gaap leaves
         │   └── type-subtype/v1/                Charlie's classification linkbase
         └── bridges/
             ├── README.md

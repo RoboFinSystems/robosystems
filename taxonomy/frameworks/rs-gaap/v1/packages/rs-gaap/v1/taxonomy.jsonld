@@ -11,7 +11,7 @@
     "xbrldt": "http://xbrl.org/2005/xbrldt#",
     "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
     "us-gaap": "http://fasb.org/us-gaap/2026#",
-    "metamodel": "https://robosystems.ai/taxonomy/us-gaap-metamodel/v1/",
+    "metamodel": "https://robosystems.ai/taxonomy/fac-metamodel/v1/",
     "rs": "https://robosystems.ai/vocab/",
     "balance": {
       "@id": "https://robosystems.ai/vocab/balance"
@@ -77,7 +77,7 @@
     "format": "XBRL taxonomy (FASB authoritative)"
   },
   "forked_at": "2026-04-20",
-  "description": "rs-gaap v1 — RoboSystems canonical reporting taxonomy. ~2,000 elements curated from FASB us-gaap 2026. Each concept carries only XBRL-intrinsic attributes (balance, periodType, abstract, monetary, elementType, substitutionGroup) plus labels, documentation, and deprecation status. Classification data lives in us-gaap-metamodel/v1/ + rs-gaap-to-metamodel/v1/; hierarchy in rs-gaap-hierarchy/v1/.",
+  "description": "rs-gaap v1 — RoboSystems canonical reporting taxonomy. ~2,000 elements curated from FASB us-gaap 2026. Each concept carries only XBRL-intrinsic attributes (balance, periodType, abstract, monetary, elementType, substitutionGroup) plus labels, documentation, and deprecation status. Classification data lives in fac-metamodel/v1/ + rs-gaap-to-metamodel/v1/; hierarchy in rs-gaap-hierarchy/v1/.",
   "@graph": [
     {
       "@id": "rs-gaap:AccountsNotesAndLoansReceivableNetCurrent",

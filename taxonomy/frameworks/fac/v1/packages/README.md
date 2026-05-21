@@ -36,12 +36,34 @@ Each package declares its provenance in its top-level JSON-LD metadata.
 
 ```
 packages/
+├── fac-metamodel/v1/        forked  — universal trait vocabulary (24 axes, 99 traits,
+│                                      25 categories — elementsOfFinancialStatements,
+│                                      liquidity, activityType, recordedValue,
+│                                      flowClassification, …)
 ├── fac/v1/                  forked  — FAC fundamental concepts (~177 elements)
 ├── fac-presentation/v1/     native  — FAC multi-variant presentation hierarchies
 ├── fac-calculations/v1/     native  — FAC BS/IS/CF accounting identities
 └── fac-rules/v1/            forked  — Seattle Method verification rules (14 rules,
                                        3 categories, 5 patterns)
 ```
+
+## Notes on `fac-metamodel`
+
+The trait vocabulary was originally forked from FASB's us-gaap 2026
+metamodel publication, but the axes themselves are not us-gaap-specific
+— `elementsOfFinancialStatements`, `liquidity`, `activityType`,
+`recordedValue`, `realizationStatus`, `flowClassification`, etc.
+describe how *any* accounting element is classified, regardless of
+regulatory regime. Hoisted into `fac` so every dependent rs-* framework
+(rs-gaap today; rs-ifrs / rs-call-report / rs-statutory tomorrow)
+inherits the same axes via `depends_on` and no rs-* framework has to
+re-author or duplicate the trait catalog.
+
+Per-element trait assignments live in each framework's
+`*-to-metamodel/v1/` package (today: `rs-gaap-to-metamodel/v1/`).
+A future `rs-ifrs-to-metamodel/v1/` would bind ifrs elements to the
+same axes; jurisdiction-specific enum values would extend the trait
+catalog if the existing 95 members don't cover them.
 
 ## Editing packages
 

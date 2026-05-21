@@ -33,7 +33,8 @@ Data changes (public schema):
 
 - DELETE 0001-seeded library rows
 - INSERT from JSON-LD seeds: fac, rs-gaap (concept taxonomies);
-  us-gaap-metamodel (trait vocabulary, 99 traits across 25 categories);
+  fac-metamodel (trait vocabulary, 99 traits across 25 categories;
+  inherited from fac framework via depends_on);
   rs-gaap-to-metamodel (trait assignments, ~1.7k arcs);
   rs-gaap-hierarchy (class-subclass); fac-to-rs-gaap, fac-calculations,
   fac-presentation, type-subtype (mapping seeds)
@@ -881,7 +882,7 @@ def upgrade() -> None:
   # These columns live on the 0001 schema. Replaced by
   # element_traits junction rows in the
   # 'elementsOfFinancialStatements' category (seeded from
-  # us-gaap-metamodel/v1).
+  # fac-metamodel/v1).
   op.drop_constraint("check_element_classification", "elements", type_="check")
   op.drop_index("idx_elements_classification", table_name="elements")
   op.drop_column("elements", "classification")
@@ -972,7 +973,7 @@ def upgrade() -> None:
   op.create_check_constraint(
     "check_association_type", "associations", _WIDENED_ASSOCIATION_CHECK
   )
-  # us-gaap-metamodel uses 'classification-vocabulary',
+  # fac-metamodel uses 'trait-vocabulary',
   # rs-gaap-to-metamodel uses 'classification-assignment' — neither in
   # the 0001 CHECK. Widen before loading JSON-LD seeds in section 7.
   op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")

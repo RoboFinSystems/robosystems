@@ -63,12 +63,9 @@ Each package declares its provenance in its top-level JSON-LD metadata:
 
 ```
 packages/
-├── us-gaap-metamodel/v1/             forked  — FASB metamodel trait vocabulary
-│                                              (99 traits, 25 categories;
-│                                              incl. SFAC 6 as
-│                                              `elementsOfFinancialStatements` traits)
 ├── rs-gaap/v1/                       forked  — RoboSystems canonical us-gaap (~2,000 leaves)
-├── rs-gaap-to-metamodel/v1/          native  — trait assignments (rs-gaap ↔ FASB metamodel)
+├── rs-gaap-to-metamodel/v1/          native  — trait assignments for rs-gaap leaves
+│                                              (binds them to fac-metamodel axes)
 ├── rs-gaap-hierarchy/v1/             forked  — rs-gaap class hierarchy
 ├── rs-gaap-presentation/v1/          native  — rs-gaap presentation hierarchies
 ├── rs-gaap-calculations/v1/          native  — rs-gaap calc DAG (composes with fac-calculations)
@@ -81,12 +78,13 @@ packages/
                                                 Mining, Cannabis, …)
 ```
 
-## Notes on specific packages
+The trait vocabulary (`fac-metamodel/v1`, ~99 traits across 25
+categories) lives in the upstream `fac` framework and is inherited
+here via `depends_on`. The `rs-gaap-to-metamodel/v1/` package is the
+rs-gaap-specific binding — it declares which trait values apply to
+which rs-gaap leaves.
 
-**`us-gaap-metamodel`** is FASB-authored upstream trait vocabulary
-(not RoboSystems curation). It's bundled inside `rs-gaap@v1` rather
-than promoted to a peer framework because it's tightly coupled to
-us-gaap — every consumer of `rs-gaap` needs it.
+## Notes on specific packages
 
 **`type-subtype`** is Charlie's classification linkbase pattern.
 Theoretically reusable, but currently scoped to rs-gaap; if/when
@@ -103,9 +101,11 @@ within a regime.
 **SFAC 6** doesn't have its own package — its content (Assets,
 Liabilities, Equity, Revenues, Expenses, etc.) is encoded as the
 `elementsOfFinancialStatements` trait category inside
-`us-gaap-metamodel/v1` and attached to concepts via `element_traits`.
+`fac-metamodel/v1` (in the `fac` framework) and attached to rs-gaap
+concepts via `rs-gaap-to-metamodel/v1`'s trait-assignment arcs.
 This keeps SFAC 6 categorization queryable per-element without giving
-it a separate concept namespace.
+it a separate concept namespace, and lets every rs-* framework
+inherit the same axes.
 
 ## Editing packages
 

@@ -109,7 +109,7 @@ class ClassificationLite(BaseModel):
     None,
     description=(
       "Provenance — 'arcrole_analysis', 'disclosure_mechanics', "
-      "'us-gaap-metamodel', adapter name, etc."
+      "'fac-metamodel', adapter name, etc."
     ),
   )
 
