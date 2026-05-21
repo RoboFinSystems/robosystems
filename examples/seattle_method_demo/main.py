@@ -200,7 +200,7 @@ def step_provision_graph() -> str:
     initial_entity={
       "name": ENTITY_NAME,
       "uri": "https://luca.pacioli.ai/luca/view/0f24fd35e961e167a727b663c75a4c5ec9fb7eb86730d6292f46e6e180fc2018980cd52e/index",
-      "entity_type": "llc",
+      "entity_type": "corporation",
     },
     tags=["demo", "seattle-method", "cross-taxonomy-test", "mini"],
   )

@@ -145,6 +145,35 @@ composition.
 3. `just reset-local`, then `change-reporting-style` to the preset's
    Structure id (`uuid5(roleUri, "structure")`) and re-render.
 
+### The equity-form axis (worked example)
+
+The second segment of the code is the entity's legal form
+(`CORP`/`PART`/`LLC`/…). Because composition is per-*statement*, an
+equity-form variant is a **full balance-sheet Structure** that clones the
+corporate asset/liability arcs and swaps only the equity section, plus a
+form-specific Statement-of-Changes rollforward:
+
+- `BS-classified-PART` / `BS-classified-LLC` keep `rs-gaap:StockholdersEquity`
+  as the equity *total* (the calc-DAG plug: `StockholdersEquity = Σ equity
+  leaves`, which already sums `PartnersCapital`/`MembersEquity`), so the
+  balance sheet still foots. They differ from `BS-classified` only in which
+  child the equity section presents — `PartnersCapital` / `MembersEquity`
+  instead of the corporate stack.
+- `Equity-rollforward-PART` / `Equity-rollforward-LLC` root the rollforward
+  at the form's capital concept.
+
+The `Partnership` / `LimitedLiabilityCompany` presets then compose those
+Networks (`BSC-PART-IS02-CF1`, `BSC-LLC-IS02-CF1`) with the shared
+`IS-multistep` + `CashFlow-indirect`. New graphs default to the matching
+Style from the entity's `entity_type` at creation (see
+`operations/graph/reporting_style_defaults.py`).
+
+**Known limit:** auto-derived Retained Earnings is corporate-specific —
+partnerships/LLCs roll undistributed earnings into the capital account, not
+a separate RE line, so a PART/LLC equity section only foots cleanly once
+form-aware earnings rollup lands. `SOLE`/`NFP` need new leaf concepts
+(`ProprietorCapital`, net-asset classes) before they can be authored.
+
 ## Editing packages
 
 The JSON-LD is the source of truth. Edit it directly. We're past the

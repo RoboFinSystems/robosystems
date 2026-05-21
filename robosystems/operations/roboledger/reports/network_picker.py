@@ -117,3 +117,38 @@ def load_graph_reporting_style(graph_id: str) -> str:
     if graph is None:
       raise LookupError(f"Graph {graph_id!r} not found in platform DB.")
     return str(graph.reporting_style_id)
+
+
+# Corporate default — the form whose accumulated earnings get their own
+# named line. Partnership/LLC/etc. Styles override this in their metadata
+# (stamped from the package's ``retainedEarningsConcept`` by migration 0008).
+DEFAULT_CLOSE_TARGET_CONCEPT = "rs-gaap:RetainedEarningsAccumulatedDeficit"
+
+
+def load_close_target_concept(session: Session, reporting_style_id: str) -> str:
+  """The equity concept derived cumulative earnings close to for this Style.
+
+  Each Reporting Style declares exactly one earnings-home concept
+  (``retainedEarningsConcept`` in the package, stamped into
+  ``structures.metadata.retained_earnings_concept`` by migration 0008):
+  CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity. A single
+  authoritative value per Style — never a runtime scan. Falls back to the
+  corporate default for unstamped/legacy Styles so behavior is unchanged.
+
+  Args:
+      session: Extensions session with the tenant schema active.
+      reporting_style_id: The graph's ``Graph.reporting_style_id``.
+  """
+  row = session.execute(
+    text(
+      """
+      SELECT metadata ->> 'retained_earnings_concept' AS close_target
+      FROM structures
+      WHERE id = :sid
+      """
+    ),
+    {"sid": reporting_style_id},
+  ).fetchone()
+  if row is None or not row.close_target:
+    return DEFAULT_CLOSE_TARGET_CONCEPT
+  return str(row.close_target)

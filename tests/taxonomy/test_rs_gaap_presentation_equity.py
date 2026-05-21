@@ -70,3 +70,76 @@ class TestEquityPresentationStructure:
     }
     missing = required - activity_targets
     assert not missing, f"rollforward missing activity arcs to: {missing}"
+
+
+_PRES = "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation"
+
+
+def _bs_equity_children(pkg: TaxonomyPackage, role: str) -> set[str]:
+  """Concepts presented under StockholdersEquity for a given BS role."""
+  return {
+    a.to_qname
+    for a in pkg.associations
+    if a.role == role and a.from_qname == "rs-gaap:StockholdersEquity"
+  }
+
+
+class TestEquityFormVariants:
+  """Phase 4 equity-form axis: CORP balance sheet trimmed to corporate
+  equity; dedicated PART/LLC balance-sheet + Statement-of-Changes
+  structures present the form-appropriate capital concept."""
+
+  def test_corp_bs_equity_dropped_partners_and_members(
+    self, presentation: TaxonomyPackage
+  ) -> None:
+    children = _bs_equity_children(presentation, f"{_PRES}/BS-classified")
+    assert "rs-gaap:PartnersCapital" not in children
+    assert "rs-gaap:MembersEquity" not in children
+    # corporate stack still present
+    assert "rs-gaap:CommonStockValue" in children
+    assert "rs-gaap:RetainedEarningsAccumulatedDeficit" in children
+
+  def test_partnership_bs_presents_partners_capital(
+    self, presentation: TaxonomyPackage
+  ) -> None:
+    roles = {s.role_uri for s in presentation.structures}
+    assert f"{_PRES}/BS-classified-PART" in roles
+    children = _bs_equity_children(presentation, f"{_PRES}/BS-classified-PART")
+    assert children == {"rs-gaap:PartnersCapital"}
+
+  def test_llc_bs_presents_members_equity(self, presentation: TaxonomyPackage) -> None:
+    roles = {s.role_uri for s in presentation.structures}
+    assert f"{_PRES}/BS-classified-LLC" in roles
+    children = _bs_equity_children(presentation, f"{_PRES}/BS-classified-LLC")
+    assert children == {"rs-gaap:MembersEquity"}
+
+  def test_part_llc_bs_clone_full_asset_liability_section(
+    self, presentation: TaxonomyPackage
+  ) -> None:
+    """The form-specific balance sheets are full statements — they clone
+    the corporate asset/liability arcs, only the equity section differs."""
+    corp_non_eq = {
+      (a.from_qname, a.to_qname)
+      for a in presentation.associations
+      if a.role == f"{_PRES}/BS-classified"
+      and a.from_qname != "rs-gaap:StockholdersEquity"
+    }
+    for role in (f"{_PRES}/BS-classified-PART", f"{_PRES}/BS-classified-LLC"):
+      form_non_eq = {
+        (a.from_qname, a.to_qname)
+        for a in presentation.associations
+        if a.role == role and a.from_qname != "rs-gaap:StockholdersEquity"
+      }
+      assert form_non_eq == corp_non_eq, role
+
+  def test_rollforwards_root_at_form_capital_concept(
+    self, presentation: TaxonomyPackage
+  ) -> None:
+    for role, hub in (
+      (f"{_PRES}/Equity-rollforward-PART", "rs-gaap:PartnersCapital"),
+      (f"{_PRES}/Equity-rollforward-LLC", "rs-gaap:MembersEquity"),
+    ):
+      froms = {a.from_qname for a in presentation.associations if a.role == role}
+      assert froms == {hub}, role
+      targets = {a.to_qname for a in presentation.associations if a.role == role}
+      assert "rs-gaap:NetIncomeLoss" in targets

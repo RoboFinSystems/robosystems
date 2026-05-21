@@ -23,6 +23,12 @@ _SMALL_PRIVATE_STYLE_ROLE = (
   "https://robosystems.ai/seattle/cm-roles/roles/styles/SmallPrivateCompany"
 )
 _BANKING_STYLE_ROLE = "https://robosystems.ai/seattle/cm-roles/roles/styles/Banking"
+_PARTNERSHIP_STYLE_ROLE = (
+  "https://robosystems.ai/seattle/cm-roles/roles/styles/Partnership"
+)
+_LLC_STYLE_ROLE = (
+  "https://robosystems.ai/seattle/cm-roles/roles/styles/LimitedLiabilityCompany"
+)
 
 
 @pytest.mark.unit
@@ -43,4 +49,16 @@ class TestReportingStyleConstants:
     assert (
       generate_deterministic_uuid(_BANKING_STYLE_ROLE, namespace="structure")
       == ReportingStyleConstants.BANKING_STYLE_ID
+    )
+
+  def test_partnership_style_id_matches_derivation(self) -> None:
+    assert (
+      generate_deterministic_uuid(_PARTNERSHIP_STYLE_ROLE, namespace="structure")
+      == ReportingStyleConstants.PARTNERSHIP_STYLE_ID
+    )
+
+  def test_llc_style_id_matches_derivation(self) -> None:
+    assert (
+      generate_deterministic_uuid(_LLC_STYLE_ROLE, namespace="structure")
+      == ReportingStyleConstants.LLC_STYLE_ID
     )

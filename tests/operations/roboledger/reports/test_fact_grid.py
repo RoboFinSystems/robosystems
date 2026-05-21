@@ -798,6 +798,105 @@ class TestClosePriorPeriodsToRetainedEarnings:
     assert self._get_re_fact(facts).value == -26_000.0
 
 
+class TestFormAwareCloseTarget:
+  """Derived cumulative earnings close to the active Style's earnings-home
+  concept — CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity.
+  Exactly one target per Style (a single passed qname), matched exactly so
+  the routing is deterministic (no "scan equity, pick first")."""
+
+  PS = date(2026, 1, 1)
+  PE = date(2026, 1, 31)
+
+  def _equity(self, qname: str, value: float = 0.0) -> ReportFact:
+    return ReportFact(
+      element_id=f"elem_{qname}",
+      element_qname=qname,
+      element_name=qname,
+      classification="equity",
+      balance_type="credit",
+      value=value,
+      period_start=self.PS,
+      period_end=self.PE,
+      period_type="instant",
+    )
+
+  def _flow(self, classification: str, value: float) -> ReportFact:
+    return ReportFact(
+      element_id=f"elem_{classification}",
+      element_qname=f"rs-gaap:{classification}",
+      element_name=classification,
+      classification=classification,
+      balance_type="credit" if classification == "revenue" else "debit",
+      value=value,
+      period_start=self.PS,
+      period_end=self.PE,
+      period_type="duration",
+    )
+
+  def test_find_target_matches_passed_qname_not_other_equity(self):
+    facts = [
+      self._equity("rs-gaap:AdditionalPaidInCapital"),
+      self._equity("rs-gaap:PartnersCapital"),
+    ]
+    target = _find_close_target(
+      facts, self.PS, self.PE, close_target_qname="rs-gaap:PartnersCapital"
+    )
+    assert target is not None
+    assert target.element_qname == "rs-gaap:PartnersCapital"
+
+  def test_find_target_defaults_to_retained_earnings(self):
+    facts = [
+      self._equity("rs-gaap:PartnersCapital"),
+      self._equity("rs-gaap:RetainedEarningsAccumulatedDeficit"),
+    ]
+    target = _find_close_target(facts, self.PS, self.PE)
+    assert target is not None
+    assert target.element_qname == "rs-gaap:RetainedEarningsAccumulatedDeficit"
+
+  def test_find_target_none_when_target_absent(self):
+    facts = [self._equity("rs-gaap:AdditionalPaidInCapital")]
+    assert (
+      _find_close_target(
+        facts, self.PS, self.PE, close_target_qname="rs-gaap:PartnersCapital"
+      )
+      is None
+    )
+
+  def test_close_routes_net_income_to_partners_capital(self):
+    # Partnership: 49,800 contributed capital + 28,387 NI → 78,187 (the
+    # exact figures from the live partnership demo that previously didn't foot).
+    facts = [
+      self._equity("rs-gaap:PartnersCapital", 49_800.0),
+      self._flow("revenue", 175_000.0),
+      self._flow("expense", 146_613.0),
+    ]
+    _close_to_retained_earnings(
+      facts, self.PS, self.PE, close_target_qname="rs-gaap:PartnersCapital"
+    )
+    pc = next(f for f in facts if f.element_qname == "rs-gaap:PartnersCapital")
+    assert pc.value == 78_187.0
+
+  def test_close_defaults_route_to_retained_earnings(self):
+    facts = [
+      self._equity("rs-gaap:RetainedEarningsAccumulatedDeficit", 0.0),
+      self._flow("revenue", 100.0),
+      self._flow("expense", 40.0),
+    ]
+    _close_to_retained_earnings(facts, self.PS, self.PE)
+    re = next(f for f in facts if "RetainedEarnings" in f.element_qname)
+    assert re.value == 60.0
+
+  def test_close_fallback_row_uses_target_qname(self):
+    # No materialized target fact → anonymous fallback carries the form's qname.
+    facts = [self._flow("revenue", 100.0), self._flow("expense", 40.0)]
+    _close_to_retained_earnings(
+      facts, self.PS, self.PE, close_target_qname="rs-gaap:MembersEquity"
+    )
+    appended = next(f for f in facts if f.classification == "equity")
+    assert appended.element_qname == "rs-gaap:MembersEquity"
+    assert appended.value == 60.0
+
+
 class TestInferClassification:
   """Qname/balance_type fallback for elements without FASB traits.
 

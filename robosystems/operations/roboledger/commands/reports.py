@@ -48,6 +48,7 @@ from robosystems.operations.roboledger.reports.fact_grid import generate_report_
 from robosystems.operations.roboledger.reports.network_picker import (
   NoNetworkForStatementTypeError,
   get_render_network,
+  load_close_target_concept,
   load_graph_reporting_style,
 )
 from robosystems.utils.ulid import generate_prefixed_ulid
@@ -348,15 +349,22 @@ def create_report(
   session.add(report_def)
   session.flush()
 
+  # Resolve the active Style's earnings home before generating facts, so
+  # derived cumulative earnings close to the form's capital concept
+  # (CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity) and
+  # the balance sheet foots for non-corporate forms.
+  reporting_style_id = load_graph_reporting_style(graph_id)
+  close_target = load_close_target_concept(session, reporting_style_id)
+
   facts = generate_report_facts(
     session=session,
     taxonomy_id=resolved_taxonomy_id,
     mapping_id=body.mapping_id,
     periods=periods,
+    close_target_qname=close_target,
   )
 
   entity_id = _get_entity_id(session, graph_id)
-  reporting_style_id = load_graph_reporting_style(graph_id)
   element_to_structures, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )
@@ -450,15 +458,18 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
+  reporting_style_id = load_graph_reporting_style(graph_id)
+  close_target = load_close_target_concept(session, reporting_style_id)
+
   facts = generate_report_facts(
     session=session,
     taxonomy_id=report_def.taxonomy_id,
     mapping_id=report_def.mapping_id or "",
     periods=periods,
+    close_target_qname=close_target,
   )
 
   entity_id = _get_entity_id(session, graph_id)
-  reporting_style_id = load_graph_reporting_style(graph_id)
   element_to_structures, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )

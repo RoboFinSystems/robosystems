@@ -21,6 +21,8 @@ from __future__ import annotations
 import importlib.util as _util
 from pathlib import Path
 
+import pytest
+
 _MIGRATION_PATH = (
   Path(__file__).resolve().parents[2]
   / "migrations"
@@ -53,9 +55,14 @@ class _Conn:
 
 
 class TestDeclaredStyles:
-  def test_exactly_the_two_composed_presets(self) -> None:
+  def test_exactly_the_four_composed_presets(self) -> None:
     codes = {s["code"] for s in mig_0008._declared_styles()}
-    assert codes == {"BSC-CORP-IS02-CF1", "BSC-CORP-IS01-CF1"}
+    assert codes == {
+      "BSC-CORP-IS02-CF1",
+      "BSC-CORP-IS01-CF1",
+      "BSC-PART-IS02-CF1",
+      "BSC-LLC-IS02-CF1",
+    }
 
   def test_every_declared_style_has_complete_composition(self) -> None:
     """The change-reporting-style validator rejects an incomplete
@@ -64,17 +71,38 @@ class TestDeclaredStyles:
       stmt_types = {st for st, _net in style["networks"]}
       assert stmt_types == _REQUIRED, style["code"]
 
-  def test_is_axis_distinguishes_the_two_presets(self) -> None:
-    """The whole point of the proof slice: IS02 → multi-step network,
-    IS01 → single-step network. Everything else is shared."""
+  def test_is_axis_distinguishes_the_single_vs_multistep_presets(self) -> None:
+    """IS02 → multi-step network, IS01 → single-step network. Everything
+    else is shared between the two corporate presets."""
     by_code = {s["code"]: dict(s["networks"]) for s in mig_0008._declared_styles()}
     assert by_code["BSC-CORP-IS02-CF1"]["income_statement"].endswith("IS-multistep")
     assert by_code["BSC-CORP-IS01-CF1"]["income_statement"].endswith("IS-singlestep")
-    # BS / CF / SE are identical across the two presets.
+    # BS / CF / SE are identical across the two corporate presets.
     for stmt in ("balance_sheet", "cash_flow_statement", "equity_statement"):
       assert by_code["BSC-CORP-IS02-CF1"][stmt] == by_code["BSC-CORP-IS01-CF1"][stmt], (
         stmt
       )
+
+  def test_equity_form_axis_is_the_only_difference_corp_part_llc(self) -> None:
+    """CORP/PART/LLC share IS-multistep + CashFlow-indirect; only the
+    balance_sheet equity section and the equity_statement rollforward vary
+    by form (the equity-form axis)."""
+    by_code = {s["code"]: dict(s["networks"]) for s in mig_0008._declared_styles()}
+    corp = by_code["BSC-CORP-IS02-CF1"]
+    part = by_code["BSC-PART-IS02-CF1"]
+    llc = by_code["BSC-LLC-IS02-CF1"]
+
+    # IS + CF are held constant across the three forms.
+    for stmt in ("income_statement", "cash_flow_statement"):
+      assert corp[stmt] == part[stmt] == llc[stmt], stmt
+
+    # Equity-form axis: BS + equity_statement networks are form-specific.
+    assert corp["balance_sheet"].endswith("BS-classified")
+    assert part["balance_sheet"].endswith("BS-classified-PART")
+    assert llc["balance_sheet"].endswith("BS-classified-LLC")
+    assert corp["equity_statement"].endswith("Equity-rollforward")
+    assert part["equity_statement"].endswith("Equity-rollforward-PART")
+    assert llc["equity_statement"].endswith("Equity-rollforward-LLC")
 
   def test_placeholder_skipped_but_still_promoted(self) -> None:
     """Banking declares no composition — skipped by the seeder (stays
@@ -90,8 +118,8 @@ class TestSeedComposition:
   def test_seeds_one_row_per_statement_per_style(self) -> None:
     conn = _Conn()
     mig_0008._seed_style_compositions(conn, "public")
-    # 2 composed presets, 4 statement types each.
-    assert len(conn.calls) == 8
+    # 4 composed presets, 4 statement types each.
+    assert len(conn.calls) == 16
     for sql, params in conn.calls:
       assert "public.reporting_style_networks" in sql
       assert set(params) >= {"style", "stmt", "network"}
@@ -119,4 +147,62 @@ class TestStampStyleCodes:
     conn = _Conn()
     mig_0008._stamp_style_codes(conn)
     stamped = {params["code"] for _sql, params in conn.calls}
-    assert stamped == {"BSC-CORP-IS02-CF1", "BSC-CORP-IS01-CF1"}
+    assert stamped == {
+      "BSC-CORP-IS02-CF1",
+      "BSC-CORP-IS01-CF1",
+      "BSC-PART-IS02-CF1",
+      "BSC-LLC-IS02-CF1",
+    }
+
+
+class _Result:
+  def __init__(self, row) -> None:
+    self._row = row
+
+  def fetchone(self):
+    return self._row
+
+
+class _ValidatingConn:
+  """Fake conn for _stamp_close_targets: answers the present-in-BS SELECT
+  with a configurable hit/miss, captures the UPDATEs."""
+
+  def __init__(self, present: bool) -> None:
+    self.present = present
+    self.updates: list[tuple[str, dict]] = []
+
+  def execute(self, stmt, params=None):
+    sql = str(stmt)
+    if "associations" in sql:  # the present-in-BS validation SELECT
+      return _Result((1,) if self.present else None)
+    self.updates.append((sql, params or {}))
+    return _Result(None)
+
+
+class TestCloseTargets:
+  def test_declared_styles_carry_form_close_target(self) -> None:
+    by_code = {s["code"]: s["close_target"] for s in mig_0008._declared_styles()}
+    assert by_code["BSC-CORP-IS02-CF1"] == "rs-gaap:RetainedEarningsAccumulatedDeficit"
+    assert by_code["BSC-CORP-IS01-CF1"] == "rs-gaap:RetainedEarningsAccumulatedDeficit"
+    assert by_code["BSC-PART-IS02-CF1"] == "rs-gaap:PartnersCapital"
+    assert by_code["BSC-LLC-IS02-CF1"] == "rs-gaap:MembersEquity"
+
+  def test_stamps_every_close_target_when_present_in_bs(self) -> None:
+    conn = _ValidatingConn(present=True)
+    mig_0008._stamp_close_targets(conn)
+    stamped = {params["target"] for _sql, params in conn.updates}
+    assert stamped == {
+      "rs-gaap:RetainedEarningsAccumulatedDeficit",
+      "rs-gaap:PartnersCapital",
+      "rs-gaap:MembersEquity",
+    }
+    for sql, params in conn.updates:
+      assert "retained_earnings_concept" in sql
+      assert set(params) == {"sid", "target"}
+
+  def test_raises_when_close_target_absent_from_bs(self) -> None:
+    """The determinism guard: a declared earnings concept the BS doesn't
+    present would silently drop earnings — must fail the migration."""
+    conn = _ValidatingConn(present=False)
+    with pytest.raises(RuntimeError, match="does not"):
+      mig_0008._stamp_close_targets(conn)
