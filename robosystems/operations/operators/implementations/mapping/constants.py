@@ -82,18 +82,21 @@ FAC_TO_RS_GAAP_FALLBACK: dict[str, str] = {
   # paid-in catch-all that isn't a rollup.
   "fac:Equity": "rs-gaap:AdditionalPaidInCapital",
   "fac:EquityAttributableToParent": "rs-gaap:AdditionalPaidInCapital",
-  # Revenues
-  "fac:Revenues": "rs-gaap:OtherIncome",
-  "fac:OtherOperatingIncomeExpenses": "rs-gaap:OtherIncome",
+  # Revenues — OtherSalesRevenueNet is the operating-revenue catch-all
+  # leaf wired under rs-gaap:Revenues (NOT OtherIncome, which is
+  # non-operating and isn't a child of the Revenues rollup → would drop).
+  "fac:Revenues": "rs-gaap:OtherSalesRevenueNet",
+  "fac:OtherOperatingIncomeExpenses": "rs-gaap:OtherCostAndExpenseOperating",
   "fac:NonoperatingIncomeLoss": "rs-gaap:OtherNonoperatingIncomeExpense",
-  # Cost of Revenue — note: rs-gaap:CostOfRevenue itself is a rollup;
-  # CostOfGoodsAndServicesSold is the catch-all leaf.
-  "fac:CostOfRevenue": "rs-gaap:CostOfGoodsAndServicesSold",
-  "fac:CostOfRevenueGoods": "rs-gaap:CostOfGoodsAndServicesSold",
-  "fac:CostOfRevenueServices": "rs-gaap:CostOfGoodsAndServicesSold",
-  # Operating expenses
+  # Cost of Revenue — rs-gaap:CostOfRevenue itself is a rollup;
+  # OtherCostOfOperatingRevenue is the catch-all leaf wired under it.
+  "fac:CostOfRevenue": "rs-gaap:OtherCostOfOperatingRevenue",
+  "fac:CostOfRevenueGoods": "rs-gaap:OtherCostOfOperatingRevenue",
+  "fac:CostOfRevenueServices": "rs-gaap:OtherCostOfOperatingRevenue",
+  # Operating expenses — OtherCostAndExpenseOperating is the catch-all
+  # leaf wired under rs-gaap:OperatingExpenses.
   "fac:OperatingExpenses": "rs-gaap:OtherCostAndExpenseOperating",
-  "fac:ExciseAndSalesTaxes": "rs-gaap:TaxesExcludingIncomeAndExciseTaxes",
+  "fac:ExciseAndSalesTaxes": "rs-gaap:OtherCostAndExpenseOperating",
 }
 
 # Confidence stamp for fallback-driven mappings. Below

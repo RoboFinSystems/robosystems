@@ -1,0 +1,756 @@
+{
+  "@context": {
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "rs": "https://robosystems.ai/vocab/",
+    "ruleCategory": {
+      "@id": "https://robosystems.ai/vocab/ruleCategory"
+    },
+    "rulePattern": {
+      "@id": "https://robosystems.ai/vocab/rulePattern"
+    },
+    "ruleExpression": {
+      "@id": "https://robosystems.ai/vocab/ruleExpression"
+    },
+    "ruleTarget": {
+      "@id": "https://robosystems.ai/vocab/ruleTarget"
+    },
+    "targetKind": {
+      "@id": "https://robosystems.ai/vocab/targetKind"
+    },
+    "targetRef": {
+      "@id": "https://robosystems.ai/vocab/targetRef"
+    },
+    "ruleVariables": {
+      "@id": "https://robosystems.ai/vocab/ruleVariables",
+      "@container": "@list"
+    },
+    "variableName": {
+      "@id": "https://robosystems.ai/vocab/variableName"
+    },
+    "variableQname": {
+      "@id": "https://robosystems.ai/vocab/variableQname"
+    },
+    "ruleMessage": {
+      "@id": "https://robosystems.ai/vocab/ruleMessage"
+    },
+    "ruleSeverity": {
+      "@id": "https://robosystems.ai/vocab/ruleSeverity"
+    },
+    "ruleOrigin": {
+      "@id": "https://robosystems.ai/vocab/ruleOrigin"
+    }
+  },
+  "standard": "rs-gaap-rollup-rules",
+  "version": "v1",
+  "taxonomy_type": "rules",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/rollup-rules/",
+  "default_block_type": "validation_rules",
+  "origin": "native",
+  "created_at": "2026-05-21",
+  "description": "L2 calc-arc RollUp verification rules \u2014 one rule per subtotal parent in rs-gaap-calculations/v1 ($Parent = \u03a3 weighted children). RoboSystems-native (info-block \u00a76.1 Package II.a). Element-scoped to the parent concept so the rule fires against any rendered statement that presents that subtotal, across all equity-form variants. The RollUp evaluator treats a missing RHS child as 0 (matching the renderer); a missing parent subtotal skips. Regenerate via robosystems.taxonomy.scripts.generate_rollup_rules from rs-gaap-calculations/v1.",
+  "@graph": [
+    {
+      "@id": "_:rs-gaap-rollup-bs-assets",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$Assets = ($AssetsCurrent + $AssetsNoncurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:Assets"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Assets",
+          "variableQname": "rs-gaap:Assets"
+        },
+        {
+          "variableName": "AssetsCurrent",
+          "variableQname": "rs-gaap:AssetsCurrent"
+        },
+        {
+          "variableName": "AssetsNoncurrent",
+          "variableQname": "rs-gaap:AssetsNoncurrent"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:Assets = rs-gaap:AssetsCurrent + rs-gaap:AssetsNoncurrent",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-bs-currentassets",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$AssetsCurrent = ($CashCashEquivalentsAndShortTermInvestments + $ReceivablesNetCurrent + $InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings + $PrepaidExpenseCurrent + $RestrictedCashAndInvestmentsCurrent + $OtherAssetsCurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:AssetsCurrent"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "AssetsCurrent",
+          "variableQname": "rs-gaap:AssetsCurrent"
+        },
+        {
+          "variableName": "CashCashEquivalentsAndShortTermInvestments",
+          "variableQname": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
+        },
+        {
+          "variableName": "ReceivablesNetCurrent",
+          "variableQname": "rs-gaap:ReceivablesNetCurrent"
+        },
+        {
+          "variableName": "InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings",
+          "variableQname": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"
+        },
+        {
+          "variableName": "PrepaidExpenseCurrent",
+          "variableQname": "rs-gaap:PrepaidExpenseCurrent"
+        },
+        {
+          "variableName": "RestrictedCashAndInvestmentsCurrent",
+          "variableQname": "rs-gaap:RestrictedCashAndInvestmentsCurrent"
+        },
+        {
+          "variableName": "OtherAssetsCurrent",
+          "variableQname": "rs-gaap:OtherAssetsCurrent"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:AssetsCurrent = \u03a3 rs-gaap current-asset leaves",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-bs-currentliabilities",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$LiabilitiesCurrent = ($AccountsPayableAndAccruedLiabilitiesCurrent + $DebtCurrent + $DeferredRevenueCurrent + $FinanceLeaseLiabilityCurrent + $OtherLiabilitiesCurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:LiabilitiesCurrent"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "LiabilitiesCurrent",
+          "variableQname": "rs-gaap:LiabilitiesCurrent"
+        },
+        {
+          "variableName": "AccountsPayableAndAccruedLiabilitiesCurrent",
+          "variableQname": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
+        },
+        {
+          "variableName": "DebtCurrent",
+          "variableQname": "rs-gaap:DebtCurrent"
+        },
+        {
+          "variableName": "DeferredRevenueCurrent",
+          "variableQname": "rs-gaap:DeferredRevenueCurrent"
+        },
+        {
+          "variableName": "FinanceLeaseLiabilityCurrent",
+          "variableQname": "rs-gaap:FinanceLeaseLiabilityCurrent"
+        },
+        {
+          "variableName": "OtherLiabilitiesCurrent",
+          "variableQname": "rs-gaap:OtherLiabilitiesCurrent"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:LiabilitiesCurrent = \u03a3 rs-gaap current-liability leaves",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-bs-equity",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$StockholdersEquity = ($CommonStockValue + $PreferredStockValue + $AdditionalPaidInCapital + $RetainedEarningsAccumulatedDeficit + $AccumulatedOtherComprehensiveIncomeLossNetOfTax - $TreasuryStockValue + $PartnersCapital + $MembersEquity)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:StockholdersEquity"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "StockholdersEquity",
+          "variableQname": "rs-gaap:StockholdersEquity"
+        },
+        {
+          "variableName": "CommonStockValue",
+          "variableQname": "rs-gaap:CommonStockValue"
+        },
+        {
+          "variableName": "PreferredStockValue",
+          "variableQname": "rs-gaap:PreferredStockValue"
+        },
+        {
+          "variableName": "AdditionalPaidInCapital",
+          "variableQname": "rs-gaap:AdditionalPaidInCapital"
+        },
+        {
+          "variableName": "RetainedEarningsAccumulatedDeficit",
+          "variableQname": "rs-gaap:RetainedEarningsAccumulatedDeficit"
+        },
+        {
+          "variableName": "AccumulatedOtherComprehensiveIncomeLossNetOfTax",
+          "variableQname": "rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax"
+        },
+        {
+          "variableName": "TreasuryStockValue",
+          "variableQname": "rs-gaap:TreasuryStockValue"
+        },
+        {
+          "variableName": "PartnersCapital",
+          "variableQname": "rs-gaap:PartnersCapital"
+        },
+        {
+          "variableName": "MembersEquity",
+          "variableQname": "rs-gaap:MembersEquity"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:StockholdersEquity = \u03a3 rs-gaap equity leaves (Treasury weight=-1)",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-bs-liabilities",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$Liabilities = ($LiabilitiesCurrent + $LiabilitiesNoncurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:Liabilities"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Liabilities",
+          "variableQname": "rs-gaap:Liabilities"
+        },
+        {
+          "variableName": "LiabilitiesCurrent",
+          "variableQname": "rs-gaap:LiabilitiesCurrent"
+        },
+        {
+          "variableName": "LiabilitiesNoncurrent",
+          "variableQname": "rs-gaap:LiabilitiesNoncurrent"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:Liabilities = rs-gaap:LiabilitiesCurrent + rs-gaap:LiabilitiesNoncurrent",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-bs-liabilitiesandstockholdersequity",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$LiabilitiesAndStockholdersEquity = ($Liabilities + $StockholdersEquity)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:LiabilitiesAndStockholdersEquity"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "LiabilitiesAndStockholdersEquity",
+          "variableQname": "rs-gaap:LiabilitiesAndStockholdersEquity"
+        },
+        {
+          "variableName": "Liabilities",
+          "variableQname": "rs-gaap:Liabilities"
+        },
+        {
+          "variableName": "StockholdersEquity",
+          "variableQname": "rs-gaap:StockholdersEquity"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:LiabilitiesAndStockholdersEquity = rs-gaap:Liabilities + rs-gaap:StockholdersEquity",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-bs-noncurrentassets",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$AssetsNoncurrent = ($PropertyPlantAndEquipmentNet + $IntangibleAssetsNetIncludingGoodwill + $LongTermInvestmentsAndReceivablesNet + $OperatingLeaseRightOfUseAsset + $FinanceLeaseRightOfUseAsset + $OtherAssetsNoncurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:AssetsNoncurrent"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "AssetsNoncurrent",
+          "variableQname": "rs-gaap:AssetsNoncurrent"
+        },
+        {
+          "variableName": "PropertyPlantAndEquipmentNet",
+          "variableQname": "rs-gaap:PropertyPlantAndEquipmentNet"
+        },
+        {
+          "variableName": "IntangibleAssetsNetIncludingGoodwill",
+          "variableQname": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
+        },
+        {
+          "variableName": "LongTermInvestmentsAndReceivablesNet",
+          "variableQname": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
+        },
+        {
+          "variableName": "OperatingLeaseRightOfUseAsset",
+          "variableQname": "rs-gaap:OperatingLeaseRightOfUseAsset"
+        },
+        {
+          "variableName": "FinanceLeaseRightOfUseAsset",
+          "variableQname": "rs-gaap:FinanceLeaseRightOfUseAsset"
+        },
+        {
+          "variableName": "OtherAssetsNoncurrent",
+          "variableQname": "rs-gaap:OtherAssetsNoncurrent"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:AssetsNoncurrent = \u03a3 rs-gaap noncurrent-asset leaves",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-bs-noncurrentliabilities",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$LiabilitiesNoncurrent = ($LongTermDebtAndCapitalLeaseObligations + $DeferredIncomeTaxLiabilitiesNet + $DeferredRevenueNoncurrent + $OperatingLeaseLiabilityNoncurrent + $OtherLiabilitiesNoncurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:LiabilitiesNoncurrent"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "LiabilitiesNoncurrent",
+          "variableQname": "rs-gaap:LiabilitiesNoncurrent"
+        },
+        {
+          "variableName": "LongTermDebtAndCapitalLeaseObligations",
+          "variableQname": "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+        },
+        {
+          "variableName": "DeferredIncomeTaxLiabilitiesNet",
+          "variableQname": "rs-gaap:DeferredIncomeTaxLiabilitiesNet"
+        },
+        {
+          "variableName": "DeferredRevenueNoncurrent",
+          "variableQname": "rs-gaap:DeferredRevenueNoncurrent"
+        },
+        {
+          "variableName": "OperatingLeaseLiabilityNoncurrent",
+          "variableQname": "rs-gaap:OperatingLeaseLiabilityNoncurrent"
+        },
+        {
+          "variableName": "OtherLiabilitiesNoncurrent",
+          "variableQname": "rs-gaap:OtherLiabilitiesNoncurrent"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:LiabilitiesNoncurrent = \u03a3 rs-gaap noncurrent-liability leaves",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-cf-financing",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$NetCashProvidedByUsedInFinancingActivities = ($ProceedsFromIssuanceOfCommonStock + $ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "NetCashProvidedByUsedInFinancingActivities",
+          "variableQname": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+        },
+        {
+          "variableName": "ProceedsFromIssuanceOfCommonStock",
+          "variableQname": "rs-gaap:ProceedsFromIssuanceOfCommonStock"
+        },
+        {
+          "variableName": "ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+          "variableQname": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInFinancingActivities = \u03a3 proceeds \u2212 \u03a3 payments",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-cf-investing",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$NetCashProvidedByUsedInInvestingActivities = ($PaymentsToAcquirePropertyPlantAndEquipment)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "NetCashProvidedByUsedInInvestingActivities",
+          "variableQname": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+        },
+        {
+          "variableName": "PaymentsToAcquirePropertyPlantAndEquipment",
+          "variableQname": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInInvestingActivities = \u03a3 Investing leaves (each pre-signed: outflows negative, proceeds positive)",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-cf-netchange",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$CashAndCashEquivalentsPeriodIncreaseDecrease = ($NetCashProvidedByUsedInOperatingActivities + $NetCashProvidedByUsedInInvestingActivities + $NetCashProvidedByUsedInFinancingActivities + $EffectOfExchangeRateOnCash)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "CashAndCashEquivalentsPeriodIncreaseDecrease",
+          "variableQname": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+        },
+        {
+          "variableName": "NetCashProvidedByUsedInOperatingActivities",
+          "variableQname": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+        },
+        {
+          "variableName": "NetCashProvidedByUsedInInvestingActivities",
+          "variableQname": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+        },
+        {
+          "variableName": "NetCashProvidedByUsedInFinancingActivities",
+          "variableQname": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+        },
+        {
+          "variableName": "EffectOfExchangeRateOnCash",
+          "variableQname": "rs-gaap:EffectOfExchangeRateOnCash"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease = Op + Inv + Fin + Exchange",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-cf-operating",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$NetCashProvidedByUsedInOperatingActivities = ($NetIncomeLoss + $DepreciationDepletionAndAmortization + $IncreaseDecreaseInAccountsReceivable + $IncreaseDecreaseInInventories + $IncreaseDecreaseInPrepaidExpense + $IncreaseDecreaseInAccountsPayableAndAccruedLiabilities + $IncreaseDecreaseInOtherOperatingCapitalNet + $IncreaseDecreaseInAccruedLiabilities + $IncreaseDecreaseInAccruedIncomeTaxesPayable)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "NetCashProvidedByUsedInOperatingActivities",
+          "variableQname": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+        },
+        {
+          "variableName": "NetIncomeLoss",
+          "variableQname": "rs-gaap:NetIncomeLoss"
+        },
+        {
+          "variableName": "DepreciationDepletionAndAmortization",
+          "variableQname": "rs-gaap:DepreciationDepletionAndAmortization"
+        },
+        {
+          "variableName": "IncreaseDecreaseInAccountsReceivable",
+          "variableQname": "rs-gaap:IncreaseDecreaseInAccountsReceivable"
+        },
+        {
+          "variableName": "IncreaseDecreaseInInventories",
+          "variableQname": "rs-gaap:IncreaseDecreaseInInventories"
+        },
+        {
+          "variableName": "IncreaseDecreaseInPrepaidExpense",
+          "variableQname": "rs-gaap:IncreaseDecreaseInPrepaidExpense"
+        },
+        {
+          "variableName": "IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
+          "variableQname": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+        },
+        {
+          "variableName": "IncreaseDecreaseInOtherOperatingCapitalNet",
+          "variableQname": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+        },
+        {
+          "variableName": "IncreaseDecreaseInAccruedLiabilities",
+          "variableQname": "rs-gaap:IncreaseDecreaseInAccruedLiabilities"
+        },
+        {
+          "variableName": "IncreaseDecreaseInAccruedIncomeTaxesPayable",
+          "variableQname": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInOperatingActivities = NetIncomeLoss + DDA + \u03a3 working-capital deltas (indirect method)",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-continuingops",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$IncomeLossFromContinuingOperations = ($IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest - $IncomeTaxExpenseBenefit)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:IncomeLossFromContinuingOperations"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "IncomeLossFromContinuingOperations",
+          "variableQname": "rs-gaap:IncomeLossFromContinuingOperations"
+        },
+        {
+          "variableName": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+          "variableQname": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+        },
+        {
+          "variableName": "IncomeTaxExpenseBenefit",
+          "variableQname": "rs-gaap:IncomeTaxExpenseBenefit"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:IncomeLossFromContinuingOperations = PreTax \u2212 IncomeTaxExpenseBenefit",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-cor",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$CostOfRevenue = ($CostOfGoodsSold + $CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization + $OtherCostOfOperatingRevenue)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:CostOfRevenue"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "CostOfRevenue",
+          "variableQname": "rs-gaap:CostOfRevenue"
+        },
+        {
+          "variableName": "CostOfGoodsSold",
+          "variableQname": "rs-gaap:CostOfGoodsSold"
+        },
+        {
+          "variableName": "CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization",
+          "variableQname": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
+        },
+        {
+          "variableName": "OtherCostOfOperatingRevenue",
+          "variableQname": "rs-gaap:OtherCostOfOperatingRevenue"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:CostOfRevenue = \u03a3 rs-gaap COGS leaves",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-grossprofit",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$GrossProfit = ($Revenues - $CostOfRevenue)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:GrossProfit"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "GrossProfit",
+          "variableQname": "rs-gaap:GrossProfit"
+        },
+        {
+          "variableName": "Revenues",
+          "variableQname": "rs-gaap:Revenues"
+        },
+        {
+          "variableName": "CostOfRevenue",
+          "variableQname": "rs-gaap:CostOfRevenue"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:GrossProfit = rs-gaap:Revenues \u2212 rs-gaap:CostOfRevenue",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-netincome",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$NetIncomeLoss = ($IncomeLossFromContinuingOperations + $IncomeLossFromDiscontinuedOperationsNetOfTax)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:NetIncomeLoss"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "NetIncomeLoss",
+          "variableQname": "rs-gaap:NetIncomeLoss"
+        },
+        {
+          "variableName": "IncomeLossFromContinuingOperations",
+          "variableQname": "rs-gaap:IncomeLossFromContinuingOperations"
+        },
+        {
+          "variableName": "IncomeLossFromDiscontinuedOperationsNetOfTax",
+          "variableQname": "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:NetIncomeLoss = ContinuingOps + DiscontinuedOps",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-nonop",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$NonoperatingIncomeExpense = ($InvestmentIncomeInterest - $InterestExpense + $GainLossOnDispositionOfAssets + $OtherNonoperatingIncomeExpense)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "NonoperatingIncomeExpense",
+          "variableQname": "rs-gaap:NonoperatingIncomeExpense"
+        },
+        {
+          "variableName": "InvestmentIncomeInterest",
+          "variableQname": "rs-gaap:InvestmentIncomeInterest"
+        },
+        {
+          "variableName": "InterestExpense",
+          "variableQname": "rs-gaap:InterestExpense"
+        },
+        {
+          "variableName": "GainLossOnDispositionOfAssets",
+          "variableQname": "rs-gaap:GainLossOnDispositionOfAssets"
+        },
+        {
+          "variableName": "OtherNonoperatingIncomeExpense",
+          "variableQname": "rs-gaap:OtherNonoperatingIncomeExpense"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:NonoperatingIncomeExpense = \u03a3 rs-gaap nonoperating leaves",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-operatingincome",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$OperatingIncomeLoss = ($GrossProfit - $OperatingExpenses)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:OperatingIncomeLoss"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "OperatingIncomeLoss",
+          "variableQname": "rs-gaap:OperatingIncomeLoss"
+        },
+        {
+          "variableName": "GrossProfit",
+          "variableQname": "rs-gaap:GrossProfit"
+        },
+        {
+          "variableName": "OperatingExpenses",
+          "variableQname": "rs-gaap:OperatingExpenses"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:OperatingIncomeLoss = rs-gaap:GrossProfit \u2212 rs-gaap:OperatingExpenses",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-opex",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$OperatingExpenses = ($SellingGeneralAndAdministrativeExpense + $ResearchAndDevelopmentExpense + $DepreciationDepletionAndAmortization + $OtherCostAndExpenseOperating)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:OperatingExpenses"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "OperatingExpenses",
+          "variableQname": "rs-gaap:OperatingExpenses"
+        },
+        {
+          "variableName": "SellingGeneralAndAdministrativeExpense",
+          "variableQname": "rs-gaap:SellingGeneralAndAdministrativeExpense"
+        },
+        {
+          "variableName": "ResearchAndDevelopmentExpense",
+          "variableQname": "rs-gaap:ResearchAndDevelopmentExpense"
+        },
+        {
+          "variableName": "DepreciationDepletionAndAmortization",
+          "variableQname": "rs-gaap:DepreciationDepletionAndAmortization"
+        },
+        {
+          "variableName": "OtherCostAndExpenseOperating",
+          "variableQname": "rs-gaap:OtherCostAndExpenseOperating"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:OperatingExpenses = \u03a3 rs-gaap operating expense leaves",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-pretax",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest = ($OperatingIncomeLoss + $NonoperatingIncomeExpense)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+          "variableQname": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+        },
+        {
+          "variableName": "OperatingIncomeLoss",
+          "variableQname": "rs-gaap:OperatingIncomeLoss"
+        },
+        {
+          "variableName": "NonoperatingIncomeExpense",
+          "variableQname": "rs-gaap:NonoperatingIncomeExpense"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxes... = OperatingIncomeLoss + NonoperatingIncomeExpense \u2212 InterestExpense",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-gaap-rollup-is-rev",
+      "ruleCategory": "FundamentalAccountingConceptRelation",
+      "rulePattern": "RollUp",
+      "ruleExpression": "$Revenues = ($SalesRevenueNet + $RevenueFromContractWithCustomerExcludingAssessedTax + $OtherSalesRevenueNet)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:Revenues"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Revenues",
+          "variableQname": "rs-gaap:Revenues"
+        },
+        {
+          "variableName": "SalesRevenueNet",
+          "variableQname": "rs-gaap:SalesRevenueNet"
+        },
+        {
+          "variableName": "RevenueFromContractWithCustomerExcludingAssessedTax",
+          "variableQname": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+        },
+        {
+          "variableName": "OtherSalesRevenueNet",
+          "variableQname": "rs-gaap:OtherSalesRevenueNet"
+        }
+      ],
+      "ruleMessage": "Calculation rollup: rs-gaap:Revenues = \u03a3 rs-gaap revenue leaves",
+      "ruleSeverity": "error",
+      "ruleOrigin": "native"
+    }
+  ]
+}

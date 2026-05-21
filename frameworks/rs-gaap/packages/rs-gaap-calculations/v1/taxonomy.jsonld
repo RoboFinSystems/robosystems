@@ -70,6 +70,15 @@
       "arcWeight": 1.0,
       "arcOrder": 200.0
     },
+    {
+      "@id": "_:rs-gaap-calc-is-rev-arc-3",
+      "arcFrom": { "@id": "rs-gaap:Revenues" },
+      "arcTo": { "@id": "rs-gaap:OtherSalesRevenueNet" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
+      "arcWeight": 1.0,
+      "arcOrder": 300.0
+    },
 
     {
       "@id": "_:rs-gaap-calc-is-cor",
@@ -95,6 +104,15 @@
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
       "arcWeight": 1.0,
       "arcOrder": 200.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-cor-arc-3",
+      "arcFrom": { "@id": "rs-gaap:CostOfRevenue" },
+      "arcTo": { "@id": "rs-gaap:OtherCostOfOperatingRevenue" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "arcWeight": 1.0,
+      "arcOrder": 300.0
     },
 
     {
@@ -157,6 +175,15 @@
       "arcWeight": 1.0,
       "arcOrder": 300.0
     },
+    {
+      "@id": "_:rs-gaap-calc-is-opex-arc-4",
+      "arcFrom": { "@id": "rs-gaap:OperatingExpenses" },
+      "arcTo": { "@id": "rs-gaap:OtherCostAndExpenseOperating" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "arcWeight": 1.0,
+      "arcOrder": 400.0
+    },
 
     {
       "@id": "_:rs-gaap-calc-is-opinc",
@@ -194,11 +221,38 @@
     {
       "@id": "_:rs-gaap-calc-is-nonop-arc-1",
       "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
-      "arcTo": { "@id": "rs-gaap:OtherNonoperatingIncomeExpense" },
+      "arcTo": { "@id": "rs-gaap:InvestmentIncomeInterest" },
       "arcAssociationType": "calculation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
       "arcWeight": 1.0,
       "arcOrder": 100.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-nonop-arc-2",
+      "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
+      "arcTo": { "@id": "rs-gaap:InterestExpense" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "arcWeight": -1.0,
+      "arcOrder": 200.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-nonop-arc-3",
+      "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
+      "arcTo": { "@id": "rs-gaap:GainLossOnDispositionOfAssets" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "arcWeight": 1.0,
+      "arcOrder": 300.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-nonop-arc-4",
+      "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
+      "arcTo": { "@id": "rs-gaap:OtherNonoperatingIncomeExpense" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "arcWeight": 1.0,
+      "arcOrder": 400.0
     },
 
     {
@@ -226,16 +280,6 @@
       "arcWeight": 1.0,
       "arcOrder": 200.0
     },
-    {
-      "@id": "_:rs-gaap-calc-is-pretax-arc-3",
-      "arcFrom": { "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" },
-      "arcTo": { "@id": "rs-gaap:InterestExpense" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
-      "arcWeight": -1.0,
-      "arcOrder": 300.0
-    },
-
     {
       "@id": "_:rs-gaap-calc-is-conops",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-ContinuingOps",

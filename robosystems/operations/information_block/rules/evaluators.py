@@ -2,8 +2,12 @@
 
 Maps each ``rule_pattern`` value to an evaluation strategy:
 
-* ``EqualTo`` / ``RollUp`` / ``RollForward`` — arithmetic equality via
-  the safe AST parser; ``pass`` when ``abs(lhs - rhs) <= tolerance``.
+* ``EqualTo`` / ``RollForward`` — strict arithmetic equality via the
+  safe AST parser; ``pass`` when ``abs(lhs - rhs) <= tolerance``; any
+  unbound variable → ``skipped``.
+* ``RollUp`` — ``$Parent = Σ children``; the parent subtotal (LHS) must
+  be bound, but a missing RHS child is treated as 0 (the renderer sums
+  only present children); ``skipped`` only when the parent is unbound.
 * ``Exists`` — ``pass`` when the first variable's bound value is not
   ``None`` (i.e., a fact exists for that concept in the period).
 * ``CoExists`` — ``pass`` when *all* variables are bound or *all* are
@@ -23,6 +27,7 @@ from robosystems.operations.information_block.rules.expressions import (
   EQUALITY_TOLERANCE,
   InvalidRuleExpression,
   evaluate_equality,
+  lhs_variable_names,
   parse_arithmetic_expression,
 )
 
@@ -36,7 +41,7 @@ class EvaluationOutcome:
   detail: dict[str, Any] = field(default_factory=dict)
 
 
-_EQUALITY_PATTERNS = frozenset({"EqualTo", "RollUp", "RollForward"})
+_EQUALITY_PATTERNS = frozenset({"EqualTo", "RollForward"})
 
 
 def evaluate_rule(rule: Any, bindings: dict[str, float | None]) -> EvaluationOutcome:
@@ -49,6 +54,8 @@ def evaluate_rule(rule: Any, bindings: dict[str, float | None]) -> EvaluationOut
   pattern = rule.rule_pattern
   if pattern in _EQUALITY_PATTERNS:
     return _evaluate_equality_pattern(rule, bindings)
+  if pattern == "RollUp":
+    return _evaluate_rollup(rule, bindings)
   if pattern == "Exists":
     return _evaluate_exists(rule, bindings)
   if pattern == "CoExists":
@@ -94,6 +101,70 @@ def _evaluate_equality_pattern(
       "bindings": _serializable(bindings),
       "residual": residual,
       "tolerance": tolerance,
+    },
+  )
+
+
+def _evaluate_rollup(rule: Any, bindings: dict[str, float | None]) -> EvaluationOutcome:
+  """Evaluate a ``RollUp`` rule (``$Parent = Σ children``).
+
+  Unlike strict :func:`_evaluate_equality_pattern`, a missing RHS child
+  is treated as 0 — the renderer sums only the children that have facts
+  (all-zero rows are dropped), so a report that presents two of a
+  subtotal's six possible children must still satisfy the rollup. The
+  parent subtotal (the LHS) MUST be bound; if it isn't, the subtotal
+  wasn't reported, so there's nothing to verify → ``skipped``.
+  """
+  variable_names = [v["variable_name"] for v in (rule.rule_variables or [])]
+  if not variable_names:
+    return EvaluationOutcome(
+      status="skipped", message="RollUp rule has no variables", detail={}
+    )
+  try:
+    parsed = parse_arithmetic_expression(rule.rule_expression, variable_names)
+    required = lhs_variable_names(parsed)
+  except InvalidRuleExpression as exc:
+    return EvaluationOutcome(
+      status="error", message=str(exc), detail={"expression": rule.rule_expression}
+    )
+
+  missing_subtotal = [n for n in required if bindings.get(n) is None]
+  if missing_subtotal:
+    return EvaluationOutcome(
+      status="skipped",
+      message=f"no fact bound for subtotal: {', '.join(missing_subtotal)}",
+      detail={
+        "bindings": _serializable(bindings),
+        "missing_subtotal": missing_subtotal,
+      },
+    )
+
+  tolerance = EQUALITY_TOLERANCE
+  if rule.metadata_ and isinstance(rule.metadata_, dict):
+    tolerance = float(rule.metadata_.get("tolerance", EQUALITY_TOLERANCE))
+
+  # RHS children with no fact default to 0 (sum-of-present-children).
+  defaulted = [
+    n for n in variable_names if n not in required and bindings.get(n) is None
+  ]
+  bound: dict[str, float] = {
+    n: (float(bindings[n]) if bindings.get(n) is not None else 0.0)
+    for n in variable_names
+  }
+  try:
+    passed, residual = evaluate_equality(parsed, bound, tolerance=tolerance)
+  except InvalidRuleExpression as exc:
+    return EvaluationOutcome(
+      status="error", message=str(exc), detail={"expression": rule.rule_expression}
+    )
+  return EvaluationOutcome(
+    status="pass" if passed else "fail",
+    message=None if passed else f"rollup failed; residual = {residual:.2f}",
+    detail={
+      "bindings": _serializable(bindings),
+      "residual": residual,
+      "tolerance": tolerance,
+      "children_defaulted_to_zero": defaulted,
     },
   )
 
