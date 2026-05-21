@@ -886,14 +886,17 @@ class TestFormAwareCloseTarget:
     re = next(f for f in facts if "RetainedEarnings" in f.element_qname)
     assert re.value == 60.0
 
-  def test_close_fallback_row_uses_target_qname(self):
-    # No materialized target fact → anonymous fallback carries the form's qname.
+  def test_close_fallback_row_uses_target_qname_and_label(self):
+    # No materialized target fact → anonymous fallback carries the form's
+    # qname AND a form-appropriate label (not the corporate "Retained
+    # Earnings" string).
     facts = [self._flow("revenue", 100.0), self._flow("expense", 40.0)]
     _close_to_retained_earnings(
       facts, self.PS, self.PE, close_target_qname="rs-gaap:MembersEquity"
     )
     appended = next(f for f in facts if f.classification == "equity")
     assert appended.element_qname == "rs-gaap:MembersEquity"
+    assert appended.element_name == "Members' Equity"
     assert appended.value == 60.0
 
 

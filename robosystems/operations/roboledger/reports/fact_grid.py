@@ -1316,6 +1316,20 @@ def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, d
 # _append_empty_equity_facts before the close runs.
 _ANON_RE_ELEMENT_ID = "elem_rsgaap_retained_earnings_anon"
 
+# Display labels for the form-aware close targets, used on the anonymous
+# fallback row so a partnership/LLC graph doesn't render "Retained Earnings"
+# for what is actually Partners' Capital / Members' Equity. Falls back to the
+# qname for any concept not in the map.
+_CLOSE_TARGET_LABELS = {
+  "rs-gaap:RetainedEarningsAccumulatedDeficit": "Retained Earnings (Accumulated Deficit)",
+  "rs-gaap:PartnersCapital": "Partners' Capital",
+  "rs-gaap:MembersEquity": "Members' Equity",
+}
+
+
+def _close_target_label(qname: str) -> str:
+  return _CLOSE_TARGET_LABELS.get(qname, qname)
+
 
 def _find_close_target(
   facts: list[ReportFact],
@@ -1428,7 +1442,7 @@ def _close_to_retained_earnings(
     ReportFact(
       element_id=_ANON_RE_ELEMENT_ID,
       element_qname=close_target_qname,
-      element_name="Retained Earnings (Accumulated Deficit)",
+      element_name=_close_target_label(close_target_qname),
       classification="equity",
       balance_type="credit",
       value=net_income,

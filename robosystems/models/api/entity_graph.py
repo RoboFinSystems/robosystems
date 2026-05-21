@@ -21,7 +21,10 @@ class EntityCreate(BaseModel):
   ein: str | None = None
   entity_type: str | None = Field(
     default=None,
-    description="Entity legal form (corporation, llc, partnership, sole_proprietorship, non_profit).",
+    description=(
+      "Entity legal form (corporation, llc / limited_liability_company, "
+      "partnership, sole_proprietorship, non_profit)."
+    ),
   )
   tier: str | None = Field(
     default=None,

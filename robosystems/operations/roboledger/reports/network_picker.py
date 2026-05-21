@@ -139,6 +139,12 @@ def load_close_target_concept(session: Session, reporting_style_id: str) -> str:
       session: Extensions session with the tenant schema active.
       reporting_style_id: The graph's ``Graph.reporting_style_id``.
   """
+  # Read from the tenant's ``structures`` (search_path), NOT ``public`` —
+  # the Style row is mirrored into each tenant with its stamped metadata by
+  # ``copy_library_into_tenant``, and customer-authored Styles live only in
+  # the tenant. This is consistent with how ``get_render_network`` and the
+  # rest of the renderer read; an explicit ``public.`` prefix would miss
+  # tenant-only Styles.
   row = session.execute(
     text(
       """

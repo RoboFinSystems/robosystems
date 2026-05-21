@@ -95,8 +95,9 @@ class InitialEntityData(BaseModel):
   entity_type: str | None = Field(
     None,
     description=(
-      "Entity legal form (e.g. 'corporation', 'llc', 'partnership', "
-      "'sole_proprietorship', 'non_profit'). Drives the graph's default "
+      "Entity legal form (e.g. 'corporation', 'llc' / "
+      "'limited_liability_company', 'partnership', 'sole_proprietorship', "
+      "'non_profit'). Drives the graph's default "
       "Reporting Style at creation — partnership and llc get dedicated "
       "equity-form Styles; everything else defaults to corporate. Blank "
       "falls back to corporate."
