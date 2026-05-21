@@ -1,19 +1,18 @@
 """Filter evaluation engine for ``rollforward`` Information Blocks.
 
 Implements **Tier 2 of the rollforward attribution design** from
-``information-block.md`` §4.5. Phase 2 MVP scope: one predicate kind
-(``line_item_metadata_field``) — decompose a BS account's period change
-across declared flow concepts by matching ledger LineItems on a JSONB
-metadata field.
+``information-block.md`` §4.5. Decompose a BS account's period change
+across declared flow concepts by matching ledger LineItems on their
+first-class ``flow_element_id`` FK. Each filter authors flow concepts by
+qname; the engine resolves those to element_ids and matches the FK.
 
 Sibling pattern: ``fact_grid._derive_cash_flow_facts`` (Tier 1 default
 change tag derivation, shipped 2026-05-14). Where Phase 1 derives flow
 facts from period-over-period BS deltas using ``derivation`` arcs, this
-module derives them from per-LineItem flow tags carried on
-``line_items.metadata``. The two are complementary — Tier 1 handles
-legacy data without flow tags, Tier 2 handles data with explicit
-tagging (Charlie Hoffman's mini data; future XBRL GL with
-``GenericFlowCategory``).
+module derives them from per-LineItem flow concepts on
+``line_items.flow_element_id``. The two are complementary — Tier 1
+handles untagged data, Tier 2 handles data with explicit flow tagging
+(Charlie Hoffman's mini data; future XBRL GL with ``GenericFlowCategory``).
 
 **Sign convention**: all internal aggregations are in **debit-positive
 cents** (``debit_amount - credit_amount``). This matches the LineItem
@@ -144,8 +143,7 @@ def evaluate_attribution_filters(
       bs_element_id=bs_element_id,
       filter_target_element_id=f.target_element_id,
       filter_target_qname=f.target_qname,
-      field_name=f.predicate.field,
-      values=f.predicate.values,
+      flow_qnames=f.predicate.values,
       period_start=period_start,
       period_end=period_end,
     )
@@ -249,8 +247,7 @@ def _evaluate_one_filter(
   bs_element_id: str,
   filter_target_element_id: str | None,
   filter_target_qname: str,
-  field_name: str,
-  values: list[str],
+  flow_qnames: list[str],
   period_start: date,
   period_end: date,
 ) -> AttributedFact | None:
@@ -260,8 +257,23 @@ def _evaluate_one_filter(
   Match criteria:
    - LineItem.element_id = BS source (only lines touching the BS account)
    - Entry.posting_date in period AND Entry.status='posted'
-   - LineItem.metadata->>field IN values
+   - LineItem.flow_element_id ∈ the elements named by ``flow_qnames``
+
+  The filter authors flow concepts by qname; resolve them to element_ids
+  once and match the first-class ``flow_element_id`` FK (the predicate's
+  ``values`` are flow-concept qnames). Returns ``None`` when no qname
+  resolves to an element — the same no-match outcome as before.
   """
+  value_ids = [
+    r[0]
+    for r in session.execute(
+      text("SELECT id FROM elements WHERE qname = ANY(:qnames)"),
+      {"qnames": flow_qnames},
+    ).fetchall()
+  ]
+  if not value_ids:
+    return None
+
   rows = session.execute(
     text(
       """
@@ -278,15 +290,14 @@ def _evaluate_one_filter(
       WHERE li.element_id = :element_id
         AND en.posting_date BETWEEN :start AND :end
         AND en.status = 'posted'
-        AND li.metadata ->> :field = ANY(:values)
+        AND li.flow_element_id = ANY(:value_ids)
       """
     ),
     {
       "element_id": bs_element_id,
       "start": period_start,
       "end": period_end,
-      "field": field_name,
-      "values": values,
+      "value_ids": value_ids,
     },
   ).fetchone()
 

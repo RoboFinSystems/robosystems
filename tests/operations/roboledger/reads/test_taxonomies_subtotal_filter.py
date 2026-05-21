@@ -15,6 +15,8 @@ from robosystems.operations.operators.implementations.mapping.constants import (
   RS_GAAP_SUBTOTAL_DENYLIST,
 )
 from robosystems.operations.roboledger.reads.taxonomies import (
+  _is_rolled_up_at_render,
+  _load_rollup_concepts,
   expand_to_rs_gaap_candidates,
 )
 
@@ -253,3 +255,100 @@ def test_denylist_locks_canonical_rollups():
     "rs-gaap:GrossProfit",
   }
   assert must_be_denylisted.issubset(RS_GAAP_SUBTOTAL_DENYLIST)
+
+
+# ---------------------------------------------------------------------------
+# Structure-aware rollup guard (info-block §3.7.2)
+#
+# The static denylist over-denies on thin Reporting Style structures: a
+# concept like rs-gaap:Revenues is a rollup in the full taxonomy but, on a
+# Style where it has no rendering children, it IS the leaf and a CoA account
+# must be allowed to map to it. _load_rollup_concepts derives the rolled-up
+# set per-Style (concepts that are PARENTS in the Style's presentation arcs);
+# _is_rolled_up_at_render is the single-concept predicate over it.
+# ---------------------------------------------------------------------------
+
+
+def _rollup_session(parent_element_ids):
+  """Session whose reporting_style_networks presentation query returns the
+  given parent (rolled-up) element_ids."""
+  session = MagicMock()
+  q = MagicMock()
+  q.fetchall.return_value = [_row(element_id=eid) for eid in parent_element_ids]
+  session.execute.return_value = q
+  return session
+
+
+def test_load_rollup_concepts_returns_parent_element_ids():
+  session = _rollup_session(["elem_assets", "elem_liabilities"])
+  assert _load_rollup_concepts(session, "style_1") == {
+    "elem_assets",
+    "elem_liabilities",
+  }
+
+
+def test_is_rolled_up_at_render_true_for_parent_concept():
+  """A concept that is a parent on the active Style's structures (its
+  children render) is rolled up — CoA must not map to it."""
+  session = _rollup_session(["elem_assets"])
+  assert _is_rolled_up_at_render(session, "style_1", "elem_assets") is True
+
+
+def test_is_rolled_up_at_render_false_for_leaf_on_thin_style():
+  """The core fix: rs-gaap:Revenues is statically denylisted, but on a thin
+  Style where it has no rendering children it is the leaf. The structure-
+  aware predicate must allow it (returns False = not a rollup here)."""
+  # Only Assets rolls up on this Style; the revenue concept renders as a leaf.
+  session = _rollup_session(["elem_assets"])
+  assert _is_rolled_up_at_render(session, "thin_style", "elem_revenues_leaf") is False
+
+
+def test_is_rolled_up_at_render_false_when_style_unseeded():
+  """A Style with no composed networks yields an empty rollup set, so nothing
+  is treated as a rollup — callers fall back to the static denylist."""
+  session = _rollup_session([])
+  assert _is_rolled_up_at_render(session, "empty_style", "elem_anything") is False
+
+
+def test_expand_structure_aware_allows_leaf_that_is_statically_denylisted():
+  """With a Reporting Style active where rs-gaap:Revenues is a LEAF (not a
+  parent in the Style's networks), expand_to_rs_gaap_candidates must offer
+  it as a candidate even though it is in RS_GAAP_SUBTOTAL_DENYLIST — the
+  structure-aware guard supersedes the static list when a Style is seeded."""
+  equiv_rows = [
+    _row(id="elem_rev", qname="rs-gaap:Revenues", name="Revenues"),
+    _row(id="elem_lic_rev", qname="rs-gaap:LicenseRevenue", name="License Revenue"),
+  ]
+  session = MagicMock()
+  fac_lookup = MagicMock()
+  fac_lookup.fetchone.return_value = _row(qname="fac:Revenues")
+  # reporting_style_id present → presentation_set via _load_renderable_concepts
+  renderable_query = MagicMock()
+  renderable_query.fetchall.return_value = [
+    _row(element_id="elem_rev"),
+    _row(element_id="elem_lic_rev"),
+  ]
+  equiv_query = MagicMock()
+  equiv_query.fetchall.return_value = equiv_rows
+  # rollup set: only some other concept rolls up here — Revenues is a leaf.
+  rollup_query = MagicMock()
+  rollup_query.fetchall.return_value = [_row(element_id="elem_other_rollup")]
+  child_query = MagicMock()
+  child_query.fetchall.return_value = []
+  session.execute.side_effect = [
+    fac_lookup,
+    renderable_query,
+    equiv_query,
+    rollup_query,
+    child_query,
+  ]
+
+  result = expand_to_rs_gaap_candidates(
+    session, "fac_revenues_id", reporting_style_id="thin_style"
+  )
+
+  assert result is not None
+  qnames = {c["qname"] for c in result["candidates"]}
+  # Statically-denylisted, but a leaf on this Style → now offered.
+  assert "rs-gaap:Revenues" in qnames
+  assert "rs-gaap:LicenseRevenue" in qnames

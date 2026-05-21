@@ -1,7 +1,7 @@
 # Seattle Method Cross-Taxonomy — Test Case 1: Four-Statement Report
 
-**Graph**: `kg19e46c0855a126fb49f3`
-**Report**: `rpt_01KS3CBBR0XK79D4FT8FQATVTJ` (published)
+**Graph**: `kg19e48e582867f658d601`
+**Report**: `rpt_01KS4EB8J1G24X8D4BQX24F6S2` (published)
 **Entity**: Lemonade Stand (Charlie Hoffman Test Case 1)
 **Period**: 2024-01-01 → 2024-03-31 (Current)
 **Comparative**: 2023-10-02 → 2023-12-31 (Prior — zero opening balances)
@@ -122,7 +122,7 @@ The architectural piece that powers this lives in
 
 - **Structure**: `rs-gaap — Cash Flow Statement — Indirect`
 - **Block type**: `cash_flow_statement`
-- **Row count**: 8
+- **Row count**: 11
 - **Unmapped elements**: 0
 
 | QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
@@ -132,8 +132,11 @@ The architectural piece that powers this lives in
 | `rs-gaap:IncreaseDecreaseInInventories` |     Increase (Decrease) in Inventories | $(2,700.00) | $0.00 |
 | `rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities` |     Increase (Decrease) in Accounts Payable and Accrued Liabilities | $1,400.00 | $0.00 |
 | `rs-gaap:NetCashProvidedByUsedInOperatingActivities` |   **Cash Provided by (Used in) Operating Activity, Including Discontinued Operation** | $850.00 | $0.00 |
+| `rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment` |     Payments to Acquire Property, Plant, and Equipment | $(1,000.00) | $0.00 |
+| `rs-gaap:NetCashProvidedByUsedInInvestingActivities` |   **Cash Provided by (Used in) Investing Activity, Including Discontinued Operation** | $(1,000.00) | $0.00 |
 | `rs-gaap:ProceedsFromIssuanceOfCommonStock` |     Proceeds from Issuance of Common Stock | $10,000.00 | $0.00 |
-| `rs-gaap:NetCashProvidedByUsedInFinancingActivities` |   **Cash Provided by (Used in) Financing Activity, Including Discontinued Operation** | $10,000.00 | $0.00 |
+| `rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet` |     Proceeds from Issuance of Long-Term Debt and Capital Securities, Net | $1,000.00 | $0.00 |
+| `rs-gaap:NetCashProvidedByUsedInFinancingActivities` |   **Cash Provided by (Used in) Financing Activity, Including Discontinued Operation** | $11,000.00 | $0.00 |
 | `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **CashAndCashEquivalentsPeriodIncreaseDecrease** | $10,850.00 | $0.00 |
 
 ---
@@ -155,12 +158,12 @@ The architectural piece that powers this lives in
 
 ## Provenance
 
-- **Report ID**: `rpt_01KS3CBBR0XK79D4FT8FQATVTJ`
-- **Graph**: `kg19e46c0855a126fb49f3`
+- **Report ID**: `rpt_01KS4EB8J1G24X8D4BQX24F6S2`
+- **Graph**: `kg19e48e582867f658d601`
 - **Taxonomy**: `rs-gaap` (resolved at create-report time)
-- **Mapping**: `struct_01KS3C141WTVM66K68BN6N6EN9`
-- **Created**: 2026-05-20T19:03:41.056953
-- **Last generated**: 2026-05-20T19:03:41.144617
+- **Mapping**: `struct_01KS4EB57T2TBNH8ZP1A4SSE32`
+- **Created**: 2026-05-21T04:57:49.377958
+- **Last generated**: 2026-05-21T04:57:49.419965
 
 ### How to reproduce
 

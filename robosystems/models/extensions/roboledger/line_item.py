@@ -28,6 +28,7 @@ class LineItem(ExtensionsBase):
   __table_args__ = (
     Index("idx_line_items_entry", "entry_id"),
     Index("idx_line_items_element", "element_id"),
+    Index("idx_line_items_flow_element", "flow_element_id"),
     CheckConstraint("debit_amount >= 0", name="check_debit_positive"),
     CheckConstraint("credit_amount >= 0", name="check_credit_positive"),
     CheckConstraint(
@@ -48,6 +49,17 @@ class LineItem(ExtensionsBase):
     String, ForeignKey("entries.id", ondelete="CASCADE"), nullable=False
   )
   element_id = Column(String, ForeignKey("elements.id"), nullable=False)
+
+  # Flow concept (the economic-flow / "transaction description" classification
+  # this line represents — e.g. rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment).
+  # First-class replacement for the legacy metadata['transaction_description_code']
+  # string. Drives rollforward attribution + cash-flow/equity-flow rendering.
+  # Nullable: not every line carries a flow (e.g. simple balance transfers).
+  # Points at the element the source flow tag names directly (rs-gaap when the
+  # enrichment classifier emits rs-gaap-valued tags; the source vocabulary in
+  # cross-taxonomy projections). A valid flow element carries an `activityType`
+  # trait.
+  flow_element_id = Column(String, ForeignKey("elements.id"), nullable=True)
 
   # Financial (minor currency units — cents)
   debit_amount = Column(BigInteger, nullable=False, default=0)

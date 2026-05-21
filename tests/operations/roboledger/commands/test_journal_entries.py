@@ -32,6 +32,7 @@ from robosystems.operations.roboledger.commands.journal_entries import (
   UnbalancedJournalEntryError,
   create_journal_entry,
   delete_journal_entry,
+  resolve_flow_element_id,
   reverse_journal_entry,
   update_journal_entry,
   validate_and_normalize_lines,
@@ -184,9 +185,10 @@ class TestValidateAndNormalizeLines:
 
 
 class TestLineMetadataPassthrough:
-  """Per-line ``metadata`` rides through the normalization layer onto
-  ``LineItem.metadata_`` — the field that rollforward filter predicates
-  match against.
+  """Per-line ``metadata`` rides through the normalization layer; the flow
+  tag (``transaction_description_code``) is then promoted to the first-class
+  ``LineItem.flow_element_id`` FK at create time and stripped from the stored
+  metadata. Other metadata keys are preserved.
   """
 
   def test_metadata_normalizes_to_dict_when_present(self):
@@ -224,10 +226,15 @@ class TestLineMetadataPassthrough:
 
   @patch(f"{MODULE}._entry_to_response")
   @patch(f"{MODULE}.assert_period_not_closed")
-  def test_create_journal_entry_persists_line_metadata(self, _mock_guard, _mock_resp):
-    """A metadata-bearing line creates a LineItem with metadata_ stamped."""
+  @patch(f"{MODULE}.resolve_flow_element_id")
+  def test_create_journal_entry_promotes_flow_tag(
+    self, mock_resolve, _mock_guard, _mock_resp
+  ):
+    """A flow-tagged line resolves to ``flow_element_id`` and strips the
+    legacy ``transaction_description_code`` key from the stored metadata."""
     from robosystems.models.extensions.roboledger.line_item import LineItem
 
+    mock_resolve.side_effect = ["elem_flow_a", "elem_flow_b"]
     session = MagicMock()
     body = CreateJournalEntryRequest(
       posting_date=_DATE,
@@ -237,7 +244,8 @@ class TestLineMetadataPassthrough:
           element_id="elem_cash",
           debit_amount=10000,
           metadata={
-            "transaction_description_code": "mini:ProceedsFromInvestmentsByOwner"
+            "transaction_description_code": "mini:ProceedsFromInvestmentsByOwner",
+            "source_ref": "JE-201",
           },
         ),
         JournalEntryLineItemInput(
@@ -255,13 +263,49 @@ class TestLineMetadataPassthrough:
       if isinstance(call[0][0], LineItem)
     ]
     assert len(line_adds) == 2
+    # Flow tag promoted to the FK.
+    assert line_adds[0].flow_element_id == "elem_flow_a"
+    assert line_adds[1].flow_element_id == "elem_flow_b"
+    # Legacy key stripped from stored metadata; unrelated keys preserved.
+    assert "transaction_description_code" not in line_adds[0].metadata_
+    assert line_adds[0].metadata_["source_ref"] == "JE-201"
+    assert "transaction_description_code" not in line_adds[1].metadata_
+
+
+class TestResolveFlowElementId:
+  """``resolve_flow_element_id`` maps a line's flow tag (a flow-concept qname)
+  to its Element id for ``LineItem.flow_element_id``."""
+
+  def test_resolves_qname_to_element_id(self):
+    session = MagicMock()
+    el_row = MagicMock()
+    el_row.fetchone.return_value = ("elem_x",)
+    activity_row = MagicMock()
+    activity_row.fetchone.return_value = (1,)  # has an activityType trait
+    session.execute.side_effect = [el_row, activity_row]
     assert (
-      line_adds[0].metadata_["transaction_description_code"]
-      == "mini:ProceedsFromInvestmentsByOwner"
+      resolve_flow_element_id(
+        session, {"transaction_description_code": "mini:CollectionOfReceivables"}
+      )
+      == "elem_x"
     )
+
+  def test_returns_none_when_tag_absent(self):
+    session = MagicMock()
+    assert resolve_flow_element_id(session, None) is None
+    assert resolve_flow_element_id(session, {}) is None
+    assert resolve_flow_element_id(session, {"other": "x"}) is None
+
+  def test_returns_none_when_qname_unresolvable(self):
+    session = MagicMock()
+    miss = MagicMock()
+    miss.fetchone.return_value = None
+    session.execute.side_effect = [miss]
     assert (
-      line_adds[1].metadata_["transaction_description_code"]
-      == "mini:InvestmentsByOwner"
+      resolve_flow_element_id(
+        session, {"transaction_description_code": "mini:NoSuchConcept"}
+      )
+      is None
     )
 
 

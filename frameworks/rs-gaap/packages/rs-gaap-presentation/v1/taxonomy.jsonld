@@ -8188,6 +8188,126 @@
     },
 
     {
+      "@id": "_:rs-gaap-pres-is-singlestep",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "structureName": "rs-gaap — Income Statement — Single-step",
+      "blockType": "income_statement",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-1",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:Revenues" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10100.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-2",
+      "arcFrom": { "@id": "rs-gaap:Revenues" },
+      "arcTo": { "@id": "rs-gaap:SalesRevenueNet" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10110.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-3",
+      "arcFrom": { "@id": "rs-gaap:Revenues" },
+      "arcTo": { "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10120.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-4",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:CostOfRevenue" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10200.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-5",
+      "arcFrom": { "@id": "rs-gaap:CostOfRevenue" },
+      "arcTo": { "@id": "rs-gaap:CostOfGoodsSold" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10210.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-6",
+      "arcFrom": { "@id": "rs-gaap:CostOfRevenue" },
+      "arcTo": { "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10220.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-7",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10300.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-8",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:ResearchAndDevelopmentExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10310.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-9",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:DepreciationDepletionAndAmortization" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10320.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-10",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:OtherNonoperatingIncomeExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10400.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-11",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:InterestExpense" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10500.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-12",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10800.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-13",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:IncomeTaxExpenseBenefit" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 10900.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-14",
+      "arcFrom": { "@id": "rs-gaap:IncomeStatementAbstract" },
+      "arcTo": { "@id": "rs-gaap:NetIncomeLoss" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "arcOrder": 11200.0
+    },
+
+    {
       "@id": "_:rs-gaap-pres-cf-indirect",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "structureName": "rs-gaap — Cash Flow Statement — Indirect",

@@ -275,11 +275,24 @@ def suggest_mapping_candidates(
     .all()
   )
 
+  # Structure-aware rollup guard (info-block §3.7.2): when a Reporting
+  # Style is active and seeded, deny a target only if it actually rolls
+  # up on that Style (its children render). On a thin Style where the
+  # concept IS the leaf, mapping to it is correct. Without a seeded Style
+  # (tests / partial deployments) fall back to the static denylist.
+  rollup_set = (
+    _load_rollup_concepts(session, reporting_style_id) if reporting_style_id else set()
+  )
+
+  def _denied(r) -> bool:
+    if rollup_set:
+      return r.id in rollup_set
+    return r.qname in RS_GAAP_SUBTOTAL_DENYLIST
+
   filtered = [
     r
     for r in rows
-    if r.qname not in RS_GAAP_SUBTOTAL_DENYLIST
-    and (not presentation_set or r.id in presentation_set)
+    if not _denied(r) and (not presentation_set or r.id in presentation_set)
   ]
 
   efs_map = _efs_by_element(session, [r.id for r in filtered])
@@ -387,6 +400,71 @@ def _load_renderable_concepts(
   except (AttributeError, TypeError):
     pass
   return result
+
+
+_ROLLUP_CONCEPTS_ATTR_PREFIX = "_rollup_concepts_cache_"
+
+
+def _load_rollup_concepts(
+  session: Session,
+  reporting_style_id: str,
+) -> set[str]:
+  """Return element_ids that are *rolled up at render* under a Reporting Style.
+
+  A concept is rolled up at render iff it appears as the **parent**
+  (``from_element_id``) of a ``presentation`` arc on one of the Style's
+  rendering structures — its value comes from summing the children the
+  renderer walks, so a CoA account must not map to it (the leaf fact would
+  double-count). A concept that is **not** in this set is a leaf on the
+  active Style, and mapping a CoA account to it is correct.
+
+  This is the structure-aware replacement for the static
+  ``RS_GAAP_SUBTOTAL_DENYLIST`` (info-block §3.7.2): the static list
+  over-denies on thin Style structures where, e.g., ``rs-gaap:Revenues``
+  has no rendering children and is itself the leaf. Empty result = no Style
+  structures seeded → callers fall back to the static denylist.
+
+  Cached on the session keyed by reporting_style_id (same pattern as
+  ``_load_renderable_concepts``).
+  """
+  cache_attr = f"{_ROLLUP_CONCEPTS_ATTR_PREFIX}{reporting_style_id}"
+  cached = getattr(session, cache_attr, None)
+  if isinstance(cached, set):
+    return cached
+
+  rows = session.execute(
+    text("""
+      SELECT DISTINCT a.from_element_id AS element_id
+      FROM reporting_style_networks rsn
+      JOIN associations a ON a.structure_id = rsn.network_id
+      WHERE rsn.reporting_style_id = :rsid
+        AND a.association_type = 'presentation'
+        AND a.from_element_id IS NOT NULL
+        AND a.to_element_id IS NOT NULL
+    """),
+    {"rsid": reporting_style_id},
+  ).fetchall()
+  result = {r.element_id for r in rows}
+  try:
+    setattr(session, cache_attr, result)
+  except (AttributeError, TypeError):
+    pass
+  return result
+
+
+def _is_rolled_up_at_render(
+  session: Session,
+  reporting_style_id: str,
+  concept_id: str,
+) -> bool:
+  """True if ``concept_id`` rolls up at render under the active Style.
+
+  A concept is denied as a CoA mapping target only when its presentation
+  children also render on the Style's structures. If it is the leaf on the
+  active Style, this returns False and mapping to it is allowed. See
+  ``_load_rollup_concepts`` (info-block §3.7.2).
+  """
+  return concept_id in _load_rollup_concepts(session, reporting_style_id)
 
 
 def _load_rs_gaap_presentation_set(session: Session) -> set[str]:
@@ -530,10 +608,20 @@ def expand_to_rs_gaap_candidates(
 
   _NARROW_THRESHOLD = 3
 
-  # Identify equivalents that are themselves valid candidate targets:
-  # not denylisted AND (if a presentation set exists) in the set.
+  # Identify equivalents that are themselves valid candidate targets.
+  # Structure-aware rollup guard (info-block §3.7.2): with a seeded Style,
+  # deny only concepts that roll up on that Style; otherwise fall back to
+  # the static denylist. Then require (if a presentation set exists) the
+  # target to be in the renderable set.
+  rollup_set = (
+    _load_rollup_concepts(session, reporting_style_id) if reporting_style_id else set()
+  )
+
   def _is_valid_target(qname: str | None, eid: str) -> bool:
-    if qname in RS_GAAP_SUBTOTAL_DENYLIST:
+    if rollup_set:
+      if eid in rollup_set:
+        return False
+    elif qname in RS_GAAP_SUBTOTAL_DENYLIST:
       return False
     if presentation_set and eid not in presentation_set:
       return False

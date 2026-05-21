@@ -62,36 +62,47 @@ def _filter(
 def _session(
   *, bs_delta_cents: int, filter_results: list[tuple[int, int, list[str]]]
 ) -> MagicMock:
-  """Build a session mock whose ``execute()`` returns the BS-delta query
-  first, then one result per filter in order.
+  """Build a session mock for the engine's query sequence.
+
+  Per period the engine issues: one BS-delta query (``fetchone``), then
+  for each filter a flow-qname → element_id resolution query
+  (``fetchall``) followed by the per-filter aggregation query
+  (``fetchone``). The resolution stub returns one element id per filter so
+  every filter proceeds to aggregation (the no-resolve short-circuit isn't
+  exercised by these aggregation/residual tests).
 
   ``filter_results`` items are ``(value_cents, matched_count, event_ids)``
-  tuples returned by the per-filter aggregation query. Rows are
-  returned as plain tuples — SQLAlchemy Row objects are both indexable
-  and iterable, so tuple stand-ins satisfy both access patterns the
-  engine uses (``row[0]`` for the BS delta, tuple-unpack for filter
-  aggregates).
+  tuples returned by the aggregation query. Rows are returned as plain
+  tuples — SQLAlchemy Row objects are both indexable and iterable, so
+  tuple stand-ins satisfy both access patterns the engine uses.
   """
   session = MagicMock()
 
-  bs_delta_row: tuple = (bs_delta_cents,)
-  filter_rows: list[tuple] = [
-    (value_cents, matched_count, event_ids)
-    for value_cents, matched_count, event_ids in filter_results
-  ]
-  rows_in_order = [bs_delta_row, *filter_rows]
+  results_in_order: list[MagicMock] = []
+
+  bs = MagicMock()
+  bs.fetchone.return_value = (bs_delta_cents,)
+  results_in_order.append(bs)
+
+  for i, (value_cents, matched_count, event_ids) in enumerate(filter_results):
+    resolve = MagicMock()
+    resolve.fetchall.return_value = [(f"elem_flow_{i}",)]
+    results_in_order.append(resolve)
+    agg = MagicMock()
+    agg.fetchone.return_value = (value_cents, matched_count, event_ids)
+    results_in_order.append(agg)
 
   call_count = {"n": 0}
 
   def _execute(*_args, **_kwargs):
-    result = MagicMock()
     idx = call_count["n"]
     call_count["n"] += 1
-    if idx < len(rows_in_order):
-      result.fetchone.return_value = rows_in_order[idx]
-    else:
-      result.fetchone.return_value = None
-    return result
+    if idx < len(results_in_order):
+      return results_in_order[idx]
+    fallback = MagicMock()
+    fallback.fetchone.return_value = None
+    fallback.fetchall.return_value = []
+    return fallback
 
   session.execute.side_effect = _execute
   return session

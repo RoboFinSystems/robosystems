@@ -17,6 +17,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _close_to_retained_earnings,
   _compute_prior_period,
   _derive_cash_flow_facts,
+  _emit_flow_facts,
   _emit_net_income_facts,
   _facts_to_balance_dict,
   _find_close_target,
@@ -1551,6 +1552,107 @@ class TestEmitNetIncomeFacts:
 
 
 # ── _derive_cash_flow_facts ──────────────────────────────────────────────
+
+
+class TestEmitFlowFacts:
+  """``_emit_flow_facts`` — investing/financing CF facts from per-line flow
+  concepts. The SQL aggregation (cash-anchor + activityType filtering +
+  flow→rs-gaap resolution) is exercised end-to-end by the Seattle Method demo;
+  these unit tests cover the Python logic: sign, cents→dollars, zero-skip, and
+  the authoritative-replace of a pre-existing placeholder.
+  """
+
+  S = date(2024, 1, 1)
+  E = date(2024, 3, 31)
+
+  def _row(self, flow_id, qname, cash_cents, *, balance_type="debit", name="Flow"):
+    return SimpleNamespace(
+      flow_id=flow_id,
+      flow_qname=qname,
+      flow_name=name,
+      flow_balance_type=balance_type,
+      cash_movement_cents=cash_cents,
+    )
+
+  def _session(self, *period_rows):
+    """One execute per period; each returns its row list via fetchall()."""
+    session = MagicMock()
+    results = []
+    for rows in period_rows:
+      r = MagicMock()
+      r.fetchall.return_value = list(rows)
+      results.append(r)
+    session.execute.side_effect = results
+    return session
+
+  def _period(self):
+    return [PeriodSpec(self.S, self.E, "Current")]
+
+  def test_investing_outflow_emits_negative(self):
+    """Capex: cash-side credit (debit - credit < 0) → negative outflow."""
+    facts: list[ReportFact] = []
+    session = self._session(
+      [self._row("inv1", "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment", -100000)]
+    )
+    _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
+    assert len(facts) == 1
+    assert facts[0].element_id == "inv1"
+    assert facts[0].value == -1000.0
+    assert facts[0].period_type == "duration"
+    assert facts[0].classification is None
+
+  def test_financing_inflow_emits_positive(self):
+    """Stock issuance: cash-side debit (debit - credit > 0) → positive inflow."""
+    facts: list[ReportFact] = []
+    session = self._session(
+      [
+        self._row(
+          "fin1",
+          "rs-gaap:ProceedsFromIssuanceOfCommonStock",
+          1000000,
+          balance_type="credit",
+        )
+      ]
+    )
+    _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
+    assert facts[0].value == 10000.0
+
+  def test_zero_movement_skipped(self):
+    facts: list[ReportFact] = []
+    session = self._session([self._row("z", "rs-gaap:Foo", 0)])
+    _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
+    assert facts == []
+
+  def test_replaces_preexisting_placeholder(self):
+    """A pre-existing 0/instant placeholder for the flow leaf is replaced by
+    the flow-derived duration fact — not duplicated. This is the bug that
+    suppressed the long-term-debt financing line in the demo."""
+    placeholder = ReportFact(
+      element_id="fin1",
+      element_qname="rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+      element_name="Debt",
+      classification=None,
+      balance_type="debit",
+      value=0.0,
+      period_start=self.S,
+      period_end=self.E,
+      period_type="instant",
+    )
+    facts: list[ReportFact] = [placeholder]
+    session = self._session(
+      [
+        self._row(
+          "fin1",
+          "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+          100000,
+        )
+      ]
+    )
+    _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
+    debt = [f for f in facts if f.element_id == "fin1"]
+    assert len(debt) == 1
+    assert debt[0].value == 1000.0
+    assert debt[0].period_type == "duration"
 
 
 class TestDeriveCashFlowFacts:

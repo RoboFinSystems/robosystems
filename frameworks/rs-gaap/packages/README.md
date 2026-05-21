@@ -110,6 +110,41 @@ This keeps SFAC 6 categorization queryable per-element without giving
 it a separate concept namespace, and lets every rs-* framework
 inherit the same axes.
 
+## Adding a Reporting Style preset
+
+A Reporting Style is a **selection vector** over per-statement
+presentation Structures, identified by a 4-segment code
+`{BS-layout}-{equity-form}-{IS-layout}-{CF-method}` (e.g.
+`BSC-CORP-IS01-CF1`). A preset composes one Network (presentation
+Structure) per statement type; switching a graph's Style re-renders its
+statements against the composed Networks.
+
+Adding a preset is **pure package content** — no migration. On a fresh
+`reset-local`, migration `0008` re-reads this package's declarations and
+seeds `reporting_style_networks` for every Style that declares a
+composition.
+
+1. **(Optional) Author a new axis Structure** in
+   `rs-gaap-presentation/v1` if the preset needs a layout that doesn't
+   exist yet. Mirror an existing sibling (e.g. `_:rs-gaap-pres-is-singlestep`
+   mirrors `_:rs-gaap-pres-is-multistep`): a role node with `roleUri`,
+   `structureName`, `blockType`, `conceptArrangementPattern`, then its
+   `presentation` arcs. The calc-DAG (`rs-gaap-calculations`) is global,
+   so a presentation Structure only selects *which* rows render —
+   subtotals like `GrossProfit` are still computed even if not presented.
+2. **Declare the Style** in `rs-gaap-reporting-styles/v1` by adding two
+   fields to the Style's Structure node (the one carrying `roleUri`):
+   - `reportingStyleCode`: the 4-segment code.
+   - `reportingStyleNetworks`: an array of
+     `{"statementType": …, "networkRoleUri": …}`, one per statement type
+     (`balance_sheet`, `income_statement`, `cash_flow_statement`,
+     `equity_statement`). Each `networkRoleUri` is a presentation
+     Structure's `roleUri`.
+   A Style with no `reportingStyleNetworks` (e.g. `Banking`) stays a
+   non-selectable placeholder.
+3. `just reset-local`, then `change-reporting-style` to the preset's
+   Structure id (`uuid5(roleUri, "structure")`) and re-render.
+
 ## Editing packages
 
 The JSON-LD is the source of truth. Edit it directly. We're past the
