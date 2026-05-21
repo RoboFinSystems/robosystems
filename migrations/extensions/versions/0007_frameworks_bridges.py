@@ -11,7 +11,7 @@ Adds four public-schema tables that record taxonomy library
   with any package)
 - ``framework_bridges`` — junction pinning bridges into a framework
 
-Then walks ``taxonomy/frameworks/*/v*/manifest.json`` and inserts
+Then walks ``frameworks/{name}/{version}.json`` and inserts
 one Framework row per manifest, one FrameworkPackage row per
 ``packages[]`` entry, one Bridge row per bridge that's loaded as a
 package (looked up via the ``standard`` field), and one

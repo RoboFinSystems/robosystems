@@ -1,14 +1,14 @@
 """Taxonomy subsystem — the Python runtime around the library content.
 
 The taxonomy library (JSON-LD content + framework manifests) lives at
-the repo-root `/taxonomy/` directory, peer to `/robosystems/`. This
+the repo-root `/frameworks/` directory, peer to `/robosystems/`. This
 package is the Python code that walks it, parses it, and writes its
 contents into per-tenant schemas at provision time.
 
 ## Lifecycle
 
 ```
-disk (/taxonomy/)
+disk (/frameworks/)
     │
     │  discovery.py        walks frameworks/{name}/v*.json + packages/* + bridges/*
     ▼
@@ -45,8 +45,7 @@ tenant schema (per-graph subset)
 - `seed.py` — legacy Python-dict seeder (retained for migration 0001
   backward compatibility)
 
-The library content itself is documented in `/taxonomy/README.md` and
-`/taxonomy/frameworks/README.md`.
+The library content itself is documented in `/frameworks/README.md`.
 """
 
 from __future__ import annotations

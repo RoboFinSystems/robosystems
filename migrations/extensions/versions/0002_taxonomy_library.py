@@ -871,6 +871,12 @@ def _framework_seed_files() -> list[Path]:
   return _list_framework_seed_paths(manifest, skip_missing_optional=True)
 
 
+# Evaluated at import time: the repo-root ``frameworks/`` tree (and the
+# rs-gaap@v1 manifest) must be present whenever Alembic imports this
+# migration — including for ``alembic history`` / ``current``. That holds
+# in every real environment (Docker COPYs frameworks/; dev has the working
+# tree). Left as a module-level eval deliberately — a missing frameworks/
+# tree is a genuine misconfiguration we want surfaced loudly, not masked.
 SEED_FILES = _framework_seed_files()
 
 

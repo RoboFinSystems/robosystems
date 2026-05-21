@@ -125,9 +125,16 @@ def load_framework_manifest(
 ) -> dict:
   """Read ``frameworks/{name}/{version}.json`` and validate.
 
+  Validates top-level keys, name/version agreement with the path, and
+  the shape of each ``packages[]`` / ``bridges[]`` entry — so a manifest
+  with a malformed entry (e.g. a package missing ``version``) fails here
+  with a clear message rather than raising an opaque ``KeyError`` later
+  inside ``expand_framework_to_pin`` / ``list_framework_seed_paths``.
+
   Raises:
       FileNotFoundError: manifest file missing
-      ValueError: manifest is missing required keys
+      ValueError: manifest is missing required keys, declares a
+          mismatched name/version, or has a malformed entry
   """
   path = framework_root(name, root) / f"{version}.json"
   if not path.exists():
@@ -150,6 +157,19 @@ def load_framework_manifest(
       f"Framework manifest {path} declares version={manifest['version']!r}; "
       f"expected {version!r}"
     )
+
+  for pkg in manifest["packages"]:
+    if "standard" not in pkg or "version" not in pkg:
+      raise ValueError(
+        f"Framework manifest {path} has a packages[] entry missing "
+        f"'standard' or 'version': {pkg!r}"
+      )
+  for brg in manifest["bridges"]:
+    if "bridge" not in brg or "version" not in brg:
+      raise ValueError(
+        f"Framework manifest {path} has a bridges[] entry missing "
+        f"'bridge' or 'version': {brg!r}"
+      )
 
   return manifest
 
@@ -219,7 +239,13 @@ def list_framework_seed_paths(
   are silently skipped — useful while authoring a framework whose
   optional packages haven't been written yet. Missing required entries
   always raise.
+
+  A diamond ``depends_on`` (e.g. ``rs-call-report → [fac, rs-gaap]`` and
+  ``rs-gaap → fac``) reaches a shared dependency via multiple branches;
+  the top-level call deduplicates the result, order-preserving, so each
+  seed appears exactly once in load order.
   """
+  is_root_call = _seen is None
   seen = _seen if _seen is not None else set()
   key = (manifest["framework"], manifest["version"])
   if key in seen:
@@ -267,6 +293,11 @@ def list_framework_seed_paths(
         )
       continue
     paths.append(path)
+
+  if is_root_call:
+    # Diamond depends_on can reach a shared dependency via multiple
+    # branches; collapse duplicates while preserving first-seen order.
+    return list(dict.fromkeys(paths))
   return paths
 
 
