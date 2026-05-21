@@ -188,12 +188,21 @@ def generate_report_facts(
   # value. Skipped when a direct PPE Net fact already exists.
   _synthesize_ppe_net_facts(session, facts, periods)
 
+  # Emit investing/financing CF facts directly from per-line flow concepts
+  # (LineItem.flow_element_id), routed by the activityType trait. Anchors on
+  # the cash side of each entry so the sign is correct without a flip. Runs
+  # BEFORE _derive_cash_flow_facts so the latter's "direct fact wins" guard
+  # suppresses the fragile ΔBS derivation arcs for these leaves (e.g. capex,
+  # whose ΔGross derivation is defeated by an all-in-Net PP&E mapping).
+  _emit_flow_facts(session, facts, periods, mapping_id, arc_type)
+
   # Derive Cash Flow facts from period-over-period BS deltas (indirect
   # method). Each derivation arc encodes "this CF leaf is the change in
   # this BS source element" with a sign weight for the
   # asset-up=cash-use / liability-up=cash-source convention. Runs after
   # the per-period loop because each derivation reads both the current
-  # and prior period's BS values.
+  # and prior period's BS values. Operating flows land here; investing/
+  # financing were already emitted from flow concepts above.
   _derive_cash_flow_facts(session, facts, periods)
 
   unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
@@ -987,6 +996,127 @@ def _synthesize_ppe_net_facts(
         period_type="instant",
       )
     )
+
+
+# rs-gaap concepts that represent "cash" for cash-flow attribution. A
+# LineItem whose account resolves to one of these is a cash line; its signed
+# movement (debit - credit) IS the period cash flow for that entry. Curated by
+# qname for the same reason as _EQUITY_FLOW_REDUCER_QNAMES — trait coverage on
+# cash concepts is incomplete, and the set is small and stable.
+_CASH_ANCHOR_QNAMES: frozenset[str] = frozenset(
+  {
+    "rs-gaap:CashCashEquivalentsAndShortTermInvestments",
+    "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+    "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    "rs-gaap:Cash",
+    "rs-gaap:CashAndCashEquivalents",
+  }
+)
+
+
+def _emit_flow_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+  mapping_id: str,
+  arc_type: str,
+) -> None:
+  """Emit **investing/financing** CF facts directly from per-line flow concepts.
+
+  Each LineItem carries a first-class ``flow_element_id`` (the economic flow it
+  represents). For investing + financing flows the period cash flow is the
+  signed movement of the **cash side** of the entry: summing the cash-side
+  line's ``debit - credit`` gives the flow with the correct sign (cash debit =
+  inflow +, cash credit = outflow -). Summing the *non-cash* side instead would
+  require a sign flip, and summing *both* sides double-counts to zero (both
+  sides resolve to the same CF concept) — so we anchor on the cash line.
+
+  Operating flows are intentionally skipped: indirect-method operating is
+  NI + non-cash addbacks + ΔWC (handled by ``_derive_cash_flow_facts``), not a
+  flow-sum. Section routing is by the ``activityType`` trait on the resolved
+  rs-gaap flow concept.
+
+  Runs BEFORE ``_derive_cash_flow_facts`` so that function's "direct fact wins"
+  guard suppresses the (often-defeated) ΔBS derivation arcs for these same CF
+  leaves — e.g. ``PaymentsToAcquirePropertyPlantAndEquipment`` whose ΔGross
+  derivation yields 0 under an all-in-Net PP&E mapping.
+
+  Resolution uses the same ``mapping_id``/``arc_type`` as the balance reader, so
+  source-vocabulary flows (mini) and accounts resolve to rs-gaap consistently.
+  Mutates ``facts`` in place.
+  """
+  cash_qnames = list(_CASH_ANCHOR_QNAMES)
+  for period in periods:
+    rows = session.execute(
+      text("""
+        SELECT
+          COALESCE(fmap.to_element_id, li.flow_element_id) AS flow_id,
+          rf.qname AS flow_qname,
+          rf.name AS flow_name,
+          rf.balance_type AS flow_balance_type,
+          COALESCE(SUM(li.debit_amount - li.credit_amount), 0) AS cash_movement_cents
+        FROM line_items li
+        JOIN entries en ON en.id = li.entry_id
+        JOIN elements acct ON acct.id = li.element_id
+        LEFT JOIN associations amap
+          ON amap.from_element_id = li.element_id
+          AND amap.association_type = :arc_type
+          AND amap.structure_id = :mapping_id
+        LEFT JOIN elements racct ON racct.id = amap.to_element_id
+        LEFT JOIN associations fmap
+          ON fmap.from_element_id = li.flow_element_id
+          AND fmap.association_type = :arc_type
+          AND fmap.structure_id = :mapping_id
+        JOIN elements rf ON rf.id = COALESCE(fmap.to_element_id, li.flow_element_id)
+        JOIN element_traits et ON et.element_id = rf.id
+        JOIN traits t ON t.id = et.trait_id
+          AND t.category = 'activityType'
+          AND t.identifier IN ('investingActivity', 'financingActivity')
+        WHERE li.flow_element_id IS NOT NULL
+          AND en.status = 'posted'
+          AND en.posting_date BETWEEN :start AND :end
+          AND COALESCE(racct.qname, acct.qname) = ANY(:cash_qnames)
+        GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
+      """),
+      {
+        "arc_type": arc_type,
+        "mapping_id": mapping_id,
+        "start": period.start,
+        "end": period.end,
+        "cash_qnames": cash_qnames,
+      },
+    ).fetchall()
+
+    for row in rows:
+      cf_value = cents_to_dollars(row.cash_movement_cents)
+      if cf_value == 0:
+        continue
+      # This emitter is authoritative for investing/financing flow leaves:
+      # drop any pre-existing fact for this leaf+period (e.g. a 0-valued or
+      # balance-shaped placeholder that some upstream pass materialized) so
+      # the flow-derived value is what renders.
+      facts[:] = [
+        f
+        for f in facts
+        if not (
+          f.element_id == row.flow_id
+          and f.period_start == period.start
+          and f.period_end == period.end
+        )
+      ]
+      facts.append(
+        ReportFact(
+          element_id=row.flow_id,
+          element_qname=row.flow_qname,
+          element_name=row.flow_name,
+          classification=None,
+          balance_type=row.flow_balance_type or "debit",
+          value=cf_value,
+          period_start=period.start,
+          period_end=period.end,
+          period_type="duration",
+        )
+      )
 
 
 def _derive_cash_flow_facts(
