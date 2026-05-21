@@ -339,7 +339,7 @@ class GetMappingSummaryTool:
 
 
 class ExpandToRsGaapCandidatesTool:
-  """Follow FAC → rs-gaap equivalence + type-subtype to get specific filing candidates."""
+  """Follow FAC → rs-gaap equivalence + rs-gaap-type-subtype to get specific filing candidates."""
 
   def __init__(self, graph_client):
     self.client = graph_client
@@ -348,7 +348,7 @@ class ExpandToRsGaapCandidatesTool:
     return {
       "name": "expand-to-rs-gaap-candidates",
       "description": """Follow a FAC element's fac-to-rs-gaap equivalence arc to its
-rs-gaap parent, then return type-subtype children as specific filing-level candidates.
+rs-gaap parent, then return rs-gaap-type-subtype children as specific filing-level candidates.
 
 **WHEN TO USE:**
 - After confirming a CoA → FAC mapping (second pass)
@@ -356,7 +356,7 @@ rs-gaap parent, then return type-subtype children as specific filing-level candi
 
 **RETURNS:**
 - rs_gaap_parent: the direct rs-gaap equivalent of the FAC concept
-- candidates: type-subtype children (more specific filing variants)""",
+- candidates: rs-gaap-type-subtype children (more specific filing variants)""",
       "inputSchema": {
         "type": "object",
         "properties": {

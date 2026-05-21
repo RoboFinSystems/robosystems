@@ -90,7 +90,7 @@ Respond ONLY with the JSON array, no other text."""
 
 RS_GAAP_REFINEMENT_SYSTEM_PROMPT = """You are a financial taxonomy specialist. \
 A Chart of Accounts element has already been mapped to FAC (Fundamental Accounting Concepts). \
-Your task is to select the most specific rs-gaap filing tag from the type-subtype children \
+Your task is to select the most specific rs-gaap filing tag from the rs-gaap-type-subtype children \
 of the FAC element's rs-gaap equivalent.
 
 ## Selection Rules

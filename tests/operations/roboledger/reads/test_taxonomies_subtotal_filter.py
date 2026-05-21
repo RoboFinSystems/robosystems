@@ -32,7 +32,7 @@ def _make_session(fac_qname: str, equiv_rows, child_rows=None, presentation_ids=
   ``presentation_ids`` for the rs-gaap-presentation set query (defaults
   to "no filter" — empty set means caller treats as unfiltered),
   ``equiv_rows`` for the fac-to-rs-gaap query, and ``child_rows`` for
-  the type-subtype query."""
+  the rs-gaap-type-subtype query."""
   child_rows = child_rows or []
   presentation_ids = presentation_ids or []
   session = MagicMock()
@@ -104,7 +104,7 @@ def test_filters_denylisted_rollup_from_wide_equivalents():
 
 
 def test_returns_none_when_all_equivalents_are_rollups_and_no_children():
-  """If every equivalent is a rollup AND no traversable type-subtype
+  """If every equivalent is a rollup AND no traversable rs-gaap-type-subtype
   children exist, there's nothing to land on — return None so the
   caller's per-FAC fallback fires."""
   equiv_rows = [
@@ -120,7 +120,7 @@ def test_returns_none_when_all_equivalents_are_rollups_and_no_children():
 
 def test_traverses_through_denylisted_rollup_to_reach_children():
   """The denylist blocks rollups as TARGETS, but we still traverse
-  type-subtype children of denylisted equivalents. fac:CurrentLiabilities
+  rs-gaap-type-subtype children of denylisted equivalents. fac:CurrentLiabilities
   is the canonical case: its only fac-to-rs-gaap equivalent is
   rs-gaap:LiabilitiesCurrent (denylisted rollup), but its real children
   (AccountsPayable, DebtCurrent, …) are exactly what CoA accounts must

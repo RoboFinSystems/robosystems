@@ -14,7 +14,7 @@ from sqlalchemy import CheckConstraint
 
 from robosystems.db import extensions as extensions_db
 from robosystems.models.extensions import Structure
-from robosystems.taxonomy.writers.tenant_writer import _ELEMENT_COLS
+from robosystems.taxonomy.writer import _ELEMENT_COLS
 
 _MIGRATION_PATH = (
   Path(__file__).resolve().parents[2]

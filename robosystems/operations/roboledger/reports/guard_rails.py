@@ -127,7 +127,7 @@ def _top_most_subtotal_for_classification(
   cleanly as either liability or equity).
 
   Classification falls back to qname-based inference when ``row.classification``
-  is empty (FAC, rs-gaap, type-subtype reference taxonomies).
+  is empty (FAC, rs-gaap, rs-gaap-type-subtype reference taxonomies).
 
   Single-step income statements often have ``Revenues`` as a leaf row
   (no children to roll up). The validator must accept the leaf as the
@@ -196,7 +196,7 @@ def _validate_balance_sheet(rows: list[FactRow]) -> ValidationResult:
   # they conflate two classifications and would inflate the equity total.
   #
   # Classification falls back to qname-based inference (FAC, rs-gaap,
-  # type-subtype reference taxonomies often lack FASB element_traits).
+  # rs-gaap-type-subtype reference taxonomies often lack FASB element_traits).
   result.checks.append("accounting_equation")
 
   # Reuses the IS validator's resolution chain (smallest depth → subtotal

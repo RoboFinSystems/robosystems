@@ -1,7 +1,7 @@
 """Tests for the fac-rules/v1 JSON-LD seed.
 
 Pure data tests — parses the seed via
-:func:`robosystems.taxonomy.loaders.jsonld_loader.load_taxonomy_package`
+:func:`robosystems.taxonomy.loader.load_taxonomy_package`
 and asserts the shape Phase δ.3 ships: 14 forked rules drawn from three
 rule categories and five rule patterns, every `$Variable` bound via
 `rule_variables`, every rule scoped to a known fac-calculations /
@@ -14,17 +14,15 @@ import re
 
 import pytest
 
-from robosystems.taxonomy.loaders.discovery import framework_root
-from robosystems.taxonomy.loaders.jsonld_loader import (
+from robosystems.taxonomy.discovery import framework_root
+from robosystems.taxonomy.loader import (
   RULE_CATEGORY_VALUES,
   RULE_PATTERN_VALUES,
   load_taxonomy_package,
 )
 from robosystems.taxonomy.model import RuleSpec, TaxonomyPackage
 
-SEED_PATH = (
-  framework_root("fac", "v1") / "packages" / "fac-rules" / "v1" / "taxonomy.jsonld"
-)
+SEED_PATH = framework_root("fac") / "packages" / "fac-rules" / "v1" / "taxonomy.jsonld"
 
 VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 

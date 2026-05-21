@@ -20,7 +20,7 @@ chain, idempotency, error envelope, transport exposure pattern.
   the ledger: every triggered Transaction / Entry carries
   `triggered_by_event_id` back to the originating event.
 - **Workflows** (kernels like `roboledger/fiscal_calendar/`,
-  `graph/`, `library/`, `taxonomy/writers/`) — procedural operations
+  `graph/`, `library/`, `taxonomy/`) — procedural operations
   on the books: close a period, materialize the graph, regenerate a
   report, run the rules engine. Workflows MANAGE state. Not events:
   closing a period isn't a real-world occurrence — the customers

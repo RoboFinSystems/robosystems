@@ -144,7 +144,7 @@ def _classify_concept(concept: Any) -> str:
 
   Heuristic: use balance + periodType as signals, fall back to
   name-based inference. Authoritative classification will eventually
-  come from the type-subtype linkbase.
+  come from the rs-gaap-type-subtype linkbase.
   """
   balance = getattr(concept, "balance", None)
   period_type = getattr(concept, "periodType", None)

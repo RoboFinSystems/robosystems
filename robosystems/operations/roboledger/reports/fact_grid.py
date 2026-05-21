@@ -222,7 +222,7 @@ def render_structure_view(
   This is the "lens" — same facts, different structure = different view.
 
   Facts whose ``element_id`` isn't in the structure's hierarchy are
-  resolved upward via type-subtype ``general-special`` arcs to the
+  resolved upward via rs-gaap-type-subtype ``general-special`` arcs to the
   nearest in-structure ancestor (see ``_resolve_renderable_ancestor``)
   and aggregated there. Facts with no in-structure ancestor are dropped
   from the rendered view — they're persisted in ``facts`` for audit
@@ -327,7 +327,7 @@ def _resolve_renderable_ancestor(
   - ``mapping`` — broader category placement; auto-mapper writes one
     of these from each CoA element to its FAC anchor (e.g.,
     fac:Revenues, fac:OperatingExpenses)
-  - ``general-special`` — class-subtype hierarchy (type-subtype,
+  - ``general-special`` — class-subtype hierarchy (rs-gaap-type-subtype,
     rs-gaap-hierarchy); used to roll a specialized rs-gaap concept up
     to its in-Disclosure ancestor
 
@@ -541,7 +541,7 @@ def _is_equity_flow_reducer(qname: str | None) -> bool:
 def _infer_classification(qname: str | None, balance_type: str | None) -> str | None:
   """Best-effort classification fallback for elements lacking FASB traits.
 
-  Reference taxonomies (FAC, rs-gaap, type-subtype) and freshly-loaded
+  Reference taxonomies (FAC, rs-gaap, rs-gaap-type-subtype) and freshly-loaded
   custom taxonomies often have no ``element_traits`` rows pointing at
   ``traits.category='elementsOfFinancialStatements'``. Without
   classification, ``_close_to_retained_earnings`` can't compute Net

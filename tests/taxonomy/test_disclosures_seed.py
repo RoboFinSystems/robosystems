@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import pytest
 
-from robosystems.taxonomy.loaders import load_taxonomy_package
-from robosystems.taxonomy.loaders.discovery import framework_root
+from robosystems.taxonomy import load_taxonomy_package
+from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.model import TaxonomyPackage
 
-_FW_ROOT = framework_root("rs-gaap", "v1")
+_FW_ROOT = framework_root("rs-gaap")
 _PACKAGES = _FW_ROOT / "packages"
 _BRIDGES = _FW_ROOT / "bridges"
 

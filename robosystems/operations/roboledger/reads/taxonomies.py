@@ -448,11 +448,11 @@ def expand_to_rs_gaap_candidates(
 
   **Narrow** (1-3 equivalents): the rs-gaap peer is a broad grouping concept
   (e.g. ``fac:CurrentAssets`` → ``rs-gaap:AssetsCurrent``). In this case the
-  type-subtype children of that peer are the filing-specific candidates.
+  rs-gaap-type-subtype children of that peer are the filing-specific candidates.
 
   **Wide** (4+ equivalents): the rs-gaap peers are already the filing-specific
   variants (e.g. ``fac:Revenues`` → 80 industry-specific revenue tags). Here the
-  equivalents themselves are the candidates; recursing into their type-subtype
+  equivalents themselves are the candidates; recursing into their rs-gaap-type-subtype
   children would produce an unmanageably large set.
 
   Returns::
@@ -517,7 +517,7 @@ def expand_to_rs_gaap_candidates(
   #
   #   * The presentation_set tells us which concepts will actually render
   #     in some Disclosure. We require the candidate (the writeable target)
-  #     to be in this set, but we still walk type-subtype children of
+  #     to be in this set, but we still walk rs-gaap-type-subtype children of
   #     equivalents that aren't.
   #
   # Earlier this function dropped denylisted equivalents up front and
@@ -555,7 +555,7 @@ def expand_to_rs_gaap_candidates(
       ],
     }
 
-  # Narrow case: walk type-subtype children under EVERY equivalent
+  # Narrow case: walk rs-gaap-type-subtype children under EVERY equivalent
   # (denylisted or not) so we can land on a leaf even when the only
   # equivalent is a rollup.
   child_rows = session.execute(
@@ -566,14 +566,14 @@ def expand_to_rs_gaap_candidates(
       JOIN taxonomies t ON s.taxonomy_id = t.id
       JOIN elements e ON a.to_element_id = e.id
       WHERE a.from_element_id = ANY(:rs_ids)
-        AND t.standard = 'type-subtype'
+        AND t.standard = 'rs-gaap-type-subtype'
         AND a.association_type = 'general-special'
       ORDER BY e.qname
     """),
     {"rs_ids": [r.id for r in traversal_roots]},
   ).fetchall()
 
-  # Pick the equivalent with the most emittable type-subtype children as
+  # Pick the equivalent with the most emittable rs-gaap-type-subtype children as
   # the "primary parent" — the refinement agent's fallback chain lands
   # on this when the AI can't pick a child confidently. We require the
   # parent itself to be a valid target so the fallback never points at a

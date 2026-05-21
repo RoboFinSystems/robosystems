@@ -800,7 +800,7 @@ class TestClosePriorPeriodsToRetainedEarnings:
 class TestInferClassification:
   """Qname/balance_type fallback for elements without FASB traits.
 
-  Reference taxonomies (FAC, rs-gaap, type-subtype) often ship without
+  Reference taxonomies (FAC, rs-gaap, rs-gaap-type-subtype) often ship without
   the elementsOfFinancialStatements trait wired. The close-to-RE
   pipeline depends on classification to compute Net Income; this
   fallback restores it from the qname + balance_type.

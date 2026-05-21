@@ -52,7 +52,7 @@ class Structure(ExtensionsBase):
       # Reference-taxonomy structure kinds (XBRL network roles distinct
       # from presentation): formal calculation/business rules expressed
       # as a network (FAC's "Assets = L + E"), named SEC/regulatory
-      # disclosures (type-subtype's 991xxx schedules), and crosswalks
+      # disclosures (rs-gaap-type-subtype's 991xxx schedules), and crosswalks
       # between taxonomies (fac-to-rs-gaap concordances). Filtered out
       # of the report-package render path; surfaced through their own
       # consumption paths (rule engine, disclosure registry, mapping

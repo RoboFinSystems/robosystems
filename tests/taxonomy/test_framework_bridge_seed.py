@@ -1,7 +1,7 @@
 """Shape tests for the Framework + Bridge tables seeded by migration 0007.
 
 These tests ensure the framework manifest at
-``taxonomy/frameworks/rs-gaap/v1/manifest.json`` round-trips
+``frameworks/rs-gaap/v1.json`` round-trips
 through the migration into the public-schema rows that the rest of the
 system queries — and that the row counts match the manifest's
 declarations.
@@ -26,9 +26,9 @@ from robosystems.models.extensions import (
   FrameworkBridge,
   FrameworkPackage,
 )
-from robosystems.taxonomy.loaders.discovery import framework_root
+from robosystems.taxonomy.discovery import framework_root
 
-_MANIFEST_PATH = framework_root("rs-gaap", "v1") / "manifest.json"
+_MANIFEST_PATH = framework_root("rs-gaap") / "v1.json"
 
 
 @pytest.fixture(scope="module")

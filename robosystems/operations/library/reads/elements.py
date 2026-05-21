@@ -499,7 +499,7 @@ def get_element_arcs(
 
   Filters to arcs whose structure belongs to a `taxonomy_type='mapping'`
   taxonomy — the cross-taxonomy bridges (fac↔rs-gaap equivalence,
-  fac→rs-gaap equivalence, type-subtype). Hierarchical arcs inside
+  fac→rs-gaap equivalence, rs-gaap-type-subtype). Hierarchical arcs inside
   a single reporting taxonomy (presentation/calculation) are excluded.
 
   Each arc is returned once, oriented from this element's perspective:

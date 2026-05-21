@@ -382,7 +382,7 @@ class TestBuildHierarchyFromAtoms:
   """Cover both presentation-tree root conventions in _build_hierarchy_from_atoms.
 
   The seed.py taxonomy anchors presentation arcs at ``from_element_id ==
-  structure_id``; FAC / rs-gaap / type-subtype reference taxonomies anchor
+  structure_id``; FAC / rs-gaap / rs-gaap-type-subtype reference taxonomies anchor
   at an abstract element (``fac:BalanceSheetAbstract``) and the structure
   itself never appears in any presentation arc. Both must produce a
   non-empty hierarchy or the rendering projection silently empties out.

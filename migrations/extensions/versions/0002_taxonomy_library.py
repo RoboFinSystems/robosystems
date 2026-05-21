@@ -1,9 +1,10 @@
 """Taxonomy library — XBRL-faithful model.
 
 Replaces the Python-dict seed (``seed_reporting_taxonomy``) with JSON-LD
-artifacts loaded from ``taxonomy/frameworks/rs-gaap/v1/packages/``
-and ``taxonomy/frameworks/rs-gaap/v1/bridges/`` (composed via the
-framework manifest at ``taxonomy/frameworks/rs-gaap/v1/manifest.json``),
+artifacts loaded from ``taxonomy/frameworks/rs-gaap/packages/`` and
+``taxonomy/frameworks/rs-gaap/bridges/`` (composed via the framework
+manifest at ``taxonomy/frameworks/rs-gaap/v1.json``, which depends_on
+``taxonomy/frameworks/fac/v1.json`` for the universal substrate),
 aligned with
 XBRL's association model: elements carry only XBRL-intrinsic attributes
 (balance, periodType, abstract, monetary, elementType,
@@ -33,11 +34,11 @@ Data changes (public schema):
 
 - DELETE 0001-seeded library rows
 - INSERT from JSON-LD seeds: fac, rs-gaap (concept taxonomies);
-  fac-metamodel (trait vocabulary, 99 traits across 25 categories;
+  fac-traits (trait vocabulary, 99 traits across 25 categories;
   inherited from fac framework via depends_on);
-  rs-gaap-to-metamodel (trait assignments, ~1.7k arcs);
+  rs-gaap-traits (per-element trait bindings, ~1.7k arcs);
   rs-gaap-hierarchy (class-subclass); fac-to-rs-gaap, fac-calculations,
-  fac-presentation, type-subtype (mapping seeds)
+  fac-presentation, rs-gaap-type-subtype (mapping seeds)
 
 Tenant-schema rollout (for every existing tenant schema ``kg*``):
 
@@ -68,19 +69,19 @@ from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 
 from migrations.extensions.helpers import TenantOps, for_each_tenant_schema
-from robosystems.taxonomy.loaders.discovery import (
-  TAXONOMY_ROOT as _TAXONOMY_ROOT,
+from robosystems.taxonomy.discovery import (
+  FRAMEWORKS_DIR as _FRAMEWORKS_DIR,
 )
-from robosystems.taxonomy.loaders.discovery import (
+from robosystems.taxonomy.discovery import (
   framework_root as _framework_root,
 )
-from robosystems.taxonomy.loaders.discovery import (
+from robosystems.taxonomy.discovery import (
   list_framework_seed_paths as _list_framework_seed_paths,
 )
-from robosystems.taxonomy.loaders.discovery import (
+from robosystems.taxonomy.discovery import (
   load_framework_manifest as _load_framework_manifest,
 )
-from robosystems.taxonomy.writers.tenant_writer import copy_library_into_tenant
+from robosystems.taxonomy.writer import copy_library_into_tenant
 
 # revision identifiers, used by Alembic.
 revision = "0002"
@@ -193,7 +194,7 @@ _NARROW_BLOCK_TYPE_CHECK = (
 # Phase d.2 — Seattle Method rule taxonomy: 8 VerificationRule categories
 # x 10 BusinessRulePattern mechanisms. These match the CHECK constraints on
 # public.rules.rule_category / rule_pattern and the RULE_CATEGORY_VALUES /
-# RULE_PATTERN_VALUES frozensets in jsonld_loader.py.
+# RULE_PATTERN_VALUES frozensets in loader.py.
 _RULE_CATEGORY_CHECK = (
   "rule_category IN ("
   "'AutomatedAccountingAndReportingChecks', "
@@ -860,7 +861,7 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
 
 # Kept for backward compat with importers that referenced the old name.
 # Now points at the default framework's packages directory.
-SEEDS_DIR = _framework_root("rs-gaap", "v1") / "packages"
+SEEDS_DIR = _framework_root("rs-gaap") / "packages"
 
 
 def _framework_seed_files() -> list[Path]:
@@ -882,7 +883,7 @@ def upgrade() -> None:
   # These columns live on the 0001 schema. Replaced by
   # element_traits junction rows in the
   # 'elementsOfFinancialStatements' category (seeded from
-  # fac-metamodel/v1).
+  # fac-traits/v1).
   op.drop_constraint("check_element_classification", "elements", type_="check")
   op.drop_index("idx_elements_classification", table_name="elements")
   op.drop_column("elements", "classification")
@@ -973,8 +974,8 @@ def upgrade() -> None:
   op.create_check_constraint(
     "check_association_type", "associations", _WIDENED_ASSOCIATION_CHECK
   )
-  # fac-metamodel uses 'trait-vocabulary',
-  # rs-gaap-to-metamodel uses 'classification-assignment' — neither in
+  # fac-traits uses 'trait-vocabulary',
+  # rs-gaap-traits uses 'trait-assignment' — neither in
   # the 0001 CHECK. Widen before loading JSON-LD seeds in section 7.
   op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")
   op.create_check_constraint(
@@ -1316,7 +1317,7 @@ def upgrade() -> None:
     create_library_rules,
     create_library_taxonomy_elements,
   )
-  from robosystems.taxonomy.loaders import load_taxonomy_package
+  from robosystems.taxonomy import load_taxonomy_package
 
   session = _Session(bind=conn)
   try:
@@ -1327,7 +1328,7 @@ def upgrade() -> None:
         continue
       # ``seed_path`` may live under packages/ or bridges/, so anchor the
       # relative display at the taxonomy root (the common parent).
-      print(f"  Loading seed: {seed_path.relative_to(_TAXONOMY_ROOT)}")
+      print(f"  Loading seed: {seed_path.relative_to(_FRAMEWORKS_DIR)}")
       package = load_taxonomy_package(seed_path)
       loaded_packages.append(package)
       _, counts = create_library_taxonomy_elements(session, package)
@@ -1373,7 +1374,7 @@ def upgrade() -> None:
   # for the arrangement defaults.
   #
   # ``concept_arrangement`` and ``member_arrangement`` are only set when
-  # NULL — the seed loader (``jsonld_loader._extract_structures``) already
+  # NULL — the seed loader (``loader._extract_structures``) already
   # writes Charlie's Concept Arrangement Pattern (``arithmetic`` /
   # ``roll_forward`` / etc.) explicitly per Disclosure Structure when the
   # seed declares ``conceptArrangementPattern``. This backfill is the

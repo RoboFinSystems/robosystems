@@ -18,7 +18,7 @@ holds the pin and accepts three polymorphic shapes:
 
 ``resolve_pin`` returns a flat ``{standard: version}`` dict regardless
 of input shape, which is what
-``robosystems.taxonomy.writers.tenant_writer.copy_library_into_tenant``
+``robosystems.taxonomy.writer.copy_library_into_tenant``
 consumes.
 
 This module reads the framework manifest from disk so it stays usable
@@ -34,7 +34,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-from robosystems.taxonomy.loaders.discovery import (
+from robosystems.taxonomy.discovery import (
   expand_framework_to_pin,
   load_framework_manifest,
 )

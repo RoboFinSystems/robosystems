@@ -44,7 +44,7 @@ from alembic import op
 from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 
-from robosystems.taxonomy.loaders.discovery import (
+from robosystems.taxonomy.discovery import (
   list_framework_manifests,
 )
 from robosystems.utils.uuid import generate_deterministic_uuid
@@ -77,7 +77,7 @@ def _framework_bridge_id(framework_id: str, bridge_id: str) -> str:
 
 
 def _list_framework_manifests() -> list[Path]:
-  """Walk ``frameworks/{name}/{version}/manifest.json`` for every manifest.
+  """Walk ``frameworks/{name}/{version}.json`` for every manifest.
 
   Thin wrapper kept for migration-local naming; delegates to the
   centralised discovery helper.

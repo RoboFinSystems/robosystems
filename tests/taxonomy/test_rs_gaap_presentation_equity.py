@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import pytest
 
-from robosystems.taxonomy.loaders import load_taxonomy_package
-from robosystems.taxonomy.loaders.discovery import framework_root
+from robosystems.taxonomy import load_taxonomy_package
+from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.model import TaxonomyPackage
 
-_PACKAGES = framework_root("rs-gaap", "v1") / "packages"
+_PACKAGES = framework_root("rs-gaap") / "packages"
 
 EQUITY_STRUCTURE_NAME = (
   "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)"

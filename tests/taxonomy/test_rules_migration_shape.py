@@ -24,7 +24,7 @@ import importlib.util as _util
 from pathlib import Path
 
 from robosystems.db import extensions as extensions_db
-from robosystems.taxonomy.loaders.jsonld_loader import (
+from robosystems.taxonomy.loader import (
   RULE_CATEGORY_VALUES,
   RULE_PATTERN_VALUES,
 )
@@ -102,7 +102,7 @@ class TestSeedFiles:
     rs-gaap@v1's manifest. ``is_required: false`` lets the
     framework resolve gracefully even if a deployment is missing
     them, but the manifest entries must be present."""
-    from robosystems.taxonomy.loaders import load_framework_manifest
+    from robosystems.taxonomy import load_framework_manifest
 
     manifest = load_framework_manifest("rs-gaap", "v1")
     package_names = {p["standard"] for p in manifest["packages"]}
@@ -179,7 +179,7 @@ class TestTenantWriterRuleCols:
     """The public→tenant INSERT...SELECT must name the polymorphic FK
     columns so the CHECK constraint on the tenant side sees a valid
     combination on insert."""
-    from robosystems.taxonomy.writers.tenant_writer import _RULE_COLS
+    from robosystems.taxonomy.writer import _RULE_COLS
 
     for col in (
       "id",

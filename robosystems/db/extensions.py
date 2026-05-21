@@ -361,7 +361,7 @@ def provision_tenant_schema(graph_id: str) -> None:
   from robosystems.database import platform_session
   from robosystems.models.core.graph.graph import Graph
   from robosystems.taxonomy.pins import resolve_pin
-  from robosystems.taxonomy.writers.tenant_writer import copy_library_into_tenant
+  from robosystems.taxonomy.writer import copy_library_into_tenant
 
   with platform_session() as pdb:
     graph = pdb.get(Graph, graph_id)

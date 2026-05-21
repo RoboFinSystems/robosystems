@@ -121,7 +121,7 @@ def list_taxonomy_arcs(
 ) -> list[LibraryAssociationResponse]:
   """Return every arc contributed by a taxonomy (via its structures).
 
-  For mapping taxonomies (fac-to-rs-gaap, type-subtype) this
+  For mapping taxonomies (fac-to-rs-gaap, rs-gaap-type-subtype) this
   is the whole point — the taxonomy's value is in its arcs, not in any
   concepts it owns. Joins from → element and to → element so the response
   carries qnames + names for UI display without a second round-trip.

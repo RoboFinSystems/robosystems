@@ -1,8 +1,8 @@
 """Smoke tests for the Arelle → rdflib → JSON-LD pipeline.
 
 These tests avoid live XBRL fetches by relying on the committed
-artifacts under `taxonomy/frameworks/fac/v1/packages/` (FAC concept seed)
-and `taxonomy/frameworks/rs-gaap/v1/bridges/` (fac-to-rs-gaap mapping).
+artifacts under `frameworks/fac/packages/` (FAC concept seed)
+and `frameworks/rs-gaap/bridges/` (fac-to-rs-gaap mapping).
 They exercise the serializer/loader round-trip and the TaxonomyPackage
 shape, but not the extractor (which needs a live ModelXbrl).
 
@@ -19,21 +19,17 @@ from rdflib import Graph
 
 from robosystems.arelle import CANONICAL_CONTEXT, serialize_jsonld
 from robosystems.arelle.context import context_document
-from robosystems.taxonomy.loaders import load_taxonomy_package
-from robosystems.taxonomy.loaders.discovery import framework_root
+from robosystems.taxonomy import load_taxonomy_package
+from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.model import (
   AssociationSpec,
   ElementSpec,
   TaxonomyPackage,
 )
 
-FAC_SEED = framework_root("fac", "v1") / "packages" / "fac" / "v1" / "taxonomy.jsonld"
+FAC_SEED = framework_root("fac") / "packages" / "fac" / "v1" / "taxonomy.jsonld"
 FAC_TO_RS_GAAP_SEED = (
-  framework_root("rs-gaap", "v1")
-  / "bridges"
-  / "fac-to-rs-gaap"
-  / "v1"
-  / "taxonomy.jsonld"
+  framework_root("rs-gaap") / "bridges" / "fac-to-rs-gaap" / "v1" / "taxonomy.jsonld"
 )
 
 
