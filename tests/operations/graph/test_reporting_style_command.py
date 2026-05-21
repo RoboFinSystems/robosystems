@@ -248,6 +248,86 @@ class TestChangeReportingStyleCmd:
     db.commit.assert_called_once()
     db.refresh.assert_called_once_with(graph)
 
+  async def test_happy_path_returns_reporting_style_code(self):
+    """The 4-segment code stamped into the Style Structure's metadata by
+    migration 0008 surfaces in the response."""
+    db = MagicMock()
+    user = _make_user()
+    graph = _make_graph(DEFAULT_STYLE_ID)
+    row = MagicMock()
+    row.id = SMALL_PRIVATE_STYLE_ID
+    row.name = "Small Private Company Style"
+    row.block_type = "reporting_style"
+    row.is_active = True
+    row.metadata = {"reporting_style_code": "BSC-CORP-IS01-CF1"}
+    ext_cm = _make_ext_session(
+      style_row=row, composed_types=list(_REQUIRED_STATEMENT_TYPES)
+    )
+    with (
+      _patch_owner_membership(),
+      patch(f"{_GRAPH}.get_by_id", return_value=graph),
+      patch(_EXT_SESSION, return_value=ext_cm),
+    ):
+      result = await change_reporting_style_cmd(
+        GRAPH_ID, SMALL_PRIVATE_STYLE_ID, user, db
+      )
+
+    assert result["reporting_style_code"] == "BSC-CORP-IS01-CF1"
+
+  async def test_reporting_style_code_none_when_unstamped(self):
+    """Legacy Style rows without a stamped code return ``None`` (not a
+    crash) — metadata may be NULL or lack the key."""
+    db = MagicMock()
+    user = _make_user()
+    graph = _make_graph(DEFAULT_STYLE_ID)
+    row = MagicMock()
+    row.id = SMALL_PRIVATE_STYLE_ID
+    row.name = "Small Private Company Style"
+    row.block_type = "reporting_style"
+    row.is_active = True
+    row.metadata = None
+    ext_cm = _make_ext_session(
+      style_row=row, composed_types=list(_REQUIRED_STATEMENT_TYPES)
+    )
+    with (
+      _patch_owner_membership(),
+      patch(f"{_GRAPH}.get_by_id", return_value=graph),
+      patch(_EXT_SESSION, return_value=ext_cm),
+    ):
+      result = await change_reporting_style_cmd(
+        GRAPH_ID, SMALL_PRIVATE_STYLE_ID, user, db
+      )
+
+    assert result["reporting_style_code"] is None
+
+  async def test_previous_style_none_renders_as_null(self):
+    """A freshly provisioned graph with no style pinned reports
+    ``previous_reporting_style_id`` as JSON null, not the string
+    "None", and still proceeds with the change."""
+    db = MagicMock()
+    user = _make_user()
+    graph = _make_graph(reporting_style_id=None)
+    row = MagicMock()
+    row.id = SMALL_PRIVATE_STYLE_ID
+    row.name = "Small Private Company Style"
+    row.block_type = "reporting_style"
+    row.is_active = True
+    row.metadata = {"reporting_style_code": "BSC-CORP-IS01-CF1"}
+    ext_cm = _make_ext_session(
+      style_row=row, composed_types=list(_REQUIRED_STATEMENT_TYPES)
+    )
+    with (
+      _patch_owner_membership(),
+      patch(f"{_GRAPH}.get_by_id", return_value=graph),
+      patch(_EXT_SESSION, return_value=ext_cm),
+    ):
+      result = await change_reporting_style_cmd(
+        GRAPH_ID, SMALL_PRIVATE_STYLE_ID, user, db
+      )
+
+    assert result["changed"] is True
+    assert result["previous_reporting_style_id"] is None
+
   async def test_legacy_custom_block_type_accepted(self):
     """Existing tenants whose 3 Style rows weren't promoted by 0008
     (immutability trigger leaves tenant copies as 'custom') can still

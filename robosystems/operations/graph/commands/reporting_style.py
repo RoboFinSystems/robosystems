@@ -86,7 +86,12 @@ async def change_reporting_style_cmd(
   if not graph:
     raise HTTPException(status_code=404, detail=f"Graph {graph_id!r} not found")
 
-  previous_style_id = str(graph.reporting_style_id)
+  # ``None`` for a freshly provisioned graph with no style pinned yet —
+  # keep it as JSON null in the response rather than the string "None",
+  # and let the no-op check below fall through to a real change.
+  previous_style_id = (
+    str(graph.reporting_style_id) if graph.reporting_style_id else None
+  )
 
   # Same-target is an idempotent no-op so a retry on transient network
   # error doesn't churn the platform row or surface a spurious change
