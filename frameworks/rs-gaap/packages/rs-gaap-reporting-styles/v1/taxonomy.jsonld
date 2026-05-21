@@ -31,6 +31,9 @@
     "reportingStyleComposesDisclosure": {
       "@id": "https://robosystems.ai/vocab/reportingStyleComposesDisclosure",
       "@type": "@id"
+    },
+    "reportingStyleCode": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleCode"
     }
   },
   "standard": "rs-gaap-reporting-styles",
@@ -69,14 +72,28 @@
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/Default",
       "structureName": "Default Style — Composition",
       "blockType": "custom",
-      "conceptArrangementPattern": "set"
+      "conceptArrangementPattern": "set",
+      "reportingStyleCode": "BSC-CORP-IS02-CF1",
+      "reportingStyleNetworks": [
+        {"statementType": "balance_sheet", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified"},
+        {"statementType": "income_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep"},
+        {"statementType": "cash_flow_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"},
+        {"statementType": "equity_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward"}
+      ]
     },
     {
       "@id": "_:style-smallprivate-structure",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/SmallPrivateCompany",
-      "structureName": "Small Private Company Style — Composition",
+      "structureName": "Small Private Company Style — Composition (single-step IS)",
       "blockType": "custom",
-      "conceptArrangementPattern": "set"
+      "conceptArrangementPattern": "set",
+      "reportingStyleCode": "BSC-CORP-IS01-CF1",
+      "reportingStyleNetworks": [
+        {"statementType": "balance_sheet", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified"},
+        {"statementType": "income_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep"},
+        {"statementType": "cash_flow_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"},
+        {"statementType": "equity_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward"}
+      ]
     },
     {
       "@id": "_:style-banking-structure",

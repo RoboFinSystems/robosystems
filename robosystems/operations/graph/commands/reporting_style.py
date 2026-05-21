@@ -108,7 +108,7 @@ async def change_reporting_style_cmd(
     row = ext.execute(
       text(
         """
-        SELECT id, name, block_type, is_active
+        SELECT id, name, block_type, is_active, metadata
         FROM structures
         WHERE id = :sid
         """
@@ -167,6 +167,12 @@ async def change_reporting_style_cmd(
         ),
       )
 
+  # 4-segment Reporting Style code (e.g. BSC-CORP-IS01-CF1), stamped into
+  # the Style Structure's metadata by migration 0008 from the package's
+  # reportingStyleCode declaration. None for legacy/unstamped Styles.
+  metadata = row.metadata if isinstance(row.metadata, dict) else {}
+  reporting_style_code = metadata.get("reporting_style_code")
+
   # All validation passed — flip the platform-DB column.
   graph.reporting_style_id = new_reporting_style_id
   db.commit()
@@ -176,5 +182,6 @@ async def change_reporting_style_cmd(
     "graph_id": graph_id,
     "previous_reporting_style_id": previous_style_id,
     "reporting_style_id": new_reporting_style_id,
+    "reporting_style_code": reporting_style_code,
     "changed": True,
   }

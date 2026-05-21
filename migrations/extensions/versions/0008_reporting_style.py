@@ -19,8 +19,12 @@ This migration is additive:
    doesn't filter on the Style's block_type, and the immutability
    trigger blocks tenant-scope UPDATE on library-seeded rows. Newly
    re-provisioned tenants pick up the corrected type from public.
-4. Seed the Default Style's composition (Balance Sheet / Multi-step IS /
-   Indirect CF / Equity Roll Forward) into ``public.reporting_style_networks``.
+4. Seed every declared Style's composition into
+   ``public.reporting_style_networks``, read data-driven from the
+   reporting-styles package's ``reportingStyleNetworks`` declarations,
+   and stamp each Style's 4-segment ``reportingStyleCode`` into
+   ``structures.metadata``. Adding a preset is pure package content — a
+   ``reset-local`` re-runs this and picks it up with no new migration.
 
 No prod backfill (Reporting Style hasn't shipped): the platform-side
 ``graphs.reporting_style_id`` lands in a sibling migration; local dev
@@ -32,6 +36,9 @@ Create Date: 2026-05-13
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 import sqlalchemy as sa
 from alembic import op
@@ -46,28 +53,61 @@ branch_labels = None
 depends_on = None
 
 
-# ── Reporting Style + Network role URIs (deterministic, library-seeded) ──
+# ── Style compositions are read from the reporting-styles package ─────────
+# at migration time (data-driven). The package declares each Style's
+# 4-segment ``reportingStyleCode`` and its ``reportingStyleNetworks``
+# composition (statement_type → network roleUri); the seeder resolves
+# every roleUri to its deterministic Structure id. Adding a new preset is
+# therefore pure package content — ``reset-local`` re-runs this migration
+# and picks it up with no new migration.
 
-_DEFAULT_STYLE_ROLE = "https://robosystems.ai/seattle/cm-roles/roles/styles/Default"
-_SMALL_PRIVATE_STYLE_ROLE = (
-  "https://robosystems.ai/seattle/cm-roles/roles/styles/SmallPrivateCompany"
-)
-_BANKING_STYLE_ROLE = "https://robosystems.ai/seattle/cm-roles/roles/styles/Banking"
-
-_BS_NETWORK_ROLE = (
-  "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified"
-)
-_IS_NETWORK_ROLE = (
-  "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep"
-)
-_CF_NETWORK_ROLE = (
-  "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"
-)
-_SE_NETWORK_ROLE = "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward"
+_STYLE_ROLE_PREFIX = "https://robosystems.ai/seattle/cm-roles/roles/styles/"
 
 
 def _structure_id(role_uri: str) -> str:
   return generate_deterministic_uuid(role_uri, namespace="structure")
+
+
+def _read_reporting_styles_package() -> list[dict]:
+  """Load the rs-gaap-reporting-styles package ``@graph`` nodes."""
+  from robosystems.taxonomy.discovery import framework_root, package_path
+
+  pkg = package_path(
+    "rs-gaap-reporting-styles", "v1", framework_root("rs-gaap") / "packages"
+  )
+  return json.loads(Path(pkg).read_text()).get("@graph", [])
+
+
+def _declared_styles() -> list[dict]:
+  """Every Style that declares a composition.
+
+  Returns ``[{"role_uri", "code", "networks": [(stmt, net_role), ...]}]``.
+  Composition-less placeholders (e.g. Banking) are skipped so they stay
+  non-selectable until a composition is authored.
+  """
+  styles: list[dict] = []
+  for node in _read_reporting_styles_package():
+    networks = node.get("reportingStyleNetworks")
+    role_uri = node.get("roleUri")
+    if not networks or not isinstance(role_uri, str):
+      continue
+    styles.append(
+      {
+        "role_uri": role_uri,
+        "code": node.get("reportingStyleCode"),
+        "networks": [(n["statementType"], n["networkRoleUri"]) for n in networks],
+      }
+    )
+  return styles
+
+
+def _all_style_role_uris() -> list[str]:
+  """Every Style Structure roleUri in the package (composed or not)."""
+  return [
+    n["roleUri"]
+    for n in _read_reporting_styles_package()
+    if isinstance(n.get("roleUri"), str) and n["roleUri"].startswith(_STYLE_ROLE_PREFIX)
+  ]
 
 
 # ── block_type CHECK widen (admit 'reporting_style') ──────────────────
@@ -157,63 +197,77 @@ def _drop_rsn_in_tenant(conn, schema: str) -> None:
   conn.execute(text(f'DROP TABLE IF EXISTS "{schema}".reporting_style_networks'))
 
 
-# ── Default Style composition rows (seeded in public only) ────────────────
+# ── Style composition rows (data-driven from the package) ─────────────────
 
 
-_DEFAULT_STYLE_COMPOSITION = [
-  # (statement_type, network_role_uri)
-  ("balance_sheet", _BS_NETWORK_ROLE),
-  ("income_statement", _IS_NETWORK_ROLE),
-  ("cash_flow_statement", _CF_NETWORK_ROLE),
-  ("equity_statement", _SE_NETWORK_ROLE),
-]
+def _seed_style_compositions(conn, schema: str) -> None:
+  """Seed every declared Style's composition into ``{schema}.reporting_style_networks``.
 
-
-def _seed_default_style_composition(conn, schema: str) -> None:
-  """Seed the Default Style's 4 composition rows into ``{schema}.reporting_style_networks``.
-
-  Used for both ``public`` (the library template) and every existing
-  tenant schema. Reporting Style hasn't shipped, so this backfill is
-  safe across all tenants — there's no live composition to overwrite.
-  ``ON CONFLICT DO NOTHING`` keeps it idempotent.
+  Reads each Style's ``reportingStyleNetworks`` from the reporting-styles
+  package and resolves both the Style roleUri and each network roleUri to
+  its deterministic Structure id. Used for both ``public`` (the library
+  template) and every existing tenant schema. Reporting Style hasn't
+  shipped, so this backfill is safe across all tenants — there's no live
+  composition to overwrite. ``ON CONFLICT DO NOTHING`` keeps it idempotent.
   """
-  default_style_id = _structure_id(_DEFAULT_STYLE_ROLE)
   table = (
     "public.reporting_style_networks"
     if schema == "public"
     else f'"{schema}".reporting_style_networks'
   )
-  for statement_type, role in _DEFAULT_STYLE_COMPOSITION:
+  for style in _declared_styles():
+    style_id = _structure_id(style["role_uri"])
+    for statement_type, network_role in style["networks"]:
+      conn.execute(
+        text(
+          f"""
+          INSERT INTO {table} (
+            reporting_style_id, statement_type, network_id, created_by
+          ) VALUES (:style, :stmt, :network, 'library-seeder')
+          ON CONFLICT (reporting_style_id, statement_type) DO NOTHING
+          """
+        ),
+        {
+          "style": style_id,
+          "stmt": statement_type,
+          "network": _structure_id(network_role),
+        },
+      )
+
+
+def _stamp_style_codes(conn) -> None:
+  """Stamp ``reportingStyleCode`` into ``public.structures.metadata`` for
+  every declared Style. Tenant rows pick it up via the library copy on
+  re-provision (the immutability trigger blocks tenant-scope UPDATE)."""
+  for style in _declared_styles():
+    if not style["code"]:
+      continue
     conn.execute(
       text(
-        f"""
-        INSERT INTO {table} (
-          reporting_style_id, statement_type, network_id, created_by
-        ) VALUES (:style, :stmt, :network, 'library-seeder')
-        ON CONFLICT (reporting_style_id, statement_type) DO NOTHING
+        """
+        UPDATE public.structures
+        SET metadata = jsonb_set(
+          COALESCE(metadata, '{}'::jsonb),
+          '{reporting_style_code}',
+          to_jsonb(CAST(:code AS text)),
+          true
+        )
+        WHERE id = :sid
         """
       ),
-      {
-        "style": default_style_id,
-        "stmt": statement_type,
-        "network": _structure_id(role),
-      },
+      {"sid": _structure_id(style["role_uri"]), "code": style["code"]},
     )
 
 
 def _promote_style_structures(conn) -> None:
-  """Flip the 3 placeholder Style Structures in PUBLIC from 'custom' →
+  """Flip every Style Structure in PUBLIC from 'custom' →
   'reporting_style'. Tenant rows are left untouched: the library
   immutability trigger blocks tenant-scope UPDATE, and the picker
   doesn't care about the Style's block_type. Fresh tenants pick
   up the corrected type when ``copy_library_into_tenant`` re-mirrors
   rows from public after this migration runs.
   """
-  ids = [
-    _structure_id(_DEFAULT_STYLE_ROLE),
-    _structure_id(_SMALL_PRIVATE_STYLE_ROLE),
-    _structure_id(_BANKING_STYLE_ROLE),
-  ]
+  ids = [_structure_id(r) for r in _all_style_role_uris()]
   conn.execute(
     text(
       """
@@ -227,11 +281,7 @@ def _promote_style_structures(conn) -> None:
 
 
 def _restore_style_structures(conn) -> None:
-  ids = [
-    _structure_id(_DEFAULT_STYLE_ROLE),
-    _structure_id(_SMALL_PRIVATE_STYLE_ROLE),
-    _structure_id(_BANKING_STYLE_ROLE),
-  ]
+  ids = [_structure_id(r) for r in _all_style_role_uris()]
   conn.execute(
     text(
       """
@@ -283,17 +333,20 @@ def upgrade() -> None:
   # 3. Create reporting_style_networks in every existing tenant schema.
   for_each_tenant_schema(conn, _create_rsn_in_tenant)
 
-  # 4. Promote 3 Style Structures in public from 'custom' →
-  # 'reporting_style'. Tenant rows are left alone (immutability trigger).
+  # 4. Promote every Style Structure in public from 'custom' →
+  # 'reporting_style' and stamp its 4-segment reportingStyleCode into
+  # structures.metadata. Tenant rows are left alone (immutability trigger).
   _promote_style_structures(conn)
+  _stamp_style_codes(conn)
 
-  # 5. Seed Default Style's composition (BS / IS / CF / SE) into public
-  # AND every existing tenant. Backfilling tenants is safe here because
-  # Reporting Style hasn't shipped — there's no live composition to
-  # overwrite. Production tenants don't exist yet; local dev tenants
-  # need the rows for the picker to resolve a Network.
-  _seed_default_style_composition(conn, "public")
-  for_each_tenant_schema(conn, _seed_default_style_composition)
+  # 5. Seed each declared Style's composition into public AND every
+  # existing tenant. Data-driven from the reporting-styles package, so a
+  # new preset is pure content (reset-local re-runs this). Backfilling
+  # tenants is safe here because Reporting Style hasn't shipped — there's
+  # no live composition to overwrite. Production tenants don't exist yet;
+  # local dev tenants need the rows for the picker to resolve a Network.
+  _seed_style_compositions(conn, "public")
+  for_each_tenant_schema(conn, _seed_style_compositions)
 
 
 def downgrade() -> None:
