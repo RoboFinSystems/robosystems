@@ -57,8 +57,14 @@ MAPPINGS: list[tuple[str, str]] = [
   ),  # Accumulated Depreciation (contra-asset)
   # Liabilities
   ("2000", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Accounts Payable
-  ("2100", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Accrued Liabilities
-  ("2200", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Payroll Taxes Payable
+  (
+    "2100",
+    "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent",
+  ),  # Accrued Liabilities
+  (
+    "2200",
+    "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent",
+  ),  # Payroll Taxes Payable
   # Equity
   ("3000", "rs-gaap:AdditionalPaidInCapital"),  # Owner's Equity
   ("3100", "rs-gaap:RetainedEarningsAccumulatedDeficit"),  # Retained Earnings
@@ -75,9 +81,40 @@ MAPPINGS: list[tuple[str, str]] = [
   ("6000", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Office Rent
   ("6100", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Software Subscriptions
   ("6200", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Cloud Hosting
-  ("6300", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Professional Development
+  (
+    "6300",
+    "rs-gaap:SellingGeneralAndAdministrativeExpense",
+  ),  # Professional Development
   ("6400", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Business Insurance
   ("6500", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Office Supplies
   ("6600", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Travel & Entertainment
   ("7000", "rs-gaap:DepreciationDepletionAndAmortization"),  # Depreciation Expense
 ]
+
+
+# Equity CoA (3000 Owner's Equity, 3100 Retained Earnings) maps to the
+# rs-gaap capital concept appropriate to the entity's legal form, so the
+# equity-form Reporting Style (BSC-{CORP,PART,LLC}-…) renders its native
+# capital line. Non-equity mappings are identical across forms.
+_EQUITY_BY_FORM: dict[str, list[tuple[str, str]]] = {
+  "corporation": [
+    ("3000", "rs-gaap:AdditionalPaidInCapital"),
+    ("3100", "rs-gaap:RetainedEarningsAccumulatedDeficit"),
+  ],
+  "partnership": [
+    ("3000", "rs-gaap:PartnersCapital"),
+    ("3100", "rs-gaap:PartnersCapital"),
+  ],
+  "llc": [
+    ("3000", "rs-gaap:MembersEquity"),
+    ("3100", "rs-gaap:MembersEquity"),
+  ],
+}
+
+
+def mappings_for(entity_type: str = "corporation") -> list[tuple[str, str]]:
+  """CoA→rs-gaap mappings with equity rows tuned to the entity legal form."""
+  form = (entity_type or "corporation").strip().lower()
+  equity = _EQUITY_BY_FORM.get(form, _EQUITY_BY_FORM["corporation"])
+  base = [m for m in MAPPINGS if m[0] not in ("3000", "3100")]
+  return base + equity

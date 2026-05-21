@@ -280,6 +280,7 @@ class Graph(Model):
     is_subgraph: bool = False,
     subgraph_metadata: dict[str, Any] | None = None,
     status: GraphStatus = GraphStatus.ACTIVE,
+    reporting_style_id: str | None = None,
     commit: bool = True,
   ) -> "Graph":
     """Create a new graph metadata entry."""
@@ -322,6 +323,12 @@ class Graph(Model):
       subgraph_metadata=subgraph_metadata,
       status=status.value if isinstance(status, GraphStatus) else status,
     )
+
+    # Only set when caller supplies one; otherwise the column default
+    # (corporate DEFAULT_STYLE_ID) applies. Passing None explicitly would
+    # violate the NOT NULL constraint.
+    if reporting_style_id is not None:
+      graph.reporting_style_id = reporting_style_id
 
     session.add(graph)
     if commit:

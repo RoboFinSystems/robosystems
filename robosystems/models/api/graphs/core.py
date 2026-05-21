@@ -92,6 +92,26 @@ class InitialEntityData(BaseModel):
   state_of_incorporation: str | None = Field(None, description="State of incorporation")
   fiscal_year_end: str | None = Field(None, description="Fiscal year end (MMDD)")
   ein: str | None = Field(None, description="Employer Identification Number")
+  entity_type: str | None = Field(
+    None,
+    description=(
+      "Entity legal form (e.g. 'corporation', 'llc' / "
+      "'limited_liability_company', 'partnership', 'sole_proprietorship', "
+      "'non_profit'). Drives the graph's default "
+      "Reporting Style at creation — partnership and llc get dedicated "
+      "equity-form Styles; everything else defaults to corporate. Blank "
+      "falls back to corporate."
+    ),
+  )
+  reporting_style_id: str | None = Field(
+    None,
+    description=(
+      "Optional explicit Reporting Style Structure id to pin on the graph, "
+      "overriding the entity_type-derived default. Leave blank to derive "
+      "from entity_type. Change later via the change-reporting-style "
+      "operation."
+    ),
+  )
 
 
 class CreateGraphRequest(BaseModel):

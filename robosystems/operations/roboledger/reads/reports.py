@@ -47,6 +47,9 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   render_structure_view,
 )
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
+from robosystems.operations.roboledger.reports.network_picker import (
+  load_close_target_concept,
+)
 
 VALID_BLOCK_TYPES = {
   "income_statement",
@@ -139,6 +142,7 @@ def generate_adhoc_private_statement(
     taxonomy_id=resolved_taxonomy_id,
     mapping_id=mapping.id,
     periods=periods,
+    close_target_qname=load_close_target_concept(session, reporting_style_id),
   )
 
   grid = render_structure_view(

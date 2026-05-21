@@ -19,6 +19,13 @@ class EntityCreate(BaseModel):
   state_of_incorporation: str | None = None
   fiscal_year_end: str | None = None
   ein: str | None = None
+  entity_type: str | None = Field(
+    default=None,
+    description=(
+      "Entity legal form (corporation, llc / limited_liability_company, "
+      "partnership, sole_proprietorship, non_profit)."
+    ),
+  )
   tier: str | None = Field(
     default=None,
     description="Graph tier to create (ladybug-standard, ladybug-large, ladybug-xlarge). If not specified, defaults to ladybug-standard.",
@@ -71,6 +78,7 @@ class EntityUpdate(BaseModel):
   state_of_incorporation: str | None = None
   fiscal_year_end: str | None = None
   ein: str | None = None
+  entity_type: str | None = None
 
   @field_validator("uri")
   @classmethod
@@ -93,6 +101,7 @@ class EntityResponse(BaseModel):
   state_of_incorporation: str | None = None
   fiscal_year_end: str | None = None
   ein: str | None = None
+  entity_type: str | None = None
   created_at: str
   updated_at: str
   tier: str | None = None

@@ -210,6 +210,8 @@ class ReportingStyleConstants:
   DEFAULT_STYLE_ID = "025f5d48-12ce-5d65-b9eb-4f137a10ef06"
   SMALL_PRIVATE_COMPANY_STYLE_ID = "921f5214-afd8-565c-8189-50bcc94c0234"
   BANKING_STYLE_ID = "511aeedc-fa99-5fe5-b7f1-67673b7bdb19"
+  PARTNERSHIP_STYLE_ID = "10d05f23-8ea8-5348-b8c9-f1e65bbda4a3"
+  LLC_STYLE_ID = "69bee020-87d6-5e5d-8c1e-9007d8eb8d4f"
 
 
 class PrefixConstants:

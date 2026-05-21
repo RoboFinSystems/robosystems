@@ -81,9 +81,12 @@ def _read_reporting_styles_package() -> list[dict]:
 def _declared_styles() -> list[dict]:
   """Every Style that declares a composition.
 
-  Returns ``[{"role_uri", "code", "networks": [(stmt, net_role), ...]}]``.
-  Composition-less placeholders (e.g. Banking) are skipped so they stay
-  non-selectable until a composition is authored.
+  Returns ``[{"role_uri", "code", "close_target", "networks": [(stmt,
+  net_role), ...]}]``. ``close_target`` is the form's earnings-home concept
+  qname (``retainedEarningsConcept``) — where derived cumulative earnings
+  roll for this form (CORP→RetainedEarnings, PART→PartnersCapital,
+  LLC→MembersEquity). Composition-less placeholders (e.g. Banking) are
+  skipped so they stay non-selectable until a composition is authored.
   """
   styles: list[dict] = []
   for node in _read_reporting_styles_package():
@@ -95,6 +98,7 @@ def _declared_styles() -> list[dict]:
       {
         "role_uri": role_uri,
         "code": node.get("reportingStyleCode"),
+        "close_target": node.get("retainedEarningsConcept"),
         "networks": [(n["statementType"], n["networkRoleUri"]) for n in networks],
       }
     )
@@ -259,6 +263,69 @@ def _stamp_style_codes(conn) -> None:
     )
 
 
+def _stamp_close_targets(conn) -> None:
+  """Stamp each composed Style's earnings-home concept into
+  ``public.structures.metadata.retained_earnings_concept``.
+
+  This is the single authoritative close target the fact generator routes
+  derived cumulative earnings to (``fact_grid._find_close_target``). Exactly
+  one per Style by construction (a single declared field) — never a runtime
+  scan that could match many. Validates that the declared concept is
+  actually presented in the Style's balance_sheet Network's equity section,
+  so earnings can't close to a concept the BS doesn't render (which would
+  silently drop them from the equity subtotal). Fails the migration loudly
+  on a mis-declaration.
+  """
+  for style in _declared_styles():
+    target = style["close_target"]
+    if not target:
+      continue
+    bs_role = next(
+      (net for stmt, net in style["networks"] if stmt == "balance_sheet"), None
+    )
+    if bs_role is None:
+      raise RuntimeError(
+        f"Style {style['role_uri']} declares retainedEarningsConcept "
+        f"{target!r} but composes no balance_sheet network."
+      )
+    presented = conn.execute(
+      text(
+        """
+        SELECT 1
+        FROM public.associations a
+        JOIN public.elements e ON e.id = a.to_element_id
+        WHERE a.structure_id = :bs_id
+          AND a.association_type = 'presentation'
+          AND e.qname = :target
+        LIMIT 1
+        """
+      ),
+      {"bs_id": _structure_id(bs_role), "target": target},
+    ).fetchone()
+    if presented is None:
+      raise RuntimeError(
+        f"Style {style['role_uri']} declares retainedEarningsConcept "
+        f"{target!r}, but the balance_sheet network {bs_role!r} does not "
+        f"present it — derived earnings would close to an unrendered "
+        f"concept and drop out of the equity subtotal."
+      )
+    conn.execute(
+      text(
+        """
+        UPDATE public.structures
+        SET metadata = jsonb_set(
+          COALESCE(metadata, '{}'::jsonb),
+          '{retained_earnings_concept}',
+          to_jsonb(CAST(:target AS text)),
+          true
+        )
+        WHERE id = :sid
+        """
+      ),
+      {"sid": _structure_id(style["role_uri"]), "target": target},
+    )
+
+
 def _promote_style_structures(conn) -> None:
   """Flip every Style Structure in PUBLIC from 'custom' →
   'reporting_style'. Tenant rows are left untouched: the library
@@ -338,6 +405,7 @@ def upgrade() -> None:
   # structures.metadata. Tenant rows are left alone (immutability trigger).
   _promote_style_structures(conn)
   _stamp_style_codes(conn)
+  _stamp_close_targets(conn)
 
   # 5. Seed each declared Style's composition into public AND every
   # existing tenant. Data-driven from the reporting-styles package, so a

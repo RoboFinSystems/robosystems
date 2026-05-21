@@ -328,7 +328,13 @@ class GraphCreationService:
     from robosystems.models.core import GraphSchema, GraphUser
     from robosystems.models.core.graph import Graph
 
+    from .reporting_style_defaults import resolve_reporting_style_id
     from .table_service import TableService
+
+    # Derive the initial Reporting Style from the entity's legal form (an
+    # explicit reporting_style_id on the request overrides it). Reads the
+    # raw create payload — the tenant schema doesn't exist yet here.
+    reporting_style_id = resolve_reporting_style_id(config.entity_data)
 
     db_gen = get_db_session()
     db = next(db_gen)
@@ -352,6 +358,7 @@ class GraphCreationService:
           "type": config.graph_type,
           "tags": config.tags,
         },
+        reporting_style_id=reporting_style_id,
         commit=False,
       )
 
@@ -449,6 +456,7 @@ class GraphCreationService:
         state_of_incorporation=entity_data.state_of_incorporation,
         fiscal_year_end=entity_data.fiscal_year_end,
         tax_id=entity_data.ein,
+        entity_type=entity_data.entity_type,
         website=entity_data.uri,
         status="active",
         is_parent=True,

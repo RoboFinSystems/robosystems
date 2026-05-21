@@ -34,6 +34,9 @@
     },
     "reportingStyleCode": {
       "@id": "https://robosystems.ai/vocab/reportingStyleCode"
+    },
+    "retainedEarningsConcept": {
+      "@id": "https://robosystems.ai/vocab/retainedEarningsConcept"
     }
   },
   "standard": "rs-gaap-reporting-styles",
@@ -66,6 +69,20 @@
       "periodType": "duration",
       "abstract": true
     },
+    {
+      "@id": "styles:Partnership",
+      "label": "Partnership Style",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true
+    },
+    {
+      "@id": "styles:LimitedLiabilityCompany",
+      "label": "Limited Liability Company Style",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true
+    },
 
     {
       "@id": "_:style-default-structure",
@@ -74,6 +91,7 @@
       "blockType": "custom",
       "conceptArrangementPattern": "set",
       "reportingStyleCode": "BSC-CORP-IS02-CF1",
+      "retainedEarningsConcept": "rs-gaap:RetainedEarningsAccumulatedDeficit",
       "reportingStyleNetworks": [
         {"statementType": "balance_sheet", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified"},
         {"statementType": "income_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep"},
@@ -88,6 +106,7 @@
       "blockType": "custom",
       "conceptArrangementPattern": "set",
       "reportingStyleCode": "BSC-CORP-IS01-CF1",
+      "retainedEarningsConcept": "rs-gaap:RetainedEarningsAccumulatedDeficit",
       "reportingStyleNetworks": [
         {"statementType": "balance_sheet", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified"},
         {"statementType": "income_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep"},
@@ -101,6 +120,36 @@
       "structureName": "Banking Style — Composition (placeholder)",
       "blockType": "custom",
       "conceptArrangementPattern": "set"
+    },
+    {
+      "@id": "_:style-partnership-structure",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/Partnership",
+      "structureName": "Partnership Style — Composition (partners' capital equity)",
+      "blockType": "custom",
+      "conceptArrangementPattern": "set",
+      "reportingStyleCode": "BSC-PART-IS02-CF1",
+      "retainedEarningsConcept": "rs-gaap:PartnersCapital",
+      "reportingStyleNetworks": [
+        {"statementType": "balance_sheet", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART"},
+        {"statementType": "income_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep"},
+        {"statementType": "cash_flow_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"},
+        {"statementType": "equity_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-PART"}
+      ]
+    },
+    {
+      "@id": "_:style-llc-structure",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/LimitedLiabilityCompany",
+      "structureName": "Limited Liability Company Style — Composition (members' equity)",
+      "blockType": "custom",
+      "conceptArrangementPattern": "set",
+      "reportingStyleCode": "BSC-LLC-IS02-CF1",
+      "retainedEarningsConcept": "rs-gaap:MembersEquity",
+      "reportingStyleNetworks": [
+        {"statementType": "balance_sheet", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC"},
+        {"statementType": "income_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep"},
+        {"statementType": "cash_flow_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"},
+        {"statementType": "equity_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward-LLC"}
+      ]
     },
 
     {
@@ -148,6 +197,40 @@
         {"@id": "disclosures:IncomeStatement"},
         {"@id": "disclosures:CashFlowStatement"},
         {"@id": "disclosures:StatementOfChangesInEquity"}
+      ]
+    },
+
+    {
+      "@id": "styles:Partnership",
+      "reportingStyleComposesDisclosure": [
+        {"@id": "disclosures:BalanceSheet"},
+        {"@id": "disclosures:IncomeStatement"},
+        {"@id": "disclosures:CashFlowStatement"},
+        {"@id": "disclosures:StatementOfChangesInEquity"},
+        {"@id": "disclosures:DocumentAndEntityInformation"},
+        {"@id": "disclosures:NatureOfOperations"},
+        {"@id": "disclosures:SignificantAccountingPolicies"},
+        {"@id": "disclosures:PropertyPlantAndEquipmentDisclosure"},
+        {"@id": "disclosures:DebtDisclosure"},
+        {"@id": "disclosures:CommitmentsDisclosure"},
+        {"@id": "disclosures:RelatedPartyDisclosures"}
+      ]
+    },
+
+    {
+      "@id": "styles:LimitedLiabilityCompany",
+      "reportingStyleComposesDisclosure": [
+        {"@id": "disclosures:BalanceSheet"},
+        {"@id": "disclosures:IncomeStatement"},
+        {"@id": "disclosures:CashFlowStatement"},
+        {"@id": "disclosures:StatementOfChangesInEquity"},
+        {"@id": "disclosures:DocumentAndEntityInformation"},
+        {"@id": "disclosures:NatureOfOperations"},
+        {"@id": "disclosures:SignificantAccountingPolicies"},
+        {"@id": "disclosures:PropertyPlantAndEquipmentDisclosure"},
+        {"@id": "disclosures:DebtDisclosure"},
+        {"@id": "disclosures:CommitmentsDisclosure"},
+        {"@id": "disclosures:RelatedPartyDisclosures"}
       ]
     }
   ]

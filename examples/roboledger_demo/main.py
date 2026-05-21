@@ -102,13 +102,18 @@ def _get_operation_client():
 # ---------------------------------------------------------------------------
 
 
-def create_demo_graph(skeleton: bool = False) -> str:
+def create_demo_graph(skeleton: bool = False, entity_type: str = "corporation") -> str:
   """Create user + roboledger graph via the API.
 
   When ``skeleton=True``, provisions an empty graph (placeholder Entity,
   no synthetic data) under a separate ``.local/config.json`` slot so it
   doesn't collide with the full Cascade demo. The placeholder Entity is
   overwritten by QB CompanyInfo on first sync.
+
+  ``entity_type`` sets the entity's legal form on the create request, which
+  the backend uses to prefill the graph's Reporting Style (partnership →
+  PART, llc → LLC, else corporate). Non-corporate forms use a separate
+  credential slot so they don't collide with the corporate Cascade graph.
   """
   project_root = Path(__file__).resolve().parents[2]
   if str(project_root) not in sys.path:
@@ -144,7 +149,12 @@ def create_demo_graph(skeleton: bool = False) -> str:
   credentials = ensure_user_credentials(context)
   api_key = credentials["api_key"]
 
-  demo_slot = SKELETON_DEMO_NAME if skeleton else DEMO_NAME
+  if skeleton:
+    demo_slot = SKELETON_DEMO_NAME
+  elif entity_type != "corporation":
+    demo_slot = f"{DEMO_NAME}_{entity_type}"
+  else:
+    demo_slot = DEMO_NAME
   existing = get_graph_id(CREDENTIALS_FILE, demo_slot)
   if existing:
     print(f"\nReusing existing graph: {existing}")
@@ -184,22 +194,30 @@ def create_demo_graph(skeleton: bool = False) -> str:
     )
     print(f"\nCreating graph: {SKELETON_GRAPH_NAME}")
   else:
+    # Non-corporate forms get a distinct entity name so the equity-form
+    # variant is obvious in the render; entity_type drives the prefilled
+    # Reporting Style.
+    company_name = (
+      COMPANY_NAME
+      if entity_type == "corporation"
+      else f"Cascade Advisory Group ({entity_type.upper()})"
+    )
     metadata = GraphMetadata(
-      graph_name=COMPANY_NAME,
+      graph_name=company_name,
       description="Boutique management consulting firm — close workflow demo",
       schema_extensions=["roboledger"],
     )
     request = CreateGraphRequest(
       metadata=metadata,
       initial_entity={
-        "name": COMPANY_NAME,
+        "name": company_name,
         "uri": "https://cascadeadvisory.com",
-        "entity_type": "llc",
+        "entity_type": entity_type,
         "ticker": "CAG",
       },
-      tags=["demo", "cascade", "roboledger", "close-workflow"],
+      tags=["demo", "cascade", "roboledger", "close-workflow", entity_type],
     )
-    print(f"\nCreating graph: {COMPANY_NAME}")
+    print(f"\nCreating graph: {company_name}  (entity_type={entity_type})")
   response = api_create_graph(client=client, body=request)
   if response.status_code >= 400:
     body = response.content.decode() if response.content else "(no body)"
@@ -397,9 +415,7 @@ def _build_line_items(
     elem_id = element_lookup.get(elem_code)
     if not elem_id:
       return None
-    out.append(
-      {"element_id": elem_id, "debit_amount": debit, "credit_amount": credit}
-    )
+    out.append({"element_id": elem_id, "debit_amount": debit, "credit_amount": credit})
   return out
 
 
@@ -409,9 +425,7 @@ def _can_split_bill_payment(lines: list[tuple[str, int, int]]) -> bool:
   debits (e.g. payroll tax deposits crediting cash against an existing
   payable) are settlements, not vendor bills — keep those as plain
   journal entries so we don't misroute the AP intermediate."""
-  has_cash_credit = any(
-    code == _CASH_CODE and credit > 0 for code, _, credit in lines
-  )
+  has_cash_credit = any(code == _CASH_CODE and credit > 0 for code, _, credit in lines)
   has_liability_debit = any(
     code.startswith("2") and debit > 0 for code, debit, _ in lines
   )
@@ -545,7 +559,11 @@ def create_business_events(
           "event_type": "bill_received",
           "event_category": "purchase",
           "agent_id": agent_id,
-          "metadata": {**base_metadata, "line_items": br_lines, "memo": f"Bill: {memo}"},
+          "metadata": {
+            **base_metadata,
+            "line_items": br_lines,
+            "memo": f"Bill: {memo}",
+          },
         }
         br_resp = client.create_event_block(graph_id, br_body)
         counts["bill_received"] += 1
@@ -562,7 +580,11 @@ def create_business_events(
           "event_category": "purchase",
           "agent_id": agent_id,
           "discharges_event_id": br_resp.id,
-          "metadata": {**base_metadata, "line_items": bp_lines, "memo": f"Payment of: {memo}"},
+          "metadata": {
+            **base_metadata,
+            "line_items": bp_lines,
+            "memo": f"Payment of: {memo}",
+          },
         }
         client.create_event_block(graph_id, bp_body)
         counts["bill_paid"] += 1
@@ -602,7 +624,9 @@ def create_business_events(
 # ---------------------------------------------------------------------------
 
 
-def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
+def create_mappings(
+  graph_id: str, element_lookup: dict[str, str], entity_type: str = "corporation"
+) -> int:
   """Create mapping associations between CoA elements and rs-gaap reporting concepts.
 
   CoA → rs-gaap is the canonical mapping target (§3.2 Reporting Style).
@@ -613,7 +637,9 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
   Uses `LedgerClient.create_associations()` — the bulk HTTP API — to
   exercise the same path the frontend UI and MCP tools use.
   """
-  from .mappings import MAPPINGS
+  from .mappings import mappings_for
+
+  mappings = mappings_for(entity_type)
 
   client = _get_ledger_client()
 
@@ -640,11 +666,11 @@ def create_mappings(graph_id: str, element_lookup: dict[str, str]) -> int:
       break
     offset += 1000
 
-  # Walk MAPPINGS and post each association one-by-one through
-  # create-mapping-association which takes a single pair. The demo's
-  # mapping set is ~27 rows so per-call latency is fine.
+  # Walk the (form-aware) mappings and post each association one-by-one
+  # through create-mapping-association which takes a single pair. The
+  # demo's mapping set is ~27 rows so per-call latency is fine.
   created = 0
-  for coa_code, rs_gaap_qname in MAPPINGS:
+  for coa_code, rs_gaap_qname in mappings:
     coa_id = element_lookup.get(coa_code)
     if not coa_id:
       print(f"  WARNING: CoA code {coa_code} not in element_lookup")
@@ -988,7 +1014,9 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     # InformationBlockEnvelope. Earlier this read item.block_type directly
     # and silently rendered "?" for every item.
     block_names = [
-      (i.get("block") or {}).get("name") or (i.get("block") or {}).get("block_type") or "?"
+      (i.get("block") or {}).get("name")
+      or (i.get("block") or {}).get("block_type")
+      or "?"
       for i in items
     ]
     print(f"  Package:      {len(items)} block(s) — {', '.join(block_names)}")
@@ -1012,6 +1040,10 @@ def main() -> None:
   dry_run = "--dry-run" in sys.argv
   with_ai_mapping = "--ai" in sys.argv
   skeleton = "--skeleton" in sys.argv
+  entity_type = next(
+    (a.split("=", 1)[1] for a in sys.argv if a.startswith("--entity-type=")),
+    "corporation",
+  )
   args = [a for a in sys.argv[1:] if not a.startswith("--")]
 
   # Add project root to path
@@ -1067,7 +1099,7 @@ def main() -> None:
   if args:
     graph_id = args[0]
   else:
-    graph_id = create_demo_graph()
+    graph_id = create_demo_graph(entity_type=entity_type)
 
   # Reset prior demo state (the ONLY direct-DB operation)
   print(f"\nResetting demo state for graph {graph_id}...")
@@ -1102,7 +1134,7 @@ def main() -> None:
     run_ai_mapping(graph_id)
   else:
     print("\nCreating CoA → GAAP mappings...")
-    mapping_count = create_mappings(graph_id, element_lookup)
+    mapping_count = create_mappings(graph_id, element_lookup, entity_type=entity_type)
     print(f"  Mappings:     {mapping_count}")
 
   # Initialize fiscal calendar (via HTTP API — exercises initialize op)

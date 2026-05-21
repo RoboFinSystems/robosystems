@@ -107,6 +107,7 @@ def generate_report_facts(
   taxonomy_id: str,
   mapping_id: str,
   periods: list[PeriodSpec],
+  close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> ReportFacts:
   """Generate facts for all mapped elements across N periods.
 
@@ -118,6 +119,12 @@ def generate_report_facts(
       taxonomy_id: Taxonomy identifier (e.g., "tax_usgaap_reporting").
       mapping_id: Structure ID for the CoA→GAAP mapping.
       periods: Ordered list of period specifications.
+      close_target_qname: The equity concept derived cumulative earnings
+          close to — the active Reporting Style's earnings home
+          (``network_picker.load_close_target_concept``). CORP defaults to
+          ``rs-gaap:RetainedEarningsAccumulatedDeficit``; PART/LLC override
+          to ``PartnersCapital`` / ``MembersEquity`` so earnings land in the
+          form's presented capital line and the BS foots.
 
   Returns:
       ReportFacts with all generated facts and metadata.
@@ -153,13 +160,21 @@ def generate_report_facts(
     # equity values. Pre-seeding the empty equity facts gives the close
     # logic a stable target.
     _append_empty_equity_facts(
-      session, mapping_id, facts, period.start, period.end, arc_type=arc_type
+      session,
+      mapping_id,
+      facts,
+      period.start,
+      period.end,
+      arc_type=arc_type,
+      close_target_qname=close_target_qname,
     )
 
     # Close the current period's temporary accounts (revenue/expense)
     # into retained earnings. For periods where real closing entries
     # have already zeroed the rev/exp accounts, this is a no-op (sum=0).
-    _close_to_retained_earnings(facts, period.start, period.end)
+    _close_to_retained_earnings(
+      facts, period.start, period.end, close_target_qname=close_target_qname
+    )
 
     # For balance sheet accuracy: add cumulative prior-period net income
     # to RE. This always runs from inception — real closing entries
@@ -168,7 +183,13 @@ def generate_report_facts(
     # returns only the still-unclosed portion. Adding that to whatever
     # RE balance the ledger already carries is always correct.
     _close_prior_periods_to_retained_earnings(
-      session, mapping_id, facts, period.start, period.end, arc_type=arc_type
+      session,
+      mapping_id,
+      facts,
+      period.start,
+      period.end,
+      arc_type=arc_type,
+      close_target_qname=close_target_qname,
     )
 
   # Emit rs-gaap:NetIncomeLoss facts for each period. The close logic
@@ -714,15 +735,17 @@ def _append_empty_equity_facts(
   period_start: date,
   period_end: date,
   arc_type: str = "mapping",
+  close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> None:
   """Append zero-balance facts for mapped equity targets without postings.
 
   Equity targets are stock concepts (period_type='instant') — they should
   appear on the BS even when their source CoA element has no current
-  postings. The close-to-RE flow specifically needs the RE-shaped target
-  to exist as a fact so `_find_close_target` can route net income to
-  it. Without this, RE silently disappears and net income lands on
-  whatever other equity fact is present (typically APIC).
+  postings. The close-to-RE flow specifically needs the close-target
+  concept to exist as a fact so `_find_close_target` can route net income
+  to it. ``close_target_qname`` is the active Style's earnings home
+  (CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity); without
+  materializing it the earnings silently disappear from the form's equity.
   """
   result = session.execute(
     text("""
@@ -773,24 +796,25 @@ def _append_empty_equity_facts(
       )
     )
 
-  # Always materialize rs-gaap:RetainedEarningsAccumulatedDeficit at $0
-  # even when no source CoA element maps to it. This is the QuickBooks /
-  # Xero pattern: RE is a *derived* concept, computed from cumulative
-  # (revenue - expense - dividends) at render time, not a posted GL
-  # balance from period-end closing journal entries. Without this, mini
-  # / FAC / simple CoAs that omit an explicit RE concept can't carry
-  # net income onto the BS - `_close_to_retained_earnings` falls back
-  # to an anonymous fact whose element_id isn't in any presentation
-  # network and silently disappears from the rendered statement.
+  # Always materialize the close-target concept at $0 even when no source
+  # CoA element maps to it. This is the QuickBooks / Xero pattern: earnings
+  # are a *derived* concept, computed from cumulative (revenue - expense -
+  # distributions) at render time, not a posted GL balance from period-end
+  # closing journal entries. The target is form-aware (CORP→RetainedEarnings,
+  # PART→PartnersCapital, LLC→MembersEquity). Without this, simple CoAs that
+  # omit an explicit earnings concept can't carry net income onto the BS —
+  # `_close_to_retained_earnings` falls back to an anonymous fact whose
+  # element_id isn't in any presentation network and silently disappears.
   re_row = session.execute(
     text(
       """
       SELECT id, qname, name, balance_type
       FROM elements
-      WHERE qname = 'rs-gaap:RetainedEarningsAccumulatedDeficit'
+      WHERE qname = :close_target
       LIMIT 1
       """
-    )
+    ),
+    {"close_target": close_target_qname},
   ).fetchone()
   if re_row is not None and re_row.id not in existing_ids:
     already_present = any(
@@ -1292,30 +1316,59 @@ def _compute_prior_period(period_start: date, period_end: date) -> tuple[date, d
 # _append_empty_equity_facts before the close runs.
 _ANON_RE_ELEMENT_ID = "elem_rsgaap_retained_earnings_anon"
 
+# Display labels for the form-aware close targets, used on the anonymous
+# fallback row so a partnership/LLC graph doesn't render "Retained Earnings"
+# for what is actually Partners' Capital / Members' Equity. Falls back to the
+# qname for any concept not in the map.
+_CLOSE_TARGET_LABELS = {
+  "rs-gaap:RetainedEarningsAccumulatedDeficit": "Retained Earnings (Accumulated Deficit)",
+  "rs-gaap:PartnersCapital": "Partners' Capital",
+  "rs-gaap:MembersEquity": "Members' Equity",
+}
+
+
+def _close_target_label(qname: str) -> str:
+  return _CLOSE_TARGET_LABELS.get(qname, qname)
+
 
 def _find_close_target(
   facts: list[ReportFact],
   period_start: date,
   period_end: date,
+  close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> ReportFact | None:
-  """Find the rs-gaap RetainedEarnings fact to receive the closing entry.
+  """Find the equity fact to receive the closing entry.
 
-  Looks for an equity-classified fact whose qname matches
-  ``*RetainedEarnings*`` or ``*RetainedDeficit*`` — under the
-  rs-gaap-anchored architecture the canonical target is
-  ``rs-gaap:RetainedEarningsAccumulatedDeficit``, materialized at $0
-  by :func:`_append_empty_equity_facts` when the source CoA element has
-  no postings. Returns ``None`` if no such fact exists; caller appends
-  a fresh row (defensive fallback for unmapped graphs).
+  Matches the active Reporting Style's single earnings-home concept
+  (``close_target_qname`` — CORP→RetainedEarnings, PART→PartnersCapital,
+  LLC→MembersEquity), materialized at $0 by
+  :func:`_append_empty_equity_facts` when the source CoA element has no
+  postings. Exact-qname match — there is exactly one close target per Style,
+  so form-specific routing (PartnersCapital / MembersEquity) is fully
+  deterministic.
+
+  Only when targeting the corporate default
+  (``rs-gaap:RetainedEarningsAccumulatedDeficit``) does it also accept any
+  ``*RetainedEarnings*`` / ``*RetainedDeficit*`` shape — legacy support for
+  seed.py us-gaap / FAC taxonomies whose RE concept carries a different
+  qname. Non-default (form-specific) targets never widen, so they can't
+  match the wrong concept.
+
+  Returns ``None`` if no such fact exists; caller appends a fresh row
+  (defensive fallback for unmapped graphs).
   """
+  re_default = close_target_qname == "rs-gaap:RetainedEarningsAccumulatedDeficit"
   for fact in facts:
     if fact.period_start != period_start or fact.period_end != period_end:
       continue
     if fact.classification != "equity":
       continue
-    qname_lower = (fact.element_qname or "").lower()
-    if "retainedearnings" in qname_lower or "retaineddeficit" in qname_lower:
+    if fact.element_qname == close_target_qname:
       return fact
+    if re_default:
+      qname_lower = (fact.element_qname or "").lower()
+      if "retainedearnings" in qname_lower or "retaineddeficit" in qname_lower:
+        return fact
 
   return None
 
@@ -1324,15 +1377,17 @@ def _close_to_retained_earnings(
   facts: list[ReportFact],
   period_start: date,
   period_end: date,
+  close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> None:
-  """Close the current period's revenue/expense into retained earnings.
+  """Close the current period's revenue/expense into the earnings home.
 
-  Computes net income = sum(revenue facts) - sum(expense facts) for the
-  given period and adds it to the rs-gaap:RetainedEarningsAccumulatedDeficit
-  fact materialized by :func:`_append_empty_equity_facts`. On
-  unmapped graphs where no RE fact exists, appends a fresh anonymous row
-  with the canonical rs-gaap qname so downstream rendering still has a
-  bottom line.
+  Computes net income = sum(revenue facts) - sum(expense facts) +
+  equity-flow reducers for the given period and adds it to the
+  ``close_target_qname`` fact materialized by
+  :func:`_append_empty_equity_facts` (the active Style's earnings home —
+  CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity). On
+  unmapped graphs where no target fact exists, appends a fresh anonymous
+  row with that qname so downstream rendering still has a bottom line.
 
   Mutates the facts list in place.
   """
@@ -1362,7 +1417,9 @@ def _close_to_retained_earnings(
   if net_income == 0.0:
     return
 
-  target = _find_close_target(facts, period_start, period_end)
+  target = _find_close_target(
+    facts, period_start, period_end, close_target_qname=close_target_qname
+  )
   if target is not None:
     target.value += net_income
     return
@@ -1374,17 +1431,18 @@ def _close_to_retained_earnings(
   # surfaces this gap to operators; this warning makes it visible at
   # render time too.
   logger.warning(
-    "close_to_retained_earnings: no rs-gaap RE fact in scope for period "
+    "close_to_retained_earnings: no %s fact in scope for period "
     "%s..%s; appending anonymous fallback row. CoA is missing a mapping "
-    "to an equity RetainedEarnings concept.",
+    "to the Style's earnings-home equity concept.",
+    close_target_qname,
     period_start,
     period_end,
   )
   facts.append(
     ReportFact(
       element_id=_ANON_RE_ELEMENT_ID,
-      element_qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
-      element_name="Retained Earnings (Accumulated Deficit)",
+      element_qname=close_target_qname,
+      element_name=_close_target_label(close_target_qname),
       classification="equity",
       balance_type="credit",
       value=net_income,
@@ -1402,6 +1460,7 @@ def _close_prior_periods_to_retained_earnings(
   period_start: date,
   period_end: date,
   arc_type: str = "mapping",
+  close_target_qname: str = "rs-gaap:RetainedEarningsAccumulatedDeficit",
 ) -> None:
   """Close un-closed cumulative net income into retained earnings.
 
@@ -1527,21 +1586,24 @@ def _close_prior_periods_to_retained_earnings(
   if prior_periods_net_income == 0.0:
     return
 
-  target = _find_close_target(facts, period_start, period_end)
+  target = _find_close_target(
+    facts, period_start, period_end, close_target_qname=close_target_qname
+  )
   if target is not None:
     target.value += prior_periods_net_income
   else:
     logger.warning(
-      "close_prior_periods_to_retained_earnings: no rs-gaap RE fact in "
+      "close_prior_periods_to_retained_earnings: no %s fact in "
       "scope for period %s..%s; appending anonymous fallback row. "
-      "CoA is missing a mapping to an equity RetainedEarnings concept.",
+      "CoA is missing a mapping to the Style's earnings-home equity concept.",
+      close_target_qname,
       period_start,
       period_end,
     )
     facts.append(
       ReportFact(
         element_id=_ANON_RE_ELEMENT_ID,
-        element_qname="rs-gaap:RetainedEarningsAccumulatedDeficit",
+        element_qname=close_target_qname,
         element_name="Retained Earnings (Accumulated Deficit)",
         classification="equity",
         balance_type="credit",
