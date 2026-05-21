@@ -24,17 +24,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class LineItemMetadataPredicate(BaseModel):
-  """Filter ledger LineItems whose ``metadata_[field]`` is in ``values``.
+  """Filter ledger LineItems by flow concept.
 
-  The single predicate kind shipped in Phase 2 MVP. Sufficient for any
-  source taxonomy that stamps a flow-tag column on each transaction
-  line — mini's ``TransactionDescriptionCode``, future XBRL GL
-  ``GenericFlowCategory`` columns, custom tenant tags.
+  The single predicate kind shipped to date. ``values`` are flow-concept
+  qnames — mini's ``TransactionDescriptionCode`` values, rs-gaap flow
+  concepts (what the enrichment classifier emits for QuickBooks data),
+  future XBRL GL ``GenericFlowCategory`` codes. The engine resolves them
+  to element_ids and matches the first-class ``LineItem.flow_element_id``
+  FK; matched lines aggregate signed into the attributed fact for the
+  period.
 
-  ``field`` is the JSONB key under ``line_items.metadata`` (e.g.
-  ``"transaction_description_code"``). ``values`` is the set of values
-  that route to the filter's target concept; matched LineItems aggregate
-  signed into the attributed fact for the period.
+  ``field`` is **legacy and ignored** — the flow tag used to live in
+  ``line_items.metadata[field]`` but has been promoted to the typed
+  ``flow_element_id`` FK. Retained for wire-compatibility; the engine no
+  longer reads it.
   """
 
   kind: Literal["line_item_metadata_field"] = Field(
@@ -42,20 +45,21 @@ class LineItemMetadataPredicate(BaseModel):
     description="Discriminator value selecting this predicate shape.",
   )
   field: str = Field(
-    ...,
+    "transaction_description_code",
     description=(
-      "JSONB key under ``line_items.metadata`` to match against — e.g. "
-      "``transaction_description_code``. The renderer performs an "
-      "exact-string comparison on the JSONB-extracted text value."
+      "Legacy/ignored. The flow tag now lives in the typed "
+      "``flow_element_id`` FK, not JSONB metadata; the engine no longer "
+      "reads this. Retained for wire-compatibility."
     ),
   )
   values: list[str] = Field(
     ...,
     min_length=1,
     description=(
-      "Metadata values that route to this filter's target concept. "
-      "A LineItem matches when ``metadata[field] ∈ values`` AND the "
-      "line falls within the rollforward's period."
+      "Flow-concept qnames that route to this filter's target concept. "
+      "A LineItem matches when its ``flow_element_id`` is one of the "
+      "elements named here AND the line falls within the rollforward's "
+      "period."
     ),
   )
 

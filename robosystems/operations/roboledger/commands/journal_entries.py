@@ -35,9 +35,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from robosystems.logger import logger
 from robosystems.models.api.extensions.journal_entries import (
   CreateJournalEntryRequest,
   DeleteJournalEntryRequest,
@@ -111,6 +112,68 @@ class UnbalancedJournalEntryError(ValueError):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
+
+
+_FLOW_TAG_KEY = "transaction_description_code"
+
+
+def resolve_flow_element_id(session: Session, metadata: dict | None) -> str | None:
+  """Resolve a line's flow tag (``transaction_description_code`` qname) to its
+  Element id for ``LineItem.flow_element_id``.
+
+  Source-named: points at the element the qname names directly — rs-gaap in
+  production (the enrichment classifier emits rs-gaap-valued tags), the source
+  vocabulary (e.g. ``mini``) in cross-taxonomy projections. Returns ``None`` when
+  the tag is absent or doesn't resolve. Logs (advisory) when the resolved element
+  lacks an ``activityType`` trait — i.e. isn't a recognized flow concept; trait
+  coverage is backfilled in the rs-gaap content phase.
+  """
+  if not metadata:
+    return None
+  qname = metadata.get(_FLOW_TAG_KEY)
+  if not qname:
+    return None
+  row = session.execute(
+    text("SELECT id FROM elements WHERE qname = :qname LIMIT 1"),
+    {"qname": qname},
+  ).fetchone()
+  if row is None:
+    logger.warning(
+      "flow tag %s did not resolve to an element; flow_element_id left NULL", qname
+    )
+    return None
+  element_id = row[0]
+  has_activity_type = session.execute(
+    text(
+      """
+      SELECT 1 FROM element_traits et
+      JOIN traits t ON t.id = et.trait_id
+      WHERE et.element_id = :eid AND t.category = 'activityType'
+      LIMIT 1
+      """
+    ),
+    {"eid": element_id},
+  ).fetchone()
+  if has_activity_type is None:
+    logger.warning(
+      "flow element %s (%s) has no activityType trait — not a recognized flow "
+      "concept (advisory; trait coverage backfilled in the rs-gaap content phase)",
+      qname,
+      element_id,
+    )
+  return element_id
+
+
+def _split_flow_tag(metadata: dict | None) -> dict:
+  """Return a shallow copy of ``metadata`` with the legacy flow-tag key removed.
+
+  The flow concept is now a first-class ``flow_element_id`` FK; the qname no
+  longer rides in JSONB. Other metadata keys (source-system refs, etc.) are
+  preserved.
+  """
+  meta = dict(metadata or {})
+  meta.pop(_FLOW_TAG_KEY, None)
+  return meta
 
 
 def validate_and_normalize_lines(
@@ -274,11 +337,12 @@ def create_journal_entry(
       LineItem(
         entry_id=entry.id,
         element_id=li["element_id"],
+        flow_element_id=resolve_flow_element_id(session, li.get("metadata")),
         debit_amount=li["debit_amount"],
         credit_amount=li["credit_amount"],
         description=li["description"],
         line_order=order,
-        metadata_=li.get("metadata") or {},
+        metadata_=_split_flow_tag(li.get("metadata")),
       )
     )
   session.flush()
@@ -343,11 +407,12 @@ def update_journal_entry(
         LineItem(
           entry_id=entry.id,
           element_id=li["element_id"],
+          flow_element_id=resolve_flow_element_id(session, li.get("metadata")),
           debit_amount=li["debit_amount"],
           credit_amount=li["credit_amount"],
           description=li["description"],
           line_order=order,
-          metadata_=li.get("metadata") or {},
+          metadata_=_split_flow_tag(li.get("metadata")),
         )
       )
 
@@ -434,13 +499,14 @@ def reverse_journal_entry(
       LineItem(
         entry_id=reversing_entry.id,
         element_id=li.element_id,
+        # Carry the flow concept through to the reversal so the rollforward
+        # filter engine sees the offsetting flow on the reversal period.
+        flow_element_id=li.flow_element_id,
         # Flip: original debit → reversal credit, and vice versa.
         debit_amount=int(li.credit_amount),
         credit_amount=int(li.debit_amount),
-        # Preserve per-line metadata on the reversal — flow tags (e.g.
-        # transaction_description_code) need to ride through so the
-        # rollforward filter engine sees the offsetting flow on the
-        # reversal period. Shallow copy is sufficient (JSON-shaped dict).
+        # Preserve any remaining per-line metadata (source-system refs, etc.).
+        # Shallow copy is sufficient (JSON-shaped dict).
         metadata_=dict(li.metadata_ or {}),
         description=(
           f"Reversal of line {li.line_order}"
