@@ -100,7 +100,7 @@ class TraitSpec(BaseModel):
     ..., description="Member name within the category, e.g. 'asset', 'current'."
   )
   source: str = Field(
-    ..., description="Provenance, e.g. 'us-gaap-metamodel', 'fac', 'system'."
+    ..., description="Provenance, e.g. 'fac-traits', 'fac', 'system'."
   )
   name: str | None = Field(None, description="Human-readable display name")
   description: str | None = Field(None)
@@ -113,13 +113,14 @@ class TraitAssignmentSpec(BaseModel):
   category: str = Field(..., description="Trait category")
   identifier: str = Field(..., description="Member identifier within the category")
   source: str = Field(
-    "us-gaap-metamodel",
+    "fac-traits",
     description=(
       "Provenance of the assignment — which seed/taxonomy declared the "
-      "(element → trait) arc. Defaults to us-gaap-metamodel since that's "
-      "where nearly all EFS assignments originate; future seeds from other "
-      "metamodels (e.g. ifrs-metamodel) should set this explicitly so "
-      "row provenance is preserved in element_traits.source."
+      "(element → trait) arc. Defaults to fac-traits since that's "
+      "where the universal trait vocabulary lives; per-framework "
+      "binding packages (rs-gaap-traits, future rs-ifrs-traits, etc.) "
+      "should set this explicitly so row provenance is preserved in "
+      "element_traits.source."
     ),
   )
   is_primary: bool = Field(
@@ -322,10 +323,10 @@ class TaxonomyPackage(BaseModel):
       "classification-vocabulary | classification-assignment — shapes "
       "how the library viewer renders this taxonomy. Concept taxonomies "
       "(rs-gaap) are 'reporting_standard'; equivalence + hierarchy "
-      "arc packs (fac, rs-gaap-hierarchy) are 'mapping'; the FASB "
-      "metamodel seed is 'trait-vocabulary'; rs-gaap-to-metamodel "
-      "is 'trait-assignment'; verification-rule packs (fac-rules) "
-      "are 'rules'."
+      "arc packs (fac, rs-gaap-hierarchy) are 'mapping'; the universal "
+      "trait vocabulary (fac-traits) is 'trait-vocabulary'; per-element "
+      "trait binding packs (rs-gaap-traits) are 'trait-assignment'; "
+      "verification-rule packs (fac-rules) are 'rules'."
     ),
   )
   is_shared: bool = Field(True, description="Shared across tenants (library-origin)")

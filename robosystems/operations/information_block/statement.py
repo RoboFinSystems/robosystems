@@ -370,7 +370,7 @@ def _build_hierarchy_from_atoms(
     structure itself is the implicit root and its children become the
     rendered top-level rows.
   - **abstract-element-rooted** (XBRL standard, used by FAC / rs-gaap /
-    type-subtype reference taxonomies): an abstract element (e.g.
+    rs-gaap-type-subtype reference taxonomies): an abstract element (e.g.
     ``fac:BalanceSheetAbstract``) is the top of the tree; the structure
     itself doesn't appear in any presentation arc. Detected by
     ``from_set - to_set`` — elements that appear as ``from_element_id``
@@ -397,7 +397,7 @@ def _build_hierarchy_from_atoms(
   # Roots = children of the structure_id anchor (seed.py convention).
   root_ids = [child_id for _, child_id in children_by_parent.get(structure_id, [])]
 
-  # Fallback: structures from FAC / rs-gaap / type-subtype reference
+  # Fallback: structures from FAC / rs-gaap / rs-gaap-type-subtype reference
   # taxonomies anchor at an abstract element instead of the structure_id.
   # Detect roots via the standard XBRL convention — elements that appear
   # as ``from_element_id`` but never as ``to_element_id``.

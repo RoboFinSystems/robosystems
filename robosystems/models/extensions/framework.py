@@ -2,12 +2,12 @@
 
 A Framework is the addressable, versioned bundle that pins specific
 ``(package, version)`` and ``(bridge, version)`` tuples together. The
-deliverable that says "rs-gaap-base v1 = these N packages + these M
+deliverable that says "rs-gaap v1 = these N packages + these M
 bridges at these versions, in this load order."
 
 Frameworks live in the **public schema only** — they're library
 metadata, not per-tenant content. Tenants reference them by name
-through ``Graph.taxonomy_pin = {"framework": "rs-gaap-base@v1"}``;
+through ``Graph.taxonomy_pin = {"framework": "rs-gaap@v1"}``;
 the resolver expands the framework into a flat ``{standard: version}``
 pin which drives the existing tenant-copy machinery.
 

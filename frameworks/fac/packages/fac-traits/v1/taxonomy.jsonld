@@ -1,0 +1,2558 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "xbrl": "http://www.xbrl.org/2003/linkbase#",
+    "xbrldt": "http://xbrl.org/2005/xbrldt#",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "us-gaap": "http://fasb.org/us-gaap/2026#",
+    "trait": "https://robosystems.ai/taxonomy/fac-traits/v1/",
+    "rs": "https://robosystems.ai/vocab/",
+    "balance": {
+      "@id": "https://robosystems.ai/vocab/balance"
+    },
+    "periodType": {
+      "@id": "https://robosystems.ai/vocab/periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "substitutionGroup": {
+      "@id": "https://robosystems.ai/vocab/substitutionGroup",
+      "@type": "@id"
+    },
+    "source": {
+      "@id": "https://robosystems.ai/vocab/source"
+    },
+    "category": {
+      "@id": "https://robosystems.ai/vocab/category"
+    },
+    "identifier": {
+      "@id": "https://robosystems.ai/vocab/identifier"
+    },
+    "classifiedAs": {
+      "@id": "https://robosystems.ai/vocab/classifiedAs",
+      "@type": "@id"
+    },
+    "generalOf": {
+      "@id": "https://robosystems.ai/vocab/generalOf",
+      "@type": "@id"
+    },
+    "deprecated": {
+      "@id": "https://robosystems.ai/vocab/deprecated",
+      "@type": "xsd:boolean"
+    },
+    "replacedBy": {
+      "@id": "https://robosystems.ai/vocab/replacedBy",
+      "@type": "@id"
+    },
+    "orphan2026": {
+      "@id": "https://robosystems.ai/vocab/orphan2026",
+      "@type": "xsd:boolean"
+    },
+    "label": "rdfs:label",
+    "altLabel": "skos:altLabel",
+    "documentation": "rdfs:comment"
+  },
+  "standard": "fac-traits",
+  "version": "v1",
+  "taxonomy_type": "trait-vocabulary",
+  "namespace_uri": "https://robosystems.ai/taxonomy/fac-traits/v1/",
+  "forked_from": {
+    "author": "FASB us-gaap 2026 metamodel (XBRL US)",
+    "url": "https://xbrl.fasb.org/us-gaap/2026/meta/",
+    "format": "XBRL metamodel (traits + domains + members)"
+  },
+  "forked_at": "2026-04-20",
+  "description": "Universal accounting-element trait vocabulary \u2014 24 orthogonal classification axes (elementsOfFinancialStatements, liquidity, activityType, operatingNonoperating, recordedValue, realizationStatus, hedging, leaseType, \u2026) covering 95 trait members, plus the flowClassification axis (inflow/outflow/accrual/contra) derived from FASB's instant-* arcroles. Seeds the `traits` table \u2014 each member is a (category, identifier) pair. Forked from the FASB us-gaap 2026 metamodel; the axes themselves describe how *any* accounting element gets classified, not just us-gaap, so the vocabulary lives in the fac framework as the dependency root and is inherited by every rs-* curation that depends on fac. Per-element trait bindings (seeding the `element_traits` junction) live in each framework's `*-traits/v1/` package \u2014 today: `rs-gaap-traits/v1/`.",
+  "@graph": [
+    {
+      "@id": "trait:statisticalMeasurement/arithmeticAverage",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "statisticalMeasurement"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "arithmeticAverage"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "arithmeticAverage",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:statisticalMeasurement/maximum",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "statisticalMeasurement"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "maximum"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "maximum",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:statisticalMeasurement/median",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "statisticalMeasurement"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "median"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "median",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:statisticalMeasurement/minimum",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "statisticalMeasurement"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "minimum"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "minimum",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:statisticalMeasurement/weightedAverage",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "statisticalMeasurement"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "weightedAverage"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "weightedAverage",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:accrualOrPayable/accrual",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "accrualOrPayable"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "accrual"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "accrual",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:use/allocation",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "use"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "allocation"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "allocation",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/contraAsset",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "contraAsset"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "contraAsset",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/contraEquity",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "contraEquity"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "contraEquity",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/contraLiability",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "contraLiability"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "contraLiability",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:convertibility/convertible",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "convertibility"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "convertible"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "convertible",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:liquidity/current",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "liquidity"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "current"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "current",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:use/derecognize",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "use"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "derecognize"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "derecognize",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:leaseType/directFinancingLease",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "leaseType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "directFinancingLease"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "directFinancingLease",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/distributionToOwners",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "distributionToOwners"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "distributionToOwners",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/equity",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "equity"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "equity",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:estimatedFutureActivity/estimatedFutureCashReceipt",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "estimatedFutureActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "estimatedFutureCashReceipt"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "estimatedFutureCashReceipt",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:estimatedFutureActivity/estimatedFutureExpense",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "estimatedFutureActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "estimatedFutureExpense"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "estimatedFutureExpense",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:estimatedFutureActivity/estimatedFutureMaturity",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "estimatedFutureActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "estimatedFutureMaturity"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "estimatedFutureMaturity",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:estimatedFutureActivity/estimatedFutureObligation",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "estimatedFutureActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "estimatedFutureObligation"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "estimatedFutureObligation",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:estimatedFutureActivity/estimatedFuturePayment",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "estimatedFutureActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "estimatedFuturePayment"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "estimatedFuturePayment",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:estimatedFutureActivity/estimatedFutureRevenue",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "estimatedFutureActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "estimatedFutureRevenue"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "estimatedFutureRevenue",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/expense",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "expense"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "expense",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/expenseReversal",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "expenseReversal"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "expenseReversal",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/faceOrParValue",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "faceOrParValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "faceOrParValue",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:leaseType/financeLease",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "leaseType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "financeLease"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "financeLease",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:activityType/financingActivity",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "activityType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "financingActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "financingActivity",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:interestRateType/fixedRate",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "interestRateType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "fixedRate"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "fixedRate",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/gain",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "gain"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "gain",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "indirectCashFlowReconcilingItem"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "indirectCashFlowMethodReconcilingItem"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "indirectCashFlowMethodReconcilingItem",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/intrinsicValue",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "intrinsicValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "intrinsicValue",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:activityType/investingActivity",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "activityType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "investingActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "investingActivity",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/investmentByOwners",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "investmentByOwners"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "investmentByOwners",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/loss",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "loss"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "loss",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/metric",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "metric"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "metric",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/nonTaxableRevenue",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "nonTaxableRevenue"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "nonTaxableRevenue",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:convertibility/nonconvertible",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "convertibility"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "nonconvertible"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "nonconvertible",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:liquidity/noncurrent",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "liquidity"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "noncurrent"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "noncurrent",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/nondeductibleExpense",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "nondeductibleExpense"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "nondeductibleExpense",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:operatingNonoperating/nonoperating",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "operatingNonoperating"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "nonoperating"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "nonoperating",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:activityType/operatingActivity",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "activityType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "operatingActivity"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "operatingActivity",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:leaseType/operatingLease",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "leaseType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "operatingLease"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "operatingLease",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:operatingNonoperating/operating",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "operatingNonoperating"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "operating"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "operating",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeInstrument/option",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeInstrument"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "option"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "option",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:accrualOrPayable/payable",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "accrualOrPayable"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "payable"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "payable",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:realizationStatus/realized",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "realizationStatus"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "realized"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "realized",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:use/reclassification",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "use"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "reclassification"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "reclassification",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:use/recognize",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "use"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "recognize"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "recognize",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/reconcilingTaxItem",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "reconcilingTaxItem"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "reconcilingTaxItem",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/recordedAsEstimate",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "recordedAsEstimate"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "recordedAsEstimate",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/recordedAtAmortizedCostAfterAllowanceForCreditLoss",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "recordedAtAmortizedCostAfterAllowanceForCreditLoss"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "recordedAtAmortizedCostAfterAllowanceForCreditLoss",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/recordedAtAmortizedCost",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "recordedAtAmortizedCost"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "recordedAtAmortizedCost",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/recordedAtHistoricalCost",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "recordedAtHistoricalCost"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "recordedAtHistoricalCost",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/recordedAtLowerOfCarryingValueOrFairValue",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "recordedAtLowerOfCarryingValueOrFairValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "recordedAtLowerOfCarryingValueOrFairValue",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/recordedAtLowerOfCarryingValueOrFairValueLessCostToSell",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "recordedAtLowerOfCarryingValueOrFairValueLessCostToSell"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "recordedAtLowerOfCarryingValueOrFairValueLessCostToSell",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:use/remeasurement",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "use"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "remeasurement"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "remeasurement",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recordedValue/reportedAtFairValue",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recordedValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "reportedAtFairValue"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "reportedAtFairValue",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:restriction/restricted",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "restriction"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "restricted"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "restricted",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/revenue",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "revenue"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "revenue",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:creditStructure/revolvingLoan",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "creditStructure"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "revolvingLoan"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "revolvingLoan",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:leaseType/salesTypeLease",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "leaseType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "salesTypeLease"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "salesTypeLease",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxBenefits",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxBenefits"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxBenefits",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxCarryforward",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxCarryforward"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxCarryforward",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxContingency",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxContingency"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxContingency",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxCredit",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxCredit"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxCredit",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxDeductibleExpense",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxDeductibleExpense"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxDeductibleExpense",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxDeductibleNonExpenseItem",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxDeductibleNonExpenseItem"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxDeductibleNonExpenseItem",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxExpense",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxExpense"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxExpense",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxSettlement",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxSettlement"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxSettlement",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:taxComponents/taxableRevenue",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "taxComponents"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "taxableRevenue"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "taxableRevenue",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/temporaryEquity",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "temporaryEquity"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "temporaryEquity",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:creditStructure/termLoan",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "creditStructure"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "termLoan"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "termLoan",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:threshold/threshold",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "threshold"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "threshold"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "threshold",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:realizationStatus/unrealized",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "realizationStatus"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "unrealized"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "unrealized",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:restriction/unrestricted",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "restriction"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "unrestricted"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "unrestricted",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:interestRateType/variableRate",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "interestRateType"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "variableRate"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "variableRate",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/asset",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "asset"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "asset",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeContract/commodityContract",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "commodityContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "commodityContract",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/comprehensiveIncome",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "comprehensiveIncome"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "comprehensiveIncome",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeContract/creditRiskContract",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "creditRiskContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "creditRiskContract",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:hedging/designatedAsHedgingInstrument",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "hedging"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "designatedAsHedgingInstrument"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "designatedAsHedgingInstrument",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeContract/equityContract",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "equityContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "equityContract",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeContract/foreignExchangeContract",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "foreignExchangeContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "foreignExchangeContract",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeInstrument/forwardContracts",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeInstrument"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "forwardContracts"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "forwardContracts",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeInstrument/future",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeInstrument"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "future"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "future",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeContract/interestRateContract",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "interestRateContract"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "interestRateContract",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:elementsOfFinancialStatements/liability",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "elementsOfFinancialStatements"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "liability"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "liability",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:hedging/nondesignated",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "hedging"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "nondesignated"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "nondesignated",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:debtGuarantee/securedDebt",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "debtGuarantee"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "securedDebt"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "securedDebt",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:operatingIntent/segmentContinuingOperations",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "operatingIntent"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "segmentContinuingOperations"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "segmentContinuingOperations",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:operatingIntent/segmentDiscontinuedOperations",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "operatingIntent"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "segmentDiscontinuedOperations"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "segmentDiscontinuedOperations",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:priority/seniorDebtObligations",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "priority"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "seniorDebtObligations"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "seniorDebtObligations",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:priority/subordinatedDebt",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "priority"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "subordinatedDebt"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "subordinatedDebt",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:derivativeInstrument/swap",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "derivativeInstrument"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "swap"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "swap",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:debtGuarantee/unsecuredDebt",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "debtGuarantee"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "unsecuredDebt"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "unsecuredDebt",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:flowClassification/inflow",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "flowClassification"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "inflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "inflow",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:flowClassification/outflow",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "flowClassification"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "outflow"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "outflow",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:flowClassification/accrual",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "flowClassification"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "accrual"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "accrual",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:flowClassification/contra",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "flowClassification"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "contra"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "contra",
+          "@language": "en"
+        }
+      ]
+    }
+  ]
+}

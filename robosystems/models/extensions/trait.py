@@ -70,7 +70,7 @@ class Trait(ExtensionsBase):
   category = Column(String, nullable=False)
   identifier = Column(String, nullable=False)
 
-  # Where this trait comes from: 'us-gaap-metamodel' | 'fac' |
+  # Where this trait comes from: 'fac-traits' | 'fac' |
   # 'rs-gaap' | 'system' (built-in) | 'user'.
   type = Column(String, nullable=False, default="system")
 

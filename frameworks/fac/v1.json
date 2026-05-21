@@ -1,0 +1,16 @@
+{
+  "framework": "fac",
+  "version": "v1",
+  "title": "Fundamental Accounting Concepts (FAC)",
+  "description": "Universal accounting substrate: Charlie Hoffman's Fundamental Accounting Concepts (Assets, Liabilities, Equity, Revenues, Expenses, Income, Cash Flow) plus their presentation hierarchies, calculation identities, verification rules, and the universal trait vocabulary that classifies elements along orthogonal axes (elementsOfFinancialStatements, liquidity, activityType, recordedValue, …). Designed to be the shared foundation that every accounting reporting framework (rs-gaap, rs-ifrs, rs-call-report, rs-statutory, rs-irs, rs-ferc) inherits via depends_on. FAC concepts forked from Seattle Method; trait vocabulary (fac-traits) forked from FASB us-gaap 2026 metamodel publication; both now maintained natively as JSON-LD.",
+  "framework_type": "reporting",
+  "depends_on": [],
+  "packages": [
+    {"standard": "fac-traits",       "version": "v1", "ordinal": 0, "is_required": true},
+    {"standard": "fac",              "version": "v1", "ordinal": 1, "is_required": true},
+    {"standard": "fac-presentation", "version": "v1", "ordinal": 2, "is_required": true},
+    {"standard": "fac-calculations", "version": "v1", "ordinal": 3, "is_required": true},
+    {"standard": "fac-rules",        "version": "v1", "ordinal": 4, "is_required": true}
+  ],
+  "bridges": []
+}

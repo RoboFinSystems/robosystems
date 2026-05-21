@@ -1,7 +1,7 @@
 """Shape tests for the Framework + Bridge tables seeded by migration 0007.
 
 These tests ensure the framework manifest at
-``robosystems/taxonomy/frameworks/rs-gaap-base/v1.json`` round-trips
+``frameworks/rs-gaap/v1.json`` round-trips
 through the migration into the public-schema rows that the rest of the
 system queries — and that the row counts match the manifest's
 declarations.
@@ -15,7 +15,6 @@ SQL/ORM.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 from sqlalchemy import text as sa_text
@@ -27,15 +26,9 @@ from robosystems.models.extensions import (
   FrameworkBridge,
   FrameworkPackage,
 )
+from robosystems.taxonomy.discovery import framework_root
 
-_MANIFEST_PATH = (
-  Path(__file__).resolve().parents[2]
-  / "robosystems"
-  / "taxonomy"
-  / "frameworks"
-  / "rs-gaap-base"
-  / "v1.json"
-)
+_MANIFEST_PATH = framework_root("rs-gaap") / "v1.json"
 
 
 @pytest.fixture(scope="module")
@@ -66,14 +59,14 @@ def _require_extensions_db() -> None:
 class TestFrameworkSeeded:
   def test_default_framework_row_exists(self, manifest: dict) -> None:
     with extensions_session("library") as s:
-      fw = s.query(Framework).filter_by(framework="rs-gaap-base", version="v1").one()
+      fw = s.query(Framework).filter_by(framework="rs-gaap", version="v1").one()
       assert fw.title == manifest["title"]
       assert fw.framework_type == manifest["framework_type"]
       assert fw.is_active is True
 
   def test_package_pin_count_matches_manifest(self, manifest: dict) -> None:
     with extensions_session("library") as s:
-      fw = s.query(Framework).filter_by(framework="rs-gaap-base", version="v1").one()
+      fw = s.query(Framework).filter_by(framework="rs-gaap", version="v1").one()
       count = s.query(FrameworkPackage).filter_by(framework_id=fw.id).count()
       assert count == len(manifest["packages"])
 
@@ -84,7 +77,7 @@ class TestFrameworkSeeded:
     expected_optional = len(manifest["packages"]) - expected_required
 
     with extensions_session("library") as s:
-      fw = s.query(Framework).filter_by(framework="rs-gaap-base", version="v1").one()
+      fw = s.query(Framework).filter_by(framework="rs-gaap", version="v1").one()
       required = (
         s.query(FrameworkPackage)
         .filter_by(framework_id=fw.id, is_required=True)
@@ -102,7 +95,7 @@ class TestFrameworkSeeded:
     """Ordinal drives load order; must round-trip from manifest."""
     expected_by_std = {p["standard"]: p.get("ordinal", 0) for p in manifest["packages"]}
     with extensions_session("library") as s:
-      fw = s.query(Framework).filter_by(framework="rs-gaap-base", version="v1").one()
+      fw = s.query(Framework).filter_by(framework="rs-gaap", version="v1").one()
       for fp in s.query(FrameworkPackage).filter_by(framework_id=fw.id).all():
         assert fp.ordinal == expected_by_std[fp.package_standard]
 
@@ -112,7 +105,7 @@ class TestBridgeSeeded:
   def test_bridge_count_matches_manifest(self, manifest: dict) -> None:
     expected = len(manifest["bridges"])
     with extensions_session("library") as s:
-      fw = s.query(Framework).filter_by(framework="rs-gaap-base", version="v1").one()
+      fw = s.query(Framework).filter_by(framework="rs-gaap", version="v1").one()
       count = s.query(FrameworkBridge).filter_by(framework_id=fw.id).count()
       assert count == expected
 
@@ -142,14 +135,14 @@ class TestResolvePinDispatch:
       resolve_pin,
     )
 
-    assert DEFAULT_FRAMEWORK == "rs-gaap-base@v1"
+    assert DEFAULT_FRAMEWORK == "rs-gaap@v1"
     assert resolve_pin(None) == DEFAULT_TAXONOMY_PIN
 
   def test_framework_ref_dispatches(self) -> None:
     from robosystems.taxonomy.pins import DEFAULT_TAXONOMY_PIN, resolve_pin
 
     class _G:
-      taxonomy_pin = {"framework": "rs-gaap-base@v1"}
+      taxonomy_pin = {"framework": "rs-gaap@v1"}
 
     assert resolve_pin(_G()) == DEFAULT_TAXONOMY_PIN  # type: ignore[arg-type]
 
@@ -158,7 +151,7 @@ class TestResolvePinDispatch:
 
     class _G:
       taxonomy_pin = {
-        "framework": "rs-gaap-base@v1",
+        "framework": "rs-gaap@v1",
         "overrides": {"rs-gaap": "v999"},
       }
 

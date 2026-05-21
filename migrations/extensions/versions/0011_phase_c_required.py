@@ -14,7 +14,7 @@ The runtime impact of the flag is small — `expand_framework_to_pin`
 ignores it — but admin tooling and API surfaces query
 ``framework_packages`` directly, so the database needs to reflect
 reality. This migration updates the existing rows; the
-``rs-gaap-base/v1.json`` manifest is the source of truth and was
+``rs-gaap/v1.json`` manifest is the source of truth and was
 flipped in the same PR.
 
 Revision ID: 0011

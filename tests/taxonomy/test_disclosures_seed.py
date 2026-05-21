@@ -16,16 +16,15 @@ The tests are loader-only — no DB access. They run without the
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from robosystems.taxonomy.loaders import load_taxonomy_package
+from robosystems.taxonomy import load_taxonomy_package
+from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.model import TaxonomyPackage
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_PACKAGES = _REPO_ROOT / "robosystems" / "taxonomy" / "packages"
-_BRIDGES = _REPO_ROOT / "robosystems" / "taxonomy" / "bridges"
+_FW_ROOT = framework_root("rs-gaap")
+_PACKAGES = _FW_ROOT / "packages"
+_BRIDGES = _FW_ROOT / "bridges"
 
 
 @pytest.fixture(scope="module")

@@ -146,7 +146,7 @@ class LibraryElementArcResponse(BaseModel):
 
   Scoped to arcs whose structure belongs to a `taxonomy_type='mapping'`
   taxonomy — the cross-taxonomy bridges (equivalence, general-special,
-  type-subtype). Hierarchical arcs inside a single reporting taxonomy
+  rs-gaap-type-subtype). Hierarchical arcs inside a single reporting taxonomy
   are out of scope.
   """
 

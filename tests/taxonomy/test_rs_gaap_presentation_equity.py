@@ -14,15 +14,13 @@ These tests guard against:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from robosystems.taxonomy.loaders import load_taxonomy_package
+from robosystems.taxonomy import load_taxonomy_package
+from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.model import TaxonomyPackage
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_PACKAGES = _REPO_ROOT / "robosystems" / "taxonomy" / "packages"
+_PACKAGES = framework_root("rs-gaap") / "packages"
 
 EQUITY_STRUCTURE_NAME = (
   "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)"

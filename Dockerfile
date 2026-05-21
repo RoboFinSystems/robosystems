@@ -180,6 +180,10 @@ COPY robosystems/ /app/robosystems/
 RUN rm -rf /app/robosystems/adapters/sec/arelle
 # Copy builder's complete arelle directory (includes EDGAR + cache + bundles)
 COPY --from=builder /build/robosystems/adapters/sec/arelle/ /app/robosystems/adapters/sec/arelle/
+# Copy reporting-framework library (top-level, peer to robosystems/;
+# loaded by extensions migrations at provision time). Resolved via
+# FRAMEWORKS_DIR in robosystems/taxonomy/discovery.py.
+COPY frameworks/ /app/frameworks/
 COPY main.py ./
 COPY bin/ /app/bin/
 # Copy static files for serving directly from container

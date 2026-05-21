@@ -236,7 +236,7 @@ class MappingOperator(Operator):
           percent=(processed / total) * 100,
         )
 
-    # 4b. rs-gaap refinement pass — follow FAC → rs-gaap equivalence + type-subtype
+    # 4b. rs-gaap refinement pass — follow FAC → rs-gaap equivalence + rs-gaap-type-subtype
     # for every confirmed FAC mapping, grouped by FAC element to minimise AI calls.
     if confirmed_fac and not await ctx.progress.is_cancelled():
       await ctx.progress.report("Running rs-gaap refinement pass…", percent=90)
@@ -341,7 +341,7 @@ class MappingOperator(Operator):
       if await ctx.progress.is_cancelled():
         break
 
-      # Expand FAC → rs-gaap parent + type-subtype children
+      # Expand FAC → rs-gaap parent + rs-gaap-type-subtype children
       expand_result = await expand_tool.execute({"fac_element_id": fac_id})
       expand_failed = "error" in expand_result
       if expand_failed:

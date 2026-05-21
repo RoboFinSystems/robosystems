@@ -18,7 +18,7 @@ import importlib.util as _util
 from pathlib import Path
 
 from robosystems.db import extensions as extensions_db
-from robosystems.taxonomy.writers.tenant_writer import (
+from robosystems.taxonomy.writer import (
   _ASSOC_CLASSIFICATION_COLS,
   CopyStats,
 )

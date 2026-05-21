@@ -94,7 +94,7 @@ def reset_demo_state(graph_id: str) -> None:
     )
 
     # 6b. Tenant-origin elements. Library elements (fac, rs-gaap,
-    # type-subtype, plus the native mapping/presentation overlays all
+    # rs-gaap-type-subtype, plus the native mapping/presentation overlays all
     # carrying 'library-seeder') stay put.
     session.execute(
       text("DELETE FROM elements WHERE created_by != :seeder"),

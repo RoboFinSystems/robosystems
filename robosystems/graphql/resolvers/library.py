@@ -136,7 +136,7 @@ class LibraryQuery:
   ) -> list[LibraryAssociation]:
     """List every arc contributed by a taxonomy (via its structures).
 
-    For mapping taxonomies (fac-to-rs-gaap, type-subtype)
+    For mapping taxonomies (fac-to-rs-gaap, rs-gaap-type-subtype)
     this is the primary browse view — the arcs ARE what the taxonomy
     contributes, not concepts. Each entry includes the from/to element
     qname + name so the UI can render the arc directly.
@@ -295,7 +295,7 @@ class LibraryQuery:
     """Return all mapping arcs where this element is source or target.
 
     Covers every `taxonomy_type='mapping'` bridge — equivalence,
-    general-special, type-subtype. Each row is oriented from the
+    general-special, rs-gaap-type-subtype. Each row is oriented from the
     element's perspective (`direction` = outgoing | incoming).
     """
     with _open_session(info) as session:

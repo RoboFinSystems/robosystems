@@ -3,7 +3,7 @@
 Adds four public-schema tables that record taxonomy library
 **composition**:
 
-- ``frameworks`` — named, versioned bundles (rs-gaap-base@v1, etc.)
+- ``frameworks`` — named, versioned bundles (rs-gaap@v1, etc.)
 - ``framework_packages`` — junction pinning specific (package, version)
   tuples into a framework, with load-order ordinal + is_required flag
 - ``bridges`` — cross-namespace equivalence taxonomies (metadata
@@ -11,7 +11,7 @@ Adds four public-schema tables that record taxonomy library
   with any package)
 - ``framework_bridges`` — junction pinning bridges into a framework
 
-Then walks ``robosystems/taxonomy/frameworks/*/v*.json`` and inserts
+Then walks ``frameworks/{name}/{version}.json`` and inserts
 one Framework row per manifest, one FrameworkPackage row per
 ``packages[]`` entry, one Bridge row per bridge that's loaded as a
 package (looked up via the ``standard`` field), and one
@@ -19,7 +19,7 @@ FrameworkBridge row per ``bridges[]`` entry.
 
 Frameworks live in the public schema only — they're library metadata,
 not per-tenant content. Tenants reference them by name through
-``Graph.taxonomy_pin = {"framework": "rs-gaap-base@v1"}``; the
+``Graph.taxonomy_pin = {"framework": "rs-gaap@v1"}``; the
 resolver expands the framework into the flat ``{standard: version}``
 pin shape that ``copy_library_into_tenant`` consumes.
 
@@ -44,8 +44,8 @@ from alembic import op
 from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 
-from robosystems.taxonomy.loaders.discovery import (
-  FRAMEWORKS_DIR,
+from robosystems.taxonomy.discovery import (
+  list_framework_manifests,
 )
 from robosystems.utils.uuid import generate_deterministic_uuid
 
@@ -77,17 +77,12 @@ def _framework_bridge_id(framework_id: str, bridge_id: str) -> str:
 
 
 def _list_framework_manifests() -> list[Path]:
-  """Walk ``frameworks/{name}/{version}.json`` for every manifest."""
-  if not FRAMEWORKS_DIR.exists():
-    return []
-  paths: list[Path] = []
-  for name_dir in sorted(FRAMEWORKS_DIR.iterdir()):
-    if not name_dir.is_dir() or name_dir.name.startswith("."):
-      continue
-    for entry in sorted(name_dir.iterdir()):
-      if entry.is_file() and entry.suffix == ".json":
-        paths.append(entry)
-  return paths
+  """Walk ``frameworks/{name}/{version}.json`` for every manifest.
+
+  Thin wrapper kept for migration-local naming; delegates to the
+  centralised discovery helper.
+  """
+  return list_framework_manifests()
 
 
 def _seed_framework_rows(conn) -> None:
@@ -252,7 +247,7 @@ def _seed_framework_rows(conn) -> None:
 
 
 # Widen the elements.source CHECK constraint to admit the namespace
-# prefixes used by the rs-gaap-base framework extension packages
+# prefixes used by the rs-gaap framework extension packages
 # (disclosures, checklist, styles). Without this, elements from those
 # packages get rejected at INSERT time. The widen runs in every
 # tenant schema (each has its own copy of the constraint) plus the
