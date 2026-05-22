@@ -6,10 +6,10 @@ and seeds ``reporting_style_networks`` + stamps ``reportingStyleCode``.
 "Adding a preset is pure package content" is now load-bearing, so these
 lock the contract a typo in the package or the seeder could break:
 
-- ``_declared_styles`` parses the package into the two composed presets
-  (Default = multi-step IS, SmallPrivate = single-step IS), each with a
-  complete 4-statement composition.
-- Composition-less placeholders (Banking) are skipped but still promoted.
+- ``_declared_styles`` parses the package into the three default-family
+  presets (the equity-form axis CORP/PART/LLC over a fixed BSC /
+  multi-step IS / indirect CF layout), each with a complete 4-statement
+  composition.
 - ``_stamp_style_codes`` uses ``CAST(:code AS text)`` — guards against
   the ``:bind::cast`` form that silently fails to bind in SQLAlchemy.
 """
@@ -55,11 +55,13 @@ class _Conn:
 
 
 class TestDeclaredStyles:
-  def test_exactly_the_four_composed_presets(self) -> None:
+  def test_exactly_the_three_composed_presets(self) -> None:
+    """The default family: the equity-form axis (CORP/PART/LLC) over a
+    fixed BSC / multi-step IS / indirect CF layout. Single-step IS,
+    BSU/NET layouts, CF direct, and vertical styles are deferred."""
     codes = {s["code"] for s in mig_0008._declared_styles()}
     assert codes == {
       "BSC-CORP-IS02-CF1",
-      "BSC-CORP-IS01-CF1",
       "BSC-PART-IS02-CF1",
       "BSC-LLC-IS02-CF1",
     }
@@ -71,17 +73,13 @@ class TestDeclaredStyles:
       stmt_types = {st for st, _net in style["networks"]}
       assert stmt_types == _REQUIRED, style["code"]
 
-  def test_is_axis_distinguishes_the_single_vs_multistep_presets(self) -> None:
-    """IS02 → multi-step network, IS01 → single-step network. Everything
-    else is shared between the two corporate presets."""
+  def test_all_presets_share_multistep_is_and_indirect_cf(self) -> None:
+    """The default family fixes IS-multistep + CashFlow-indirect across
+    all three forms — only the equity-form axis varies (next test)."""
     by_code = {s["code"]: dict(s["networks"]) for s in mig_0008._declared_styles()}
-    assert by_code["BSC-CORP-IS02-CF1"]["income_statement"].endswith("IS-multistep")
-    assert by_code["BSC-CORP-IS01-CF1"]["income_statement"].endswith("IS-singlestep")
-    # BS / CF / SE are identical across the two corporate presets.
-    for stmt in ("balance_sheet", "cash_flow_statement", "equity_statement"):
-      assert by_code["BSC-CORP-IS02-CF1"][stmt] == by_code["BSC-CORP-IS01-CF1"][stmt], (
-        stmt
-      )
+    for code in ("BSC-CORP-IS02-CF1", "BSC-PART-IS02-CF1", "BSC-LLC-IS02-CF1"):
+      assert by_code[code]["income_statement"].endswith("IS-multistep"), code
+      assert by_code[code]["cash_flow_statement"].endswith("CashFlow-indirect"), code
 
   def test_equity_form_axis_is_the_only_difference_corp_part_llc(self) -> None:
     """CORP/PART/LLC share IS-multistep + CashFlow-indirect; only the
@@ -104,22 +102,13 @@ class TestDeclaredStyles:
     assert part["equity_statement"].endswith("Equity-rollforward-PART")
     assert llc["equity_statement"].endswith("Equity-rollforward-LLC")
 
-  def test_placeholder_skipped_but_still_promoted(self) -> None:
-    """Banking declares no composition — skipped by the seeder (stays
-    non-selectable) but still listed for the block_type promotion."""
-    declared = {s["role_uri"] for s in mig_0008._declared_styles()}
-    all_styles = set(mig_0008._all_style_role_uris())
-    banking = mig_0008._STYLE_ROLE_PREFIX + "Banking"
-    assert banking in all_styles
-    assert banking not in declared
-
 
 class TestSeedComposition:
   def test_seeds_one_row_per_statement_per_style(self) -> None:
     conn = _Conn()
     mig_0008._seed_style_compositions(conn, "public")
-    # 4 composed presets, 4 statement types each.
-    assert len(conn.calls) == 16
+    # 3 composed presets, 4 statement types each.
+    assert len(conn.calls) == 12
     for sql, params in conn.calls:
       assert "public.reporting_style_networks" in sql
       assert set(params) >= {"style", "stmt", "network"}
@@ -149,7 +138,6 @@ class TestStampStyleCodes:
     stamped = {params["code"] for _sql, params in conn.calls}
     assert stamped == {
       "BSC-CORP-IS02-CF1",
-      "BSC-CORP-IS01-CF1",
       "BSC-PART-IS02-CF1",
       "BSC-LLC-IS02-CF1",
     }
@@ -183,7 +171,6 @@ class TestCloseTargets:
   def test_declared_styles_carry_form_close_target(self) -> None:
     by_code = {s["code"]: s["close_target"] for s in mig_0008._declared_styles()}
     assert by_code["BSC-CORP-IS02-CF1"] == "rs-gaap:RetainedEarningsAccumulatedDeficit"
-    assert by_code["BSC-CORP-IS01-CF1"] == "rs-gaap:RetainedEarningsAccumulatedDeficit"
     assert by_code["BSC-PART-IS02-CF1"] == "rs-gaap:PartnersCapital"
     assert by_code["BSC-LLC-IS02-CF1"] == "rs-gaap:MembersEquity"
 

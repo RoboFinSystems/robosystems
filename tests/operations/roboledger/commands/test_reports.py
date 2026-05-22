@@ -88,9 +88,9 @@ def test_build_structure_mapping_resolves_each_statement_type_via_picker() -> No
 
 def test_build_structure_mapping_skips_uncomposed_statement_types() -> None:
   """A Reporting Style that doesn't compose every statement type (e.g.,
-  Banking with no equity Network) skips the missing types silently —
-  the picker raises ``NoNetworkForStatementTypeError`` which the caller
-  catches."""
+  a future vertical style with no equity Network) skips the missing types
+  silently — the picker raises ``NoNetworkForStatementTypeError`` which
+  the caller catches."""
   session = MagicMock()
 
   picked = {

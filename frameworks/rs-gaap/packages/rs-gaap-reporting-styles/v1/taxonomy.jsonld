@@ -46,25 +46,11 @@
   "origin": "native",
   "created_at": "2026-05-10",
   "default_block_type": "custom",
-  "description": "Reporting Styles — composition profiles that pin specific Disclosures for a vertical / filer profile. Each Style is an abstract subject with reportingStyle-composesDisclosure arcs naming the disclosures it includes. Mirrors Charlie Hoffman's seattlemethod ReportingStyles concept (the COMID-BSC-CF1-… composition schemas at auditchain.finance) but anchored to rs-gaap disclosures instead of fac/us-gaap concepts. v1 ships three minimal styles; vertical-specific styles (banking, insurance) are placeholders until customer demand surfaces.",
+  "description": "Reporting Styles — composition profiles that pin specific Disclosures for a vertical / filer profile. Each Style is an abstract subject with reportingStyle-composesDisclosure arcs naming the disclosures it includes. Mirrors Charlie Hoffman's seattlemethod ReportingStyles concept (the COMID-BSC-CF1-… composition schemas at auditchain.finance) but anchored to rs-gaap disclosures instead of fac/us-gaap concepts. v1 ships the default family — BSC-{CORP|PART|LLC}-IS02-CF1 (the equity-form axis is the only flex; BS-layout/IS-layout/CF-method are fixed). Additional BS layouts (BSU/NET), IS single-step, CF direct, and vertical styles (banking/insurance/REIT/NFP) are deferred and land as pure package content (no migration) when prioritized — see information-block.md §3.6.",
   "@graph": [
     {
       "@id": "styles:DefaultStyle",
       "label": "Default Style",
-      "elementType": "abstract",
-      "periodType": "duration",
-      "abstract": true
-    },
-    {
-      "@id": "styles:SmallPrivateCompany",
-      "label": "Small Private Company Style",
-      "elementType": "abstract",
-      "periodType": "duration",
-      "abstract": true
-    },
-    {
-      "@id": "styles:Banking",
-      "label": "Banking Style (placeholder)",
       "elementType": "abstract",
       "periodType": "duration",
       "abstract": true
@@ -98,28 +84,6 @@
         {"statementType": "cash_flow_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"},
         {"statementType": "equity_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward"}
       ]
-    },
-    {
-      "@id": "_:style-smallprivate-structure",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/SmallPrivateCompany",
-      "structureName": "Small Private Company Style — Composition (single-step IS)",
-      "blockType": "custom",
-      "conceptArrangementPattern": "set",
-      "reportingStyleCode": "BSC-CORP-IS01-CF1",
-      "retainedEarningsConcept": "rs-gaap:RetainedEarningsAccumulatedDeficit",
-      "reportingStyleNetworks": [
-        {"statementType": "balance_sheet", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified"},
-        {"statementType": "income_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep"},
-        {"statementType": "cash_flow_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect"},
-        {"statementType": "equity_statement", "networkRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward"}
-      ]
-    },
-    {
-      "@id": "_:style-banking-structure",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/styles/Banking",
-      "structureName": "Banking Style — Composition (placeholder)",
-      "blockType": "custom",
-      "conceptArrangementPattern": "set"
     },
     {
       "@id": "_:style-partnership-structure",
@@ -169,34 +133,6 @@
         {"@id": "disclosures:CommitmentsDisclosure"},
         {"@id": "disclosures:ContingenciesDisclosure"},
         {"@id": "disclosures:RelatedPartyDisclosures"}
-      ]
-    },
-
-    {
-      "@id": "styles:SmallPrivateCompany",
-      "reportingStyleComposesDisclosure": [
-        {"@id": "disclosures:BalanceSheet"},
-        {"@id": "disclosures:IncomeStatement"},
-        {"@id": "disclosures:CashFlowStatement"},
-        {"@id": "disclosures:StatementOfChangesInEquity"},
-        {"@id": "disclosures:DocumentAndEntityInformation"},
-        {"@id": "disclosures:NatureOfOperations"},
-        {"@id": "disclosures:SignificantAccountingPolicies"},
-        {"@id": "disclosures:PropertyPlantAndEquipmentDisclosure"},
-        {"@id": "disclosures:DebtDisclosure"},
-        {"@id": "disclosures:IncomeTaxDisclosure"},
-        {"@id": "disclosures:CommitmentsDisclosure"},
-        {"@id": "disclosures:RelatedPartyDisclosures"}
-      ]
-    },
-
-    {
-      "@id": "styles:Banking",
-      "reportingStyleComposesDisclosure": [
-        {"@id": "disclosures:BalanceSheet"},
-        {"@id": "disclosures:IncomeStatement"},
-        {"@id": "disclosures:CashFlowStatement"},
-        {"@id": "disclosures:StatementOfChangesInEquity"}
       ]
     },
 

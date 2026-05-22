@@ -4,10 +4,11 @@ Tenant-scoped junction table. One row per (reporting_style, statement_type)
 pair, pointing at the Network Structure the renderer should use for that
 statement type when this Reporting Style is in effect.
 
-Library-seeded: the Default Style ships with 4 rows (BS / IS / CF / SE)
-pinned to canonical rs-gaap Networks; Small Private Company Style and
-Banking Style ship empty, to be filled in by future library work or
-customer-authored Taxonomy Blocks (Phase 3 of §3.2).
+Library-seeded: each default-family Style (Default / Partnership / LLC)
+ships with 4 rows (BS / IS / CF / SE) pinned to canonical rs-gaap
+Networks. Additional styles (BSU/NET layouts, single-step IS, direct CF,
+vertical profiles) land later as pure package content or customer-authored
+Taxonomy Blocks (Phase 3 of §3.2).
 
 No DB foreign key on ``network_id`` / ``reporting_style_id``: both are
 ``Structure.id`` values, validated at the application layer. Library

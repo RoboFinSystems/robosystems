@@ -180,7 +180,7 @@ class Graph(Model):
   taxonomy_pin = Column(JSONB, nullable=True)
 
   # Reporting Style — Charlie Hoffman's term for the bundle a company
-  # picks (e.g. Default / Small Private Company / Banking). The value is
+  # picks (the default family: Default / Partnership / LLC). The value is
   # a Structure id in the per-tenant extensions schema; the renderer
   # picker uses it to resolve which Network fills each statement-type
   # slot via ``reporting_style_networks``. NOT NULL because every entity

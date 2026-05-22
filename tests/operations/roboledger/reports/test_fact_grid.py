@@ -26,6 +26,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _infer_period_type,
   _is_equity_flow_reducer,
   _natural_sign,
+  _roll_up_facts_to_structure,
   _root_sort_key,
   _synthesize_ppe_net_facts,
 )
@@ -1077,6 +1078,170 @@ class TestCloseToRetainedEarningsRsGaap:
     assert re.value == 192_500.0 - 157_950.0
     # No phantom legacy RE fact created.
     assert not any(f.element_id == "elem_gaap_retained_earnings" for f in facts)
+
+
+class TestDefaultFamilyFooting:
+  """The default family (BSC-{CORP|PART|LLC}-IS02-CF1) must foot after the
+  form-aware close: Assets = Liabilities + Equity, with net income folded
+  into the form's earnings home (CORP→RetainedEarnings,
+  PART→PartnersCapital, LLC→MembersEquity). Regression guard for the
+  equity-form axis — previously only demo-verified (see
+  architecture_equity_form_structures), not pinned in CI."""
+
+  PS = date(2025, 1, 1)
+  PE = date(2025, 12, 31)
+
+  # (form label, close-target equity concept)
+  _FORMS = [
+    ("CORP", "rs-gaap:RetainedEarningsAccumulatedDeficit"),
+    ("PART", "rs-gaap:PartnersCapital"),
+    ("LLC", "rs-gaap:MembersEquity"),
+  ]
+
+  def _fact(
+    self, qname, classification, balance_type, value, period_type="duration"
+  ) -> ReportFact:
+    return ReportFact(
+      element_id=qname,
+      element_qname=qname,
+      element_name=qname,
+      classification=classification,
+      balance_type=balance_type,
+      value=value,
+      period_start=self.PS,
+      period_end=self.PE,
+      period_type=period_type,
+    )
+
+  def test_accounting_equation_holds_for_each_form(self) -> None:
+    for form, close_target in self._FORMS:
+      # Balanced double-entry fixture: Cash 1000 = AP 400 + Equity 600,
+      # where Equity 600 = contributed 0 + net income (Rev 1000 - Exp 400).
+      facts = [
+        self._fact(
+          "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+          "asset",
+          "debit",
+          1000.0,
+          "instant",
+        ),
+        self._fact(
+          "rs-gaap:AccountsPayableCurrent", "liability", "credit", 400.0, "instant"
+        ),
+        self._fact(close_target, "equity", "credit", 0.0, "instant"),
+        self._fact("rs-gaap:SalesRevenueNet", "revenue", "credit", 1000.0),
+        self._fact(
+          "rs-gaap:SellingGeneralAndAdministrativeExpense", "expense", "debit", 400.0
+        ),
+      ]
+
+      _close_to_retained_earnings(
+        facts, self.PS, self.PE, close_target_qname=close_target
+      )
+
+      # Net income folded into the form's earnings home.
+      target = next(f for f in facts if f.element_qname == close_target)
+      assert target.value == 600.0, form
+
+      # Balance-sheet classifications foot (revenue/expense are temporary
+      # accounts now closed into equity, so they're excluded).
+      assets = sum(f.value for f in facts if f.classification == "asset")
+      liabilities = sum(f.value for f in facts if f.classification == "liability")
+      equity = sum(f.value for f in facts if f.classification == "equity")
+      assert assets == liabilities + equity, (
+        f"{form}: Assets {assets} != Liabilities {liabilities} + Equity {equity}"
+      )
+
+
+class TestPpeNetSynthesisAuditOnly:
+  """PP&E Gross + Accumulated Depreciation, once consumed by
+  ``_synthesize_ppe_net_facts`` to produce PropertyPlantAndEquipmentNet, must
+  be flagged ``audit_only`` so the render roll-up doesn't ALSO resolve them
+  into the noncurrent section and double-count PP&E (the footing bug where
+  AssetsNoncurrent rendered Gross + Net)."""
+
+  PS = date(2025, 1, 1)
+  PE = date(2025, 12, 31)
+  _NET_ID, _GROSS_ID, _AD_ID = "net1", "gross1", "ad1"
+  _GROSS_Q = "rs-gaap:PropertyPlantAndEquipmentGross"
+  _AD_Q = (
+    "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"
+  )
+
+  def _session(self) -> MagicMock:
+    session = MagicMock()
+    net_res = MagicMock()
+    net_res.fetchone.return_value = (self._NET_ID, "debit")
+    src_res = MagicMock()
+    src_res.fetchall.return_value = [
+      (self._GROSS_Q, self._GROSS_ID),
+      (self._AD_Q, self._AD_ID),
+    ]
+    session.execute.side_effect = [net_res, src_res]
+    return session
+
+  def _detail(self, eid: str, qname: str, value: float) -> ReportFact:
+    return ReportFact(
+      element_id=eid,
+      element_qname=qname,
+      element_name=qname,
+      classification="asset",
+      balance_type="debit",
+      value=value,
+      period_start=self.PS,
+      period_end=self.PE,
+      period_type="instant",
+    )
+
+  def test_synthesizes_net_and_flags_components_audit_only(self) -> None:
+    facts = [
+      self._detail(self._GROSS_ID, self._GROSS_Q, 6300.0),
+      self._detail(self._AD_ID, self._AD_Q, 158.33),
+    ]
+    _synthesize_ppe_net_facts(
+      self._session(), facts, [PeriodSpec(self.PS, self.PE, "FY2025")]
+    )
+    net = next(
+      f for f in facts if f.element_qname == "rs-gaap:PropertyPlantAndEquipmentNet"
+    )
+    assert net.value == 6300.0 - 158.33
+    assert net.audit_only is False
+    # The consumed components are now audit-only.
+    gross = next(f for f in facts if f.element_id == self._GROSS_ID)
+    ad = next(f for f in facts if f.element_id == self._AD_ID)
+    assert gross.audit_only is True
+    assert ad.audit_only is True
+
+
+class TestRollUpSkipsAuditOnly:
+  """``_roll_up_facts_to_structure`` drops ``audit_only`` facts entirely so a
+  component already represented by a synthesized parent never resolves to an
+  in-structure ancestor and double-counts."""
+
+  def _fact(self, eid: str, audit_only: bool) -> ReportFact:
+    return ReportFact(
+      element_id=eid,
+      element_qname=f"rs-gaap:{eid}",
+      element_name=eid,
+      classification="asset",
+      balance_type="debit",
+      value=100.0,
+      period_start=date(2025, 1, 1),
+      period_end=date(2025, 12, 31),
+      period_type="instant",
+      audit_only=audit_only,
+    )
+
+  def test_audit_only_fact_dropped_not_resolved(self) -> None:
+    facts = [
+      self._fact("inStructure", audit_only=False),
+      self._fact("grossDetail", audit_only=True),
+    ]
+    # session is never consulted: the in-structure fact passes through and
+    # the audit-only fact is dropped before ancestor resolution.
+    result = _roll_up_facts_to_structure(MagicMock(), facts, {"inStructure"})
+    ids = {f.element_id for f in result}
+    assert ids == {"inStructure"}
 
 
 # ── _is_equity_flow_reducer + dividend handling in close ─────────────────
