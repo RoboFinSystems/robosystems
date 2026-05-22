@@ -493,6 +493,55 @@ class TestBuildRows:
     gp_row = next(r for r in rows if r.element_id == "gp")
     assert gp_row.values == [600.0, 450.0]  # 1000-400, 800-350
 
+  def test_calc_subtotal_present_when_one_source_absent(self):
+    """Calc-DAG presence propagation: a subtotal whose calc has one present
+    source and one absent source is computed (absent = 0) AND marked present,
+    so it still renders — a single-account trial balance produces its
+    subtotal rather than dropping out. Regression guard for the presence-set
+    propagation in ``_build_rows`` pass 2."""
+    hierarchy = [
+      _HierarchyNode(
+        element_id="rev",
+        qname="rev",
+        name="Revenue",
+        classification="revenue",
+        balance_type="credit",
+        is_abstract=False,
+        depth=0,
+      ),
+      _HierarchyNode(
+        element_id="cogs",
+        qname="cogs",
+        name="COGS",
+        classification="expense",
+        balance_type="debit",
+        is_abstract=False,
+        depth=0,
+      ),
+      _HierarchyNode(
+        element_id="gp",
+        qname="gp",
+        name="Gross Profit",
+        classification="revenue",
+        balance_type="credit",
+        is_abstract=False,
+        depth=0,
+      ),
+    ]
+    # Only Revenue is reported; COGS is absent (no fact at all, not a 0).
+    balances = self._make_balances({"rev": 1000.0}, "credit")
+    calculations = {"gp": [("rev", 1.0), ("cogs", -1.0)]}
+
+    rows = _build_rows(hierarchy, [balances], calculations)
+    by_id = {r.element_id: r for r in rows}
+
+    # GP = 1000 - 0, marked present (a source is present), so it renders.
+    assert "gp" in by_id
+    assert by_id["gp"].values == [1000.0]
+    assert by_id["gp"].is_subtotal is True
+    # Absent COGS (→ 0) is suppressed as an all-zero row.
+    assert "cogs" not in by_id
+
 
 class TestInferPeriodType:
   def test_balance_sheet_items_are_instant(self):
@@ -1211,6 +1260,33 @@ class TestPpeNetSynthesisAuditOnly:
     ad = next(f for f in facts if f.element_id == self._AD_ID)
     assert gross.audit_only is True
     assert ad.audit_only is True
+
+  def test_direct_net_present_skips_synthesis_but_flags_components(self) -> None:
+    """Early-continue path: a direct PropertyPlantAndEquipmentNet fact already
+    exists (e.g. an all-in-Net mapping), so synthesis is skipped — but any
+    stray Gross/AD facts must STILL be flagged audit_only so the render
+    roll-up doesn't double-count them, and no duplicate Net fact is created."""
+    direct_net = self._detail(
+      self._NET_ID, "rs-gaap:PropertyPlantAndEquipmentNet", 4766.70
+    )
+    facts = [
+      direct_net,
+      self._detail(self._GROSS_ID, self._GROSS_Q, 6300.0),
+      self._detail(self._AD_ID, self._AD_Q, 158.33),
+    ]
+    _synthesize_ppe_net_facts(
+      self._session(), facts, [PeriodSpec(self.PS, self.PE, "FY2025")]
+    )
+    # No duplicate Net fact — the direct one is left untouched.
+    nets = [
+      f for f in facts if f.element_qname == "rs-gaap:PropertyPlantAndEquipmentNet"
+    ]
+    assert len(nets) == 1
+    assert nets[0].value == 4766.70
+    assert direct_net.audit_only is False
+    # Stray components still flagged so they don't roll up into the BS.
+    assert next(f for f in facts if f.element_id == self._GROSS_ID).audit_only is True
+    assert next(f for f in facts if f.element_id == self._AD_ID).audit_only is True
 
 
 class TestRollUpSkipsAuditOnly:
