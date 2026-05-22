@@ -162,6 +162,38 @@ def evaluate_equality(
   return residual <= tolerance, residual
 
 
+def variable_names_in(node: ast.AST) -> list[str]:
+  """Return the rule variable names (``$Name`` → ``Name``) used in a subtree.
+
+  Walks the AST for ``_var_`` identifiers (the preprocessed form of
+  ``$Name``) and strips the prefix. Order follows ``ast.walk``.
+  """
+  names: list[str] = []
+  for child in ast.walk(node):
+    if isinstance(child, ast.Name) and child.id.startswith("_var_"):
+      names.append(child.id[len("_var_") :])
+  return names
+
+
+def lhs_variable_names(parsed: ParsedExpression) -> list[str]:
+  """Variable names on the left of the equality — the subtotal being checked.
+
+  Used by the ``RollUp`` evaluator to distinguish the parent subtotal
+  (which must have a bound fact) from the RHS children (a missing child
+  is treated as 0, matching the renderer's sum-of-present-children).
+  """
+  body = parsed.tree.body
+  if (
+    not isinstance(body, ast.Compare)
+    or len(body.ops) != 1
+    or not isinstance(body.ops[0], ast.Eq)
+  ):
+    raise InvalidRuleExpression(
+      f"expected a single LHS = RHS expression, got: {ast.dump(body)}"
+    )
+  return variable_names_in(body.left)
+
+
 def evaluate_arithmetic(parsed: ParsedExpression, values: dict[str, float]) -> float:
   """Evaluate a single arithmetic expression (no equality) to a float.
 
@@ -180,5 +212,7 @@ __all__ = [
   "ParsedExpression",
   "evaluate_arithmetic",
   "evaluate_equality",
+  "lhs_variable_names",
   "parse_arithmetic_expression",
+  "variable_names_in",
 ]

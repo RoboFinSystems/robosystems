@@ -1,11 +1,14 @@
 """Tests for the fac-rules/v1 JSON-LD seed.
 
 Pure data tests — parses the seed via
-:func:`robosystems.taxonomy.loader.load_taxonomy_package`
-and asserts the shape Phase δ.3 ships: 14 forked rules drawn from three
-rule categories and five rule patterns, every `$Variable` bound via
-`rule_variables`, every rule scoped to a known fac-calculations /
-fac-presentation Structure role URI.
+:func:`robosystems.taxonomy.loader.load_taxonomy_package` and asserts the
+shape Package II.a ships: L1 cross-tree consistency identities harvested
+from Charlie Hoffman's PROOF and **rewritten to rs-gaap subtotal
+concepts**, element-scoped so they fire against any rendered statement
+that presents the subtotal (info-block §6.1). The prior FAC-keyed,
+structure-scoped 14-rule seed (which evaluated to ``skipped`` because our
+facts are rs-gaap-keyed) is superseded; rollup-shaped identities now live
+in ``rs-gaap-rollup-rules/v1`` (L2).
 """
 
 from __future__ import annotations
@@ -50,94 +53,69 @@ class TestPackageMetadata:
   def test_package_carries_no_elements_or_associations(
     self, package: TaxonomyPackage
   ) -> None:
-    """fac-rules/v1 is rule-only. Elements and associations are seeded
-    by the sibling fac-calculations/v1 and fac-presentation/v1 packages.
-    """
+    """fac-rules/v1 is rule-only. Elements are seeded by rs-gaap/v1."""
     assert package.elements == []
     assert package.associations == []
 
 
-class TestRuleCount:
-  def test_has_fourteen_rules(self, rules: list[RuleSpec]) -> None:
-    """Phase δ.3 expands the seed to 14 rules: 7 from Phase δ.2 plus
-    2 harvested from XBRL formula linkbases (IS / CNA identities) and
-    5 from disclosure-mechanics definition linkbases."""
-    assert len(rules) == 14
+class TestRuleContent:
+  def test_has_three_cross_tree_identities(self, rules: list[RuleSpec]) -> None:
+    """Only the genuine cross-tree identities are kept (BS0, BS01, IS04);
+    rollup-shaped Consistency rules move to rs-gaap-rollup-rules (L2) and
+    FAC/SFAC6-aggregate rules have no rs-gaap subtotal target."""
+    assert len(rules) == 3
+    assert {r.id for r in rules} == {
+      "rs-gaap-rule-bs-identity",
+      "rs-gaap-rule-bs-balances",
+      "rs-gaap-rule-ci-identity",
+    }
 
+  def test_only_fac_relation_category(self, rules: list[RuleSpec]) -> None:
+    assert {r.rule_category for r in rules} == {"FundamentalAccountingConceptRelation"}
 
-class TestRuleEnums:
-  def test_all_categories_are_known(self, rules: list[RuleSpec]) -> None:
+  def test_only_equal_to_pattern(self, rules: list[RuleSpec]) -> None:
+    """Cross-tree identities are strict equalities (all subtotals must be
+    present); lenient rollups live in the L2 package."""
+    assert {r.rule_pattern for r in rules} == {"EqualTo"}
+
+  def test_all_categories_and_patterns_are_known(self, rules: list[RuleSpec]) -> None:
     for rule in rules:
       assert rule.rule_category in RULE_CATEGORY_VALUES
-
-  def test_all_patterns_are_known(self, rules: list[RuleSpec]) -> None:
-    for rule in rules:
       assert rule.rule_pattern in RULE_PATTERN_VALUES
 
-  def test_seed_covers_three_categories(self, rules: list[RuleSpec]) -> None:
-    """Three of eight cm:VerificationRule categories seeded in Phase δ.3:
-    the two from δ.2 plus DisclosureMechanicsRule harvested from the
-    Seattle Method dm definition linkbases."""
-    categories = {rule.rule_category for rule in rules}
-    assert categories == {
-      "FundamentalAccountingConceptRelation",
-      "ReportLevelModelStructureRule",
-      "DisclosureMechanicsRule",
-    }
-
-  def test_seed_covers_five_patterns(self, rules: list[RuleSpec]) -> None:
-    """Five of ten cm:BusinessRulePattern mechanisms used in Phase δ.2."""
-    patterns = {rule.rule_pattern for rule in rules}
-    assert patterns == {
-      "EqualTo",
-      "RollForward",
-      "RollUp",
-      "Exists",
-      "CoExists",
-    }
-
-
-class TestRuleOrigin:
   def test_all_rules_are_forked(self, rules: list[RuleSpec]) -> None:
-    """Every seeded rule transcribes an upstream Seattle Method artifact
-    — no 'native' authorship before Phase δ.3's engine ships."""
+    """Each transcribes an upstream PROOF Consistency assertion."""
     for rule in rules:
       assert rule.rule_origin == "forked"
 
-
-class TestRuleSeverity:
   def test_all_rules_default_to_error(self, rules: list[RuleSpec]) -> None:
-    """The seed omits `ruleSeverity`; the Pydantic default populates all
-    7 rules to `error` — these are hard constraints."""
     for rule in rules:
       assert rule.rule_severity == "error"
 
 
 class TestRuleTargets:
-  def test_every_rule_targets_a_structure(self, rules: list[RuleSpec]) -> None:
+  def test_every_rule_is_element_scoped(self, rules: list[RuleSpec]) -> None:
+    """Element-scoping (to the LHS subtotal) makes a rule fire whenever a
+    rendered statement presents that concept — across every equity-form
+    Balance Sheet variant — without coupling to a presentation role-URI."""
     for rule in rules:
-      assert rule.rule_target is not None, (
-        f"rule {rule.id} missing rule_target — Phase δ.2 seeds structure-scoped "
-        f"rules only"
-      )
-      assert rule.rule_target.target_kind == "structure"
+      assert rule.rule_target is not None, f"rule {rule.id} missing rule_target"
+      assert rule.rule_target.target_kind == "element"
 
-  def test_every_target_ref_is_a_fac_role_uri(self, rules: list[RuleSpec]) -> None:
-    """Rules reference Structures seeded by fac-calculations/v1 and
-    fac-presentation/v1 — their role URIs are under cm-roles/roles/{fac-*}/."""
-    prefix = "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/"
+  def test_every_target_ref_is_an_rs_gaap_qname(self, rules: list[RuleSpec]) -> None:
+    """The library creator resolves element targets by ``Element.qname``,
+    so the ref must be the literal rs-gaap qname (un-expanded)."""
     for rule in rules:
       assert rule.rule_target is not None
-      assert rule.rule_target.target_ref.startswith(prefix), (
-        f"rule {rule.id} has unexpected target_ref {rule.rule_target.target_ref}"
+      assert rule.rule_target.target_ref.startswith("rs-gaap:"), (
+        f"rule {rule.id} target_ref {rule.rule_target.target_ref} is not rs-gaap"
       )
 
 
 class TestRuleExpressionsBindVariables:
   def test_every_dollar_variable_is_bound(self, rules: list[RuleSpec]) -> None:
     """Every `$Variable` in `rule_expression` must appear in
-    `rule_variables` — Phase δ.3's engine looks bindings up by name, and
-    an unbound variable is a seed bug that would only fail at runtime."""
+    `rule_variables` — the engine looks bindings up by name."""
     for rule in rules:
       referenced = set(VARIABLE_PATTERN.findall(rule.rule_expression))
       bound = {v.variable_name for v in rule.rule_variables}
@@ -147,26 +125,24 @@ class TestRuleExpressionsBindVariables:
         f"rule_variables bind only {sorted(bound)}"
       )
 
-  def test_every_bound_variable_has_a_qname(self, rules: list[RuleSpec]) -> None:
+  def test_every_variable_qname_is_rs_gaap(self, rules: list[RuleSpec]) -> None:
+    """Variables resolve against rs-gaap-keyed facts — the FAC->rs-gaap
+    rewrite is the whole point of the Package II.a harvest."""
     for rule in rules:
       for variable in rule.rule_variables:
-        assert variable.variable_qname, (
-          f"rule {rule.id}: variable {variable.variable_name} missing qname"
-        )
-        assert ":" in variable.variable_qname, (
-          f"rule {rule.id}: variable qname {variable.variable_qname} must be "
-          f"prefix:local"
+        assert variable.variable_qname.startswith("rs-gaap:"), (
+          f"rule {rule.id}: variable {variable.variable_name} qname "
+          f"{variable.variable_qname} must be rs-gaap"
         )
 
 
 class TestRuleIdShape:
   def test_ids_have_known_prefix(self, rules: list[RuleSpec]) -> None:
-    """Blank-node local ids prefix with `fac-rule-` (Phase δ.2 rules) or
-    `sfac6-rule-` (Phase δ.3 formula/dm harvested rules). The writer
-    rewrites to a deterministic UUID5 at seed time."""
+    """Blank-node local ids prefix with `rs-gaap-rule-` (the rewritten
+    L1 identities). The writer rewrites to a deterministic UUID5."""
     for rule in rules:
-      assert "fac-rule-" in rule.id or "sfac6-rule-" in rule.id, (
-        f"rule id {rule.id!r} should contain 'fac-rule-' or 'sfac6-rule-'"
+      assert rule.id.startswith("rs-gaap-rule-"), (
+        f"rule id {rule.id!r} should start with 'rs-gaap-rule-'"
       )
 
   def test_ids_are_unique(self, rules: list[RuleSpec]) -> None:

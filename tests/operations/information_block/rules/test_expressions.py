@@ -8,8 +8,25 @@ from robosystems.operations.information_block.rules.expressions import (
   EQUALITY_TOLERANCE,
   InvalidRuleExpression,
   evaluate_equality,
+  lhs_variable_names,
   parse_arithmetic_expression,
 )
+
+
+class TestLhsVariableNames:
+  def test_returns_only_left_side_variables(self) -> None:
+    """The RollUp evaluator uses this to find the parent subtotal (LHS),
+    which must be bound; RHS children default to 0 when missing."""
+    parsed = parse_arithmetic_expression(
+      "$Assets = ($AssetsCurrent + $AssetsNoncurrent)",
+      ["Assets", "AssetsCurrent", "AssetsNoncurrent"],
+    )
+    assert lhs_variable_names(parsed) == ["Assets"]
+
+  def test_raises_when_not_an_equality(self) -> None:
+    parsed = parse_arithmetic_expression("$A + $B", ["A", "B"])
+    with pytest.raises(InvalidRuleExpression):
+      lhs_variable_names(parsed)
 
 
 class TestParseArithmeticExpression:

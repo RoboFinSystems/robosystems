@@ -178,14 +178,24 @@ def _build_structure_mapping(
   if not picked_structure_ids:
     return {}, {}
 
+  # Map BOTH endpoints of every arc to the structure, not just
+  # ``to_element_id``. A subtotal that sits at the top of its tree
+  # (e.g. ``rs-gaap:Assets``, ``rs-gaap:LiabilitiesAndStockholdersEquity``)
+  # appears only as a ``from_element_id`` (parent), so a to-only mapping
+  # never stamps its persisted subtotal fact into the structure's FactSet
+  # — and the balance-identity rule scoped to it can't bind. Abstract
+  # parents carry no facts, so including ``from_element_id`` is harmless
+  # for them and load-bearing for top-level subtotals.
   rows = session.execute(
     text(
       """
-      SELECT DISTINCT
-        a.structure_id AS structure_id,
-        a.to_element_id AS element_id
+      SELECT DISTINCT a.structure_id AS structure_id, a.to_element_id AS element_id
       FROM associations a
-      WHERE a.structure_id = ANY(:struct_ids)
+      WHERE a.structure_id = ANY(:struct_ids) AND a.to_element_id IS NOT NULL
+      UNION
+      SELECT DISTINCT a.structure_id AS structure_id, a.from_element_id AS element_id
+      FROM associations a
+      WHERE a.structure_id = ANY(:struct_ids) AND a.from_element_id IS NOT NULL
       """
     ),
     {"struct_ids": picked_structure_ids},
@@ -246,6 +256,15 @@ def _persist_report_facts(
         fact_set_id=fact_set_id,
       )
       session.add(rf)
+
+  # Flush so every fact is visible to the rule-evaluation binds that
+  # follow. The session runs ``autoflush=False``, and
+  # ``_evaluate_report_structures`` iterates structures in
+  # non-deterministic set order; without an explicit flush here the
+  # FIRST structure evaluated would bind against unflushed facts and
+  # spuriously ``skip`` every rule (the terminal flush inside the first
+  # ``evaluate_rules_for_structure`` would only rescue the later ones).
+  session.flush()
 
 
 def _pre_create_report_fact_sets(

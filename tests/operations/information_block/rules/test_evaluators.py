@@ -89,6 +89,65 @@ class TestRollUpPattern:
     outcome = evaluate_rule(rule, {"Total": 1001.0, "Part1": 600.0, "Part2": 400.0})
     assert outcome.status == "fail"
 
+  def _three_part_rule(self) -> MagicMock:
+    return _make_rule(
+      pattern="RollUp",
+      expression="$Total = ($Part1 + $Part2 + $Part3)",
+      variables=[
+        {"variable_name": "Total", "variable_qname": "rs-gaap:Total"},
+        {"variable_name": "Part1", "variable_qname": "rs-gaap:Part1"},
+        {"variable_name": "Part2", "variable_qname": "rs-gaap:Part2"},
+        {"variable_name": "Part3", "variable_qname": "rs-gaap:Part3"},
+      ],
+    )
+
+  def test_missing_child_treated_as_zero_passes(self) -> None:
+    """The renderer drops all-zero rows, so a rollup must still pass when
+    an unreported child is absent — it's summed as 0."""
+    rule = self._three_part_rule()
+    outcome = evaluate_rule(
+      rule, {"Total": 1000.0, "Part1": 600.0, "Part2": 400.0, "Part3": None}
+    )
+    assert outcome.status == "pass"
+    assert outcome.detail["children_defaulted_to_zero"] == ["Part3"]
+
+  def test_missing_child_treated_as_zero_can_fail(self) -> None:
+    """A present subtotal that doesn't equal the sum of its present
+    children is a genuine rollup violation (not masked by the 0 default)."""
+    rule = self._three_part_rule()
+    outcome = evaluate_rule(
+      rule, {"Total": 1000.0, "Part1": 600.0, "Part2": 300.0, "Part3": None}
+    )
+    assert outcome.status == "fail"
+    assert "rollup failed" in (outcome.message or "")
+
+  def test_skipped_when_parent_subtotal_missing(self) -> None:
+    """No parent fact means the subtotal wasn't reported — nothing to
+    verify, so skip rather than treat the LHS as 0."""
+    rule = self._three_part_rule()
+    outcome = evaluate_rule(
+      rule, {"Total": None, "Part1": 600.0, "Part2": 400.0, "Part3": None}
+    )
+    assert outcome.status == "skipped"
+    assert "subtotal" in (outcome.message or "")
+
+  def test_skipped_when_all_children_absent(self) -> None:
+    """Parent present but EVERY child absent → vacuous rollup → skip, not
+    a spurious fail. Happens when an element-scoped rule fires in a
+    statement that lists the subtotal as a standalone line without
+    decomposing it (e.g. NetIncomeLoss on the CF / Equity statements)."""
+    rule = self._three_part_rule()
+    outcome = evaluate_rule(
+      rule, {"Total": 1000.0, "Part1": None, "Part2": None, "Part3": None}
+    )
+    assert outcome.status == "skipped"
+    assert "none of its rollup children" in (outcome.message or "")
+
+  def test_skipped_when_no_variables(self) -> None:
+    rule = _make_rule(pattern="RollUp", expression="$X = $Y", variables=[])
+    outcome = evaluate_rule(rule, {})
+    assert outcome.status == "skipped"
+
 
 class TestRollForwardPattern:
   def test_pass_when_equal(self) -> None:
