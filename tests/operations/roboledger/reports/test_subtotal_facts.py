@@ -113,3 +113,47 @@ class TestEmitSubtotalFacts:
     facts = [_leaf("PPE", 0.0)]
     _emit_subtotal_facts(_session(dag, ["AssetsNoncurrent"]), facts, [_P])
     assert all(f.element_id != "AssetsNoncurrent" for f in facts)
+
+  def test_zero_direct_fact_wins_over_calc_sum_for_downstream(self) -> None:
+    """A calc target with a zero-valued DIRECT fact must contribute its 0
+    to a downstream subtotal — 'direct wins' keys off presence, not a
+    non-zero test. Regression for the zero-value bypass: with a non-zero
+    test, SubA would wrongly resolve to its calc sum (100) and Parent
+    would be 150 instead of 50."""
+    dag = [
+      _dag_row("SubA", "Leaf1", 1.0),  # SubA is a target with a direct 0.0 fact
+      _dag_row("Parent", "SubA", 1.0),
+      _dag_row("Parent", "SubB", 1.0),
+    ]
+    facts = [
+      _leaf("SubA", 0.0),  # authoritative direct fact = 0 (present)
+      _leaf("Leaf1", 100.0),  # SubA's calc sum would be 100 — must NOT win
+      _leaf("SubB", 50.0),
+    ]
+    _emit_subtotal_facts(_session(dag, ["SubA", "Parent"]), facts, [_P])
+    parent = next(f for f in facts if f.element_id == "Parent")
+    assert parent.value == 50.0  # SubA contributes its direct 0, not the 100 sum
+
+  def test_subtotals_computed_per_period_independently(self) -> None:
+    """Each period's subtotal sums only that period's leaves — no bleed."""
+    p2 = PeriodSpec(start=date(2024, 1, 1), end=date(2024, 12, 31), label="FY2024")
+
+    def leaf_p(eid: str, value: float, period: PeriodSpec) -> ReportFact:
+      return ReportFact(
+        element_id=eid,
+        element_qname=f"rs-gaap:{eid}",
+        element_name=eid,
+        classification="asset",
+        balance_type="debit",
+        value=value,
+        period_start=period.start,
+        period_end=period.end,
+        period_type="instant",
+      )
+
+    dag = [_dag_row("AssetsCurrent", "Cash", 1.0)]
+    facts = [leaf_p("Cash", 100.0, _P), leaf_p("Cash", 200.0, p2)]
+    _emit_subtotal_facts(_session(dag, ["AssetsCurrent"]), facts, [_P, p2])
+    ac = {f.period_start: f.value for f in facts if f.element_id == "AssetsCurrent"}
+    assert ac[_P.start] == 100.0
+    assert ac[p2.start] == 200.0

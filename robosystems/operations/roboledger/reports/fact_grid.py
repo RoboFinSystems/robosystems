@@ -974,14 +974,18 @@ def _emit_subtotal_facts(
         balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
         present.add(f.element_id)
 
-    # Topological resolution — direct fact wins over the calc result,
-    # matching ``_build_rows`` (calc is the fallback for un-reported
-    # subtotals, never an override of an authoritative direct fact).
+    # Topological resolution — a direct fact wins over the calc result
+    # (calc is the fallback for un-reported subtotals, never an override
+    # of an authoritative direct fact). The "direct wins" test keys off
+    # PRESENCE (``elem_id in present``), not a non-zero value: a
+    # legitimately-zero direct fact (e.g. a seeded equity component, or a
+    # subtotal reported as 0) must not be overwritten by the calc sum, or
+    # a downstream subtotal that depends on it inherits the wrong summand.
     computed: dict[str, float] = dict(balances)
     for elem_id in order:
       direct = computed.get(elem_id, 0.0)
       summed = sum(computed.get(src, 0.0) * w for src, w in calculations[elem_id])
-      computed[elem_id] = direct if direct != 0.0 else summed
+      computed[elem_id] = direct if elem_id in present else summed
 
     for elem_id in target_ids:
       # Already a fact (leaf-mapped or a prior derived emit like

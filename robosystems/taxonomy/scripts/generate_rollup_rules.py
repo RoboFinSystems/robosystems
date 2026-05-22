@@ -181,7 +181,6 @@ def build_package(rules: list[dict]) -> dict:
     "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/rollup-rules/",
     "default_block_type": "validation_rules",
     "origin": "native",
-    "created_at": "2026-05-21",
     "description": (
       "L2 calc-arc RollUp verification rules — one rule per subtotal parent "
       "in rs-gaap-calculations/v1 ($Parent = Σ weighted children). "
