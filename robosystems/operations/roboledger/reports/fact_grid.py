@@ -663,12 +663,21 @@ def _read_mapped_balances(
   ``'mapping'`` (CoA→FAC, default for fac-presentation reports) or
   ``'equivalence'`` (CoA→rs-gaap, for rs-gaap-presentation reports).
 
-  ``classification`` is resolved via ``element_traits`` →
-  ``classifications`` with ``category='elementsOfFinancialStatements'``
-  (the FASB SFAC 6 trait axis). Balance-sheet classifications (asset /
-  liability / equity) are stock concepts and must be loaded
-  cumulatively; IS / SCF items are flows and constrain by
-  ``posting_date >= :start_date``.
+  Cumulative-vs-windowed loading keys off the concept's intrinsic
+  ``period_type``: **instant** concepts (every balance-sheet item,
+  including contra accounts like Accumulated Depreciation and Treasury
+  Stock) are stock balances and load cumulatively through ``:end_date``
+  with no lower bound; **duration** concepts (IS / SCF flows) constrain
+  by ``posting_date >= :start_date`` so they report only the period's
+  activity. (``period_type`` is preferred over the SFAC 6 trait
+  ``identifier`` because the trait can be NULL or a contra-* value that
+  isn't ``asset``/``liability``/``equity`` — which previously period-
+  windowed contra balances and broke footing on non-inception periods.)
+
+  ``classification`` (asset / liability / equity / …) is still resolved
+  via ``element_traits`` → ``classifications`` with
+  ``category='elementsOfFinancialStatements'`` (the FASB SFAC 6 trait
+  axis) for the rendered row's classification label.
 
   When the trait join returns ``NULL`` (reference taxonomies whose
   elements aren't wired to FASB traits), :func:`_infer_classification`
@@ -709,7 +718,7 @@ def _read_mapped_balances(
         AND target.is_abstract = false
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
         AND (
-          tcls.identifier IN ('asset', 'liability', 'equity')
+          target.period_type = 'instant'
           OR e.posting_date >= :start_date
           OR :start_date IS NULL
         )
