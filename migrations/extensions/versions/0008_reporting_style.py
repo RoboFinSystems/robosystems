@@ -85,8 +85,9 @@ def _declared_styles() -> list[dict]:
   net_role), ...]}]``. ``close_target`` is the form's earnings-home concept
   qname (``retainedEarningsConcept``) — where derived cumulative earnings
   roll for this form (CORP→RetainedEarnings, PART→PartnersCapital,
-  LLC→MembersEquity). Composition-less placeholders (e.g. Banking) are
-  skipped so they stay non-selectable until a composition is authored.
+  LLC→MembersEquity). Composition-less style nodes are skipped so they
+  stay non-selectable until a composition is authored (the default family
+  has none; the guard stays for future vertical/industry styles).
   """
   styles: list[dict] = []
   for node in _read_reporting_styles_package():

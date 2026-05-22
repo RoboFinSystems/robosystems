@@ -37,6 +37,12 @@ class ReportFact:
   period_start: date
   period_end: date
   period_type: str  # "duration" or "instant"
+  # Detail fact already absorbed into a synthesized parent (e.g. PP&E
+  # Gross + Accumulated Depreciation, consumed by _synthesize_ppe_net_facts
+  # to produce PropertyPlantAndEquipmentNet). Kept in the list for the CF
+  # derivation, but excluded from structure rendering so it doesn't
+  # double-count when rolled up to an in-structure ancestor.
+  audit_only: bool = False
 
 
 @dataclass
@@ -448,6 +454,12 @@ def _roll_up_facts_to_structure(
   cache: dict[str, str | None] = {}
   rolled: list[ReportFact] = []
   for fact in facts:
+    # Detail facts already absorbed into a synthesized parent (PP&E Gross /
+    # Accumulated Depreciation → PropertyPlantAndEquipmentNet) must not also
+    # roll up into the structure — that double-counts the value already
+    # carried by the synthesized parent. Drop them from rendering.
+    if fact.audit_only:
+      continue
     if fact.element_id in in_structure:
       rolled.append(fact)
       continue
@@ -651,12 +663,21 @@ def _read_mapped_balances(
   ``'mapping'`` (CoA→FAC, default for fac-presentation reports) or
   ``'equivalence'`` (CoA→rs-gaap, for rs-gaap-presentation reports).
 
-  ``classification`` is resolved via ``element_traits`` →
-  ``classifications`` with ``category='elementsOfFinancialStatements'``
-  (the FASB SFAC 6 trait axis). Balance-sheet classifications (asset /
-  liability / equity) are stock concepts and must be loaded
-  cumulatively; IS / SCF items are flows and constrain by
-  ``posting_date >= :start_date``.
+  Cumulative-vs-windowed loading keys off the concept's intrinsic
+  ``period_type``: **instant** concepts (every balance-sheet item,
+  including contra accounts like Accumulated Depreciation and Treasury
+  Stock) are stock balances and load cumulatively through ``:end_date``
+  with no lower bound; **duration** concepts (IS / SCF flows) constrain
+  by ``posting_date >= :start_date`` so they report only the period's
+  activity. (``period_type`` is preferred over the SFAC 6 trait
+  ``identifier`` because the trait can be NULL or a contra-* value that
+  isn't ``asset``/``liability``/``equity`` — which previously period-
+  windowed contra balances and broke footing on non-inception periods.)
+
+  ``classification`` (asset / liability / equity / …) is still resolved
+  via ``element_traits`` → ``classifications`` with
+  ``category='elementsOfFinancialStatements'`` (the FASB SFAC 6 trait
+  axis) for the rendered row's classification label.
 
   When the trait join returns ``NULL`` (reference taxonomies whose
   elements aren't wired to FASB traits), :func:`_infer_classification`
@@ -697,7 +718,7 @@ def _read_mapped_balances(
         AND target.is_abstract = false
         AND (e.posting_date <= :end_date OR :end_date IS NULL)
         AND (
-          tcls.identifier IN ('asset', 'liability', 'equity')
+          target.period_type = 'instant'
           OR e.posting_date >= :start_date
           OR :start_date IS NULL
         )
@@ -1015,6 +1036,26 @@ def _emit_subtotal_facts(
       )
 
 
+def _mark_ppe_details_audit_only(
+  facts: list[ReportFact],
+  period: PeriodSpec,
+  gross_id: str | None,
+  ad_id: str | None,
+) -> None:
+  """Flag the PP&E Gross + Accumulated-Depreciation facts for ``period`` as
+  ``audit_only`` so the render roll-up excludes them — their value is already
+  carried by the synthesized (or directly-mapped) PropertyPlantAndEquipmentNet.
+  """
+  detail_ids = {i for i in (gross_id, ad_id) if i is not None}
+  for f in facts:
+    if (
+      f.element_id in detail_ids
+      and f.period_start == period.start
+      and f.period_end == period.end
+    ):
+      f.audit_only = True
+
+
 def _synthesize_ppe_net_facts(
   session: Session,
   facts: list[ReportFact],
@@ -1094,6 +1135,10 @@ def _synthesize_ppe_net_facts(
           period.start,
           period.end,
         )
+      # A direct Net fact already carries the value; if Gross/AD facts also
+      # exist (split mapping + a stray direct Net), keep them out of the
+      # render roll-up so they don't double-count.
+      _mark_ppe_details_audit_only(facts, period, gross_id, ad_id)
       continue
     gross_value = 0.0
     ad_value = 0.0
@@ -1132,6 +1177,12 @@ def _synthesize_ppe_net_facts(
         period_type="instant",
       )
     )
+    # Gross + AD are now fully represented by the synthesized Net. Mark
+    # them audit-only so the render roll-up doesn't ALSO resolve them into
+    # the noncurrent section and double-count PP&E. They remain in the
+    # list for the CF derivation (PaymentsToAcquirePPE = ΔGross), which
+    # reads by element_id regardless of this flag.
+    _mark_ppe_details_audit_only(facts, period, gross_id, ad_id)
 
 
 # rs-gaap concepts that represent "cash" for cash-flow attribution. A
@@ -2121,14 +2172,27 @@ def _balance_value(
   element_id: str,
   pre_signed: bool,
   balance_type: str,
-) -> float:
-  """Look up a balance value for an element, applying sign convention if needed."""
+) -> float | None:
+  """Look up a balance value for an element, applying sign convention if needed.
+
+  Returns ``None`` when no balance/fact is present for the element —
+  distinct from a present fact whose value is ``0.0``. Callers prefer an
+  authoritative zero over a derived rollup, so presence must be
+  observable (mirrors the presence-based ``_emit_subtotal_facts`` fix).
+  """
   balance = balances.get(element_id)
-  if not balance:
-    return 0.0
+  if balance is None:
+    return None
   if pre_signed:
     return balance.net_balance
   return _natural_sign(balance.net_balance, balance_type)
+
+
+# ASC 205-20 redundant-subtotal suppression (see _build_rows). These two
+# concepts appear only in the income statement, so matching on them is
+# inert for the balance sheet / cash flow renders.
+_CONTINUING_OPS_QNAME = "rs-gaap:IncomeLossFromContinuingOperations"
+_DISCONTINUED_OPS_QNAME = "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax"
 
 
 def _build_rows(
@@ -2152,46 +2216,67 @@ def _build_rows(
 
   # Pass 1: collect all values per period (leaf balances + abstract rollups)
   # computed_per_period[period_idx][element_id] = value
+  # present_per_period[period_idx] = element_ids that carry an authoritative
+  # value (a direct fact, or a parent whose children are present) — keyed on
+  # PRESENCE, not non-zero, so a legitimate 0 wins over a derived rollup.
   computed_per_period: list[dict[str, float]] = [{} for _ in range(n_periods)]
+  present_per_period: list[set[str]] = [set() for _ in range(n_periods)]
 
-  def _collect(node: _HierarchyNode) -> list[float]:
-    """Walk a node, return list of values (one per period) for rollup.
+  def _collect(node: _HierarchyNode) -> tuple[list[float], list[bool]]:
+    """Walk a node, return (values, presence-flags) per period for rollup.
 
     A parent node can receive a value via two distinct reporting paths:
-    (a) directly — a fact mapped at the parent's element_id (the auto-
-    mapper writes one of these per CoA element to its FAC anchor like
-    fac:Revenues), or (b) computed — sum of child values when the
-    breakdown is reported at the leaves. Whichever path is populated
-    in a given period wins; we never sum a real direct fact under empty
-    leaves.
+    (a) directly — a fact mapped at the parent's element_id, or (b)
+    computed — sum of child values when the breakdown is reported at the
+    leaves. Whichever path is *present* in a given period wins (a direct
+    fact, even valued 0, beats a derived rollup); we never sum a real
+    direct fact under empty leaves.
     """
     if node.children:
       child_totals = [0.0] * n_periods
+      child_present = [False] * n_periods
       for child in node.children:
-        child_vals = _collect(child)
+        child_vals, child_pres = _collect(child)
         for i in range(n_periods):
           child_totals[i] += child_vals[i]
-      vals = []
+          child_present[i] = child_present[i] or child_pres[i]
+      vals: list[float] = []
+      present: list[bool] = []
       for i in range(n_periods):
         direct = _balance_value(
           period_balances[i], node.element_id, pre_signed, node.balance_type
         )
-        # Prefer the direct fact when present (mapping landed at this
-        # FAC anchor); fall back to children sum (rs-gaap leaves
-        # populated by equivalence path).
-        chosen = direct if direct != 0.0 else child_totals[i]
+        if direct is not None:
+          # Direct fact landed at this anchor — authoritative, even at 0.
+          chosen, is_present = direct, True
+        elif child_present[i]:
+          # No direct fact; roll up the reported leaves.
+          chosen, is_present = child_totals[i], True
+        else:
+          chosen, is_present = 0.0, False
         computed_per_period[i][node.element_id] = chosen
+        if is_present:
+          present_per_period[i].add(node.element_id)
         vals.append(chosen)
-      return vals
+        present.append(is_present)
+      return vals, present
     else:
       vals = []
+      present = []
       for i in range(n_periods):
         v = _balance_value(
           period_balances[i], node.element_id, pre_signed, node.balance_type
         )
-        computed_per_period[i][node.element_id] = v
-        vals.append(v)
-      return vals
+        if v is not None:
+          computed_per_period[i][node.element_id] = v
+          present_per_period[i].add(node.element_id)
+          vals.append(v)
+          present.append(True)
+        else:
+          computed_per_period[i][node.element_id] = 0.0
+          vals.append(0.0)
+          present.append(False)
+      return vals, present
 
   for root in hierarchy:
     _collect(root)
@@ -2209,11 +2294,19 @@ def _build_rows(
   for elem_id in _topo_sort_calculations(calculations):
     sources = calculations[elem_id]
     for i in range(n_periods):
-      direct = computed_per_period[i].get(elem_id, 0.0)
+      # Keep an authoritative pass-1 value (direct fact or reported-leaf
+      # rollup) when present — keyed on presence, not non-zero, so a
+      # legitimate 0 isn't overwritten by the calc-DAG sum. Otherwise
+      # fall back to the calc result and mark it present (derived from
+      # present sources) so dependent subtotals up the chain see it.
+      if elem_id in present_per_period[i]:
+        continue
       computed = sum(
         computed_per_period[i].get(src_id, 0.0) * weight for src_id, weight in sources
       )
-      computed_per_period[i][elem_id] = direct if direct != 0.0 else computed
+      computed_per_period[i][elem_id] = computed
+      if any(src_id in present_per_period[i] for src_id, _ in sources):
+        present_per_period[i].add(elem_id)
 
   # Pass 2: build rows in financial-statement order — children first,
   # then their parent subtotal (post-order). This matches the convention
@@ -2264,6 +2357,17 @@ def _build_rows(
   # that actually populate the statement, which is what readers expect
   # to see.
   rows = [r for r in rows if any(v not in (None, 0, 0.0) for v in r.values)]
+
+  # ASC 205-20: the "Income from Continuing Operations" subtotal is only
+  # presented when discontinued operations are reported. With no
+  # discontinued-ops row (the norm — it was dropped above as all-zero, or
+  # never reported) the subtotal is value-identical to Net Income, so it
+  # renders as a redundant duplicate line. Drop it in that case. Keyed on
+  # qname — both concepts appear only in the income statement, so this is
+  # inert for BS/CF. (Curated convention; a future trait/structure-driven
+  # rule could subsume it — see information-block.md §3.6 Track B seams.)
+  if not any(r.element_qname == _DISCONTINUED_OPS_QNAME for r in rows):
+    rows = [r for r in rows if r.element_qname != _CONTINUING_OPS_QNAME]
 
   return rows
 
