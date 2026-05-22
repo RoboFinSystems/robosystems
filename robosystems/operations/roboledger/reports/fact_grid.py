@@ -226,6 +226,12 @@ def generate_report_facts(
   # financing were already emitted from flow concepts above.
   _derive_cash_flow_facts(session, facts, periods)
 
+  # Persist the calc-DAG subtotals (Assets, Revenues, GrossProfit,
+  # StockholdersEquity, …) as facts. Runs last so every leaf + derived
+  # fact above is in place; the rollup reads them and emits one subtotal
+  # fact per period so verification rules scoped to a subtotal can bind.
+  _emit_subtotal_facts(session, facts, periods)
+
   unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
 
   return ReportFacts(
@@ -901,6 +907,108 @@ def _emit_net_income_facts(
         period_type="duration",
       )
     )
+
+
+def _emit_subtotal_facts(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+) -> None:
+  """Emit one fact per rs-gaap calculation subtotal, per period.
+
+  Subtotals (Assets, Revenues, GrossProfit, StockholdersEquity, …) are
+  otherwise computed only at render time (``_build_rows``) and never
+  persisted, so a verification rule scoped to a subtotal never binds a
+  fact and silently ``skipped``s. This walks the ``rs-gaap-calculations``
+  DAG bottom-up over the already-emitted leaf + derived facts, applying
+  the same ``Σ child·weight`` resolution the renderer uses, and emits a
+  fact for each subtotal not already present.
+
+  Consistency with display is by construction: the persisted value is the
+  same topological calc resolution ``_build_rows`` runs, so the renderer's
+  "prefer direct fact, else sum children" logic reads the persisted
+  subtotal and shows the identical number. A subtotal that already has a
+  direct fact (e.g. ``NetIncomeLoss`` from the close) is left untouched —
+  its authoritative value wins, exactly as in ``_build_rows``.
+
+  Must run LAST in ``generate_report_facts`` so every leaf + derived fact
+  (NetIncomeLoss, PP&E net, CF flows) is in place. Mutates ``facts``.
+  """
+  rows = session.execute(
+    text("""
+      SELECT a.from_element_id AS parent, a.to_element_id AS child, a.weight
+      FROM associations a
+      JOIN structures s ON s.id = a.structure_id
+      JOIN taxonomies t ON t.id = s.taxonomy_id
+      WHERE a.association_type = 'calculation'
+        AND t.standard = 'rs-gaap-calculations'
+      ORDER BY a.order_value
+    """)
+  ).fetchall()
+  if not rows:
+    return
+  calculations: dict[str, list[tuple[str, float]]] = {}
+  for r in rows:
+    weight = float(r.weight) if r.weight is not None else 1.0
+    calculations.setdefault(r.parent, []).append((r.child, weight))
+
+  target_ids = list(calculations.keys())
+  meta = {
+    m.id: m
+    for m in session.execute(
+      text(
+        "SELECT id, qname, name, balance_type, period_type "
+        "FROM elements WHERE id = ANY(:ids)"
+      ),
+      {"ids": target_ids},
+    ).fetchall()
+  }
+
+  order = _topo_sort_calculations(calculations)
+
+  for period in periods:
+    balances: dict[str, float] = {}
+    present: set[str] = set()
+    for f in facts:
+      if f.period_start == period.start and f.period_end == period.end:
+        balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
+        present.add(f.element_id)
+
+    # Topological resolution — direct fact wins over the calc result,
+    # matching ``_build_rows`` (calc is the fallback for un-reported
+    # subtotals, never an override of an authoritative direct fact).
+    computed: dict[str, float] = dict(balances)
+    for elem_id in order:
+      direct = computed.get(elem_id, 0.0)
+      summed = sum(computed.get(src, 0.0) * w for src, w in calculations[elem_id])
+      computed[elem_id] = direct if direct != 0.0 else summed
+
+    for elem_id in target_ids:
+      # Already a fact (leaf-mapped or a prior derived emit like
+      # NetIncomeLoss) → leave it; the direct value is authoritative.
+      if elem_id in present:
+        continue
+      value = computed.get(elem_id, 0.0)
+      # Zero subtotals are dropped by the renderer and have nothing to
+      # verify — skip so the facts table isn't padded with empties.
+      if value == 0.0:
+        continue
+      m = meta.get(elem_id)
+      if m is None:
+        continue
+      facts.append(
+        ReportFact(
+          element_id=elem_id,
+          element_qname=m.qname,
+          element_name=m.name or m.qname,
+          classification=None,  # subtotals aren't leaf revenue/expense
+          balance_type=m.balance_type or "credit",
+          value=value,
+          period_start=period.start,
+          period_end=period.end,
+          period_type=m.period_type or "instant",
+        )
+      )
 
 
 def _synthesize_ppe_net_facts(

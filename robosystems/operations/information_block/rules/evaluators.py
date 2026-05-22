@@ -144,9 +144,22 @@ def _evaluate_rollup(rule: Any, bindings: dict[str, float | None]) -> Evaluation
     tolerance = float(rule.metadata_.get("tolerance", EQUALITY_TOLERANCE))
 
   # RHS children with no fact default to 0 (sum-of-present-children).
-  defaulted = [
-    n for n in variable_names if n not in required and bindings.get(n) is None
-  ]
+  rhs_names = [n for n in variable_names if n not in required]
+  defaulted = [n for n in rhs_names if bindings.get(n) is None]
+  # Parent present but NONE of its rollup children reported here: the
+  # rollup is vacuous (nothing to sum), which happens when an
+  # element-scoped rule fires in a statement that lists the subtotal as a
+  # standalone line but doesn't decompose it (e.g. NetIncomeLoss on the
+  # Cash Flow / Equity statements, where it's an input/total, not a
+  # rollup of ContinuingOps + Discontinued). Skip rather than report a
+  # spurious failure — the rule still evaluates in the subtotal's home
+  # statement where the children ARE presented.
+  if rhs_names and len(defaulted) == len(rhs_names):
+    return EvaluationOutcome(
+      status="skipped",
+      message="subtotal reported but none of its rollup children are present here",
+      detail={"bindings": _serializable(bindings), "absent_children": defaulted},
+    )
   bound: dict[str, float] = {
     n: (float(bindings[n]) if bindings.get(n) is not None else 0.0)
     for n in variable_names

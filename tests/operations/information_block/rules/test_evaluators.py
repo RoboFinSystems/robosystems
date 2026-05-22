@@ -131,6 +131,18 @@ class TestRollUpPattern:
     assert outcome.status == "skipped"
     assert "subtotal" in (outcome.message or "")
 
+  def test_skipped_when_all_children_absent(self) -> None:
+    """Parent present but EVERY child absent → vacuous rollup → skip, not
+    a spurious fail. Happens when an element-scoped rule fires in a
+    statement that lists the subtotal as a standalone line without
+    decomposing it (e.g. NetIncomeLoss on the CF / Equity statements)."""
+    rule = self._three_part_rule()
+    outcome = evaluate_rule(
+      rule, {"Total": 1000.0, "Part1": None, "Part2": None, "Part3": None}
+    )
+    assert outcome.status == "skipped"
+    assert "none of its rollup children" in (outcome.message or "")
+
   def test_skipped_when_no_variables(self) -> None:
     rule = _make_rule(pattern="RollUp", expression="$X = $Y", variables=[])
     outcome = evaluate_rule(rule, {})
