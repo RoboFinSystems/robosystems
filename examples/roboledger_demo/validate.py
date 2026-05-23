@@ -212,7 +212,7 @@ class _Validator:
       self._check(
         "verificationSummary present",
         vs is not None,
-        "summary missing despite verificationResults",
+        "present" if vs is not None else "missing despite verificationResults",
       )
       if vs:
         tallied = vs["passed"] + vs["failed"] + vs["errored"] + vs["skipped"]
