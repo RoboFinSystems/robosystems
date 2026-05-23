@@ -154,7 +154,7 @@ class _Validator:
     # Fetch all schedules and pick the first one whose envelope carries
     # facts. A schedule's envelope only surfaces `fact_scope='in_scope'`
     # rows; schedules whose entire period window sits at or before
-    # `closed_through` (e.g. Business Insurance running Apr 2025 –
+    # `closed_through` (e.g. Business Insurance running Apr 2025 -
     # Mar 2026 against closed_through=2026-03) correctly return zero
     # facts. The check picks the first schedule with in_scope facts so
     # it asserts envelope shape, not a side-effect of closed_through.
@@ -167,6 +167,10 @@ class _Validator:
           rules { rulePattern ruleOrigin ruleSeverity }
           facts { value periodType }
           verificationResults { status }
+          verificationSummary {
+            total passed failed errored skipped
+            byCategory { category total passed failed errored skipped }
+          }
         }
       }
     """)
@@ -197,6 +201,38 @@ class _Validator:
       if r.get("rulePattern") == "SumEquals" and r.get("ruleOrigin") == "native"
     ]
     self._check("native SumEquals rule in envelope", len(se) == 1, f"{len(se)} found")
+
+    # verificationSummary arm (info-block §6.1.6 / financial-viewer §7.12):
+    # server-computed aggregate over verificationResults. Present when there
+    # are results; its counts must reconcile with the result rows and the
+    # per-category breakdown.
+    vr = b.get("verificationResults", [])
+    vs = b.get("verificationSummary")
+    if vr:
+      self._check(
+        "verificationSummary present",
+        vs is not None,
+        "present" if vs is not None else "missing despite verificationResults",
+      )
+      if vs:
+        tallied = vs["passed"] + vs["failed"] + vs["errored"] + vs["skipped"]
+        self._check(
+          "verificationSummary counts reconcile",
+          vs["total"] == tallied == len(vr),
+          f"total={vs['total']} tallied={tallied} results={len(vr)}",
+        )
+        by_cat_total = sum(c["total"] for c in vs.get("byCategory", []))
+        self._check(
+          "verificationSummary byCategory sums to total",
+          by_cat_total == vs["total"],
+          f"byCategory={by_cat_total} total={vs['total']}",
+        )
+    else:
+      self._check(
+        "verificationSummary null when no results",
+        vs is None,
+        f"expected null, got {vs}",
+      )
 
   # ── Dispose smoke test ───────────────────────────────────────────────────
 

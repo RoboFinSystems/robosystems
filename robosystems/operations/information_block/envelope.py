@@ -23,7 +23,9 @@ from robosystems.models.api.information_block import (
   RuleLite,
   RuleTargetLite,
   RuleVariableLite,
+  VerificationCategorySummary,
   VerificationResultLite,
+  VerificationSummary,
 )
 from robosystems.models.extensions import (
   Association,
@@ -198,6 +200,67 @@ def load_verification_results_for_structure(
   return [verification_result_to_lite(r) for r in rows]
 
 
+# Maps the ``verification_results.status`` enum onto the summary count field.
+_STATUS_TO_FIELD: dict[str, str] = {
+  "pass": "passed",
+  "fail": "failed",
+  "error": "errored",
+  "skipped": "skipped",
+}
+
+
+def build_verification_summary(
+  verification_results: list[VerificationResultLite],
+  rules: list[RuleLite],
+) -> VerificationSummary | None:
+  """Aggregate verification results into overall + per-category counts.
+
+  Each result's ``rule_category`` is resolved by joining to the block's
+  ``rules`` on ``rule_id`` (results carry only ``rule_id``; the category
+  lives on the Rule). Returns ``None`` when there are no results so the
+  viewer can hide the panel rather than render an all-zero summary. See
+  financial-viewer.md §7.12.
+  """
+  if not verification_results:
+    return None
+
+  category_by_rule = {r.id: r.rule_category for r in rules}
+  overall = {"passed": 0, "failed": 0, "errored": 0, "skipped": 0}
+  per_category: dict[str, dict[str, int]] = {}
+
+  for vr in verification_results:
+    field = _STATUS_TO_FIELD.get(vr.status)
+    if field is None:
+      # Status outside the CHECK closure — shouldn't occur; skip defensively.
+      continue
+    overall[field] += 1
+    category = category_by_rule.get(vr.rule_id) or "Uncategorized"
+    bucket = per_category.setdefault(
+      category, {"passed": 0, "failed": 0, "errored": 0, "skipped": 0}
+    )
+    bucket[field] += 1
+
+  by_category = [
+    VerificationCategorySummary(
+      category=category,
+      total=sum(counts.values()),
+      passed=counts["passed"],
+      failed=counts["failed"],
+      errored=counts["errored"],
+      skipped=counts["skipped"],
+    )
+    for category, counts in sorted(per_category.items())
+  ]
+  return VerificationSummary(
+    total=sum(overall.values()),
+    passed=overall["passed"],
+    failed=overall["failed"],
+    errored=overall["errored"],
+    skipped=overall["skipped"],
+    by_category=by_category,
+  )
+
+
 def load_latest_fact_set_for_structure(
   session: Session, structure_id: str
 ) -> FactSetLite | None:
@@ -339,6 +402,7 @@ class BaseEnvelopeAtoms:
   classifications_by_assoc: dict[str, list[ClassificationLite]]
   fact_set: FactSetLite | None
   verification_results: list[VerificationResultLite]
+  verification_summary: VerificationSummary | None
 
 
 def load_base_envelope_atoms(
@@ -424,6 +488,7 @@ def load_base_envelope_atoms(
     classifications_by_assoc=classifications_by_assoc,
     fact_set=fact_set,
     verification_results=verification_results,
+    verification_summary=build_verification_summary(verification_results, rules),
   )
 
 
@@ -526,6 +591,7 @@ def load_disclosure_id_for_structure(session: Session, structure_id: str) -> str
 __all__ = [
   "BaseEnvelopeAtoms",
   "association_to_connection",
+  "build_verification_summary",
   "element_to_lite",
   "fact_set_to_lite",
   "fact_to_lite",

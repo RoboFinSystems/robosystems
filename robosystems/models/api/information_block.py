@@ -264,6 +264,46 @@ class VerificationResultLite(BaseModel):
   evaluated_at: datetime | None = None
 
 
+class VerificationCategorySummary(BaseModel):
+  """Pass/fail/skip counts for one ``rule_category`` within a block's
+  verification results.
+
+  Drives the per-category accordions in the Verification Results panel
+  (financial-viewer §7.12). ``category`` is the rule's ``rule_category``
+  (one of the cm:VerificationRule subclasses), resolved by joining each
+  result to its Rule.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  category: str
+  total: int = 0
+  passed: int = 0
+  failed: int = 0
+  errored: int = 0
+  skipped: int = 0
+
+
+class VerificationSummary(BaseModel):
+  """Server-computed aggregate of a block's ``verification_results``.
+
+  Overall counts plus a per-``rule_category`` breakdown, so the viewer
+  renders the grouped Verification Results panel (financial-viewer §7.12)
+  without a client-side results→rules join. Status closure is
+  ``pass | fail | error | skipped`` (the ``public.verification_results``
+  CHECK); ``total`` is their sum.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  total: int = 0
+  passed: int = 0
+  failed: int = 0
+  errored: int = 0
+  skipped: int = 0
+  by_category: list[VerificationCategorySummary] = Field(default_factory=list)
+
+
 class RuleLite(BaseModel):
   """Rule projection for the Information Block envelope.
 
@@ -759,6 +799,15 @@ class InformationBlockEnvelope(BaseModel):
     ),
   )
   verification_results: list[VerificationResultLite] = Field(default_factory=list)
+  verification_summary: VerificationSummary | None = Field(
+    None,
+    description=(
+      "Server-computed aggregate over ``verification_results`` — overall "
+      "pass/fail/error/skip counts plus a per-rule_category breakdown for "
+      "the grouped Verification Results panel. Null when the block has no "
+      "verification results."
+    ),
+  )
 
   view: ViewProjections = Field(
     default_factory=ViewProjections,
@@ -1302,6 +1351,8 @@ __all__ = [
   "StatementMechanics",
   "UpdateInformationBlockRequest",
   "ValidationLite",
+  "VerificationCategorySummary",
   "VerificationResultLite",
+  "VerificationSummary",
   "ViewProjections",
 ]
