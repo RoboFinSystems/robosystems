@@ -287,6 +287,7 @@ def build_envelope(
     rules=atoms.rules,
     fact_set=atoms.fact_set,
     verification_results=atoms.verification_results,
+    verification_summary=atoms.verification_summary,
   )
 
 

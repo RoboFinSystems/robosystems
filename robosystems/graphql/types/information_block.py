@@ -66,7 +66,13 @@ from robosystems.models.api.information_block import (
   ValidationLite as PydanticValidation,
 )
 from robosystems.models.api.information_block import (
+  VerificationCategorySummary as PydanticVerificationCategorySummary,
+)
+from robosystems.models.api.information_block import (
   VerificationResultLite as PydanticVerificationResult,
+)
+from robosystems.models.api.information_block import (
+  VerificationSummary as PydanticVerificationSummary,
 )
 from robosystems.models.api.information_block import (
   ViewProjections as PydanticViewProjections,
@@ -127,6 +133,16 @@ class InformationBlockRule:
 @pydantic_type(model=PydanticVerificationResult, all_fields=True)
 class InformationBlockVerificationResult:
   """Persisted outcome of a rule evaluation."""
+
+
+@pydantic_type(model=PydanticVerificationCategorySummary, all_fields=True)
+class InformationBlockVerificationCategorySummary:
+  """Pass/fail/skip counts for one rule_category in the block's results."""
+
+
+@pydantic_type(model=PydanticVerificationSummary, all_fields=True)
+class InformationBlockVerificationSummary:
+  """Aggregate of the block's verification results — overall + by category."""
 
 
 @pydantic_type(model=PydanticRenderingRow, all_fields=True)
@@ -220,6 +236,7 @@ class InformationBlock:
   dimensions: list[MechanicsPayload]
   fact_set: InformationBlockFactSet | None
   verification_results: list[InformationBlockVerificationResult]
+  verification_summary: InformationBlockVerificationSummary | None
 
   view: InformationBlockViewProjections
 
@@ -255,6 +272,11 @@ class InformationBlock:
         InformationBlockVerificationResult.from_pydantic(vr)
         for vr in envelope.verification_results
       ],
+      verification_summary=(
+        InformationBlockVerificationSummary.from_pydantic(envelope.verification_summary)
+        if envelope.verification_summary is not None
+        else None
+      ),
       view=InformationBlockViewProjections.from_pydantic(envelope.view),
     )
 
@@ -274,7 +296,9 @@ __all__ = [
   "InformationBlockRuleTarget",
   "InformationBlockRuleVariable",
   "InformationBlockValidation",
+  "InformationBlockVerificationCategorySummary",
   "InformationBlockVerificationResult",
+  "InformationBlockVerificationSummary",
   "InformationBlockViewProjections",
   "InformationModel",
 ]

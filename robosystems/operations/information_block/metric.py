@@ -22,6 +22,7 @@ from robosystems.models.api.information_block import (
 )
 from robosystems.models.extensions import Structure, Taxonomy
 from robosystems.operations.information_block.envelope import (
+  build_verification_summary,
   load_latest_fact_set_for_structure,
   load_verification_results_for_structure,
 )
@@ -91,6 +92,10 @@ def build_envelope(
     ),
     fact_set=fact_set,
     verification_results=verification_results,
+    # Metric blocks don't load rules (no rules on the envelope yet) and have
+    # no verification results until the derivation evaluator lands, so this
+    # resolves to None today; pass [] rather than skip for shape parity.
+    verification_summary=build_verification_summary(verification_results, []),
   )
 
 
