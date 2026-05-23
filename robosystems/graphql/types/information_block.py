@@ -137,7 +137,7 @@ class InformationBlockVerificationResult:
 
 @pydantic_type(model=PydanticVerificationCategorySummary, all_fields=True)
 class InformationBlockVerificationCategorySummary:
-  """Pass/fail/skip counts for one rule_category in the block's results."""
+  """Pass/fail/error/skip counts for one rule_category in the block's results."""
 
 
 @pydantic_type(model=PydanticVerificationSummary, all_fields=True)

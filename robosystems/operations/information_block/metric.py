@@ -94,7 +94,9 @@ def build_envelope(
     verification_results=verification_results,
     # Metric blocks don't load rules (no rules on the envelope yet) and have
     # no verification results until the derivation evaluator lands, so this
-    # resolves to None today; pass [] rather than skip for shape parity.
+    # resolves to None today; pass [] rather than skip for shape parity. If
+    # results ever appear before rules are wired here, they'd bucket under
+    # "Uncategorized" (the rule-join fallback) — correct, not a bug.
     verification_summary=build_verification_summary(verification_results, []),
   )
 

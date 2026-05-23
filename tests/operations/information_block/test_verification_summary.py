@@ -91,3 +91,15 @@ def test_result_without_matching_rule_is_uncategorized() -> None:
   assert summary.total == 1 and summary.failed == 1
   assert [c.category for c in summary.by_category] == ["Uncategorized"]
   assert summary.by_category[0].failed == 1
+
+
+def test_unknown_status_is_silently_skipped() -> None:
+  """A status outside the CHECK closure (pass|fail|error|skipped) is skipped
+  defensively — not counted — so a future schema drift can't inflate totals."""
+  rules = [_rule("r1", "Consistency")]
+  results = [_result("r1", "pass"), _result("r1", "unknown_future")]
+  summary = build_verification_summary(results, rules)
+  assert summary is not None
+  assert summary.total == 1  # only the "pass" is counted
+  assert summary.passed == 1
+  assert summary.by_category[0].total == 1

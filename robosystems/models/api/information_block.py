@@ -1351,6 +1351,8 @@ __all__ = [
   "StatementMechanics",
   "UpdateInformationBlockRequest",
   "ValidationLite",
+  "VerificationCategorySummary",
   "VerificationResultLite",
+  "VerificationSummary",
   "ViewProjections",
 ]

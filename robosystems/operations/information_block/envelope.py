@@ -591,6 +591,7 @@ def load_disclosure_id_for_structure(session: Session, structure_id: str) -> str
 __all__ = [
   "BaseEnvelopeAtoms",
   "association_to_connection",
+  "build_verification_summary",
   "element_to_lite",
   "fact_set_to_lite",
   "fact_to_lite",
