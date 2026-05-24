@@ -1564,8 +1564,23 @@ def _check_cash_flow_tie_out(
   for i in range(1, len(ordered)):
     current, prior = ordered[i], ordered[i - 1]
     net_change = net_change_by_end.get(current.end)
+    if net_change is None:
+      continue
     cash_end = cash_by_date.get(current.end)
-    if net_change is None or cash_end is None:
+    if cash_end is None:
+      # A net-change fact exists but no instant cash balance does — the
+      # reconciliation can't run. Warn rather than skip silently: "couldn't
+      # check" must not look identical to "checked and tied". Causes: the cash
+      # concept isn't in _CASH_ANCHOR_QNAMES, or the balance sheet wasn't
+      # generated for this period.
+      logger.warning(
+        "CF tie-out could not run for period ending %s: net change in cash "
+        "(%.2f) is present but no instant cash-balance fact was found (cash "
+        "concept missing from _CASH_ANCHOR_QNAMES, or balance sheet not "
+        "generated).",
+        current.end,
+        net_change,
+      )
       continue
     # A missing opening balance means $0 cash at that boundary (inception) —
     # default to 0 rather than skip, so a first-period discrepancy (e.g. a

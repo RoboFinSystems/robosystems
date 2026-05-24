@@ -2123,6 +2123,15 @@ class TestCheckCashFlowTieOut:
       _check_cash_flow_tie_out(facts, [PeriodSpec(date(2023, 1, 1), self.P0, "Only")])
     assert not log.warning.called
 
+  def test_warns_when_no_cash_fact(self):
+    # A net-change fact exists but no instant cash-balance fact does, so the
+    # reconciliation can't run. It must WARN (not silently skip) — "couldn't
+    # check" must be distinguishable from "checked and tied".
+    facts = [self._net_change(800.0)]
+    with patch(self._LOGGER) as log:
+      _check_cash_flow_tie_out(facts, self._periods())
+    assert log.warning.called
+
 
 class TestDeriveCashFlowFacts:
   PRIOR_S = date(2024, 1, 1)
