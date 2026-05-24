@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from robosystems.operations.roboledger.reports.fact_grid import (
   _EQUITY_FLOW_REDUCER_QNAMES,
@@ -13,6 +13,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _append_empty_equity_facts,
   _Balance,
   _build_rows,
+  _check_cash_flow_tie_out,
   _close_prior_periods_to_retained_earnings,
   _close_to_retained_earnings,
   _compute_prior_period,
@@ -1898,33 +1899,36 @@ class TestEmitNetIncomeFacts:
 
 
 class TestEmitFlowFacts:
-  """``_emit_flow_facts`` — investing/financing CF facts from per-line flow
-  concepts. The SQL aggregation (cash-anchor + activityType filtering +
-  flow→rs-gaap resolution) is exercised end-to-end by the Seattle Method demo;
-  these unit tests cover the Python logic: sign, cents→dollars, zero-skip, and
-  the authoritative-replace of a pre-existing placeholder.
+  """``_emit_flow_facts`` — investing/financing CF facts. Two passes per period:
+  Pass 1 (explicit per-line flow tags) and Pass 2 (element-default fallback for
+  untagged QB data). The SQL aggregation (cash-anchor + activityType filtering +
+  direction-by-sign default resolution) is exercised end-to-end by the Seattle
+  Method demo; these unit tests cover the Python logic: sign, cents→dollars,
+  zero-skip, authoritative-replace, and explicit+fallback combination.
   """
 
   S = date(2024, 1, 1)
   E = date(2024, 3, 31)
 
-  def _row(self, flow_id, qname, cash_cents, *, balance_type="debit", name="Flow"):
+  def _row(self, flow_id, qname, value_cents, *, balance_type="debit", name="Flow"):
     return SimpleNamespace(
       flow_id=flow_id,
       flow_qname=qname,
       flow_name=name,
       flow_balance_type=balance_type,
-      cash_movement_cents=cash_cents,
+      value_cents=value_cents,
     )
 
-  def _session(self, *period_rows):
-    """One execute per period; each returns its row list via fetchall()."""
+  def _session(self, *periods):
+    """Two executes per period (explicit pass, then fallback pass). Each period
+    arg is an ``(explicit_rows, fallback_rows)`` tuple."""
     session = MagicMock()
     results = []
-    for rows in period_rows:
-      r = MagicMock()
-      r.fetchall.return_value = list(rows)
-      results.append(r)
+    for explicit_rows, fallback_rows in periods:
+      for rows in (explicit_rows, fallback_rows):
+        r = MagicMock()
+        r.fetchall.return_value = list(rows)
+        results.append(r)
     session.execute.side_effect = results
     return session
 
@@ -1932,10 +1936,17 @@ class TestEmitFlowFacts:
     return [PeriodSpec(self.S, self.E, "Current")]
 
   def test_investing_outflow_emits_negative(self):
-    """Capex: cash-side credit (debit - credit < 0) → negative outflow."""
+    """Capex (explicit): cash-side credit (debit - credit < 0) → negative."""
     facts: list[ReportFact] = []
     session = self._session(
-      [self._row("inv1", "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment", -100000)]
+      (
+        [
+          self._row(
+            "inv1", "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment", -100000
+          )
+        ],
+        [],
+      )
     )
     _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
     assert len(facts) == 1
@@ -1945,24 +1956,69 @@ class TestEmitFlowFacts:
     assert facts[0].classification is None
 
   def test_financing_inflow_emits_positive(self):
-    """Stock issuance: cash-side debit (debit - credit > 0) → positive inflow."""
+    """Stock issuance (explicit): cash-side debit (debit - credit > 0) → +."""
     facts: list[ReportFact] = []
     session = self._session(
-      [
-        self._row(
-          "fin1",
-          "rs-gaap:ProceedsFromIssuanceOfCommonStock",
-          1000000,
-          balance_type="credit",
-        )
-      ]
+      (
+        [
+          self._row(
+            "fin1",
+            "rs-gaap:ProceedsFromIssuanceOfCommonStock",
+            1000000,
+            balance_type="credit",
+          )
+        ],
+        [],
+      )
     )
     _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
     assert facts[0].value == 10000.0
 
+  def test_fallback_emits_when_no_explicit_tag(self):
+    """Pass 2: an untagged entry resolves its non-cash line to the element
+    default (the load-bearing path for real QuickBooks data)."""
+    facts: list[ReportFact] = []
+    session = self._session(
+      (
+        [],  # no explicit tags
+        [
+          self._row(
+            "inv1", "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment", -100000
+          )
+        ],
+      )
+    )
+    _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
+    assert len(facts) == 1
+    assert facts[0].element_id == "inv1"
+    assert facts[0].value == -1000.0
+
+  def test_explicit_and_fallback_combine_for_same_leaf(self):
+    """A flow leaf fed by both passes (mixed tagged/untagged entries) sums —
+    neither pass clobbers the other."""
+    facts: list[ReportFact] = []
+    session = self._session(
+      (
+        [
+          self._row(
+            "inv1", "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment", -100000
+          )
+        ],
+        [
+          self._row(
+            "inv1", "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment", -50000
+          )
+        ],
+      )
+    )
+    _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
+    inv = [f for f in facts if f.element_id == "inv1"]
+    assert len(inv) == 1
+    assert inv[0].value == -1500.0
+
   def test_zero_movement_skipped(self):
     facts: list[ReportFact] = []
-    session = self._session([self._row("z", "rs-gaap:Foo", 0)])
+    session = self._session(([self._row("z", "rs-gaap:Foo", 0)], []))
     _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
     assert facts == []
 
@@ -1972,7 +2028,7 @@ class TestEmitFlowFacts:
     suppressed the long-term-debt financing line in the demo."""
     placeholder = ReportFact(
       element_id="fin1",
-      element_qname="rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+      element_qname="rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
       element_name="Debt",
       classification=None,
       balance_type="debit",
@@ -1983,19 +2039,89 @@ class TestEmitFlowFacts:
     )
     facts: list[ReportFact] = [placeholder]
     session = self._session(
-      [
-        self._row(
-          "fin1",
-          "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
-          100000,
-        )
-      ]
+      (
+        [self._row("fin1", "rs-gaap:ProceedsFromIssuanceOfLongTermDebt", 100000)],
+        [],
+      )
     )
     _emit_flow_facts(session, facts, self._period(), "map1", "mapping")
     debt = [f for f in facts if f.element_id == "fin1"]
     assert len(debt) == 1
     assert debt[0].value == 1000.0
     assert debt[0].period_type == "duration"
+
+
+class TestCheckCashFlowTieOut:
+  """``_check_cash_flow_tie_out`` — CF net change in cash vs ΔCash from the BS.
+
+  ΔCash uses the prior-period-end cash balance as the opening (instant facts
+  sit at period boundaries), so the comparison is cash(end) - cash(prior end).
+  """
+
+  P0 = date(2023, 12, 31)
+  P1 = date(2024, 12, 31)
+
+  def _periods(self):
+    return [
+      PeriodSpec(date(2023, 1, 1), self.P0, "Prior"),
+      PeriodSpec(date(2024, 1, 1), self.P1, "Current"),
+    ]
+
+  def _cash(self, value, end):
+    return ReportFact(
+      element_id=f"cash-{end}",
+      element_qname="rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+      element_name="Cash",
+      classification=None,
+      balance_type="debit",
+      value=value,
+      period_start=None,
+      period_end=end,
+      period_type="instant",
+    )
+
+  def _net_change(self, value):
+    return ReportFact(
+      element_id="cfnc",
+      element_qname="rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease",
+      element_name="Net change in cash",
+      classification=None,
+      balance_type="debit",
+      value=value,
+      period_start=date(2024, 1, 1),
+      period_end=self.P1,
+      period_type="duration",
+    )
+
+  _LOGGER = "robosystems.operations.roboledger.reports.fact_grid.logger"
+
+  def test_ties_no_warning(self):
+    # Cash 1000 → 1850, ΔCash = 850; net change = 850 → ties.
+    facts = [
+      self._cash(1000.0, self.P0),
+      self._cash(1850.0, self.P1),
+      self._net_change(850.0),
+    ]
+    with patch(self._LOGGER) as log:
+      _check_cash_flow_tie_out(facts, self._periods())
+    assert not log.warning.called
+
+  def test_mismatch_warns(self):
+    # ΔCash = 850 but net change reports 800 → residual 50 → warns.
+    facts = [
+      self._cash(1000.0, self.P0),
+      self._cash(1850.0, self.P1),
+      self._net_change(800.0),
+    ]
+    with patch(self._LOGGER) as log:
+      _check_cash_flow_tie_out(facts, self._periods())
+    assert log.warning.called
+
+  def test_single_period_noop(self):
+    facts = [self._cash(1000.0, self.P0), self._net_change(800.0)]
+    with patch(self._LOGGER) as log:
+      _check_cash_flow_tie_out(facts, [PeriodSpec(date(2023, 1, 1), self.P0, "Only")])
+    assert not log.warning.called
 
 
 class TestDeriveCashFlowFacts:

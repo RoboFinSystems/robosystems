@@ -39,7 +39,10 @@ BS_IS_MAPPINGS: list[tuple[str, str]] = [
   # didn't aggregate into Assets / L+E subtotals.
   ("mini:CashAndCashEquivalents", "rs-gaap:CashCashEquivalentsAndShortTermInvestments"),
   ("mini:Receivables", "rs-gaap:ReceivablesNetCurrent"),
-  ("mini:Inventories", "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"),
+  (
+    "mini:Inventories",
+    "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings",
+  ),
   ("mini:PropertyPlantAndEquipment", "rs-gaap:PropertyPlantAndEquipmentNet"),
   # AP and Accrued both roll into the same combined BS-Classified leaf
   # (the rs-gaap presentation network doesn't expose them separately
@@ -85,26 +88,26 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
   # the equity-side of an issuance (mini does).
   ("mini:ProceedsFromInvestmentsByOwner", "rs-gaap:ProceedsFromIssuanceOfCommonStock"),
   ("mini:InvestmentsByOwner", "rs-gaap:ProceedsFromIssuanceOfCommonStock"),
-  # Financing — debt. CF-Indirect's only debt-financing leaf is
-  # ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet — a signed
-  # net concept that absorbs both issuances and repayments. Mapping both
-  # mini concepts to it loses the signed split but lands on a leaf that
-  # actually renders.
+  # Financing — debt, GROSS per ASC 230. The CF-Financing calc rollup now
+  # carries the signed gross pair (ProceedsFromIssuanceOfLongTermDebt +
+  # RepaymentsOfLongTermDebt), so issuances and repayments map to their own
+  # leaves and present separately — no longer collapsed onto the signed-net
+  # concept (the prior "lands on a leaf that renders" workaround, now obsolete).
   (
     "mini:ProceedsFromAdditionalLongtermBorrowings",
-    "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+    "rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
   ),
   (
     "mini:AdditionalLongtermBorrowings",
-    "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+    "rs-gaap:ProceedsFromIssuanceOfLongTermDebt",
   ),
   (
     "mini:RepaymentLongtermBorrowings",
-    "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+    "rs-gaap:RepaymentsOfLongTermDebt",
   ),
   (
     "mini:PaymentForReductionOfLongtermBorrowings",
-    "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
+    "rs-gaap:RepaymentsOfLongTermDebt",
   ),
   # Investing — PP&E
   (
@@ -120,7 +123,10 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
     "mini:IncreaseInReceivablesFromSalesOnAccount",
     "rs-gaap:IncreaseDecreaseInAccountsReceivable",
   ),
-  ("mini:ProceedsFromCollectionOfReceivables", "rs-gaap:IncreaseDecreaseInAccountsReceivable"),
+  (
+    "mini:ProceedsFromCollectionOfReceivables",
+    "rs-gaap:IncreaseDecreaseInAccountsReceivable",
+  ),
   ("mini:CollectionOfReceivables", "rs-gaap:IncreaseDecreaseInAccountsReceivable"),
   # Operating — inventory
   ("mini:PurchasesOfInventoryForSale", "rs-gaap:IncreaseDecreaseInInventories"),
@@ -163,7 +169,10 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
   # is approximate; the CF rendering will conflate the IS expense
   # and the CF payment).
   ("mini:PaymentInterest", "rs-gaap:InterestExpense"),
-  ("mini:DecreaseFromPaymentOfInterest", "rs-gaap:IncreaseDecreaseInAccruedLiabilities"),
+  (
+    "mini:DecreaseFromPaymentOfInterest",
+    "rs-gaap:IncreaseDecreaseInAccruedLiabilities",
+  ),
   ("mini:InterestAccrued", "rs-gaap:IncreaseDecreaseInAccruedLiabilities"),
   # Operating — D&A
   (

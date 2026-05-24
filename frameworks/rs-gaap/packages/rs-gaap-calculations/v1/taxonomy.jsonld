@@ -936,6 +936,15 @@
       "arcWeight": 1.0,
       "arcOrder": 100.0
     },
+    {
+      "@id": "_:rs-gaap-calc-cf-investing-arc-2",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "arcWeight": 1.0,
+      "arcOrder": 200.0
+    },
 
     {
       "@id": "_:rs-gaap-calc-cf-financing",
@@ -1040,19 +1049,70 @@
     },
 
     {
-      "@id": "_:rs-gaap-deriv-cf-long-term-debt-net",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-LongTermDebtNet",
-      "structureName": "rs-gaap derivation CF — ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet = +Δ(LongTermDebtNoncurrent) [debt up = net proceeds, debt down = net repayments]. BS delta recovers net activity, not gross. For gross Proceeds + Repayments disclosure, author a rollforward IB with filter-based attribution (§3.16 Phase 3-4).",
+      "@id": "_:rs-gaap-deriv-cf-ppe-sales",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfPropertyPlantAndEquipment",
+      "structureName": "rs-gaap default-flow CF — ProceedsFromSaleOfPropertyPlantAndEquipment is the investing INFLOW default for PropertyPlantAndEquipmentGross. arcWeight sign = cash direction (+1 inflow); paired with PaymentsToAcquirePropertyPlantAndEquipment (-1 outflow). Consumed by the line-level flow fallback in _emit_flow_facts when LineItem.flow_element_id is NULL, NOT by _derive_cash_flow_facts (investing/financing arcs are excluded from net-delta).",
       "blockType": "validation_rules",
       "conceptArrangementPattern": "arithmetic"
     },
     {
-      "@id": "_:rs-gaap-deriv-cf-long-term-debt-net-arc-1",
-      "arcFrom": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet" },
+      "@id": "_:rs-gaap-deriv-cf-ppe-sales-arc-1",
+      "arcFrom": { "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment" },
+      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentGross" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfPropertyPlantAndEquipment",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-debt-issuance",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfLongTermDebt",
+      "structureName": "rs-gaap default-flow CF — ProceedsFromIssuanceOfLongTermDebt is the financing INFLOW default for LongTermDebtNoncurrent. arcWeight +1 = inflow (debt line is a credit/increase); paired with RepaymentsOfLongTermDebt (-1 outflow) for gross presentation per ASC 230. Line-level fallback only.",
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-debt-issuance-arc-1",
+      "arcFrom": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt" },
       "arcTo": { "@id": "rs-gaap:LongTermDebtNoncurrent" },
       "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-LongTermDebtNet",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfLongTermDebt",
       "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-debt-repayment",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-RepaymentsOfLongTermDebt",
+      "structureName": "rs-gaap default-flow CF — RepaymentsOfLongTermDebt is the financing OUTFLOW default for LongTermDebtNoncurrent. arcWeight -1 = outflow (debt line is a debit/decrease). Line-level fallback only.",
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-debt-repayment-arc-1",
+      "arcFrom": { "@id": "rs-gaap:RepaymentsOfLongTermDebt" },
+      "arcTo": { "@id": "rs-gaap:LongTermDebtNoncurrent" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-RepaymentsOfLongTermDebt",
+      "arcWeight": -1.0,
+      "arcOrder": 200.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-stock-repurchase",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsForRepurchaseOfCommonStock",
+      "structureName": "rs-gaap default-flow CF — PaymentsForRepurchaseOfCommonStock is the financing OUTFLOW default for AdditionalPaidInCapital. arcWeight -1 = outflow (equity line is a debit/decrease); paired with ProceedsFromIssuanceOfCommonStock (+1 inflow). Line-level fallback only.",
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-stock-repurchase-arc-1",
+      "arcFrom": { "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock" },
+      "arcTo": { "@id": "rs-gaap:AdditionalPaidInCapital" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsForRepurchaseOfCommonStock",
+      "arcWeight": -1.0,
       "arcOrder": 100.0
     },
 
@@ -1078,11 +1138,29 @@
     {
       "@id": "_:rs-gaap-calc-cf-financing-arc-2",
       "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
-      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt" },
       "arcAssociationType": "calculation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
       "arcWeight": 1.0,
       "arcOrder": 200.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-financing-arc-3",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
+      "arcTo": { "@id": "rs-gaap:RepaymentsOfLongTermDebt" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "arcWeight": 1.0,
+      "arcOrder": 300.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-financing-arc-4",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
+      "arcTo": { "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "arcWeight": 1.0,
+      "arcOrder": 400.0
     }
   ]
 }

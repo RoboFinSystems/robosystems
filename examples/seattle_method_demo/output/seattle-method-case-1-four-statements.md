@@ -1,7 +1,7 @@
 # Seattle Method Cross-Taxonomy — Test Case 1: Four-Statement Report
 
-**Graph**: `kg19e48e582867f658d601`
-**Report**: `rpt_01KS4EB8J1G24X8D4BQX24F6S2` (published)
+**Graph**: `kg19e5b8b619973b960555`
+**Report**: `rpt_01KSDRQ3YDQHFMZV8KQGE0KAT2` (published)
 **Entity**: Lemonade Stand (Charlie Hoffman Test Case 1)
 **Period**: 2024-01-01 → 2024-03-31 (Current)
 **Comparative**: 2023-10-02 → 2023-12-31 (Prior — zero opening balances)
@@ -110,10 +110,10 @@ The architectural piece that powers this lives in
 | `rs-gaap:DepreciationDepletionAndAmortization` |     Depreciation, Depletion and Amortization | $100.00 | $0.00 |
 | `rs-gaap:OperatingExpenses` |   **Operating Expenses** | $100.00 | $0.00 |
 | `rs-gaap:OperatingIncomeLoss` |   **Operating Income (Loss)** | $2,600.00 | $0.00 |
-| `rs-gaap:InterestExpense` |   Interest Expense, Operating and Nonoperating | $150.00 | $0.00 |
+| `rs-gaap:InterestExpense` |     Interest Expense, Operating and Nonoperating | $150.00 | $0.00 |
+| `rs-gaap:NonoperatingIncomeExpense` |   **Nonoperating Income (Expense)** | $(150.00) | $0.00 |
 | `rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest` |   **Income (Loss) from Continuing Operations before Income Taxes, Noncontrolling Interest** | $2,450.00 | $0.00 |
 | `rs-gaap:IncomeTaxExpenseBenefit` |   Income Tax Expense (Benefit) | $400.00 | $0.00 |
-| `rs-gaap:IncomeLossFromContinuingOperations` |   **Income (Loss) from Continuing Operations, Net of Tax, Attributable to Parent** | $2,050.00 | $0.00 |
 | `rs-gaap:NetIncomeLoss` |   **Net Income (Loss) Attributable to Parent** | $2,050.00 | $0.00 |
 
 ---
@@ -122,7 +122,7 @@ The architectural piece that powers this lives in
 
 - **Structure**: `rs-gaap — Cash Flow Statement — Indirect`
 - **Block type**: `cash_flow_statement`
-- **Row count**: 11
+- **Row count**: 12
 - **Unmapped elements**: 0
 
 | QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
@@ -135,7 +135,8 @@ The architectural piece that powers this lives in
 | `rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment` |     Payments to Acquire Property, Plant, and Equipment | $(1,000.00) | $0.00 |
 | `rs-gaap:NetCashProvidedByUsedInInvestingActivities` |   **Cash Provided by (Used in) Investing Activity, Including Discontinued Operation** | $(1,000.00) | $0.00 |
 | `rs-gaap:ProceedsFromIssuanceOfCommonStock` |     Proceeds from Issuance of Common Stock | $10,000.00 | $0.00 |
-| `rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet` |     Proceeds from Issuance of Long-Term Debt and Capital Securities, Net | $1,000.00 | $0.00 |
+| `rs-gaap:ProceedsFromIssuanceOfLongTermDebt` |     Proceeds from Issuance of Long-Term Debt | $2,000.00 | $0.00 |
+| `rs-gaap:RepaymentsOfLongTermDebt` |     Repayments of Long-Term Debt | $(1,000.00) | $0.00 |
 | `rs-gaap:NetCashProvidedByUsedInFinancingActivities` |   **Cash Provided by (Used in) Financing Activity, Including Discontinued Operation** | $11,000.00 | $0.00 |
 | `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **CashAndCashEquivalentsPeriodIncreaseDecrease** | $10,850.00 | $0.00 |
 
@@ -158,12 +159,12 @@ The architectural piece that powers this lives in
 
 ## Provenance
 
-- **Report ID**: `rpt_01KS4EB8J1G24X8D4BQX24F6S2`
-- **Graph**: `kg19e48e582867f658d601`
+- **Report ID**: `rpt_01KSDRQ3YDQHFMZV8KQGE0KAT2`
+- **Graph**: `kg19e5b8b619973b960555`
 - **Taxonomy**: `rs-gaap` (resolved at create-report time)
-- **Mapping**: `struct_01KS4EB57T2TBNH8ZP1A4SSE32`
-- **Created**: 2026-05-21T04:57:49.377958
-- **Last generated**: 2026-05-21T04:57:49.419965
+- **Mapping**: `struct_01KSDRPXVCWT2WTM4HGJQE9SHC`
+- **Created**: 2026-05-24T19:52:13.517931
+- **Last generated**: 2026-05-24T19:52:13.653286
 
 ### How to reproduce
 
