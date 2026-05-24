@@ -8466,6 +8466,14 @@
       "arcOrder": 30210.0
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-12b",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30220.0
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-arc-13",
       "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
       "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
@@ -8492,10 +8500,26 @@
     {
       "@id": "_:rs-gaap-pres-cf-indirect-arc-16",
       "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
-      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt" },
       "arcAssociationType": "presentation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
       "arcOrder": 30320.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-16b",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
+      "arcTo": { "@id": "rs-gaap:RepaymentsOfLongTermDebt" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30330.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-16c",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
+      "arcTo": { "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30340.0
     },
 
     {

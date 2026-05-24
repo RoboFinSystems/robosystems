@@ -27,16 +27,22 @@ class ValidationResult:
 def validate_report(block_type: str, rows: list[FactRow]) -> ValidationResult:
   """Run structural and semantic validation for a rendered structure.
 
-  Note: `cash_flow_statement`, `equity_statement`, and
-  `comprehensive_income` are intentionally not handled — the
-  roboledger renderers for those types aren't implemented yet. When
-  they are, re-wire the `_validate_cash_flow` helper below and add
-  equity / comprehensive-income validators.
+  `_check_totals_foot` (shared) is the load-bearing CF check: it verifies the
+  net-change-in-cash line foots to Op + Inv + Fin and that each section foots
+  to its leaves — i.e. the investing/financing flows actually roll up. The
+  cross-statement ΔCash reconciliation (CF net-change == BS cash movement)
+  lives at the fact-bundle level in ``fact_grid._check_cash_flow_tie_out``,
+  since the rendered CF rows carry no independent beginning/ending cash.
+
+  `equity_statement` and `comprehensive_income` remain unhandled until their
+  validators are added.
   """
   if block_type == "income_statement":
     return _validate_income_statement(rows)
   elif block_type == "balance_sheet":
     return _validate_balance_sheet(rows)
+  elif block_type == "cash_flow_statement":
+    return _validate_cash_flow(rows)
   return ValidationResult(checks=["no_validation_rules"])
 
 
@@ -251,14 +257,14 @@ def _validate_balance_sheet(rows: list[FactRow]) -> ValidationResult:
   return result
 
 
-def _validate_cash_flow(  # pyright: ignore[reportUnusedFunction]
-  rows: list[FactRow],
-) -> ValidationResult:
-  """Cash flow validation — retained for when the renderer is implemented.
+def _validate_cash_flow(rows: list[FactRow]) -> ValidationResult:
+  """Cash flow validation — structural footing of the rendered CF.
 
-  Currently unreferenced; `validate_report` does not dispatch to this
-  function. Wire it back into `validate_report` when the CF renderer
-  lands in fact_grid and drop the `reportUnusedFunction` ignore above.
+  `_check_totals_foot` verifies the net-change line foots to Op + Inv + Fin
+  and each section foots to its leaves (so the investing/financing flow facts
+  emitted by ``fact_grid._emit_flow_facts`` actually roll up). The ΔCash
+  reconciliation against the balance sheet is a fact-bundle check
+  (``fact_grid._check_cash_flow_tie_out``), not a per-statement one.
   """
   result = ValidationResult()
 

@@ -238,6 +238,12 @@ def generate_report_facts(
   # fact per period so verification rules scoped to a subtotal can bind.
   _emit_subtotal_facts(session, facts, periods)
 
+  # Reconcile the CF net change in cash against the balance-sheet cash
+  # movement (the acceptance criterion for flow attribution). Warning-only —
+  # the bundle is already generated; a mismatch flags incomplete investing/
+  # financing attribution (dead-branch flow concept or coarse CoA mapping).
+  _check_cash_flow_tie_out(facts, periods)
+
   unmapped_count = _count_unmapped(session, mapping_id, arc_type=arc_type)
 
   return ReportFacts(
@@ -1208,40 +1214,45 @@ def _emit_flow_facts(
   mapping_id: str,
   arc_type: str,
 ) -> None:
-  """Emit **investing/financing** CF facts directly from per-line flow concepts.
+  """Emit **investing/financing** CF facts from per-line economic flows.
 
-  Each LineItem carries a first-class ``flow_element_id`` (the economic flow it
-  represents). For investing + financing flows the period cash flow is the
-  signed movement of the **cash side** of the entry: summing the cash-side
-  line's ``debit - credit`` gives the flow with the correct sign (cash debit =
-  inflow +, cash credit = outflow -). Summing the *non-cash* side instead would
-  require a sign flip, and summing *both* sides double-counts to zero (both
-  sides resolve to the same CF concept) — so we anchor on the cash line.
+  Two passes, combined per flow leaf:
 
-  Operating flows are intentionally skipped: indirect-method operating is
-  NI + non-cash addbacks + ΔWC (handled by ``_derive_cash_flow_facts``), not a
-  flow-sum. Section routing is by the ``activityType`` trait on the resolved
-  rs-gaap flow concept.
+  - **Pass 1 (explicit)** — a LineItem's ``flow_element_id`` is set (manual
+    override, or pre-tagged source like Charlie's mini fixture). The cash line
+    carries the tag; its signed ``debit - credit`` is the flow (cash debit =
+    inflow +, cash credit = outflow -). Anchoring on cash avoids the sign flip
+    and the both-sides double-count.
+  - **Pass 2 (element-default fallback)** — the load-bearing path for real
+    QuickBooks data, which carries no ``flow_element_id``. Each NON-cash line
+    of an untagged, cash-affecting entry routes to its mapped rs-gaap element's
+    DEFAULT inv/fin flow (a ``derivation`` arc, to = BS element, from = flow
+    concept; weight SIGN = cash direction), selected against the line's own
+    ``credit - debit``. The two passes agree in sign because in a balanced
+    entry the cash side is the negation of the non-cash side.
 
-  Runs BEFORE ``_derive_cash_flow_facts`` so that function's "direct fact wins"
-  guard suppresses the (often-defeated) ΔBS derivation arcs for these same CF
-  leaves — e.g. ``PaymentsToAcquirePropertyPlantAndEquipment`` whose ΔGross
-  derivation yields 0 under an all-in-Net PP&E mapping.
+  Operating flows are intentionally absent from both passes: indirect-method
+  operating is NI + non-cash addbacks + ΔWC (``_derive_cash_flow_facts``), not
+  a flow-sum. Section routing is by the ``activityType`` trait on the resolved
+  flow concept, which also keeps the inv/fin ``derivation`` arcs out of the
+  operating net-delta path (they're excluded there by the same trait).
 
   Resolution uses the same ``mapping_id``/``arc_type`` as the balance reader, so
   source-vocabulary flows (mini) and accounts resolve to rs-gaap consistently.
-  Mutates ``facts`` in place.
+  Authoritative for inv/fin flow leaves: replaces any pre-existing fact for the
+  leaf+period. Mutates ``facts`` in place.
   """
   cash_qnames = list(_CASH_ANCHOR_QNAMES)
-  for period in periods:
-    rows = session.execute(
-      text("""
+
+  # Pass 1 — explicit per-line flow tags. The cash line of an entry carries a
+  # ``flow_element_id``; its signed movement (debit - credit) is the flow.
+  explicit_sql = text("""
         SELECT
           COALESCE(fmap.to_element_id, li.flow_element_id) AS flow_id,
           rf.qname AS flow_qname,
           rf.name AS flow_name,
           rf.balance_type AS flow_balance_type,
-          COALESCE(SUM(li.debit_amount - li.credit_amount), 0) AS cash_movement_cents
+          COALESCE(SUM(li.debit_amount - li.credit_amount), 0) AS value_cents
         FROM line_items li
         JOIN entries en ON en.id = li.entry_id
         JOIN elements acct ON acct.id = li.element_id
@@ -1264,41 +1275,109 @@ def _emit_flow_facts(
           AND en.posting_date BETWEEN :start AND :end
           AND COALESCE(racct.qname, acct.qname) = ANY(:cash_qnames)
         GROUP BY flow_id, rf.qname, rf.name, rf.balance_type
-      """),
-      {
-        "arc_type": arc_type,
-        "mapping_id": mapping_id,
-        "start": period.start,
-        "end": period.end,
-        "cash_qnames": cash_qnames,
-      },
-    ).fetchall()
+      """)
 
-    for row in rows:
-      cf_value = cents_to_dollars(row.cash_movement_cents)
-      if cf_value == 0:
+  # Pass 2 — element-default fallback (the load-bearing path for real
+  # QuickBooks data, which carries no flow_element_id). For an entry with no
+  # explicit tag, each NON-cash line routes to its mapped rs-gaap element's
+  # DEFAULT investing/financing flow: a ``derivation`` arc (to = BS element,
+  # from = flow concept) whose weight SIGN encodes cash direction (+1 inflow,
+  # -1 outflow), selected against the line's own ``credit - debit`` — asset-up
+  # = outflow (-), liability/equity-up = inflow (+). The line's ``credit -
+  # debit`` IS the signed cash flow (consistent with Pass 1's cash-anchored
+  # ``debit - credit``, since in a balanced entry the cash side is the
+  # negation of the non-cash side). Gated on (a) the entry actually moving
+  # cash, so accruals don't leak into investing/financing, and (b) no explicit
+  # tag anywhere in the entry, so Pass 1 / manual overrides own those entries.
+  fallback_sql = text("""
+        SELECT
+          rf.id AS flow_id,
+          rf.qname AS flow_qname,
+          rf.name AS flow_name,
+          rf.balance_type AS flow_balance_type,
+          COALESCE(SUM(li.credit_amount - li.debit_amount), 0) AS value_cents
+        FROM line_items li
+        JOIN entries en ON en.id = li.entry_id
+        JOIN elements acct ON acct.id = li.element_id
+        LEFT JOIN associations amap
+          ON amap.from_element_id = li.element_id
+          AND amap.association_type = :arc_type
+          AND amap.structure_id = :mapping_id
+        LEFT JOIN elements racct ON racct.id = amap.to_element_id
+        JOIN associations darc
+          ON darc.to_element_id = COALESCE(amap.to_element_id, li.element_id)
+          AND darc.association_type = 'derivation'
+          AND SIGN(darc.weight) = SIGN(li.credit_amount - li.debit_amount)
+        JOIN elements rf ON rf.id = darc.from_element_id
+        JOIN element_traits et ON et.element_id = rf.id
+        JOIN traits t ON t.id = et.trait_id
+          AND t.category = 'activityType'
+          AND t.identifier IN ('investingActivity', 'financingActivity')
+        WHERE li.flow_element_id IS NULL
+          AND en.status = 'posted'
+          AND en.posting_date BETWEEN :start AND :end
+          AND COALESCE(racct.qname, acct.qname) <> ALL(:cash_qnames)
+          AND EXISTS (
+            SELECT 1 FROM line_items cl
+            JOIN elements ca ON ca.id = cl.element_id
+            LEFT JOIN associations cmap
+              ON cmap.from_element_id = cl.element_id
+              AND cmap.association_type = :arc_type
+              AND cmap.structure_id = :mapping_id
+            LEFT JOIN elements cra ON cra.id = cmap.to_element_id
+            WHERE cl.entry_id = en.id
+              AND COALESCE(cra.qname, ca.qname) = ANY(:cash_qnames)
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM line_items x
+            WHERE x.entry_id = en.id AND x.flow_element_id IS NOT NULL
+          )
+        GROUP BY rf.id, rf.qname, rf.name, rf.balance_type
+      """)
+
+  for period in periods:
+    params = {
+      "arc_type": arc_type,
+      "mapping_id": mapping_id,
+      "start": period.start,
+      "end": period.end,
+      "cash_qnames": cash_qnames,
+    }
+    # Combine explicit + fallback contributions per flow leaf so a leaf that
+    # receives both (mixed tagged/untagged entries) sums rather than one pass
+    # clobbering the other. Value: [qname, name, balance_type, summed_value].
+    combined: dict[str, list] = {}
+    for sql in (explicit_sql, fallback_sql):
+      for row in session.execute(sql, params).fetchall():
+        agg = combined.get(row.flow_id)
+        if agg is None:
+          agg = [row.flow_qname, row.flow_name, row.flow_balance_type or "debit", 0.0]
+          combined[row.flow_id] = agg
+        agg[3] += cents_to_dollars(row.value_cents)
+
+    for flow_id, (qname, name, balance_type, value) in combined.items():
+      if value == 0:
         continue
-      # This emitter is authoritative for investing/financing flow leaves:
-      # drop any pre-existing fact for this leaf+period (e.g. a 0-valued or
-      # balance-shaped placeholder that some upstream pass materialized) so
-      # the flow-derived value is what renders.
+      # Authoritative for investing/financing flow leaves: drop any pre-existing
+      # fact for this leaf+period (e.g. a 0/instant placeholder) so the
+      # flow-derived value is what renders.
       facts[:] = [
         f
         for f in facts
         if not (
-          f.element_id == row.flow_id
+          f.element_id == flow_id
           and f.period_start == period.start
           and f.period_end == period.end
         )
       ]
       facts.append(
         ReportFact(
-          element_id=row.flow_id,
-          element_qname=row.flow_qname,
-          element_name=row.flow_name,
+          element_id=flow_id,
+          element_qname=qname,
+          element_name=name,
           classification=None,
-          balance_type=row.flow_balance_type or "debit",
-          value=cf_value,
+          balance_type=balance_type,
+          value=value,
           period_start=period.start,
           period_end=period.end,
           period_type="duration",
@@ -1358,11 +1437,24 @@ def _derive_cash_flow_facts(
   # immutability trigger blocks tenants from inserting their own. If
   # tenant-authored derivations land later (§3.16 Phase 4), this query
   # will need a scope (Reporting Style or taxonomy_id).
+  # Operating-only: investing/financing derivation arcs are intentionally
+  # excluded here. Net-delta can't do gross presentation (a period with only a
+  # debt issuance would still emit a spurious repayment off Δdebt) and silently
+  # omits co-mingled flows (ΔPP&E Net nets capex against depreciation). Those
+  # arcs are the DEFAULT-flow lookup for the line-level fallback in
+  # _emit_flow_facts instead, routed by the flow concept's activityType trait.
   rows = session.execute(
     text("""
-      SELECT from_element_id, to_element_id, weight
-      FROM associations
-      WHERE association_type = 'derivation'
+      SELECT a.from_element_id, a.to_element_id, a.weight
+      FROM associations a
+      WHERE a.association_type = 'derivation'
+        AND NOT EXISTS (
+          SELECT 1 FROM element_traits et
+          JOIN traits t ON t.id = et.trait_id
+          WHERE et.element_id = a.from_element_id
+            AND t.category = 'activityType'
+            AND t.identifier IN ('investingActivity', 'financingActivity')
+        )
     """)
   ).fetchall()
   if not rows:
@@ -1432,6 +1524,81 @@ def _derive_cash_flow_facts(
           period_end=current.end,
           period_type="duration",
         )
+      )
+
+
+def _check_cash_flow_tie_out(
+  facts: list[ReportFact], periods: list[PeriodSpec]
+) -> None:
+  """Reconcile the CF net change in cash against the BS cash movement.
+
+  The CF net-change concept (``CashAndCashEquivalentsPeriodIncreaseDecrease``)
+  is, by the calc DAG, Operating + Investing + Financing — so it always foots
+  to the sections internally (``_check_totals_foot`` covers that). The
+  *meaningful* check is whether that net change equals the actual period-over-
+  period movement in the cash balance (ΔCash). A mismatch means the flow
+  attribution is incomplete or wrong — e.g. an investing line routed to a flow
+  concept that isn't in the render structure, or a coarse "PP&E Net" mapping
+  that the gross-grained default arcs can't resolve.
+
+  Warning-only: the bundle is already generated and the BS/CF still render;
+  this surfaces the residual so it's visible rather than silently wrong. It is
+  the acceptance criterion the enrichment work is validated against.
+  """
+  if len(periods) < 2:
+    return
+  cash_by_date: dict[date, float] = {}
+  net_change_by_end: dict[date, float] = {}
+  for f in facts:
+    if f.period_type == "instant" and f.element_qname in _CASH_ANCHOR_QNAMES:
+      cash_by_date[f.period_end] = cash_by_date.get(f.period_end, 0.0) + f.value
+    elif f.element_qname == "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease":
+      net_change_by_end[f.period_end] = (
+        net_change_by_end.get(f.period_end, 0.0) + f.value
+      )
+
+  # Cash balances are instant facts at period boundaries (a period's end is the
+  # next period's opening), so ΔCash for period i is cash(end_i) - cash(end_{i-1})
+  # — the same prior-period-end delta basis as _derive_cash_flow_facts.
+  ordered = sorted(periods, key=lambda p: p.end)
+  for i in range(1, len(ordered)):
+    current, prior = ordered[i], ordered[i - 1]
+    net_change = net_change_by_end.get(current.end)
+    if net_change is None:
+      continue
+    cash_end = cash_by_date.get(current.end)
+    if cash_end is None:
+      # A net-change fact exists but no instant cash balance does — the
+      # reconciliation can't run. Warn rather than skip silently: "couldn't
+      # check" must not look identical to "checked and tied". Causes: the cash
+      # concept isn't in _CASH_ANCHOR_QNAMES, or the balance sheet wasn't
+      # generated for this period.
+      logger.warning(
+        "CF tie-out could not run for period ending %s: net change in cash "
+        "(%.2f) is present but no instant cash-balance fact was found (cash "
+        "concept missing from _CASH_ANCHOR_QNAMES, or balance sheet not "
+        "generated).",
+        current.end,
+        net_change,
+      )
+      continue
+    # A missing opening balance means $0 cash at that boundary (inception) —
+    # default to 0 rather than skip, so a first-period discrepancy (e.g. a
+    # financing leaf that renders but isn't summed) is flagged, not masked.
+    cash_start = cash_by_date.get(prior.end, 0.0)
+    delta_cash = cash_end - cash_start
+    residual = net_change - delta_cash
+    if abs(residual) > 0.01:
+      logger.warning(
+        "CF tie-out mismatch for period ending %s: net change in cash (%.2f) "
+        "≠ ΔCash from balance sheet (%.2f), residual %.2f. Investing/financing "
+        "attribution is likely incomplete (flow concept off the render "
+        "structure, or a coarse CoA mapping the gross default arcs can't "
+        "resolve).",
+        current.end,
+        net_change,
+        delta_cash,
+        residual,
       )
 
 
