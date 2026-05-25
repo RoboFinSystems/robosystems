@@ -59,6 +59,11 @@ just demo-seattle-method-create-report <graph_id>
 | `reconcile`           | `output/seattle-method-case-1.md` — mini-vocab line-by-line comparison vs. Charlie's PoC, classified per methodology spec §3.2               |
 | `create-report`       | `output/seattle-method-case-1-four-statements.md` — rs-gaap 4-IB Report (BS / IS / CF / SE) materialized via create-report + reportPackage   |
 
+Steps write to `output/` (gitignored — each run stamps fresh graph/report
+IDs, so committing it would churn). Committed reference copies live in
+[`sample_output/`](sample_output/); refresh them with
+`cp output/*.md sample_output/`.
+
 ## Inputs (all fetched from Charlie's published artifacts, none committed)
 
 Charlie maintains his test artifacts on GitHub and xbrlsite. We pull
