@@ -52,6 +52,7 @@ just demo-world-online-create-report <graph_id>
 | `author-rollforwards` | 7 rollforward IBs (Cash, Receivables, Inventories, PP&E, AP, LongtermDebt, PaidInCapital — no AccruedExpenses in this dataset) |
 | `reconcile` | `output/world-online-reconciliation.md` — the `(line-item × business-event)` pivot reproduced from the graph and reconciled cell-by-cell against `SummaryOfTransactions.csv` |
 | `create-report` | `output/world-online-four-statements.md` — the rs-gaap 4-statement Report (BS / IS / CF / SE) |
+| `trial-balance` | `output/world-online-trial-balance.md` — trial balance (total debits = total credits), via the `trialBalance` GraphQL query |
 
 ## Opening balances (the load-bearing design decision)
 
@@ -146,13 +147,10 @@ financing section.
 ## Out of Scope (Charlie's wishlist — forward work)
 
 Charlie's dataset README lists ten things a full implementation could
-show. This demo delivers the core (ingest → rollforwards → 4 statements
-→ the business-event summary, which is the reconciliation pivot). The
-rest are noted here as forward work, not built:
+show. This demo delivers the core: ingest → rollforwards → 4 statements
+→ the business-event summary (the reconciliation pivot) → **trial balance**
+(item 9). The rest are noted here as forward work, not built:
 
-- **Trial balance** (item 9) — MINI 2026 ships a TrialBalance support
-  network; a `trialBalance` GraphQL query already exists. A dedicated
-  trial-balance artifact is a small follow-on.
 - **Policies & text disclosures** (item 2) — appended by a separate
   process; not derivable from transactions.
 - **Subclassifications** (item 3) — we collapse GL accounts to the

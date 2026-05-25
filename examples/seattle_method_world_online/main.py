@@ -326,6 +326,30 @@ def step_create_report(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"create_report exited with code {result.returncode}")
 
 
+def step_trial_balance(graph_id: str, dry_run: bool = False) -> None:
+  """Step 9 — render the trial balance (Charlie's objective item 9)."""
+  print("─" * 70)
+  print(f"Step 9 — trial balance → graph {graph_id}")
+  print("─" * 70)
+  if dry_run:
+    print("  (dry-run — skipping trial balance)")
+    return
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples.seattle_method_world_online.trial_balance",
+      graph_id,
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if result.returncode != 0:
+    raise SystemExit(f"trial_balance exited with code {result.returncode}")
+
+
 # ── Step registry ──────────────────────────────────────────────────────────
 
 STEPS = {
@@ -340,6 +364,7 @@ STEPS = {
   ),
   "reconcile": ("Reconcile vs SummaryOfTransactions.csv", step_reconcile),
   "create-report": ("Materialize the rs-gaap 4-statement Report", step_create_report),
+  "trial-balance": ("Render the trial balance", step_trial_balance),
 }
 
 
@@ -410,6 +435,8 @@ def main() -> None:
   print()
   step_create_report(graph_id, dry_run=args.dry_run)
   print()
+  step_trial_balance(graph_id, dry_run=args.dry_run)
+  print()
 
   print("─" * 70)
   print(f"✓ End-to-end demo run complete against graph {graph_id}")
@@ -417,6 +444,7 @@ def main() -> None:
   print("\nArtifacts in examples/seattle_method_world_online/output/:")
   print("  - world-online-reconciliation.md   (mini pivot vs SummaryOfTransactions)")
   print("  - world-online-four-statements.md  (rs-gaap 4-statement Report)")
+  print("  - world-online-trial-balance.md    (trial balance)")
 
 
 if __name__ == "__main__":

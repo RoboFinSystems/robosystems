@@ -226,6 +226,10 @@ demo-world-online-reconcile *args="":
 demo-world-online-create-report *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.create_report {{args}}
 
+# Render the World Online trial balance for a graph after the main demo has run
+demo-world-online-trial-balance *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.trial_balance {{args}}
+
 
 ## CI/CD ##
 
