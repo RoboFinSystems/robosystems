@@ -58,6 +58,13 @@ BS_IS_MAPPINGS: list[tuple[str, str]] = [
   # lemonade-stand fixtures (contractor labor in JE-205 is mis-tagged
   # per the README's data-quality findings).
   ("mini:CostsOfSales", "rs-gaap:CostOfGoodsSold"),
+  # SG&A — not exercised by the 14-JE lemonade stand, but the World
+  # Online dataset (examples/seattle_method_world_online) has 7,822 SG&A
+  # lines. Additive: Case 1 simply never touches this concept.
+  (
+    "mini:SalesGeneralAndAdministrativeExpenses",
+    "rs-gaap:SellingGeneralAndAdministrativeExpense",
+  ),
   ("mini:DepreciationAndAmortization", "rs-gaap:DepreciationDepletionAndAmortization"),
   ("mini:InterestExpense", "rs-gaap:InterestExpense"),
   (

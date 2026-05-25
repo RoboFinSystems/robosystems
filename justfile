@@ -214,6 +214,18 @@ demo-seattle-method-reconcile *args="":
 demo-seattle-method-create-report *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_demo.create_report {{args}}
 
+# Run "The World Online" demo (Seattle Method MINI 2026 — Charlie Hoffman's 22,288-line GL). Flags: --dry-run, --step <name>, --graph <id>, --limit <n>
+demo-world-online *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.main {{args}}
+
+# Render the World Online reconciliation report (mini pivot vs SummaryOfTransactions.csv) for a graph after the main demo has run
+demo-world-online-reconcile *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.reconcile {{args}}
+
+# Materialize the World Online 4-statement rs-gaap Report (BS / IS / CF / SE) for a graph after the main demo has run
+demo-world-online-create-report *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.create_report {{args}}
+
 
 ## CI/CD ##
 
