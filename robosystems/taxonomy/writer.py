@@ -121,6 +121,30 @@ class CopyStats:
     )
 
 
+# The transaction-scoped GUC that opts a transaction into a library re-sync.
+# resync_library_into_tenant requires it (the immutability triggers consult it),
+# and callers run SET_LIBRARY_RESYNC in the same transaction first. Defined at
+# this layer so the writer's guard and every caller share one source of truth.
+LIBRARY_RESYNC_GUC = "robosystems.library_resync"
+SET_LIBRARY_RESYNC = f"SET LOCAL {LIBRARY_RESYNC_GUC} = 'on'"
+
+
+def _build_pin_clause(resolved_pin: dict[str, str]) -> tuple[str, dict[str, str]]:
+  """Flatten a resolved pin into a parameterized ``VALUES`` clause + params.
+
+  E.g. ``{"fac":"v1","rs-gaap":"v1"}`` → ``"(:s0, :v0), (:s1, :v1)"`` plus the
+  bound params. Shared by :func:`copy_library_into_tenant` and
+  :func:`resync_library_into_tenant` so the two paths cannot drift in how they
+  bind the pinned ``(standard, version)`` pairs.
+  """
+  pin_values_sql = ", ".join(f"(:s{i}, :v{i})" for i in range(len(resolved_pin)))
+  pin_params: dict[str, str] = {}
+  for i, (std, ver) in enumerate(resolved_pin.items()):
+    pin_params[f"s{i}"] = std
+    pin_params[f"v{i}"] = ver
+  return pin_values_sql, pin_params
+
+
 def copy_library_into_tenant(
   connection: Connection,
   schema: str,
@@ -149,13 +173,7 @@ def copy_library_into_tenant(
   if not resolved_pin:
     return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-  # Flatten the pin into a parameterized IN clause via VALUES.
-  # E.g., ("fac", "v1"), ("rs-gaap", "v1"), …
-  pin_values_sql = ", ".join(f"(:s{i}, :v{i})" for i in range(len(resolved_pin)))
-  pin_params: dict[str, str] = {}
-  for i, (std, ver) in enumerate(resolved_pin.items()):
-    pin_params[f"s{i}"] = std
-    pin_params[f"v{i}"] = ver
+  pin_values_sql, pin_params = _build_pin_clause(resolved_pin)
 
   # Taxonomies — only the pinned (standard, version) pairs.
   tax_result = connection.execute(
@@ -329,6 +347,288 @@ def copy_library_into_tenant(
   # Style Structure + a Network Structure that have both been copied into
   # this tenant — gate on both structure_ids existing locally so an
   # unpinned package doesn't leave dangling composition references.
+  rsn_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.reporting_style_networks ({_REPORTING_STYLE_NETWORK_COLS})
+      SELECT {_REPORTING_STYLE_NETWORK_COLS} FROM public.reporting_style_networks rsn
+      WHERE EXISTS (SELECT 1 FROM {schema}.structures s WHERE s.id = rsn.reporting_style_id)
+        AND EXISTS (SELECT 1 FROM {schema}.structures s WHERE s.id = rsn.network_id)
+      ON CONFLICT (reporting_style_id, statement_type) DO NOTHING
+    """),
+  )
+
+  return CopyStats(
+    taxonomies=tax_result.rowcount or 0,
+    elements=elem_result.rowcount or 0,
+    element_labels=label_result.rowcount or 0,
+    element_references=ref_result.rowcount or 0,
+    structures=struct_result.rowcount or 0,
+    associations=assoc_result.rowcount or 0,
+    traits=trait_result.rowcount or 0,
+    element_traits=et_result.rowcount or 0,
+    classifications=cls_result.rowcount or 0,
+    association_classifications=ac_result.rowcount or 0,
+    rules=rule_result.rowcount or 0,
+    reporting_style_networks=rsn_result.rowcount or 0,
+  )
+
+
+# Per-table ON CONFLICT clauses for the re-sync path. The updatable column sets
+# mirror ``operations/taxonomy_block/library_creator.py`` EXACTLY — public and
+# tenant must agree on what is mutable. Frozen tables stay DO NOTHING (additive:
+# new rows insert, existing rows are left alone).
+#
+# IMPORTANT: keep these statements in lockstep with ``copy_library_into_tenant``
+# above (same tables, same FK order, same WHERE clauses) — only the trailing
+# conflict action differs.
+_RESYNC_TAXONOMY_CONFLICT = (
+  "ON CONFLICT (id) DO UPDATE SET "
+  "taxonomy_type = EXCLUDED.taxonomy_type, description = EXCLUDED.description"
+)
+_RESYNC_ELEMENT_CONFLICT = (
+  "ON CONFLICT (id) DO UPDATE SET "
+  "balance_type = EXCLUDED.balance_type, period_type = EXCLUDED.period_type, "
+  "substitution_group = EXCLUDED.substitution_group, "
+  "is_abstract = EXCLUDED.is_abstract, is_monetary = EXCLUDED.is_monetary, "
+  "element_type = EXCLUDED.element_type"
+)
+_RESYNC_TRAIT_CONFLICT = (
+  "ON CONFLICT (id) DO UPDATE SET "
+  "name = EXCLUDED.name, description = EXCLUDED.description"
+)
+_RESYNC_ELEMENT_TRAIT_CONFLICT = (
+  "ON CONFLICT (element_id, trait_id) DO UPDATE SET "
+  "is_primary = EXCLUDED.is_primary, confidence = EXCLUDED.confidence, "
+  "source = EXCLUDED.source"
+)
+_RESYNC_RULE_CONFLICT = (
+  "ON CONFLICT (id) DO UPDATE SET "
+  "rule_expression = EXCLUDED.rule_expression, "
+  "rule_message = EXCLUDED.rule_message, "
+  "rule_severity = EXCLUDED.rule_severity, "
+  "rule_variables = EXCLUDED.rule_variables"
+)
+# Gap B — the association id (uuid5(structure:from:to:type)) is preserved when
+# only these value columns change, so calc-weight / presentation-order / arcrole
+# fixes update cleanly. Changing from/to/type mints a new arc (additive; the
+# stale arc lingers until a deletion pass exists). Mirrors library_creator.
+_RESYNC_ASSOCIATION_CONFLICT = (
+  "ON CONFLICT (id) DO UPDATE SET "
+  "weight = EXCLUDED.weight, order_value = EXCLUDED.order_value, "
+  "arcrole = EXCLUDED.arcrole, confidence = EXCLUDED.confidence, "
+  "metadata = EXCLUDED.metadata"
+)
+
+
+def resync_library_into_tenant(
+  connection: Connection,
+  schema: str,
+  pin: dict[str, str] | None = None,
+) -> CopyStats:
+  """Re-sync pinned library taxonomies from ``public.*`` into ``{schema}.*``.
+
+  The ``DO UPDATE`` sibling of :func:`copy_library_into_tenant`: same 12
+  statements in the same FK order, but in-place library fixes (rule logic,
+  calc-irrelevant element attributes, trait names/bindings) flow into an
+  already-provisioned tenant instead of being skipped. New rows still insert;
+  existing rows update for the mutable columns only; **nothing is ever
+  deleted** (retirement propagation is intentionally out of scope).
+
+  The updatable column sets mirror ``library_creator`` exactly: taxonomies,
+  elements, traits, element_traits, rules, and **associations** (calc/
+  presentation value columns — Gap B) update in place. Frozen (additive only):
+  labels, references, structures, classifications, association_classifications,
+  reporting_style_networks.
+
+  Caller contract (identical to :func:`copy_library_into_tenant`): this function
+  only issues statements and does not commit. **The caller MUST run inside a
+  transaction that has executed** :data:`SET_LIBRARY_RESYNC`
+  (``SET LOCAL robosystems.library_resync = 'on'``) — otherwise the immutability
+  triggers (migration 0016) reject the ``DO UPDATE``. This is asserted up front:
+  a missing GUC raises a clear ``RuntimeError`` rather than an opaque trigger
+  exception mid-fan-out.
+
+  Returns:
+      :class:`CopyStats`. For ``DO UPDATE`` tables ``rowcount`` counts inserts
+      **and** updates (the per-table delta touched by this re-sync); for frozen
+      tables it counts inserts only.
+  """
+  resolved_pin = pin if pin is not None else DEFAULT_TAXONOMY_PIN
+  if not resolved_pin:
+    return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+  # Fail loudly and early if the caller forgot the bypass GUC — otherwise the
+  # first DO UPDATE raises an opaque PL/pgSQL trigger exception mid-fan-out.
+  if (
+    connection.execute(
+      text("SELECT current_setting(:guc, true)"), {"guc": LIBRARY_RESYNC_GUC}
+    ).scalar()
+    != "on"
+  ):
+    raise RuntimeError(
+      "resync_library_into_tenant must run inside a transaction that has "
+      f"executed `{SET_LIBRARY_RESYNC}`; the immutability triggers reject the "
+      "DO UPDATE otherwise. Use operations/taxonomy_block/resync.py."
+    )
+
+  pin_values_sql, pin_params = _build_pin_clause(resolved_pin)
+
+  tax_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.taxonomies ({_TAXONOMY_COLS})
+      SELECT {_TAXONOMY_COLS} FROM public.taxonomies
+      WHERE (standard, version) IN (VALUES {pin_values_sql})
+      {_RESYNC_TAXONOMY_CONFLICT}
+    """),
+    pin_params,
+  )
+
+  elem_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.elements ({_ELEMENT_COLS})
+      SELECT {_ELEMENT_COLS} FROM public.elements
+      WHERE taxonomy_id IN (
+        SELECT id FROM public.taxonomies
+        WHERE (standard, version) IN (VALUES {pin_values_sql})
+      )
+      {_RESYNC_ELEMENT_CONFLICT}
+    """),
+    pin_params,
+  )
+
+  # Labels + references — frozen (additive only).
+  label_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.element_labels ({_ELEMENT_LABEL_COLS})
+      SELECT {_ELEMENT_LABEL_COLS} FROM public.element_labels
+      WHERE element_id IN (
+        SELECT id FROM public.elements
+        WHERE taxonomy_id IN (
+          SELECT id FROM public.taxonomies
+          WHERE (standard, version) IN (VALUES {pin_values_sql})
+        )
+      )
+      ON CONFLICT (id) DO NOTHING
+    """),
+    pin_params,
+  )
+
+  ref_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.element_references ({_ELEMENT_REFERENCE_COLS})
+      SELECT {_ELEMENT_REFERENCE_COLS} FROM public.element_references
+      WHERE element_id IN (
+        SELECT id FROM public.elements
+        WHERE taxonomy_id IN (
+          SELECT id FROM public.taxonomies
+          WHERE (standard, version) IN (VALUES {pin_values_sql})
+        )
+      )
+      ON CONFLICT (id) DO NOTHING
+    """),
+    pin_params,
+  )
+
+  # Structures — frozen (additive only).
+  struct_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.structures ({_STRUCTURE_COLS})
+      SELECT {_STRUCTURE_COLS} FROM public.structures
+      WHERE taxonomy_id IN (
+        SELECT id FROM public.taxonomies
+        WHERE (standard, version) IN (VALUES {pin_values_sql})
+      )
+      ON CONFLICT (id) DO NOTHING
+    """),
+    pin_params,
+  )
+
+  # Associations — DO UPDATE on value columns (Gap B): calc weights and
+  # presentation order propagate in place; from/to/type changes mint new arcs.
+  assoc_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.associations ({_ASSOCIATION_COLS})
+      SELECT {_ASSOCIATION_COLS} FROM public.associations
+      WHERE structure_id IN (
+        SELECT id FROM public.structures
+        WHERE taxonomy_id IN (
+          SELECT id FROM public.taxonomies
+          WHERE (standard, version) IN (VALUES {pin_values_sql})
+        )
+      )
+      {_RESYNC_ASSOCIATION_CONFLICT}
+    """),
+    pin_params,
+  )
+
+  trait_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.traits ({_TRAIT_COLS})
+      SELECT {_TRAIT_COLS} FROM public.traits
+      WHERE created_by = 'library-seeder'
+      {_RESYNC_TRAIT_CONFLICT}
+    """),
+  )
+
+  et_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.element_traits ({_ELEMENT_TRAIT_COLS})
+      SELECT {_ELEMENT_TRAIT_COLS} FROM public.element_traits
+      WHERE element_id IN (
+        SELECT id FROM public.elements
+        WHERE taxonomy_id IN (
+          SELECT id FROM public.taxonomies
+          WHERE (standard, version) IN (VALUES {pin_values_sql})
+        )
+      )
+      {_RESYNC_ELEMENT_TRAIT_CONFLICT}
+    """),
+    pin_params,
+  )
+
+  # Classifications — frozen (additive only).
+  cls_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.classifications ({_CLASSIFICATION_COLS})
+      SELECT {_CLASSIFICATION_COLS} FROM public.classifications
+      WHERE created_by = 'library-seeder'
+      ON CONFLICT (id) DO NOTHING
+    """),
+  )
+
+  ac_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.association_classifications ({_ASSOC_CLASSIFICATION_COLS})
+      SELECT {_ASSOC_CLASSIFICATION_COLS} FROM public.association_classifications
+      WHERE association_id IN (
+        SELECT id FROM public.associations
+        WHERE structure_id IN (
+          SELECT id FROM public.structures
+          WHERE taxonomy_id IN (
+            SELECT id FROM public.taxonomies
+            WHERE (standard, version) IN (VALUES {pin_values_sql})
+          )
+        )
+      )
+      ON CONFLICT (association_id, classification_id) DO NOTHING
+    """),
+    pin_params,
+  )
+
+  rule_result = connection.execute(
+    text(f"""
+      INSERT INTO {schema}.rules ({_RULE_COLS})
+      SELECT {_RULE_COLS} FROM public.rules
+      WHERE taxonomy_id IN (
+        SELECT id FROM public.taxonomies
+        WHERE (standard, version) IN (VALUES {pin_values_sql})
+      )
+      {_RESYNC_RULE_CONFLICT}
+    """),
+    pin_params,
+  )
+
+  # Reporting Style composition — frozen (additive only).
   rsn_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.reporting_style_networks ({_REPORTING_STYLE_NETWORK_COLS})

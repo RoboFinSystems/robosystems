@@ -15,12 +15,23 @@ seeds. Not routed through the public envelope or registry — takes TaxonomyPack
 directly because the envelope model (TaxonomyBlockElementRequest) is missing
 library-specific fields (source, labels, references, classifications).
 
-Key derivation must remain stable across re-seeds: same input → same UUID5,
-so re-runs hit ON CONFLICT rather than inserting duplicates and existing
-seeded DBs are not disturbed.
+Key derivation is stable *within a derivation generation*: the same input
+yields the same UUID5, so an additive re-run hits ON CONFLICT rather than
+inserting duplicates and existing seeded DBs are not disturbed.
+
+Exception — the C1 re-key (`_element_id`, below) intentionally *changed* the
+element-id derivation (it now strips the framework version segment). That is a
+one-time re-key: applying it requires a **full wipe + re-seed** of the public
+library (e.g. `reset-local`, or a fresh first run of migration 0002), NOT an
+additive re-seed onto rows created under the old formula — an additive re-run
+would mint new-id rows alongside the old ones (duplicate concepts, dangling
+FKs). Safe to do now because the public library is freely rebuildable and there
+are ~zero durable tenants; see `archive/taxonomy-propagation.md` §4.3.
 """
 
 from __future__ import annotations
+
+import re
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -77,8 +88,20 @@ def _taxonomy_id(standard: str, version: str) -> str:
   return generate_deterministic_uuid(f"{standard}:{version}", namespace="taxonomy")
 
 
+# Matches the trailing framework-version path segment (e.g. ``/v1/`` or ``/v1``)
+# in a namespace URI like ``https://robosystems.ai/taxonomy/rs-gaap/v1/``.
+_VERSION_SEGMENT = re.compile(r"/v\d+/?$")
+
+
 def _element_id(namespace_uri: str, qname: str) -> str:
-  return generate_deterministic_uuid(f"{namespace_uri}#{qname}", namespace="element")
+  # C1 — version-stable concept identity. The id keys on the framework's
+  # version-independent namespace (``.../rs-gaap/#rs-gaap:Assets``), so a
+  # concept keeps one id across rs-gaap@v1 → v2 and tenant CoA→rs-gaap
+  # mappings survive a version bump. The full versioned ``namespace_uri`` is
+  # still stored on the Element row; only the derived id is version-stable.
+  # Structural change belongs on versioned arcs/structures, not concept identity.
+  stable_ns = _VERSION_SEGMENT.sub("/", namespace_uri)
+  return generate_deterministic_uuid(f"{stable_ns}#{qname}", namespace="element")
 
 
 def _label_id(element_id: str, role: str, language: str) -> str:
@@ -509,7 +532,21 @@ def create_library_arcs(
         metadata={},
         created_by=created_by,
       )
-      .on_conflict_do_nothing(index_elements=["id"])
+      # Gap B — calc weights / presentation order / arcrole are the churniest
+      # library content; an in-place edit (id is uuid5(structure:from:to:type),
+      # so weight/order/arcrole/confidence/metadata changes keep the id) must
+      # re-seed cleanly. Changing from/to/type mints a new arc (additive).
+      # Keep this set in lockstep with ``writer._RESYNC_ASSOCIATION_CONFLICT``.
+      .on_conflict_do_update(
+        index_elements=["id"],
+        set_={
+          "weight": pg_insert(Association.__table__).excluded["weight"],
+          "order_value": pg_insert(Association.__table__).excluded["order_value"],
+          "arcrole": pg_insert(Association.__table__).excluded["arcrole"],
+          "confidence": pg_insert(Association.__table__).excluded["confidence"],
+          "metadata": pg_insert(Association.__table__).excluded["metadata"],
+        },
+      )
     )
     counts["associations"] += 1
 

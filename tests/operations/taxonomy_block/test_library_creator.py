@@ -61,6 +61,21 @@ class TestIdHelpers:
       "http://x.com#", "fac:B"
     )
 
+  def test_element_id_version_stable(self) -> None:
+    # C1 — a concept keeps one id across framework versions, so tenant
+    # CoA→rs-gaap mappings survive a version bump. The trailing /vN/ segment
+    # must not participate in the derived id.
+    v1 = _element_id("https://robosystems.ai/taxonomy/rs-gaap/v1/", "rs-gaap:Assets")
+    v2 = _element_id("https://robosystems.ai/taxonomy/rs-gaap/v2/", "rs-gaap:Assets")
+    assert v1 == v2
+
+  def test_element_id_distinguishes_framework(self) -> None:
+    # Stripping the version must NOT collapse different frameworks that share
+    # a local name — fac:Assets and rs-gaap:Assets stay distinct.
+    fac = _element_id("https://robosystems.ai/taxonomy/fac/v1/", "fac:Assets")
+    rsg = _element_id("https://robosystems.ai/taxonomy/rs-gaap/v1/", "rs-gaap:Assets")
+    assert fac != rsg
+
   def test_structure_id_stable(self) -> None:
     assert _structure_id("http://role/bs") == _structure_id("http://role/bs")
 
@@ -241,6 +256,34 @@ class TestCreateLibraryArcs:
     counts = create_library_arcs(session, package)
     assert counts["associations"] == 1
     assert counts["associations_skipped"] == 0
+
+  def test_association_reseed_updates_value_columns(self) -> None:
+    # Gap B — re-seeding an existing arc must UPDATE its value columns in place
+    # (calc weight / presentation order), not silently skip on id conflict.
+    from sqlalchemy.dialects import postgresql
+
+    session = self._session_with_element_map(
+      {"fac:Assets": "elem_from_id", "fac:Cash": "elem_to_id"}
+    )
+    assoc = AssociationSpec(
+      from_qname="fac:Assets",
+      to_qname="fac:Cash",
+      association_type="presentation",
+      arcrole="http://xbrl.org/arcrole/presentation",
+    )
+    create_library_arcs(session, _make_package(associations=[assoc]))
+
+    inserts = [
+      call.args[0]
+      for call in session.execute.call_args_list
+      if call.args
+      and getattr(getattr(call.args[0], "table", None), "name", None) == "associations"
+    ]
+    assert inserts, "no insert against the associations table was issued"
+    sql = str(inserts[0].compile(dialect=postgresql.dialect()))
+    assert "ON CONFLICT" in sql and "DO UPDATE" in sql
+    for col in ("weight", "order_value", "arcrole", "confidence", "metadata"):
+      assert col in sql
 
   def test_skips_unresolved_classification_assignment(self) -> None:
     session = self._session_with_element_map({})
