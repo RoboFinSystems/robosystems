@@ -158,6 +158,7 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   CreateMappingAssociationOperation,
+  DeleteMappingAssociationOperation,
   EntityTaxonomyResponse,
   LinkEntityTaxonomyRequest,
 )
@@ -338,6 +339,7 @@ from robosystems.operations.roboledger.commands.schedules import (
   ScheduleNotFoundError,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
+  AssociationNotFoundError,
   ElementNotFoundError,
   EntityNotFoundError,
   MappingStructureNotFoundError,
@@ -523,26 +525,6 @@ class ReopenPeriodOperation(ReopenPeriodRequest):
         {
           "period": "2026-03",
           "reason": "Discovered late vendor invoice — needs to land in March.",
-        },
-      ]
-    },
-  )
-
-
-class DeleteMappingAssociationOperation(BaseModel):
-  """Delete a single CoA → reporting-concept mapping edge."""
-
-  mapping_id: str = Field(
-    ..., description="The mapping structure containing the association."
-  )
-  association_id: str = Field(..., description="The association edge to delete.")
-
-  model_config = ConfigDict(
-    json_schema_extra={
-      "examples": [
-        {
-          "mapping_id": "map_01HVF8T0M2YTAY3BBNRH0V0",
-          "association_id": "assn_01HVF8T0M2YTAY3BBNRH0V0",
         },
       ]
     },
@@ -908,53 +890,28 @@ create_mapping_association_op = _registrar.register(
 )
 
 
-@router.post(
-  "/delete-mapping-association",
-  response_model=OperationEnvelope[DeleteResult],
-  operation_id="opDeleteMappingAssociation",
-  summary="Delete Mapping Association",
-  description=(
-    "Remove a single CoA → reporting-concept mapping edge. The mapping "
-    "structure itself remains; only the association row is dropped."
-  ),
-  tags=[_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/extensions/roboledger/{graph_id}/operations/delete-mapping-association",
-  method="POST",
-  business_event_type="ledger_delete_mapping_association",
-)
-async def delete_mapping_association_op(
-  body: DeleteMappingAssociationOperation,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  _ext: GraphExtensionContext = Depends(_require_roboledger),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-) -> OperationEnvelope:
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=str(user.id),
-    op="delete-mapping-association",
-    idempotency_key=idempotency_key,
-    body=body,
+delete_mapping_association_op = _registrar.register(
+  OperationSpec(
+    name="delete-mapping-association",
+    summary="Delete Mapping Association",
+    description=(
+      "Remove a single CoA → reporting-concept mapping edge by id. The "
+      "mapping structure itself remains; only the association row is "
+      "dropped. Use this to correct a wrong mapping — delete the bad edge, "
+      "then `create-mapping-association` the right one. Find the "
+      "association id via the `library_element_arcs` GraphQL field. "
+      "Library-seeded rows cannot be deleted (403)."
+    ),
+    command=cmd_delete_mapping_association,
+    request_model=DeleteMappingAssociationOperation,
+    result_type=DeleteResult,
+    requires_created_by=False,
+    error_map={
+      AssociationNotFoundError: (404, lambda _e: "Association not found"),
+      LibraryImmutableError: 403,
+    },
   )
-
-  def _runner():
-    try:
-      with extensions_session(graph_id) as session:
-        deleted = cmd_delete_mapping_association(
-          session, body.mapping_id, body.association_id
-        )
-    except (ValueError, ProgrammingError):
-      raise _ledger_404()
-    if not deleted:
-      raise HTTPException(status_code=404, detail="Association not found")
-    return DeleteResult(deleted=True)
-
-  return await _dispatch(ctx, _runner, cache)
+)
 
 
 class AutoMapElementsOperation(BaseModel):

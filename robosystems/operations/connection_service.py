@@ -71,14 +71,13 @@ class ConnectionService:
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
       )
 
-      # Phase 4 §4.2 — default new QuickBooks connections to
-      # `qb_authoritative` so the loader's auto-commit branch fires
-      # (matches pre-Phase-4 behavior, the customer pitch for "QB is
-      # source-of-truth, RoboSystems is the review layer"). Other
-      # providers stay on the column default `'native'`.
-      if provider.lower() == "quickbooks":
-        conn.write_policy = "qb_authoritative"
-        session.flush()
+      # `write_policy` governs the OUTBOUND (write-back) direction only,
+      # and defaults to the column's `'native'` — no writes back to the
+      # source system without an explicit operator opt-in. Inbound
+      # sync-down is decoupled: QB rows auto-commit to GL via the loader's
+      # source-keyed rule (`_source_auto_commits_on_sync`) regardless of
+      # this policy, so a `native` QB connection still mirrors QB into a
+      # populated ledger ("sync down, don't write back").
 
       # Store credentials if provided
       if credentials:

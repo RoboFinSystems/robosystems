@@ -370,6 +370,13 @@ class GraphqlQueryTool(BaseTool):
     }
 
   def _fetch_user(self) -> Any:
+    # The MCP handler attaches the authenticated User object to the client
+    # (`client.user`); use it directly rather than re-fetching by id. Fall
+    # back to a by-id lookup for callers that only thread `user_id`.
+    user = getattr(self.client, "user", None)
+    if user is not None:
+      return user
+
     user_id = getattr(self.client, "user_id", None)
     if not user_id:
       return None

@@ -964,130 +964,33 @@ class TestCaptureAutoCommit:
     assert _SOURCE_AUTO_COMMITS.get("manual") is None
 
 
-class TestResolveAutoCommitWritePolicy:
-  """Phase 4 §4.2 — per-connection `write_policy` governs auto-commit
-  on inbound sync. The legacy `_SOURCE_AUTO_COMMITS` hardcode is the
-  fallback (preserves behavior when the platform-DB lookup fails or
-  no connection_id is supplied)."""
+class TestInboundAutoCommitDecoupledFromWritePolicy:
+  """Inbound auto-commit is a property of the SOURCE, not the
+  connection's ``write_policy``. ``write_policy`` governs the OUTBOUND
+  (write-back) direction only — so QB rows auto-commit to GL on
+  sync-down in every policy mode, and a ``native`` QB connection still
+  mirrors QB into a populated ledger ("sync down, don't write back")."""
 
-  def test_qb_authoritative_policy_auto_commits(self):
-    """A QB connection with write_policy='qb_authoritative' triggers
-    auto-commit (the customer-pitch default)."""
-    from unittest.mock import patch
+  def test_quickbooks_auto_commits_inbound(self):
+    """QB is an external system of record — its rows are already booked,
+    so inbound sync auto-commits regardless of connection policy."""
+    from robosystems.operations.extensions.loader import (
+      _source_auto_commits_on_sync,
+    )
 
-    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
+    assert _source_auto_commits_on_sync("quickbooks") is True
 
-    mock_conn = MagicMock()
-    mock_conn.write_policy = "qb_authoritative"
+  def test_native_origin_sources_do_not_auto_commit(self):
+    """Native-origin sources (manual / schedule / system / AI) carry no
+    external system of record and route to the inbox. Un-graduated
+    adapters (xero, netsuite) likewise stay False until verified."""
+    from robosystems.operations.extensions.loader import (
+      _source_auto_commits_on_sync,
+    )
 
-    # Context-manager-shaped session mock — `_resolves_to_auto_commit`
-    # uses `with SessionFactory() as session:` so __enter__ / __exit__
-    # need to be wired explicitly on MagicMock.
-    mock_session = MagicMock()
-    mock_session.__enter__ = MagicMock(return_value=mock_session)
-    mock_session.__exit__ = MagicMock(return_value=False)
-
-    with (
-      patch("robosystems.database.SessionFactory", return_value=mock_session),
-      patch(
-        "robosystems.models.core.connection.connection.Connection.get_by_id",
-        return_value=mock_conn,
-      ),
-    ):
-      assert _resolves_to_auto_commit("quickbooks", "conn_1") is True
-
-    # The `with` block invokes __exit__ — that's the context-manager
-    # version of "the session got cleaned up."
-    mock_session.__exit__.assert_called_once()
-
-  def test_native_policy_routes_to_inbox(self):
-    """A QB connection with write_policy='native' does NOT auto-commit
-    — events stay captured for inbox review."""
-    from unittest.mock import patch
-
-    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
-
-    mock_conn = MagicMock()
-    mock_conn.write_policy = "native"
-
-    mock_session = MagicMock()
-    mock_session.__enter__ = MagicMock(return_value=mock_session)
-    mock_session.__exit__ = MagicMock(return_value=False)
-
-    with (
-      patch("robosystems.database.SessionFactory", return_value=mock_session),
-      patch(
-        "robosystems.models.core.connection.connection.Connection.get_by_id",
-        return_value=mock_conn,
-      ),
-    ):
-      assert _resolves_to_auto_commit("quickbooks", "conn_1") is False
-
-  def test_hybrid_policy_auto_commits(self):
-    """Hybrid mode auto-commits like qb_authoritative on inbound (the
-    exception-flagging heuristic fires at a different layer)."""
-    from unittest.mock import patch
-
-    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
-
-    mock_conn = MagicMock()
-    mock_conn.write_policy = "hybrid"
-
-    mock_session = MagicMock()
-    mock_session.__enter__ = MagicMock(return_value=mock_session)
-    mock_session.__exit__ = MagicMock(return_value=False)
-
-    with (
-      patch("robosystems.database.SessionFactory", return_value=mock_session),
-      patch(
-        "robosystems.models.core.connection.connection.Connection.get_by_id",
-        return_value=mock_conn,
-      ),
-    ):
-      assert _resolves_to_auto_commit("quickbooks", "conn_1") is True
-
-  def test_no_connection_id_falls_back_to_hardcode(self):
-    """Direct loader callers without a connection_id (legacy / test
-    paths) use the `_SOURCE_AUTO_COMMITS` hardcode — quickbooks=True,
-    everything else False."""
-    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
-
-    assert _resolves_to_auto_commit("quickbooks", None) is True
-    assert _resolves_to_auto_commit("manual", None) is False
-    assert _resolves_to_auto_commit("xero", None) is False
-
-  def test_lookup_failure_falls_back_to_hardcode(self):
-    """If the platform-DB lookup raises (DB down, transient), fall back
-    to the hardcode — don't break a sync over policy resolution."""
-    from unittest.mock import patch
-
-    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
-
-    with patch(
-      "robosystems.database.SessionFactory",
-      side_effect=RuntimeError("DB unavailable"),
-    ):
-      assert _resolves_to_auto_commit("quickbooks", "conn_1") is True
-
-  def test_missing_connection_falls_back_to_hardcode(self):
-    """If Connection.get_by_id returns None (deleted connection still
-    referenced by a sync in flight), fall back to the hardcode."""
-    from unittest.mock import patch
-
-    from robosystems.operations.extensions.loader import _resolves_to_auto_commit
-
-    mock_session = MagicMock()
-    mock_session.__enter__ = MagicMock(return_value=mock_session)
-    mock_session.__exit__ = MagicMock(return_value=False)
-
-    with (
-      patch("robosystems.database.SessionFactory", return_value=mock_session),
-      patch(
-        "robosystems.models.core.connection.connection.Connection.get_by_id",
-        return_value=None,
-      ),
-    ):
-      assert _resolves_to_auto_commit("quickbooks", "conn_missing") is True
+    assert _source_auto_commits_on_sync("manual") is False
+    assert _source_auto_commits_on_sync("xero") is False
+    assert _source_auto_commits_on_sync("netsuite") is False
 
 
 class TestApplySourceElementTraits:

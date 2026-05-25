@@ -15,20 +15,21 @@ from pathlib import Path
 from robosystems.logger import logger
 from robosystems.operations.event_block.commands import fire_handler_on_commit
 
-# Per-source default for whether captured events should auto-commit on
-# sync (handler fires immediately, event lands ``status='committed'``)
-# vs. land in the inbox for human approval. Keyed by the ``source``
-# string written to ``Event.source``.
+# Per-source rule for whether captured events auto-commit to GL on
+# inbound sync (handler fires immediately, event lands
+# ``status='committed'``) vs. land in the inbox for human approval.
+# Keyed by the ``source`` string written to ``Event.source``.
 #
-# QuickBooks is qb_authoritative by default — anything that landed in
-# QB has already been booked there, so a sync replicates approved
-# entries rather than queueing them for re-approval. Native (manual /
-# schedule / system / AI) entries always go through the inbox.
-#
-# This is a placeholder for the per-connection ``write_policy`` column
-# (``roadmap.md`` Decision 5 / Phase 5). When that column lands, this
-# map becomes the fallback default for connections that haven't set
-# their policy explicitly.
+# This is a property of the SOURCE, not the connection's
+# ``write_policy``. Inbound sync is a *mirror-down from an external
+# system of record*: anything QuickBooks sends has already been booked
+# there, so we replicate it straight into GL rather than queueing it for
+# re-approval — regardless of ``write_policy``. ``write_policy`` governs
+# the OUTBOUND (write-back) direction only (see ``event_block.commands``
+# / ``close_service``). Keeping the two decoupled means a ``native`` QB
+# connection ("sync down, don't write back") still produces a populated
+# ledger. Native-origin events (manual / schedule / system / AI) carry
+# no external system of record and always go through the inbox.
 #
 # Only flip a source to ``True`` once its adapter has been tested
 # end-to-end with auto-commit — otherwise every event for that source
@@ -40,43 +41,14 @@ _SOURCE_AUTO_COMMITS: dict[str, bool] = {
 }
 
 
-def _resolves_to_auto_commit(source: str, connection_id: str | None) -> bool:
-  """Decide whether captured events for ``source`` should auto-commit on
-  sync (Phase 4 §4.2 — per-connection ``write_policy`` lookup).
+def _source_auto_commits_on_sync(source: str) -> bool:
+  """Whether inbound events for ``source`` auto-commit to GL on sync.
 
-  For QB connections, the per-connection ``write_policy`` is the
-  per-row truth:
-  - ``'qb_authoritative'`` / ``'hybrid'``: QB is source-of-truth →
-    auto-commit on sync (pre-Phase-4 behavior — every QB row was
-    already booked in QB so we mirror it directly).
-  - ``'native'``: RoboSystems is source-of-truth → drop to inbox
-    review path (operator approves before posting).
-
-  Falls back to the legacy ``_SOURCE_AUTO_COMMITS`` hardcode when
-  ``connection_id`` is None (defensive — keeps direct loader callers
-  that bypass the connection registry working). Also falls back if the
-  platform-DB lookup fails for any reason (don't break a sync over
-  policy resolution).
+  Decoupled from ``write_policy`` (which governs outbound write-back):
+  inbound auto-commit is purely a property of the source — QB rows are
+  already booked in QB, so we mirror them down regardless of the
+  connection's policy. See ``_SOURCE_AUTO_COMMITS``.
   """
-  if connection_id:
-    try:
-      from robosystems.database import SessionFactory
-      from robosystems.models.core.connection.connection import Connection
-
-      # Context manager handles cleanup even if `SessionFactory()`
-      # raises (the prior bare assignment + try/finally hit
-      # UnboundLocalError in that case).
-      with SessionFactory() as session:
-        conn = Connection.get_by_id(connection_id, session)
-        if conn is not None:
-          # `WritePolicy.QB_AUTHORITATIVE` + `HYBRID` → auto-commit;
-          # `NATIVE` → inbox path.
-          return conn.write_policy in ("qb_authoritative", "hybrid")
-    except Exception as e:
-      logger.warning(
-        f"Failed to resolve write_policy for connection {connection_id}: {e}; "
-        f"falling back to _SOURCE_AUTO_COMMITS hardcode"
-      )
   return _SOURCE_AUTO_COMMITS.get(source, False)
 
 
@@ -86,7 +58,7 @@ def _resolves_to_auto_commit(source: str, connection_id: str | None) -> bool:
 # rollup machinery expects (asset / liability / equity / revenue /
 # expense). Without this translation, QB-imported elements have
 # ``trait IS NULL`` and the auto-map agent skips them entirely
-# (see operations/agents/implementations/mapping/agent.py).
+# (see operations/operators/implementations/mapping/operator.py).
 #
 # QB's "Cost of Goods Sold" rolls into expense for FASB EFS purposes —
 # the IS sub-classification (operating-expense vs. COGS) is captured
@@ -455,7 +427,7 @@ class OLTPLoader:
       from robosystems.models.extensions.roboledger.line_item import LineItem
       from robosystems.models.extensions.roboledger.transaction import Transaction
 
-      if full_rebuild and _resolves_to_auto_commit(source, connection_id):
+      if full_rebuild and _source_auto_commits_on_sync(source):
         # Subquery of events about to be wiped — captured/classified rows
         # for this (source, connection_id). The GL cascade scopes via
         # triggered_by_event_id to this subquery so fulfilled events'
@@ -1050,10 +1022,11 @@ class OLTPLoader:
     in QB has been booked there), the event's handler fires immediately
     and the event lands ``status='committed'`` with backing GL rows. The
     inbox is reserved for events that genuinely need human review — AI
-    suggestions, manual journal entries, scheduled accruals. This
-    matches ``roadmap.md`` Decision 5: connections eventually carry a
-    ``write_policy`` (native | qb_authoritative | hybrid); until that
-    column lands, QB hardcodes to qb_authoritative behavior. Events
+    suggestions, manual journal entries, scheduled accruals. Inbound
+    auto-commit is keyed purely on the ``source`` (``_SOURCE_AUTO_COMMITS``)
+    and is independent of the connection's ``write_policy`` — that column
+    governs only the OUTBOUND (write-back) direction, so a ``native`` QB
+    connection still mirrors QB down into a populated ledger. Events
     whose handler dispatch fails (e.g., element_external_id not yet
     mapped) fall back to ``status='captured'`` so the user can fix the
     underlying issue and re-approve from the inbox.
@@ -1279,9 +1252,7 @@ class OLTPLoader:
       # Entry rows with ``status='posted'`` (vs. the default 'draft').
       # Trial balance / reports filter on posted entries; without this,
       # QB-synced data would silently disappear from the read side.
-      jeh_status = (
-        "posted" if _resolves_to_auto_commit(source, connection_id) else "draft"
-      )
+      jeh_status = "posted" if _source_auto_commits_on_sync(source) else "draft"
 
       # ``metadata_blob["status"]`` is the JOURNAL-ENTRY status consumed
       # by the journal_entry_recorded handler's metadata_schema (see
@@ -1481,7 +1452,7 @@ class OLTPLoader:
     # under the existing idempotency rule: only ``captured`` /
     # ``classified`` events are touched, so previously-committed events
     # don't get re-fired.
-    if _resolves_to_auto_commit(source, connection_id):
+    if _source_auto_commits_on_sync(source):
       events_to_commit: list[Event] = list(new_events)
       # Re-include updated captured events — covers two cases:
       # (1) old captured events left over from before auto-commit was
