@@ -8,6 +8,8 @@ control flow is exercised without Bedrock or a database.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from robosystems.operations.operators.base import OperatorResult
@@ -37,6 +39,11 @@ def _pass(mapped=0, flagged=0, skipped=0, coverage=0.0) -> OperatorResult:
 class _Ctx:
   graph_id = "kg_test"
   user_id = "user_test"
+
+  def __init__(self):
+    # run() awaits ctx.progress.is_cancelled() before each pass.
+    self.progress = AsyncMock()
+    self.progress.is_cancelled = AsyncMock(return_value=False)
 
 
 @pytest.mark.asyncio
@@ -171,3 +178,30 @@ async def test_pass_cap_bounds_a_slowly_progressing_loop():
   assert result.metadata["passes"] == MAX_MAPPING_PASSES
   assert result.metadata["stop_reason"] == "pass_cap_reached"
   assert result.metadata["mapped"] == MAX_MAPPING_PASSES
+
+
+@pytest.mark.asyncio
+async def test_stops_when_cancelled_before_pass():
+  """A cancellation between passes stops the loop without starting a new
+  (paid) pass — no AI spend after the user cancels."""
+  op = _operator()
+  op._has_credit_budget = lambda ctx: True
+
+  calls = 0
+
+  async def one_pass(ctx):
+    nonlocal calls
+    calls += 1
+    return _pass(mapped=5, coverage=50.0)
+
+  op._run_single_pass = one_pass
+
+  ctx = _Ctx()
+  ctx.progress.is_cancelled = AsyncMock(return_value=True)
+
+  result = await op.run(ctx)
+
+  assert calls == 0
+  assert result.metadata["stop_reason"] == "cancelled"
+  assert result.metadata["passes"] == 0
+  assert result.metadata["mapped"] == 0

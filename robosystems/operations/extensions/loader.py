@@ -58,7 +58,7 @@ def _source_auto_commits_on_sync(source: str) -> bool:
 # rollup machinery expects (asset / liability / equity / revenue /
 # expense). Without this translation, QB-imported elements have
 # ``trait IS NULL`` and the auto-map agent skips them entirely
-# (see operations/agents/implementations/mapping/agent.py).
+# (see operations/operators/implementations/mapping/operator.py).
 #
 # QB's "Cost of Goods Sold" rolls into expense for FASB EFS purposes —
 # the IS sub-classification (operating-expense vs. COGS) is captured

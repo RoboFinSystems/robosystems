@@ -13,6 +13,7 @@ in-process via DirectToolAccess.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections import defaultdict
@@ -100,11 +101,18 @@ class MappingOperator(Operator):
     stop_reason = "pass_cap_reached"
 
     for attempt in range(1, MAX_MAPPING_PASSES + 1):
+      # Stop before starting another (paid) pass if cancelled.
+      # ``_run_single_pass`` also checks mid-pass, but gating here avoids
+      # kicking off a fresh pass at all.
+      if await ctx.progress.is_cancelled():
+        stop_reason = "cancelled"
+        break
       # Credit pre-check — the graph's own balance bounds the loop. AI
       # credits are consumed post-call (and lookup failures are swallowed
       # downstream), so this is the only place spend is gated before a
-      # pass rather than after it.
-      if not self._has_credit_budget(ctx):
+      # pass rather than after it. The check does a sync DB read, so run it
+      # off the event loop.
+      if not await asyncio.to_thread(self._has_credit_budget, ctx):
         stop_reason = "insufficient_credits"
         break
 
