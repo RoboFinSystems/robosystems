@@ -26,11 +26,11 @@ from sqlalchemy import text
 
 from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
 from robosystems.logger import logger
-from robosystems.taxonomy.writer import CopyStats, resync_library_into_tenant
-
-# Transaction-scoped bypass flag. SET LOCAL cannot leak past commit/rollback, so
-# the carve-out exists only for the duration of the re-sync transaction.
-_RESYNC_GUC = "SET LOCAL robosystems.library_resync = 'on'"
+from robosystems.taxonomy.writer import (
+  SET_LIBRARY_RESYNC,
+  CopyStats,
+  resync_library_into_tenant,
+)
 
 # Tenant schemas are graph-id-named: ``kg`` + 16+ hex chars (mirrors
 # ``migrations/extensions/helpers.py::for_each_tenant_schema``).
@@ -56,7 +56,7 @@ def resync_tenant(graph_id: str, pin: dict[str, str] | None = None) -> CopyStats
   tables on the same connection/transaction.
   """
   with extensions_session(graph_id) as session:
-    session.execute(text(_RESYNC_GUC))
+    session.execute(text(SET_LIBRARY_RESYNC))
     stats = resync_library_into_tenant(session.connection(), graph_id, pin)
   logger.info(
     "[taxonomy-resync] %s: %d library rows inserted/updated (total)",
@@ -75,6 +75,11 @@ def resync_all_tenants(
   one tenant rolls back only that tenant and does not block the rest. Failures are
   logged and the schema is omitted from the returned map; the caller decides how
   to surface partial completion.
+
+  **Sequential by design** — `O(N)` independent transactions over the tenant
+  schemas. Fine at current tenant counts (tens to low hundreds); if the fleet grows
+  enough that a full-fleet re-sync becomes slow, batch or parallelize here (each
+  schema is independent). Phase E (admin CLI / publish hook) is the caller.
   """
   schemas = list_tenant_schemas()
   logger.info("[taxonomy-resync] re-syncing %d tenant schema(s)", len(schemas))

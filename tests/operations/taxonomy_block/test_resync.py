@@ -84,3 +84,33 @@ class TestResyncAllTenants:
   def test_empty_when_no_tenants(self) -> None:
     with patch(f"{_MODULE}.list_tenant_schemas", return_value=[]):
       assert resync.resync_all_tenants() == {}
+
+  def test_pin_is_forwarded_to_each_tenant(self) -> None:
+    pin = {"rs-gaap": "v1"}
+    seen: list[dict[str, str] | None] = []
+
+    def _fake_resync_tenant(graph_id: str, p=None):
+      seen.append(p)
+      return MagicMock(total=0)
+
+    with (
+      patch(f"{_MODULE}.list_tenant_schemas", return_value=["kg1111111111111111"]),
+      patch(f"{_MODULE}.resync_tenant", side_effect=_fake_resync_tenant),
+    ):
+      resync.resync_all_tenants(pin)
+
+    assert seen == [pin]
+
+
+class TestListTenantSchemas:
+  def test_extracts_schema_names_from_rows(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.fetchall.return_value = [
+      ("kg1111111111111111",),
+      ("kg2222222222222222",),
+    ]
+    with patch(f"{_MODULE}.extensions_session", _session_cm(session)):
+      assert resync.list_tenant_schemas() == [
+        "kg1111111111111111",
+        "kg2222222222222222",
+      ]

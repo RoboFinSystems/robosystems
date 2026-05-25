@@ -158,6 +158,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+  # Restores the no-carve-out guards. Note: any library rows a re-sync updated
+  # in tenant schemas while this migration was applied STAY updated — downgrade
+  # only removes the bypass, it does not revert data — and the restored
+  # immutability trigger then blocks further updates to them. That is the
+  # intended post-downgrade state, not a bug; operators auditing event streams
+  # should expect already-re-synced rows to remain at their re-synced values.
   conn = op.get_bind()
   conn.execute(text(_IMMUTABLE_ORIGINAL))
   conn.execute(text(_INSERT_GUARD_ORIGINAL))

@@ -121,6 +121,30 @@ class CopyStats:
     )
 
 
+# The transaction-scoped GUC that opts a transaction into a library re-sync.
+# resync_library_into_tenant requires it (the immutability triggers consult it),
+# and callers run SET_LIBRARY_RESYNC in the same transaction first. Defined at
+# this layer so the writer's guard and every caller share one source of truth.
+LIBRARY_RESYNC_GUC = "robosystems.library_resync"
+SET_LIBRARY_RESYNC = f"SET LOCAL {LIBRARY_RESYNC_GUC} = 'on'"
+
+
+def _build_pin_clause(resolved_pin: dict[str, str]) -> tuple[str, dict[str, str]]:
+  """Flatten a resolved pin into a parameterized ``VALUES`` clause + params.
+
+  E.g. ``{"fac":"v1","rs-gaap":"v1"}`` → ``"(:s0, :v0), (:s1, :v1)"`` plus the
+  bound params. Shared by :func:`copy_library_into_tenant` and
+  :func:`resync_library_into_tenant` so the two paths cannot drift in how they
+  bind the pinned ``(standard, version)`` pairs.
+  """
+  pin_values_sql = ", ".join(f"(:s{i}, :v{i})" for i in range(len(resolved_pin)))
+  pin_params: dict[str, str] = {}
+  for i, (std, ver) in enumerate(resolved_pin.items()):
+    pin_params[f"s{i}"] = std
+    pin_params[f"v{i}"] = ver
+  return pin_values_sql, pin_params
+
+
 def copy_library_into_tenant(
   connection: Connection,
   schema: str,
@@ -149,13 +173,7 @@ def copy_library_into_tenant(
   if not resolved_pin:
     return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-  # Flatten the pin into a parameterized IN clause via VALUES.
-  # E.g., ("fac", "v1"), ("rs-gaap", "v1"), …
-  pin_values_sql = ", ".join(f"(:s{i}, :v{i})" for i in range(len(resolved_pin)))
-  pin_params: dict[str, str] = {}
-  for i, (std, ver) in enumerate(resolved_pin.items()):
-    pin_params[f"s{i}"] = std
-    pin_params[f"v{i}"] = ver
+  pin_values_sql, pin_params = _build_pin_clause(resolved_pin)
 
   # Taxonomies — only the pinned (standard, version) pairs.
   tax_result = connection.execute(
@@ -424,9 +442,11 @@ def resync_library_into_tenant(
 
   Caller contract (identical to :func:`copy_library_into_tenant`): this function
   only issues statements and does not commit. **The caller MUST run inside a
-  transaction that has executed** ``SET LOCAL robosystems.library_resync = 'on'``
-  — otherwise the per-row immutability trigger (migration 0016) raises on the
-  first ``DO UPDATE`` against a library-seeded row.
+  transaction that has executed** :data:`SET_LIBRARY_RESYNC`
+  (``SET LOCAL robosystems.library_resync = 'on'``) — otherwise the immutability
+  triggers (migration 0016) reject the ``DO UPDATE``. This is asserted up front:
+  a missing GUC raises a clear ``RuntimeError`` rather than an opaque trigger
+  exception mid-fan-out.
 
   Returns:
       :class:`CopyStats`. For ``DO UPDATE`` tables ``rowcount`` counts inserts
@@ -437,11 +457,21 @@ def resync_library_into_tenant(
   if not resolved_pin:
     return CopyStats(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-  pin_values_sql = ", ".join(f"(:s{i}, :v{i})" for i in range(len(resolved_pin)))
-  pin_params: dict[str, str] = {}
-  for i, (std, ver) in enumerate(resolved_pin.items()):
-    pin_params[f"s{i}"] = std
-    pin_params[f"v{i}"] = ver
+  # Fail loudly and early if the caller forgot the bypass GUC — otherwise the
+  # first DO UPDATE raises an opaque PL/pgSQL trigger exception mid-fan-out.
+  if (
+    connection.execute(
+      text("SELECT current_setting(:guc, true)"), {"guc": LIBRARY_RESYNC_GUC}
+    ).scalar()
+    != "on"
+  ):
+    raise RuntimeError(
+      "resync_library_into_tenant must run inside a transaction that has "
+      f"executed `{SET_LIBRARY_RESYNC}`; the immutability triggers reject the "
+      "DO UPDATE otherwise. Use operations/taxonomy_block/resync.py."
+    )
+
+  pin_values_sql, pin_params = _build_pin_clause(resolved_pin)
 
   tax_result = connection.execute(
     text(f"""

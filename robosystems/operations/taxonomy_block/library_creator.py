@@ -15,9 +15,18 @@ seeds. Not routed through the public envelope or registry — takes TaxonomyPack
 directly because the envelope model (TaxonomyBlockElementRequest) is missing
 library-specific fields (source, labels, references, classifications).
 
-Key derivation must remain stable across re-seeds: same input → same UUID5,
-so re-runs hit ON CONFLICT rather than inserting duplicates and existing
-seeded DBs are not disturbed.
+Key derivation is stable *within a derivation generation*: the same input
+yields the same UUID5, so an additive re-run hits ON CONFLICT rather than
+inserting duplicates and existing seeded DBs are not disturbed.
+
+Exception — the C1 re-key (`_element_id`, below) intentionally *changed* the
+element-id derivation (it now strips the framework version segment). That is a
+one-time re-key: applying it requires a **full wipe + re-seed** of the public
+library (e.g. `reset-local`, or a fresh first run of migration 0002), NOT an
+additive re-seed onto rows created under the old formula — an additive re-run
+would mint new-id rows alongside the old ones (duplicate concepts, dangling
+FKs). Safe to do now because the public library is freely rebuildable and there
+are ~zero durable tenants; see `archive/taxonomy-propagation.md` §4.3.
 """
 
 from __future__ import annotations
