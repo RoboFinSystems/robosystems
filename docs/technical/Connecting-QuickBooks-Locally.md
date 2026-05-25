@@ -337,7 +337,10 @@ The stack runs in your terminals — counts depend on path:
 
 Wait for `just start` to bring up Postgres, Valkey, LadybugDB, the API, and Dagster (the dashboard at [localhost:8002](http://localhost:8002) is a useful sign the stack is up).
 
-`npm run dev` uses Turbopack and is the normal choice. Switch to `npm run dev:webpack` only if you have the TypeScript SDK installed locally as a symlinked `file:` dependency (`npm install ../robosystems-typescript-client`) — Turbopack doesn't resolve symlinked `file:` deps cleanly. The published SDK from npm works fine with Turbopack.
+`npm run dev` uses Turbopack and is the normal choice. Switch to `npm run dev:webpack` if either of these applies:
+
+- You have the TypeScript SDK installed locally as a symlinked `file:` dependency (`npm install ../robosystems-typescript-client`) — Turbopack doesn't resolve symlinked `file:` deps cleanly. The published SDK from npm works fine with Turbopack.
+- **You're on Path B and the tunnel proxy isn't working** — i.e. `/v1/*` calls still hit the public host or 404 even though `PUBLIC_TUNNEL_DOMAIN` is set. The `next.config.js` rewrites that make the tunnel work haven't proven reliable under Turbopack; webpack proxies them deterministically. See the troubleshooting note below.
 
 For Path B, verify the tunnel is reachable:
 
@@ -656,6 +659,18 @@ This is **dev-server-only** — it works because `next dev` re-reads `next.confi
 **Fallback workaround:** if `npm run dev` isn't an option, **use Firefox for the OAuth connect step**, then go back to Chrome for normal use. Firefox doesn't enforce PNA the same way, so the OAuth callback completes cleanly. Once the connection is established, day-to-day use against `http://localhost:3001` (Path A — same-origin localhost) doesn't trigger PNA and Chrome works fine.
 
 Only affects Path B (public tunnel → localhost) during the OAuth callback moment. Path A is same-origin localhost and bypasses PNA entirely.
+
+### Tunnel proxy not working under Turbopack — `/v1/*` requests fail or 404
+
+Symptom: on Path B the proxy described above is configured correctly — `PUBLIC_TUNNEL_DOMAIN` is set and the `rewrites()` block is present in `next.config.js` — but API calls still fail. Requests to `/v1/*` or `/extensions/*` aren't proxied to `localhost:8000`, so login or the OAuth callback hangs, even though the same config has worked in another run.
+
+The default dev server (`npm run dev`) uses Turbopack, which has been observed not to honor the `next.config.js` `rewrites()` proxy to `http://localhost:8000` reliably during tunnel sessions. Switch to the webpack dev server:
+
+```bash
+npm run dev:webpack
+```
+
+The rewrites are a standard Next feature and webpack proxies them deterministically. If a tunnel setup that previously worked breaks after a Next upgrade, try webpack before assuming the tunnel or env config is wrong.
 
 ### `Invalid email or password` on login (Puppeteer / automation)
 
