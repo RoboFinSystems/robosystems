@@ -57,7 +57,7 @@ BS_LEAVES: tuple[str, ...] = (
 def _get_ledger_client():
   from robosystems_client.clients.ledger_client import LedgerClient
 
-  config_path = Path(".local/config.json")
+  config_path = REPO_ROOT / ".local" / "config.json"
   if not config_path.exists():
     raise SystemExit("Missing .local/config.json — run `just demo-user` first.")
   with config_path.open() as f:

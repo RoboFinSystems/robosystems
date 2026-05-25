@@ -98,7 +98,7 @@ class DiffRow:
 def _read_graph_id_from_credentials() -> str | None:
   import json
 
-  config_path = Path(".local/config.json")
+  config_path = REPO_ROOT / ".local" / "config.json"
   if not config_path.exists():
     return None
   try:
