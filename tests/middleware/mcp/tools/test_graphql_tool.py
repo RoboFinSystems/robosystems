@@ -424,6 +424,7 @@ class TestGraphqlQueryTool:
     client = MagicMock()
     client.graph_id = "kgtest123"
     client.user_id = None
+    client.user = None
 
     tool = gt.GraphqlQueryTool(client, schema_extensions=("roboledger",))
 
@@ -439,6 +440,23 @@ class TestGraphqlQueryTool:
     ctx = fake_schema.execute.call_args.kwargs["context_value"]
     assert ctx["user"] is None
     assert "errors" in result
+
+  def test_fetch_user_prefers_attached_user_object(self, mock_user):
+    """The MCP handler attaches the authenticated User to `client.user`;
+    `_fetch_user` returns it directly (no by-id DB round-trip). Regression
+    guard for the UNAUTHENTICATED bug where the handler set `client.user`
+    but the tool only read `client.user_id`."""
+    client = MagicMock()
+    client.user = mock_user
+    tool = gt.GraphqlQueryTool(client)
+    assert tool._fetch_user() is mock_user
+
+  def test_fetch_user_returns_none_without_user_or_id(self):
+    client = MagicMock()
+    client.user = None
+    client.user_id = None
+    tool = gt.GraphqlQueryTool(client)
+    assert tool._fetch_user() is None
 
   @pytest.mark.asyncio
   async def test_user_lookup_runs_on_thread(self, mock_client, mock_user):

@@ -232,6 +232,26 @@ class CreateMappingAssociationOperation(CreateAssociationRequest):
   )
 
 
+class DeleteMappingAssociationOperation(BaseModel):
+  """Delete a single CoA → reporting-concept mapping edge."""
+
+  mapping_id: str = Field(
+    ..., description="The mapping structure containing the association."
+  )
+  association_id: str = Field(..., description="The association edge to delete.")
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "mapping_id": "map_01HVF8T0M2YTAY3BBNRH0V0",
+          "association_id": "assoc_01HVF8T0M2YTAY3BBNRH0V0",
+        }
+      ]
+    }
+  )
+
+
 # ── Mapping ───────────────────────────────────────────────────────────────
 
 

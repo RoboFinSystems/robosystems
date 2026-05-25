@@ -51,6 +51,16 @@ CONFIDENCE_MIN_MAP = 0.70
 # Max elements per Bedrock call (batched by classification)
 BATCH_SIZE = 10
 
+# Max re-invocation passes the bounded mapping loop will make. Each pass
+# re-fetches ONLY the still-unmapped elements (idempotent) and persists
+# each mapping as it goes, so passes resume rather than repeat work — a
+# pass interrupted by the worker timeout just continues on the next. The
+# loop is additionally bounded by the graph's credit balance (checked
+# before each pass) and stops early when a pass maps nothing new (the
+# remaining elements are unmappable by the operator). The cap is a final
+# safety net so a fast-failing pass can't spin indefinitely.
+MAX_MAPPING_PASSES = 6
+
 
 @register_operator("mapping")
 class MappingOperator(Operator):
@@ -72,6 +82,96 @@ class MappingOperator(Operator):
   )
 
   async def run(self, ctx: OperatorContext) -> OperatorResult:
+    """Bounded, credit-constrained mapping loop.
+
+    Re-invokes the single-pass mapper until the CoA is fully mapped, a
+    pass makes no further progress (remaining elements are unmappable by
+    the operator), the graph runs out of credits, or the pass cap is hit
+    — whichever comes first. Each pass only touches still-unmapped
+    elements and persists each mapping as it goes, so the loop never
+    re-maps confirmed elements and a pass interrupted by the worker
+    timeout simply resumes on the next run.
+    """
+    mapped_total = 0
+    flagged_total = 0
+    last_skipped = 0
+    coverage_percent = 0.0
+    passes = 0
+    stop_reason = "pass_cap_reached"
+
+    for attempt in range(1, MAX_MAPPING_PASSES + 1):
+      # Credit pre-check — the graph's own balance bounds the loop. AI
+      # credits are consumed post-call (and lookup failures are swallowed
+      # downstream), so this is the only place spend is gated before a
+      # pass rather than after it.
+      if not self._has_credit_budget(ctx):
+        stop_reason = "insufficient_credits"
+        break
+
+      md = (await self._run_single_pass(ctx)).metadata
+      passes = attempt
+      coverage_percent = md.get("coverage_percent", coverage_percent)
+      pass_mapped = md.get("mapped", 0)
+      pass_flagged = md.get("flagged", 0)
+      # mapped + flagged both persist an association, so they leave the
+      # unmapped set and are never recounted across passes — safe to sum.
+      mapped_total += pass_mapped
+      flagged_total += pass_flagged
+      # skipped elements get no association and are re-attempted next pass,
+      # so reflect the LAST pass only rather than summing (avoids double count).
+      last_skipped = md.get("skipped", 0)
+
+      if coverage_percent >= 100:
+        stop_reason = "complete"
+        break
+      # A pass that confirmed/flagged nothing new means the rest are
+      # unmappable by the operator — stop instead of paying for the same
+      # no-op pass every iteration.
+      if pass_mapped == 0 and pass_flagged == 0:
+        stop_reason = "no_progress"
+        break
+
+    return OperatorResult(
+      content=(
+        f"Mapping stopped ({stop_reason}) after {passes} pass(es): "
+        f"{mapped_total} mapped, {flagged_total} flagged for review, "
+        f"{coverage_percent:.0f}% coverage"
+      ),
+      metadata={
+        "mapped": mapped_total,
+        "flagged": flagged_total,
+        "skipped": last_skipped,
+        "coverage_percent": coverage_percent,
+        "passes": passes,
+        "stop_reason": stop_reason,
+      },
+    )
+
+  def _has_credit_budget(self, ctx: OperatorContext) -> bool:
+    """Whether the graph has a positive credit balance for another pass.
+
+    Fails open on lookup error — the ``MAX_MAPPING_PASSES`` cap still
+    bounds worst-case spend, so a transient platform-DB hiccup shouldn't
+    strand a mapping run.
+    """
+    try:
+      from robosystems.database import SessionFactory
+      from robosystems.operations.graph.credit_service import CreditService
+
+      with SessionFactory() as session:
+        summary = CreditService(session).get_credit_summary(ctx.graph_id, ctx.user_id)
+      if "error" in summary:
+        return True
+      return float(summary.get("current_balance", 0)) > 0
+    except Exception as e:
+      logger.warning(
+        "Credit pre-check failed for %s: %s; allowing pass (pass cap bounds spend)",
+        ctx.graph_id,
+        e,
+      )
+      return True
+
+  async def _run_single_pass(self, ctx: OperatorContext) -> OperatorResult:
     mapping_id = ctx.extra["mapping_id"]
 
     # Import and instantiate MCP tool classes via DirectToolAccess

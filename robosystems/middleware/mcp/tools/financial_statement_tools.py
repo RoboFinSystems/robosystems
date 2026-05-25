@@ -53,7 +53,7 @@ class LiveFinancialStatementTool(BaseTool):
 - income_statement — Revenue, expenses, net income
 - balance_sheet — Assets, liabilities, equity (instant periods)
 - equity_statement — Equity components and changes
-- cash_flow_statement is NOT supported yet for OLTP; see financial-statement-analysis for SEC cash flow.
+- cash_flow_statement — Operating (indirect: net income + non-cash add-backs + working-capital deltas), investing, financing. Investing/financing leaves resolve from each line's explicit flow tag when present, else from the mapped rs-gaap element's default-flow derivation arc — so untagged QB data renders too, provided the relevant accounts are mapped at the grain the arcs key on (e.g. PP&E Gross for capex). Needs ≥2 periods (current + prior) for the indirect deltas.
 
 **INPUTS:**
 - Explicit `period_start` / `period_end` (YYYY-MM-DD) win over everything else
@@ -110,7 +110,8 @@ Facts with element qnames, names, classifications, values across current + prior
         "error": (
           f"Unknown statement_type '{statement_type}'. "
           f"Valid types: {', '.join(LIVE_STATEMENT_TYPES)}. "
-          "Use financial-statement-analysis for cash_flow_statement."
+          "For graph-backed (materialized / SEC) statements, see "
+          "financial-statement-analysis."
         ),
       }
 

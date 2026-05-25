@@ -102,8 +102,15 @@ class MCPHandler:
       self.graph_client = await create_graph_mcp_client(
         self.graph_id, api_base_url=repository_url
       )
-      # Attach user to client for workspace tools
+      # Attach the authenticated user to the client so tools can resolve it.
+      # Set both the User object (workspace + GraphQL query tools) and the id
+      # string: the GraphQL tool builds its auth context from the user, and
+      # the registrar's `created_by` resolution reads `user_id` — without it,
+      # GraphQL resolvers reject as UNAUTHENTICATED and writes are audited as
+      # `mcp:{graph_id}` instead of the real user.
       self.graph_client.user = self.user
+      if self.user is not None:
+        self.graph_client.user_id = str(self.user.id)
 
       # Resolve schema extensions for schema-driven tool gating
       from robosystems.middleware.mcp.tools.manager import resolve_schema_extensions

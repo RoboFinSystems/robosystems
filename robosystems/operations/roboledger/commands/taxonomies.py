@@ -15,12 +15,14 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from robosystems.models.api.common import DeleteResult
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   CreateMappingAssociationOperation,
   CreateStructureRequest,
   CreateTaxonomyRequest,
   DeleteAssociationRequest,
+  DeleteMappingAssociationOperation,
   DeleteStructureRequest,
   DeleteTaxonomyRequest,
   EntityTaxonomyResponse,
@@ -259,31 +261,33 @@ def create_mapping_association(
 
 
 def delete_mapping_association(
-  session: Session, mapping_id: str, association_id: str
-) -> bool:
-  """Delete a mapping association. Returns True if a row was deleted."""
+  session: Session, body: DeleteMappingAssociationOperation
+) -> DeleteResult:
+  """Delete a mapping association edge (the inverse of create).
+
+  Raises ``AssociationNotFoundError`` (→ 404) when no edge matches, or
+  ``LibraryImmutableError`` (→ 403) for library-seeded rows. Used to
+  correct a wrong mapping: delete the bad edge, then re-create the right
+  one with ``create_mapping_association``.
+  """
   assoc = session.execute(
     select(Association).where(
-      Association.id == association_id,
-      Association.structure_id == mapping_id,
+      Association.id == body.association_id,
+      Association.structure_id == body.mapping_id,
     )
   ).scalar_one_or_none()
   if assoc is None:
-    return False
+    raise AssociationNotFoundError(body.association_id)
   # Match update_association / delete_association — reject library-seeded
   # rows at the service layer so the caller sees LibraryImmutableError
   # (→ 403) instead of a bare DB trigger ProgrammingError (→ 500).
   assert_not_library_origin(assoc)
-  _delete_association_dependents(session, [association_id])
-  deleted = (
-    session.query(Association)
-    .filter(
-      Association.id == association_id,
-      Association.structure_id == mapping_id,
-    )
-    .delete(synchronize_session=False)
-  )
-  return bool(deleted)
+  _delete_association_dependents(session, [body.association_id])
+  session.query(Association).filter(
+    Association.id == body.association_id,
+    Association.structure_id == body.mapping_id,
+  ).delete(synchronize_session=False)
+  return DeleteResult(deleted=True)
 
 
 def _delete_association_dependents(
