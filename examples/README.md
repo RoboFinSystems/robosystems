@@ -15,6 +15,8 @@ just demo
 just demo-roboledger
 just demo-custom-graph
 just demo-sec --ticker NVDA --year 2025
+just demo-seattle-method
+just demo-world-online
 ```
 
 ## Available Demos
@@ -107,6 +109,65 @@ just demo-custom-graph --skip-queries
 
 **Customization:** Edit `schema.json` to define your own node types and relationships
 
+### 3. Seattle Method Demo - Record-to-Report (Charlie Hoffman's "mini")
+
+End-to-end accounting proof against Charlie Hoffman's Seattle Method "mini" record-to-report test case: ingest a 14-JE general journal (lemonade stand), map the chart of accounts to rs-gaap, and render a validated 4-statement report.
+
+**Features:**
+
+- Ingests Charlie's `mini`-tagged general-journal transactions
+- Cross-taxonomy projection: `mini` → rs-gaap (reconciles 18/18 concepts; BS balances $14,450)
+- Materializes a 4-Information-Block rs-gaap Report (BS / IS / CF / SE)
+- Reconciliation report vs. Charlie's published reference
+
+**Usage:**
+
+```bash
+# Run the full demo (ingest → map → render)
+just demo-seattle-method
+
+# Render the reconciliation report for an existing graph
+just demo-seattle-method-reconcile
+
+# Materialize the 4-statement rs-gaap report
+just demo-seattle-method-create-report
+```
+
+**Location:** `/examples/seattle_method_demo/`
+
+**Documentation:** See [README.md](seattle_method_demo/README.md) for the walkthrough
+
+### 4. World Online Demo - Seattle Method at Scale
+
+The scaled-up sibling of the `mini` demo: Charlie Hoffman's "The World Online" dataset — a real-size general ledger tagged against MINI 2026.
+
+**Features:**
+
+- 22,288 GL lines / 3,389 entries / 239-account chart of accounts
+- Opening balances ingested as ordinary BBF transactions (`mini:OpeningBalance` as a first-class flow concept), not synthesized as a prior-period number
+- Reconciles 22/23 vs. the source pivot; BS balances $0.00; trial balance balances
+- Same `load_taxonomy` / `seed_mappings` / report-render helpers as the `mini` demo
+
+**Usage:**
+
+```bash
+# Run the full demo
+just demo-world-online
+
+# Render the reconciliation report (pivot vs. SummaryOfTransactions.csv)
+just demo-world-online-reconcile
+
+# Materialize the 4-statement rs-gaap report
+just demo-world-online-create-report
+
+# Render the trial balance
+just demo-world-online-trial-balance
+```
+
+**Location:** `/examples/seattle_method_world_online/`
+
+**Documentation:** See [README.md](seattle_method_world_online/README.md) for the walkthrough
+
 ## Credential Management
 
 All demos share a common credential system for authentication.
@@ -187,7 +248,7 @@ This pipeline demonstrates the production data loading workflow used by RoboSyst
 
 **Successful Demo Output:**
 
-```
+```text
 ✓ User authenticated
 ✓ Graph created: kg1a2b3c4d5e
 ✓ Data generated: 6 files

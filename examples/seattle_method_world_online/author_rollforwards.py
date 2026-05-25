@@ -42,7 +42,9 @@ GL_PATH = DATA_DIR / "GeneralLedger.csv"
 
 # The balance-sheet leaves with activity in the World Online dataset
 # (per SummaryOfTransactions.csv). Note: no AccruedExpenses in this
-# dataset — unlike Charlie's 14-JE lemonade stand.
+# dataset — unlike Charlie's 14-JE lemonade stand. RetainedEarnings is
+# also intentionally absent: it's auto-derived from NetIncomeLoss by the
+# Report architecture, so authoring a manual rollforward would double-count.
 BS_LEAVES: tuple[str, ...] = (
   "mini:CashAndCashEquivalents",
   "mini:Receivables",
