@@ -38,11 +38,13 @@ import argparse
 import csv
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEMO_ROOT = REPO_ROOT / "examples" / "seattle_method_world_online"
@@ -109,7 +111,8 @@ def _read_graph_id_from_credentials() -> str | None:
   return slot.get("graph_id")
 
 
-def _open_session(graph_id: str) -> Session:
+@contextmanager
+def _open_session(graph_id: str) -> Iterator[Session]:
   """Open a SQLAlchemy session scoped to the graph's extensions schema."""
   if not SAFE_GRAPH_ID.match(graph_id):
     raise SystemExit(
@@ -122,9 +125,12 @@ def _open_session(graph_id: str) -> Session:
       ".env.local), or export the env var manually."
     )
   engine = create_engine(EXTENSIONS_DB_URL)
-  session = sessionmaker(bind=engine)()
-  session.execute(text(f"SET search_path TO {graph_id}, public"))
-  return session
+  try:
+    with Session(engine) as session:
+      session.execute(text(f"SET search_path TO {graph_id}, public"))
+      yield session
+  finally:
+    engine.dispose()
 
 
 # ── Load expected (Charlie's pivot) ─────────────────────────────────────────
@@ -190,7 +196,7 @@ def load_actual_pivot(session: Session) -> dict[tuple[str, str], Cell]:
   out: dict[tuple[str, str], Cell] = {}
   for line_item, business_event, cents, cnt in rows:
     out[(line_item, business_event)] = Cell(
-      line_item, business_event, round(int(cents)) / 100.0, int(cnt)
+      line_item, business_event, round(float(cents)) / 100.0, int(cnt)
     )
   return out
 
@@ -428,11 +434,8 @@ def main() -> None:
   if not SUMMARY_PATH.exists():
     raise SystemExit(f"{SUMMARY_PATH} missing — run the pull step.")
 
-  session = _open_session(graph_id)
-  try:
+  with _open_session(graph_id) as session:
     actual = load_actual_pivot(session)
-  finally:
-    session.close()
 
   actual_total_dollars = sum(c.amount_dollars for c in actual.values())
   actual_total_count = sum(c.count for c in actual.values())

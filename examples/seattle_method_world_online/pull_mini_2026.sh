@@ -40,7 +40,11 @@ done
 
 # Parse linkbase file refs from the entry point. Each linkbaseRef has
 # `xlink:href='mini-foo.xml'`; we extract the unique set.
-mapfile -t LINKBASES < <(
+# (while-read loop, not `mapfile` — macOS ships Bash 3.2, which lacks it.)
+LINKBASES=()
+while IFS= read -r _ref; do
+  LINKBASES+=("$_ref")
+done < <(
   grep -oE "xlink:href='[^']+'" "$OUT_DIR/mini-entryPoint.xsd" \
     | sed -E "s/xlink:href='([^']+)'/\1/" \
     | sort -u
