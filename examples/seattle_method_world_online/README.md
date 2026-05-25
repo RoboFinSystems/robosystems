@@ -76,7 +76,7 @@ The rollforward period spans the opening date, so the opening is a
 genuine **$0 genesis** and `mini:OpeningBalance` is simply the first
 business event in the decomposition:
 
-```
+```text
 0 (genesis) + OpeningBalance + Σ(flow events) = ending balance   (residual 0)
 ```
 
