@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -32,6 +33,7 @@ from robosystems.operations.operators.base import (
 from robosystems.operations.operators.implementations.mapping.constants import (
   FAC_TO_RS_GAAP_FALLBACK,
   FALLBACK_CONFIDENCE,
+  RS_GAAP_NAME_PATTERN_OVERRIDES,
   RS_GAAP_SUBTOTAL_DENYLIST,
 )
 from robosystems.operations.operators.implementations.mapping.prompt import (
@@ -61,6 +63,25 @@ BATCH_SIZE = 10
 # remaining elements are unmappable by the operator). The cap is a final
 # safety net so a fast-failing pass can't spin indefinitely.
 MAX_MAPPING_PASSES = 6
+
+# Compiled once: deterministic CoA-name → rs-gaap qname overrides for
+# synthesized-detail concepts the AI tends to collapse into the net parent.
+_NAME_PATTERN_OVERRIDES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+  (re.compile(pat, re.IGNORECASE), qname)
+  for pat, qname in RS_GAAP_NAME_PATTERN_OVERRIDES
+)
+
+
+def _deterministic_rs_gaap_override(coa_elem: dict) -> str | None:
+  """Return a forced rs-gaap qname when the CoA element's name/code is an
+  unambiguous synthesized-detail concept (e.g. accumulated depreciation),
+  else None. The name is a stronger signal than the AI's semantic match,
+  which otherwise collapses the contra into the net parent."""
+  text = f"{coa_elem.get('name') or ''} {coa_elem.get('code') or ''}"
+  for pattern, qname in _NAME_PATTERN_OVERRIDES:
+    if pattern.search(text):
+      return qname
+  return None
 
 
 @register_operator("mapping")
@@ -309,30 +330,47 @@ class MappingOperator(Operator):
             skipped += 1
 
           for m in seen_in_batch.values():
-            fac_target = m.get("target_id")
+            target = m.get("target_id")
             confidence = m["confidence"]
-            if fac_target and confidence >= CONFIDENCE_AUTO_APPROVE:
+
+            # Deterministic override for unambiguous synthesized-detail
+            # accounts (e.g. "Accumulated Depreciation") that the AI tends
+            # to collapse into the net parent (PP&E Net). The account name
+            # is a stronger signal than the semantic match; resolve the
+            # rs-gaap qname directly, independent of the candidate set.
+            override_qname = _deterministic_rs_gaap_override(
+              elem_by_id[m["element_id"]]
+            )
+            if override_qname:
+              override_id = await self._resolve_qname_to_id(ctx, override_qname)
+              if override_id:
+                target = override_id
+                confidence = max(confidence, 0.95)
+
+            if target and confidence >= CONFIDENCE_AUTO_APPROVE:
               mapped += 1
-            elif fac_target and confidence >= CONFIDENCE_MIN_MAP:
+            elif target and confidence >= CONFIDENCE_MIN_MAP:
               flagged += 1
             else:
               skipped += 1
               continue
 
-            # Persist the CoA → FAC arc as the primary mapping target.
+            # Persist the CoA → rs-gaap arc as the primary mapping target.
             try:
               await create_tool.execute(
                 {
                   "mapping_id": mapping_id,
                   "from_element_id": m["element_id"],
-                  "to_element_id": fac_target,
+                  "to_element_id": target,
                   "confidence": confidence,
                   "association_type": "mapping",
                 }
               )
-              confirmed_fac.append((elem_by_id[m["element_id"]], fac_target))
+              confirmed_fac.append((elem_by_id[m["element_id"]], target))
             except Exception as e:
-              logger.warning(f"FAC create failed for {m['element_id']}: {e}")
+              logger.warning(
+                f"rs-gaap mapping create failed for {m['element_id']}: {e}"
+              )
 
         except Exception as e:
           logger.warning(f"Batch mapping failed for {cls}: {e}")

@@ -62,6 +62,24 @@ RS_GAAP_SUBTOTAL_DENYLIST: frozenset[str] = frozenset(
 )
 
 
+# rs-gaap leaf concepts that the report renderer synthesizes a parent
+# from rather than presenting directly, so they're absent from the BS
+# presentation network — yet they ARE the correct CoA mapping grain.
+# ``_synthesize_ppe_net_facts`` computes PropertyPlantAndEquipmentNet as
+# Gross minus AccumulatedDepreciation and marks the two details
+# ``audit_only`` (no extra BS rows), but mapping fixed-asset accounts to
+# Gross + the accumulated-depreciation contra is what lets CF Investing
+# read the change in Gross as capex (the change in Net conflates
+# purchases with depreciation). The candidate
+# suggester admits these regardless of presentation-set membership.
+RS_GAAP_SYNTHESIZED_DETAIL_ALLOW: frozenset[str] = frozenset(
+  {
+    "rs-gaap:PropertyPlantAndEquipmentGross",
+    "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+  }
+)
+
+
 # Per-FAC "Other" bucket. When the rs-gaap refinement AI fails (low
 # confidence or wide-equivalence dead end), pick the canonical Other
 # concept for that FAC category as a safe non-rollup fallback at
@@ -103,3 +121,24 @@ FAC_TO_RS_GAAP_FALLBACK: dict[str, str] = {
 # CONFIDENCE_AUTO_APPROVE — the user sees these as low-confidence in
 # the CoA UI and can correct them.
 FALLBACK_CONFIDENCE: float = 0.40
+
+
+# Deterministic CoA-name → rs-gaap overrides for synthesized-detail
+# concepts (see RS_GAAP_SYNTHESIZED_DETAIL_ALLOW). The AI refinement
+# tends to collapse these into the net parent (e.g. an "Accumulated
+# Depreciation" account → PropertyPlantAndEquipmentNet via the
+# FixedAssets parent fallback) because the contra is absorbed into the
+# synthesized net at render time and isn't the highest-confidence
+# semantic match. The account NAME is the unambiguous signal, so we
+# route it deterministically before the AI pass. Each entry is a
+# (compiled-at-use regex pattern, rs-gaap qname) pair; the pattern is
+# matched case-insensitively against the CoA element's name + code.
+# Intentionally narrow — only accounts whose meaning is unambiguous
+# from the name belong here (accumulated depreciation, NOT amortization,
+# which maps to the single IntangibleAssetsNetIncludingGoodwill concept).
+RS_GAAP_NAME_PATTERN_OVERRIDES: tuple[tuple[str, str], ...] = (
+  (
+    r"accumulated\s+deprec",
+    "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+  ),
+)

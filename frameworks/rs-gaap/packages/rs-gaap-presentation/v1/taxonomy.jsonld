@@ -8474,6 +8474,38 @@
       "arcOrder": 30220.0
     },
     {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-12c",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:PaymentsToAcquireInvestments" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30230.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-12d",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30240.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-12e",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30250.0
+    },
+    {
+      "@id": "_:rs-gaap-pres-cf-indirect-arc-12f",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets" },
+      "arcAssociationType": "presentation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect",
+      "arcOrder": 30260.0
+    },
+    {
       "@id": "_:rs-gaap-pres-cf-indirect-arc-13",
       "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
       "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
