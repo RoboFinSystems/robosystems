@@ -54,6 +54,14 @@ if the candidate set has one (specific enough)
 4. **One-to-one mapping** — each CoA element maps to exactly one FAC concept
 5. **Skip abstract candidates** — FAC has abstract/grouping concepts (`is_abstract=true`); \
 always target concrete ones
+6. **Fixed assets: prefer the gross cost concept, not the net** — a fixed-asset cost \
+account ("Equipment", "Furniture & Fixtures", "Vehicles", "Buildings", "Property & \
+Equipment", "Gross Fixed Assets") should map to the **gross** PP&E concept \
+(`PropertyPlantAndEquipmentGross`) when both gross and net appear in the candidates, \
+NOT the net concept. Reason: the cash-flow statement derives capital expenditures from \
+the change in GROSS PP&E; mapping to net conflates purchases with depreciation and \
+silently drops capex from investing activities. (The accumulated-depreciation contra \
+account is routed deterministically and needs no judgment here.)
 
 ## Confidence Scoring
 

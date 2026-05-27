@@ -35,6 +35,7 @@ from robosystems.graphql.types.ledger import (
   AccountTreeNode,
   Agent,
   ClosingBookStructures,
+  Element,
   ElementList,
   EventBlock,
   FiscalCalendar,
@@ -583,6 +584,37 @@ class LedgerQuery:
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return ElementList.from_pydantic(response)
+
+  @strawberry.field
+  def mapping_candidates(
+    self,
+    info: Info[GraphQLContext, None],
+    classification: str,
+  ) -> list[Element]:
+    """rs-gaap concepts a CoA element of the given EFS ``classification``
+    (asset / liability / equity / revenue / expense / gain / loss) may map
+    to — limited to concepts that actually render under the active Reporting
+    Style (falling back to the rs-gaap-presentation set when no Style is
+    seeded), with statement-level subtotals excluded. This is the same
+    candidate set the MappingOperator picks from, so the mapping UI never
+    offers a target that would land a fact on an unreachable branch.
+    """
+    # Reporting Style is pre-loaded onto the context at request build time
+    # (graphql/context.py) for app requests; narrowing to it keeps the picker
+    # in sync with what the renderer walks. When absent (e.g. tooling paths
+    # that don't resolve a Style), suggest_mapping_candidates falls back to
+    # the rs-gaap-presentation set — still far narrower than the full vocab.
+    reporting_style_id = info.context.get("reporting_style_id")
+    try:
+      with _open_session(info, "roboledger") as session:
+        rows = reads_taxonomies.suggest_mapping_candidates(
+          session,
+          trait=classification,
+          reporting_style_id=reporting_style_id,
+        )
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    return [Element.from_pydantic(r) for r in rows]
 
   @strawberry.field
   def unmapped_elements(

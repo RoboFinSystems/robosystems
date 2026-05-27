@@ -945,6 +945,42 @@
       "arcWeight": 1.0,
       "arcOrder": 200.0
     },
+    {
+      "@id": "_:rs-gaap-calc-cf-investing-arc-3",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:PaymentsToAcquireInvestments" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "arcWeight": 1.0,
+      "arcOrder": 300.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-investing-arc-4",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "arcWeight": 1.0,
+      "arcOrder": 400.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-investing-arc-5",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "arcWeight": 1.0,
+      "arcOrder": 500.0
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf-investing-arc-6",
+      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
+      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets" },
+      "arcAssociationType": "calculation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "arcWeight": 1.0,
+      "arcOrder": 600.0
+    },
 
     {
       "@id": "_:rs-gaap-calc-cf-financing",
@@ -1061,6 +1097,74 @@
       "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentGross" },
       "arcAssociationType": "derivation",
       "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfPropertyPlantAndEquipment",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-investments-purchases",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireInvestments",
+      "structureName": "rs-gaap default-flow CF — PaymentsToAcquireInvestments is the investing OUTFLOW default for LongTermInvestmentsAndReceivablesNet. arcWeight -1 = outflow (investment line is a debit/increase). Line-level fallback only (cash-gated, so non-cash MTM remeasurements are excluded); the inflow side keys on cost basis, not proceeds — a gain/loss split is a future investment-accounting refinement.",
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-investments-purchases-arc-1",
+      "arcFrom": { "@id": "rs-gaap:PaymentsToAcquireInvestments" },
+      "arcTo": { "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireInvestments",
+      "arcWeight": -1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-investments-sales",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleMaturityAndCollectionsOfInvestments",
+      "structureName": "rs-gaap default-flow CF — ProceedsFromSaleMaturityAndCollectionsOfInvestments is the investing INFLOW default for LongTermInvestmentsAndReceivablesNet. arcWeight +1 = inflow (investment line is a credit/decrease); paired with PaymentsToAcquireInvestments (-1 outflow). Line-level fallback only.",
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-investments-sales-arc-1",
+      "arcFrom": { "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments" },
+      "arcTo": { "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleMaturityAndCollectionsOfInvestments",
+      "arcWeight": 1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-intangibles-purchases",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireIntangibleAssets",
+      "structureName": "rs-gaap default-flow CF — PaymentsToAcquireIntangibleAssets is the investing OUTFLOW default for IntangibleAssetsNetIncludingGoodwill. arcWeight -1 = outflow (intangible line is a debit/increase). Line-level fallback only (cash-gated, so non-cash amortization is excluded).",
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-intangibles-purchases-arc-1",
+      "arcFrom": { "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets" },
+      "arcTo": { "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireIntangibleAssets",
+      "arcWeight": -1.0,
+      "arcOrder": 100.0
+    },
+
+    {
+      "@id": "_:rs-gaap-deriv-cf-intangibles-sales",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfIntangibleAssets",
+      "structureName": "rs-gaap default-flow CF — ProceedsFromSaleOfIntangibleAssets is the investing INFLOW default for IntangibleAssetsNetIncludingGoodwill. arcWeight +1 = inflow (intangible line is a credit/decrease); paired with PaymentsToAcquireIntangibleAssets (-1 outflow). Line-level fallback only.",
+      "blockType": "validation_rules",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-deriv-cf-intangibles-sales-arc-1",
+      "arcFrom": { "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets" },
+      "arcTo": { "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill" },
+      "arcAssociationType": "derivation",
+      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfIntangibleAssets",
       "arcWeight": 1.0,
       "arcOrder": 100.0
     },

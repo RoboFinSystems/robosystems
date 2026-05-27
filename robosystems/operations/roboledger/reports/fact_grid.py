@@ -2493,7 +2493,28 @@ def _build_rows(
     # value from `computed_per_period`. Pass 1 populated it with the
     # rolled-up sum of all descendants for parent nodes, so subtotal
     # rows get the correct aggregate instead of zeros.
-    vals = [computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)]
+    # An abstract presentation concept (e.g. "Income Statement [Abstract]")
+    # that groups MULTIPLE subtotals is a structural header over a calc
+    # cascade — its children (Revenues, GrossProfit, OperatingIncome, …)
+    # already aggregate overlapping sets, so summing them double-counts and
+    # the abstract has no meaningful value. Render it value-less and let the
+    # all-null drop below hide it. A single clean rollup (a section abstract
+    # over its leaves, e.g. "Operating Expenses" → R&D + SG&A) keeps its sum.
+    subtotal_children = sum(
+      1
+      for child in (node.children or [])
+      if child.children or child.element_id in calc_targets
+    )
+    if node.is_abstract and subtotal_children > 1:
+      vals: list[float | None] = [None] * n_periods
+    else:
+      # Both subtotal (has children) and leaf rows read the precomputed
+      # value from `computed_per_period`. Pass 1 populated it with the
+      # rolled-up sum of all descendants for parent nodes, so subtotal
+      # rows get the correct aggregate instead of zeros.
+      vals = [
+        computed_per_period[i].get(node.element_id, 0.0) for i in range(n_periods)
+      ]
     # A row is a subtotal if it aggregates other rows by either path:
     # (a) it has child summands in the disclosure DAG, or (b) it is a
     # calc-DAG target whose summands live elsewhere in the disclosure

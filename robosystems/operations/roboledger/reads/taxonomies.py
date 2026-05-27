@@ -247,6 +247,7 @@ def suggest_mapping_candidates(
   # Lazy import to avoid pulling agent constants into every read path.
   from robosystems.operations.operators.implementations.mapping.constants import (
     RS_GAAP_SUBTOTAL_DENYLIST,
+    RS_GAAP_SYNTHESIZED_DETAIL_ALLOW,
   )
 
   if reporting_style_id:
@@ -289,10 +290,20 @@ def suggest_mapping_candidates(
       return r.id in rollup_set
     return r.qname in RS_GAAP_SUBTOTAL_DENYLIST
 
+  # Synthesized-detail concepts (PP&E Gross + accumulated depreciation)
+  # aren't in the presentation set — the renderer absorbs them into a
+  # synthesized PropertyPlantAndEquipmentNet — but they're the correct
+  # mapping grain for fixed-asset / contra accounts (lets CF Investing
+  # read ΔGross as capex). Admit them past the presentation filter.
   filtered = [
     r
     for r in rows
-    if not _denied(r) and (not presentation_set or r.id in presentation_set)
+    if not _denied(r)
+    and (
+      not presentation_set
+      or r.id in presentation_set
+      or r.qname in RS_GAAP_SYNTHESIZED_DETAIL_ALLOW
+    )
   ]
 
   efs_map = _efs_by_element(session, [r.id for r in filtered])

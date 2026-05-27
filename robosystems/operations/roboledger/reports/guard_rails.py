@@ -55,44 +55,88 @@ def _validate_income_statement(rows: list[FactRow]) -> ValidationResult:
   # Check: totals foot (subtotals equal sum of children)
   _check_totals_foot(rows, result)
 
-  # Structural: Net Income = Revenue - Expenses (when all three are
-  # identifiable). Same top-most-subtotal-per-classification approach as
-  # BS — handles FAC's parallel subtotals at the same depth and falls
-  # back to qname inference when FASB element_traits aren't wired.
+  # Structural: Net Income must reconcile against EVERY income-statement
+  # line by natural balance — credit-nature items (operating AND
+  # nonoperating revenue, gains) add; debit-nature items (expenses, losses,
+  # interest, tax) subtract. Summing leaves (not subtotals) avoids
+  # double-counting, and keying on balance_type rather than classification
+  # correctly handles contras (e.g. sales returns) and nonoperating lines.
+  #
+  # The earlier single-step identity (operating Revenue minus Expenses)
+  # spuriously failed on multi-step statements that carry nonoperating
+  # income, gains, or losses below operating income.
   result.checks.append("net_income_equation")
 
-  revenue_row = _top_most_subtotal_for_classification(rows, "revenue")
-  expense_row = _top_most_subtotal_for_classification(rows, "expense")
   net_income_row = _net_income_row(rows)
 
-  if revenue_row is None or expense_row is None:
-    # No silent pass — without revenue/expense rollups identifiable, the
-    # validator can't make any structural claim about Net Income.
-    missing: list[str] = []
-    if revenue_row is None:
-      missing.append("revenue")
-    if expense_row is None:
-      missing.append("expense")
+  # Reconcile Net Income against the income-statement components by natural
+  # balance: credit-nature lines (operating AND nonoperating revenue, gains)
+  # add; debit-nature lines (expenses, losses, interest, tax) subtract.
+  # Summing the reported LEAVES (atomic facts) — not subtotals — captures
+  # nonoperating items a single-step Revenue minus Expenses identity would miss,
+  # and keying on balance_type rather than classification makes contras
+  # (e.g. sales returns) net correctly.
+  implied_ni = 0.0
+  credit_leaves = 0
+  debit_leaves = 0
+  for row in rows:
+    # Skip subtotals/abstracts (would double-count) and the reported Net
+    # Income row itself (it's the target, not a component) — guarded by
+    # identity so it's excluded even if its is_subtotal flag is unset.
+    if row.is_subtotal or row.is_abstract or row is net_income_row:
+      continue
+    value = (row.values[0] or 0.0) if row.values else 0.0
+    if row.balance_type == "credit":
+      implied_ni += value
+      credit_leaves += 1
+    elif row.balance_type == "debit":
+      implied_ni -= value
+      debit_leaves += 1
+    # else: per-share / ratio metrics carry no monetary balance — skip.
+
+  inconclusive = False
+  if credit_leaves == 0 and debit_leaves == 0:
+    # Statement reported only at the subtotal level (no leaf detail). Fall
+    # back to the top-most Revenue minus Expenses subtotals — the same approach
+    # as the balance sheet, handling FAC's parallel subtotals + qname
+    # inference.
+    revenue_row = _top_most_subtotal_for_classification(rows, "revenue")
+    expense_row = _top_most_subtotal_for_classification(rows, "expense")
+    if revenue_row is None or expense_row is None:
+      missing: list[str] = []
+      if revenue_row is None:
+        missing.append("revenue")
+      if expense_row is None:
+        missing.append("expense")
+      result.failures.append(
+        "Income statement validation inconclusive: missing classification "
+        f"rollups for {missing}. Wire FASB elementsOfFinancialStatements "
+        "traits onto the structure's elements, or ensure at least one "
+        "subtotal row per classification is present."
+      )
+      result.passed = False
+      inconclusive = True
+    else:
+      revenue = (revenue_row.values[0] or 0.0) if revenue_row.values else 0.0
+      expense = (expense_row.values[0] or 0.0) if expense_row.values else 0.0
+      implied_ni = revenue - expense
+  elif credit_leaves == 0:
+    # Leaf detail present but no revenue/income line — can't reconcile.
     result.failures.append(
-      "Income statement validation inconclusive: missing classification "
-      f"rollups for {missing}. Wire FASB elementsOfFinancialStatements "
-      "traits onto the structure's elements, or ensure at least one "
-      "subtotal row per classification is present."
+      "Income statement validation inconclusive: no revenue/income line "
+      "found to reconcile Net Income against."
     )
     result.passed = False
-  else:
-    revenue = (revenue_row.values[0] or 0.0) if revenue_row.values else 0.0
-    expense = (expense_row.values[0] or 0.0) if expense_row.values else 0.0
-    implied_ni = revenue - expense
+    inconclusive = True
 
+  if not inconclusive:
     if net_income_row is not None:
       reported_ni = (net_income_row.values[0] or 0.0) if net_income_row.values else 0.0
       diff = abs(reported_ni - implied_ni)
       if diff > _TOLERANCE:
         result.failures.append(
           f"Net Income mismatch: reported '{net_income_row.element_name}' "
-          f"({reported_ni:.2f}) ≠ Revenue ({revenue:.2f}) − "
-          f"Expenses ({expense:.2f}) = {implied_ni:.2f}, "
+          f"({reported_ni:.2f}) ≠ Σ(income − expense) ({implied_ni:.2f}), "
           f"difference: {diff:.2f}"
         )
         result.passed = False
@@ -101,8 +145,7 @@ def _validate_income_statement(rows: list[FactRow]) -> ValidationResult:
       # is common in multi-step structures whose final line is
       # "Income from Continuing Operations" or similar.
       result.warnings.append(
-        f"No Net Income line found; implied NI = Revenue ({revenue:.2f}) "
-        f"− Expenses ({expense:.2f}) = {implied_ni:.2f}"
+        f"No Net Income line found; implied NI = Σ(income − expense) = {implied_ni:.2f}"
       )
 
   # Semantic: check for zero-balance subtotals
