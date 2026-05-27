@@ -345,7 +345,10 @@ class MappingOperator(Operator):
               override_id = await self._resolve_qname_to_id(ctx, override_qname)
               if override_id:
                 target = override_id
-                confidence = max(confidence, 0.95)
+                # Guarantee the override auto-approves regardless of how the
+                # threshold is tuned — the deterministic name match is a
+                # stronger signal than any AI confidence score.
+                confidence = max(confidence, CONFIDENCE_AUTO_APPROVE)
 
             if target and confidence >= CONFIDENCE_AUTO_APPROVE:
               mapped += 1

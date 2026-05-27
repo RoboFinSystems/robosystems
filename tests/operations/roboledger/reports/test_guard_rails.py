@@ -14,18 +14,23 @@ def _row(
   depth: int = 0,
   qname: str = "",
   prior: float | None = None,
+  balance_type: str | None = None,
 ) -> FactRow:
   vals = [value]
   if prior is not None:
     vals.append(prior)
+  # IS reconciliation keys on balance_type, not classification, so callers
+  # can model gains/losses (credit/debit-nature items whose classification
+  # isn't revenue/expense) by overriding balance_type explicitly.
+  resolved_balance = balance_type or (
+    "credit" if classification in ("revenue", "liability", "equity") else "debit"
+  )
   return FactRow(
     element_id=f"elem_{name.lower().replace(' ', '_')}",
     element_qname=qname or f"us-gaap:{name.replace(' ', '')}",
     element_name=name,
     classification=classification,
-    balance_type="credit"
-    if classification in ("revenue", "liability", "equity")
-    else "debit",
+    balance_type=resolved_balance,
     values=vals,
     is_subtotal=is_subtotal,
     depth=depth,
@@ -104,6 +109,40 @@ class TestIncomeStatementStructuralValidation:
     result = validate_report("income_statement", rows)
     assert result.passed is True, f"Failures: {result.failures}"
     assert "net_income_equation" in result.checks
+
+  def test_multistep_with_nonoperating_gain_and_loss_leaves_passes(self):
+    """The motivating case for the natural-balance refactor: a multi-step
+    statement with nonoperating items (a gain and interest expense) below
+    operating income. Summing leaves by balance_type captures these; the
+    prior single-step Revenue - Expenses identity dropped them and failed
+    spuriously. NI = 1000 - 400 - 300 + 50 - 20 = 330."""
+    rows = [
+      _row("Revenue", 1000.0, classification="revenue", depth=2),
+      _row("Cost of Revenue", 400.0, classification="expense", depth=2),
+      _row("SG&A", 300.0, classification="expense", depth=2),
+      # Nonoperating gain — credit-nature but not classified 'revenue'.
+      _row(
+        "Gain on Sale of Asset",
+        50.0,
+        classification="gain",
+        balance_type="credit",
+        depth=2,
+      ),
+      # Nonoperating debit-nature item below operating income.
+      _row("Interest Expense", 20.0, classification="expense", depth=2),
+      _row(
+        "Net Income",
+        330.0,
+        classification="",
+        qname="us-gaap:NetIncomeLoss",
+        is_subtotal=True,
+        depth=0,
+      ),
+    ]
+    result = validate_report("income_statement", rows)
+    assert result.passed is True, f"Failures: {result.failures}"
+    assert "net_income_equation" in result.checks
+    assert len(result.failures) == 0
 
   def test_net_income_mismatch_fails(self):
     rows = [
