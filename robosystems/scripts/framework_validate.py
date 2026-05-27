@@ -36,8 +36,9 @@ the demo oracles (Harbinger, World Online — they foot and balance) plus the
 RollUp rules.
 
 Run it:
-    just framework-validate                 # totals + table + annotated trees
-    just framework-validate --summary        # terse: totals + table only
+    just framework-validate                 # everything: A (structure) + C (package) + B (coverage)
+    just framework-validate --summary        # same, but terse (no per-statement trees)
+    just framework-validate --coverage-only  # just Mode B coverage (no tenant provisioning)
     UV_ENV_FILE=.env.local uv run python -m robosystems.scripts.framework_validate
 """
 
@@ -1033,21 +1034,33 @@ def validate_framework(keep: bool = False) -> GapReport:
       return report
 
 
+def _print_coverage() -> None:
+  """Print the Mode B coverage report for the graphs in .local/config.json."""
+  graphs = load_config_graphs()
+  if not graphs:
+    print(
+      "Framework Mode B — CoA coverage: no graphs in .local/config.json "
+      "(load a demo, e.g. just demo-roboledger)."
+    )
+    return
+  print(format_coverage(run_coverage(graphs)))
+
+
 def main(argv: list[str] | None = None) -> int:
   parser = argparse.ArgumentParser(
-    description="Validate the curated rs-gaap framework "
-    "(Mode A: structure; --coverage for Mode B: CoA coverage on real graphs)."
+    description="Validate the curated rs-gaap framework. Default runs all three: "
+    "Mode A (structure) + Mode C (package integrity) + Mode B (CoA coverage)."
   )
   parser.add_argument(
-    "--coverage",
+    "--coverage-only",
     action="store_true",
-    help="Mode B: measure CoA mapping coverage on the graphs in "
-    ".local/config.json (deterministic — reads existing mappings)",
+    help="run only Mode B (CoA coverage on .local/config.json graphs) and skip "
+    "the reference-tenant structural + package checks (no provisioning)",
   )
   parser.add_argument(
     "--summary",
     action="store_true",
-    help="terse Mode A output: framework totals + the per-statement table only "
+    help="terse: framework totals + the per-statement table only "
     "(omit the per-statement presentation trees, which print by default)",
   )
   parser.add_argument(
@@ -1057,12 +1070,9 @@ def main(argv: list[str] | None = None) -> int:
   )
   args = parser.parse_args(argv)
 
-  if args.coverage:
-    graphs = load_config_graphs()
-    if not graphs:
-      print("No graphs found in .local/config.json — run a demo to load some.")
-      return 1
-    print(format_coverage(run_coverage(graphs)))
+  # Coverage-only fast path: no reference-tenant provisioning.
+  if args.coverage_only:
+    _print_coverage()
     return 0
 
   with reference_tenant(keep=args.keep) as rt:
@@ -1073,6 +1083,11 @@ def main(argv: list[str] | None = None) -> int:
         print(render_trees(session, rt.styles))
         print()
       print(report.format_text())
+
+  # Mode B coverage is informational (doesn't gate the A+C verdict) and reads
+  # real graphs, so it prints as its own section after the framework report.
+  print()
+  _print_coverage()
   return 0 if report.ok() else 1
 
 
