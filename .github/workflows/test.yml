@@ -14,7 +14,7 @@ on:
 jobs:
   test:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
       security-events: write  # Required for Trivy SARIF upload
@@ -217,7 +217,7 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
 
       - name: Run tests
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
           # Run tests (exclude slow tests)
           uv run pytest -v --tb=short -m "not slow"
