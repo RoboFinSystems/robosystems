@@ -147,6 +147,11 @@ REACHABILITY = "reachability"  # renders but doesn't foot to a canonical root
 CONSISTENCY = "consistency"  # calc-reachable but never presented
 CYCLE = "cycle"  # calc DAG has a cycle
 EQUITY = "equity"  # form earnings-home concept missing from the balance sheet
+# ── package-integrity categories (Mode C: cross-package soundness) ──
+DRIFT = "drift"  # a RollUp rule no longer matches the calc arcs it mirrors
+REFERENTIAL = "referential"  # a non-FK ref (rule var / style concept) dangles
+CLASSIFICATION = "classification"  # a renderable leaf lacks a primary EFS trait
+BRIDGE = "bridge"  # fac→rs-gaap bridge integrity
 
 
 @dataclass(frozen=True)
@@ -210,6 +215,10 @@ class GapReport:
   totals: FrameworkTotals | None = None
   equity_home: dict[str, tuple[str, bool]] = field(default_factory=dict)
   # form → (close-target qname, present-on-balance-sheet)
+  renderable_leaf_ids: set[str] = field(default_factory=set)  # for package checks
+  bs_leaf_ids: set[str] = field(default_factory=set)  # balance-sheet leaves only
+  package_checks: dict[str, tuple[bool, str]] = field(default_factory=dict)
+  # check name → (passed, one-line detail)
 
   def add(self, finding: Finding) -> None:
     self.findings.append(finding)
@@ -252,7 +261,10 @@ class GapReport:
     gap_types = self._uncomposed_statement_types()
     if gap_types:
       lines.append("  known coverage gaps (no form composes): " + ", ".join(gap_types))
-    if self.totals or self.equity_home or gap_types:
+    for name, (passed, detail) in self.package_checks.items():
+      mark = "ok" if passed else "FAIL"
+      lines.append(f"  package · {name}: {mark} ({detail})")
+    if self.totals or self.equity_home or gap_types or self.package_checks:
       lines.append("")
 
     failed = {(f.form, f.statement) for f in self.errors if f.statement}
@@ -317,6 +329,7 @@ def run_structural(session: Session, styles: dict[str, str]) -> GapReport:
   presentation_leaves: dict[str, str] = {}  # element_id → qname (all statements)
   rollup_leaf_ids: set[str] = set()  # distinct concrete leaves on roll-up stmts
   reachable_leaf_ids: set[str] = set()
+  bs_leaf_ids: set[str] = set()  # balance-sheet leaves (where EFS class is needed)
 
   for form, style_id in styles.items():
     bs_leaf_qnames: set[str] = set()
@@ -338,6 +351,7 @@ def run_structural(session: Session, styles: dict[str, str]) -> GapReport:
         presentation_leaves[node.element_id] = node.qname
       if stmt == "balance_sheet":
         bs_leaf_qnames = {node.qname for node in leaves}
+        bs_leaf_ids |= {node.element_id for node in leaves}
 
       # Roll-forward statements (Statement of Changes in Equity) foot by an
       # opening+movements=closing identity, not by calc-DAG roll-up — their
@@ -374,6 +388,8 @@ def run_structural(session: Session, styles: dict[str, str]) -> GapReport:
     reachable_leaves=len(reachable_leaf_ids),
     off_hierarchy=sum(1 for f in report.warnings if f.category == CONSISTENCY),
   )
+  report.renderable_leaf_ids = rollup_leaf_ids
+  report.bs_leaf_ids = bs_leaf_ids
   return report
 
 
@@ -584,6 +600,190 @@ def _qnames_for(session: Session, element_ids: set[str]) -> dict[str, str]:
 
 def _scalar(session: Session, sql: str) -> int:
   return int(session.execute(text(sql)).scalar() or 0)
+
+
+# ── Mode C: package + bridge integrity (cross-package, against the tenant) ────
+#
+# These span packages, so the per-package seed tests in tests/taxonomy/ don't
+# cover them. They run against the same loaded reference tenant as the
+# structural checks (the packages are seeded into it), so they validate the
+# library *as loaded* — catching seed→load drift, not just authored-file shape.
+
+
+def run_package_integrity(session: Session, report: GapReport) -> None:
+  """Cross-package soundness: rule↔calc, referential integrity, traits, bridge."""
+  element_qnames = {
+    r[0]
+    for r in session.execute(
+      text("SELECT qname FROM elements WHERE qname IS NOT NULL")
+    ).fetchall()
+  }
+  _check_rollup_calc_drift(session, report)
+  _check_referential_integrity(session, element_qnames, report)
+  _check_classification_completeness(session, report)
+  _check_bridge(session, element_qnames, report)
+
+
+def _check_rollup_calc_drift(session: Session, report: GapReport) -> None:
+  """Each seeded RollUp rule's children must equal its parent's calc arcs.
+
+  The rollup-rules package is *generated* from rs-gaap-calculations; if calc is
+  edited without regenerating, the loaded rule silently stops mirroring the
+  DAG it claims to verify. Nothing else checks this on the real seeds.
+  """
+  calc_children: dict[str, set[str]] = {}
+  for parent, child in session.execute(
+    text(
+      "SELECT p.qname, c.qname FROM associations a "
+      "JOIN elements p ON p.id = a.from_element_id "
+      "JOIN elements c ON c.id = a.to_element_id "
+      "WHERE a.association_type = 'calculation'"
+    )
+  ).fetchall():
+    calc_children.setdefault(parent, set()).add(child)
+
+  rules = session.execute(
+    text("SELECT rule_variables FROM rules WHERE rule_pattern = 'RollUp'")
+  ).fetchall()
+  drift = 0
+  for (variables,) in rules:
+    if not variables:
+      continue
+    parent_q = variables[0]["variable_qname"]
+    rule_children = {v["variable_qname"] for v in variables[1:]}
+    calc_kids = calc_children.get(parent_q, set())
+    if rule_children != calc_kids:
+      drift += 1
+      report.add(
+        Finding(
+          severity=ERROR,
+          category=DRIFT,
+          message=(
+            "RollUp rule no longer matches calc arcs "
+            f"(calc-only={len(calc_kids - rule_children)}, "
+            f"rule-only={len(rule_children - calc_kids)}) — regenerate rollup-rules"
+          ),
+          element_qname=parent_q,
+        )
+      )
+  report.package_checks["rollup↔calc"] = (
+    drift == 0,
+    f"{len(rules)} RollUp rules vs calc arcs, {drift} drifted",
+  )
+
+
+def _check_referential_integrity(
+  session: Session, element_qnames: set[str], report: GapReport
+) -> None:
+  """Non-FK references resolve: rule variable qnames + style close-targets.
+
+  Arc endpoints are FK-enforced (a dangling one fails the library load), but
+  rule variables (JSONB) and the reporting-style close-target (a qname string
+  in metadata) are not — they can dangle silently.
+  """
+  dangling = 0
+  for (variables,) in session.execute(
+    text("SELECT rule_variables FROM rules")
+  ).fetchall():
+    for v in variables or []:
+      q = v.get("variable_qname")
+      if q and q not in element_qnames:
+        dangling += 1
+        report.add(
+          Finding(
+            severity=ERROR,
+            category=REFERENTIAL,
+            message="rule references a concept that doesn't exist",
+            element_qname=q,
+          )
+        )
+  for form, style_id in REFERENCE_STYLES.items():
+    close_target = load_close_target_concept(session, style_id)
+    if close_target not in element_qnames:
+      dangling += 1
+      report.add(
+        Finding(
+          severity=ERROR,
+          category=REFERENTIAL,
+          message=f"{form} reporting-style close target doesn't resolve",
+          element_qname=close_target,
+        )
+      )
+  report.package_checks["referential integrity"] = (
+    dangling == 0,
+    f"{dangling} dangling non-FK refs",
+  )
+
+
+def _check_classification_completeness(session: Session, report: GapReport) -> None:
+  """Every *balance-sheet* leaf has a primary EFS classification trait.
+
+  ``guard_rails._validate_balance_sheet`` assigns each BS line to
+  asset/liability/equity by its ``elementsOfFinancialStatements`` trait to test
+  Assets = Liabilities + Equity, so a BS leaf with none breaks that check.
+  Scoped to BS deliberately: cash-flow movement leaves (Payments/Proceeds/…)
+  and flat IS subtotals carry no EFS class and don't need one — requiring it
+  there would be a false positive. (The existing ``LeafHasClassification`` is
+  CoA-side.)
+  """
+  primary_efs = {
+    r[0]
+    for r in session.execute(
+      text(
+        "SELECT et.element_id FROM element_traits et "
+        "JOIN traits t ON t.id = et.trait_id "
+        "WHERE t.category = 'elementsOfFinancialStatements' AND et.is_primary"
+      )
+    ).fetchall()
+  }
+  missing = [e for e in report.bs_leaf_ids if e not in primary_efs]
+  if missing:
+    qnames = _qnames_for(session, set(missing))
+    for element_id in missing:
+      report.add(
+        Finding(
+          severity=ERROR,
+          category=CLASSIFICATION,
+          message="balance-sheet leaf has no primary EFS classification trait",
+          element_qname=qnames.get(element_id),
+        )
+      )
+  report.package_checks["EFS classification"] = (
+    not missing,
+    f"{len(report.bs_leaf_ids)} balance-sheet leaves, {len(missing)} unclassified",
+  )
+
+
+def _check_bridge(
+  session: Session, element_qnames: set[str], report: GapReport
+) -> None:
+  """fac→rs-gaap bridge: report coverage + confirm fallback catch-alls exist.
+
+  Deep bridge *correctness* needs FAC judgment (out of scope here); what's
+  soundly checkable is that the catch-all leaves the bridge/fallback routes to
+  actually exist as concepts — a missing one would make the fallback dangle.
+  """
+  arcs, sources = session.execute(
+    text(
+      "SELECT count(*), count(DISTINCT from_element_id) FROM associations "
+      "WHERE association_type = 'equivalence'"
+    )
+  ).fetchone()
+  missing_catchalls = sorted(q for q in _CATCHALL_LEAVES if q not in element_qnames)
+  for q in missing_catchalls:
+    report.add(
+      Finding(
+        severity=ERROR,
+        category=BRIDGE,
+        message="fallback catch-all leaf does not exist as a concept",
+        element_qname=q,
+      )
+    )
+  report.package_checks["fac→rs-gaap bridge"] = (
+    not missing_catchalls,
+    f"{arcs or 0} equivalence arcs, {sources or 0} fac sources, "
+    f"{len(_CATCHALL_LEAVES)} catch-alls present",
+  )
 
 
 # ── Tree view (--tree) ───────────────────────────────────────────────────────
@@ -825,10 +1025,12 @@ def format_coverage(results: list[CoverageResult]) -> str:
 
 
 def validate_framework(keep: bool = False) -> GapReport:
-  """Provision a reference tenant and run Mode A against it (no tree output)."""
+  """Provision a reference tenant and run the structural + package checks."""
   with reference_tenant(keep=keep) as rt:
     with extensions_session(rt.graph_id) as session:
-      return run_structural(session, rt.styles)
+      report = run_structural(session, rt.styles)
+      run_package_integrity(session, report)
+      return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -866,6 +1068,7 @@ def main(argv: list[str] | None = None) -> int:
   with reference_tenant(keep=args.keep) as rt:
     with extensions_session(rt.graph_id) as session:
       report = run_structural(session, rt.styles)
+      run_package_integrity(session, report)
       if not args.summary:
         print(render_trees(session, rt.styles))
         print()

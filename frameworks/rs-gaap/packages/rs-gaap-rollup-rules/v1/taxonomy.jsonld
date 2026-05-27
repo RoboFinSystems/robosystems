@@ -348,7 +348,7 @@
       "@id": "_:rs-gaap-rollup-cf-financing",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInFinancingActivities = ($ProceedsFromIssuanceOfCommonStock + $ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet)",
+      "ruleExpression": "$NetCashProvidedByUsedInFinancingActivities = ($ProceedsFromIssuanceOfCommonStock + $ProceedsFromIssuanceOfLongTermDebt + $RepaymentsOfLongTermDebt + $PaymentsForRepurchaseOfCommonStock)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
@@ -363,8 +363,16 @@
           "variableQname": "rs-gaap:ProceedsFromIssuanceOfCommonStock"
         },
         {
-          "variableName": "ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet",
-          "variableQname": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet"
+          "variableName": "ProceedsFromIssuanceOfLongTermDebt",
+          "variableQname": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+        },
+        {
+          "variableName": "RepaymentsOfLongTermDebt",
+          "variableQname": "rs-gaap:RepaymentsOfLongTermDebt"
+        },
+        {
+          "variableName": "PaymentsForRepurchaseOfCommonStock",
+          "variableQname": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
         }
       ],
       "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInFinancingActivities = \u03a3 proceeds \u2212 \u03a3 payments",
@@ -375,7 +383,7 @@
       "@id": "_:rs-gaap-rollup-cf-investing",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$NetCashProvidedByUsedInInvestingActivities = ($PaymentsToAcquirePropertyPlantAndEquipment)",
+      "ruleExpression": "$NetCashProvidedByUsedInInvestingActivities = ($PaymentsToAcquirePropertyPlantAndEquipment + $ProceedsFromSaleOfPropertyPlantAndEquipment + $PaymentsToAcquireInvestments + $ProceedsFromSaleMaturityAndCollectionsOfInvestments + $PaymentsToAcquireIntangibleAssets + $ProceedsFromSaleOfIntangibleAssets)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
@@ -388,6 +396,26 @@
         {
           "variableName": "PaymentsToAcquirePropertyPlantAndEquipment",
           "variableQname": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+        },
+        {
+          "variableName": "ProceedsFromSaleOfPropertyPlantAndEquipment",
+          "variableQname": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
+        },
+        {
+          "variableName": "PaymentsToAcquireInvestments",
+          "variableQname": "rs-gaap:PaymentsToAcquireInvestments"
+        },
+        {
+          "variableName": "ProceedsFromSaleMaturityAndCollectionsOfInvestments",
+          "variableQname": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments"
+        },
+        {
+          "variableName": "PaymentsToAcquireIntangibleAssets",
+          "variableQname": "rs-gaap:PaymentsToAcquireIntangibleAssets"
+        },
+        {
+          "variableName": "ProceedsFromSaleOfIntangibleAssets",
+          "variableQname": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
         }
       ],
       "ruleMessage": "Calculation rollup: rs-gaap:NetCashProvidedByUsedInInvestingActivities = \u03a3 Investing leaves (each pre-signed: outflows negative, proceeds positive)",
