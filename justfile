@@ -169,6 +169,10 @@ cf-lint template:
 cf-lint-all:
     @uv run cfn-lint -t cloudformation/*.yaml
 
+# Validate the rs-gaap framework (Mode A) against a fresh reference tenant (pass --tree for the annotated hierarchy)
+framework-validate *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.scripts.framework_validate {{args}}
+
 
 ## Demo Scripts ##
 
