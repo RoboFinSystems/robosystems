@@ -1,14 +1,32 @@
-"""``StatementBundle`` envelope — the design unit shared by both encoder
-families and (eventually) both producers (Report + LiveSnapshot).
+"""``StatementBundle`` envelope — XBRL-aligned shape (v1.0).
 
-The envelope is intentionally format-neutral: the JSON-LD encoder and the
-XBRL 2.1 encoder both consume the same ``StatementBundle`` and emit the
-same fact set in their respective shapes. Mode-tagging
-(``mode='report'`` vs ``mode='live'``) carries the persistence /
-authority semantics — see spec §3 for the importer rejection invariant.
+The bundle is the design unit shared by both encoder families and
+(eventually) both producers (Report + LiveSnapshot). v1.0 of the
+serialization ontology treats the bundle as **XBRL expressed in RDF,
+plus our extensions**:
 
-Phase 1 ships ``build_report_bundle``; Phase 3 will add
-``build_live_bundle`` over the same envelope with no encoder changes.
+* The schema portion (``schema_concepts``) maps 1:1 to XBRL
+  ``<xs:element>`` declarations with ``xbrli:`` attributes.
+* The linkbases portion (``linkbases.presentation_links`` /
+  ``calculation_links`` / ``definition_links``) maps to XBRL
+  ``<link:presentationLink>`` / ``<link:calculationLink>`` /
+  ``<link:definitionLink>`` containers, grouped by ``xlink:role``
+  (the Extended Link Role).
+* The instance portion is XBRL-native: dedupe'd ``contexts`` (one per
+  distinct entity+period combo), dedupe'd ``units``, and ``facts``
+  that reference contexts/units by id via ``xbrli:contextRef`` /
+  ``xbrli:unitRef``. Facts carry the concept qname as their type
+  (``@type: rs-gaap:Assets``) and the value as ``rdf:value`` — matching
+  XBRL's "the element name IS the type tag" pattern.
+
+The ``rs:`` extension surface (IB envelopes, reporting style,
+verification, provenance) carries everything XBRL has no standard
+for. The XBRL 2.1 emitter walks the same bundle, ignores the ``rs:``
+extensions when projecting to XML, and produces a valid XBRL instance
++ linkbase set.
+
+See ``local/docs/specs/bundle-ontology-v1.md`` for the full ontology
+spec including ``@context`` mapping tables and migration path.
 """
 
 from __future__ import annotations
@@ -26,7 +44,13 @@ from robosystems.logger import logger
 
 
 class EntityMeta(BaseModel):
-  """Reporting entity identity carried in the bundle header."""
+  """Reporting entity identity carried in the bundle header.
+
+  This is the org-level entity, not the instance-level
+  ``xbrli:entity`` (which lives on contexts). Customers usually have
+  one entity per graph, so the header carries the canonical identity
+  and contexts reference it via their ``identifier`` field.
+  """
 
   id: str
   name: str
@@ -81,16 +105,29 @@ class LiveMeta(BaseModel):
   non_authoritative: Literal[True] = True
 
 
-# ── Framework slice ────────────────────────────────────────────────────────
+class FrameworkPin(BaseModel):
+  """One framework version pin carried in the bundle header.
+
+  Replaces the flat ``dict[str, str]`` so the JSON-LD output renders
+  as ``[{framework, version}]`` — friendlier to RDF consumers than a
+  bare object map.
+  """
+
+  framework: str
+  version: str
+
+
+# ── Schema concepts (XBRL concept declarations) ────────────────────────────
 
 
 class BundleElement(BaseModel):
-  """A taxonomy element node in the bundle's framework slice.
+  """An XBRL concept declaration carried in the bundle's schema slice.
 
-  Carries only the XBRL-intrinsic attributes the encoders need to emit
-  a self-describing JSON-LD ``rs:Element`` node or an XBRL ``<xs:element>``
-  declaration. Linkbase arcs (parent, summationOf, etc.) live on
-  ``BundleAssociation`` rows, not on the element itself.
+  Maps 1:1 to an ``<xs:element>`` declaration in the XBRL emitter.
+  Attributes use XBRL's vocabulary: ``xbrli:substitutionGroup``,
+  ``xbrli:periodType``, ``xbrli:balance``, ``xsd:type`` (resolved to
+  ``xbrli:monetaryItemType`` or ``xbrli:stringItemType`` based on
+  ``is_monetary``).
   """
 
   id: str
@@ -109,59 +146,112 @@ class BundleElement(BaseModel):
   source: str
 
 
-class BundleAssociation(BaseModel):
-  """A linkbase arc in the bundle's framework slice.
+# ── Linkbases (XBRL linkbase content) ──────────────────────────────────────
 
-  One row per arc — presentation, calculation, definition, label.
+
+class BundleArc(BaseModel):
+  """A single linkbase arc — presentation / calculation / definition.
+
   ``arcrole`` carries the XBRL arcrole URI (e.g.
-  ``http://www.xbrl.org/2003/arcrole/parent-child``); the JSON-LD
-  encoder maps it back to a predicate via ``ARCROLE_MAPPING`` (the
-  inverse of the framework-ingest direction).
+  ``http://www.xbrl.org/2003/arcrole/parent-child``). ``arc_type``
+  is the discriminator the XBRL emitter uses to pick the right
+  ``<link:presentationArc>`` / ``<link:calculationArc>`` /
+  ``<link:definitionArc>`` element. ``weight`` is only meaningful on
+  calculation arcs; null elsewhere.
   """
 
-  structure_id: str
-  from_element_id: str
-  to_element_id: str
+  arc_type: Literal["presentationArc", "calculationArc", "definitionArc"]
   arcrole: str
-  association_type: str
+  from_qname: str
+  to_qname: str
   order_value: float | None = None
   weight: float | None = None
-  role: str | None = None
 
 
-class FrameworkSlice(BaseModel):
-  """The subset of the framework taxonomy referenced by this bundle.
+class BundleLinkbaseLink(BaseModel):
+  """A ``<link:X>`` link wrapping arcs scoped to one Extended Link Role.
 
-  Bundles are self-contained: the slice includes only Elements +
-  Associations actually used by the facts and IB envelopes. A reader
-  can reconstruct the rendered statements + linkbase relationships
-  from the slice alone without dereferencing external taxonomies.
+  Mirrors XBRL XML where each link element wraps arcs for one ELR
+  (``xlink:role``). The JSON-LD encoder emits this as a node with
+  ``@type: link:presentationLink`` (or calc/def). Carries the
+  Structure identity + name + block_type as ``rs:`` extensions so
+  consumers can recover the Network identity.
   """
 
-  elements: list[BundleElement] = Field(default_factory=list)
-  associations: list[BundleAssociation] = Field(default_factory=list)
+  link_type: Literal["presentationLink", "calculationLink", "definitionLink"]
+  role_uri: str
+  structure_id: str
+  structure_name: str
+  block_type: str | None = None
+  arcs: list[BundleArc] = Field(default_factory=list)
 
 
-# ── Fact ───────────────────────────────────────────────────────────────────
+class BundleLinkbases(BaseModel):
+  """The bundle's linkbase content, grouped by link type.
+
+  v1.0 carries presentation / calculation / definition; label and
+  reference linkbases are deferred to v1.1 (labels live on
+  ``BundleElement.label`` for now). Each list is a sequence of
+  link-per-ELR groupings; the XBRL emitter walks each in order.
+  """
+
+  presentation_links: list[BundleLinkbaseLink] = Field(default_factory=list)
+  calculation_links: list[BundleLinkbaseLink] = Field(default_factory=list)
+  definition_links: list[BundleLinkbaseLink] = Field(default_factory=list)
+
+
+# ── Instance: contexts, units, facts ───────────────────────────────────────
+
+
+class BundleContext(BaseModel):
+  """An ``<xbrli:context>`` — one per distinct (entity, period) combo.
+
+  Dedupe'd at the bundle level so the JSON-LD output has a flat
+  ``xbrli:context`` array and the XBRL emitter writes a clean set of
+  ``<xbrli:context id="...">`` elements. Facts reference contexts by
+  id via ``xbrli:contextRef``.
+
+  ``entity_scheme`` defaults to RoboSystems' native scheme; SEC-sourced
+  entities preserve their CIK scheme. ``period_start`` is null for
+  instant periods (the period IS ``period_end`` in that case).
+  """
+
+  id: str
+  entity_identifier: str
+  entity_scheme: str = "http://robosystems.ai/entity"
+  period_start: date | None = None
+  period_end: date
+  period_type: Literal["duration", "instant"]
+
+
+class BundleUnit(BaseModel):
+  """An ``<xbrli:unit>`` — one per distinct measure.
+
+  v1.0 carries simple-measure units only (e.g., ``iso4217:USD``).
+  Complex units (per-share with divide, ratios) are deferred until a
+  customer needs them.
+  """
+
+  id: str
+  measure: str
 
 
 class BundleFact(BaseModel):
   """A single Fact node in the bundle.
 
-  The round-trip fidelity bar is at this granularity: every Fact in
-  the source must emit a Fact with matching (concept, period, unit,
-  value) on the way out. ``decimals`` follows XBRL convention
-  (``"INF"`` for exact integers, integer N for N-decimal precision).
+  Carries the value + decimals + references into contexts/units; the
+  period and unit data live on the referenced ``BundleContext`` /
+  ``BundleUnit`` objects. The round-trip fidelity bar is at this
+  granularity: every Fact in the source emits a Fact with matching
+  (concept, contextRef → period, unitRef → unit, value, decimals).
   """
 
   id: str
   element_id: str
   element_qname: str
   value: float
-  period_start: date
-  period_end: date
-  period_type: Literal["duration", "instant"]
-  unit: str = "USD"
+  context_ref: str
+  unit_ref: str
   decimals: str = "INF"
   fact_set_id: str | None = None
   structure_id: str | None = None
@@ -177,12 +267,13 @@ class StatementBundle(BaseModel):
   S3-stamped at publish; ``mode='live'`` bundles carry ``live_meta``,
   are response-body-only, and are rejected by the (future) importer
   by construction. The mode discriminator is a first-class JSON-LD
-  type, not a flag — see spec §3 for the structural enforcement.
+  type, not a flag — see ``bundle-ontology-v1.md`` §4 for the
+  structural enforcement.
 
   ``ib_envelopes`` reuses :class:`InformationBlockEnvelope` from
   ``models/api/information_block.py`` directly. This is intentional
   coupling: the IB envelope is the canonical shape the read APIs
-  already serve, and round-tripping requires the same shape.
+  already serve.
   """
 
   model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -191,10 +282,20 @@ class StatementBundle(BaseModel):
   entity: EntityMeta
   periods: list[PeriodMeta]
   reporting_style: str
-  framework_pins: dict[str, str]
+  framework_pins: list[FrameworkPin]
 
-  # Body
-  framework_slice: FrameworkSlice
+  # Schema (XBRL concept declarations)
+  schema_concepts: list[BundleElement]
+
+  # Linkbases (XBRL linkbase content, grouped by link type + ELR)
+  linkbases: BundleLinkbases
+
+  # Instance — XBRL contexts, units, facts (dedupe'd at producer time)
+  contexts: list[BundleContext]
+  units: list[BundleUnit]
+  facts: list[BundleFact]
+
+  # IB envelopes (RS extension — no XBRL equivalent)
   ib_envelopes: list[Any] = Field(
     default_factory=list,
     description=(
@@ -203,7 +304,6 @@ class StatementBundle(BaseModel):
       "consumes each as a Pydantic-dumpable mapping."
     ),
   )
-  facts: list[BundleFact]
 
   # Mode discriminator + arm
   mode: Literal["report", "live"]
@@ -225,6 +325,38 @@ _STATEMENT_BLOCK_TYPES: tuple[str, ...] = (
   "equity_statement",
 )
 
+# Map our internal ``association_type`` enum to the XBRL linkbase
+# grouping it lives in. Presentation arcs stay on presentation; calc
+# stays on calc; everything else (equivalence, general-special,
+# derivation, essence-alias) lives on the definition linkbase per XBRL
+# Dimensions / XBRL 2.1 conventions.
+_LINKBASE_GROUP_FOR_TYPE: dict[
+  str, Literal["presentation", "calculation", "definition"]
+] = {
+  "presentation": "presentation",
+  "calculation": "calculation",
+  "equivalence": "definition",
+  "general-special": "definition",
+  "derivation": "definition",
+  "essence-alias": "definition",
+  "mapping": "definition",
+}
+
+# XBRL standard arcrole URIs — used as the default when our DB rows
+# don't carry an explicit arcrole. The inverse direction lives in
+# ``arelle/extractor.py:ARCROLE_MAPPING`` (used during framework
+# ingest); these are the export direction.
+_DEFAULT_ARCROLE_FOR_TYPE: dict[str, str] = {
+  "presentation": "http://www.xbrl.org/2003/arcrole/parent-child",
+  "calculation": "http://www.xbrl.org/2003/arcrole/summation-item",
+  "general-special": "http://www.xbrl.org/2003/arcrole/general-special",
+  "essence-alias": "http://www.xbrl.org/2003/arcrole/essence-alias",
+  "equivalence": (
+    "http://xbrlsite.azurewebsites.net/2016/conceptual-model/"
+    "arcrole/class-equivalentClass"
+  ),
+}
+
 
 def build_report_bundle(
   session: Session,
@@ -240,6 +372,14 @@ def build_report_bundle(
   for an explicit ``session.flush()`` before invoking so pending Fact
   rows are visible to ORM reads inside the assembler. ORM-only reads —
   no raw SQL pulls of newly-persisted rows.
+
+  Assembly produces the XBRL-aligned shape per
+  ``bundle-ontology-v1.md`` §4: concepts in ``schema_concepts``;
+  arcs grouped into ``linkbases.{presentation,calculation,definition}_links``
+  by association_type, with each link wrapping arcs scoped to one
+  Structure (ELR); contexts dedupe'd by (entity, period); units
+  dedupe'd by measure; facts hold context/unit refs instead of inline
+  period/unit values.
 
   Args:
     session: Extensions session with tenant search_path active.
@@ -263,6 +403,7 @@ def build_report_bundle(
   from robosystems.models.extensions.roboledger.fact import Fact
   from robosystems.models.extensions.roboledger.fact_set import FactSet
   from robosystems.models.extensions.roboledger.report import Report
+  from robosystems.models.extensions.structure import Structure
   from robosystems.operations.information_block.statement import (
     _build_statement_envelope,
   )
@@ -287,7 +428,11 @@ def build_report_bundle(
     if graph is None:
       raise LookupError(f"Graph {graph_id!r} not found in platform DB.")
     reporting_style_id = str(graph.reporting_style_id)
-    framework_pins = resolve_pin(graph)
+    framework_pin_dict = resolve_pin(graph)
+  framework_pins = [
+    FrameworkPin(framework=name, version=ver)
+    for name, ver in framework_pin_dict.items()
+  ]
 
   fact_sets: list[FactSet] = list(
     session.execute(select(FactSet).where(FactSet.report_id == report_id)).scalars()
@@ -303,8 +448,7 @@ def build_report_bundle(
       session.execute(select(Fact).where(Fact.fact_set_id.in_(fact_set_ids))).scalars()
     )
 
-  # Framework slice — Elements referenced by facts + Associations on the
-  # structures the bundle covers. Both queries are bounded by the
+  # Schema concepts — Elements referenced by facts. Bounded by the
   # report's own structures + element ids; bundle stays self-contained.
   element_ids: set[str] = {str(f.element_id) for f in facts}
   elements_by_id: dict[str, Element] = {}
@@ -320,12 +464,19 @@ def build_report_bundle(
     str(fs.structure_id) for fs in fact_sets if fs.structure_id
   }
   associations: list[Association] = []
+  structures_by_id: dict[str, Structure] = {}
   if structure_ids:
     associations = list(
       session.execute(
         select(Association).where(Association.structure_id.in_(structure_ids))
       ).scalars()
     )
+    structures_by_id = {
+      str(s.id): s
+      for s in session.execute(
+        select(Structure).where(Structure.id.in_(structure_ids))
+      ).scalars()
+    }
     # Pick up any additional Elements referenced only via association
     # endpoints (parents / subtotals with no facts of their own).
     assoc_element_ids: set[str] = {str(a.from_element_id) for a in associations} | {
@@ -345,10 +496,6 @@ def build_report_bundle(
     try:
       network = get_render_network(session, reporting_style_id, block_type)
     except Exception as exc:
-      # Not all Reporting Styles compose every statement type
-      # (equity / comprehensive-income are commonly absent on the
-      # default style). Skip gracefully — the bundle still wraps what
-      # the report rendered.
       logger.debug(
         "build_report_bundle: skipping %s — no render network: %s",
         block_type,
@@ -374,30 +521,46 @@ def build_report_bundle(
   if entity is None:
     raise LookupError("No entity rows in tenant — Report cannot be bundled.")
 
+  entity_meta = EntityMeta(
+    id=str(entity.id),
+    name=str(entity.name),
+    legal_name=entity.legal_name,
+    ein=entity.tax_id,
+    country=entity.address_country,
+  )
+
+  schema_concepts = [
+    _element_to_bundle(elements_by_id[eid]) for eid in sorted(elements_by_id)
+  ]
+  linkbases = _associations_to_linkbases(associations, structures_by_id)
+  contexts, context_ref_for_fact = _mint_contexts(facts, entity_meta)
+  units, unit_ref_for_fact = _mint_units(facts)
+  bundle_facts = [
+    _fact_to_bundle(
+      f,
+      elements_by_id.get(str(f.element_id)),
+      context_ref_for_fact[str(f.id)],
+      unit_ref_for_fact[str(f.id)],
+    )
+    for f in facts
+  ]
+
   return StatementBundle(
-    entity=EntityMeta(
-      id=entity.id,
-      name=entity.name,
-      legal_name=entity.legal_name,
-      ein=entity.tax_id,
-      country=entity.address_country,
-    ),
+    entity=entity_meta,
     periods=_period_metas_for_report(report, fact_sets),
     reporting_style=reporting_style_id,
     framework_pins=framework_pins,
-    framework_slice=FrameworkSlice(
-      elements=[
-        _element_to_bundle(elements_by_id[eid]) for eid in sorted(elements_by_id)
-      ],
-      associations=[_association_to_bundle(a) for a in associations],
-    ),
+    schema_concepts=schema_concepts,
+    linkbases=linkbases,
+    contexts=contexts,
+    units=units,
+    facts=bundle_facts,
     ib_envelopes=ib_envelopes,
-    facts=[_fact_to_bundle(f, elements_by_id.get(f.element_id)) for f in facts],
     mode="report",
     report_meta=ReportMeta(
-      report_id=report.id,
-      generation_count=report.generation_count,
-      filing_status=report.filing_status,
+      report_id=str(report.id),
+      generation_count=int(report.generation_count or 0),
+      filing_status=str(report.filing_status),
       filed_at=report.filed_at,
       supersedes_id=report.supersedes_id,
       source_graph_id=report.source_graph_id,
@@ -470,45 +633,211 @@ def _period_metas_for_report(report: Any, fact_sets: list[Any]) -> list[PeriodMe
 
 def _element_to_bundle(e: Any) -> BundleElement:
   return BundleElement(
-    id=e.id,
-    qname=e.qname or e.name,
+    id=str(e.id),
+    qname=str(e.qname or e.name),
     namespace=e.namespace,
-    name=e.name,
+    name=str(e.name),
     label=e.description,
     balance_type=e.balance_type if e.balance_type in {"debit", "credit"} else None,
-    period_type=e.period_type,
-    is_abstract=e.is_abstract,
-    is_monetary=e.is_monetary,
-    element_type=e.element_type,
+    period_type=str(e.period_type),
+    is_abstract=bool(e.is_abstract),
+    is_monetary=bool(e.is_monetary),
+    element_type=str(e.element_type),
     substitution_group=e.substitution_group,
-    source=e.source,
+    source=str(e.source),
   )
 
 
-def _association_to_bundle(a: Any) -> BundleAssociation:
-  return BundleAssociation(
-    structure_id=a.structure_id,
-    from_element_id=a.from_element_id,
-    to_element_id=a.to_element_id,
-    arcrole=a.arcrole or "",
-    association_type=a.association_type,
-    order_value=a.order_value,
-    weight=a.weight,
-    role=(a.metadata_ or {}).get("role"),
+def _associations_to_linkbases(
+  associations: list[Any],
+  structures_by_id: dict[str, Any],
+) -> BundleLinkbases:
+  """Group raw Association rows into XBRL-aligned linkbase containers.
+
+  Buckets by ``association_type`` → linkbase group (presentation /
+  calculation / definition), then by ``structure_id`` (the ELR) within
+  each bucket. Each unique ``(group, structure_id)`` pair becomes one
+  ``BundleLinkbaseLink``; arcs sort by ``(order_value, from_qname,
+  to_qname)`` so the JSON-LD output is deterministic.
+  """
+  # First pass: bucket arcs by (group, structure_id)
+  buckets: dict[tuple[str, str], list[tuple[Any, str]]] = {}
+  for a in associations:
+    group = _LINKBASE_GROUP_FOR_TYPE.get(str(a.association_type))
+    if group is None:
+      logger.debug("Skipping association with unknown type %r", a.association_type)
+      continue
+    key = (group, str(a.structure_id))
+    buckets.setdefault(key, []).append((a, group))
+
+  presentation_links: list[BundleLinkbaseLink] = []
+  calculation_links: list[BundleLinkbaseLink] = []
+  definition_links: list[BundleLinkbaseLink] = []
+
+  # Element id → qname lookup for arc endpoints. Built lazily from
+  # association data; we don't have direct Element rows here so endpoints
+  # carry the raw id which gets resolved at encoding time. Instead store
+  # the from/to *element_id* on the arc and let encoders look up the
+  # qname from the bundle's schema_concepts. Simpler: use element_id as
+  # the qname placeholder for now; encoder swaps to actual qname via the
+  # schema lookup. (This is the only place producer↔encoder coupling
+  # leaks; documented as such.)
+  for (group, structure_id), arc_rows in buckets.items():
+    structure = structures_by_id.get(structure_id)
+    role_uri = ""
+    structure_name = ""
+    block_type: str | None = None
+    if structure is not None:
+      metadata = structure.metadata_ or {}
+      role_uri = str(metadata.get("role_uri") or "")
+      structure_name = str(structure.name or "")
+      block_type = str(structure.block_type) if structure.block_type else None
+
+    arc_type_for_group: dict[
+      str, Literal["presentationArc", "calculationArc", "definitionArc"]
+    ] = {
+      "presentation": "presentationArc",
+      "calculation": "calculationArc",
+      "definition": "definitionArc",
+    }
+    arcs = sorted(
+      (
+        BundleArc(
+          arc_type=arc_type_for_group[group],
+          arcrole=(
+            str(a.arcrole)
+            if a.arcrole
+            else _DEFAULT_ARCROLE_FOR_TYPE.get(str(a.association_type), "")
+          ),
+          from_qname=str(a.from_element_id),
+          to_qname=str(a.to_element_id),
+          order_value=float(a.order_value) if a.order_value is not None else None,
+          weight=(
+            float(a.weight) if a.weight is not None and group == "calculation" else None
+          ),
+        )
+        for a, _ in arc_rows
+      ),
+      key=lambda arc: (
+        arc.order_value if arc.order_value is not None else 0.0,
+        arc.from_qname,
+        arc.to_qname,
+      ),
+    )
+
+    link_type_for_group: dict[
+      str, Literal["presentationLink", "calculationLink", "definitionLink"]
+    ] = {
+      "presentation": "presentationLink",
+      "calculation": "calculationLink",
+      "definition": "definitionLink",
+    }
+    link = BundleLinkbaseLink(
+      link_type=link_type_for_group[group],
+      role_uri=role_uri,
+      structure_id=structure_id,
+      structure_name=structure_name,
+      block_type=block_type,
+      arcs=arcs,
+    )
+    if group == "presentation":
+      presentation_links.append(link)
+    elif group == "calculation":
+      calculation_links.append(link)
+    else:
+      definition_links.append(link)
+
+  presentation_links.sort(key=lambda lk: (lk.role_uri, lk.structure_id))
+  calculation_links.sort(key=lambda lk: (lk.role_uri, lk.structure_id))
+  definition_links.sort(key=lambda lk: (lk.role_uri, lk.structure_id))
+  return BundleLinkbases(
+    presentation_links=presentation_links,
+    calculation_links=calculation_links,
+    definition_links=definition_links,
   )
 
 
-def _fact_to_bundle(f: Any, element: Any | None) -> BundleFact:
+def _mint_contexts(
+  facts: list[Any],
+  entity_meta: EntityMeta,
+) -> tuple[list[BundleContext], dict[str, str]]:
+  """Dedupe facts' (entity, period) tuples into a flat context array.
+
+  Returns ``(contexts, fact_id_to_context_ref)`` so the caller can
+  populate ``BundleFact.context_ref`` without re-walking the facts.
+  Context ids are stable: ``ctx_1``, ``ctx_2``, … assigned in
+  first-seen order. Encoders consume the same ids.
+
+  v1.0 assumes one entity per bundle (matches the single-entity
+  assumption in ``_get_entity_id``); when consolidation lands, this
+  helper accepts per-fact entity overrides.
+  """
+  seen: dict[tuple[str, date | None, date, str], str] = {}
+  contexts: list[BundleContext] = []
+  fact_to_ref: dict[str, str] = {}
+  for f in facts:
+    period_start = f.period_start
+    period_end = f.period_end
+    period_type = "instant" if period_start is None else "duration"
+    key = (entity_meta.id, period_start, period_end, period_type)
+    if key not in seen:
+      ctx_id = f"ctx_{len(contexts) + 1}"
+      seen[key] = ctx_id
+      contexts.append(
+        BundleContext(
+          id=ctx_id,
+          entity_identifier=entity_meta.id,
+          period_start=period_start,
+          period_end=period_end,
+          period_type=period_type,  # type: ignore[arg-type]
+        )
+      )
+    fact_to_ref[str(f.id)] = seen[key]
+  return contexts, fact_to_ref
+
+
+def _mint_units(facts: list[Any]) -> tuple[list[BundleUnit], dict[str, str]]:
+  """Dedupe facts' units into a flat unit array.
+
+  v1.0 supports simple-measure units only. ``unit`` strings like
+  ``USD`` resolve to ``iso4217:USD``; non-currency units pass through
+  as-is (e.g., ``shares`` → ``xbrli:shares``). Encoders apply final
+  prefix resolution.
+  """
+  seen: dict[str, str] = {}
+  units: list[BundleUnit] = []
+  fact_to_ref: dict[str, str] = {}
+  for f in facts:
+    raw_unit = str(f.unit or "USD")
+    # Currency codes get the iso4217: prefix; anything else passes
+    # through unchanged for the encoder to handle.
+    measure = (
+      f"iso4217:{raw_unit}" if len(raw_unit) == 3 and raw_unit.isupper() else raw_unit
+    )
+    if measure not in seen:
+      unit_id = f"u_{raw_unit}" if len(raw_unit) == 3 else f"u_{len(units) + 1}"
+      seen[measure] = unit_id
+      units.append(BundleUnit(id=unit_id, measure=measure))
+    fact_to_ref[str(f.id)] = seen[measure]
+  return units, fact_to_ref
+
+
+def _fact_to_bundle(
+  f: Any,
+  element: Any | None,
+  context_ref: str,
+  unit_ref: str,
+) -> BundleFact:
   return BundleFact(
-    id=f.id,
-    element_id=f.element_id,
-    element_qname=(element.qname if element and element.qname else f.element_id),
-    value=f.value,
-    period_start=f.period_start or f.period_end,
-    period_end=f.period_end,
-    period_type=f.period_type,
-    unit=f.unit,
+    id=str(f.id),
+    element_id=str(f.element_id),
+    element_qname=(
+      str(element.qname) if element and element.qname else str(f.element_id)
+    ),
+    value=float(f.value),
+    context_ref=context_ref,
+    unit_ref=unit_ref,
     decimals="INF",
-    fact_set_id=f.fact_set_id,
-    structure_id=f.structure_id,
+    fact_set_id=str(f.fact_set_id) if f.fact_set_id else None,
+    structure_id=str(f.structure_id) if f.structure_id else None,
   )
