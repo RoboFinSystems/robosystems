@@ -1,20 +1,23 @@
 """RoboLedger serialization bundle downloads.
 
-REST GET endpoints that return short-lived presigned URLs to S3-stamped
-serialization artifacts. Sibling to ``operations.py`` (command writes),
-``reads.py`` (OLTP analytical reads), and ``views.py`` (graph-backed
-reads). Downloads are simple lookups — they don't carry the
-``OperationEnvelope`` shape, don't need idempotency keys, and don't
-mutate state. They live here rather than under ``/operations/`` so the
-URL semantics stay aligned with the REST resource (``/reports/{id}``)
-rather than dressing up as an operation.
+REST GET endpoints that return serialization artifacts. Sibling to
+``operations.py`` (command writes), ``reads.py`` (OLTP analytical
+reads), and ``views.py`` (graph-backed reads). Downloads are simple
+lookups — they don't carry the ``OperationEnvelope`` shape, don't
+need idempotency keys, and don't mutate state. They live here rather
+than under ``/operations/`` so the URL semantics stay aligned with
+the REST resource (``/reports/{id}``) rather than dressing up as an
+operation.
 
-Currently exposes one route, with the format-family enum scaffolded so
-the XBRL flavor (Phase 1b) drops in by extending the dispatch arm:
-
-* ``GET /extensions/roboledger/{graph_id}/reports/{report_id}/download``
-  — returns a presigned URL to the stamped JSON-LD bundle, gated by
-  the same per-graph access dependency as the rest of the extension.
+* ``GET .../reports/{id}/download?format=jsonld`` — returns a JSON
+  envelope with a short-lived presigned URL to the stamped JSON-LD
+  bundle in S3. The bundle is generated at publish time and reused
+  across downloads.
+* ``GET .../reports/{id}/download?format=xbrl-2.1`` — rebuilds the
+  bundle on-demand and streams an XBRL 2.1 zip directly. Not stored
+  (per spec §7); the cost of regenerating per download is acceptable
+  for v1.0 — Phase 2 introduces an async pre-generate path if
+  profiling reveals latency issues at scale.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import ProgrammingError
 
@@ -37,7 +41,12 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.core import User
 from robosystems.models.extensions.roboledger.report import Report
 from robosystems.operations.aws.s3 import S3Client
-from robosystems.operations.serialization import RdfFlavor
+from robosystems.operations.serialization import (
+  RdfFlavor,
+  XbrlFlavor,
+  build_report_bundle,
+  serialize_to_xbrl,
+)
 from robosystems.routers.extensions.roboledger.operations import _ledger_404
 
 router = APIRouter()
@@ -52,12 +61,22 @@ _require_roboledger = require_graph_extension("roboledger")
 _PRESIGN_DEFAULT_SECONDS = 300
 _PRESIGN_MAX_SECONDS = 3600
 
+# All format values the endpoint understands. Combines both encoder
+# families so the dispatch logic has a single source of truth.
+_ALL_FORMATS: tuple[str, ...] = tuple(
+  [f.value for f in RdfFlavor] + [f.value for f in XbrlFlavor]
+)
+
 
 class ReportBundleDownloadResponse(BaseModel):
   """Presigned-URL response for a Report bundle download.
 
   Mirrors :class:`BackupDownloadUrlResponse` in shape — the frontend
   treats both the same way (fetch, follow URL, GET the artifact).
+
+  Only returned for RDF-family flavors (JSON-LD) where the artifact
+  is stored in S3. XBRL flavors stream the binary content directly
+  in the response body (no JSON wrapper).
   """
 
   download_url: str = Field(
@@ -83,15 +102,34 @@ class ReportBundleDownloadResponse(BaseModel):
 
 @router.get(
   "/reports/{report_id}/download",
-  response_model=ReportBundleDownloadResponse,
+  # Response shape varies by format query param (JSON envelope for RDF
+  # flavors, binary zip for XBRL flavors). FastAPI can't auto-derive a
+  # single response model from a Union[JSON, binary]; opt out of
+  # auto-derivation and document the two responses explicitly below.
+  response_model=None,
+  responses={
+    200: {
+      "description": (
+        "JSON envelope (RDF flavors) or zip stream (XBRL flavors); see "
+        "``format`` query parameter."
+      ),
+      "content": {
+        "application/json": {
+          "schema": ReportBundleDownloadResponse.model_json_schema()
+        },
+        "application/zip": {"schema": {"type": "string", "format": "binary"}},
+      },
+    },
+  },
   operation_id="getReportBundleDownloadUrl",
   summary="Download Report bundle",
   description=(
-    "Return a short-lived presigned URL to the published Report's "
-    "serialization bundle. JSON-LD (default) is stored at publish; "
-    "additional flavors slot in as Phase 1b/Phase 4 work. 404 when "
-    "the Report exists but has no bundle (published before the "
-    "serialization feature shipped)."
+    "Return the published Report's serialization bundle. ``format=jsonld`` "
+    "(default) returns a JSON envelope containing a short-lived presigned "
+    "URL to the stamped JSON-LD bundle in S3. ``format=xbrl-2.1`` rebuilds "
+    "the bundle on-demand and streams an XBRL 2.1 zip directly. 404 when "
+    "the Report has no stamped bundle (published before the serialization "
+    "feature shipped — JSON-LD only)."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -106,8 +144,10 @@ async def get_report_bundle_download_url(
   format: str = Query(
     RdfFlavor.JSONLD.value,
     description=(
-      "Serialization flavor. ``jsonld`` returns the stored JSON-LD "
-      "artifact. XBRL flavors arrive in Phase 1b."
+      "Serialization flavor. ``jsonld`` returns a presigned URL to the "
+      "stored JSON-LD bundle; ``xbrl-2.1`` streams a freshly-emitted "
+      "XBRL zip directly. Other RDF / XBRL flavors slot in as their "
+      "producers ship."
     ),
   ),
   expires_in: int = Query(
@@ -115,26 +155,44 @@ async def get_report_bundle_download_url(
     ge=60,
     le=_PRESIGN_MAX_SECONDS,
     description=(
-      f"Presigned URL lifetime in seconds (min 60, max {_PRESIGN_MAX_SECONDS})."
+      f"Presigned URL lifetime in seconds (min 60, max {_PRESIGN_MAX_SECONDS}). "
+      f"Ignored for XBRL flavors (streamed directly, no URL)."
     ),
   ),
   _user: User = Depends(get_current_user_with_graph),
   _ext: GraphExtensionContext = Depends(_require_roboledger),
-) -> ReportBundleDownloadResponse:
-  # Phase 1a only the JSON-LD flavor is downloadable; other flavors
-  # are reserved enum values until their producers land. Surface a
-  # specific 400 rather than a generic 404 so the client knows the
-  # report exists but the flavor isn't supported yet.
-  try:
-    flavor = RdfFlavor(format)
-  except ValueError:
-    raise HTTPException(
-      status_code=400,
-      detail=(
-        f"Unsupported format '{format}'. Supported flavors: "
-        f"{', '.join(f.value for f in RdfFlavor)}."
-      ),
+) -> ReportBundleDownloadResponse | Response:
+  if format in {f.value for f in RdfFlavor}:
+    return _download_rdf(
+      graph_id=graph_id,
+      report_id=report_id,
+      flavor=RdfFlavor(format),
+      expires_in=expires_in,
     )
+  if format in {f.value for f in XbrlFlavor}:
+    return _download_xbrl(
+      graph_id=graph_id,
+      report_id=report_id,
+      flavor=XbrlFlavor(format),
+    )
+  raise HTTPException(
+    status_code=400,
+    detail=(
+      f"Unsupported format '{format}'. Supported flavors: {', '.join(_ALL_FORMATS)}."
+    ),
+  )
+
+
+# ── RDF-family download (presigned URL response) ─────────────────────────
+
+
+def _download_rdf(
+  graph_id: str,
+  report_id: str,
+  flavor: RdfFlavor,
+  expires_in: int,
+) -> ReportBundleDownloadResponse:
+  """JSON-LD path — return a presigned URL to the stored S3 bundle."""
   if flavor is not RdfFlavor.JSONLD:
     raise HTTPException(
       status_code=400,
@@ -155,9 +213,6 @@ async def get_report_bundle_download_url(
             f"Regenerate the report to produce a bundle."
           ),
         )
-      # Project the ORM-loaded values into locals before the session
-      # closes — Report becomes detached on context exit, and any
-      # lazy attribute access after that raises DetachedInstanceError.
       bundle_uri = str(report.bundle_url)
       generation_count = int(report.generation_count or 0)
   except ProgrammingError:
@@ -165,9 +220,6 @@ async def get_report_bundle_download_url(
 
   bucket, key = _parse_s3_uri(bundle_uri)
   if bucket is None or key is None:
-    # Bundle URL stamped but malformed — internal data integrity issue,
-    # not a client error. 500 with a generic message; logs carry the
-    # specific URL.
     raise HTTPException(
       status_code=500,
       detail="Bundle URL is malformed; cannot generate download link.",
@@ -195,6 +247,52 @@ async def get_report_bundle_download_url(
     format=flavor.value,
     generation_count=generation_count,
   )
+
+
+# ── XBRL-family download (binary stream response) ────────────────────────
+
+
+def _download_xbrl(
+  graph_id: str,
+  report_id: str,
+  flavor: XbrlFlavor,
+) -> Response:
+  """XBRL path — rebuild bundle, emit zip, stream directly.
+
+  Per spec §7 Phase 1b: XBRL is on-demand emit, not stored. The cost
+  of regenerating on each download is acceptable at v1.0 scale; Phase
+  2 introduces an async pre-generate + S3-stamp path if profiling
+  reveals latency issues.
+  """
+  try:
+    with extensions_session(graph_id) as session:
+      report = session.get(Report, report_id)
+      if report is None:
+        raise HTTPException(status_code=404, detail=f"Report '{report_id}' not found.")
+      generation_count = int(report.generation_count or 0)
+      bundle = build_report_bundle(session, graph_id, report_id)
+  except ProgrammingError:
+    raise _ledger_404()
+  except LookupError as exc:
+    # build_report_bundle raises LookupError for missing report / graph;
+    # the latter shouldn't be possible since we just resolved Report, but
+    # surface explicitly so tests catch any drift.
+    raise HTTPException(status_code=404, detail=str(exc))
+
+  zip_bytes = serialize_to_xbrl(bundle, flavor)
+  filename = f"{report_id}-g{generation_count}.zip"
+  return Response(
+    content=zip_bytes,
+    media_type="application/zip",
+    headers={
+      "Content-Disposition": f'attachment; filename="{filename}"',
+      "X-Bundle-Format": flavor.value,
+      "X-Bundle-Generation": str(generation_count),
+    },
+  )
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
 
 
 def _parse_s3_uri(uri: str) -> tuple[str | None, str | None]:
