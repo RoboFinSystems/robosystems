@@ -34,6 +34,7 @@ from sqlalchemy import (
   Float,
   ForeignKey,
   Index,
+  Integer,
   String,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -75,10 +76,15 @@ class Report(ExtensionsBase):
   # When set, overrides period_start/period_end/comparative for fact generation.
   periods = Column(JSONB, nullable=True)
 
-  # Generated output references
+  # Generated output references. ``generation_count`` monotonically
+  # increments on each (re)generation so the exported bundle in object
+  # storage stays addressable per-version; ``bundle_url`` points at the
+  # latest exported JSON-LD artifact (null pre-serialization-feature).
   graph_report_id = Column(String, nullable=True)
   last_generated = Column(DateTime, nullable=True)
   generation_status = Column(String, nullable=False, default="pending")
+  generation_count = Column(Integer, nullable=False, default=0, server_default="0")
+  bundle_url = Column(String, nullable=True)
 
   # Filing lifecycle — orthogonal to generation_status. ``filed`` is
   # the immutable locked state; ``archived`` is for superseded versions.
