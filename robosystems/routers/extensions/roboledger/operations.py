@@ -1764,6 +1764,8 @@ async def regenerate_report_op(
           raise HTTPException(
             status_code=403, detail="Not authorized to modify this report."
           )
+        except InvalidFilingTransitionError as e:
+          raise HTTPException(status_code=422, detail=str(e))
         except ValueError as e:
           raise HTTPException(status_code=422, detail=str(e))
     except (ValueError, ProgrammingError):

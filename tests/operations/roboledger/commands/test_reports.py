@@ -5,10 +5,16 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.operations.roboledger.commands.reports import (
+  InvalidFilingTransitionError,
+  NotAuthorizedError,
+  ReportNotFoundError,
   _build_structure_mapping,
   _persist_report_facts,
   _pre_create_report_fact_sets,
+  regenerate_report,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
   NoNetworkForStatementTypeError,
@@ -254,3 +260,84 @@ def test_pre_create_report_fact_sets_noop_on_empty_inputs() -> None:
     {},
   )
   assert session2.add.call_count == 0
+
+
+# ── regenerate_report filing-status gate ──────────────────────────────────
+
+
+class _FakeReport:
+  """Stand-in for a `Report` row — only the fields the gate inspects."""
+
+  def __init__(
+    self,
+    report_id: str,
+    *,
+    created_by: str = "usr_test",
+    filing_status: str = "draft",
+  ) -> None:
+    self.id = report_id
+    self.created_by = created_by
+    self.filing_status = filing_status
+
+
+def _session_with_report(report: _FakeReport | None) -> MagicMock:
+  session = MagicMock()
+  session.get.return_value = report
+  return session
+
+
+def test_regenerate_report_raises_not_found_when_missing() -> None:
+  session = _session_with_report(None)
+  body = MagicMock()
+  with pytest.raises(ReportNotFoundError):
+    regenerate_report(session, "kg_demo", "rpt_missing", body, "usr_test")
+
+
+def test_regenerate_report_raises_not_authorized_when_owner_mismatch() -> None:
+  report = _FakeReport("rpt_01", created_by="usr_owner", filing_status="draft")
+  session = _session_with_report(report)
+  body = MagicMock()
+  with pytest.raises(NotAuthorizedError):
+    regenerate_report(session, "kg_demo", "rpt_01", body, "usr_other")
+
+
+def test_regenerate_report_raises_on_filed_report() -> None:
+  """Filed Reports are immutable — regenerate would silently mutate
+  stamped facts + published bundle. Restate instead."""
+  report = _FakeReport("rpt_01", created_by="usr_test", filing_status="filed")
+  session = _session_with_report(report)
+  body = MagicMock()
+  with pytest.raises(InvalidFilingTransitionError) as exc:
+    regenerate_report(session, "kg_demo", "rpt_01", body, "usr_test")
+  assert "filed" in str(exc.value)
+  assert "supersedes_id" in str(exc.value)
+
+
+def test_regenerate_report_raises_on_archived_report() -> None:
+  """Archived Reports were filed-then-archived — the bundle is still
+  the audit-of-record. Regenerate would orphan downstream references."""
+  report = _FakeReport("rpt_01", created_by="usr_test", filing_status="archived")
+  session = _session_with_report(report)
+  body = MagicMock()
+  with pytest.raises(InvalidFilingTransitionError):
+    regenerate_report(session, "kg_demo", "rpt_01", body, "usr_test")
+
+
+def test_regenerate_report_allows_draft() -> None:
+  """``draft`` is the pre-publish state — regeneration is free; the
+  gate must not bite. The full re-run path requires reporting-style /
+  fact-grid / S3 wiring not modelled here, so we assert the
+  gate-check passes by letting the function blow up *after* it on a
+  missing collaborator and matching that signature instead."""
+  report = _FakeReport("rpt_01", created_by="usr_test", filing_status="draft")
+  session = _session_with_report(report)
+  body = MagicMock()
+  # ``periods`` attribute access on the MagicMock body succeeds, but
+  # downstream `load_graph_reporting_style` / `generate_report_facts`
+  # require a real platform DB + extensions schema. Assert the gate
+  # passed by asserting the failure is NOT the gate error.
+  with pytest.raises(Exception) as exc:
+    regenerate_report(session, "kg_demo", "rpt_01", body, "usr_test")
+  assert not isinstance(exc.value, InvalidFilingTransitionError)
+  assert not isinstance(exc.value, ReportNotFoundError)
+  assert not isinstance(exc.value, NotAuthorizedError)

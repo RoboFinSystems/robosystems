@@ -518,9 +518,18 @@ def regenerate_report(
   the route handler's path parameter flows to the ops layer rather
   than relying on a non-existent model attribute.
 
+  ``filed`` and ``archived`` Reports are immutable artifacts — they
+  carry stamped facts and a published bundle that downstream consumers
+  may already reference. Regenerating one would silently mutate that
+  state; the only legal path past ``filed`` is a restatement (a new
+  Report row with ``supersedes_id``). ``delete_report`` is already
+  gated this way; this check brings ``regenerate_report`` in line.
+
   Raises:
     ReportNotFoundError: report_id doesn't resolve.
     NotAuthorizedError: caller doesn't own the report.
+    InvalidFilingTransitionError: report is ``filed`` or ``archived``
+      — restate instead of regenerating.
     ValueError: if period_end < period_start in the new body.
   """
   report_def = session.get(Report, report_id)
@@ -528,6 +537,12 @@ def regenerate_report(
     raise ReportNotFoundError(report_id)
   if report_def.created_by != acting_user_id:
     raise NotAuthorizedError("Not authorized to modify this report.")
+  if report_def.filing_status in {"filed", "archived"}:
+    raise InvalidFilingTransitionError(
+      f"Report '{report_id}' is in '{report_def.filing_status}'; "
+      f"create a restatement (new Report with supersedes_id) instead of "
+      f"regenerating."
+    )
 
   # Resolve new periods
   if body.periods:
