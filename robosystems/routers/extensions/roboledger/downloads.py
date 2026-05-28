@@ -179,7 +179,7 @@ async def get_report_bundle_download_url(
     expires_in=expires_in,
     response_content_type="application/ld+json",
     response_content_disposition=(
-      f'attachment; filename="{report_id}-v{generation_count}.jsonld"'
+      f'attachment; filename="{report_id}-g{generation_count}.jsonld"'
     ),
   )
   if download_url is None:

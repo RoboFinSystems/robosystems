@@ -30,7 +30,7 @@ All graph storage uses the USER_DATA_BUCKET with organized prefixes:
     report-bundles/                  # Per-Report serialization artifacts (JSON-LD)
       {graph_id}/
         {report_id}/
-          v{generation_count}.jsonld
+          g{generation_count}.jsonld
 
     shared-repositories/             # Shared repository data
       databases/                     # Published databases (downloaded by replicas on boot)
@@ -328,7 +328,9 @@ def get_report_bundle_key(
   Versioned by ``generation_count`` so prior generations stay
   addressable in object storage even after a ``regenerate_report``
   bump. ``Report.bundle_url`` always points at the current version;
-  history lives on S3 for restatement audit trails.
+  history lives on S3 for restatement audit trails. The ``g`` prefix
+  reads as "generation" — distinct from framework-version letters
+  (``rs-gaap/v1``, ``fac/v1``) elsewhere in the system.
 
   Args:
       graph_id: Owning graph identifier.
@@ -342,10 +344,10 @@ def get_report_bundle_key(
 
   Example:
       >>> get_report_bundle_key("kg456", "rpt_01K8", 1)
-      'report-bundles/kg456/rpt_01K8/v1.jsonld'
+      'report-bundles/kg456/rpt_01K8/g1.jsonld'
   """
   config = GRAPH_STORAGE[GraphStorageType.REPORT_BUNDLES]
-  return f"{config.prefix}{graph_id}/{report_id}/v{generation_count}{extension}"
+  return f"{config.prefix}{graph_id}/{report_id}/g{generation_count}{extension}"
 
 
 def get_report_bundle_prefix(
