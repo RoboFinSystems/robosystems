@@ -303,6 +303,58 @@ class S3Client:
       logger.error(f"Unexpected error checking object existence: {e}")
       return False
 
+  def generate_presigned_url(
+    self,
+    bucket: str,
+    key: str,
+    expires_in: int = 300,
+    response_content_type: str | None = None,
+    response_content_disposition: str | None = None,
+  ) -> str | None:
+    """Generate a time-limited download URL for an S3 object.
+
+    Wraps ``boto3.client.generate_presigned_url`` with the sync
+    ergonomics the rest of this class uses — returns ``None`` on
+    failure rather than raising, so callers can translate to HTTP
+    cleanly. Use the async ``S3BackupAdapter.generate_download_url``
+    when running inside an event loop.
+
+    Args:
+        bucket: S3 bucket name.
+        key: S3 object key.
+        expires_in: URL expiration window in seconds (default 5 min).
+        response_content_type: Optional MIME type to force in the
+            signed URL's ``response-content-type`` query param. Use
+            for serving artifacts whose stored ``Content-Type`` may
+            not match the desired download disposition.
+        response_content_disposition: Optional Content-Disposition
+            header (e.g. ``attachment; filename="report.jsonld"``).
+
+    Returns:
+        A presigned URL on success, ``None`` if signing fails.
+    """
+    params: dict[str, Any] = {"Bucket": bucket, "Key": key}
+    if response_content_type:
+      params["ResponseContentType"] = response_content_type
+    if response_content_disposition:
+      params["ResponseContentDisposition"] = response_content_disposition
+    try:
+      return self.s3_client.generate_presigned_url(
+        "get_object",
+        Params=params,
+        ExpiresIn=expires_in,
+      )
+    except ClientError as e:
+      logger.error(
+        f"Failed to sign presigned URL for s3://{bucket}/{key}: {e}",
+      )
+      return None
+    except Exception as e:
+      logger.error(
+        f"Unexpected error signing presigned URL for s3://{bucket}/{key}: {e}",
+      )
+      return None
+
   def list_objects(
     self, bucket: str, prefix: str | None = None, max_keys: int = 1000
   ) -> list[str]:
