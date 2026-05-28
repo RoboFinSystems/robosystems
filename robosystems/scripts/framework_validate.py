@@ -57,6 +57,15 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from robosystems.config.constants import ReportingStyleConstants
+
+# NOTE — accepted coupling: this validator deliberately reuses several
+# underscore-prefixed internals from the operations/reporting layer
+# (_load_calc_parents, _resolve_root_ids, _COA_SOURCES, _load_reporting_structure,
+# _HierarchyNode, _get_engine, _sanitize_schema). It has to, to see the framework
+# *exactly* as the renderer does. The cost is that a refactor of those modules can
+# break this script with no import-time signal — so the pure-logic helpers are
+# covered by tests/taxonomy/test_framework_validate.py, which fails in CI if a
+# reused internal moves.
 from robosystems.db.extensions import (
   _get_engine,
   _sanitize_schema,
