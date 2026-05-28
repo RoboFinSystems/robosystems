@@ -864,6 +864,14 @@ class EnvConfig:
   AWS_DEFAULT_REGION = get_str_env("AWS_DEFAULT_REGION", "us-east-1")
   AWS_REGION = get_str_env("AWS_REGION", AWS_DEFAULT_REGION)
   AWS_ENDPOINT_URL = get_str_env("AWS_ENDPOINT_URL", "")  # For LocalStack
+  # Optional override for the *S3 endpoint embedded in presigned URLs*.
+  # AWS_ENDPOINT_URL is used for internal API↔S3 traffic (docker DNS hostname
+  # like ``http://localstack:4566`` in dev) but those URLs aren't reachable
+  # from the host browser. Setting this to ``http://localhost:4566`` makes
+  # ``S3Client.generate_presigned_url`` sign URLs against a separate boto3
+  # client whose endpoint is browser-reachable. Unset in staging/prod —
+  # boto3's default real-AWS endpoints are already browser-reachable.
+  AWS_S3_PRESIGN_ENDPOINT_URL = get_str_env("AWS_S3_PRESIGN_ENDPOINT_URL", "")
 
   # AWS Bedrock configuration (for AI agent features)
   # DEV ONLY: Explicit credentials for local development

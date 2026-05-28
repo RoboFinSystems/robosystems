@@ -38,15 +38,44 @@ class S3Client:
     """
     self.region_name = region_name or env.AWS_DEFAULT_REGION
     self.endpoint_url = endpoint_url or env.AWS_ENDPOINT_URL
+    # Optional second endpoint used only when *signing presigned URLs*.
+    # In dev the API container reaches LocalStack via docker DNS
+    # (``http://localstack:4566``), but that hostname isn't reachable from
+    # the host browser. Setting ``AWS_S3_PRESIGN_ENDPOINT_URL`` to
+    # ``http://localhost:4566`` produces signed URLs that the browser can
+    # follow. Unset in staging/prod — boto3's default real-AWS endpoints
+    # are already browser-reachable, so the override stays None and the
+    # presign client is the same instance as the upload/download client.
+    self.presign_endpoint_url = env.AWS_S3_PRESIGN_ENDPOINT_URL or None
 
-    # Initialize boto3 client
-    # Use S3-specific credentials if provided, otherwise rely on IAM roles
+    # Build the primary client (used for upload, download, head, list, etc.).
+    self.s3_client = self._build_client(self.endpoint_url)
+
+    # Lazy-initialised secondary client for presigned URL signing.
+    # ``_build_client`` is cheap (boto3 creates the underlying session on
+    # first request), so we materialise this up front only when the
+    # override is actually set; otherwise reuse the primary client.
+    self._presign_client = (
+      self._build_client(self.presign_endpoint_url)
+      if self.presign_endpoint_url
+      else self.s3_client
+    )
+
+    logger.debug(f"Initialized S3Client for region {self.region_name}")
+
+  def _build_client(self, endpoint_url: str | None) -> Any:
+    """Construct an underlying boto3 ``s3`` client.
+
+    Centralises the credential + retry config so both the primary
+    upload/download client and the optional presign-only client land
+    on the same defaults.
+    """
     s3_config: dict[str, Any] = {
       "region_name": self.region_name,
     }
     # Only include endpoint_url if set (empty string breaks boto3)
-    if self.endpoint_url:
-      s3_config["endpoint_url"] = self.endpoint_url
+    if endpoint_url:
+      s3_config["endpoint_url"] = endpoint_url
 
     # Prefer IAM roles over access keys for security
     # In production/staging: Use ECS task role automatically
@@ -64,13 +93,11 @@ class S3Client:
       # Development: try to use AWS CLI profile
       logger.debug("Using default AWS credentials chain for S3 access")
 
-    self.s3_client = boto3.client(
+    return boto3.client(
       "s3",
       config=BotoConfig(retries={"mode": "adaptive", "max_attempts": 3}),
       **s3_config,
     )
-
-    logger.debug(f"Initialized S3Client for region {self.region_name}")
 
   def upload_string(
     self,
@@ -339,7 +366,9 @@ class S3Client:
     if response_content_disposition:
       params["ResponseContentDisposition"] = response_content_disposition
     try:
-      return self.s3_client.generate_presigned_url(
+      # ``_presign_client`` is the same instance as ``s3_client`` unless
+      # ``AWS_S3_PRESIGN_ENDPOINT_URL`` is set (dev-only LocalStack path).
+      return self._presign_client.generate_presigned_url(
         "get_object",
         Params=params,
         ExpiresIn=expires_in,
