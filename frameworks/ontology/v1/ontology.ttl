@@ -1,0 +1,82 @@
+@prefix rs:     <https://robosystems.ai/vocab/> .
+@prefix xbrli:  <http://www.xbrl.org/2003/instance#> .
+@prefix xlink:  <http://www.w3.org/1999/xlink#> .
+@prefix link:   <http://www.xbrl.org/2003/linkbase#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:    <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos:   <http://www.w3.org/2004/02/skos/core#> .
+
+#################################################################
+# RoboSystems RDF Ontology v1 — class + property declarations.
+#
+# Authority: local/docs/specs/rdf-ontology.md.
+# Principle: RS topology, XBRL vocabulary. Classes are rs:; predicates
+# inherit XBRL/XSD/OWL where those standards define the term.
+#
+# Two layers:
+#   Taxonomy : rs:Element, rs:Structure, rs:Association
+#   Instance : rs:Fact, rs:Period, rs:Unit, rs:Dimension, rs:Entity,
+#              rs:FactSet, rs:Report
+#################################################################
+
+<https://robosystems.ai/vocab/v1>
+  a owl:Ontology ;
+  rdfs:label "RoboSystems RDF Ontology v1" ;
+  owl:versionInfo "1.0" .
+
+# ── Taxonomy layer ────────────────────────────────────────────
+
+rs:Element a rdfs:Class ;
+  rdfs:label "Element" ;
+  rdfs:comment "A taxonomy concept (qname-addressable). Carries XBRL item attributes." .
+
+rs:Structure a rdfs:Class ;
+  rdfs:label "Structure" ;
+  rdfs:comment "An extended-link-role network grouping a set of rs:Association arcs." .
+
+rs:Association a rdfs:Class ;
+  rdfs:label "Association" ;
+  rdfs:comment "A reified taxonomy arc (presentation/calculation/definition) carrying xlink:from/to, xlink:arcrole, link:weight/order." .
+
+# ── Instance layer ────────────────────────────────────────────
+
+rs:Fact a rdfs:Class ;
+  rdfs:label "Fact" ;
+  rdfs:comment "A reported value. References its aspects directly (no XBRL context node)." .
+
+rs:Period a rdfs:Class ;
+  rdfs:label "Period" .
+rs:Unit a rdfs:Class ;
+  rdfs:label "Unit" .
+rs:Dimension a rdfs:Class ;
+  rdfs:label "Dimension" .
+rs:Entity a rdfs:Class ;
+  rdfs:label "Entity" .
+rs:FactSet a rdfs:Class ;
+  rdfs:label "FactSet" .
+rs:Report a rdfs:Class ;
+  rdfs:label "Report" .
+
+# ── Properties (instance aspects mirror the graph FACT_HAS_* edges) ──
+
+rs:element   a rdf:Property ; rdfs:domain rs:Fact ; rdfs:range rs:Element .
+rs:entity    a rdf:Property ; rdfs:domain rs:Fact ; rdfs:range rs:Entity .
+rs:period    a rdf:Property ; rdfs:domain rs:Fact ; rdfs:range rs:Period .
+rs:unit      a rdf:Property ; rdfs:domain rs:Fact ; rdfs:range rs:Unit .
+rs:dimension a rdf:Property ; rdfs:domain rs:Fact ; rdfs:range rs:Dimension .
+rs:numericValue a rdf:Property ; rdfs:domain rs:Fact ; rdfs:range xsd:decimal .
+rs:decimals  a rdf:Property ; rdfs:domain rs:Fact .
+rs:factSet   a rdf:Property ; rdfs:domain rs:Fact ; rdfs:range rs:FactSet .
+rs:structure a rdf:Property ; rdfs:range rs:Structure .
+
+rs:hasAssociation a rdf:Property ; rdfs:domain rs:Structure ; rdfs:range rs:Association .
+rs:associationType a rdf:Property ; rdfs:domain rs:Association .
+
+# Inherited XBRL/XLink/XSD/OWL vocabulary (declared for documentation):
+#   xbrli:balance, xbrli:periodType, xbrli:instant, xbrli:startDate,
+#   xbrli:endDate, xbrli:measure  — concept/period/unit attributes
+#   xlink:from, xlink:to, xlink:arcrole, xlink:role — arc endpoints/roles
+#   link:weight, link:order — calc weight + arc order
+#   owl:equivalentClass — cross-taxonomy concept equivalence (direct, not reified)

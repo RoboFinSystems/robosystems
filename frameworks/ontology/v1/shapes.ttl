@@ -1,0 +1,90 @@
+@prefix sh:     <http://www.w3.org/ns/shacl#> .
+@prefix rs:     <https://robosystems.ai/vocab/> .
+@prefix xbrli:  <http://www.xbrl.org/2003/instance#> .
+@prefix xlink:  <http://www.w3.org/1999/xlink#> .
+@prefix link:   <http://www.xbrl.org/2003/linkbase#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+#################################################################
+# RoboSystems RDF Ontology v1 — SHACL shapes.
+#
+# Authority: local/docs/specs/rdf-ontology.md §6.
+# Positive shapes assert the canonical instance/arc shape; NEGATIVE
+# shapes turn the three retired dialects (XBRL context syntax, the
+# reified arc* dialect, the direct-predicate relationship dialect)
+# into hard validation failures so drift cannot recur.
+#################################################################
+
+# ── Positive: a Fact references its aspects directly (no context) ──
+rs:FactShape a sh:NodeShape ;
+  sh:targetClass rs:Fact ;
+  sh:property [
+    sh:path rs:element ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ;
+    sh:message "rs:Fact must reference exactly one rs:element (IRI)." ] ;
+  sh:property [
+    sh:path rs:period ; sh:minCount 1 ; sh:maxCount 1 ;
+    sh:message "rs:Fact must reference exactly one rs:period." ] ;
+  sh:property [
+    sh:path rs:unit ; sh:maxCount 1 ;
+    sh:message "rs:Fact may reference at most one rs:unit." ] ;
+  sh:property [
+    sh:path rs:numericValue ; sh:datatype xsd:decimal ; sh:maxCount 1 ] .
+
+# ── Positive: a reified Association carries XBRL arc vocabulary ──
+rs:AssociationShape a sh:NodeShape ;
+  sh:targetClass rs:Association ;
+  sh:property [
+    sh:path xlink:from ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ;
+    sh:message "rs:Association must have exactly one xlink:from (IRI)." ] ;
+  sh:property [
+    sh:path xlink:to ; sh:minCount 1 ; sh:maxCount 1 ; sh:nodeKind sh:IRI ;
+    sh:message "rs:Association must have exactly one xlink:to (IRI)." ] ;
+  sh:property [
+    sh:path rs:associationType ; sh:minCount 1 ; sh:maxCount 1 ;
+    sh:message "rs:Association must declare exactly one rs:associationType." ] ;
+  sh:property [
+    sh:path xlink:arcrole ; sh:maxCount 1 ;
+    sh:message "rs:Association may carry at most one xlink:arcrole (rs-native types like 'derivation' have none)." ] ;
+  # weight/order are numeric, at most one each. The XSD subtype is left
+  # unpinned: JSON-LD coerces JSON floats to ill-typed xsd:decimal literals
+  # (float value + decimal datatype), which a strict sh:datatype would reject
+  # — the producer guarantees they're numbers; the loader reads float().
+  sh:property [
+    sh:path link:weight ; sh:maxCount 1 ] ;
+  sh:property [
+    sh:path link:order ; sh:maxCount 1 ] .
+
+# ── Negative: ban XBRL context syntax (the collapse is enforced) ──
+rs:NoXbrlContextShape a sh:NodeShape ;
+  sh:targetSubjectsOf xbrli:contextRef ;
+  sh:property [
+    sh:path xbrli:contextRef ; sh:maxCount 0 ;
+    sh:message "xbrli:contextRef is XBRL syntax — facts carry rs:period/entity/unit directly. Derive contexts in the XBRL encoder only." ] .
+
+# ── Negative: ban the reified arc* dialect ──
+rs:NoArcStarShape a sh:NodeShape ;
+  sh:targetSubjectsOf rs:arcFrom ;
+  sh:property [
+    sh:path rs:arcFrom ; sh:maxCount 0 ;
+    sh:message "rs:arcFrom/arcTo retired — use rs:Association with xlink:from/to." ] .
+
+# ── Negative: ban the direct-predicate relationship dialect ──
+rs:NoDirectSummationShape a sh:NodeShape ;
+  sh:targetSubjectsOf rs:summationOf ;
+  sh:property [ sh:path rs:summationOf ; sh:maxCount 0 ;
+    sh:message "rs:summationOf retired — calculation arcs are rs:Association (xlink:arcrole summation-item, link:weight)." ] .
+
+rs:NoDirectParentShape a sh:NodeShape ;
+  sh:targetSubjectsOf rs:parent ;
+  sh:property [ sh:path rs:parent ; sh:maxCount 0 ;
+    sh:message "rs:parent retired — presentation arcs are rs:Association (xlink:arcrole parent-child)." ] .
+
+rs:NoDirectGeneralOfShape a sh:NodeShape ;
+  sh:targetSubjectsOf rs:generalOf ;
+  sh:property [ sh:path rs:generalOf ; sh:maxCount 0 ;
+    sh:message "rs:generalOf retired — definition arcs are rs:Association." ] .
+
+rs:NoDirectDimensionOfShape a sh:NodeShape ;
+  sh:targetSubjectsOf rs:dimensionOf ;
+  sh:property [ sh:path rs:dimensionOf ; sh:maxCount 0 ;
+    sh:message "rs:dimensionOf retired — definition arcs are rs:Association." ] .
