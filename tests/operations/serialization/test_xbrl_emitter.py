@@ -22,11 +22,11 @@ from lxml import etree
 
 from robosystems.operations.serialization.bundle import (
   BundleArc,
-  BundleContext,
   BundleElement,
   BundleFact,
   BundleLinkbaseLink,
   BundleLinkbases,
+  BundlePeriod,
   BundleUnit,
   EntityMeta,
   FrameworkPin,
@@ -119,20 +119,18 @@ def _bundle(
       )
     )
 
-  contexts = [
-    BundleContext(
-      id="ctx_1",
-      entity_identifier="ent_01",
+  period_nodes = [
+    BundlePeriod(
+      id="p_1",
       period_start=None,
       period_end=date(2024, 12, 31),
       period_type="instant",
     )
   ]
   if with_two_contexts:
-    contexts.append(
-      BundleContext(
-        id="ctx_2",
-        entity_identifier="ent_01",
+    period_nodes.append(
+      BundlePeriod(
+        id="p_2",
         period_start=date(2024, 1, 1),
         period_end=date(2024, 12, 31),
         period_type="duration",
@@ -145,8 +143,9 @@ def _bundle(
       element_id="Assets",
       element_qname="rs-gaap:Assets",
       value=295_183_000.0,
-      context_ref="ctx_1",
+      period_ref="p_1",
       unit_ref="u_USD",
+      entity_ref="ent_01",
     )
   ]
   if with_arcs:
@@ -156,8 +155,9 @@ def _bundle(
         element_id="AssetsCurrent",
         element_qname="rs-gaap:AssetsCurrent",
         value=148_000_000.0,
-        context_ref="ctx_1",
+        period_ref="p_1",
         unit_ref="u_USD",
+        entity_ref="ent_01",
       )
     )
 
@@ -168,7 +168,7 @@ def _bundle(
     framework_pins=[FrameworkPin(framework="rs-gaap", version="v1")],
     schema_concepts=schema_concepts,
     linkbases=linkbases,
-    contexts=contexts,
+    period_nodes=period_nodes,
     units=[BundleUnit(id="u_USD", measure="iso4217:USD")],
     facts=facts,
     ib_envelopes=[],
@@ -262,7 +262,7 @@ class TestInstanceXml:
 
   def test_instant_context_emits_instant_period_element(self) -> None:
     root = _parse(serialize_to_xbrl_21(_bundle()), "instance.xml")
-    ctx = root.find(f"{{{NS_XBRLI}}}context[@id='ctx_1']")
+    ctx = root.find(f"{{{NS_XBRLI}}}context[@id='ctx_p_1']")
     assert ctx is not None
     period = ctx.find(f"{{{NS_XBRLI}}}period")
     assert period is not None
@@ -275,7 +275,7 @@ class TestInstanceXml:
 
   def test_duration_context_emits_start_and_end(self) -> None:
     root = _parse(serialize_to_xbrl_21(_bundle(with_two_contexts=True)), "instance.xml")
-    ctx = root.find(f"{{{NS_XBRLI}}}context[@id='ctx_2']")
+    ctx = root.find(f"{{{NS_XBRLI}}}context[@id='ctx_p_2']")
     assert ctx is not None
     period = ctx.find(f"{{{NS_XBRLI}}}period")
     assert period is not None
@@ -287,7 +287,7 @@ class TestInstanceXml:
 
   def test_entity_identifier_carries_scheme_attribute(self) -> None:
     root = _parse(serialize_to_xbrl_21(_bundle()), "instance.xml")
-    ctx = root.find(f"{{{NS_XBRLI}}}context[@id='ctx_1']")
+    ctx = root.find(f"{{{NS_XBRLI}}}context[@id='ctx_p_1']")
     assert ctx is not None
     entity = ctx.find(f"{{{NS_XBRLI}}}entity")
     assert entity is not None
@@ -310,7 +310,7 @@ class TestInstanceXml:
     root = _parse(serialize_to_xbrl_21(_bundle()), "instance.xml")
     assets_fact = root.find(f"{{{NS_RS_GAAP}}}Assets")
     assert assets_fact is not None
-    assert assets_fact.get("contextRef") == "ctx_1"
+    assert assets_fact.get("contextRef") == "ctx_p_1"
     assert assets_fact.get("unitRef") == "u_USD"
     assert assets_fact.get("decimals") == "INF"
     assert assets_fact.text == "295183000"

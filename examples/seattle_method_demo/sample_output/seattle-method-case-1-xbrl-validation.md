@@ -1,7 +1,7 @@
 # Seattle Method — XBRL 2.1 validation
 
-Graph: `kg19e71b85344a6cd51c25`
-Report: `rpt_01KSRVGXNF4M6694WEPRB2MFGB`
+Graph: `kg19e756d44fecda0694e3`
+Report: `rpt_01KSTPTS0M093B743D1HX40TC1`
 
 ## Result: ✅ **Valid XBRL 2.1**
 

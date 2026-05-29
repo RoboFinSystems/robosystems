@@ -203,17 +203,30 @@ class BundleLinkbases(BaseModel):
 # ── Instance: contexts, units, facts ───────────────────────────────────────
 
 
+class BundlePeriod(BaseModel):
+  """An ``rs:Period`` node — one per distinct period a fact references.
+
+  v2 collapses the XBRL ``<context>`` (entity + period bundled): a Fact
+  references its Period directly (mirroring the graph's ``FACT_HAS_PERIOD``
+  edge). The XBRL encoder re-derives ``<xbrli:context>`` from these +
+  the bundle entity at emit time (XBRL 2.1 requires shared contexts).
+
+  ``period_start`` is null for instant periods (the period IS ``period_end``).
+  """
+
+  id: str
+  period_start: date | None = None
+  period_end: date
+  period_type: Literal["duration", "instant"]
+
+
 class BundleContext(BaseModel):
-  """An ``<xbrli:context>`` — one per distinct (entity, period) combo.
+  """An ``<xbrli:context>`` — entity + period, one per distinct combo.
 
-  Dedupe'd at the bundle level so the JSON-LD output has a flat
-  ``xbrli:context`` array and the XBRL emitter writes a clean set of
-  ``<xbrli:context id="...">`` elements. Facts reference contexts by
-  id via ``xbrli:contextRef``.
-
-  ``entity_scheme`` defaults to RoboSystems' native scheme; SEC-sourced
-  entities preserve their CIK scheme. ``period_start`` is null for
-  instant periods (the period IS ``period_end`` in that case).
+  **Not stored on the bundle** (v2 collapses contexts onto facts). The
+  XBRL 2.1 encoder *derives* these from the bundle's entity + ``period_nodes``
+  at emit time, because XBRL requires shared ``<context>`` elements with
+  ``contextRef``. The JSON-LD encoder never produces them.
   """
 
   id: str
@@ -225,11 +238,11 @@ class BundleContext(BaseModel):
 
 
 class BundleUnit(BaseModel):
-  """An ``<xbrli:unit>`` — one per distinct measure.
+  """An ``rs:Unit`` node — one per distinct measure.
 
-  v1.0 carries simple-measure units only (e.g., ``iso4217:USD``).
-  Complex units (per-share with divide, ratios) are deferred until a
-  customer needs them.
+  v2 carries simple-measure units only (e.g., ``iso4217:USD``). Complex
+  units (per-share with divide, ratios) are deferred until a customer
+  needs them. The XBRL encoder emits these as ``<xbrli:unit>``.
   """
 
   id: str
@@ -237,21 +250,22 @@ class BundleUnit(BaseModel):
 
 
 class BundleFact(BaseModel):
-  """A single Fact node in the bundle.
+  """A single ``rs:Fact`` node — aspects referenced directly (no context).
 
-  Carries the value + decimals + references into contexts/units; the
-  period and unit data live on the referenced ``BundleContext`` /
-  ``BundleUnit`` objects. The round-trip fidelity bar is at this
-  granularity: every Fact in the source emits a Fact with matching
-  (concept, contextRef → period, unitRef → unit, value, decimals).
+  Mirrors the graph's Fact + ``FACT_HAS_*`` edges: a Fact references its
+  ``period`` (``BundlePeriod`` id), ``unit`` (``BundleUnit`` id), and
+  ``entity`` (the bundle entity id) directly — there is no XBRL context
+  node. The fidelity bar: every Fact emits with matching (concept,
+  period → dates, unit, value, decimals).
   """
 
   id: str
   element_id: str
   element_qname: str
   value: float
-  context_ref: str
+  period_ref: str
   unit_ref: str
+  entity_ref: str
   decimals: str = "INF"
   fact_set_id: str | None = None
   structure_id: str | None = None
@@ -284,14 +298,15 @@ class StatementBundle(BaseModel):
   reporting_style: str
   framework_pins: list[FrameworkPin]
 
-  # Schema (XBRL concept declarations)
+  # Schema — Element (concept) declarations
   schema_concepts: list[BundleElement]
 
-  # Linkbases (XBRL linkbase content, grouped by link type + ELR)
+  # Linkbases — reified Structure/Association content, grouped by type + ELR
   linkbases: BundleLinkbases
 
-  # Instance — XBRL contexts, units, facts (dedupe'd at producer time)
-  contexts: list[BundleContext]
+  # Instance — graph-native: facts reference period/unit/entity directly.
+  # Period nodes replace XBRL contexts (the XBRL encoder re-derives contexts).
+  period_nodes: list[BundlePeriod]
   units: list[BundleUnit]
   facts: list[BundleFact]
 
@@ -533,14 +548,15 @@ def build_report_bundle(
     _element_to_bundle(elements_by_id[eid]) for eid in sorted(elements_by_id)
   ]
   linkbases = _associations_to_linkbases(associations, structures_by_id, elements_by_id)
-  contexts, context_ref_for_fact = _mint_contexts(facts, entity_meta)
+  period_nodes, period_ref_for_fact = _mint_periods(facts)
   units, unit_ref_for_fact = _mint_units(facts)
   bundle_facts = [
     _fact_to_bundle(
       f,
       elements_by_id.get(str(f.element_id)),
-      context_ref_for_fact[str(f.id)],
+      period_ref_for_fact[str(f.id)],
       unit_ref_for_fact[str(f.id)],
+      entity_meta.id,
     )
     for f in facts
   ]
@@ -552,7 +568,7 @@ def build_report_bundle(
     framework_pins=framework_pins,
     schema_concepts=schema_concepts,
     linkbases=linkbases,
-    contexts=contexts,
+    period_nodes=period_nodes,
     units=units,
     facts=bundle_facts,
     ib_envelopes=ib_envelopes,
@@ -772,59 +788,46 @@ def _associations_to_linkbases(
   )
 
 
-def _mint_contexts(
+def _mint_periods(
   facts: list[Any],
-  entity_meta: EntityMeta,
-) -> tuple[list[BundleContext], dict[str, str]]:
-  """Dedupe facts' (entity, period) tuples into a flat context array.
+) -> tuple[list[BundlePeriod], dict[str, str]]:
+  """Dedupe facts' periods into a flat ``rs:Period`` node array.
 
-  Returns ``(contexts, fact_id_to_context_ref)`` so the caller can
-  populate ``BundleFact.context_ref`` without re-walking the facts.
-  Context ids are stable: ``ctx_1``, ``ctx_2``, … assigned in
-  first-seen order. Encoders consume the same ids.
-
-  v1.0 assumes one entity per bundle (matches the single-entity
-  assumption in ``_get_entity_id``); when consolidation lands, this
-  helper accepts per-fact entity overrides.
+  Returns ``(period_nodes, fact_id_to_period_ref)`` so the caller can
+  populate ``BundleFact.period_ref`` without re-walking. Period ids are
+  stable: ``p_1``, ``p_2``, … in first-seen order. v2 facts reference
+  these directly (no XBRL context); the XBRL encoder re-derives contexts
+  from them + the bundle entity.
 
   **Period kind comes from ``Fact.period_type``, not from whether
-  ``period_start`` is populated.** Earlier producer logic inferred
-  the kind from ``period_start is None``, but the fact-stamping
-  side currently writes ``period_start`` even on instant facts —
-  which would route BS facts (typed ``instant``) into duration
-  contexts and break XBRL conformance (XBRL processors reject a
-  fact whose concept declares ``periodType="instant"`` referencing
-  a duration context). The dedup key uses ``period_end`` only for
-  instant rows so the redundant ``period_start`` doesn't multiply
-  contexts.
+  ``period_start`` is populated.** The fact-stamping side writes
+  ``period_start`` even on instant facts; carrying it would route
+  instant BS facts into duration periods (XBRL processors reject an
+  instant-typed concept against a duration period) and multiply the
+  dedup. So the kind drives normalization: instant → ``period_start=None``,
+  keyed on ``period_end`` only.
   """
-  seen: dict[tuple[str, date | None, date, str], str] = {}
-  contexts: list[BundleContext] = []
+  seen: dict[tuple[date | None, date, str], str] = {}
+  periods: list[BundlePeriod] = []
   fact_to_ref: dict[str, str] = {}
   for f in facts:
     period_type = str(f.period_type or "duration")
     period_end = f.period_end
-    # For instant facts, normalize period_start to None — the kind is
-    # determined by Fact.period_type, not by whether period_start is
-    # populated. Carrying a misleading start would also pollute the
-    # dedup key, producing one context per fact instead of one per
-    # distinct end date.
     period_start = None if period_type == "instant" else f.period_start
-    key = (entity_meta.id, period_start, period_end, period_type)
+    key = (period_start, period_end, period_type)
     if key not in seen:
-      ctx_id = f"ctx_{len(contexts) + 1}"
-      seen[key] = ctx_id
-      contexts.append(
-        BundleContext(
-          id=ctx_id,
-          entity_identifier=entity_meta.id,
+      pid = f"p_{len(periods) + 1}"
+      seen[key] = pid
+      periods.append(
+        BundlePeriod(
+          id=pid,
           period_start=period_start,
           period_end=period_end,
           period_type=period_type,  # type: ignore[arg-type]
         )
       )
     fact_to_ref[str(f.id)] = seen[key]
-  return contexts, fact_to_ref
+  return periods, fact_to_ref
 
 
 def _mint_units(facts: list[Any]) -> tuple[list[BundleUnit], dict[str, str]]:
@@ -856,8 +859,9 @@ def _mint_units(facts: list[Any]) -> tuple[list[BundleUnit], dict[str, str]]:
 def _fact_to_bundle(
   f: Any,
   element: Any | None,
-  context_ref: str,
+  period_ref: str,
   unit_ref: str,
+  entity_ref: str,
 ) -> BundleFact:
   return BundleFact(
     id=str(f.id),
@@ -866,8 +870,9 @@ def _fact_to_bundle(
       str(element.qname) if element and element.qname else str(f.element_id)
     ),
     value=float(f.value),
-    context_ref=context_ref,
+    period_ref=period_ref,
     unit_ref=unit_ref,
+    entity_ref=entity_ref,
     decimals="INF",
     fact_set_id=str(f.fact_set_id) if f.fact_set_id else None,
     structure_id=str(f.structure_id) if f.structure_id else None,
