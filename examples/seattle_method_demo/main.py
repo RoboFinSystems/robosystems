@@ -46,9 +46,7 @@ PULL_REPORT_SCRIPT = (
   REPO_ROOT / "examples" / "seattle_method_demo" / "pull_expected_report.sh"
 )
 TAXONOMY_DIR = REPO_ROOT / "local" / "taxonomies" / "mini"
-CSV_PATH = (
-  REPO_ROOT / "local" / "datasets" / "seattle_method" / "GeneralJournal.csv"
-)
+CSV_PATH = REPO_ROOT / "local" / "datasets" / "seattle_method" / "GeneralJournal.csv"
 
 BASE_URL = "http://localhost:8000"
 CREDENTIALS_FILE = Path(".local/config.json")
@@ -117,9 +115,7 @@ def step_pull() -> None:
     ("Record-to-Report instance.xml", PULL_REPORT_SCRIPT),
   ):
     print(f"  → {label}")
-    result = subprocess.run(
-      ["bash", str(script)], cwd=str(REPO_ROOT), check=False
-    )
+    result = subprocess.run(["bash", str(script)], cwd=str(REPO_ROOT), check=False)
     if result.returncode != 0:
       raise SystemExit(f"{script.name} exited with code {result.returncode}")
 
@@ -345,6 +341,42 @@ def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"reconcile exited with code {result.returncode}")
 
 
+def step_xbrl_diff(graph_id: str, dry_run: bool = False) -> None:
+  """Step 9 — Diff our XBRL emit against Charlie's published reference.
+
+  Produces ``output/seattle-method-case-1-xbrl-diff.md`` — the emit-side
+  reconciliation that pairs with ``reconcile.py``'s ingest-side check.
+  Together they close the round-trip loop:
+
+      Charlie's data → our DB (step 7 reconcile)
+                    → our XBRL → matches Charlie's XBRL (step 9 here)
+
+  Requires step 8 (create-report) to have run so a filed Report with a
+  stamped bundle exists for the target graph. Subprocess invocation
+  for the same isolation reason as the other rendering steps.
+  """
+  print("─" * 70)
+  print(f"Step 9 — XBRL emit diff vs Charlie's reference → graph {graph_id}")
+  print("─" * 70)
+  if dry_run:
+    print("  (dry-run — skipping xbrl-diff)")
+    return
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples.seattle_method_demo.xbrl_diff",
+      graph_id,
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if result.returncode != 0:
+    raise SystemExit(f"xbrl_diff exited with code {result.returncode}")
+
+
 def step_create_report(graph_id: str, dry_run: bool = False) -> None:
   """Step 8 — Materialize the 4-IB rs-gaap Report + render markdown.
 
@@ -396,6 +428,10 @@ STEPS = {
     "Materialize the 4-IB rs-gaap Report + render markdown",
     step_create_report,
   ),
+  "xbrl-diff": (
+    "Diff our XBRL emit against Charlie's published instance.xml",
+    step_xbrl_diff,
+  ),
 }
 
 
@@ -406,8 +442,7 @@ def main() -> None:
   parser = argparse.ArgumentParser(
     description="Seattle Method Cross-Taxonomy Demo orchestrator.",
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    epilog="Steps:\n"
-    + "\n".join(f"  {k:<22} {v[0]}" for k, v in STEPS.items()),
+    epilog="Steps:\n" + "\n".join(f"  {k:<22} {v[0]}" for k, v in STEPS.items()),
   )
   parser.add_argument(
     "--graph",
