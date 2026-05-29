@@ -234,6 +234,10 @@ demo-world-online-create-report *args="":
 demo-world-online-trial-balance *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.trial_balance {{args}}
 
+# Statement-level reconcile of the World Online four-statement anchors vs Charlie's reference instance.xml (after the main demo has written the bundle)
+demo-world-online-statement-reconcile *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.seattle_method_world_online.statement_reconcile {{args}}
+
 
 ## CI/CD ##
 
