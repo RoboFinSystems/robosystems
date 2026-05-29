@@ -384,19 +384,88 @@ class TestReportXsd:
     assert el is not None
     assert el.get("abstract") == "true"
 
+  def test_abstract_concept_does_not_carry_balance(self) -> None:
+    """Regression: per XBRL 2.1 §5.1.1.2 ``xbrli:balance`` is invalid
+    on abstract concepts (and on non-monetary types). Arelle reports
+    ``xbrl.5.1.1.2 Item ... may not have a balance`` when we leak it.
+    Abstract concepts in our taxonomy (e.g. ``IncomeStatementAbstract``)
+    historically inherited a ``balance_type`` from the framework row
+    even though they're abstract — suppress emission."""
+    bundle = _bundle()
+    bundle.schema_concepts[0].is_abstract = True
+    bundle.schema_concepts[0].balance_type = "credit"  # would leak otherwise
+    root = _parse(serialize_to_xbrl_21(bundle), "report.xsd")
+    el = root.find(f"{{{NS_XS}}}element[@name='Assets']")
+    assert el is not None
+    assert el.get(f"{{{NS_XBRLI}}}balance") is None
+
+  def test_non_monetary_concept_does_not_carry_balance(self) -> None:
+    """Regression companion: ``xbrli:balance`` only applies to monetary
+    item types. A string-typed concept with a stray ``balance_type``
+    must not emit it."""
+    bundle = _bundle()
+    bundle.schema_concepts[0].is_monetary = False
+    bundle.schema_concepts[0].balance_type = "debit"
+    root = _parse(serialize_to_xbrl_21(bundle), "report.xsd")
+    el = root.find(f"{{{NS_XS}}}element[@name='Assets']")
+    assert el is not None
+    assert el.get(f"{{{NS_XBRLI}}}balance") is None
+
+  def test_concept_id_uses_qname_derived_ncname(self) -> None:
+    """Regression: ``xs:element/@id`` must be a valid ``xs:ID``
+    (NCName) — starts with letter or underscore, no spaces or colons.
+    Bundle elements often arrive with a raw ULID for ``concept.id``
+    (e.g. ``elem_01K…`` or ``488ac9be-…``) which fails the type when
+    raw, and was producing Arelle ``MissingLoc`` errors at validation
+    time because linkbase locators already used qname-derived ids
+    (``rs-gaap_Assets``) while the schema declared digit-leading ULIDs.
+    The emitter now derives ``id`` from the qname so schema and
+    locators agree."""
+    bundle = _bundle()
+    bundle.schema_concepts[0].id = "488ac9be-588e-5ffa-92c9-a06"  # ULID-shape
+    root = _parse(serialize_to_xbrl_21(bundle), "report.xsd")
+    el = root.find(f"{{{NS_XS}}}element[@name='Assets']")
+    assert el is not None
+    # id is the qname-derived NCName, NOT the raw ULID from concept.id
+    assert el.get("id") == "rs-gaap_Assets"
+
+  def test_concept_name_uses_qname_local_not_display_name(self) -> None:
+    """Regression: ``xs:element/@name`` must be a valid NCName — no
+    spaces, commas, or parentheses. The bundle's ``concept.name`` is
+    often the human-readable label (e.g. ``"Treasury Stock, Value"``)
+    which is NOT an NCName. The emitter uses the qname's local part
+    (``TreasuryStockValue``) which is always a valid NCName by
+    construction."""
+    bundle = _bundle()
+    bundle.schema_concepts[0].qname = "rs-gaap:TreasuryStockValue"
+    bundle.schema_concepts[0].name = "Treasury Stock, Value"  # NOT an NCName
+    root = _parse(serialize_to_xbrl_21(bundle), "report.xsd")
+    el = root.find(f"{{{NS_XS}}}element[@name='TreasuryStockValue']")
+    assert el is not None
+    # The display name doesn't leak through
+    assert el.get("name") != "Treasury Stock, Value"
+
   def test_linkbase_refs_present_when_arcs_present(self) -> None:
+    """Per XBRL 2.1 §5.1.2, ``link:linkbaseRef`` must live inside the
+    schema's ``xs:annotation/xs:appinfo`` block — emitting it directly
+    under ``xs:schema`` produces an ``xbrl.5.1.2.linkbaseRefLocation``
+    load error in Arelle."""
     root = _parse(serialize_to_xbrl_21(_bundle(with_arcs=True)), "report.xsd")
-    refs = root.findall(f"{{{NS_LINK}}}linkbaseRef")
+    refs = root.findall(
+      f"{{{NS_XS}}}annotation/{{{NS_XS}}}appinfo/{{{NS_LINK}}}linkbaseRef"
+    )
     hrefs = {r.get(f"{{{NS_XLINK}}}href") for r in refs}
     assert "report-pre.xml" in hrefs
     assert "report-cal.xml" in hrefs
+    # Belt-and-braces: nothing emitted at the schema root either.
+    assert root.findall(f"{{{NS_LINK}}}linkbaseRef") == []
 
   def test_no_linkbase_ref_when_no_arcs_emitted(self) -> None:
     """When a bundle has no arcs in a given linkbase, we omit the
     linkbaseRef to keep the schema clean — XBRL processors don't
     need a pointer at an empty linkbase."""
     root = _parse(serialize_to_xbrl_21(_bundle()), "report.xsd")
-    refs = root.findall(f"{{{NS_LINK}}}linkbaseRef")
+    refs = root.findall(f".//{{{NS_LINK}}}linkbaseRef")
     hrefs = {r.get(f"{{{NS_XLINK}}}href") for r in refs}
     assert "report-pre.xml" not in hrefs
     assert "report-cal.xml" not in hrefs

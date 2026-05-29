@@ -341,25 +341,32 @@ def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"reconcile exited with code {result.returncode}")
 
 
-def step_xbrl_diff(graph_id: str, dry_run: bool = False) -> None:
-  """Step 9 — Diff our XBRL emit against Charlie's published reference.
+def step_xbrl_validate(graph_id: str, dry_run: bool = False) -> None:
+  """Step 9 — Validate our XBRL emit against the XBRL 2.1 spec via Arelle.
 
-  Produces ``output/seattle-method-case-1-xbrl-diff.md`` — the emit-side
-  reconciliation that pairs with ``reconcile.py``'s ingest-side check.
-  Together they close the round-trip loop:
+  Produces ``output/seattle-method-case-1-xbrl-validation.md`` — the
+  spec-conformance check that pairs with ``reconcile.py``'s value check:
 
-      Charlie's data → our DB (step 7 reconcile)
-                    → our XBRL → matches Charlie's XBRL (step 9 here)
+      Charlie's data → our DB (step 7 reconcile — value parity)
+                    → our XBRL → Arelle says valid (step 9 — shape parity)
+
+  Arelle is the de-facto XBRL processor; passing its validation is the
+  defensible claim that our output is consumable by any standards-
+  compliant XBRL processor. Earlier framings of this step as a
+  fact-by-fact diff against Charlie's reference were unsound — cross-
+  taxonomy (rs-gaap vs. mini) concept-name divergence makes most facts
+  incomparable, so the diff mostly surfaced taxonomy differences
+  instead of bugs.
 
   Requires step 8 (create-report) to have run so a filed Report with a
   stamped bundle exists for the target graph. Subprocess invocation
   for the same isolation reason as the other rendering steps.
   """
   print("─" * 70)
-  print(f"Step 9 — XBRL emit diff vs Charlie's reference → graph {graph_id}")
+  print(f"Step 9 — XBRL 2.1 validation (Arelle) → graph {graph_id}")
   print("─" * 70)
   if dry_run:
-    print("  (dry-run — skipping xbrl-diff)")
+    print("  (dry-run — skipping xbrl-validate)")
     return
   result = subprocess.run(
     [
@@ -367,14 +374,14 @@ def step_xbrl_diff(graph_id: str, dry_run: bool = False) -> None:
       "run",
       "python",
       "-m",
-      "examples.seattle_method_demo.xbrl_diff",
+      "examples.seattle_method_demo.xbrl_validate",
       graph_id,
     ],
     cwd=str(REPO_ROOT),
     check=False,
   )
   if result.returncode != 0:
-    raise SystemExit(f"xbrl_diff exited with code {result.returncode}")
+    raise SystemExit(f"xbrl_validate exited with code {result.returncode}")
 
 
 def step_create_report(graph_id: str, dry_run: bool = False) -> None:
@@ -428,9 +435,9 @@ STEPS = {
     "Materialize the 4-IB rs-gaap Report + render markdown",
     step_create_report,
   ),
-  "xbrl-diff": (
-    "Diff our XBRL emit against Charlie's published instance.xml",
-    step_xbrl_diff,
+  "xbrl-validate": (
+    "Validate our XBRL emit against the XBRL 2.1 spec via Arelle",
+    step_xbrl_validate,
   ),
 }
 

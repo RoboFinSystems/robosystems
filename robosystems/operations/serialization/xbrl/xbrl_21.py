@@ -272,26 +272,140 @@ def _build_schema(bundle: StatementBundle) -> etree._Element:
     },
   )
 
-  # Per-concept declarations
+  # Per XBRL 2.1 §5.1.2: ``link:linkbaseRef`` and ``link:roleType``
+  # may only appear inside ``xs:schema/xs:annotation/xs:appinfo``.
+  # Emitting them directly under the schema root produces an
+  # ``xbrl.5.1.2.linkbaseRefLocation`` load error. The roleType
+  # appinfo block is the same one — both kinds of XBRL annotation
+  # share the wrapper.
+  appinfo = _ensure_appinfo(root)
+  _append_role_type_declarations(appinfo, bundle)
+
+  # Per-concept declarations (under schema root, NOT inside appinfo —
+  # element declarations are first-class schema content)
   for concept in sorted(bundle.schema_concepts, key=lambda c: c.qname):
     _append_concept_declaration(root, concept)
 
-  # Linkbase references — each points at the bundled linkbase file
+  # Linkbase references go inside the SAME appinfo block as the
+  # roleType declarations (XBRL spec requirement).
   if bundle.linkbases.presentation_links:
-    _append_linkbase_ref(root, "report-pre.xml", "presentationLinkbaseRef")
+    _append_linkbase_ref(appinfo, "report-pre.xml", "presentationLinkbaseRef")
   if bundle.linkbases.calculation_links:
-    _append_linkbase_ref(root, "report-cal.xml", "calculationLinkbaseRef")
+    _append_linkbase_ref(appinfo, "report-cal.xml", "calculationLinkbaseRef")
   if bundle.linkbases.definition_links:
-    _append_linkbase_ref(root, "report-def.xml", "definitionLinkbaseRef")
+    _append_linkbase_ref(appinfo, "report-def.xml", "definitionLinkbaseRef")
 
   return root
 
 
+def _ensure_appinfo(schema_root: etree._Element) -> etree._Element:
+  """Return the schema's ``<xs:annotation><xs:appinfo>`` element,
+  creating both wrappers if they don't exist yet. Both ``link:roleType``
+  and ``link:linkbaseRef`` go inside this block per XBRL 2.1 §5.1.2."""
+  annotation = schema_root.find(f"{{{NS_XS}}}annotation")
+  if annotation is None:
+    annotation = etree.SubElement(schema_root, f"{{{NS_XS}}}annotation")
+  appinfo = annotation.find(f"{{{NS_XS}}}appinfo")
+  if appinfo is None:
+    appinfo = etree.SubElement(annotation, f"{{{NS_XS}}}appinfo")
+  return appinfo
+
+
+def _append_role_type_declarations(
+  appinfo: etree._Element, bundle: StatementBundle
+) -> None:
+  """Emit one ``<link:roleType>`` per unique custom ``xlink:role``
+  referenced by the bundle's linkbases into the schema's appinfo block.
+
+  XBRL 2.1 requires every Extended Link Role (ELR) URI used in a
+  linkbase to be declared in a schema via ``<link:roleType>`` with a
+  matching ``<link:usedOn>`` enumeration of the link types it may
+  appear on. Without these, Arelle (and any other conformant XBRL
+  processor) reports ``Role ... is missing a roleRef``.
+  """
+  used_on_per_role = _collect_role_usage(bundle)
+  for role_uri, used_on in sorted(used_on_per_role.items()):
+    role_type = etree.SubElement(
+      appinfo,
+      f"{{{NS_LINK}}}roleType",
+      attrib={
+        "id": _role_uri_to_id(role_uri),
+        "roleURI": role_uri,
+      },
+    )
+    definition = etree.SubElement(role_type, f"{{{NS_LINK}}}definition")
+    definition.text = role_uri.rsplit("/", 1)[-1]
+    for link_local in sorted(used_on):
+      used_el = etree.SubElement(role_type, f"{{{NS_LINK}}}usedOn")
+      used_el.text = f"link:{link_local}"
+
+
+def _any_arcs(bundle: StatementBundle) -> bool:
+  return any(
+    bool(link.arcs)
+    for link in (
+      *bundle.linkbases.presentation_links,
+      *bundle.linkbases.calculation_links,
+      *bundle.linkbases.definition_links,
+    )
+  )
+
+
+def _collect_role_usage(bundle: StatementBundle) -> dict[str, set[str]]:
+  """Walk the bundle's linkbases and return ``{role_uri: {link_type, …}}``
+  for every non-empty ``xlink:role`` referenced. Used to drive the
+  roleType emission so each role declares exactly the link types it's
+  actually used on (XBRL conformance requirement)."""
+  by_role: dict[str, set[str]] = {}
+  for link in bundle.linkbases.presentation_links:
+    if link.role_uri and link.arcs:
+      by_role.setdefault(link.role_uri, set()).add("presentationLink")
+  for link in bundle.linkbases.calculation_links:
+    if link.role_uri and link.arcs:
+      by_role.setdefault(link.role_uri, set()).add("calculationLink")
+  for link in bundle.linkbases.definition_links:
+    if link.role_uri and link.arcs:
+      by_role.setdefault(link.role_uri, set()).add("definitionLink")
+  return by_role
+
+
+def _role_uri_to_id(role_uri: str) -> str:
+  """Mint a stable, NCName-valid id for a role URI.
+
+  The id is what ``<link:roleRef xlink:href="report.xsd#…">`` targets
+  from each linkbase; it must be a valid ``xs:ID`` and must agree on
+  both sides of the reference. We use the role's last URI segment
+  with non-NCName characters replaced by underscores and a leading
+  ``role_`` prefix to guarantee a letter start regardless of how the
+  taxonomy author named the role.
+  """
+  last = role_uri.rsplit("/", 1)[-1]
+  sanitized = "".join(c if c.isalnum() or c in "-_." else "_" for c in last)
+  return f"role_{sanitized}"
+
+
 def _append_concept_declaration(parent: etree._Element, concept: BundleElement) -> None:
-  """One ``<xs:element>`` per concept with XBRL attributes."""
+  """One ``<xs:element>`` per concept with XBRL attributes.
+
+  Both ``id`` and ``name`` must be valid ``xs:NCName`` per the XML
+  Schema spec — NCNames start with a letter or underscore and contain
+  only letters, digits, hyphens, underscores, and periods. Two pitfalls
+  this declaration avoids:
+
+  * The bundle's internal id is a ULID (``elem_01K…``) which starts
+    with a letter when prefixed but commonly starts with a digit when
+    raw — failing Arelle's ``xs:ID`` regex. We use the qname-derived
+    id (``rs-gaap_Assets``) so the schema id and the linkbase locator
+    href ``report.xsd#rs-gaap_Assets`` agree and resolve cleanly.
+  * The bundle's human-readable ``name`` (``"Treasury Stock, Value"``)
+    contains spaces, commas, parentheses — none of which are NCName
+    characters. We use the qname's local part (``TreasuryStockValue``)
+    which is always a valid NCName by construction (taxonomy authors
+    enforce this upstream).
+  """
   attrs: dict[str, str] = {
     "id": _concept_id(concept),
-    "name": concept.name,
+    "name": _local_name(concept.qname),
     "type": (
       "xbrli:monetaryItemType" if concept.is_monetary else "xbrli:stringItemType"
     ),
@@ -300,7 +414,11 @@ def _append_concept_declaration(parent: etree._Element, concept: BundleElement) 
     "nillable": "true",
     f"{{{NS_XBRLI}}}periodType": concept.period_type,
   }
-  if concept.balance_type:
+  # Per XBRL 2.1 §5.1.1.2: ``xbrli:balance`` is only valid on
+  # monetary item types, and concept declarations marked abstract
+  # must not carry it. Arelle reports
+  # ``Item ... may not have a balance`` when we violate either.
+  if concept.balance_type and not concept.is_abstract and concept.is_monetary:
     attrs[f"{{{NS_XBRLI}}}balance"] = concept.balance_type
   etree.SubElement(parent, f"{{{NS_XS}}}element", attrib=attrs)
 
@@ -324,11 +442,27 @@ def _concept_id(concept: BundleElement) -> str:
   """Schema-local id for a concept — used as the ``xlink:href`` fragment
   target from linkbase locators (``report.xsd#<id>``).
 
-  Prefer the bundle's internal id (stable ULID) over the qname so the
-  same concept resolves consistently across regenerations even if a
-  framework migration re-qnames it.
+  Must be a valid ``xs:ID`` (NCName) — letter or underscore start, no
+  spaces / colons / other punctuation. We derive the id from the
+  qname via ``_qname_to_id`` (``rs-gaap:Assets`` → ``rs-gaap_Assets``)
+  so the schema-side id is naming-equivalent to the locator-side
+  reference (linkbases already use ``_qname_to_id`` for ``xlink:href``
+  fragments). Using ``concept.id`` directly would commonly produce a
+  digit-leading ULID which is not a valid NCName; resolver mismatches
+  between schema and linkbases would surface as Arelle ``MissingLoc``
+  errors at validation time.
   """
-  return concept.id
+  return _qname_to_id(concept.qname)
+
+
+def _local_name(qname: str) -> str:
+  """The part of a qname after the colon (``rs-gaap:Assets`` →
+  ``Assets``). Used as the ``name`` attribute on ``<xs:element>``
+  declarations, which must be a valid NCName — the prefix is dropped
+  because the namespace comes from the schema's ``targetNamespace``,
+  not the element name itself.
+  """
+  return qname.split(":", 1)[-1]
 
 
 # ── report-{pre,cal,def}.xml — linkbase emitters ─────────────────────────
@@ -483,11 +617,19 @@ def _qname_to_label(qname: str) -> str:
 
 
 def _role_id(link: BundleLinkbaseLink) -> str:
-  """Schema-local id for the role declaration. v1.0 uses the structure_id
-  as the id; XBRL 2.1 requires roles be declared in a schema (we omit
-  this for now — Phase 2 adds the proper ``<link:roleType>`` declarations
-  to report.xsd)."""
-  return f"role_{link.structure_id}"
+  """Schema-local id for a linkbase's roleRef href fragment.
+
+  Must match the id emitted in the corresponding ``<link:roleType>``
+  declaration in ``report.xsd`` so the cross-reference resolves at
+  validation time. Both sides derive from ``_role_uri_to_id`` over the
+  link's ``role_uri``; we no longer key on ``link.structure_id``
+  because the same ELR (xlink:role URI) can be reused across multiple
+  Networks and the schema-side declaration is keyed on the role URI,
+  not the structure.
+  """
+  return (
+    _role_uri_to_id(link.role_uri) if link.role_uri else f"role_{link.structure_id}"
+  )
 
 
 def _format_decimal(value: float) -> str:

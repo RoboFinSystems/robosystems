@@ -532,7 +532,7 @@ def build_report_bundle(
   schema_concepts = [
     _element_to_bundle(elements_by_id[eid]) for eid in sorted(elements_by_id)
   ]
-  linkbases = _associations_to_linkbases(associations, structures_by_id)
+  linkbases = _associations_to_linkbases(associations, structures_by_id, elements_by_id)
   contexts, context_ref_for_fact = _mint_contexts(facts, entity_meta)
   units, unit_ref_for_fact = _mint_units(facts)
   bundle_facts = [
@@ -651,6 +651,7 @@ def _element_to_bundle(e: Any) -> BundleElement:
 def _associations_to_linkbases(
   associations: list[Any],
   structures_by_id: dict[str, Any],
+  elements_by_id: dict[str, Any] | None = None,
 ) -> BundleLinkbases:
   """Group raw Association rows into XBRL-aligned linkbase containers.
 
@@ -659,6 +660,16 @@ def _associations_to_linkbases(
   each bucket. Each unique ``(group, structure_id)`` pair becomes one
   ``BundleLinkbaseLink``; arcs sort by ``(order_value, from_qname,
   to_qname)`` so the JSON-LD output is deterministic.
+
+  ``elements_by_id`` is an optional ``{element_id: Element-like}`` map
+  the caller already has from the bundle producer. When supplied, arc
+  endpoints (``from_qname`` / ``to_qname``) resolve to the element's
+  actual qname (``rs-gaap:Assets``); otherwise they fall back to the
+  raw element_id (ULID). The encoders consume whatever is on the arc:
+  qnames produce valid XBRL linkbase locators, ULIDs produce Arelle
+  ``xlink:to type NCName`` validation errors. Always pass the map
+  unless you're writing a fixture test that doesn't care about
+  linkbase resolution.
   """
   # First pass: bucket arcs by (group, structure_id)
   buckets: dict[tuple[str, str], list[tuple[Any, str]]] = {}
@@ -674,14 +685,18 @@ def _associations_to_linkbases(
   calculation_links: list[BundleLinkbaseLink] = []
   definition_links: list[BundleLinkbaseLink] = []
 
-  # Element id → qname lookup for arc endpoints. Built lazily from
-  # association data; we don't have direct Element rows here so endpoints
-  # carry the raw id which gets resolved at encoding time. Instead store
-  # the from/to *element_id* on the arc and let encoders look up the
-  # qname from the bundle's schema_concepts. Simpler: use element_id as
-  # the qname placeholder for now; encoder swaps to actual qname via the
-  # schema lookup. (This is the only place producer↔encoder coupling
-  # leaks; documented as such.)
+  def _qname_for(element_id: str) -> str:
+    """Resolve an element_id to its qname using the producer's
+    pre-loaded element map. Falls back to the id itself if no map is
+    available or the id isn't in it — encoders surface that as an
+    NCName-shaped error during validation so the gap is obvious."""
+    if elements_by_id is None:
+      return element_id
+    e = elements_by_id.get(element_id)
+    if e is None:
+      return element_id
+    return str(getattr(e, "qname", None) or getattr(e, "name", element_id))
+
   for (group, structure_id), arc_rows in buckets.items():
     structure = structures_by_id.get(structure_id)
     role_uri = ""
@@ -709,8 +724,8 @@ def _associations_to_linkbases(
             if a.arcrole
             else _DEFAULT_ARCROLE_FOR_TYPE.get(str(a.association_type), "")
           ),
-          from_qname=str(a.from_element_id),
-          to_qname=str(a.to_element_id),
+          from_qname=_qname_for(str(a.from_element_id)),
+          to_qname=_qname_for(str(a.to_element_id)),
           order_value=float(a.order_value) if a.order_value is not None else None,
           weight=(
             float(a.weight) if a.weight is not None and group == "calculation" else None
