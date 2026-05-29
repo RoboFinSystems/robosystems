@@ -119,11 +119,10 @@ def create_demo_graph(skeleton: bool = False, entity_type: str = "corporation") 
   if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+  from examples._common.config import get_graph_id, save_graph_id
   from examples.credentials.utils import (
     CredentialContext,
     ensure_user_credentials,
-    get_graph_id,
-    save_graph_id,
   )
 
   if skeleton:
@@ -1030,24 +1029,12 @@ def generate_fy2025_report(graph_id: str) -> str | None:
 
   # Download both bundle flavors via the SDK so the demo finishes with a
   # tangible artifact on disk that the customer can open immediately.
-  # JSON-LD is the v1.0 canonical projection; XBRL 2.1 is the
-  # filing-grade equivalent. Same Report, same fact set, two
-  # serializations — see local/docs/specs/bundle-ontology-v1.md.
-  try:
-    out_dir = Path.home() / ".robosystems" / "bundles" / graph_id
-    jsonld = client.download_report_bundle(
-      graph_id, report_id, format="jsonld", to=out_dir / f"{report_id}-g1.jsonld"
-    )
-    xbrl = client.download_report_bundle(
-      graph_id,
-      report_id,
-      format="xbrl-2.1",
-      to=out_dir / f"{report_id}-g1.zip",
-    )
-    print(f"  JSON-LD:      {jsonld.path} ({len(jsonld.content):,} bytes)")
-    print(f"  XBRL 2.1:     {xbrl.path} ({len(xbrl.content):,} bytes)")
-  except Exception as e:
-    print(f"  WARNING: bundle download failed: {e}")
+  # JSON-LD is the canonical projection; XBRL 2.1 is the filing-grade
+  # equivalent. Same Report, same fact set, two serializations — see
+  # local/docs/ref/serialization.md.
+  from .download_bundles import download_bundles_for_report
+
+  download_bundles_for_report(client, graph_id, report_id)
 
   return report_id
 

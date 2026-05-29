@@ -4,34 +4,39 @@ Shared credential utilities for demo scripts.
 
 Provides helpers to create or reuse demo users so that multiple demos can share
 the same RoboSystems account and API key.
+
+Config I/O helpers (``load_credentials``, ``save_credentials``,
+``get_graph_id``, ``save_graph_id``, ``get_user_id``) live in
+``examples/_common/config.py`` — import them from there.
 """
 
 from __future__ import annotations
 
-import json
 import secrets
 import string
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from robosystems_client import Client, AuthenticatedClient
+from robosystems_client import AuthenticatedClient, Client
 from robosystems_client.api.auth.login_user import sync_detailed as login
 from robosystems_client.api.auth.register_user import sync_detailed as register
-from robosystems_client.api.user.create_user_api_key import (
-  sync_detailed as create_api_key,
-)
 from robosystems_client.api.subscriptions.create_repository_subscription import (
   sync_detailed as subscribe_repository,
 )
+from robosystems_client.api.user.create_user_api_key import (
+  sync_detailed as create_api_key,
+)
 from robosystems_client.models.create_api_key_request import CreateAPIKeyRequest
-from robosystems_client.models.login_request import LoginRequest
-from robosystems_client.models.register_request import RegisterRequest
 from robosystems_client.models.create_repository_subscription_request import (
   CreateRepositorySubscriptionRequest,
 )
+from robosystems_client.models.login_request import LoginRequest
+from robosystems_client.models.register_request import RegisterRequest
+
+from examples._common.config import load_credentials, save_credentials
 
 
 @dataclass
@@ -62,59 +67,6 @@ def generate_secure_password(length: int = 16) -> str:
   password_list = list(password)
   secrets.SystemRandom().shuffle(password_list)
   return "".join(password_list)
-
-
-def load_credentials(path: Path) -> Optional[Dict[str, Any]]:
-  """Load credentials if they exist."""
-  if path.exists():
-    with path.open() as fh:
-      return json.load(fh)
-  return None
-
-
-def save_credentials(path: Path, data: Dict[str, Any]) -> None:
-  """Persist credential data."""
-  path.parent.mkdir(parents=True, exist_ok=True)
-  with path.open("w") as fh:
-    json.dump(data, fh, indent=2)
-  print(f"\n💾 Credentials saved to: {path}")
-
-
-def get_user_id(path: Path) -> Optional[str]:
-  """Get user_id from credentials."""
-  credentials = load_credentials(path)
-  if not credentials:
-    return None
-  return credentials.get("user_id") or credentials.get("user", {}).get("id")
-
-
-def get_graph_id(path: Path, demo_name: str) -> Optional[str]:
-  """Get graph_id for a specific demo from credentials."""
-  credentials = load_credentials(path)
-  if not credentials:
-    return None
-  graphs = credentials.get("graphs", {})
-  demo_data = graphs.get(demo_name, {})
-  return demo_data.get("graph_id")
-
-
-def save_graph_id(
-  path: Path, demo_name: str, graph_id: str, graph_created_at: str
-) -> None:
-  """Save graph_id for a specific demo to credentials."""
-  credentials = load_credentials(path)
-  if not credentials:
-    raise ValueError(f"No credentials found at {path}")
-
-  if "graphs" not in credentials:
-    credentials["graphs"] = {}
-
-  credentials["graphs"][demo_name] = {
-    "graph_id": graph_id,
-    "graph_created_at": graph_created_at,
-  }
-
-  save_credentials(path, credentials)
 
 
 def ensure_user_credentials(

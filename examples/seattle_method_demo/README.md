@@ -58,11 +58,13 @@ just demo-seattle-method-create-report <graph_id>
 | `author-rollforwards` | 8 rollforward IBs (one per BS leaf with activity) — Cash, Receivables, Inventories, PP&E, AP, Accrued, LTD, PaidInCapital                    |
 | `reconcile`           | `output/seattle-method-case-1.md` — mini-vocab line-by-line comparison vs. Charlie's PoC, classified per methodology spec §3.2               |
 | `create-report`       | `output/seattle-method-case-1-four-statements.md` — rs-gaap 4-IB Report (BS / IS / CF / SE) materialized via create-report + reportPackage   |
+| `download-bundles`    | `output/seattle-method-case-1.jsonld` + `output/seattle-method-case-1.zip` — JSON-LD bundle + XBRL 2.1 report package, pulled via the SDK    |
+| `xbrl-validate`       | `output/seattle-method-case-1-xbrl-validation.md` — Arelle conformance report against the XBRL emit (shape parity)                           |
 
 Steps write to `output/` (gitignored — each run stamps fresh graph/report
 IDs, so committing it would churn). Committed reference copies live in
-[`sample_output/`](sample_output/); refresh them with
-`cp output/*.md sample_output/`.
+[`sample_output/`](sample_output/) so a reviewer can inspect a clean run
+without spinning up the platform; refresh them with `cp output/*.{md,jsonld,zip} sample_output/`.
 
 ## Inputs (all fetched from Charlie's published artifacts, none committed)
 
