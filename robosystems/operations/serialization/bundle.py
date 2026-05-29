@@ -771,14 +771,30 @@ def _mint_contexts(
   v1.0 assumes one entity per bundle (matches the single-entity
   assumption in ``_get_entity_id``); when consolidation lands, this
   helper accepts per-fact entity overrides.
+
+  **Period kind comes from ``Fact.period_type``, not from whether
+  ``period_start`` is populated.** Earlier producer logic inferred
+  the kind from ``period_start is None``, but the fact-stamping
+  side currently writes ``period_start`` even on instant facts —
+  which would route BS facts (typed ``instant``) into duration
+  contexts and break XBRL conformance (XBRL processors reject a
+  fact whose concept declares ``periodType="instant"`` referencing
+  a duration context). The dedup key uses ``period_end`` only for
+  instant rows so the redundant ``period_start`` doesn't multiply
+  contexts.
   """
   seen: dict[tuple[str, date | None, date, str], str] = {}
   contexts: list[BundleContext] = []
   fact_to_ref: dict[str, str] = {}
   for f in facts:
-    period_start = f.period_start
+    period_type = str(f.period_type or "duration")
     period_end = f.period_end
-    period_type = "instant" if period_start is None else "duration"
+    # For instant facts, normalize period_start to None — the kind is
+    # determined by Fact.period_type, not by whether period_start is
+    # populated. Carrying a misleading start would also pollute the
+    # dedup key, producing one context per fact instead of one per
+    # distinct end date.
+    period_start = None if period_type == "instant" else f.period_start
     key = (entity_meta.id, period_start, period_end, period_type)
     if key not in seen:
       ctx_id = f"ctx_{len(contexts) + 1}"

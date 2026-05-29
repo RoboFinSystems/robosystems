@@ -387,6 +387,49 @@ class TestMintContexts:
     period_types = {ctx.period_type for ctx in contexts}
     assert period_types == {"instant", "duration"}
 
+  def test_instant_period_type_trumps_populated_period_start(self) -> None:
+    """Regression: BS facts arrive with ``period_type='instant'`` but
+    a populated ``period_start`` (the fact-stamping side carries
+    period bounds even on instants). The dedup must honour the
+    declared period_type — emitting BS facts under a duration
+    context would break XBRL conformance (concept declares
+    ``periodType='instant'``; processors reject mismatches).
+
+    Found by the Seattle Method round-trip vs. Charlie Hoffman's
+    reference instance: BS concepts like ``rs-gaap:Assets`` were
+    shipping under duration contexts, surfacing as ours-only in the
+    diff. Producer now coerces instant facts' ``period_start`` to
+    ``None`` regardless of what the DB row carries."""
+    entity = EntityMeta(id="ent_01", name="Test")
+    facts = [
+      _FakeFact(
+        id="bs_fact",
+        element_id="Assets",
+        period_start=date(2024, 1, 1),  # populated despite period_type=instant
+        period_end=date(2024, 3, 31),
+        period_type="instant",
+      ),
+      _FakeFact(
+        id="is_fact",
+        element_id="Revenue",
+        period_start=date(2024, 1, 1),
+        period_end=date(2024, 3, 31),
+        period_type="duration",
+      ),
+    ]
+    contexts, fact_to_ref = _mint_contexts(facts, entity)
+    assert len(contexts) == 2
+    by_kind = {ctx.period_type: ctx for ctx in contexts}
+    # BS fact's context is instant + has period_start normalized to None
+    assert by_kind["instant"].period_start is None
+    assert by_kind["instant"].period_end == date(2024, 3, 31)
+    # IS fact's context keeps the start
+    assert by_kind["duration"].period_start == date(2024, 1, 1)
+    assert by_kind["duration"].period_end == date(2024, 3, 31)
+    # Facts route to their respective context kinds
+    assert by_kind["instant"].id == fact_to_ref["bs_fact"]
+    assert by_kind["duration"].id == fact_to_ref["is_fact"]
+
 
 # ── _mint_units ───────────────────────────────────────────────────────
 
