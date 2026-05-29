@@ -45,7 +45,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
   sys.path.insert(0, str(PROJECT_ROOT))
 
-from examples.credentials.utils import get_graph_id  # noqa: E402
+from examples._common.config import get_graph_id  # noqa: E402
 
 CREDENTIALS_FILE = PROJECT_ROOT / ".local" / "config.json"
 DEMO_NAME = "custom_graph_demo"

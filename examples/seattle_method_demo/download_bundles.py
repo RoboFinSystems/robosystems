@@ -31,72 +31,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
 from pathlib import Path
 
-from robosystems_client.clients import LedgerClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from examples._common.config import REPO_ROOT, require_cached_graph_id, require_config
+from examples._common.sdk import latest_report_id, make_ledger_client
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEMO_ROOT = REPO_ROOT / "examples" / "seattle_method_demo"
+DEMO_ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = DEMO_ROOT / "output"
 JSONLD_PATH = OUTPUT_DIR / "seattle-method-case-1.jsonld"
 XBRL_PATH = OUTPUT_DIR / "seattle-method-case-1.zip"
-EXTENSIONS_DB_URL = os.environ.get("EXTENSIONS_DATABASE_URL")
 
-
-def _load_config() -> dict:
-  cfg_path = REPO_ROOT / ".local" / "config.json"
-  if not cfg_path.exists():
-    raise SystemExit("Missing .local/config.json — run `just demo-user` first.")
-  return json.loads(cfg_path.read_text())
-
-
-def _resolve_graph_id(cfg: dict, cli_graph: str | None) -> str:
-  if cli_graph:
-    return cli_graph
-  cached = cfg.get("graphs", {}).get("seattle_method_test")
-  if not cached:
-    raise SystemExit(
-      "No seattle_method_test graph cached in .local/config.json. "
-      "Pass a graph_id or run `just demo-seattle-method` first."
-    )
-  return cached["graph_id"]
-
-
-def _latest_report_id(graph_id: str) -> str:
-  """Look up the most-recent filed Report id for this graph by querying
-  the extensions DB directly. Same boundary ``reconcile.py`` and
-  ``xbrl_validate.py`` cross."""
-  if not EXTENSIONS_DB_URL:
-    raise SystemExit(
-      "EXTENSIONS_DATABASE_URL not set. The justfile sets it from "
-      ".env.local; if invoking outside the justfile, export it yourself."
-    )
-  engine = create_engine(EXTENSIONS_DB_URL)
-  SessionLocal = sessionmaker(bind=engine, autoflush=False)
-  with SessionLocal() as session:
-    row = (
-      session.execute(
-        text(
-          f"SET search_path TO {graph_id}; "
-          "SELECT id FROM reports "
-          "WHERE bundle_url IS NOT NULL "
-          "ORDER BY created_at DESC LIMIT 1"
-        )
-      )
-      .mappings()
-      .first()
-    )
-  if row is None:
-    raise SystemExit(
-      f"No filed Report with a stamped bundle found for graph {graph_id}. "
-      "Run `just demo-seattle-method-create-report` first."
-    )
-  return str(row["id"])
+GRAPH_SLOT = "seattle_method_test"
+DEMO_RECIPE = "just demo-seattle-method"
 
 
 def main() -> None:
@@ -110,7 +57,7 @@ def main() -> None:
     "graph_id",
     nargs="?",
     default=None,
-    help="Target graph id. Defaults to the cached seattle_method_test entry.",
+    help=f"Target graph id. Defaults to the cached {GRAPH_SLOT} entry.",
   )
   parser.add_argument(
     "--report-id",
@@ -119,18 +66,13 @@ def main() -> None:
   )
   args = parser.parse_args()
 
-  cfg = _load_config()
-  base_url = cfg.get("base_url", "http://localhost:8000")
-  api_key = cfg["api_key"]
-  graph_id = _resolve_graph_id(cfg, args.graph_id)
-  report_id = args.report_id or _latest_report_id(graph_id)
+  cfg = require_config()
+  graph_id = args.graph_id or require_cached_graph_id(cfg, GRAPH_SLOT, DEMO_RECIPE)
+  client = make_ledger_client(cfg)
+  report_id = args.report_id or latest_report_id(client, graph_id)
 
   print(f"Downloading bundle artifacts for graph={graph_id}, report={report_id}")
-
   OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-  client = LedgerClient(
-    {"base_url": base_url, "token": api_key, "headers": {}, "timeout": 60}
-  )
 
   jsonld = client.download_report_bundle(
     graph_id, report_id, format="jsonld", to=JSONLD_PATH

@@ -141,11 +141,10 @@ def step_provision_graph() -> str:
   if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+  from examples._common.config import get_graph_id, save_graph_id
   from examples.credentials.utils import (
     CredentialContext,
     ensure_user_credentials,
-    get_graph_id,
-    save_graph_id,
   )
 
   context = CredentialContext(
