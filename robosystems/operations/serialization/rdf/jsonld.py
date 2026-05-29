@@ -21,14 +21,17 @@ Shape (per ``local/docs/specs/{rdf-ontology,bundle-ontology-v2}.md``):
 * IB envelopes embed under ``rs:informationBlocks`` (top-level fields as
   triples; deep mechanics as a JSON literal — the pragmatic v1 boundary).
 
-Validation runs SHACL (``frameworks/ontology/v1/shapes.ttl``) over the built
-graph, so the same shapes that gate the seeds gate the export — including the
-negative shapes that ban the retired dialects.
+Validation is decoupled from serialization: ``shacl_report`` (non-raising,
+structured) / ``validate_graph`` (raising) run SHACL over the built graph
+against ``frameworks/ontology/v1/shapes.ttl`` — the same shapes that gate the
+seeds. The publish hook runs it opt-in per ``REPORT_BUNDLE_SHACL_VALIDATION``
+and records the outcome on the Report; serialization itself never blocks.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -114,9 +117,15 @@ _BUNDLE_CONTEXT_EXTRA: dict[str, Any] = {
 
 
 def serialize_to_jsonld(bundle: StatementBundle) -> str:
-  """Serialize a ``StatementBundle`` to a v1.0 JSON-LD string."""
+  """Serialize a ``StatementBundle`` to a v1.0 JSON-LD string.
+
+  Serialization does not validate — that's a separate, caller-controlled
+  concern (``shacl_report`` / ``validate_graph``). The publish hook decides
+  whether to validate per the ``REPORT_BUNDLE_SHACL_VALIDATION`` mode; the
+  standalone ``examples/_common/validate.py`` and the SHACL regression test
+  validate the on-disk artifact; downloads just serialize.
+  """
   graph = build_graph(bundle)
-  validate_graph(graph, bundle)
   return graph.serialize(
     format="json-ld",
     auto_compact=True,
@@ -129,7 +138,6 @@ def serialize_to_jsonld(bundle: StatementBundle) -> str:
 def serialize_to_turtle(bundle: StatementBundle) -> str:
   """Serialize the bundle to Turtle. Free given the rdflib graph."""
   graph = build_graph(bundle)
-  validate_graph(graph, bundle)
   return graph.serialize(format="turtle")
 
 
@@ -441,7 +449,36 @@ class BundleValidationError(ValueError):
   """Raised when the bundle graph fails SHACL conformance."""
 
 
+@dataclass(frozen=True)
+class ShaclResult:
+  """Structured outcome of a SHACL run — capturable / loggable.
+
+  ``ran`` is False when the shapes file is unavailable (validation skipped);
+  callers treat that as "not validated", not "conformant". ``report`` is the
+  pyshacl text report (empty when conforming).
+  """
+
+  ran: bool
+  conforms: bool
+  violations: int
+  shapes_checked: int
+  report: str
+
+  def as_dict(self) -> dict[str, Any]:
+    """A compact, JSON-storable summary (for ``Report.metadata``)."""
+    return {
+      "ran": self.ran,
+      "conforms": self.conforms,
+      "violations": self.violations,
+      "shapes_checked": self.shapes_checked,
+      # Keep the stored excerpt bounded — the full report can be large.
+      "report_excerpt": self.report[:4000] if self.report else "",
+      "shapes_version": "frameworks/ontology/v1/shapes.ttl",
+    }
+
+
 _SHAPES_CACHE: Graph | None = None
+_SH = Namespace("http://www.w3.org/ns/shacl#")
 
 
 def _shapes_graph() -> Graph | None:
@@ -454,22 +491,48 @@ def _shapes_graph() -> Graph | None:
   return _SHAPES_CACHE
 
 
-def validate_graph(g: Graph, bundle: StatementBundle) -> None:
-  """Validate the bundle graph against the canonical SHACL shapes.
+def shacl_report(g: Graph) -> ShaclResult:
+  """Run SHACL over the bundle graph and return a structured result.
 
-  Enforces the positive instance shapes (a Fact has element/period; an
-  Association has from/to/associationType) AND the negative shapes that
-  ban the retired dialects (``xbrli:contextRef``, ``arcFrom``, direct
-  ``summationOf``) — the same shapes that gate the framework seeds.
+  Non-raising — produces an outcome the caller can log (e.g. onto
+  ``Report.metadata``) or escalate. Checks the positive instance shapes
+  (a Fact has element/period; an Association has from/to/associationType)
+  and the negative shapes that ban the retired dialects (``xbrli:contextRef``,
+  ``arcFrom``, direct ``summationOf``) — the same shapes that gate the seeds.
   """
   shapes = _shapes_graph()
   if shapes is None:
-    return
+    return ShaclResult(
+      ran=False, conforms=True, violations=0, shapes_checked=0, report=""
+    )
   from pyshacl import validate as _shacl_validate
 
-  conforms, _, text = _shacl_validate(g, shacl_graph=shapes, inference="none")
-  if not conforms:
-    raise BundleValidationError(f"Bundle graph failed SHACL conformance:\n{text}")
+  conforms, results_graph, text = _shacl_validate(
+    g, shacl_graph=shapes, inference="none"
+  )
+  violations = len(list(results_graph.subjects(RDF.type, _SH.ValidationResult)))
+  shapes_checked = len(list(shapes.subjects(RDF.type, _SH.NodeShape)))
+  return ShaclResult(
+    ran=True,
+    conforms=bool(conforms),
+    violations=violations,
+    shapes_checked=shapes_checked,
+    report="" if conforms else text,
+  )
+
+
+def validate_graph(g: Graph, bundle: StatementBundle) -> None:
+  """Strict SHACL check — raises on non-conformance.
+
+  Thin wrapper over :func:`shacl_report` for callers that want fail-loud
+  behavior (tests; the ``strict`` publish mode). Skips silently when the
+  shapes file is unavailable.
+  """
+  result = shacl_report(g)
+  if result.ran and not result.conforms:
+    raise BundleValidationError(
+      f"Bundle graph failed SHACL conformance:\n{result.report}"
+    )
 
 
 # ── JSON encoder default ───────────────────────────────────────────────────

@@ -337,6 +337,48 @@ def _pre_create_report_fact_sets(
   session.flush()
 
 
+def _record_bundle_validation(bundle: Any, report_def: Report) -> None:
+  """Optionally SHACL-validate the bundle and record the result on the Report.
+
+  Gated by ``env.REPORT_BUNDLE_SHACL_VALIDATION`` (``off`` | ``warn`` |
+  ``strict``) — opt-in, so the publish path stays fast by default. When it
+  runs, the structured outcome is logged onto
+  ``report.metadata['bundle_validation']`` (audit trail), and ``strict``
+  additionally blocks the publish on non-conformance.
+  """
+  mode = (env.REPORT_BUNDLE_SHACL_VALIDATION or "off").strip().lower()
+  if mode == "off":
+    return
+  from robosystems.operations.serialization.rdf.jsonld import (
+    BundleValidationError,
+    build_graph,
+    shacl_report,
+  )
+
+  result = shacl_report(build_graph(bundle))
+  # Reassign (not mutate) so SQLAlchemy flags the JSONB column dirty.
+  report_def.metadata_ = {
+    **(report_def.metadata_ or {}),
+    "bundle_validation": {
+      **result.as_dict(),
+      "validated_at": datetime.now(UTC).isoformat(),
+    },
+  }
+  logger.info(
+    "Bundle SHACL for report %s: ran=%s conforms=%s violations=%d (mode=%s)",
+    report_def.id,
+    result.ran,
+    result.conforms,
+    result.violations,
+    mode,
+  )
+  if mode == "strict" and result.ran and not result.conforms:
+    raise BundleValidationError(
+      f"Report {report_def.id} bundle failed SHACL conformance "
+      f"({result.violations} violation(s)); aborting publish (strict mode)."
+    )
+
+
 def _stamp_report_bundle(
   session: Session,
   graph_id: str,
@@ -365,6 +407,7 @@ def _stamp_report_bundle(
   session.flush()
   report_def.generation_count = (report_def.generation_count or 0) + 1
   bundle = build_report_bundle(session, graph_id, report_def.id)
+  _record_bundle_validation(bundle, report_def)
   jsonld_doc = serialize_to_rdf(bundle, RdfFlavor.JSONLD)
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(graph_id, report_def.id, report_def.generation_count)
