@@ -14,6 +14,11 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from robosystems.config import env
+from robosystems.config.storage.graph import (
+  get_report_bundle_key,
+  get_report_bundle_uri,
+)
 from robosystems.logger import logger
 from robosystems.models.api.extensions.reports import (
   CreateReportRequest,
@@ -31,6 +36,7 @@ from robosystems.models.extensions import (
   Report,
   ReportShare,
 )
+from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
@@ -50,6 +56,11 @@ from robosystems.operations.roboledger.reports.network_picker import (
   get_render_network,
   load_close_target_concept,
   load_graph_reporting_style,
+)
+from robosystems.operations.serialization import (
+  RdfFlavor,
+  build_report_bundle,
+  serialize_to_rdf,
 )
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -80,6 +91,15 @@ class NoEntityError(Exception):
 
 class TaxonomyNotFoundError(LookupError):
   """Raised when `create_report` references a missing taxonomy."""
+
+
+class BundleUploadError(RuntimeError):
+  """Raised when the publish-time JSON-LD bundle upload to S3 fails.
+
+  The publish path is fail-loud: a Report cannot transition to
+  ``published`` without a bundle artifact at ``Report.bundle_url``.
+  Callers (router layer) translate this to HTTP 502.
+  """
 
 
 def _get_entity_id(session: Session, graph_id: str) -> str:
@@ -317,6 +337,60 @@ def _pre_create_report_fact_sets(
   session.flush()
 
 
+def _stamp_report_bundle(
+  session: Session,
+  graph_id: str,
+  report_def: Report,
+) -> None:
+  """Produce + stash the JSON-LD bundle for a Report about to publish.
+
+  Called from the publish-hook in :func:`create_report` and
+  :func:`regenerate_report` after facts are stamped and rules have run,
+  before the transaction commits. Sequence:
+
+  1. ``session.flush()`` so freshly-stamped FactSet + Fact rows are
+     visible to the bundler's ORM reads (the extensions session is
+     ``autoflush=False``).
+  2. Bump ``report_def.generation_count`` so the S3 key bumps a new
+     version even on regenerate.
+  3. Build the ``StatementBundle`` via :func:`build_report_bundle`.
+  4. Serialize to JSON-LD via :func:`serialize_to_rdf`.
+  5. Upload to S3 under ``report-bundles/{graph_id}/{report_id}/v{n}.jsonld``.
+  6. Stamp ``report_def.bundle_url`` with the full ``s3://`` URI.
+
+  Fail-loud: any S3 failure raises :class:`BundleUploadError` so the
+  caller's transaction never commits. Orphan S3 objects are
+  acceptable; orphan published-Reports without a bundle are not.
+  """
+  session.flush()
+  report_def.generation_count = (report_def.generation_count or 0) + 1
+  bundle = build_report_bundle(session, graph_id, report_def.id)
+  jsonld_doc = serialize_to_rdf(bundle, RdfFlavor.JSONLD)
+  bucket = env.USER_DATA_BUCKET
+  key = get_report_bundle_key(graph_id, report_def.id, report_def.generation_count)
+  ok = S3Client().upload_string(
+    content=jsonld_doc,
+    bucket=bucket,
+    key=key,
+    content_type="application/ld+json",
+    metadata={"report-id": report_def.id, "graph-id": graph_id},
+  )
+  if not ok:
+    raise BundleUploadError(
+      f"Failed to upload JSON-LD bundle for report {report_def.id} "
+      f"to s3://{bucket}/{key}; aborting publish."
+    )
+  report_def.bundle_url = get_report_bundle_uri(
+    bucket, graph_id, report_def.id, report_def.generation_count
+  )
+  logger.info(
+    "Stamped bundle for report %s (g%d) at %s",
+    report_def.id,
+    report_def.generation_count,
+    report_def.bundle_url,
+  )
+
+
 def create_report(
   session: Session,
   graph_id: str,
@@ -416,6 +490,8 @@ def create_report(
     created_by,
   )
 
+  _stamp_report_bundle(session, graph_id, report_def)
+
   report_def.generation_status = "published"
   report_def.last_generated = datetime.now(UTC)
   session.commit()
@@ -442,9 +518,18 @@ def regenerate_report(
   the route handler's path parameter flows to the ops layer rather
   than relying on a non-existent model attribute.
 
+  ``filed`` and ``archived`` Reports are immutable artifacts — they
+  carry stamped facts and a published bundle that downstream consumers
+  may already reference. Regenerating one would silently mutate that
+  state; the only legal path past ``filed`` is a restatement (a new
+  Report row with ``supersedes_id``). ``delete_report`` is already
+  gated this way; this check brings ``regenerate_report`` in line.
+
   Raises:
     ReportNotFoundError: report_id doesn't resolve.
     NotAuthorizedError: caller doesn't own the report.
+    InvalidFilingTransitionError: report is ``filed`` or ``archived``
+      — restate instead of regenerating.
     ValueError: if period_end < period_start in the new body.
   """
   report_def = session.get(Report, report_id)
@@ -452,6 +537,12 @@ def regenerate_report(
     raise ReportNotFoundError(report_id)
   if report_def.created_by != acting_user_id:
     raise NotAuthorizedError("Not authorized to modify this report.")
+  if report_def.filing_status in {"filed", "archived"}:
+    raise InvalidFilingTransitionError(
+      f"Report '{report_id}' is in '{report_def.filing_status}'; "
+      f"create a restatement (new Report with supersedes_id) instead of "
+      f"regenerating."
+    )
 
   # Resolve new periods
   if body.periods:
@@ -525,6 +616,8 @@ def regenerate_report(
     report_def.period_end,
     acting_user_id,
   )
+
+  _stamp_report_bundle(session, graph_id, report_def)
 
   report_def.generation_status = "published"
   report_def.last_generated = datetime.now(UTC)

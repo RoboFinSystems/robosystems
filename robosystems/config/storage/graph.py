@@ -27,6 +27,11 @@ All graph storage uses the USER_DATA_BUCKET with organized prefixes:
         {graph_id}/
           {graph_id}_{timestamp}.tar.gz
 
+    report-bundles/                  # Per-Report serialization artifacts (JSON-LD)
+      {graph_id}/
+        {report_id}/
+          g{generation_count}.jsonld
+
     shared-repositories/             # Shared repository data
       databases/                     # Published databases (downloaded by replicas on boot)
         {graph_id}.lbug
@@ -50,6 +55,7 @@ class GraphStorageType(Enum):
   USER_STAGING = "user-staging"  # Pre-ingestion file uploads
   BACKUPS = "graph-backups"  # Application-level backups
   DATABASES = "graph-databases"  # Instance-level database backups
+  REPORT_BUNDLES = "report-bundles"  # Per-Report serialization artifacts
   SHARED_REPO_DATABASES = "shared-repositories/databases"  # Published snapshots
   SHARED_REPO_BACKUPS = "shared-repositories/backups"  # Subscriber backups
   R2_DOWNLOADS = "downloads"  # R2 zero-egress subscriber downloads
@@ -80,6 +86,11 @@ GRAPH_STORAGE: dict[GraphStorageType, GraphStorageConfig] = {
     storage_type=GraphStorageType.DATABASES,
     prefix="graph-databases/",
     description="Instance-level database backups from writer nodes",
+  ),
+  GraphStorageType.REPORT_BUNDLES: GraphStorageConfig(
+    storage_type=GraphStorageType.REPORT_BUNDLES,
+    prefix="report-bundles/",
+    description="Per-Report serialization bundles (JSON-LD) stamped at publish",
   ),
   GraphStorageType.SHARED_REPO_DATABASES: GraphStorageConfig(
     storage_type=GraphStorageType.SHARED_REPO_DATABASES,
@@ -302,6 +313,70 @@ def get_instance_backup_prefix(
 
 
 # =============================================================================
+# Report Bundle Helpers
+# =============================================================================
+
+
+def get_report_bundle_key(
+  graph_id: str,
+  report_id: str,
+  generation_count: int,
+  extension: str = ".jsonld",
+) -> str:
+  """Build S3 key for a per-Report serialization bundle.
+
+  Versioned by ``generation_count`` so prior generations stay
+  addressable in object storage even after a ``regenerate_report``
+  bump. ``Report.bundle_url`` always points at the current version;
+  history lives on S3 for restatement audit trails. The ``g`` prefix
+  reads as "generation" — distinct from framework-version letters
+  (``rs-gaap/v1``, ``fac/v1``) elsewhere in the system.
+
+  Args:
+      graph_id: Owning graph identifier.
+      report_id: Report row id (ULID, ``rpt_`` prefix).
+      generation_count: Monotonic counter from ``Report.generation_count``.
+      extension: File extension (``.jsonld`` for the JSON-LD flavor;
+          future flavors slot in by passing their own extension).
+
+  Returns:
+      S3 key string (without bucket name).
+
+  Example:
+      >>> get_report_bundle_key("kg456", "rpt_01K8", 1)
+      'report-bundles/kg456/rpt_01K8/g1.jsonld'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.REPORT_BUNDLES]
+  return f"{config.prefix}{graph_id}/{report_id}/g{generation_count}{extension}"
+
+
+def get_report_bundle_prefix(
+  graph_id: str | None = None,
+  report_id: str | None = None,
+) -> str:
+  """Build S3 prefix for listing report bundles.
+
+  Args:
+      graph_id: Optional graph filter.
+      report_id: Optional report filter (only valid when ``graph_id`` set).
+
+  Returns:
+      S3 prefix for listing.
+
+  Example:
+      >>> get_report_bundle_prefix("kg456", "rpt_01K8")
+      'report-bundles/kg456/rpt_01K8/'
+  """
+  config = GRAPH_STORAGE[GraphStorageType.REPORT_BUNDLES]
+  prefix = config.prefix
+  if graph_id:
+    prefix += f"{graph_id}/"
+    if report_id:
+      prefix += f"{report_id}/"
+  return prefix
+
+
+# =============================================================================
 # Shared Repository Helpers
 # =============================================================================
 
@@ -451,4 +526,18 @@ def get_instance_backup_uri(bucket: str, *args, **kwargs) -> str:
       Full S3 URI string
   """
   key = get_instance_backup_key(*args, **kwargs)
+  return f"s3://{bucket}/{key}"
+
+
+def get_report_bundle_uri(bucket: str, *args, **kwargs) -> str:
+  """Build full S3 URI for a report bundle.
+
+  Args:
+      bucket: S3 bucket name.
+      *args, **kwargs: Arguments forwarded to ``get_report_bundle_key``.
+
+  Returns:
+      Full S3 URI string.
+  """
+  key = get_report_bundle_key(*args, **kwargs)
   return f"s3://{bucket}/{key}"

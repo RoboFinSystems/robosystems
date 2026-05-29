@@ -46,9 +46,7 @@ PULL_REPORT_SCRIPT = (
   REPO_ROOT / "examples" / "seattle_method_demo" / "pull_expected_report.sh"
 )
 TAXONOMY_DIR = REPO_ROOT / "local" / "taxonomies" / "mini"
-CSV_PATH = (
-  REPO_ROOT / "local" / "datasets" / "seattle_method" / "GeneralJournal.csv"
-)
+CSV_PATH = REPO_ROOT / "local" / "datasets" / "seattle_method" / "GeneralJournal.csv"
 
 BASE_URL = "http://localhost:8000"
 CREDENTIALS_FILE = Path(".local/config.json")
@@ -117,9 +115,7 @@ def step_pull() -> None:
     ("Record-to-Report instance.xml", PULL_REPORT_SCRIPT),
   ):
     print(f"  → {label}")
-    result = subprocess.run(
-      ["bash", str(script)], cwd=str(REPO_ROOT), check=False
-    )
+    result = subprocess.run(["bash", str(script)], cwd=str(REPO_ROOT), check=False)
     if result.returncode != 0:
       raise SystemExit(f"{script.name} exited with code {result.returncode}")
 
@@ -345,6 +341,49 @@ def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"reconcile exited with code {result.returncode}")
 
 
+def step_xbrl_validate(graph_id: str, dry_run: bool = False) -> None:
+  """Step 9 — Validate our XBRL emit against the XBRL 2.1 spec via Arelle.
+
+  Produces ``output/seattle-method-case-1-xbrl-validation.md`` — the
+  spec-conformance check that pairs with ``reconcile.py``'s value check:
+
+      Charlie's data → our DB (step 7 reconcile — value parity)
+                    → our XBRL → Arelle says valid (step 9 — shape parity)
+
+  Arelle is the de-facto XBRL processor; passing its validation is the
+  defensible claim that our output is consumable by any standards-
+  compliant XBRL processor. Earlier framings of this step as a
+  fact-by-fact diff against Charlie's reference were unsound — cross-
+  taxonomy (rs-gaap vs. mini) concept-name divergence makes most facts
+  incomparable, so the diff mostly surfaced taxonomy differences
+  instead of bugs.
+
+  Requires step 8 (create-report) to have run so a filed Report with a
+  stamped bundle exists for the target graph. Subprocess invocation
+  for the same isolation reason as the other rendering steps.
+  """
+  print("─" * 70)
+  print(f"Step 9 — XBRL 2.1 validation (Arelle) → graph {graph_id}")
+  print("─" * 70)
+  if dry_run:
+    print("  (dry-run — skipping xbrl-validate)")
+    return
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples.seattle_method_demo.xbrl_validate",
+      graph_id,
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if result.returncode != 0:
+    raise SystemExit(f"xbrl_validate exited with code {result.returncode}")
+
+
 def step_create_report(graph_id: str, dry_run: bool = False) -> None:
   """Step 8 — Materialize the 4-IB rs-gaap Report + render markdown.
 
@@ -396,6 +435,10 @@ STEPS = {
     "Materialize the 4-IB rs-gaap Report + render markdown",
     step_create_report,
   ),
+  "xbrl-validate": (
+    "Validate our XBRL emit against the XBRL 2.1 spec via Arelle",
+    step_xbrl_validate,
+  ),
 }
 
 
@@ -406,8 +449,7 @@ def main() -> None:
   parser = argparse.ArgumentParser(
     description="Seattle Method Cross-Taxonomy Demo orchestrator.",
     formatter_class=argparse.RawDescriptionHelpFormatter,
-    epilog="Steps:\n"
-    + "\n".join(f"  {k:<22} {v[0]}" for k, v in STEPS.items()),
+    epilog="Steps:\n" + "\n".join(f"  {k:<22} {v[0]}" for k, v in STEPS.items()),
   )
   parser.add_argument(
     "--graph",

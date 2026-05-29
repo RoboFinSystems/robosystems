@@ -31,12 +31,18 @@ from robosystems.models.api.extensions.report_package import (
   FileReportRequest,
   TransitionFilingStatusRequest,
 )
-from robosystems.models.api.extensions.reports import ReportResponse
+from robosystems.models.api.extensions.reports import (
+  CreateReportRequest,
+  ReportResponse,
+)
 from robosystems.routers.extensions.roboledger.operations import (
   AutoMapElementsOperation,
+  RegenerateReportOperation,
   auto_map_elements_op,
+  create_report_op,
   delete_journal_entry_op,
   file_report_op,
+  regenerate_report_op,
   transition_filing_status_op,
   update_entity_op,
   update_event_block_op,
@@ -630,6 +636,137 @@ def _make_filed_report_response() -> ReportResponse:
     filed_at=datetime(2026, 4, 15, tzinfo=UTC),
     filed_by="usr_test123",
   )
+
+
+def _make_create_report_body() -> CreateReportRequest:
+  return CreateReportRequest(
+    name="Q1 2026 Financials",
+    taxonomy_id="rs-gaap",
+    mapping_id="map_test123",
+    period_start=date(2026, 1, 1),
+    period_end=date(2026, 3, 31),
+    period_type="quarterly",
+    comparative=True,
+  )
+
+
+def _make_published_report_response() -> ReportResponse:
+  return ReportResponse(
+    id="rpt_01",
+    name="Q1 2026 Financials",
+    taxonomy_id="rs-gaap",
+    generation_status="published",
+    period_type="quarterly",
+    period_start=date(2026, 1, 1),
+    period_end=date(2026, 3, 31),
+    comparative=True,
+    created_at=datetime(2026, 4, 1, tzinfo=UTC),
+    filing_status="draft",
+  )
+
+
+class TestCreateReportOp:
+  """Covers the new bundle-stamping error path on create-report."""
+
+  @pytest.mark.asyncio
+  async def test_502_when_bundle_upload_fails(self) -> None:
+    """``_stamp_report_bundle`` raises ``BundleUploadError`` when S3 is
+    unreachable at publish time, aborting the transaction so the
+    invariant "every published Report has a stored bundle" holds.
+    The router must translate it to 502, not let it surface as 500."""
+    from robosystems.operations.roboledger.commands.reports import BundleUploadError
+
+    body = _make_create_report_body()
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_create_report",
+        side_effect=BundleUploadError(
+          "Failed to upload JSON-LD bundle for report rpt_01 to "
+          "s3://test-bucket/graph-bundles/kg.../rpt_01/g1.jsonld; aborting publish."
+        ),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await create_report_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 502
+    assert "aborting publish" in exc.value.detail
+
+  @pytest.mark.asyncio
+  async def test_happy_path_returns_published_report(self) -> None:
+    body = _make_create_report_body()
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_create_report",
+        return_value=_make_published_report_response(),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+      patch("robosystems.routers.extensions.roboledger.operations.mark_graph_stale"),
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      envelope = await create_report_op(
+        body=body,
+        graph_id=GRAPH_ID,
+        user=_make_user(),
+        idempotency_key=None,
+        cache=_FakeCache(),
+      )
+    assert isinstance(envelope, OperationEnvelope)
+    assert envelope.operation == "create-report"
+    assert envelope.result is not None
+    assert envelope.result["generation_status"] == "published"
+
+
+class TestRegenerateReportOp:
+  """Covers the new bundle-stamping error path on regenerate-report."""
+
+  @pytest.mark.asyncio
+  async def test_502_when_bundle_upload_fails(self) -> None:
+    """Same fail-loud semantics as create-report. Without the handler
+    a regenerate would surface as 500; the router translates to 502."""
+    from robosystems.operations.roboledger.commands.reports import BundleUploadError
+
+    body = RegenerateReportOperation(report_id="rpt_01")
+    with (
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.cmd_regenerate_report",
+        side_effect=BundleUploadError(
+          "Failed to upload JSON-LD bundle for report rpt_01 to "
+          "s3://test-bucket/graph-bundles/kg.../rpt_01/g2.jsonld; aborting publish."
+        ),
+      ),
+      patch(
+        "robosystems.routers.extensions.roboledger.operations.extensions_session"
+      ) as mock_session,
+    ):
+      mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+      mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+      with pytest.raises(HTTPException) as exc:
+        await regenerate_report_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 502
+    assert "aborting publish" in exc.value.detail
 
 
 class TestFileReportOp:

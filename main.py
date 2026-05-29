@@ -448,6 +448,9 @@ def create_app() -> FastAPI:
 
   # Extensions REST operation surface: POST /extensions/{domain}/{graph_id}/operations/{op}
   if env.ROBOLEDGER_ENABLED:
+    from robosystems.routers.extensions.roboledger.downloads import (
+      router as roboledger_downloads_router,
+    )
     from robosystems.routers.extensions.roboledger.operations import (
       router as roboledger_operations_router,
     )
@@ -463,6 +466,15 @@ def create_app() -> FastAPI:
     app.include_router(
       roboledger_reads_router,
       prefix="/extensions/roboledger/{graph_id}/operations",
+      include_in_schema=True,
+    )
+    # Serialization-bundle downloads — REST GET surface, not an
+    # OperationEnvelope. Mounts at /reports/{id}/download under the
+    # graph-scoped prefix rather than /operations/ so the URL reads
+    # like the REST resource it is.
+    app.include_router(
+      roboledger_downloads_router,
+      prefix="/extensions/roboledger/{graph_id}",
       include_in_schema=True,
     )
 
