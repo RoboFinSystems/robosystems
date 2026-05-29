@@ -1,4 +1,4 @@
-"""Cross-encoder fact-equivalence assertion (v2 graph-native).
+"""Cross-encoder fact-equivalence assertion (v1 graph-native).
 
 The ontology claim: *one bundle, two encoders, one fact set*. The JSON-LD
 encoder (graph-native: ``rs:Fact`` referencing ``rs:period``/``rs:unit``) and

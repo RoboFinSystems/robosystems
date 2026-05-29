@@ -122,7 +122,7 @@ def _build_instance(bundle: StatementBundle) -> etree._Element:
   schema_ref.set(f"{{{NS_XLINK}}}type", "simple")
   schema_ref.set(f"{{{NS_XLINK}}}href", "report.xsd")
 
-  # v2 bundles carry graph-native period nodes, not XBRL contexts —
+  # Bundles carry graph-native period nodes, not XBRL contexts —
   # derive the contexts here (XBRL 2.1 requires shared <context> elements).
   contexts, ctx_for_period = _derive_contexts(bundle)
   for ctx in contexts:
@@ -140,7 +140,7 @@ def _derive_contexts(
 ) -> tuple[list[BundleContext], dict[str, str]]:
   """Reconstruct ``<xbrli:context>`` set from the bundle's period nodes.
 
-  v2 collapsed entity+period into per-fact references; XBRL 2.1 still
+  The bundle collapses entity+period into per-fact references; XBRL 2.1 still
   needs shared contexts. Single entity per bundle → one context per
   period node. Returns ``(contexts, period_ref -> context_id)``.
   """
@@ -232,7 +232,7 @@ def _append_fact(parent: etree._Element, fact: BundleFact, context_ref: str) -> 
   XBRL's "the element name IS the type tag" pattern — the fact element
   uses the concept qname as its tag, with contextRef / unitRef /
   decimals on attributes and the numeric value as the element text. The
-  ``context_ref`` is derived (see :func:`_derive_contexts`) since v2
+  ``context_ref`` is derived (see :func:`_derive_contexts`) since bundle
   facts carry a ``period_ref`` rather than an XBRL context ref.
   """
   if ":" in fact.element_qname:

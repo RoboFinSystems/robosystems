@@ -1,4 +1,4 @@
-"""Unit tests for the JSON-LD encoder (``rdf/jsonld.py``) — v2 graph-native.
+"""Unit tests for the JSON-LD encoder (``rdf/jsonld.py``) — v1 graph-native.
 
 The bundle serializes to the canonical RoboSystems RDF ontology: facts are
 ``rs:Fact`` nodes referencing their aspects directly (``rs:element`` /
@@ -135,11 +135,11 @@ def _root(g: Graph) -> URIRef:
 
 
 class TestRoot:
-  def test_root_is_rs_report_with_version_2(self) -> None:
+  def test_root_is_rs_report_with_version_1(self) -> None:
     g = build_graph(_bundle())
     root = _root(g)
     assert (root, RS.serializationVersion, Literal(SERIALIZATION_VERSION)) in g
-    assert SERIALIZATION_VERSION == "2.0"
+    assert SERIALIZATION_VERSION == "1.0"
     assert (root, RS.mode, Literal("report")) in g
     assert (root, RS.reportingStyle, Literal("BSC-CORP-IS02-CF1")) in g
 

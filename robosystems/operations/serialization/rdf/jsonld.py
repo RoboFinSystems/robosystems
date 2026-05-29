@@ -1,4 +1,9 @@
-"""RDF-graph encoder for ``StatementBundle`` — v2.0 graph-native shape.
+"""RDF-graph encoder for ``StatementBundle`` — v1.0 graph-native shape.
+
+The graph-native shape is the first *published* bundle ontology (v1.0): the
+earlier XBRL-aligned draft never shipped beyond a one-day demo, so there is no
+released predecessor to supersede. The design history (XBRL-aligned →
+graph-native) is recorded in the specs; the artifact itself is v1.
 
 Builds an :class:`rdflib.Graph` from the bundle and serializes it as JSON-LD
 using the canonical ``CANONICAL_CONTEXT`` (``robosystems/arelle/context.py``),
@@ -14,7 +19,7 @@ Shape (per ``local/docs/specs/{rdf-ontology,bundle-ontology-v2}.md``):
   graph's ``FACT_HAS_*`` edges. There is **no** XBRL ``context``; ``rs:Period``
   / ``rs:Unit`` are first-class nodes. The XBRL encoder re-derives contexts.
 * IB envelopes embed under ``rs:informationBlocks`` (top-level fields as
-  triples; deep mechanics as a JSON literal — the pragmatic v2 boundary).
+  triples; deep mechanics as a JSON literal — the pragmatic v1 boundary).
 
 Validation runs SHACL (``frameworks/ontology/v1/shapes.ttl``) over the built
 graph, so the same shapes that gate the seeds gate the export — including the
@@ -36,8 +41,9 @@ from robosystems.arelle.context import CANONICAL_CONTEXT
 from robosystems.logger import logger
 from robosystems.operations.serialization.bundle import StatementBundle
 
-# Bundle ontology version emitted on the root node.
-SERIALIZATION_VERSION = "2.0"
+# Bundle ontology version emitted on the root node. This is the first published
+# bundle ontology — the XBRL-aligned draft never shipped, so it's v1, not v2.
+SERIALIZATION_VERSION = "1.0"
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _SHAPES_PATH = _REPO_ROOT / "frameworks" / "ontology" / "v1" / "shapes.ttl"
@@ -108,7 +114,7 @@ _BUNDLE_CONTEXT_EXTRA: dict[str, Any] = {
 
 
 def serialize_to_jsonld(bundle: StatementBundle) -> str:
-  """Serialize a ``StatementBundle`` to a v2.0 JSON-LD string."""
+  """Serialize a ``StatementBundle`` to a v1.0 JSON-LD string."""
   graph = build_graph(bundle)
   validate_graph(graph, bundle)
   return graph.serialize(
@@ -413,7 +419,7 @@ def _add_information_blocks(g: Graph, bundle: StatementBundle, root: URIRef) -> 
         Literal(
           json.dumps(body, default=_json_default, sort_keys=True),
           datatype=URIRef(
-            "https://robosystems.ai/datatype/v2/InformationBlockEnvelopeJSON"
+            "https://robosystems.ai/datatype/v1/InformationBlockEnvelopeJSON"
           ),
         ),
       )

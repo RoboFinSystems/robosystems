@@ -206,7 +206,7 @@ class BundleLinkbases(BaseModel):
 class BundlePeriod(BaseModel):
   """An ``rs:Period`` node — one per distinct period a fact references.
 
-  v2 collapses the XBRL ``<context>`` (entity + period bundled): a Fact
+  The bundle collapses the XBRL ``<context>`` (entity + period bundled): a Fact
   references its Period directly (mirroring the graph's ``FACT_HAS_PERIOD``
   edge). The XBRL encoder re-derives ``<xbrli:context>`` from these +
   the bundle entity at emit time (XBRL 2.1 requires shared contexts).
@@ -223,7 +223,7 @@ class BundlePeriod(BaseModel):
 class BundleContext(BaseModel):
   """An ``<xbrli:context>`` — entity + period, one per distinct combo.
 
-  **Not stored on the bundle** (v2 collapses contexts onto facts). The
+  **Not stored on the bundle** (the graph-native bundle collapses contexts onto facts). The
   XBRL 2.1 encoder *derives* these from the bundle's entity + ``period_nodes``
   at emit time, because XBRL requires shared ``<context>`` elements with
   ``contextRef``. The JSON-LD encoder never produces them.
@@ -240,7 +240,7 @@ class BundleContext(BaseModel):
 class BundleUnit(BaseModel):
   """An ``rs:Unit`` node — one per distinct measure.
 
-  v2 carries simple-measure units only (e.g., ``iso4217:USD``). Complex
+  The bundle carries simple-measure units only (e.g., ``iso4217:USD``). Complex
   units (per-share with divide, ratios) are deferred until a customer
   needs them. The XBRL encoder emits these as ``<xbrli:unit>``.
   """
@@ -795,7 +795,7 @@ def _mint_periods(
 
   Returns ``(period_nodes, fact_id_to_period_ref)`` so the caller can
   populate ``BundleFact.period_ref`` without re-walking. Period ids are
-  stable: ``p_1``, ``p_2``, … in first-seen order. v2 facts reference
+  stable: ``p_1``, ``p_2``, … in first-seen order. Facts reference
   these directly (no XBRL context); the XBRL encoder re-derives contexts
   from them + the bundle entity.
 
