@@ -1,10 +1,10 @@
-# Seattle Method (Test Case 1) — XBRL 2.1 Validation (Arelle)
+# The World Online — XBRL 2.1 Validation (Arelle)
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `seattle-method-case-1.zip` (7,195 bytes)
+- **Package**: `world-online.zip` (7,448 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-def.xml, report-pre.xml, report.xsd`)
-- **Facts loaded by Arelle**: 46
+- **Facts loaded by Arelle**: 55
 - **Load errors**: 0
 - **Validation errors**: 0
 

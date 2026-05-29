@@ -412,6 +412,44 @@ def step_statement_reconcile(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"statement_reconcile exited with code {result.returncode}")
 
 
+def step_validate(graph_id: str, dry_run: bool = False) -> None:
+  """Step 12 — Validate the downloaded bundle artifacts, container-free.
+
+  Reads step 10's downloaded ``output/`` files back and checks both projections
+  on the host (no API, no DB, no container):
+
+  - ``world-online.jsonld`` → **SHACL** vs the published ontology
+    (``frameworks/ontology/v1/shapes.ttl``)
+  - ``world-online.zip``    → **Arelle** vs the XBRL 2.1 spec
+  """
+  print("─" * 70)
+  print(f"Step 12 — Validate downloaded bundle (SHACL + Arelle) → graph {graph_id}")
+  print("─" * 70)
+  if dry_run:
+    print("  (dry-run — skipping validate)")
+    return
+  out_dir = REPO_ROOT / "examples" / "seattle_method_world_online" / "output"
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples._common.validate",
+      "--jsonld",
+      str(out_dir / "world-online.jsonld"),
+      "--zip",
+      str(out_dir / "world-online.zip"),
+      "--label",
+      "The World Online",
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if result.returncode != 0:
+    raise SystemExit(f"validate exited with code {result.returncode}")
+
+
 # ── Step registry ──────────────────────────────────────────────────────────
 
 STEPS = {
@@ -434,6 +472,10 @@ STEPS = {
   "statement-reconcile": (
     "Reconcile rendered-statement anchors vs Charlie's reference instance",
     step_statement_reconcile,
+  ),
+  "validate": (
+    "Validate the downloaded bundle: SHACL (JSON-LD) + Arelle (XBRL 2.1)",
+    step_validate,
   ),
 }
 
@@ -508,6 +550,10 @@ def main() -> None:
   step_trial_balance(graph_id, dry_run=args.dry_run)
   print()
   step_download_bundles(graph_id, dry_run=args.dry_run)
+  print()
+  step_statement_reconcile(graph_id, dry_run=args.dry_run)
+  print()
+  step_validate(graph_id, dry_run=args.dry_run)
   print()
 
   print("─" * 70)

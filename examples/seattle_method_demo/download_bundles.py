@@ -19,7 +19,7 @@ consumers, XBRL 2.1 for filing-grade interop. Charlie Hoffman's
 Seattle Method test grades on the XBRL emit; JSON-LD is the headline
 modern format.
 
-Pairs with ``xbrl_validate.py`` (which validates the XBRL emit through
+Pairs with the `validate` step (which checks the downloaded artifacts through
 Arelle) — that step proves the **shape** is valid; this step writes the
 artifacts to disk so a reviewer can inspect them directly.
 

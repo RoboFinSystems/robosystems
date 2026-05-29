@@ -66,6 +66,17 @@ def download_bundles_for_report(
   print(f"  JSON-LD:      {jsonld.path} ({len(jsonld.content):,} bytes)")
   print(f"  XBRL 2.1:     {xbrl.path} ({len(xbrl.content):,} bytes)")
 
+  # Validate the just-received artifacts on the host — container-free:
+  # JSON-LD → SHACL (ontology conformance), XBRL zip → Arelle (XBRL 2.1).
+  from examples._common.validate import validate_arelle, validate_shacl
+
+  shacl_md = out_dir / "roboledger-demo-shacl-validation.md"
+  xbrl_md = out_dir / "roboledger-demo-xbrl-validation.md"
+  conforms = validate_shacl(out_dir / JSONLD_PATH.name, shacl_md, "RoboLedger")
+  valid = validate_arelle(out_dir / XBRL_PATH.name, xbrl_md, "RoboLedger")
+  print(f"  SHACL:        {shacl_md} ({'conforms' if conforms else 'VIOLATIONS'})")
+  print(f"  Arelle:       {xbrl_md} ({'valid' if valid else 'INVALID'})")
+
 
 def main() -> None:
   parser = argparse.ArgumentParser(
