@@ -1030,19 +1030,20 @@ def generate_fy2025_report(graph_id: str) -> str | None:
 
   # Download both bundle flavors via the SDK so the demo finishes with a
   # tangible artifact on disk that the customer can open immediately.
-  # JSON-LD is the v1.0 canonical projection; XBRL 2.1 is the
-  # filing-grade equivalent. Same Report, same fact set, two
-  # serializations — see local/docs/specs/bundle-ontology-v1.md.
+  # JSON-LD is the canonical projection; XBRL 2.1 is the filing-grade
+  # equivalent. Same Report, same fact set, two serializations — see
+  # local/docs/ref/serialization.md.
   try:
-    out_dir = Path.home() / ".robosystems" / "bundles" / graph_id
+    out_dir = Path(__file__).resolve().parent / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
     jsonld = client.download_report_bundle(
-      graph_id, report_id, format="jsonld", to=out_dir / f"{report_id}-g1.jsonld"
+      graph_id, report_id, format="jsonld", to=out_dir / "roboledger-demo.jsonld"
     )
     xbrl = client.download_report_bundle(
       graph_id,
       report_id,
       format="xbrl-2.1",
-      to=out_dir / f"{report_id}-g1.zip",
+      to=out_dir / "roboledger-demo.zip",
     )
     print(f"  JSON-LD:      {jsonld.path} ({len(jsonld.content):,} bytes)")
     print(f"  XBRL 2.1:     {xbrl.path} ({len(xbrl.content):,} bytes)")

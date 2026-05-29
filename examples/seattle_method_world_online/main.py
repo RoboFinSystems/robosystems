@@ -350,6 +350,40 @@ def step_trial_balance(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"trial_balance exited with code {result.returncode}")
 
 
+def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
+  """Step 10 — Download the latest filed Report's bundle artifacts.
+
+  Pulls both serialization flavors via the published Python SDK and
+  writes them to ``output/`` so a reviewer can inspect them directly:
+
+  - ``world-online.jsonld`` — the canonical JSON-LD bundle
+  - ``world-online.zip`` — the XBRL 2.1 report package
+
+  Subprocess invocation for the same isolation reason as the other
+  rendering / download steps.
+  """
+  print("─" * 70)
+  print(f"Step 10 — Download JSON-LD + XBRL bundle artifacts → graph {graph_id}")
+  print("─" * 70)
+  if dry_run:
+    print("  (dry-run — skipping download-bundles)")
+    return
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples.seattle_method_world_online.download_bundles",
+      graph_id,
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if result.returncode != 0:
+    raise SystemExit(f"download_bundles exited with code {result.returncode}")
+
+
 # ── Step registry ──────────────────────────────────────────────────────────
 
 STEPS = {
@@ -365,6 +399,10 @@ STEPS = {
   "reconcile": ("Reconcile vs SummaryOfTransactions.csv", step_reconcile),
   "create-report": ("Materialize the rs-gaap 4-statement Report", step_create_report),
   "trial-balance": ("Render the trial balance", step_trial_balance),
+  "download-bundles": (
+    "Download the JSON-LD + XBRL bundle artifacts into output/",
+    step_download_bundles,
+  ),
 }
 
 
@@ -437,6 +475,8 @@ def main() -> None:
   print()
   step_trial_balance(graph_id, dry_run=args.dry_run)
   print()
+  step_download_bundles(graph_id, dry_run=args.dry_run)
+  print()
 
   print("─" * 70)
   print(f"✓ End-to-end demo run complete against graph {graph_id}")
@@ -445,6 +485,8 @@ def main() -> None:
   print("  - world-online-reconciliation.md   (mini pivot vs SummaryOfTransactions)")
   print("  - world-online-four-statements.md  (rs-gaap 4-statement Report)")
   print("  - world-online-trial-balance.md    (trial balance)")
+  print("  - world-online.jsonld              (JSON-LD bundle)")
+  print("  - world-online.zip                 (XBRL 2.1 report package)")
 
 
 if __name__ == "__main__":

@@ -341,14 +341,51 @@ def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"reconcile exited with code {result.returncode}")
 
 
+def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
+  """Step 9 — Download the latest filed Report's bundle artifacts.
+
+  Pulls both serialization flavors via the published Python SDK and
+  writes them to ``output/`` so a reviewer can inspect them directly:
+
+  - ``seattle-method-case-1.jsonld`` — the canonical JSON-LD bundle
+    (the artifact stamped on publish in S3)
+  - ``seattle-method-case-1.zip`` — the XBRL 2.1 report package
+
+  Pairs with ``xbrl_validate.py`` (which proves the XBRL shape is
+  spec-conformant through Arelle); this step writes the artifacts to
+  disk for direct inspection. Subprocess invocation for the same
+  isolation reason as the other download/render steps.
+  """
+  print("─" * 70)
+  print(f"Step 9 — Download JSON-LD + XBRL bundle artifacts → graph {graph_id}")
+  print("─" * 70)
+  if dry_run:
+    print("  (dry-run — skipping download-bundles)")
+    return
+  result = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples.seattle_method_demo.download_bundles",
+      graph_id,
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if result.returncode != 0:
+    raise SystemExit(f"download_bundles exited with code {result.returncode}")
+
+
 def step_xbrl_validate(graph_id: str, dry_run: bool = False) -> None:
-  """Step 9 — Validate our XBRL emit against the XBRL 2.1 spec via Arelle.
+  """Step 10 — Validate our XBRL emit against the XBRL 2.1 spec via Arelle.
 
   Produces ``output/seattle-method-case-1-xbrl-validation.md`` — the
   spec-conformance check that pairs with ``reconcile.py``'s value check:
 
       Charlie's data → our DB (step 7 reconcile — value parity)
-                    → our XBRL → Arelle says valid (step 9 — shape parity)
+                    → our XBRL → Arelle says valid (step 10 — shape parity)
 
   Arelle is the de-facto XBRL processor; passing its validation is the
   defensible claim that our output is consumable by any standards-
@@ -363,7 +400,7 @@ def step_xbrl_validate(graph_id: str, dry_run: bool = False) -> None:
   for the same isolation reason as the other rendering steps.
   """
   print("─" * 70)
-  print(f"Step 9 — XBRL 2.1 validation (Arelle) → graph {graph_id}")
+  print(f"Step 10 — XBRL 2.1 validation (Arelle) → graph {graph_id}")
   print("─" * 70)
   if dry_run:
     print("  (dry-run — skipping xbrl-validate)")
@@ -434,6 +471,10 @@ STEPS = {
   "create-report": (
     "Materialize the 4-IB rs-gaap Report + render markdown",
     step_create_report,
+  ),
+  "download-bundles": (
+    "Download the JSON-LD + XBRL bundle artifacts into output/",
+    step_download_bundles,
   ),
   "xbrl-validate": (
     "Validate our XBRL emit against the XBRL 2.1 spec via Arelle",
@@ -516,14 +557,23 @@ def main() -> None:
   print()
   step_create_report(graph_id, dry_run=args.dry_run)
   print()
+  step_download_bundles(graph_id, dry_run=args.dry_run)
+  print()
+  step_xbrl_validate(graph_id, dry_run=args.dry_run)
+  print()
 
   print("─" * 70)
   print(f"✓ End-to-end demo run complete against graph {graph_id}")
   print("─" * 70)
   print()
   print("Artifacts in examples/seattle_method_demo/output/:")
-  print("  - seattle-method-case-1.md                  (mini reconciliation)")
-  print("  - seattle-method-case-1-four-statements.md  (rs-gaap 4-statement Report)")
+  print("  - seattle-method-case-1.md                       (mini reconciliation)")
+  print(
+    "  - seattle-method-case-1-four-statements.md       (rs-gaap 4-statement Report)"
+  )
+  print("  - seattle-method-case-1.jsonld                   (JSON-LD bundle)")
+  print("  - seattle-method-case-1.zip                      (XBRL 2.1 report package)")
+  print("  - seattle-method-case-1-xbrl-validation.md       (Arelle conformance)")
 
 
 if __name__ == "__main__":

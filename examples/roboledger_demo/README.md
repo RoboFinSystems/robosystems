@@ -154,3 +154,21 @@ Schedules are anchored to month offsets from the demo start date, so they stay a
 | `mappings.py` | CoA → GAAP mapping definitions |
 | `policies.py` | Accounting policy document content (markdown) |
 | `prompt.md` | Claude prompt for the close workflow — paste into Claude Desktop |
+
+## Output Artifacts
+
+After the filed FY 2025 Report stamps, the demo downloads both
+serialization flavors of the Report bundle via the published Python SDK
+(`LedgerClient.download_report_bundle`) into `output/`:
+
+| File | Format |
+|---|---|
+| `output/roboledger-demo.jsonld` | JSON-LD bundle — the canonical projection of the v1.0 ontology |
+| `output/roboledger-demo.zip` | XBRL 2.1 report package — `instance.xml` + `report.xsd` + presentation/calc/definition linkbases |
+
+`output/` is gitignored (each run stamps fresh graph/report IDs).
+Committed reference copies of both bundles live in
+[`sample_output/`](sample_output/) so a reviewer can inspect a clean
+run without spinning up the platform — these are point-in-time
+snapshots, not synced every commit. Refresh with
+`cp output/roboledger-demo.{jsonld,zip} sample_output/`.

@@ -53,11 +53,12 @@ just demo-world-online-create-report <graph_id>
 | `reconcile` | `output/world-online-reconciliation.md` — the `(line-item × business-event)` pivot reproduced from the graph and reconciled cell-by-cell against `SummaryOfTransactions.csv` |
 | `create-report` | `output/world-online-four-statements.md` — the rs-gaap 4-statement Report (BS / IS / CF / SE) |
 | `trial-balance` | `output/world-online-trial-balance.md` — trial balance (total debits = total credits), via the `trialBalance` GraphQL query |
+| `download-bundles` | `output/world-online.jsonld` + `output/world-online.zip` — JSON-LD bundle + XBRL 2.1 report package, pulled via the SDK |
 
 Steps write to `output/` (gitignored — each run stamps fresh graph/report
 IDs, so committing it would churn). Committed reference copies of all
-three artifacts live in [`sample_output/`](sample_output/) for browsing
-without running the demo; refresh them with `cp output/*.md sample_output/`.
+five artifacts live in [`sample_output/`](sample_output/) for browsing
+without running the demo; refresh them with `cp output/*.{md,jsonld,zip} sample_output/`.
 
 ## Opening balances (the load-bearing design decision)
 
