@@ -305,6 +305,7 @@ from robosystems.operations.roboledger.commands.publish_lists import (
   update_publish_list as cmd_update_publish_list,
 )
 from robosystems.operations.roboledger.commands.reports import (
+  BundleUploadError,
   InvalidFilingTransitionError,
   NoEntityError,
   NotAuthorizedError,
@@ -1701,6 +1702,12 @@ async def create_report_op(
           raise HTTPException(status_code=422, detail=f"Taxonomy '{e}' not found.")
         except NoEntityError as e:
           raise HTTPException(status_code=422, detail=str(e))
+        except BundleUploadError as e:
+          # S3 unavailable during the publish-time bundle stamp. Publish
+          # aborted by ``_stamp_report_bundle`` to keep the invariant
+          # "every published Report has a stored bundle artifact"; surface
+          # as 502 (upstream failure) so the client can retry.
+          raise HTTPException(status_code=502, detail=str(e))
     except (ValueError, ProgrammingError) as e:
       if isinstance(e, ProgrammingError) and not _is_schema_missing(e):
         raise
@@ -1766,6 +1773,11 @@ async def regenerate_report_op(
           )
         except InvalidFilingTransitionError as e:
           raise HTTPException(status_code=422, detail=str(e))
+        except BundleUploadError as e:
+          # Same fail-loud semantics as create-report: a regenerate
+          # without a stamped bundle would publish a Report whose
+          # ``bundle_url`` lags the regenerated facts.
+          raise HTTPException(status_code=502, detail=str(e))
         except ValueError as e:
           raise HTTPException(status_code=422, detail=str(e))
     except (ValueError, ProgrammingError):

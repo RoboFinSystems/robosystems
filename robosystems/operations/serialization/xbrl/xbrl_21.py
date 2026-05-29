@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import io
 import zipfile
-from datetime import datetime
 from decimal import Decimal
 
 from lxml import etree
@@ -637,10 +636,3 @@ def _format_decimal(value: float) -> str:
   if decimal_value == decimal_value.to_integral_value():
     return str(int(decimal_value))
   return str(decimal_value)
-
-
-# ── Utility (kept for symmetry; not currently used) ──────────────────────
-
-
-def _emit_timestamp() -> str:
-  return datetime.utcnow().isoformat() + "Z"

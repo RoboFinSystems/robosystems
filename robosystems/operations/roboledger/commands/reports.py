@@ -384,7 +384,7 @@ def _stamp_report_bundle(
     bucket, graph_id, report_def.id, report_def.generation_count
   )
   logger.info(
-    "Stamped bundle for report %s (v%d) at %s",
+    "Stamped bundle for report %s (g%d) at %s",
     report_def.id,
     report_def.generation_count,
     report_def.bundle_url,
