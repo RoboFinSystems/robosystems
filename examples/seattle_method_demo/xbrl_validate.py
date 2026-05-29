@@ -180,16 +180,20 @@ def _render_markdown(
     "",
     "## Notes",
     "",
-    "Arelle is the de-facto XBRL processor (also used by SEC EDGAR for "
-    "filing validation). Zero load errors + zero validation errors is "
-    "the structural correctness claim: our output is **valid XBRL 2.1**, "
-    "consumable by any standards-compliant XBRL processor, with no "
-    "vendor-specific shape requirements.",
+    (
+      "Arelle is the de-facto XBRL processor (also used by SEC EDGAR for "
+      + "filing validation). Zero load errors + zero validation errors is "
+      + "the structural correctness claim: our output is **valid XBRL 2.1**, "
+      + "consumable by any standards-compliant XBRL processor, with no "
+      + "vendor-specific shape requirements."
+    ),
     "",
-    "This complements ``reconcile.py`` (which validates **values** — "
-    "our DB facts match Charlie Hoffman's published reference at the "
-    "value level across the 17 mini concepts that round-trip through "
-    "our mini→rs-gaap mapping). Together they close the loop:",
+    (
+      "This complements ``reconcile.py`` (which validates **values** — "
+      + "our DB facts match Charlie Hoffman's published reference at the "
+      + "value level across the 17 mini concepts that round-trip through "
+      + "our mini→rs-gaap mapping). Together they close the loop:"
+    ),
     "",
     "- **Values** match Charlie's reference (reconcile.py)",
     "- **Shape** matches the XBRL 2.1 spec (this script)",
@@ -212,8 +216,10 @@ def _render_markdown(
     lines += [
       "## Errors",
       "",
-      "_None._ Arelle reported no load errors and no XBRL 2.1 validation "
-      "errors against the emitted instance + schema + linkbases.",
+      (
+        "_None._ Arelle reported no load errors and no XBRL 2.1 validation "
+        + "errors against the emitted instance + schema + linkbases."
+      ),
       "",
     ]
 
