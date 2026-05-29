@@ -42,6 +42,7 @@ class TestS3ClientInit:
     """Init uses env defaults for region and endpoint."""
     mock_env.AWS_DEFAULT_REGION = "us-west-2"
     mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = ""
     mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -50,6 +51,8 @@ class TestS3ClientInit:
 
     assert client.region_name == "us-west-2"
     assert client.endpoint_url == ""
+    # Only the primary client is constructed when the presign endpoint
+    # override is unset — the presign client reuses the primary instance.
     mock_boto_client.assert_called_once()
     call_kwargs = mock_boto_client.call_args[1]
     assert call_kwargs["region_name"] == "us-west-2"
@@ -61,6 +64,7 @@ class TestS3ClientInit:
     """Init respects explicit region_name and endpoint_url args."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
     mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = ""
     mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -78,6 +82,7 @@ class TestS3ClientInit:
     """In prod/staging, no access keys are passed (IAM role used)."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
     mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "prod"
     mock_env.AWS_S3_ACCESS_KEY_ID = "some-key"
     mock_env.AWS_S3_SECRET_ACCESS_KEY = "some-secret"
@@ -94,6 +99,7 @@ class TestS3ClientInit:
     """Staging environment also uses IAM role, not access keys."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
     mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "staging"
     mock_env.AWS_S3_ACCESS_KEY_ID = "key"
     mock_env.AWS_S3_SECRET_ACCESS_KEY = "secret"
@@ -109,6 +115,7 @@ class TestS3ClientInit:
     """Dev environment uses access keys when provided."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
     mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = "AKIA-TEST"
     mock_env.AWS_S3_SECRET_ACCESS_KEY = "secret-test"
@@ -125,6 +132,7 @@ class TestS3ClientInit:
     """Dev environment without access keys falls back to default cred chain."""
     mock_env.AWS_DEFAULT_REGION = "us-east-1"
     mock_env.AWS_ENDPOINT_URL = ""
+    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = ""
     mock_env.ENVIRONMENT = "dev"
     mock_env.AWS_S3_ACCESS_KEY_ID = ""
     mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
@@ -133,6 +141,30 @@ class TestS3ClientInit:
 
     call_kwargs = mock_boto_client.call_args[1]
     assert "aws_access_key_id" not in call_kwargs
+
+  @patch("robosystems.operations.aws.s3.boto3.client")
+  @patch("robosystems.operations.aws.s3.env")
+  def test_init_with_presign_endpoint_builds_second_client(
+    self, mock_env, mock_boto_client
+  ):
+    """When ``AWS_S3_PRESIGN_ENDPOINT_URL`` is set (dev/localstack), the
+    client builds a second boto3 client just for presigned URL signing
+    so signed URLs are reachable from the host browser while internal
+    upload/download traffic stays on the docker DNS endpoint."""
+    mock_env.AWS_DEFAULT_REGION = "us-east-1"
+    mock_env.AWS_ENDPOINT_URL = "http://localstack:4566"
+    mock_env.AWS_S3_PRESIGN_ENDPOINT_URL = "http://localhost:4566"
+    mock_env.ENVIRONMENT = "dev"
+    mock_env.AWS_S3_ACCESS_KEY_ID = ""
+    mock_env.AWS_S3_SECRET_ACCESS_KEY = ""
+
+    S3Client()
+
+    assert mock_boto_client.call_count == 2
+    primary_kwargs = mock_boto_client.call_args_list[0][1]
+    presign_kwargs = mock_boto_client.call_args_list[1][1]
+    assert primary_kwargs["endpoint_url"] == "http://localstack:4566"
+    assert presign_kwargs["endpoint_url"] == "http://localhost:4566"
 
 
 @pytest.mark.unit
