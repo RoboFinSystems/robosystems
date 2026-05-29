@@ -177,3 +177,45 @@ class TestRecordBundleValidation:
       reports._record_bundle_validation(_bundle(), rpt)
     # outcome still recorded before raising
     assert rpt.metadata_["bundle_validation"]["violations"] == 3
+
+  def test_strict_conforming_does_not_raise(
+    self, monkeypatch: pytest.MonkeyPatch
+  ) -> None:
+    from robosystems.config import env
+    from robosystems.operations.roboledger.commands import reports
+
+    monkeypatch.setattr(env, "REPORT_BUNDLE_SHACL_VALIDATION", "strict")
+    rpt = _fake_report()
+    reports._record_bundle_validation(_bundle(), rpt)  # real bundle conforms
+    assert rpt.metadata_["bundle_validation"]["conforms"] is True
+
+  def test_warn_swallows_validation_exception(
+    self, monkeypatch: pytest.MonkeyPatch
+  ) -> None:
+    """A pyshacl/build_graph failure must NOT break a warn-mode publish."""
+    from robosystems.config import env
+    from robosystems.operations.roboledger.commands import reports
+
+    def _boom(_bundle):
+      raise RuntimeError("pyshacl exploded")
+
+    monkeypatch.setattr(env, "REPORT_BUNDLE_SHACL_VALIDATION", "warn")
+    monkeypatch.setattr(jsonld, "build_graph", _boom)
+    rpt = _fake_report()
+    reports._record_bundle_validation(_bundle(), rpt)  # does not raise
+    assert "bundle_validation" not in rpt.metadata_
+
+  def test_strict_reraises_validation_exception(
+    self, monkeypatch: pytest.MonkeyPatch
+  ) -> None:
+    from robosystems.config import env
+    from robosystems.operations.roboledger.commands import reports
+
+    def _boom(_bundle):
+      raise RuntimeError("pyshacl exploded")
+
+    monkeypatch.setattr(env, "REPORT_BUNDLE_SHACL_VALIDATION", "strict")
+    monkeypatch.setattr(jsonld, "build_graph", _boom)
+    rpt = _fake_report()
+    with pytest.raises(RuntimeError):
+      reports._record_bundle_validation(_bundle(), rpt)

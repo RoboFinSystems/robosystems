@@ -72,17 +72,21 @@ def validate_shacl(jsonld_path: Path, out_md: Path, label: str) -> bool:
     f"- **rs:Fact nodes**: {_count(graph, RS.Fact)}",
     f"- **rs:Association nodes**: {_count(graph, RS.Association)}",
     f"- **rs:Element nodes**: {_count(graph, RS.Element)}",
-    f"- **SHACL shapes checked**: {n_shapes} (positive instance shapes + "
-    "negative shapes banning the retired dialects)",
+    (
+      f"- **SHACL shapes checked**: {n_shapes} (positive instance shapes + "
+      + "negative shapes banning the retired dialects)"
+    ),
     "",
-    "Validated on the host with **pyshacl** against "
-    "`frameworks/ontology/v1/shapes.ttl` — the *same* shapes that gate the "
-    "framework seeds and the publish-time bundle validation, run here directly "
-    "on the on-disk artifact (no API, no database, no container). Conformance "
-    "means every `rs:Fact` references its aspects directly "
-    "(`rs:element`/`rs:entity`/`rs:period`/`rs:unit` — no XBRL `context`), every "
-    "`rs:Association` carries `xlink:from`/`to` + `xlink:arcrole`, and none of the "
-    "retired dialects (`xbrli:contextRef`, `arcFrom`, direct `summationOf`) appear.",
+    (
+      "Validated on the host with **pyshacl** against "
+      + "`frameworks/ontology/v1/shapes.ttl` — the *same* shapes that gate the "
+      + "framework seeds and the publish-time bundle validation, run here directly "
+      + "on the on-disk artifact (no API, no database, no container). Conformance "
+      + "means every `rs:Fact` references its aspects directly "
+      + "(`rs:element`/`rs:entity`/`rs:period`/`rs:unit` — no XBRL `context`), every "
+      + "`rs:Association` carries `xlink:from`/`to` + `xlink:arcrole`, and none of the "
+      + "retired dialects (`xbrli:contextRef`, `arcFrom`, direct `summationOf`) appear."
+    ),
     "",
     "## Violations",
     "",
@@ -109,10 +113,19 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
 
   with zipfile.ZipFile(io.BytesIO(zip_path.read_bytes())) as zf:
     files = sorted(zf.namelist())
+    # The report package's entry point is `instance.xml` by contract; fall back
+    # to the first non-schema .xml so a producer-side rename fails loudly with a
+    # bad model rather than a silent FileNotFoundError on a hard-coded path.
+    entry = next(
+      (f for f in files if Path(f).name == "instance.xml"),
+      next((f for f in files if f.endswith(".xml")), None),
+    )
+    if entry is None:
+      raise SystemExit(f"No XBRL instance (.xml) found in {zip_path.name}: {files}")
     with tempfile.TemporaryDirectory(prefix="xbrl-validate-") as tmp:
       zf.extractall(tmp)
       client = ArelleClient()
-      model = client.controller(str(Path(tmp) / "instance.xml"))
+      model = client.controller(str(Path(tmp) / entry))
       load_errors = [str(e) for e in (model.errors or [])]
       fact_count = len(model.facts) if hasattr(model, "facts") else 0
       result = client.validate(model)
@@ -131,12 +144,14 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
     f"- **Load errors**: {len(load_errors)}",
     f"- **Validation errors**: {len(val_errors)}",
     "",
-    "Validated on the host with **Arelle** (the de-facto XBRL processor, also "
-    "used by SEC EDGAR) directly against the on-disk report package — no API, no "
-    "container. Zero load + validation errors is the structural-correctness "
-    "claim: the output is valid XBRL 2.1, consumable by any standards-compliant "
-    "processor. This is **base XBRL 2.1** validation; SEC/EFM disclosure-system "
-    "checks are not enabled (the instance isn't an SEC filing).",
+    (
+      "Validated on the host with **Arelle** (the de-facto XBRL processor, also "
+      + "used by SEC EDGAR) directly against the on-disk report package — no API, no "
+      + "container. Zero load + validation errors is the structural-correctness "
+      + "claim: the output is valid XBRL 2.1, consumable by any standards-compliant "
+      + "processor. This is **base XBRL 2.1** validation; SEC/EFM disclosure-system "
+      + "checks are not enabled (the instance isn't an SEC filing)."
+    ),
     "",
   ]
   if load_errors:
@@ -147,8 +162,10 @@ def validate_arelle(zip_path: Path, out_md: Path, label: str) -> bool:
     lines += [
       "## Errors",
       "",
-      "_None._ Arelle reported no load errors and no XBRL 2.1 validation errors "
-      "against the emitted instance + schema + linkbases.",
+      (
+        "_None._ Arelle reported no load errors and no XBRL 2.1 validation errors "
+        + "against the emitted instance + schema + linkbases."
+      ),
       "",
     ]
   out_md.write_text("\n".join(lines))

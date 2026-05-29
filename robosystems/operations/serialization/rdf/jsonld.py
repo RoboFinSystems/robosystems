@@ -31,6 +31,7 @@ and records the outcome on the Report; serialization itself never blocks.
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -473,21 +474,27 @@ class ShaclResult:
       "shapes_checked": self.shapes_checked,
       # Keep the stored excerpt bounded — the full report can be large.
       "report_excerpt": self.report[:4000] if self.report else "",
-      "shapes_version": "frameworks/ontology/v1/shapes.ttl",
+      "shapes_version": str(_SHAPES_PATH.relative_to(_REPO_ROOT)),
     }
 
 
 _SHAPES_CACHE: Graph | None = None
+_SHAPES_LOCK = threading.Lock()
 _SH = Namespace("http://www.w3.org/ns/shacl#")
 
 
 def _shapes_graph() -> Graph | None:
   global _SHAPES_CACHE
   if _SHAPES_CACHE is None:
-    if not _SHAPES_PATH.exists():
-      logger.warning("SHACL shapes not found at %s — skipping validation", _SHAPES_PATH)
-      return None
-    _SHAPES_CACHE = Graph().parse(str(_SHAPES_PATH), format="turtle")
+    with _SHAPES_LOCK:
+      # Re-check inside the lock: another thread may have parsed it already.
+      if _SHAPES_CACHE is None:
+        if not _SHAPES_PATH.exists():
+          logger.warning(
+            "SHACL shapes not found at %s — skipping validation", _SHAPES_PATH
+          )
+          return None
+        _SHAPES_CACHE = Graph().parse(str(_SHAPES_PATH), format="turtle")
   return _SHAPES_CACHE
 
 

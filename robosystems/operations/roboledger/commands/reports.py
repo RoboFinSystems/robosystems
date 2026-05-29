@@ -59,6 +59,7 @@ from robosystems.operations.roboledger.reports.network_picker import (
 )
 from robosystems.operations.serialization import (
   RdfFlavor,
+  StatementBundle,
   build_report_bundle,
   serialize_to_rdf,
 )
@@ -337,7 +338,7 @@ def _pre_create_report_fact_sets(
   session.flush()
 
 
-def _record_bundle_validation(bundle: Any, report_def: Report) -> None:
+def _record_bundle_validation(bundle: StatementBundle, report_def: Report) -> None:
   """Optionally SHACL-validate the bundle and record the result on the Report.
 
   Gated by ``env.REPORT_BUNDLE_SHACL_VALIDATION`` (``off`` | ``warn`` |
@@ -345,6 +346,10 @@ def _record_bundle_validation(bundle: Any, report_def: Report) -> None:
   runs, the structured outcome is logged onto
   ``report.metadata['bundle_validation']`` (audit trail), and ``strict``
   additionally blocks the publish on non-conformance.
+
+  Validation-infrastructure failures (e.g. pyshacl raising) never break a
+  ``warn`` publish: they are logged and skipped. Only ``strict`` re-raises,
+  since strict opted into blocking on a bad/unverifiable bundle.
   """
   mode = (env.REPORT_BUNDLE_SHACL_VALIDATION or "off").strip().lower()
   if mode == "off":
@@ -355,7 +360,15 @@ def _record_bundle_validation(bundle: Any, report_def: Report) -> None:
     shacl_report,
   )
 
-  result = shacl_report(build_graph(bundle))
+  try:
+    result = shacl_report(build_graph(bundle))
+  except Exception:
+    logger.exception(
+      "SHACL validation errored for report %s (mode=%s)", report_def.id, mode
+    )
+    if mode == "strict":
+      raise
+    return
   # Reassign (not mutate) so SQLAlchemy flags the JSONB column dirty.
   report_def.metadata_ = {
     **(report_def.metadata_ or {}),

@@ -141,7 +141,10 @@ def _load_expected(path: Path) -> dict[str, tuple[float | None, float | None]]:
 
 def _load_actual(path: Path) -> dict[str, tuple[float | None, float | None]]:
   """{rs-gaap qname: (current, prior)} from the bundle's rs:Fact nodes."""
-  graph = json.loads(path.read_text())["@graph"]
+  doc = json.loads(path.read_text())
+  # auto_compact can emit a bare root object (no @graph envelope) when the
+  # graph has a single named root — fall back to treating the doc as one node.
+  graph = doc.get("@graph", [doc])
   period_date: dict[str, str] = {}
   for n in graph:
     if n.get("@type") == "rs:Period":
@@ -199,16 +202,20 @@ def render(graph_bundle: Path, rows: list[Row]) -> str:
   lines = [
     "# The World Online — Statement-Level Reconciliation",
     "",
-    "Diffs our rendered four-statement Report's **anchor totals** against "
-    "Charlie Hoffman's **published XBRL reference instance** "
-    "(`mini/ref-num/instance.xml`, the source of his `index2.html`). Complements "
-    "the GL-pivot `reconcile.py` (which validates ingestion against "
-    "`SummaryOfTransactions.csv`) at the rendered-statement level.",
+    (
+      "Diffs our rendered four-statement Report's **anchor totals** against "
+      + "Charlie Hoffman's **published XBRL reference instance** "
+      + "(`mini/ref-num/instance.xml`, the source of his `index2.html`). Complements "
+      + "the GL-pivot `reconcile.py` (which validates ingestion against "
+      + "`SummaryOfTransactions.csv`) at the rendered-statement level."
+    ),
     "",
-    "Our values are read from the **v2 graph-native bundle** "
-    f"(`{graph_bundle.name}` — `rs:Fact` nodes). Charlie's instance is labelled "
-    "FY2022 (EUR); ours spans 2023→2028 — amounts are matched by **period "
-    "position** (latest = current), since they tie regardless of the label.",
+    (
+      "Our values are read from the **v2 graph-native bundle** "
+      + f"(`{graph_bundle.name}` — `rs:Fact` nodes). Charlie's instance is labelled "
+      + "FY2022 (EUR); ours spans 2023→2028 — amounts are matched by **period "
+      + "position** (latest = current), since they tie regardless of the label."
+    ),
     "",
     "## Scorecard",
     "",
@@ -232,11 +239,13 @@ def render(graph_bundle: Path, rows: list[Row]) -> str:
     )
   lines += [
     "",
-    "A ✓ means the rendered statement ties to Charlie's published reference for "
-    "that anchor (within the published summary's per-cell rounding). The negative "
-    "ending cash is **in Charlie's reference report too** — it is a property of the "
-    "source dataset's tagging (financing cash legs tagged operating), not an "
-    'ingestion error; see `README.md` §"Cash flow statement".',
+    (
+      "A ✓ means the rendered statement ties to Charlie's published reference for "
+      + "that anchor (within the published summary's per-cell rounding). The negative "
+      + "ending cash is **in Charlie's reference report too** — it is a property of the "
+      + "source dataset's tagging (financing cash legs tagged operating), not an "
+      + 'ingestion error; see `README.md` §"Cash flow statement".'
+    ),
     "",
     "## How to reproduce",
     "",
