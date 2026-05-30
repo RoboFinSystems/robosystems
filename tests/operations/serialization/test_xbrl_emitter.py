@@ -464,14 +464,19 @@ class TestReportXsd:
     assert root.findall(f"{{{NS_LINK}}}linkbaseRef") == []
 
   def test_no_linkbase_ref_when_no_arcs_emitted(self) -> None:
-    """When a bundle has no arcs in a given linkbase, we omit the
-    linkbaseRef to keep the schema clean — XBRL processors don't
-    need a pointer at an empty linkbase."""
-    root = _parse(serialize_to_xbrl_21(_bundle()), "report.xsd")
+    """When a bundle has no arcs in a given linkbase, we omit BOTH the
+    linkbaseRef AND the linkbase file — XBRL processors don't need a
+    pointer at, or an empty copy of, a linkbase with no relations."""
+    zip_bytes = serialize_to_xbrl_21(_bundle())
+    root = _parse(zip_bytes, "report.xsd")
     refs = root.findall(f".//{{{NS_LINK}}}linkbaseRef")
     hrefs = {r.get(f"{{{NS_XLINK}}}href") for r in refs}
     assert "report-pre.xml" not in hrefs
     assert "report-cal.xml" not in hrefs
+    # The file itself must not land in the zip either (gated like the rest).
+    names = set(_zip_open(zip_bytes).namelist())
+    assert "report-pre.xml" not in names
+    assert "report-cal.xml" not in names
 
 
 # ── Linkbases ──────────────────────────────────────────────────────────

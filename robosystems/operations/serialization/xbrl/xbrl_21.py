@@ -44,6 +44,7 @@ NS_LINK = "http://www.xbrl.org/2003/linkbase"
 NS_XLINK = "http://www.w3.org/1999/xlink"
 NS_XSI = "http://www.w3.org/2001/XMLSchema-instance"
 NS_XS = "http://www.w3.org/2001/XMLSchema"
+NS_XML = "http://www.w3.org/XML/1998/namespace"
 NS_ISO4217 = "http://www.xbrl.org/2003/iso4217"
 # rs-gaap is the canonical reporting taxonomy emitted into report.xsd
 # under its published namespace IRI; concepts referenced from other
@@ -83,11 +84,14 @@ def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
   with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("instance.xml", _serialize_xml(_build_instance(bundle)))
     zf.writestr("report.xsd", _serialize_xml(_build_schema(bundle)))
-    zf.writestr("report-pre.xml", _serialize_xml(_build_presentation_linkbase(bundle)))
     # Only emit linkbase files that actually carry arcs/labels. An empty
     # ``<link:linkbase/>`` is valid XML but useless noise that reads as a
-    # missing-relations bug to a reviewing XBRL processor — and its
+    # missing-relations bug to a reviewing XBRL processor — and each
     # linkbaseRef is already gated on the same condition in ``_build_schema``.
+    if bundle.linkbases.presentation_links:
+      zf.writestr(
+        "report-pre.xml", _serialize_xml(_build_presentation_linkbase(bundle))
+      )
     if bundle.linkbases.calculation_links:
       zf.writestr("report-cal.xml", _serialize_xml(_build_calculation_linkbase(bundle)))
     if bundle.linkbases.definition_links:
@@ -149,9 +153,9 @@ def _build_instance(bundle: StatementBundle) -> etree._Element:
     key = (
       fact.element_qname,
       context_ref,
-      str(fact.unit_ref),
+      fact.unit_ref,
       _format_value(fact.value),
-      str(fact.decimals),
+      fact.decimals,
     )
     if key in seen:
       continue
@@ -553,8 +557,7 @@ def _build_definition_linkbase(bundle: StatementBundle) -> etree._Element:
   )
 
 
-# Standard XBRL label-linkbase URIs (XBRL 2.1 §5.2.2).
-NS_XML = "http://www.w3.org/XML/1998/namespace"
+# Standard XBRL label-linkbase role/arcrole URIs (XBRL 2.1 §5.2.2).
 _ROLE_LINK = "http://www.xbrl.org/2003/role/link"
 _ROLE_LABEL = "http://www.xbrl.org/2003/role/label"
 _ARCROLE_CONCEPT_LABEL = "http://www.xbrl.org/2003/arcrole/concept-label"
