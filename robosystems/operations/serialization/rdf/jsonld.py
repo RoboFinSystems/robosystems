@@ -301,8 +301,15 @@ def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
       g.add((s_uri, RS.roleUri, Literal(link.role_uri)))
     if link.block_type:
       g.add((s_uri, RS.blockType, Literal(link.block_type)))
+    # The same Structure (ELR) can host more than one linkbase group —
+    # e.g. a presentation network whose calculation arcs were sourced onto
+    # it shares the structure_id across a presentationLink and a
+    # calculationLink. Scope the Association IRI by link group so arcs at the
+    # same index in different groups don't collapse onto one node (which would
+    # give it multiple xlink:from and fail AssociationShape).
+    group = link.link_type.removesuffix("Link")
     for idx, arc in enumerate(link.arcs):
-      a_uri = _scoped(root, f"association/{link.structure_id}", str(idx))
+      a_uri = _scoped(root, f"association/{link.structure_id}/{group}", str(idx))
       g.add((s_uri, RS.hasAssociation, a_uri))
       g.add((a_uri, RDF.type, RS.Association))
       g.add((a_uri, XLINK["from"], _concept_uri(arc.from_qname)))
