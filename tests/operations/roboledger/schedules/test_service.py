@@ -66,9 +66,24 @@ SVC_MODULE = "robosystems.operations.roboledger.schedules.service"
 
 
 def _mock_session():
-  """Create a mock SQLAlchemy session."""
+  """Create a mock SQLAlchemy session.
+
+  A real DB flush assigns ``Structure.id`` (a default ULID); the MagicMock
+  session is a no-op. Production code reads ``structure.id`` immediately
+  after the flush (associations, fact-set provenance), so we stamp an id
+  on each added Structure that lacks one — mirroring real flush behaviour.
+  """
+  from robosystems.models.extensions.roboledger import Structure
+  from robosystems.utils.ulid import generate_prefixed_ulid
+
   session = MagicMock()
   session.execute.return_value = MagicMock()
+
+  def _stamp_structure_id(obj):
+    if isinstance(obj, Structure) and getattr(obj, "id", None) is None:
+      obj.id = generate_prefixed_ulid("st")
+
+  session.add.side_effect = _stamp_structure_id
   return session
 
 

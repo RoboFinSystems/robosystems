@@ -11,7 +11,8 @@
 #################################################################
 # RoboSystems RDF Ontology v1 — class + property declarations.
 #
-# Authority: local/docs/specs/rdf-ontology.md.
+# Authority: this file is the canonical declaration of RoboSystems RDF
+# Ontology v1 (paired with ``shapes.ttl`` for SHACL validation).
 # Principle: RS topology, XBRL vocabulary. Classes are rs:; predicates
 # inherit XBRL/XSD/OWL where those standards define the term.
 #

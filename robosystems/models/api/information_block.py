@@ -1,8 +1,7 @@
 """API response models for the Information Block envelope.
 
-Wire-facing types for the cross-domain Information Block construct
-(see ``local/docs/specs/information-block.md``). Used by the REST
-``create-information-block`` operation, the GraphQL ``informationBlock``/
+Wire-facing types for the cross-domain Information Block construct.
+Used by the REST ``create-information-block`` operation, the GraphQL ``informationBlock``/
 ``informationBlocks`` fields, and the MCP read tools.
 
 Adding a block type: register its ``*Mechanics`` model and add it to
@@ -197,6 +196,15 @@ class FactSetLite(BaseModel):
     description=(
       "Back-pointer to the ``reports`` table while ``report_id`` still "
       "lives on facts. Drops out once the retirement migration lands."
+    ),
+  )
+  provenance: dict | None = Field(
+    None,
+    description=(
+      "Typed ``FactProvenance`` descriptor (discriminated on ``origin``: "
+      "pivot | schedule | derived | asserted) recording how this FactSet's "
+      "facts were constructed. Surfaced as JSON, mirroring how mechanics "
+      "is exposed. Null for pre-feature historical FactSets."
     ),
   )
 

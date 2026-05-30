@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -1020,6 +1021,21 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     ]
     print(f"  Package:      {len(items)} block(s) — {', '.join(block_names)}")
 
+    # Fact provenance — every FactSet records how its facts were
+    # constructed (the auditability spine). Surfaced via the SDK on
+    # block.fact_set.provenance; report blocks pivot from the posted ledger.
+    origins = [
+      (((i.get("block") or {}).get("fact_set") or {}).get("provenance") or {}).get(
+        "origin"
+      )
+      for i in items
+    ]
+    if origins and all(origins):
+      summary = ", ".join(f"{n}×{o}" for o, n in sorted(Counter(origins).items()))
+      print(f"  Provenance:   {summary}")
+    else:
+      print("  WARNING: some FactSets lack a provenance descriptor")
+
   # File it — flips filing_status draft → filed
   try:
     client.file_report(graph_id, report_id)
@@ -1030,8 +1046,7 @@ def generate_fy2025_report(graph_id: str) -> str | None:
   # Download both bundle flavors via the SDK so the demo finishes with a
   # tangible artifact on disk that the customer can open immediately.
   # JSON-LD is the canonical projection; XBRL 2.1 is the filing-grade
-  # equivalent. Same Report, same fact set, two serializations — see
-  # local/docs/ref/serialization.md.
+  # equivalent. Same Report, same fact set, two serializations.
   from .download_bundles import download_bundles_for_report
 
   download_bundles_for_report(client, graph_id, report_id)

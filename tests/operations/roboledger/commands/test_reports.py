@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from robosystems.models.api.fact_provenance import AssertedProvenance
 from robosystems.operations.roboledger.commands.reports import (
   InvalidFilingTransitionError,
   NotAuthorizedError,
@@ -14,6 +15,7 @@ from robosystems.operations.roboledger.commands.reports import (
   _build_structure_mapping,
   _persist_report_facts,
   _pre_create_report_fact_sets,
+  _share_to_target,
   regenerate_report,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -218,7 +220,9 @@ def test_pre_create_report_fact_sets_one_row_per_picked_structure() -> None:
     "struct_se": "fs_SE",
   }
 
-  _pre_create_report_fact_sets(session, "rep_01", "ent_01", "usr_test", periods, fs_map)
+  _pre_create_report_fact_sets(
+    session, "rep_01", "ent_01", "usr_test", periods, fs_map, "map_01"
+  )
 
   added = [c[0][0] for c in session.add.call_args_list]
   # Every picked Network gets a row — including ones with no facts.
@@ -239,6 +243,14 @@ def test_pre_create_report_fact_sets_one_row_per_picked_structure() -> None:
   # Envelope spans the full period range from `periods`.
   assert is_row.period_start == date(2025, 10, 1)
   assert is_row.period_end == date(2026, 3, 31)
+  # Report facts are pivoted from the posted ledger via the mapping.
+  assert is_row.provenance == {
+    "origin": "pivot",
+    "mapping_id": "map_01",
+    "period": "2025-10-01/2026-03-31",
+    "arc_type": None,
+    "posting_filter": None,
+  }
 
 
 def test_pre_create_report_fact_sets_noop_on_empty_inputs() -> None:
@@ -246,7 +258,7 @@ def test_pre_create_report_fact_sets_noop_on_empty_inputs() -> None:
   either (we'd have nothing to envelope)."""
   session = MagicMock()
   _pre_create_report_fact_sets(
-    session, "rep_01", "ent_01", "usr_test", [], {"struct_x": "fs_x"}
+    session, "rep_01", "ent_01", "usr_test", [], {"struct_x": "fs_x"}, "map_01"
   )
   assert session.add.call_count == 0
 
@@ -258,8 +270,94 @@ def test_pre_create_report_fact_sets_noop_on_empty_inputs() -> None:
     "usr_test",
     [_FakePeriod(date(2026, 1, 1), date(2026, 3, 31))],
     {},
+    "map_01",
   )
   assert session2.add.call_count == 0
+
+
+def test_pre_create_report_fact_sets_instant_period_key_no_leading_slash() -> None:
+  """An instant-only envelope (no period_start) stamps a single-date
+  provenance period key, not a leading-slash ``/end`` (the duration form
+  uses ``start/end``)."""
+  session = MagicMock()
+  _pre_create_report_fact_sets(
+    session,
+    "rep_01",
+    "ent_01",
+    "usr_test",
+    [_FakePeriod(None, date(2026, 3, 31))],
+    {"struct_bs": "fs_BS"},
+    "map_01",
+  )
+  fs = session.add.call_args_list[0][0][0]
+  assert fs.provenance["period"] == "2026-03-31"
+
+
+def test_share_to_target_stamps_asserted_provenance() -> None:
+  """The cross-graph share producer stamps `asserted` provenance that
+  back-references the source graph + report (the third producer in the
+  capture triangle)."""
+  graph = MagicMock()
+  graph.schema_extensions = ["roboledger"]
+  platform_session = MagicMock()
+  platform_session.execute.return_value.scalar_one_or_none.return_value = graph
+  platform_cm = MagicMock()
+  platform_cm.__enter__.return_value = platform_session
+
+  target_session = MagicMock()
+  ext_cm = MagicMock()
+  ext_cm.__enter__.return_value = target_session
+
+  captured: dict = {}
+
+  def _capture(_session, **kwargs):
+    captured.update(kwargs)
+    fs = MagicMock()
+    fs.id = "fs_shared"
+    return fs
+
+  source_facts = [
+    {
+      "element_id": "e1",
+      "value": 1.0,
+      "period_start": date(2026, 1, 1),
+      "period_end": date(2026, 3, 31),
+      "period_type": "duration",
+      "unit": "USD",
+      "entity_id": "ent_src",
+    }
+  ]
+  report_snapshot = {
+    "id": "rpt_src",
+    "name": "Q1 Report",
+    "taxonomy_id": "tax_1",
+    "period_type": "annual",
+    "comparative": False,
+  }
+
+  from robosystems.operations.roboledger.commands import reports as reports_mod
+
+  with (
+    patch("robosystems.db.platform.SessionFactory", return_value=platform_cm),
+    patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
+    patch.object(reports_mod, "create_fact_set", side_effect=_capture),
+    patch.object(reports_mod, "_ensure_linked_entity"),
+  ):
+    result = _share_to_target(
+      source_graph_id="kg_src",
+      report_snapshot=report_snapshot,
+      source_facts=source_facts,
+      target_graph_id="kg_tgt",
+      shared_by="usr_share",
+    )
+
+  assert result.status == "shared"
+  prov = captured["provenance"]
+  assert isinstance(prov, AssertedProvenance)
+  assert prov.origin == "asserted"
+  assert prov.source_system == "cross_graph_share"
+  assert "source_graph=kg_src" in prov.basis_note
+  assert "source_report=rpt_src" in prov.basis_note
 
 
 # ── regenerate_report filing-status gate ──────────────────────────────────

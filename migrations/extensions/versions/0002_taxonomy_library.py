@@ -162,8 +162,7 @@ _NARROW_ELEMENT_SOURCE_CHECK = (
 # (rollforward, reconciliation, policy) required as admissible CHECK
 # values for Phase d (typed artifact_mechanics + rules) and Phase eta
 # (metric block type). Folded into 0002 rather than shipped as a
-# standalone migration since 0002 is still unreleased. See
-# ``local/docs/specs/information-block.md`` section 5.9, Phase g.1.
+# standalone migration since 0002 is still unreleased.
 _WIDENED_BLOCK_TYPE_CHECK = (
   "block_type IN ("
   # Renderable financial-statement presentations
@@ -1008,8 +1007,7 @@ def upgrade() -> None:
   # defense in depth for tenant ALTERs below) don't fail. Post-seed
   # UPDATEs populate concept/member_arrangement + artifact_mechanics for
   # the library-seeded statement Structures; per-tenant UPDATEs backfill
-  # existing Schedule rows from metadata_. See
-  # ``local/docs/specs/information-block.md`` section 4.2, Phase d.
+  # existing Schedule rows from metadata_.
   op.add_column(
     "structures",
     sa.Column("concept_arrangement", sa.String(), nullable=True),
@@ -1375,9 +1373,7 @@ def upgrade() -> None:
   # Phase d backfill on public.structures: set concept/member_arrangement
   # + empty statement_renderer mechanics for the four library-seeded
   # statement block types. Has to run BEFORE copy_library_into_tenant so
-  # the tenant copy picks up populated values rather than NULL. See
-  # ``local/docs/specs/information-block.md`` section 5.9 block inventory
-  # for the arrangement defaults.
+  # the tenant copy picks up populated values rather than NULL.
   #
   # ``concept_arrangement`` and ``member_arrangement`` are only set when
   # NULL — the seed loader (``loader._extract_structures``) already

@@ -12,8 +12,7 @@ Pulls both serialization flavors via the published Python SDK
   rebuilt on-demand by the backend at download time
 
 Same shape as the Seattle Method ``download_bundles.py`` scripts; the
-three are intentionally parallel so each demo is self-contained. See
-``local/docs/ref/serialization.md`` for the design.
+three are intentionally parallel so each demo is self-contained.
 
 Importable as ``download_bundles_for_report(client, graph_id, report_id,
 out_dir)`` so ``main.py`` can reuse it in-process at the end of

@@ -13,8 +13,7 @@ Pulls both serialization flavors via the published Python SDK
   rebuilt on-demand by the backend at download time
 
 The two files are the *same Report content* projected into different
-formats by the two encoder families described in
-``local/docs/ref/serialization.md`` §3 — JSON-LD for modern programmatic
+formats by the two encoder families — JSON-LD for modern programmatic
 consumers, XBRL 2.1 for filing-grade interop. Charlie Hoffman's
 Seattle Method test grades on the XBRL emit; JSON-LD is the headline
 modern format.

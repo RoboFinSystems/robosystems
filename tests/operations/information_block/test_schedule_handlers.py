@@ -299,6 +299,11 @@ class TestBuildEnvelope:
     fact_set.factset_type = "schedule"
     fact_set.entity_id = "ent_demo"
     fact_set.report_id = None
+    fact_set.provenance = {
+      "origin": "schedule",
+      "structure_id": "struct_dep",
+      "method": "straight_line",
+    }
 
     session.execute.side_effect = [
       _exec_result(scalar=fact_set),  # fact_set lookup (pinned)

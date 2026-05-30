@@ -17,18 +17,22 @@ from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
+from robosystems.models.api.fact_provenance import (
+  AssertedProvenance,
+  ScheduleProvenance,
+)
 from robosystems.models.extensions.roboledger import (
   Association,
   Element,
   Entry,
   Event,
   Fact,
-  FactSet,
   LineItem,
   Structure,
   Taxonomy,
 )
 from robosystems.models.extensions.rule import Rule
+from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 # ── Data classes ─────────────────────────────────────────────────────────
@@ -249,16 +253,39 @@ class ScheduleService:
     # fact INSERTs — SQLAlchemy's session-flush ordering is by INSERT
     # statement type, not by FK dependency, and would otherwise emit
     # facts INSERTs ahead of the FactSet row in the same flush.
-    session.add(
-      FactSet(
-        id=fact_set_id,
-        structure_id=structure.id,
-        period_start=period_start,
-        period_end=period_end,
-        factset_type="schedule",
-        entity_id=entity_id,
-        created_by=created_by,
+    # A custom periodic-amounts curve is an *asserted* projection (the
+    # caller supplied the balanced amounts); a template/straight-line
+    # schedule is *schedule*-derived from method + params.
+    if schedule_metadata is not None and schedule_metadata.periodic_amounts is not None:
+      provenance = AssertedProvenance(
+        source_system="custom_amortization_curve",
+        asserted_by=created_by,
+        basis_note=f"schedule structure={structure.id}",
       )
+    else:
+      provenance = ScheduleProvenance(
+        structure_id=structure.id,
+        method=schedule_metadata.method if schedule_metadata else "straight_line",
+        params=(
+          {
+            "original_amount": schedule_metadata.original_amount,
+            "residual_value": schedule_metadata.residual_value,
+            "useful_life_months": schedule_metadata.useful_life_months,
+          }
+          if schedule_metadata
+          else None
+        ),
+      )
+    create_fact_set(
+      session,
+      id=fact_set_id,
+      structure_id=structure.id,
+      period_start=period_start,
+      period_end=period_end,
+      factset_type="schedule",
+      entity_id=entity_id,
+      created_by=created_by,
+      provenance=provenance,
     )
     session.flush()
 

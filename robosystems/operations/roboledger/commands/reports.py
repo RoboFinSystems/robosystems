@@ -28,9 +28,12 @@ from robosystems.models.api.extensions.reports import (
   ShareReportResponse,
   ShareResultItem,
 )
+from robosystems.models.api.fact_provenance import (
+  AssertedProvenance,
+  PivotProvenance,
+)
 from robosystems.models.extensions import (
   Fact,
-  FactSet,
   PublishList,
   PublishListMember,
   Report,
@@ -43,6 +46,7 @@ from robosystems.operations.information_block.rules.engine import (
 from robosystems.operations.roboledger.commands._guards import (
   rule_summary as _rule_summary,
 )
+from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.operations.roboledger.reads.reports import (
   build_periods,
   load_structures,
@@ -295,6 +299,7 @@ def _pre_create_report_fact_sets(
   created_by: str,
   periods,
   structure_to_factset: dict[str, str],
+  mapping_id: str,
 ) -> None:
   """Insert one FactSet row per picked Network — before facts are stamped.
 
@@ -319,18 +324,25 @@ def _pre_create_report_fact_sets(
   envelope_start = min(starts) if starts else None
   envelope_end = max(p.end for p in periods)
 
+  # Report facts are pivoted from the posted ledger via the CoA→framework
+  # mapping; one provenance descriptor per Network's FactSet. Duration
+  # envelopes use ``start/end``; an instant-only envelope (no start) carries
+  # the single end date rather than a leading-slash ``/end``.
+  period_key = (
+    f"{envelope_start}/{envelope_end}" if envelope_start else str(envelope_end)
+  )
   for structure_id, fact_set_id in structure_to_factset.items():
-    session.add(
-      FactSet(
-        id=fact_set_id,
-        structure_id=structure_id,
-        period_start=envelope_start,
-        period_end=envelope_end,
-        factset_type="report",
-        entity_id=entity_id,
-        report_id=report_id,
-        created_by=created_by,
-      )
+    create_fact_set(
+      session,
+      id=fact_set_id,
+      structure_id=structure_id,
+      period_start=envelope_start,
+      period_end=envelope_end,
+      factset_type="report",
+      entity_id=entity_id,
+      report_id=report_id,
+      created_by=created_by,
+      provenance=PivotProvenance(mapping_id=mapping_id, period=period_key),
     )
   # Explicit flush so the new fact_sets rows hit the DB before the fact
   # INSERTs that reference them. SQLAlchemy's session-flush ordering is
@@ -527,6 +539,7 @@ def create_report(
     created_by,
     periods,
     structure_to_factset,
+    body.mapping_id,
   )
   _persist_report_facts(
     session,
@@ -654,6 +667,7 @@ def regenerate_report(
     acting_user_id,
     periods,
     structure_to_factset,
+    report_def.mapping_id or "",
   )
   _persist_report_facts(
     session,
@@ -999,7 +1013,11 @@ def _share_to_target(
       ends = [
         fd["period_end"] for fd in source_facts if fd.get("period_end") is not None
       ]
-      shared_fact_set = FactSet(
+      # The originating ledger is not present in the target graph, so the
+      # shared facts collapse to `asserted` provenance referencing the
+      # source graph/report rather than a re-derivable pivot.
+      shared_fact_set = create_fact_set(
+        target_session,
         structure_id=None,
         period_start=min(starts) if starts else None,
         period_end=max(ends) if ends else None,
@@ -1007,8 +1025,12 @@ def _share_to_target(
         entity_id=source_facts[0]["entity_id"] if source_facts else "",
         report_id=shared_report.id,
         created_by=shared_by,
+        provenance=AssertedProvenance(
+          source_system="cross_graph_share",
+          asserted_by=shared_by,
+          basis_note=f"source_graph={source_graph_id} source_report={report_snapshot['id']}",
+        ),
       )
-      target_session.add(shared_fact_set)
       target_session.flush()
 
       for fact_data in source_facts:

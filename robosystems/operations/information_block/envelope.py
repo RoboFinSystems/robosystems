@@ -160,6 +160,7 @@ def fact_set_to_lite(fact_set: FactSet) -> FactSetLite:
     factset_type=fact_set.factset_type,
     entity_id=fact_set.entity_id,
     report_id=fact_set.report_id,
+    provenance=fact_set.provenance,
   )
 
 

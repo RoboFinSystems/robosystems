@@ -9,9 +9,7 @@ Public surface:
 - :func:`get_information_block` / :func:`list_information_blocks` —
   the reads.
 
-See ``local/docs/specs/information-block.md`` for the architectural
-context and ``local/docs/specs/financial-viewer.md`` for the companion
-View layer.
+See ``README.md`` in this package for the code-level orientation.
 """
 
 from __future__ import annotations

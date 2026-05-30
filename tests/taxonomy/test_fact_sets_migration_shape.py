@@ -30,6 +30,18 @@ assert _spec is not None and _spec.loader is not None
 mig_0003 = _util.module_from_spec(_spec)
 _spec.loader.exec_module(mig_0003)
 
+_PROVENANCE_MIGRATION_PATH = (
+  Path(__file__).resolve().parents[2]
+  / "migrations"
+  / "extensions"
+  / "versions"
+  / "0018_fact_set_provenance.py"
+)
+_prov_spec = _util.spec_from_file_location("mig_0018", _PROVENANCE_MIGRATION_PATH)
+assert _prov_spec is not None and _prov_spec.loader is not None
+mig_0018 = _util.module_from_spec(_prov_spec)
+_prov_spec.loader.exec_module(mig_0018)
+
 
 class TestMigrationChain:
   def test_revision_and_down_revision(self) -> None:
@@ -50,3 +62,20 @@ class TestTenantHelpers:
 
   def test_drop_helper_exists(self) -> None:
     assert callable(mig_0003._drop_fact_sets_in_tenant)
+
+
+class TestProvenanceMigration:
+  """Migration 0018 — the first-class ``provenance`` column on fact_sets."""
+
+  def test_chains_onto_0017(self) -> None:
+    assert mig_0018.revision == "0018"
+    assert mig_0018.down_revision == "0017"
+
+  def test_add_and_drop_helpers_exist(self) -> None:
+    assert callable(mig_0018._add_provenance_column)
+    assert callable(mig_0018._drop_provenance_column)
+
+  def test_model_declares_provenance_column(self) -> None:
+    from robosystems.models.extensions.roboledger.fact_set import FactSet
+
+    assert "provenance" in FactSet.__table__.columns

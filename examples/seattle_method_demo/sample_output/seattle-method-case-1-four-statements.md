@@ -182,6 +182,5 @@ uv run python -m examples.seattle_method_demo.create_report
 - [`seattle-method-case-1.md`](seattle-method-case-1.md) —
   source-vocabulary (`mini`) reconciliation, 17/17 exact match against
   Charlie Hoffman's published `luca.pacioli.ai` facts.
-- [`../README.md`](../README.md) — demo orchestrator.
-- [`../../../local/docs/specs/cross-taxonomy-projection.md`](../../../local/docs/specs/cross-taxonomy-projection.md)
-  — methodology spec (§3.2 reconciliation classification).
+- [`../README.md`](../README.md) — demo orchestrator and methodology
+  (§3.2 reconciliation classification).

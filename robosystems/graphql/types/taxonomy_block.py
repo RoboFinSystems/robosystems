@@ -154,9 +154,8 @@ VerificationResultPayload = strawberry.scalars.JSON
 class TaxonomyBlock:
   """Taxonomy Block envelope — the molecular exchange format for ontology.
 
-  See ``local/docs/specs/taxonomy-block.md`` §2 for the envelope
-  contract. Consumers (agents via MCP, the React TaxonomyViewer,
-  SDK clients) receive the same shape regardless of the taxonomy_type.
+  Consumers (agents via MCP, the React TaxonomyViewer, SDK clients)
+  receive the same envelope shape regardless of the taxonomy_type.
   """
 
   id: strawberry.ID
