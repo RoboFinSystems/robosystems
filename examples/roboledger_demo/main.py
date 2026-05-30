@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -1019,6 +1020,21 @@ def generate_fy2025_report(graph_id: str) -> str | None:
       for i in items
     ]
     print(f"  Package:      {len(items)} block(s) — {', '.join(block_names)}")
+
+    # Fact provenance — every FactSet records how its facts were
+    # constructed (the auditability spine). Surfaced via the SDK on
+    # block.fact_set.provenance; report blocks pivot from the posted ledger.
+    origins = [
+      (((i.get("block") or {}).get("fact_set") or {}).get("provenance") or {}).get(
+        "origin"
+      )
+      for i in items
+    ]
+    if origins and all(origins):
+      summary = ", ".join(f"{n}×{o}" for o, n in sorted(Counter(origins).items()))
+      print(f"  Provenance:   {summary}")
+    else:
+      print("  WARNING: some FactSets lack a provenance descriptor")
 
   # File it — flips filing_status draft → filed
   try:
