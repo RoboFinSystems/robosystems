@@ -59,6 +59,7 @@ from robosystems.operations.roboledger.reports.network_picker import (
 )
 from robosystems.operations.serialization import (
   RdfFlavor,
+  StatementBundle,
   build_report_bundle,
   serialize_to_rdf,
 )
@@ -337,6 +338,60 @@ def _pre_create_report_fact_sets(
   session.flush()
 
 
+def _record_bundle_validation(bundle: StatementBundle, report_def: Report) -> None:
+  """Optionally SHACL-validate the bundle and record the result on the Report.
+
+  Gated by ``env.REPORT_BUNDLE_SHACL_VALIDATION`` (``off`` | ``warn`` |
+  ``strict``) — opt-in, so the publish path stays fast by default. When it
+  runs, the structured outcome is logged onto
+  ``report.metadata['bundle_validation']`` (audit trail), and ``strict``
+  additionally blocks the publish on non-conformance.
+
+  Validation-infrastructure failures (e.g. pyshacl raising) never break a
+  ``warn`` publish: they are logged and skipped. Only ``strict`` re-raises,
+  since strict opted into blocking on a bad/unverifiable bundle.
+  """
+  mode = (env.REPORT_BUNDLE_SHACL_VALIDATION or "off").strip().lower()
+  if mode == "off":
+    return
+  from robosystems.operations.serialization.rdf.jsonld import (
+    BundleValidationError,
+    build_graph,
+    shacl_report,
+  )
+
+  try:
+    result = shacl_report(build_graph(bundle))
+  except Exception:
+    logger.exception(
+      "SHACL validation errored for report %s (mode=%s)", report_def.id, mode
+    )
+    if mode == "strict":
+      raise
+    return
+  # Reassign (not mutate) so SQLAlchemy flags the JSONB column dirty.
+  report_def.metadata_ = {
+    **(report_def.metadata_ or {}),
+    "bundle_validation": {
+      **result.as_dict(),
+      "validated_at": datetime.now(UTC).isoformat(),
+    },
+  }
+  logger.info(
+    "Bundle SHACL for report %s: ran=%s conforms=%s violations=%d (mode=%s)",
+    report_def.id,
+    result.ran,
+    result.conforms,
+    result.violations,
+    mode,
+  )
+  if mode == "strict" and result.ran and not result.conforms:
+    raise BundleValidationError(
+      f"Report {report_def.id} bundle failed SHACL conformance "
+      f"({result.violations} violation(s)); aborting publish (strict mode)."
+    )
+
+
 def _stamp_report_bundle(
   session: Session,
   graph_id: str,
@@ -365,6 +420,7 @@ def _stamp_report_bundle(
   session.flush()
   report_def.generation_count = (report_def.generation_count or 0) + 1
   bundle = build_report_bundle(session, graph_id, report_def.id)
+  _record_bundle_validation(bundle, report_def)
   jsonld_doc = serialize_to_rdf(bundle, RdfFlavor.JSONLD)
   bucket = env.USER_DATA_BUCKET
   key = get_report_bundle_key(graph_id, report_def.id, report_def.generation_count)

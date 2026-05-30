@@ -35,6 +35,11 @@ from robosystems.taxonomy.model import (
 )
 
 RS_NS = RS_VOCAB  # alias for readability
+# XBRL vocabulary namespaces — concept attributes (xbrli:balance/periodType)
+# and reified-arc endpoints/metadata (xlink:from/to/arcrole/role, link:weight/order).
+XBRLI_NS = "http://www.xbrl.org/2003/instance#"
+XLINK_NS = "http://www.w3.org/1999/xlink#"
+LINK_NS = "http://www.xbrl.org/2003/linkbase#"
 
 # Enum closures for rule axes. Kept here so both the loader (for
 # cheap sanity-checking during parse) and the migration CHECK
@@ -93,29 +98,18 @@ LABEL_ROLE_FROM_PREDICATE: dict[URIRef, str] = {
   SKOS.prefLabel: "standard",
 }
 
-# Reverse of arcrole → association_type, but keyed by the RDF predicate
+# Direct-predicate arcs keyed by RDF predicate → (association_type, arcrole).
+#
+# This map holds ONLY pure binary relations — equivalence + the Seattle-Method
+# "drules" vocabulary (disclosure / checklist / style requirements). They carry
+# no weight/order/role, so a direct predicate is their natural RDF form and
+# they have never drifted. The STRUCTURAL taxonomy arcs (presentation /
+# calculation / definition) are NOT here: they reify into rs:Association nodes
+# (xlink:from/to + xlink:arcrole + link:weight/order) — read below in the
+# reified-arc pass. The retired direct terms (summationOf/parent/generalOf/
+# dimensionOf/hypercubeOf) are banned by shapes.ttl.
 ARC_PREDICATE_TO_ASSOC_TYPE: dict[str, tuple[str, str]] = {
   # predicate_iri: (association_type, arcrole)
-  f"{RS_NS}hasChild": (
-    "presentation",
-    "http://www.xbrl.org/2003/arcrole/parent-child",
-  ),
-  f"{RS_NS}summationOf": (
-    "calculation",
-    "http://www.xbrl.org/2003/arcrole/summation-item",
-  ),
-  f"{RS_NS}generalOf": (
-    "general-special",
-    "http://www.xbrl.org/2003/arcrole/general-special",
-  ),
-  f"{RS_NS}dimensionOf": (
-    "general-special",
-    "http://xbrl.org/int/dim/arcrole/domain-member",
-  ),
-  f"{RS_NS}hypercubeOf": (
-    "calculation",
-    "http://xbrl.org/int/dim/arcrole/all",
-  ),
   str(OWL.equivalentClass): (
     "equivalence",
     "http://xbrlsite.azurewebsites.net/2016/conceptual-model/arcrole/class-equivalentClass",
@@ -285,8 +279,8 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
       return bool(v.value) if v.value is not None else default
     return str(v).lower() in ("true", "1")
 
-  balance = _single(URIRef(f"{RS_NS}balance"), "debit") or "debit"
-  period_type = _single(URIRef(f"{RS_NS}periodType"), "duration") or "duration"
+  balance = _single(URIRef(f"{XBRLI_NS}balance"), "debit") or "debit"
+  period_type = _single(URIRef(f"{XBRLI_NS}periodType"), "duration") or "duration"
   element_type = _single(URIRef(f"{RS_NS}elementType"), "concept") or "concept"
   source = _single(URIRef(f"{RS_NS}source"), prefix) or prefix or "native"
 
@@ -299,14 +293,12 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
   if sg_vals and isinstance(sg_vals[0], URIRef):
     sub_group = _iri_to_qname(str(sg_vals[0]), CANONICAL_CONTEXT)
 
-  # Parent (optional). Element-level tree-parent declarations.
-  # No active seeds use this today; kept for back-compat with seed
-  # packages that emit ``rs:childOf`` (RDF "subject is a child of X")
-  # or ``rs:parent`` on individual element definitions.
+  # Parent (optional). Element-level tree-parent declaration via ``rs:childOf``
+  # ("subject is a child of X"). No active seeds use this today. The retired
+  # ``rs:parent`` direct predicate is no longer read here — presentation arcs
+  # are reified rs:Association nodes (and rs:parent is banned by shapes.ttl).
   parent_qname: str | None = None
-  parent_vals = list(graph.objects(subject, URIRef(f"{RS_NS}childOf"))) or list(
-    graph.objects(subject, URIRef(f"{RS_NS}parent"))
-  )
+  parent_vals = list(graph.objects(subject, URIRef(f"{RS_NS}childOf")))
   if parent_vals and isinstance(parent_vals[0], URIRef):
     parent_qname = _iri_to_qname(str(parent_vals[0]), CANONICAL_CONTEXT)
 
@@ -430,12 +422,11 @@ def _extract_associations(graph: Graph) -> list[AssociationSpec]:
      ``owl:equivalentClass``) — a single triple per arc; metadata like
      weight / order / structure role is not carried.
 
-  2. Reified arcs — a subject that has ``rs:arcFrom`` + ``rs:arcTo`` is
-     treated as one arc node carrying the full XBRL linkbase shape:
-     ``rs:arcFrom`` / ``rs:arcTo`` / ``rs:arcAssociationType`` /
-     ``rs:arcRoleUri`` (structure binding) / ``rs:arcWeight`` (calc) /
-     ``rs:arcOrder`` (presentation). Mirrors ``link:calculationArc`` and
-     ``link:presentationArc`` in XBRL linkbases.
+  2. Reified arcs — an ``rs:Association`` node carrying the canonical XBRL
+     linkbase vocabulary: ``xlink:from`` / ``xlink:to`` / ``rs:associationType``
+     / ``xlink:role`` (ELR / structure binding) / ``xlink:arcrole`` /
+     ``link:weight`` (calc) / ``link:order``. This is the single canonical form
+     for presentation / calculation / definition arcs.
   """
   associations: list[AssociationSpec] = []
 
@@ -464,14 +455,15 @@ def _extract_associations(graph: Graph) -> list[AssociationSpec]:
         )
       )
 
-  # 2. Reified arcs (rs:arcFrom/arcTo + metadata)
-  arc_from_pred = URIRef(f"{RS_NS}arcFrom")
-  arc_to_pred = URIRef(f"{RS_NS}arcTo")
-  arc_type_pred = URIRef(f"{RS_NS}arcAssociationType")
-  arc_role_pred = URIRef(f"{RS_NS}arcRoleUri")
-  arc_arcrole_pred = URIRef(f"{RS_NS}arcArcrole")
-  arc_weight_pred = URIRef(f"{RS_NS}arcWeight")
-  arc_order_pred = URIRef(f"{RS_NS}arcOrder")
+  # 2. Reified arcs (rs:Association: xlink:from/to + xlink:arcrole/role +
+  #    link:weight/order + rs:associationType)
+  arc_from_pred = URIRef(f"{XLINK_NS}from")
+  arc_to_pred = URIRef(f"{XLINK_NS}to")
+  arc_type_pred = URIRef(f"{RS_NS}associationType")
+  arc_role_pred = URIRef(f"{XLINK_NS}role")
+  arc_arcrole_pred = URIRef(f"{XLINK_NS}arcrole")
+  arc_weight_pred = URIRef(f"{LINK_NS}weight")
+  arc_order_pred = URIRef(f"{LINK_NS}order")
 
   arc_subjects = {s for s, _ in graph.subject_objects(arc_from_pred)}
   for subject in arc_subjects:

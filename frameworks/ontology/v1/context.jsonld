@@ -1,0 +1,338 @@
+{
+  "@context": {
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "altLabel": "skos:altLabel",
+    "arcrole": {
+      "@id": "xlink:arcrole",
+      "@type": "@id"
+    },
+    "associationType": {
+      "@id": "https://robosystems.ai/vocab/associationType"
+    },
+    "axis": {
+      "@id": "https://robosystems.ai/vocab/axis"
+    },
+    "balance": {
+      "@id": "xbrli:balance"
+    },
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
+    },
+    "calendarPeriodKey": {
+      "@id": "https://robosystems.ai/vocab/calendarPeriodKey"
+    },
+    "category": {
+      "@id": "https://robosystems.ai/vocab/category"
+    },
+    "checklist": "https://robosystems.ai/taxonomy/rs-gaap/reporting-checklist/v1/",
+    "citation": {
+      "@id": "https://robosystems.ai/vocab/citation"
+    },
+    "classification": {
+      "@id": "https://robosystems.ai/vocab/classification"
+    },
+    "classifiedAs": {
+      "@id": "https://robosystems.ai/vocab/classifiedAs",
+      "@type": "@id"
+    },
+    "cm-roles": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/",
+    "conceptArrangementPattern": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
+    },
+    "conceptArrangementPatternRequiresConcept": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPatternRequiresConcept",
+      "@type": "@id"
+    },
+    "country": {
+      "@id": "https://robosystems.ai/vocab/country"
+    },
+    "dcterms": "http://purl.org/dc/terms/",
+    "decimals": {
+      "@id": "https://robosystems.ai/vocab/decimals"
+    },
+    "dei": "http://xbrl.sec.gov/dei/",
+    "deprecated": {
+      "@id": "https://robosystems.ai/vocab/deprecated",
+      "@type": "xsd:boolean"
+    },
+    "derivationRole": {
+      "@id": "https://robosystems.ai/vocab/derivationRole"
+    },
+    "dimension": {
+      "@id": "https://robosystems.ai/vocab/dimension",
+      "@type": "@id"
+    },
+    "disclosureAllowedAlternativeDisclosure": {
+      "@id": "https://robosystems.ai/vocab/disclosureAllowedAlternativeDisclosure",
+      "@type": "@id"
+    },
+    "disclosureEquivalentTextblock": {
+      "@id": "https://robosystems.ai/vocab/disclosureEquivalentTextblock",
+      "@type": "@id"
+    },
+    "disclosureRequiresConcept": {
+      "@id": "https://robosystems.ai/vocab/disclosureRequiresConcept",
+      "@type": "@id"
+    },
+    "disclosureRequiresHypercube": {
+      "@id": "https://robosystems.ai/vocab/disclosureRequiresHypercube",
+      "@type": "@id"
+    },
+    "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+    "documentation": "rdfs:comment",
+    "ein": {
+      "@id": "https://robosystems.ai/vocab/ein"
+    },
+    "element": {
+      "@id": "https://robosystems.ai/vocab/element",
+      "@type": "@id"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "endDate": {
+      "@id": "xbrli:endDate",
+      "@type": "xsd:date"
+    },
+    "entity": {
+      "@id": "https://robosystems.ai/vocab/entity",
+      "@type": "@id"
+    },
+    "equivalent": {
+      "@id": "owl:equivalentClass",
+      "@type": "@id"
+    },
+    "fac": "http://www.xbrlsite.com/fac#",
+    "fac-luca": "http://luca.auditchain.finance/fac#",
+    "fac-seattlemethod": "http://xbrlsite.azurewebsites.net/seattlemethod/fac#",
+    "factSet": {
+      "@id": "https://robosystems.ai/vocab/factSet",
+      "@type": "@id"
+    },
+    "financialReportPossibleDisclosure": {
+      "@id": "https://robosystems.ai/vocab/financialReportPossibleDisclosure",
+      "@type": "@id"
+    },
+    "financialReportRequiresDisclosure": {
+      "@id": "https://robosystems.ai/vocab/financialReportRequiresDisclosure",
+      "@type": "@id"
+    },
+    "from": {
+      "@id": "xlink:from",
+      "@type": "@id"
+    },
+    "hasAssociation": {
+      "@id": "https://robosystems.ai/vocab/hasAssociation",
+      "@type": "@id"
+    },
+    "hasTrait": {
+      "@id": "https://robosystems.ai/vocab/hasTrait",
+      "@type": "@id"
+    },
+    "identifier": {
+      "@id": "https://robosystems.ai/vocab/identifier"
+    },
+    "ifrs": "http://xbrl.ifrs.org/taxonomy/",
+    "instant": {
+      "@id": "xbrli:instant",
+      "@type": "xsd:date"
+    },
+    "internalId": {
+      "@id": "https://robosystems.ai/vocab/internalId"
+    },
+    "iso4217": "http://www.xbrl.org/2003/iso4217#",
+    "label": "rdfs:label",
+    "labelLanguage": {
+      "@id": "https://robosystems.ai/vocab/labelLanguage"
+    },
+    "labelRole": {
+      "@id": "https://robosystems.ai/vocab/labelRole"
+    },
+    "legalName": {
+      "@id": "https://robosystems.ai/vocab/legalName"
+    },
+    "link": "http://www.xbrl.org/2003/linkbase#",
+    "measure": {
+      "@id": "xbrli:measure",
+      "@type": "@id"
+    },
+    "member": {
+      "@id": "https://robosystems.ai/vocab/member"
+    },
+    "mode": {
+      "@id": "https://robosystems.ai/vocab/mode"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "networkRoleUri": {
+      "@id": "https://robosystems.ai/vocab/networkRoleUri"
+    },
+    "numericValue": {
+      "@id": "https://robosystems.ai/vocab/numericValue",
+      "@type": "xsd:decimal"
+    },
+    "order": {
+      "@id": "link:order",
+      "@type": "xsd:decimal"
+    },
+    "orphan2026": {
+      "@id": "https://robosystems.ai/vocab/orphan2026",
+      "@type": "xsd:boolean"
+    },
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "period": {
+      "@id": "https://robosystems.ai/vocab/period",
+      "@type": "@id"
+    },
+    "periodType": {
+      "@id": "xbrli:periodType"
+    },
+    "prefLabel": "skos:prefLabel",
+    "preferredLabel": {
+      "@id": "https://robosystems.ai/vocab/preferredLabel"
+    },
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "refType": {
+      "@id": "https://robosystems.ai/vocab/refType"
+    },
+    "references": {
+      "@id": "dcterms:references"
+    },
+    "replacedBy": {
+      "@id": "https://robosystems.ai/vocab/replacedBy",
+      "@type": "@id"
+    },
+    "reportedDisclosureRequiresDisclosure": {
+      "@id": "https://robosystems.ai/vocab/reportedDisclosureRequiresDisclosure",
+      "@type": "@id"
+    },
+    "reportingStyle": {
+      "@id": "https://robosystems.ai/vocab/reportingStyle"
+    },
+    "reportingStyleCode": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleCode"
+    },
+    "reportingStyleComposesDisclosure": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleComposesDisclosure",
+      "@type": "@id"
+    },
+    "reportingStyleNetworks": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleNetworks"
+    },
+    "retainedEarningsConcept": {
+      "@id": "https://robosystems.ai/vocab/retainedEarningsConcept"
+    },
+    "role": {
+      "@id": "xlink:role",
+      "@type": "@id"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    },
+    "rs": "https://robosystems.ai/vocab/",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "ruleCategory": {
+      "@id": "https://robosystems.ai/vocab/ruleCategory"
+    },
+    "ruleExpression": {
+      "@id": "https://robosystems.ai/vocab/ruleExpression"
+    },
+    "ruleMessage": {
+      "@id": "https://robosystems.ai/vocab/ruleMessage"
+    },
+    "ruleOrigin": {
+      "@id": "https://robosystems.ai/vocab/ruleOrigin"
+    },
+    "rulePattern": {
+      "@id": "https://robosystems.ai/vocab/rulePattern"
+    },
+    "ruleSeverity": {
+      "@id": "https://robosystems.ai/vocab/ruleSeverity"
+    },
+    "ruleTarget": {
+      "@id": "https://robosystems.ai/vocab/ruleTarget"
+    },
+    "ruleVariables": {
+      "@container": "@list",
+      "@id": "https://robosystems.ai/vocab/ruleVariables"
+    },
+    "scheme": {
+      "@id": "https://robosystems.ai/vocab/scheme",
+      "@type": "@id"
+    },
+    "secType": {
+      "@id": "https://robosystems.ai/vocab/secType"
+    },
+    "serializationVersion": {
+      "@id": "https://robosystems.ai/vocab/serializationVersion"
+    },
+    "sfac6": "http://xbrlsite.com/seattlemethod/sfac6#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "source": {
+      "@id": "https://robosystems.ai/vocab/source"
+    },
+    "startDate": {
+      "@id": "xbrli:startDate",
+      "@type": "xsd:date"
+    },
+    "statementContext": {
+      "@id": "https://robosystems.ai/vocab/statementContext"
+    },
+    "statementType": {
+      "@id": "https://robosystems.ai/vocab/statementType"
+    },
+    "structure": {
+      "@id": "https://robosystems.ai/vocab/structure",
+      "@type": "@id"
+    },
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "styles": "https://robosystems.ai/taxonomy/rs-gaap/reporting-styles/v1/",
+    "substitutionGroup": {
+      "@id": "https://robosystems.ai/vocab/substitutionGroup",
+      "@type": "@id"
+    },
+    "targetKind": {
+      "@id": "https://robosystems.ai/vocab/targetKind"
+    },
+    "targetRef": {
+      "@id": "https://robosystems.ai/vocab/targetRef"
+    },
+    "to": {
+      "@id": "xlink:to",
+      "@type": "@id"
+    },
+    "trait": "https://robosystems.ai/taxonomy/fac-traits/v1/",
+    "unit": {
+      "@id": "https://robosystems.ai/vocab/unit",
+      "@type": "@id"
+    },
+    "us-gaap": "http://fasb.org/us-gaap/",
+    "us-gaap-2017": "http://fasb.org/us-gaap/2017-01-31#",
+    "us-gaap-2020": "http://fasb.org/us-gaap/2020-01-31#",
+    "us-gaap-2022": "http://fasb.org/us-gaap/2022-01-31#",
+    "us-gaap-2024": "http://fasb.org/us-gaap/2024-01-31#",
+    "variableName": {
+      "@id": "https://robosystems.ai/vocab/variableName"
+    },
+    "variableQname": {
+      "@id": "https://robosystems.ai/vocab/variableQname"
+    },
+    "weight": {
+      "@id": "link:weight",
+      "@type": "xsd:decimal"
+    },
+    "xbrldi": "http://xbrl.org/2006/xbrldi#",
+    "xbrldt": "http://xbrl.org/2005/xbrldt#",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "xlink": "http://www.w3.org/1999/xlink#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#"
+  }
+}

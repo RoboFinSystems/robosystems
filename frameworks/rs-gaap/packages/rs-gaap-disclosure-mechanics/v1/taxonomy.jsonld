@@ -1,9 +1,119 @@
 {
   "@context": {
-    "rs": "https://robosystems.ai/vocab/",
-    "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
-    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
     "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "link": "http://www.xbrl.org/2003/linkbase#",
+    "xlink": "http://www.w3.org/1999/xlink#",
+    "xbrldt": "http://xbrl.org/2005/xbrldt#",
+    "xbrldi": "http://xbrl.org/2006/xbrldi#",
+    "iso4217": "http://www.xbrl.org/2003/iso4217#",
+    "fac": "http://www.xbrlsite.com/fac#",
+    "fac-luca": "http://luca.auditchain.finance/fac#",
+    "fac-seattlemethod": "http://xbrlsite.azurewebsites.net/seattlemethod/fac#",
+    "us-gaap-2017": "http://fasb.org/us-gaap/2017-01-31#",
+    "us-gaap-2020": "http://fasb.org/us-gaap/2020-01-31#",
+    "us-gaap-2022": "http://fasb.org/us-gaap/2022-01-31#",
+    "us-gaap-2024": "http://fasb.org/us-gaap/2024-01-31#",
+    "us-gaap": "http://fasb.org/us-gaap/",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+    "checklist": "https://robosystems.ai/taxonomy/rs-gaap/reporting-checklist/v1/",
+    "styles": "https://robosystems.ai/taxonomy/rs-gaap/reporting-styles/v1/",
+    "ifrs": "http://xbrl.ifrs.org/taxonomy/",
+    "dei": "http://xbrl.sec.gov/dei/",
+    "cm-roles": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/",
+    "rs": "https://robosystems.ai/vocab/",
+    "classification": {
+      "@id": "https://robosystems.ai/vocab/classification"
+    },
+    "statementContext": {
+      "@id": "https://robosystems.ai/vocab/statementContext"
+    },
+    "derivationRole": {
+      "@id": "https://robosystems.ai/vocab/derivationRole"
+    },
+    "balance": {
+      "@id": "xbrli:balance"
+    },
+    "periodType": {
+      "@id": "xbrli:periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "substitutionGroup": {
+      "@id": "https://robosystems.ai/vocab/substitutionGroup",
+      "@type": "@id"
+    },
+    "source": {
+      "@id": "https://robosystems.ai/vocab/source"
+    },
+    "equivalent": {
+      "@id": "owl:equivalentClass",
+      "@type": "@id"
+    },
+    "from": {
+      "@id": "xlink:from",
+      "@type": "@id"
+    },
+    "to": {
+      "@id": "xlink:to",
+      "@type": "@id"
+    },
+    "arcrole": {
+      "@id": "xlink:arcrole",
+      "@type": "@id"
+    },
+    "role": {
+      "@id": "xlink:role",
+      "@type": "@id"
+    },
+    "order": {
+      "@id": "link:order",
+      "@type": "xsd:decimal"
+    },
+    "weight": {
+      "@id": "link:weight",
+      "@type": "xsd:decimal"
+    },
+    "associationType": {
+      "@id": "https://robosystems.ai/vocab/associationType"
+    },
+    "preferredLabel": {
+      "@id": "https://robosystems.ai/vocab/preferredLabel"
+    },
+    "label": "rdfs:label",
+    "altLabel": "skos:altLabel",
+    "prefLabel": "skos:prefLabel",
+    "documentation": "rdfs:comment",
+    "labelRole": {
+      "@id": "https://robosystems.ai/vocab/labelRole"
+    },
+    "labelLanguage": {
+      "@id": "https://robosystems.ai/vocab/labelLanguage"
+    },
+    "references": {
+      "@id": "dcterms:references"
+    },
+    "refType": {
+      "@id": "https://robosystems.ai/vocab/refType"
+    },
+    "citation": {
+      "@id": "https://robosystems.ai/vocab/citation"
+    },
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
@@ -16,6 +126,126 @@
     "conceptArrangementPattern": {
       "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
     },
+    "hasAssociation": {
+      "@id": "https://robosystems.ai/vocab/hasAssociation",
+      "@type": "@id"
+    },
+    "element": {
+      "@id": "https://robosystems.ai/vocab/element",
+      "@type": "@id"
+    },
+    "entity": {
+      "@id": "https://robosystems.ai/vocab/entity",
+      "@type": "@id"
+    },
+    "period": {
+      "@id": "https://robosystems.ai/vocab/period",
+      "@type": "@id"
+    },
+    "unit": {
+      "@id": "https://robosystems.ai/vocab/unit",
+      "@type": "@id"
+    },
+    "dimension": {
+      "@id": "https://robosystems.ai/vocab/dimension",
+      "@type": "@id"
+    },
+    "factSet": {
+      "@id": "https://robosystems.ai/vocab/factSet",
+      "@type": "@id"
+    },
+    "structure": {
+      "@id": "https://robosystems.ai/vocab/structure",
+      "@type": "@id"
+    },
+    "numericValue": {
+      "@id": "https://robosystems.ai/vocab/numericValue",
+      "@type": "xsd:decimal"
+    },
+    "decimals": {
+      "@id": "https://robosystems.ai/vocab/decimals"
+    },
+    "instant": {
+      "@id": "xbrli:instant",
+      "@type": "xsd:date"
+    },
+    "startDate": {
+      "@id": "xbrli:startDate",
+      "@type": "xsd:date"
+    },
+    "endDate": {
+      "@id": "xbrli:endDate",
+      "@type": "xsd:date"
+    },
+    "calendarPeriodKey": {
+      "@id": "https://robosystems.ai/vocab/calendarPeriodKey"
+    },
+    "measure": {
+      "@id": "xbrli:measure",
+      "@type": "@id"
+    },
+    "axis": {
+      "@id": "https://robosystems.ai/vocab/axis"
+    },
+    "member": {
+      "@id": "https://robosystems.ai/vocab/member"
+    },
+    "scheme": {
+      "@id": "https://robosystems.ai/vocab/scheme",
+      "@type": "@id"
+    },
+    "legalName": {
+      "@id": "https://robosystems.ai/vocab/legalName"
+    },
+    "ein": {
+      "@id": "https://robosystems.ai/vocab/ein"
+    },
+    "country": {
+      "@id": "https://robosystems.ai/vocab/country"
+    },
+    "reportingStyle": {
+      "@id": "https://robosystems.ai/vocab/reportingStyle"
+    },
+    "serializationVersion": {
+      "@id": "https://robosystems.ai/vocab/serializationVersion"
+    },
+    "mode": {
+      "@id": "https://robosystems.ai/vocab/mode"
+    },
+    "internalId": {
+      "@id": "https://robosystems.ai/vocab/internalId"
+    },
+    "category": {
+      "@id": "https://robosystems.ai/vocab/category"
+    },
+    "classifiedAs": {
+      "@id": "https://robosystems.ai/vocab/classifiedAs",
+      "@type": "@id"
+    },
+    "deprecated": {
+      "@id": "https://robosystems.ai/vocab/deprecated",
+      "@type": "xsd:boolean"
+    },
+    "replacedBy": {
+      "@id": "https://robosystems.ai/vocab/replacedBy",
+      "@type": "@id"
+    },
+    "orphan2026": {
+      "@id": "https://robosystems.ai/vocab/orphan2026",
+      "@type": "xsd:boolean"
+    },
+    "identifier": {
+      "@id": "https://robosystems.ai/vocab/identifier"
+    },
+    "secType": {
+      "@id": "https://robosystems.ai/vocab/secType"
+    },
+    "hasTrait": {
+      "@id": "https://robosystems.ai/vocab/hasTrait",
+      "@type": "@id"
+    },
+    "trait": "https://robosystems.ai/taxonomy/fac-traits/v1/",
+    "sfac6": "http://xbrlsite.com/seattlemethod/sfac6#",
     "reportedDisclosureRequiresDisclosure": {
       "@id": "https://robosystems.ai/vocab/reportedDisclosureRequiresDisclosure",
       "@type": "@id"
@@ -23,6 +253,86 @@
     "conceptArrangementPatternRequiresConcept": {
       "@id": "https://robosystems.ai/vocab/conceptArrangementPatternRequiresConcept",
       "@type": "@id"
+    },
+    "disclosureRequiresHypercube": {
+      "@id": "https://robosystems.ai/vocab/disclosureRequiresHypercube",
+      "@type": "@id"
+    },
+    "disclosureRequiresConcept": {
+      "@id": "https://robosystems.ai/vocab/disclosureRequiresConcept",
+      "@type": "@id"
+    },
+    "disclosureEquivalentTextblock": {
+      "@id": "https://robosystems.ai/vocab/disclosureEquivalentTextblock",
+      "@type": "@id"
+    },
+    "financialReportRequiresDisclosure": {
+      "@id": "https://robosystems.ai/vocab/financialReportRequiresDisclosure",
+      "@type": "@id"
+    },
+    "financialReportPossibleDisclosure": {
+      "@id": "https://robosystems.ai/vocab/financialReportPossibleDisclosure",
+      "@type": "@id"
+    },
+    "disclosureAllowedAlternativeDisclosure": {
+      "@id": "https://robosystems.ai/vocab/disclosureAllowedAlternativeDisclosure",
+      "@type": "@id"
+    },
+    "reportingStyleComposesDisclosure": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleComposesDisclosure",
+      "@type": "@id"
+    },
+    "reportingStyleCode": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleCode"
+    },
+    "retainedEarningsConcept": {
+      "@id": "https://robosystems.ai/vocab/retainedEarningsConcept"
+    },
+    "reportingStyleNetworks": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleNetworks"
+    },
+    "statementType": {
+      "@id": "https://robosystems.ai/vocab/statementType"
+    },
+    "networkRoleUri": {
+      "@id": "https://robosystems.ai/vocab/networkRoleUri"
+    },
+    "ruleTarget": {
+      "@id": "https://robosystems.ai/vocab/ruleTarget"
+    },
+    "ruleCategory": {
+      "@id": "https://robosystems.ai/vocab/ruleCategory"
+    },
+    "rulePattern": {
+      "@id": "https://robosystems.ai/vocab/rulePattern"
+    },
+    "ruleSeverity": {
+      "@id": "https://robosystems.ai/vocab/ruleSeverity"
+    },
+    "ruleExpression": {
+      "@id": "https://robosystems.ai/vocab/ruleExpression"
+    },
+    "ruleMessage": {
+      "@id": "https://robosystems.ai/vocab/ruleMessage"
+    },
+    "ruleOrigin": {
+      "@id": "https://robosystems.ai/vocab/ruleOrigin"
+    },
+    "ruleVariables": {
+      "@id": "https://robosystems.ai/vocab/ruleVariables",
+      "@container": "@list"
+    },
+    "variableName": {
+      "@id": "https://robosystems.ai/vocab/variableName"
+    },
+    "variableQname": {
+      "@id": "https://robosystems.ai/vocab/variableQname"
+    },
+    "targetKind": {
+      "@id": "https://robosystems.ai/vocab/targetKind"
+    },
+    "targetRef": {
+      "@id": "https://robosystems.ai/vocab/targetRef"
     }
   },
   "standard": "rs-gaap-disclosure-mechanics",
@@ -34,7 +344,6 @@
   "default_block_type": "validation_rules",
   "description": "Disclosure Mechanics rules per rs-gaap Disclosure. Two arcrole patterns dominate: (1) reportedDisclosure-requiresDisclosure for composition (BalanceSheet → AssetsRollUp), and (2) conceptArrangementPattern-requiresConcept for concept binding (AssetsRollUp → rs-gaap:Assets). Mirrors Charlie Hoffman's seattlemethod arcrole vocabulary so a future Arelle harvest of his theory file lands into the same association rows.",
   "@graph": [
-
     {
       "@id": "_:dm-balance-sheet",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/BalanceSheet",
@@ -45,11 +354,14 @@
     {
       "@id": "disclosures:BalanceSheet",
       "reportedDisclosureRequiresDisclosure": [
-        {"@id": "disclosures:AssetsRollUp"},
-        {"@id": "disclosures:LiabilitiesAndEquityRollUp"}
+        {
+          "@id": "disclosures:AssetsRollUp"
+        },
+        {
+          "@id": "disclosures:LiabilitiesAndEquityRollUp"
+        }
       ]
     },
-
     {
       "@id": "_:dm-income-statement",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/IncomeStatement",
@@ -60,11 +372,14 @@
     {
       "@id": "disclosures:IncomeStatement",
       "reportedDisclosureRequiresDisclosure": [
-        {"@id": "disclosures:RevenuesRollUp"},
-        {"@id": "disclosures:OperatingExpensesRollUp"}
+        {
+          "@id": "disclosures:RevenuesRollUp"
+        },
+        {
+          "@id": "disclosures:OperatingExpensesRollUp"
+        }
       ]
     },
-
     {
       "@id": "_:dm-changes-equity",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/StatementOfChangesInEquity",
@@ -75,10 +390,11 @@
     {
       "@id": "disclosures:StatementOfChangesInEquity",
       "reportedDisclosureRequiresDisclosure": [
-        {"@id": "disclosures:EquityRollForward"}
+        {
+          "@id": "disclosures:EquityRollForward"
+        }
       ]
     },
-
     {
       "@id": "_:dm-assets-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/AssetsRollUp",
@@ -89,14 +405,19 @@
     {
       "@id": "disclosures:AssetsRollUp",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:Assets"}
+        {
+          "@id": "rs-gaap:Assets"
+        }
       ],
       "reportedDisclosureRequiresDisclosure": [
-        {"@id": "disclosures:CurrentAssetsRollUp"},
-        {"@id": "disclosures:NoncurrentAssetsRollUp"}
+        {
+          "@id": "disclosures:CurrentAssetsRollUp"
+        },
+        {
+          "@id": "disclosures:NoncurrentAssetsRollUp"
+        }
       ]
     },
-
     {
       "@id": "_:dm-liab-equity-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/LiabilitiesAndEquityRollUp",
@@ -107,14 +428,19 @@
     {
       "@id": "disclosures:LiabilitiesAndEquityRollUp",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:LiabilitiesAndStockholdersEquity"}
+        {
+          "@id": "rs-gaap:LiabilitiesAndStockholdersEquity"
+        }
       ],
       "reportedDisclosureRequiresDisclosure": [
-        {"@id": "disclosures:CurrentLiabilitiesRollUp"},
-        {"@id": "disclosures:NoncurrentLiabilitiesRollUp"}
+        {
+          "@id": "disclosures:CurrentLiabilitiesRollUp"
+        },
+        {
+          "@id": "disclosures:NoncurrentLiabilitiesRollUp"
+        }
       ]
     },
-
     {
       "@id": "_:dm-current-assets-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/CurrentAssetsRollUp",
@@ -125,10 +451,11 @@
     {
       "@id": "disclosures:CurrentAssetsRollUp",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:AssetsCurrent"}
+        {
+          "@id": "rs-gaap:AssetsCurrent"
+        }
       ]
     },
-
     {
       "@id": "_:dm-noncurrent-assets-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/NoncurrentAssetsRollUp",
@@ -139,10 +466,11 @@
     {
       "@id": "disclosures:NoncurrentAssetsRollUp",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:AssetsNoncurrent"}
+        {
+          "@id": "rs-gaap:AssetsNoncurrent"
+        }
       ]
     },
-
     {
       "@id": "_:dm-current-liabilities-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/CurrentLiabilitiesRollUp",
@@ -153,10 +481,11 @@
     {
       "@id": "disclosures:CurrentLiabilitiesRollUp",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:LiabilitiesCurrent"}
+        {
+          "@id": "rs-gaap:LiabilitiesCurrent"
+        }
       ]
     },
-
     {
       "@id": "_:dm-noncurrent-liabilities-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/NoncurrentLiabilitiesRollUp",
@@ -167,10 +496,11 @@
     {
       "@id": "disclosures:NoncurrentLiabilitiesRollUp",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:LiabilitiesNoncurrent"}
+        {
+          "@id": "rs-gaap:LiabilitiesNoncurrent"
+        }
       ]
     },
-
     {
       "@id": "_:dm-revenues-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/RevenuesRollUp",
@@ -181,10 +511,11 @@
     {
       "@id": "disclosures:RevenuesRollUp",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:Revenues"}
+        {
+          "@id": "rs-gaap:Revenues"
+        }
       ]
     },
-
     {
       "@id": "_:dm-operating-expenses-rollup",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/OperatingExpensesRollUp",
@@ -195,10 +526,11 @@
     {
       "@id": "disclosures:OperatingExpensesRollUp",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:OperatingExpenses"}
+        {
+          "@id": "rs-gaap:OperatingExpenses"
+        }
       ]
     },
-
     {
       "@id": "_:dm-equity-rollforward",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/EquityRollForward",
@@ -209,10 +541,11 @@
     {
       "@id": "disclosures:EquityRollForward",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:StockholdersEquity"}
+        {
+          "@id": "rs-gaap:StockholdersEquity"
+        }
       ]
     },
-
     {
       "@id": "_:dm-cash-flow",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/CashFlowStatement",
@@ -223,10 +556,11 @@
     {
       "@id": "disclosures:CashFlowStatement",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"}
+        {
+          "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+        }
       ]
     },
-
     {
       "@id": "_:dm-comprehensive-income",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/StatementOfComprehensiveIncome",
@@ -237,10 +571,11 @@
     {
       "@id": "disclosures:StatementOfComprehensiveIncome",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:ComprehensiveIncomeNetOfTax"}
+        {
+          "@id": "rs-gaap:ComprehensiveIncomeNetOfTax"
+        }
       ]
     },
-
     {
       "@id": "_:dm-long-term-debt-maturities",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/LongTermDebtMaturities",
@@ -251,10 +586,11 @@
     {
       "@id": "disclosures:LongTermDebtMaturities",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:LongTermDebt"}
+        {
+          "@id": "rs-gaap:LongTermDebt"
+        }
       ]
     },
-
     {
       "@id": "_:dm-goodwill-rollforward",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/dm/GoodwillRollForward",
@@ -265,7 +601,9 @@
     {
       "@id": "disclosures:GoodwillRollForward",
       "conceptArrangementPatternRequiresConcept": [
-        {"@id": "rs-gaap:Goodwill"}
+        {
+          "@id": "rs-gaap:Goodwill"
+        }
       ]
     }
   ]

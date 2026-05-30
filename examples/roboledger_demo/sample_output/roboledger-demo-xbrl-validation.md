@@ -1,10 +1,10 @@
-# Seattle Method (Test Case 1) — XBRL 2.1 Validation (Arelle)
+# RoboLedger — XBRL 2.1 Validation (Arelle)
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `seattle-method-case-1.zip` (7,195 bytes)
+- **Package**: `roboledger-demo.zip` (7,088 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-def.xml, report-pre.xml, report.xsd`)
-- **Facts loaded by Arelle**: 46
+- **Facts loaded by Arelle**: 39
 - **Load errors**: 0
 - **Validation errors**: 0
 

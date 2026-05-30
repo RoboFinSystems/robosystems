@@ -350,10 +350,10 @@ def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
     (the artifact stamped on publish in S3)
   - ``seattle-method-case-1.zip`` — the XBRL 2.1 report package
 
-  Pairs with ``xbrl_validate.py`` (which proves the XBRL shape is
-  spec-conformant through Arelle); this step writes the artifacts to
-  disk for direct inspection. Subprocess invocation for the same
-  isolation reason as the other download/render steps.
+  The next step (``validate``) reads these files back and checks them with
+  SHACL (JSON-LD) + Arelle (XBRL) — container-free, against what we received.
+  Subprocess invocation for the same isolation reason as the other
+  download/render steps.
   """
   print("─" * 70)
   print(f"Step 9 — Download JSON-LD + XBRL bundle artifacts → graph {graph_id}")
@@ -377,47 +377,47 @@ def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"download_bundles exited with code {result.returncode}")
 
 
-def step_xbrl_validate(graph_id: str, dry_run: bool = False) -> None:
-  """Step 10 — Validate our XBRL emit against the XBRL 2.1 spec via Arelle.
+def step_validate(graph_id: str, dry_run: bool = False) -> None:
+  """Step 10 — Validate the downloaded bundle artifacts, container-free.
 
-  Produces ``output/seattle-method-case-1-xbrl-validation.md`` — the
-  spec-conformance check that pairs with ``reconcile.py``'s value check:
+  Treats step 9's downloaded ``output/`` files as "what we received" and
+  validates them on the host — no API, no DB, no container:
 
-      Charlie's data → our DB (step 7 reconcile — value parity)
-                    → our XBRL → Arelle says valid (step 10 — shape parity)
+  - ``seattle-method-case-1.jsonld`` → **SHACL** vs the published ontology
+    (``frameworks/ontology/v1/shapes.ttl``) — semantic conformance
+  - ``seattle-method-case-1.zip``    → **Arelle** vs the XBRL 2.1 spec —
+    structural conformance
 
-  Arelle is the de-facto XBRL processor; passing its validation is the
-  defensible claim that our output is consumable by any standards-
-  compliant XBRL processor. Earlier framings of this step as a
-  fact-by-fact diff against Charlie's reference were unsound — cross-
-  taxonomy (rs-gaap vs. mini) concept-name divergence makes most facts
-  incomparable, so the diff mostly surfaced taxonomy differences
-  instead of bugs.
-
-  Requires step 8 (create-report) to have run so a filed Report with a
-  stamped bundle exists for the target graph. Subprocess invocation
-  for the same isolation reason as the other rendering steps.
+  Pairs with ``reconcile.py``'s value check: Charlie's data → our DB
+  (reconcile — value parity) → our export → SHACL + Arelle say it's
+  well-formed (this step — shape parity). Requires step 9 (download-bundles).
   """
   print("─" * 70)
-  print(f"Step 10 — XBRL 2.1 validation (Arelle) → graph {graph_id}")
+  print(f"Step 10 — Validate downloaded bundle (SHACL + Arelle) → graph {graph_id}")
   print("─" * 70)
   if dry_run:
-    print("  (dry-run — skipping xbrl-validate)")
+    print("  (dry-run — skipping validate)")
     return
+  out_dir = REPO_ROOT / "examples" / "seattle_method_demo" / "output"
   result = subprocess.run(
     [
       "uv",
       "run",
       "python",
       "-m",
-      "examples.seattle_method_demo.xbrl_validate",
-      graph_id,
+      "examples._common.validate",
+      "--jsonld",
+      str(out_dir / "seattle-method-case-1.jsonld"),
+      "--zip",
+      str(out_dir / "seattle-method-case-1.zip"),
+      "--label",
+      "Seattle Method (Test Case 1)",
     ],
     cwd=str(REPO_ROOT),
     check=False,
   )
   if result.returncode != 0:
-    raise SystemExit(f"xbrl_validate exited with code {result.returncode}")
+    raise SystemExit(f"validate exited with code {result.returncode}")
 
 
 def step_create_report(graph_id: str, dry_run: bool = False) -> None:
@@ -475,9 +475,9 @@ STEPS = {
     "Download the JSON-LD + XBRL bundle artifacts into output/",
     step_download_bundles,
   ),
-  "xbrl-validate": (
-    "Validate our XBRL emit against the XBRL 2.1 spec via Arelle",
-    step_xbrl_validate,
+  "validate": (
+    "Validate the downloaded bundle: SHACL (JSON-LD) + Arelle (XBRL 2.1)",
+    step_validate,
   ),
 }
 
@@ -558,7 +558,7 @@ def main() -> None:
   print()
   step_download_bundles(graph_id, dry_run=args.dry_run)
   print()
-  step_xbrl_validate(graph_id, dry_run=args.dry_run)
+  step_validate(graph_id, dry_run=args.dry_run)
   print()
 
   print("─" * 70)

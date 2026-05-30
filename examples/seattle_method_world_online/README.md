@@ -54,6 +54,8 @@ just demo-world-online-create-report <graph_id>
 | `create-report` | `output/world-online-four-statements.md` — the rs-gaap 4-statement Report (BS / IS / CF / SE) |
 | `trial-balance` | `output/world-online-trial-balance.md` — trial balance (total debits = total credits), via the `trialBalance` GraphQL query |
 | `download-bundles` | `output/world-online.jsonld` + `output/world-online.zip` — JSON-LD bundle + XBRL 2.1 report package, pulled via the SDK |
+| `statement-reconcile` | `output/world-online-statement-reconciliation.md` — the four-statement **anchor totals** diffed against Charlie's published reference instance (`mini/ref-num/instance.xml`); 7/7 tie. Reads our values from the JSON-LD bundle. Complements `reconcile` (GL pivot) at the rendered-statement level |
+| `validate` | Validates the downloaded artifacts **on the host, container-free**: `output/world-online-xbrl-validation.md` (Arelle vs XBRL 2.1) + `output/world-online-shacl-validation.md` (pyshacl vs `frameworks/ontology/v1/shapes.ttl`). Reads the on-disk `.jsonld`/`.zip` we just received — no API/DB |
 
 Steps write to `output/` (gitignored — each run stamps fresh graph/report
 IDs, so committing it would churn). Committed reference copies of all

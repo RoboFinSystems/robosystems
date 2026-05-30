@@ -1,7 +1,119 @@
 {
   "@context": {
-    "rs": "https://robosystems.ai/vocab/",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "owl": "http://www.w3.org/2002/07/owl#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "link": "http://www.xbrl.org/2003/linkbase#",
+    "xlink": "http://www.w3.org/1999/xlink#",
+    "xbrldt": "http://xbrl.org/2005/xbrldt#",
+    "xbrldi": "http://xbrl.org/2006/xbrldi#",
+    "iso4217": "http://www.xbrl.org/2003/iso4217#",
+    "fac": "http://www.xbrlsite.com/fac#",
+    "fac-luca": "http://luca.auditchain.finance/fac#",
+    "fac-seattlemethod": "http://xbrlsite.azurewebsites.net/seattlemethod/fac#",
+    "us-gaap-2017": "http://fasb.org/us-gaap/2017-01-31#",
+    "us-gaap-2020": "http://fasb.org/us-gaap/2020-01-31#",
+    "us-gaap-2022": "http://fasb.org/us-gaap/2022-01-31#",
+    "us-gaap-2024": "http://fasb.org/us-gaap/2024-01-31#",
+    "us-gaap": "http://fasb.org/us-gaap/",
     "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
+    "checklist": "https://robosystems.ai/taxonomy/rs-gaap/reporting-checklist/v1/",
+    "styles": "https://robosystems.ai/taxonomy/rs-gaap/reporting-styles/v1/",
+    "ifrs": "http://xbrl.ifrs.org/taxonomy/",
+    "dei": "http://xbrl.sec.gov/dei/",
+    "cm-roles": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/",
+    "rs": "https://robosystems.ai/vocab/",
+    "classification": {
+      "@id": "https://robosystems.ai/vocab/classification"
+    },
+    "statementContext": {
+      "@id": "https://robosystems.ai/vocab/statementContext"
+    },
+    "derivationRole": {
+      "@id": "https://robosystems.ai/vocab/derivationRole"
+    },
+    "balance": {
+      "@id": "xbrli:balance"
+    },
+    "periodType": {
+      "@id": "xbrli:periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "substitutionGroup": {
+      "@id": "https://robosystems.ai/vocab/substitutionGroup",
+      "@type": "@id"
+    },
+    "source": {
+      "@id": "https://robosystems.ai/vocab/source"
+    },
+    "equivalent": {
+      "@id": "owl:equivalentClass",
+      "@type": "@id"
+    },
+    "from": {
+      "@id": "xlink:from",
+      "@type": "@id"
+    },
+    "to": {
+      "@id": "xlink:to",
+      "@type": "@id"
+    },
+    "arcrole": {
+      "@id": "xlink:arcrole",
+      "@type": "@id"
+    },
+    "role": {
+      "@id": "xlink:role",
+      "@type": "@id"
+    },
+    "order": {
+      "@id": "link:order",
+      "@type": "xsd:decimal"
+    },
+    "weight": {
+      "@id": "link:weight",
+      "@type": "xsd:decimal"
+    },
+    "associationType": {
+      "@id": "https://robosystems.ai/vocab/associationType"
+    },
+    "preferredLabel": {
+      "@id": "https://robosystems.ai/vocab/preferredLabel"
+    },
+    "label": "rdfs:label",
+    "altLabel": "skos:altLabel",
+    "prefLabel": "skos:prefLabel",
+    "documentation": "rdfs:comment",
+    "labelRole": {
+      "@id": "https://robosystems.ai/vocab/labelRole"
+    },
+    "labelLanguage": {
+      "@id": "https://robosystems.ai/vocab/labelLanguage"
+    },
+    "references": {
+      "@id": "dcterms:references"
+    },
+    "refType": {
+      "@id": "https://robosystems.ai/vocab/refType"
+    },
+    "citation": {
+      "@id": "https://robosystems.ai/vocab/citation"
+    },
     "structureName": {
       "@id": "https://robosystems.ai/vocab/structureName"
     },
@@ -14,27 +126,213 @@
     "conceptArrangementPattern": {
       "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
     },
-    "arcFrom": {
-      "@id": "https://robosystems.ai/vocab/arcFrom",
+    "hasAssociation": {
+      "@id": "https://robosystems.ai/vocab/hasAssociation",
       "@type": "@id"
     },
-    "arcTo": {
-      "@id": "https://robosystems.ai/vocab/arcTo",
+    "element": {
+      "@id": "https://robosystems.ai/vocab/element",
       "@type": "@id"
     },
-    "arcAssociationType": {
-      "@id": "https://robosystems.ai/vocab/arcAssociationType"
+    "entity": {
+      "@id": "https://robosystems.ai/vocab/entity",
+      "@type": "@id"
     },
-    "arcRoleUri": {
-      "@id": "https://robosystems.ai/vocab/arcRoleUri"
+    "period": {
+      "@id": "https://robosystems.ai/vocab/period",
+      "@type": "@id"
     },
-    "arcOrder": {
-      "@id": "https://robosystems.ai/vocab/arcOrder",
-      "@type": "http://www.w3.org/2001/XMLSchema#decimal"
+    "unit": {
+      "@id": "https://robosystems.ai/vocab/unit",
+      "@type": "@id"
     },
-    "arcWeight": {
-      "@id": "https://robosystems.ai/vocab/arcWeight",
-      "@type": "http://www.w3.org/2001/XMLSchema#decimal"
+    "dimension": {
+      "@id": "https://robosystems.ai/vocab/dimension",
+      "@type": "@id"
+    },
+    "factSet": {
+      "@id": "https://robosystems.ai/vocab/factSet",
+      "@type": "@id"
+    },
+    "structure": {
+      "@id": "https://robosystems.ai/vocab/structure",
+      "@type": "@id"
+    },
+    "numericValue": {
+      "@id": "https://robosystems.ai/vocab/numericValue",
+      "@type": "xsd:decimal"
+    },
+    "decimals": {
+      "@id": "https://robosystems.ai/vocab/decimals"
+    },
+    "instant": {
+      "@id": "xbrli:instant",
+      "@type": "xsd:date"
+    },
+    "startDate": {
+      "@id": "xbrli:startDate",
+      "@type": "xsd:date"
+    },
+    "endDate": {
+      "@id": "xbrli:endDate",
+      "@type": "xsd:date"
+    },
+    "calendarPeriodKey": {
+      "@id": "https://robosystems.ai/vocab/calendarPeriodKey"
+    },
+    "measure": {
+      "@id": "xbrli:measure",
+      "@type": "@id"
+    },
+    "axis": {
+      "@id": "https://robosystems.ai/vocab/axis"
+    },
+    "member": {
+      "@id": "https://robosystems.ai/vocab/member"
+    },
+    "scheme": {
+      "@id": "https://robosystems.ai/vocab/scheme",
+      "@type": "@id"
+    },
+    "legalName": {
+      "@id": "https://robosystems.ai/vocab/legalName"
+    },
+    "ein": {
+      "@id": "https://robosystems.ai/vocab/ein"
+    },
+    "country": {
+      "@id": "https://robosystems.ai/vocab/country"
+    },
+    "reportingStyle": {
+      "@id": "https://robosystems.ai/vocab/reportingStyle"
+    },
+    "serializationVersion": {
+      "@id": "https://robosystems.ai/vocab/serializationVersion"
+    },
+    "mode": {
+      "@id": "https://robosystems.ai/vocab/mode"
+    },
+    "internalId": {
+      "@id": "https://robosystems.ai/vocab/internalId"
+    },
+    "category": {
+      "@id": "https://robosystems.ai/vocab/category"
+    },
+    "classifiedAs": {
+      "@id": "https://robosystems.ai/vocab/classifiedAs",
+      "@type": "@id"
+    },
+    "deprecated": {
+      "@id": "https://robosystems.ai/vocab/deprecated",
+      "@type": "xsd:boolean"
+    },
+    "replacedBy": {
+      "@id": "https://robosystems.ai/vocab/replacedBy",
+      "@type": "@id"
+    },
+    "orphan2026": {
+      "@id": "https://robosystems.ai/vocab/orphan2026",
+      "@type": "xsd:boolean"
+    },
+    "identifier": {
+      "@id": "https://robosystems.ai/vocab/identifier"
+    },
+    "secType": {
+      "@id": "https://robosystems.ai/vocab/secType"
+    },
+    "hasTrait": {
+      "@id": "https://robosystems.ai/vocab/hasTrait",
+      "@type": "@id"
+    },
+    "trait": "https://robosystems.ai/taxonomy/fac-traits/v1/",
+    "sfac6": "http://xbrlsite.com/seattlemethod/sfac6#",
+    "reportedDisclosureRequiresDisclosure": {
+      "@id": "https://robosystems.ai/vocab/reportedDisclosureRequiresDisclosure",
+      "@type": "@id"
+    },
+    "conceptArrangementPatternRequiresConcept": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPatternRequiresConcept",
+      "@type": "@id"
+    },
+    "disclosureRequiresHypercube": {
+      "@id": "https://robosystems.ai/vocab/disclosureRequiresHypercube",
+      "@type": "@id"
+    },
+    "disclosureRequiresConcept": {
+      "@id": "https://robosystems.ai/vocab/disclosureRequiresConcept",
+      "@type": "@id"
+    },
+    "disclosureEquivalentTextblock": {
+      "@id": "https://robosystems.ai/vocab/disclosureEquivalentTextblock",
+      "@type": "@id"
+    },
+    "financialReportRequiresDisclosure": {
+      "@id": "https://robosystems.ai/vocab/financialReportRequiresDisclosure",
+      "@type": "@id"
+    },
+    "financialReportPossibleDisclosure": {
+      "@id": "https://robosystems.ai/vocab/financialReportPossibleDisclosure",
+      "@type": "@id"
+    },
+    "disclosureAllowedAlternativeDisclosure": {
+      "@id": "https://robosystems.ai/vocab/disclosureAllowedAlternativeDisclosure",
+      "@type": "@id"
+    },
+    "reportingStyleComposesDisclosure": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleComposesDisclosure",
+      "@type": "@id"
+    },
+    "reportingStyleCode": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleCode"
+    },
+    "retainedEarningsConcept": {
+      "@id": "https://robosystems.ai/vocab/retainedEarningsConcept"
+    },
+    "reportingStyleNetworks": {
+      "@id": "https://robosystems.ai/vocab/reportingStyleNetworks"
+    },
+    "statementType": {
+      "@id": "https://robosystems.ai/vocab/statementType"
+    },
+    "networkRoleUri": {
+      "@id": "https://robosystems.ai/vocab/networkRoleUri"
+    },
+    "ruleTarget": {
+      "@id": "https://robosystems.ai/vocab/ruleTarget"
+    },
+    "ruleCategory": {
+      "@id": "https://robosystems.ai/vocab/ruleCategory"
+    },
+    "rulePattern": {
+      "@id": "https://robosystems.ai/vocab/rulePattern"
+    },
+    "ruleSeverity": {
+      "@id": "https://robosystems.ai/vocab/ruleSeverity"
+    },
+    "ruleExpression": {
+      "@id": "https://robosystems.ai/vocab/ruleExpression"
+    },
+    "ruleMessage": {
+      "@id": "https://robosystems.ai/vocab/ruleMessage"
+    },
+    "ruleOrigin": {
+      "@id": "https://robosystems.ai/vocab/ruleOrigin"
+    },
+    "ruleVariables": {
+      "@id": "https://robosystems.ai/vocab/ruleVariables",
+      "@container": "@list"
+    },
+    "variableName": {
+      "@id": "https://robosystems.ai/vocab/variableName"
+    },
+    "variableQname": {
+      "@id": "https://robosystems.ai/vocab/variableQname"
+    },
+    "targetKind": {
+      "@id": "https://robosystems.ai/vocab/targetKind"
+    },
+    "targetRef": {
+      "@id": "https://robosystems.ai/vocab/targetRef"
     }
   },
   "standard": "rs-gaap-calculations",
@@ -54,32 +352,49 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-rev-arc-1",
-      "arcFrom": { "@id": "rs-gaap:Revenues" },
-      "arcTo": { "@id": "rs-gaap:SalesRevenueNet" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:Revenues"
+      },
+      "to": {
+        "@id": "rs-gaap:SalesRevenueNet"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-rev-arc-2",
-      "arcFrom": { "@id": "rs-gaap:Revenues" },
-      "arcTo": { "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:Revenues"
+      },
+      "to": {
+        "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-rev-arc-3",
-      "arcFrom": { "@id": "rs-gaap:Revenues" },
-      "arcTo": { "@id": "rs-gaap:OtherSalesRevenueNet" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:Revenues"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherSalesRevenueNet"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-is-cor",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
@@ -89,32 +404,49 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-cor-arc-1",
-      "arcFrom": { "@id": "rs-gaap:CostOfRevenue" },
-      "arcTo": { "@id": "rs-gaap:CostOfGoodsSold" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:CostOfRevenue"
+      },
+      "to": {
+        "@id": "rs-gaap:CostOfGoodsSold"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-cor-arc-2",
-      "arcFrom": { "@id": "rs-gaap:CostOfRevenue" },
-      "arcTo": { "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:CostOfRevenue"
+      },
+      "to": {
+        "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-cor-arc-3",
-      "arcFrom": { "@id": "rs-gaap:CostOfRevenue" },
-      "arcTo": { "@id": "rs-gaap:OtherCostOfOperatingRevenue" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:CostOfRevenue"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherCostOfOperatingRevenue"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-is-gross",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-GrossProfit",
@@ -124,23 +456,34 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-gross-arc-1",
-      "arcFrom": { "@id": "rs-gaap:GrossProfit" },
-      "arcTo": { "@id": "rs-gaap:Revenues" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-GrossProfit",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:GrossProfit"
+      },
+      "to": {
+        "@id": "rs-gaap:Revenues"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-GrossProfit",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-gross-arc-2",
-      "arcFrom": { "@id": "rs-gaap:GrossProfit" },
-      "arcTo": { "@id": "rs-gaap:CostOfRevenue" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-GrossProfit",
-      "arcWeight": -1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:GrossProfit"
+      },
+      "to": {
+        "@id": "rs-gaap:CostOfRevenue"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-GrossProfit",
+      "weight": -1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-is-opex",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
@@ -150,41 +493,64 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-opex-arc-1",
-      "arcFrom": { "@id": "rs-gaap:OperatingExpenses" },
-      "arcTo": { "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-opex-arc-2",
-      "arcFrom": { "@id": "rs-gaap:OperatingExpenses" },
-      "arcTo": { "@id": "rs-gaap:ResearchAndDevelopmentExpense" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:ResearchAndDevelopmentExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-opex-arc-3",
-      "arcFrom": { "@id": "rs-gaap:OperatingExpenses" },
-      "arcTo": { "@id": "rs-gaap:DepreciationDepletionAndAmortization" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:DepreciationDepletionAndAmortization"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-opex-arc-4",
-      "arcFrom": { "@id": "rs-gaap:OperatingExpenses" },
-      "arcTo": { "@id": "rs-gaap:OtherCostAndExpenseOperating" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherCostAndExpenseOperating"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-is-opinc",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OperatingIncome",
@@ -194,23 +560,34 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-opinc-arc-1",
-      "arcFrom": { "@id": "rs-gaap:OperatingIncomeLoss" },
-      "arcTo": { "@id": "rs-gaap:GrossProfit" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OperatingIncome",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:OperatingIncomeLoss"
+      },
+      "to": {
+        "@id": "rs-gaap:GrossProfit"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OperatingIncome",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-opinc-arc-2",
-      "arcFrom": { "@id": "rs-gaap:OperatingIncomeLoss" },
-      "arcTo": { "@id": "rs-gaap:OperatingExpenses" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OperatingIncome",
-      "arcWeight": -1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:OperatingIncomeLoss"
+      },
+      "to": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OperatingIncome",
+      "weight": -1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-is-nonop",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
@@ -220,41 +597,64 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-nonop-arc-1",
-      "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
-      "arcTo": { "@id": "rs-gaap:InvestmentIncomeInterest" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:InvestmentIncomeInterest"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-nonop-arc-2",
-      "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
-      "arcTo": { "@id": "rs-gaap:InterestExpense" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
-      "arcWeight": -1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:InterestExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "weight": -1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-nonop-arc-3",
-      "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
-      "arcTo": { "@id": "rs-gaap:GainLossOnDispositionOfAssets" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:GainLossOnDispositionOfAssets"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-nonop-arc-4",
-      "arcFrom": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
-      "arcTo": { "@id": "rs-gaap:OtherNonoperatingIncomeExpense" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherNonoperatingIncomeExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-is-pretax",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
@@ -264,21 +664,33 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-pretax-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" },
-      "arcTo": { "@id": "rs-gaap:OperatingIncomeLoss" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:OperatingIncomeLoss"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-pretax-arc-2",
-      "arcFrom": { "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" },
-      "arcTo": { "@id": "rs-gaap:NonoperatingIncomeExpense" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+      },
+      "to": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-conops",
@@ -289,23 +701,34 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-conops-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncomeLossFromContinuingOperations" },
-      "arcTo": { "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-ContinuingOps",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncomeLossFromContinuingOperations"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-ContinuingOps",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-conops-arc-2",
-      "arcFrom": { "@id": "rs-gaap:IncomeLossFromContinuingOperations" },
-      "arcTo": { "@id": "rs-gaap:IncomeTaxExpenseBenefit" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-ContinuingOps",
-      "arcWeight": -1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:IncomeLossFromContinuingOperations"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeTaxExpenseBenefit"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-ContinuingOps",
+      "weight": -1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-is-netinc",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NetIncome",
@@ -315,23 +738,34 @@
     },
     {
       "@id": "_:rs-gaap-calc-is-netinc-arc-1",
-      "arcFrom": { "@id": "rs-gaap:NetIncomeLoss" },
-      "arcTo": { "@id": "rs-gaap:IncomeLossFromContinuingOperations" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NetIncome",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:NetIncomeLoss"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeLossFromContinuingOperations"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NetIncome",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-netinc-arc-2",
-      "arcFrom": { "@id": "rs-gaap:NetIncomeLoss" },
-      "arcTo": { "@id": "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NetIncome",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:NetIncomeLoss"
+      },
+      "to": {
+        "@id": "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NetIncome",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-bs-assets",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Assets",
@@ -341,23 +775,34 @@
     },
     {
       "@id": "_:rs-gaap-calc-bs-assets-arc-1",
-      "arcFrom": { "@id": "rs-gaap:Assets" },
-      "arcTo": { "@id": "rs-gaap:AssetsCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Assets",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:Assets"
+      },
+      "to": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Assets",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-assets-arc-2",
-      "arcFrom": { "@id": "rs-gaap:Assets" },
-      "arcTo": { "@id": "rs-gaap:AssetsNoncurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Assets",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:Assets"
+      },
+      "to": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Assets",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-bs-current-assets",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
@@ -367,59 +812,94 @@
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-assets-arc-1",
-      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
-      "arcTo": { "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-assets-arc-2",
-      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
-      "arcTo": { "@id": "rs-gaap:ReceivablesNetCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:ReceivablesNetCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-assets-arc-3",
-      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
-      "arcTo": { "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-assets-arc-4",
-      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
-      "arcTo": { "@id": "rs-gaap:PrepaidExpenseCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:PrepaidExpenseCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-assets-arc-5",
-      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
-      "arcTo": { "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 500.0
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "weight": 1.0,
+      "order": 500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-assets-arc-6",
-      "arcFrom": { "@id": "rs-gaap:AssetsCurrent" },
-      "arcTo": { "@id": "rs-gaap:OtherAssetsCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 600.0
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherAssetsCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "weight": 1.0,
+      "order": 600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
@@ -429,59 +909,94 @@
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-1",
-      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentNet" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:PropertyPlantAndEquipmentNet"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-2",
-      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-3",
-      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-4",
-      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:OperatingLeaseRightOfUseAsset" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:OperatingLeaseRightOfUseAsset"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-5",
-      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:FinanceLeaseRightOfUseAsset" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 500.0
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:FinanceLeaseRightOfUseAsset"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "weight": 1.0,
+      "order": 500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-6",
-      "arcFrom": { "@id": "rs-gaap:AssetsNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:OtherAssetsNoncurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 600.0
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherAssetsNoncurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "weight": 1.0,
+      "order": 600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-bs-liabilities",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Liabilities",
@@ -491,23 +1006,34 @@
     },
     {
       "@id": "_:rs-gaap-calc-bs-liabilities-arc-1",
-      "arcFrom": { "@id": "rs-gaap:Liabilities" },
-      "arcTo": { "@id": "rs-gaap:LiabilitiesCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Liabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:Liabilities"
+      },
+      "to": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Liabilities",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-liabilities-arc-2",
-      "arcFrom": { "@id": "rs-gaap:Liabilities" },
-      "arcTo": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Liabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:Liabilities"
+      },
+      "to": {
+        "@id": "rs-gaap:LiabilitiesNoncurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Liabilities",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-bs-current-liab",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
@@ -517,50 +1043,79 @@
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-liab-arc-1",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
-      "arcTo": { "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-liab-arc-2",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
-      "arcTo": { "@id": "rs-gaap:DebtCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DebtCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-liab-arc-3",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
-      "arcTo": { "@id": "rs-gaap:DeferredRevenueCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DeferredRevenueCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-liab-arc-4",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
-      "arcTo": { "@id": "rs-gaap:FinanceLeaseLiabilityCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:FinanceLeaseLiabilityCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-liab-arc-5",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesCurrent" },
-      "arcTo": { "@id": "rs-gaap:OtherLiabilitiesCurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 500.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherLiabilitiesCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "weight": 1.0,
+      "order": 500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-liab",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
@@ -570,50 +1125,79 @@
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-liab-arc-1",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-liab-arc-2",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:DeferredIncomeTaxLiabilitiesNet" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DeferredIncomeTaxLiabilitiesNet"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-liab-arc-3",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:DeferredRevenueNoncurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:DeferredRevenueNoncurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-liab-arc-4",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:OperatingLeaseLiabilityNoncurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:OperatingLeaseLiabilityNoncurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-liab-arc-5",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesNoncurrent" },
-      "arcTo": { "@id": "rs-gaap:OtherLiabilitiesNoncurrent" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 500.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherLiabilitiesNoncurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "weight": 1.0,
+      "order": 500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-bs-equity",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
@@ -623,77 +1207,124 @@
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-1",
-      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:CommonStockValue" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:CommonStockValue"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-2",
-      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:PreferredStockValue" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:PreferredStockValue"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-3",
-      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:AdditionalPaidInCapital" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:AdditionalPaidInCapital"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-4",
-      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:RetainedEarningsAccumulatedDeficit" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:RetainedEarningsAccumulatedDeficit"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-5",
-      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "arcWeight": 1.0,
-      "arcOrder": 500.0
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "weight": 1.0,
+      "order": 500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-6",
-      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:TreasuryStockValue" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "arcWeight": -1.0,
-      "arcOrder": 600.0
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:TreasuryStockValue"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "weight": -1.0,
+      "order": 600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-7",
-      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:PartnersCapital" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "arcWeight": 1.0,
-      "arcOrder": 700.0
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:PartnersCapital"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "weight": 1.0,
+      "order": 700.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-8",
-      "arcFrom": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:MembersEquity" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "arcWeight": 1.0,
-      "arcOrder": 800.0
+      "from": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:MembersEquity"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "weight": 1.0,
+      "order": 800.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-bs-liab-equity",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-LiabilitiesAndStockholdersEquity",
@@ -703,23 +1334,34 @@
     },
     {
       "@id": "_:rs-gaap-calc-bs-liab-equity-arc-1",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesAndStockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:Liabilities" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-LiabilitiesAndStockholdersEquity",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesAndStockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:Liabilities"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-LiabilitiesAndStockholdersEquity",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-bs-liab-equity-arc-2",
-      "arcFrom": { "@id": "rs-gaap:LiabilitiesAndStockholdersEquity" },
-      "arcTo": { "@id": "rs-gaap:StockholdersEquity" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-LiabilitiesAndStockholdersEquity",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:LiabilitiesAndStockholdersEquity"
+      },
+      "to": {
+        "@id": "rs-gaap:StockholdersEquity"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-LiabilitiesAndStockholdersEquity",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-cf-net-change",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
@@ -729,41 +1371,64 @@
     },
     {
       "@id": "_:rs-gaap-calc-cf-net-change-arc-1",
-      "arcFrom": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
-      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-net-change-arc-2",
-      "arcFrom": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
-      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-net-change-arc-3",
-      "arcFrom": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
-      "arcTo": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-net-change-arc-4",
-      "arcFrom": { "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease" },
-      "arcTo": { "@id": "rs-gaap:EffectOfExchangeRateOnCash" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+      },
+      "to": {
+        "@id": "rs-gaap:EffectOfExchangeRateOnCash"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-cf-operating",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
@@ -773,68 +1438,109 @@
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-1",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:NetIncomeLoss" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:NetIncomeLoss"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-2",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:DepreciationDepletionAndAmortization" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:DepreciationDepletionAndAmortization"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-3",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-4",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInInventories" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInInventories"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-5",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 500.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-6",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 600.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-7",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 700.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 700.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-ar",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsReceivable",
@@ -844,14 +1550,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ar-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable" },
-      "arcTo": { "@id": "rs-gaap:ReceivablesNetCurrent" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsReceivable",
-      "arcWeight": -1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable"
+      },
+      "to": {
+        "@id": "rs-gaap:ReceivablesNetCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsReceivable",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-inventory",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-Inventory",
@@ -861,14 +1571,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-inventory-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInInventories" },
-      "arcTo": { "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-Inventory",
-      "arcWeight": -1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInInventories"
+      },
+      "to": {
+        "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-Inventory",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-prepaid",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PrepaidExpense",
@@ -878,14 +1592,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-prepaid-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense" },
-      "arcTo": { "@id": "rs-gaap:PrepaidExpenseCurrent" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PrepaidExpense",
-      "arcWeight": -1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:PrepaidExpenseCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PrepaidExpense",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-ap",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsPayable",
@@ -895,14 +1613,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ap-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities" },
-      "arcTo": { "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsPayable",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+      },
+      "to": {
+        "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsPayable",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-other-op",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-OtherOperatingCapital",
@@ -912,14 +1634,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-other-op-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet" },
-      "arcTo": { "@id": "rs-gaap:OtherLiabilitiesCurrent" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-OtherOperatingCapital",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+      },
+      "to": {
+        "@id": "rs-gaap:OtherLiabilitiesCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-OtherOperatingCapital",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-calc-cf-investing",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
@@ -929,59 +1655,94 @@
     },
     {
       "@id": "_:rs-gaap-calc-cf-investing-arc-1",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
-      "arcTo": { "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-investing-arc-2",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
-      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-investing-arc-3",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
-      "arcTo": { "@id": "rs-gaap:PaymentsToAcquireInvestments" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-investing-arc-4",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
-      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-investing-arc-5",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
-      "arcTo": { "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
-      "arcWeight": 1.0,
-      "arcOrder": 500.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "weight": 1.0,
+      "order": 500.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-investing-arc-6",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities" },
-      "arcTo": { "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
-      "arcWeight": 1.0,
-      "arcOrder": 600.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "weight": 1.0,
+      "order": 600.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-cf-financing",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
@@ -991,14 +1752,19 @@
     },
     {
       "@id": "_:rs-gaap-calc-cf-financing-arc-1",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
-      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-ppe-purchases",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
@@ -1008,14 +1774,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ppe-purchases-arc-1",
-      "arcFrom": { "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment" },
-      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentGross" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
-      "arcWeight": -1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+      },
+      "to": {
+        "@id": "rs-gaap:PropertyPlantAndEquipmentGross"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-stock-proceeds",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfCommonStock",
@@ -1025,14 +1795,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-stock-proceeds-arc-1",
-      "arcFrom": { "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock" },
-      "arcTo": { "@id": "rs-gaap:AdditionalPaidInCapital" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfCommonStock",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock"
+      },
+      "to": {
+        "@id": "rs-gaap:AdditionalPaidInCapital"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfCommonStock",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-accrued-liabilities",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccruedLiabilities",
@@ -1042,14 +1816,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-accrued-liabilities-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities" },
-      "arcTo": { "@id": "rs-gaap:AccruedLiabilitiesCurrent" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccruedLiabilities",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities"
+      },
+      "to": {
+        "@id": "rs-gaap:AccruedLiabilitiesCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccruedLiabilities",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-income-taxes-payable",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-IncomeTaxesPayable",
@@ -1059,14 +1837,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-income-taxes-payable-arc-1",
-      "arcFrom": { "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable" },
-      "arcTo": { "@id": "rs-gaap:AccruedIncomeTaxesCurrent" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-IncomeTaxesPayable",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
+      },
+      "to": {
+        "@id": "rs-gaap:AccruedIncomeTaxesCurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-IncomeTaxesPayable",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-dda-from-accum",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-DDA-FromAccumulated",
@@ -1076,14 +1858,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-dda-from-accum-arc-1",
-      "arcFrom": { "@id": "rs-gaap:DepreciationDepletionAndAmortization" },
-      "arcTo": { "@id": "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-DDA-FromAccumulated",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:DepreciationDepletionAndAmortization"
+      },
+      "to": {
+        "@id": "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-DDA-FromAccumulated",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-ppe-sales",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfPropertyPlantAndEquipment",
@@ -1093,14 +1879,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ppe-sales-arc-1",
-      "arcFrom": { "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment" },
-      "arcTo": { "@id": "rs-gaap:PropertyPlantAndEquipmentGross" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfPropertyPlantAndEquipment",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
+      },
+      "to": {
+        "@id": "rs-gaap:PropertyPlantAndEquipmentGross"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfPropertyPlantAndEquipment",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-investments-purchases",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireInvestments",
@@ -1110,14 +1900,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-investments-purchases-arc-1",
-      "arcFrom": { "@id": "rs-gaap:PaymentsToAcquireInvestments" },
-      "arcTo": { "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireInvestments",
-      "arcWeight": -1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:PaymentsToAcquireInvestments"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireInvestments",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-investments-sales",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleMaturityAndCollectionsOfInvestments",
@@ -1127,14 +1921,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-investments-sales-arc-1",
-      "arcFrom": { "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments" },
-      "arcTo": { "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleMaturityAndCollectionsOfInvestments",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleMaturityAndCollectionsOfInvestments",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-intangibles-purchases",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireIntangibleAssets",
@@ -1144,14 +1942,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-intangibles-purchases-arc-1",
-      "arcFrom": { "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets" },
-      "arcTo": { "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireIntangibleAssets",
-      "arcWeight": -1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets"
+      },
+      "to": {
+        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireIntangibleAssets",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-intangibles-sales",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfIntangibleAssets",
@@ -1161,14 +1963,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-intangibles-sales-arc-1",
-      "arcFrom": { "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets" },
-      "arcTo": { "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfIntangibleAssets",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
+      },
+      "to": {
+        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfIntangibleAssets",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-debt-issuance",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfLongTermDebt",
@@ -1178,14 +1984,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-debt-issuance-arc-1",
-      "arcFrom": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt" },
-      "arcTo": { "@id": "rs-gaap:LongTermDebtNoncurrent" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfLongTermDebt",
-      "arcWeight": 1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtNoncurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfLongTermDebt",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-debt-repayment",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-RepaymentsOfLongTermDebt",
@@ -1195,14 +2005,18 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-debt-repayment-arc-1",
-      "arcFrom": { "@id": "rs-gaap:RepaymentsOfLongTermDebt" },
-      "arcTo": { "@id": "rs-gaap:LongTermDebtNoncurrent" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-RepaymentsOfLongTermDebt",
-      "arcWeight": -1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:RepaymentsOfLongTermDebt"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtNoncurrent"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-RepaymentsOfLongTermDebt",
+      "weight": -1.0,
+      "order": 200.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-deriv-cf-stock-repurchase",
       "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsForRepurchaseOfCommonStock",
@@ -1212,59 +2026,92 @@
     },
     {
       "@id": "_:rs-gaap-deriv-cf-stock-repurchase-arc-1",
-      "arcFrom": { "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock" },
-      "arcTo": { "@id": "rs-gaap:AdditionalPaidInCapital" },
-      "arcAssociationType": "derivation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsForRepurchaseOfCommonStock",
-      "arcWeight": -1.0,
-      "arcOrder": 100.0
+      "from": {
+        "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
+      },
+      "to": {
+        "@id": "rs-gaap:AdditionalPaidInCapital"
+      },
+      "associationType": "derivation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsForRepurchaseOfCommonStock",
+      "weight": -1.0,
+      "order": 100.0,
+      "@type": "rs:Association"
     },
-
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-8",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 800.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 800.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-9",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities" },
-      "arcTo": { "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "arcWeight": 1.0,
-      "arcOrder": 900.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "weight": 1.0,
+      "order": 900.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
-
     {
       "@id": "_:rs-gaap-calc-cf-financing-arc-2",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
-      "arcTo": { "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
-      "arcWeight": 1.0,
-      "arcOrder": 200.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-financing-arc-3",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
-      "arcTo": { "@id": "rs-gaap:RepaymentsOfLongTermDebt" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
-      "arcWeight": 1.0,
-      "arcOrder": 300.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:RepaymentsOfLongTermDebt"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "weight": 1.0,
+      "order": 300.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-cf-financing-arc-4",
-      "arcFrom": { "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities" },
-      "arcTo": { "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock" },
-      "arcAssociationType": "calculation",
-      "arcRoleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
-      "arcWeight": 1.0,
-      "arcOrder": 400.0
+      "from": {
+        "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+      },
+      "to": {
+        "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "weight": 1.0,
+      "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     }
   ]
 }

@@ -12,14 +12,13 @@ invariant so the constant and the calc package can't drift apart.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from robosystems.operations.operators.implementations.mapping.constants import (
   FAC_TO_RS_GAAP_FALLBACK,
 )
 from robosystems.taxonomy.discovery import framework_root
+from robosystems.taxonomy.loader import load_taxonomy_package
 
 _CALC_PATH = (
   framework_root("rs-gaap")
@@ -32,14 +31,15 @@ _CALC_PATH = (
 
 @pytest.fixture(scope="module")
 def calc_sets() -> tuple[set[str], set[str]]:
-  """(calc children, calc parents) for ``calculation`` arcs."""
-  graph = json.loads(_CALC_PATH.read_text())["@graph"]
-  children = {
-    n["arcTo"]["@id"] for n in graph if n.get("arcAssociationType") == "calculation"
-  }
-  parents = {
-    n["arcFrom"]["@id"] for n in graph if n.get("arcAssociationType") == "calculation"
-  }
+  """(calc children, calc parents) for ``calculation`` arcs.
+
+  Read through the loader so this is agnostic to the RDF encoding — the
+  canonical seed reifies calc arcs as ``rs:Association`` nodes.
+  """
+  pkg = load_taxonomy_package(_CALC_PATH)
+  calc = [a for a in pkg.associations if a.association_type == "calculation"]
+  children = {a.to_qname for a in calc}
+  parents = {a.from_qname for a in calc}
   return children, parents
 
 

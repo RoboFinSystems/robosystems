@@ -19,40 +19,49 @@ deferred to the validation rules engine.
 
 from __future__ import annotations
 
+import hashlib
+from decimal import Decimal
 from typing import Any
 
 from arelle import XbrlConst
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
-from rdflib.namespace import DCTERMS, OWL, RDFS, SKOS, XSD
+from rdflib.namespace import DCTERMS, OWL, RDF, RDFS, SKOS, XSD
 
 from robosystems.arelle.context import RS_VOCAB
 from robosystems.logger import logger
 
 # RoboSystems vocabulary namespace
 RS = Namespace(RS_VOCAB)
+# XBRL vocabulary — inherited where XBRL defines the term (concept
+# attributes, arc endpoints/roles, weight/order). Structural taxonomy
+# arcs are reified as rs:Association nodes carrying these predicates.
+XBRLI = Namespace("http://www.xbrl.org/2003/instance#")
+XLINK = Namespace("http://www.w3.org/1999/xlink#")
+LINK = Namespace("http://www.xbrl.org/2003/linkbase#")
 
 
-# Arcrole → predicate + association_type mapping
+# Arcrole → association_type mapping.
 #
-# The predicate is the rdflib predicate used in the RDF graph.
-# The association_type is the DB-side enum value (for library_writer).
-ARCROLE_MAPPING: dict[str, tuple[URIRef, str]] = {
-  "http://www.xbrl.org/2003/arcrole/parent-child": (RS.parent, "presentation"),
-  "http://www.xbrl.org/2003/arcrole/summation-item": (RS.summationOf, "calculation"),
-  "http://xbrlsite.azurewebsites.net/2016/conceptual-model/arcrole/class-equivalentClass": (
-    OWL.equivalentClass,
-    "equivalence",
-  ),
+# The association_type is the DB-side enum value (for library_writer) and is
+# stamped on each reified rs:Association via rs:associationType. The arcrole
+# URI itself is preserved on the Association as xlink:arcrole.
+ARCROLE_MAPPING: dict[str, str] = {
+  "http://www.xbrl.org/2003/arcrole/parent-child": "presentation",
+  "http://www.xbrl.org/2003/arcrole/summation-item": "calculation",
+  "http://xbrlsite.azurewebsites.net/2016/conceptual-model/arcrole/class-equivalentClass": "equivalence",
   # General-special appears under multiple arcrole URIs in practice; check
   # both the XBRL-standard and any custom variants.
-  "http://www.xbrl.org/2003/arcrole/general-special": (RS.generalOf, "general-special"),
-  "http://xbrl.org/int/dim/arcrole/domain-member": (RS.dimensionOf, "general-special"),
-  "http://xbrl.org/int/dim/arcrole/all": (RS.hypercubeOf, "calculation"),
-  "http://xbrl.org/int/dim/arcrole/hypercube-dimension": (
-    RS.dimensionOf,
-    "calculation",
-  ),
+  "http://www.xbrl.org/2003/arcrole/general-special": "general-special",
+  "http://xbrl.org/int/dim/arcrole/domain-member": "general-special",
+  "http://xbrl.org/int/dim/arcrole/all": "calculation",
+  "http://xbrl.org/int/dim/arcrole/hypercube-dimension": "calculation",
 }
+
+# Equivalence is the one relationship that stays a DIRECT predicate
+# (owl:equivalentClass): a genuine symmetric OWL relation with no
+# weight/order/role to carry. Every other arcrole reifies into an
+# rs:Association node (see _add_relationship_triples).
+EQUIVALENCE_ASSOCIATION_TYPE = "equivalence"
 
 # Namespace prefixes to skip. XBRL Formula / Variable / Validation
 # linkbase infrastructure + XBRL core meta-concepts (xbrli:item,
@@ -198,11 +207,11 @@ def _add_concept_triples(graph: Graph, concept: Any) -> None:
 
   balance = getattr(concept, "balance", None)
   if balance:
-    graph.add((iri, RS.balance, Literal(balance)))
+    graph.add((iri, XBRLI.balance, Literal(balance)))
 
   period_type = getattr(concept, "periodType", None)
   if period_type:
-    graph.add((iri, RS.periodType, Literal(period_type)))
+    graph.add((iri, XBRLI.periodType, Literal(period_type)))
 
   is_abstract = bool(getattr(concept, "isAbstract", False))
   graph.add((iri, RS.abstract, Literal(is_abstract, datatype=XSD.boolean)))
@@ -330,7 +339,15 @@ def _add_reference_triples(graph: Graph, model_xbrl: Any) -> int:
 
 
 def _add_relationship_triples(graph: Graph, model_xbrl: Any) -> dict[str, int]:
-  """Walk all relationship base sets and add arc triples per arcrole.
+  """Walk all relationship base sets and add canonical arc triples.
+
+  Structural taxonomy arcs (presentation / calculation / definition) are
+  REIFIED as ``rs:Association`` nodes carrying ``xlink:from`` / ``xlink:to``
+  / ``xlink:arcrole`` / ``xlink:role`` (the ELR binding) / ``link:weight`` /
+  ``link:order`` / ``rs:associationType`` — so weight + order + the role
+  binding survive, which the old flat-predicate form dropped. Equivalence
+  stays a DIRECT ``owl:equivalentClass`` triple (symmetric OWL relation,
+  no arc metadata to carry).
 
   Returns a dict of arcrole → count for diagnostics.
   """
@@ -341,7 +358,7 @@ def _add_relationship_triples(graph: Graph, model_xbrl: Any) -> dict[str, int]:
     if not arcrole or arcrole not in ARCROLE_MAPPING:
       continue
 
-    predicate, _assoc_type = ARCROLE_MAPPING[arcrole]
+    assoc_type = ARCROLE_MAPPING[arcrole]
 
     try:
       rel_set = model_xbrl.relationshipSet(arcrole, role, link_qname, arc_qname)
@@ -357,7 +374,40 @@ def _add_relationship_triples(graph: Graph, model_xbrl: Any) -> dict[str, int]:
       if from_iri is None or to_iri is None:
         continue
 
-      graph.add((from_iri, predicate, to_iri))
+      if assoc_type == EQUIVALENCE_ASSOCIATION_TYPE:
+        # Direct symmetric OWL relation — no reification.
+        graph.add((from_iri, OWL.equivalentClass, to_iri))
+        counts[arcrole] = counts.get(arcrole, 0) + 1
+        continue
+
+      order = getattr(rel, "order", None)
+      weight = getattr(rel, "weight", None) if assoc_type == "calculation" else None
+      preferred = getattr(rel, "preferredLabel", None)
+      # Deterministic content-hashed IRI so regenerated seeds are
+      # byte-stable across runs (a BNode would get a fresh label each run
+      # and churn the committed seed diff).
+      digest = hashlib.sha1(
+        f"{role}|{arcrole}|{from_iri}|{to_iri}|{order}|{weight}".encode()
+      ).hexdigest()[:16]
+      assoc = URIRef(f"{RS_VOCAB}association/{digest}")
+      graph.add((assoc, RDF.type, RS.Association))
+      graph.add((assoc, XLINK["from"], from_iri))
+      graph.add((assoc, XLINK.to, to_iri))
+      graph.add((assoc, XLINK.arcrole, URIRef(arcrole)))
+      graph.add((assoc, RS.associationType, Literal(assoc_type)))
+      if role:
+        # ELR binding — ties the arc to its rs:Structure (same role URI).
+        graph.add((assoc, XLINK.role, URIRef(role)))
+      if order is not None:
+        graph.add(
+          (assoc, LINK.order, Literal(Decimal(str(order)), datatype=XSD.decimal))
+        )
+      if weight is not None:
+        graph.add(
+          (assoc, LINK.weight, Literal(Decimal(str(weight)), datatype=XSD.decimal))
+        )
+      if preferred:
+        graph.add((assoc, RS.preferredLabel, Literal(preferred)))
       counts[arcrole] = counts.get(arcrole, 0) + 1
 
   return counts

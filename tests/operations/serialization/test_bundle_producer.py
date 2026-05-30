@@ -16,10 +16,10 @@ from datetime import date
 import pytest
 
 from robosystems.operations.serialization.bundle import (
-  BundleContext,
   BundleElement,
   BundleFact,
   BundleLinkbases,
+  BundlePeriod,
   BundleUnit,
   EntityMeta,
   FrameworkPin,
@@ -29,7 +29,7 @@ from robosystems.operations.serialization.bundle import (
   _associations_to_linkbases,
   _element_to_bundle,
   _fact_to_bundle,
-  _mint_contexts,
+  _mint_periods,
   _mint_units,
   _period_metas_for_report,
 )
@@ -310,12 +310,11 @@ class TestAssociationsToLinkbases:
     )
 
 
-# ── _mint_contexts ────────────────────────────────────────────────────
+# ── _mint_periods ─────────────────────────────────────────────────────
 
 
-class TestMintContexts:
-  def test_unique_period_combos_get_unique_context_ids(self) -> None:
-    entity = EntityMeta(id="ent_01", name="Test")
+class TestMintPeriods:
+  def test_unique_period_combos_get_unique_period_ids(self) -> None:
     facts = [
       _FakeFact(
         id="f1",
@@ -332,15 +331,14 @@ class TestMintContexts:
         period_type="instant",
       ),
     ]
-    contexts, fact_to_ref = _mint_contexts(facts, entity)
-    assert len(contexts) == 2
-    assert contexts[0].id == "ctx_1"
-    assert contexts[1].id == "ctx_2"
-    assert fact_to_ref["f1"] == "ctx_1"
-    assert fact_to_ref["f2"] == "ctx_2"
+    periods, fact_to_ref = _mint_periods(facts)
+    assert len(periods) == 2
+    assert periods[0].id == "p_1"
+    assert periods[1].id == "p_2"
+    assert fact_to_ref["f1"] == "p_1"
+    assert fact_to_ref["f2"] == "p_2"
 
-  def test_repeated_period_combo_dedupes_to_single_context(self) -> None:
-    entity = EntityMeta(id="ent_01", name="Test")
+  def test_repeated_period_combo_dedupes_to_single_period(self) -> None:
     facts = [
       _FakeFact(
         id="f1",
@@ -357,15 +355,14 @@ class TestMintContexts:
         period_type="instant",
       ),
     ]
-    contexts, fact_to_ref = _mint_contexts(facts, entity)
-    assert len(contexts) == 1
-    assert fact_to_ref["f1"] == fact_to_ref["f2"] == "ctx_1"
+    periods, fact_to_ref = _mint_periods(facts)
+    assert len(periods) == 1
+    assert fact_to_ref["f1"] == fact_to_ref["f2"] == "p_1"
 
-  def test_instant_vs_duration_get_separate_contexts(self) -> None:
-    """Same end date, different period_type → different contexts.
-    XBRL requires the period element shape to match what's declared
-    on the concept."""
-    entity = EntityMeta(id="ent_01", name="Test")
+  def test_instant_vs_duration_get_separate_periods(self) -> None:
+    """Same end date, different period_type → different period nodes.
+    The XBRL encoder later derives contexts whose period element shape
+    matches what's declared on the concept."""
     facts = [
       _FakeFact(
         id="f1",
@@ -382,25 +379,21 @@ class TestMintContexts:
         period_type="duration",
       ),
     ]
-    contexts, _ = _mint_contexts(facts, entity)
-    assert len(contexts) == 2
-    period_types = {ctx.period_type for ctx in contexts}
-    assert period_types == {"instant", "duration"}
+    periods, _ = _mint_periods(facts)
+    assert len(periods) == 2
+    assert {p.period_type for p in periods} == {"instant", "duration"}
 
   def test_instant_period_type_trumps_populated_period_start(self) -> None:
     """Regression: BS facts arrive with ``period_type='instant'`` but
     a populated ``period_start`` (the fact-stamping side carries
     period bounds even on instants). The dedup must honour the
-    declared period_type — emitting BS facts under a duration
-    context would break XBRL conformance (concept declares
+    declared period_type — emitting BS facts under a duration period
+    would break XBRL conformance (concept declares
     ``periodType='instant'``; processors reject mismatches).
 
     Found by the Seattle Method round-trip vs. Charlie Hoffman's
-    reference instance: BS concepts like ``rs-gaap:Assets`` were
-    shipping under duration contexts, surfacing as ours-only in the
-    diff. Producer now coerces instant facts' ``period_start`` to
-    ``None`` regardless of what the DB row carries."""
-    entity = EntityMeta(id="ent_01", name="Test")
+    reference instance. Producer coerces instant facts' ``period_start``
+    to ``None`` regardless of what the DB row carries."""
     facts = [
       _FakeFact(
         id="bs_fact",
@@ -417,16 +410,13 @@ class TestMintContexts:
         period_type="duration",
       ),
     ]
-    contexts, fact_to_ref = _mint_contexts(facts, entity)
-    assert len(contexts) == 2
-    by_kind = {ctx.period_type: ctx for ctx in contexts}
-    # BS fact's context is instant + has period_start normalized to None
+    periods, fact_to_ref = _mint_periods(facts)
+    assert len(periods) == 2
+    by_kind = {p.period_type: p for p in periods}
     assert by_kind["instant"].period_start is None
     assert by_kind["instant"].period_end == date(2024, 3, 31)
-    # IS fact's context keeps the start
     assert by_kind["duration"].period_start == date(2024, 1, 1)
     assert by_kind["duration"].period_end == date(2024, 3, 31)
-    # Facts route to their respective context kinds
     assert by_kind["instant"].id == fact_to_ref["bs_fact"]
     assert by_kind["duration"].id == fact_to_ref["is_fact"]
 
@@ -512,11 +502,12 @@ class TestFactToBundle:
       value=295_000_000.0,
     )
     element = _FakeElement(id="elem_A", qname="rs-gaap:Assets", name="Assets")
-    b = _fact_to_bundle(f, element, context_ref="ctx_1", unit_ref="u_USD")
+    b = _fact_to_bundle(f, element, period_ref="p_1", unit_ref="u_USD", entity_ref="e")
     assert b.id == "fact_01"
     assert b.element_qname == "rs-gaap:Assets"
-    assert b.context_ref == "ctx_1"
+    assert b.period_ref == "p_1"
     assert b.unit_ref == "u_USD"
+    assert b.entity_ref == "e"
     assert b.value == 295_000_000.0
     assert b.decimals == "INF"
 
@@ -531,7 +522,9 @@ class TestFactToBundle:
       period_end=date(2024, 12, 31),
       period_type="instant",
     )
-    b = _fact_to_bundle(f, element=None, context_ref="ctx_1", unit_ref="u_USD")
+    b = _fact_to_bundle(
+      f, element=None, period_ref="p_1", unit_ref="u_USD", entity_ref="e"
+    )
     assert b.element_qname == "elem_lone"
 
 
@@ -591,7 +584,7 @@ class TestStatementBundleValidation:
       "framework_pins": [FrameworkPin(framework="rs-gaap", version="v1")],
       "schema_concepts": [],
       "linkbases": BundleLinkbases(),
-      "contexts": [],
+      "period_nodes": [],
       "units": [],
       "facts": [],
       "ib_envelopes": [],
@@ -697,10 +690,9 @@ def _build_min_bundle() -> StatementBundle:
       )
     ],
     linkbases=BundleLinkbases(),
-    contexts=[
-      BundleContext(
-        id="ctx_1",
-        entity_identifier="e",
+    period_nodes=[
+      BundlePeriod(
+        id="p_1",
         period_start=None,
         period_end=date(2024, 12, 31),
         period_type="instant",
@@ -713,8 +705,9 @@ def _build_min_bundle() -> StatementBundle:
         element_id="A",
         element_qname="rs-gaap:Assets",
         value=100.0,
-        context_ref="ctx_1",
+        period_ref="p_1",
         unit_ref="u_USD",
+        entity_ref="e",
       )
     ],
     ib_envelopes=[],

@@ -708,6 +708,16 @@ class EnvConfig:
 
   GRAPH_BACKEND_TYPE = get_str_env("GRAPH_BACKEND_TYPE", "ladybug")
 
+  # SHACL validation of the JSON-LD report bundle at publish time, against
+  # frameworks/ontology/v1/shapes.ttl. Opt-in (default off) so the publish
+  # path stays fast — the standalone validator + the SHACL regression test
+  # cover the demos/CI. When enabled, the structured result is logged onto
+  # Report.metadata['bundle_validation'].
+  #   off    — skip (default)
+  #   warn   — validate, record the result, never block the publish
+  #   strict — validate, record, and raise on non-conformance (block publish)
+  REPORT_BUNDLE_SHACL_VALIDATION = get_str_env("REPORT_BUNDLE_SHACL_VALIDATION", "off")
+
   # ===========================================================================
   # GRAPH API CONFIGURATION
   # ===========================================================================
