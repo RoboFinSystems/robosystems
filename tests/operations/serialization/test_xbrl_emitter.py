@@ -192,7 +192,11 @@ def _parse(zip_bytes: bytes, name: str) -> etree._Element:
 
 
 class TestZipLayout:
-  def test_zip_contains_all_five_phase_1b_files(self) -> None:
+  def test_zip_contains_only_populated_linkbases(self) -> None:
+    # The fixture carries presentation + calculation arcs but no definition
+    # arcs and no authored labels — so only those linkbases that actually
+    # carry content ship (empty linkbase files read as a missing-relations
+    # bug to a reviewing XBRL processor).
     zip_bytes = serialize_to_xbrl_21(_bundle(with_arcs=True))
     zf = _zip_open(zip_bytes)
     assert set(zf.namelist()) == {
@@ -200,7 +204,6 @@ class TestZipLayout:
       "report.xsd",
       "report-pre.xml",
       "report-cal.xml",
-      "report-def.xml",
     }
 
   def test_zip_is_deflated_not_stored(self) -> None:
@@ -461,14 +464,19 @@ class TestReportXsd:
     assert root.findall(f"{{{NS_LINK}}}linkbaseRef") == []
 
   def test_no_linkbase_ref_when_no_arcs_emitted(self) -> None:
-    """When a bundle has no arcs in a given linkbase, we omit the
-    linkbaseRef to keep the schema clean — XBRL processors don't
-    need a pointer at an empty linkbase."""
-    root = _parse(serialize_to_xbrl_21(_bundle()), "report.xsd")
+    """When a bundle has no arcs in a given linkbase, we omit BOTH the
+    linkbaseRef AND the linkbase file — XBRL processors don't need a
+    pointer at, or an empty copy of, a linkbase with no relations."""
+    zip_bytes = serialize_to_xbrl_21(_bundle())
+    root = _parse(zip_bytes, "report.xsd")
     refs = root.findall(f".//{{{NS_LINK}}}linkbaseRef")
     hrefs = {r.get(f"{{{NS_XLINK}}}href") for r in refs}
     assert "report-pre.xml" not in hrefs
     assert "report-cal.xml" not in hrefs
+    # The file itself must not land in the zip either (gated like the rest).
+    names = set(_zip_open(zip_bytes).namelist())
+    assert "report-pre.xml" not in names
+    assert "report-cal.xml" not in names
 
 
 # ── Linkbases ──────────────────────────────────────────────────────────
@@ -542,12 +550,37 @@ class TestCalculationLinkbase:
 
 
 class TestDefinitionLinkbase:
-  def test_empty_definition_linkbase_still_well_formed(self) -> None:
-    """No definition arcs in the test bundle — but the file should
-    still be valid XML the way XBRL processors expect."""
-    root = _parse(serialize_to_xbrl_21(_bundle(with_arcs=True)), "report-def.xml")
+  def test_empty_definition_linkbase_is_suppressed(self) -> None:
+    """No definition arcs → no report-def.xml (and no def linkbaseRef).
+    An empty linkbase reads as a missing-relations bug to a reviewing
+    XBRL processor, so we omit it entirely."""
+    zf = _zip_open(serialize_to_xbrl_21(_bundle(with_arcs=True)))
+    assert "report-def.xml" not in zf.namelist()
+
+  def test_definition_linkbase_emitted_when_present(self) -> None:
+    bundle = _bundle(with_arcs=True)
+    bundle.linkbases.definition_links.append(
+      BundleLinkbaseLink(
+        link_type="definitionLink",
+        role_uri="http://robosystems.ai/role/BS",
+        structure_id="struct_01",
+        structure_name="Balance Sheet",
+        arcs=[
+          BundleArc(
+            arc_type="definitionArc",
+            arcrole="http://xbrl.org/int/dim/arcrole/all",
+            from_qname="rs-gaap:Assets",
+            to_qname="rs-gaap:AssetsCurrent",
+            order_value=1.0,
+          )
+        ],
+      )
+    )
+    zf = _zip_open(serialize_to_xbrl_21(bundle))
+    assert "report-def.xml" in zf.namelist()
+    root = _parse(serialize_to_xbrl_21(bundle), "report-def.xml")
     assert root.tag == f"{{{NS_LINK}}}linkbase"
-    assert root.findall(f"{{{NS_LINK}}}definitionLink") == []
+    assert len(root.findall(f"{{{NS_LINK}}}definitionLink")) == 1
 
 
 # ── Cross-cutting helpers ──────────────────────────────────────────────
@@ -576,6 +609,116 @@ class TestQnameAndIdMapping:
     assert arc is not None
     assert arc.get(f"{{{NS_XLINK}}}from") in loc_labels
     assert arc.get(f"{{{NS_XLINK}}}to") in loc_labels
+
+
+def _single_concept_bundle(
+  *, label: str | None, facts: list[BundleFact]
+) -> StatementBundle:
+  return StatementBundle(
+    entity=EntityMeta(id="ent_01", name="Test Co"),
+    periods=[PeriodMeta(start=date(2024, 1, 1), end=date(2024, 12, 31), label="FY24")],
+    reporting_style="BSC-CORP-IS02-CF1",
+    framework_pins=[FrameworkPin(framework="rs-gaap", version="v1")],
+    schema_concepts=[
+      BundleElement(
+        id="Assets",
+        qname="rs-gaap:Assets",
+        name="Assets",
+        label=label,
+        period_type="instant",
+        is_monetary=True,
+        balance_type="debit",
+        source="rs-gaap",
+      )
+    ],
+    linkbases=BundleLinkbases(),
+    period_nodes=[
+      BundlePeriod(
+        id="p_1",
+        period_start=None,
+        period_end=date(2024, 12, 31),
+        period_type="instant",
+      )
+    ],
+    units=[BundleUnit(id="u_USD", measure="iso4217:USD")],
+    facts=facts,
+    ib_envelopes=[],
+    mode="report",
+    report_meta=ReportMeta(report_id="rpt", generation_count=1, filing_status="draft"),
+  )
+
+
+def _fact(fact_id: str, value: float) -> BundleFact:
+  return BundleFact(
+    id=fact_id,
+    element_id="Assets",
+    element_qname="rs-gaap:Assets",
+    value=value,
+    period_ref="p_1",
+    unit_ref="u_USD",
+    entity_ref="ent_01",
+  )
+
+
+class TestLabelLinkbase:
+  def test_no_label_linkbase_when_no_labels(self) -> None:
+    # The shared fixture's concepts carry no authored label.
+    zf = _zip_open(serialize_to_xbrl_21(_bundle(with_arcs=True)))
+    assert "report-lab.xml" not in zf.namelist()
+    root = _parse(serialize_to_xbrl_21(_bundle(with_arcs=True)), "report.xsd")
+    hrefs = {
+      ref.get(f"{{{NS_XLINK}}}href") for ref in root.iter(f"{{{NS_LINK}}}linkbaseRef")
+    }
+    assert "report-lab.xml" not in hrefs
+
+  def test_label_linkbase_emitted_and_referenced(self) -> None:
+    bundle = _single_concept_bundle(label="Total Assets", facts=[_fact("f1", 100.0)])
+    zf = _zip_open(serialize_to_xbrl_21(bundle))
+    assert "report-lab.xml" in zf.namelist()
+    schema = _parse(serialize_to_xbrl_21(bundle), "report.xsd")
+    hrefs = {
+      ref.get(f"{{{NS_XLINK}}}href") for ref in schema.iter(f"{{{NS_LINK}}}linkbaseRef")
+    }
+    assert "report-lab.xml" in hrefs
+
+  def test_label_resource_text_and_arc_wiring(self) -> None:
+    bundle = _single_concept_bundle(label="Total Assets", facts=[_fact("f1", 100.0)])
+    root = _parse(serialize_to_xbrl_21(bundle), "report-lab.xml")
+    link = root.find(f"{{{NS_LINK}}}labelLink")
+    assert link is not None
+    label_el = link.find(f"{{{NS_LINK}}}label")
+    assert label_el is not None and label_el.text == "Total Assets"
+    assert label_el.get(f"{{{NS_XLINK}}}role") == "http://www.xbrl.org/2003/role/label"
+    # loc → label arc endpoints must agree with the loc and resource labels.
+    loc = link.find(f"{{{NS_LINK}}}loc")
+    arc = link.find(f"{{{NS_LINK}}}labelArc")
+    assert loc is not None and arc is not None
+    assert arc.get(f"{{{NS_XLINK}}}from") == loc.get(f"{{{NS_XLINK}}}label")
+    assert arc.get(f"{{{NS_XLINK}}}to") == label_el.get(f"{{{NS_XLINK}}}label")
+
+
+class TestFactDedup:
+  def _facts_in(self, zip_bytes: bytes) -> list[etree._Element]:
+    root = _parse(zip_bytes, "instance.xml")
+    return [el for el in root if el.tag == f"{{{NS_RS_GAAP}}}Assets"]
+
+  def test_identical_duplicate_facts_collapsed(self) -> None:
+    # Same concept value flows through several FactSets → identical fact tuples.
+    bundle = _single_concept_bundle(
+      label=None, facts=[_fact("f1", 100.0), _fact("f2", 100.0), _fact("f3", 100.0)]
+    )
+    facts = self._facts_in(serialize_to_xbrl_21(bundle))
+    assert len(facts) == 1
+    assert facts[0].text == "100"
+
+  def test_same_aspects_different_value_preserved(self) -> None:
+    # A genuine inconsistency (same aspects, different value) must NOT be
+    # silently collapsed — the validator needs to see it.
+    bundle = _single_concept_bundle(
+      label=None, facts=[_fact("f1", 100.0), _fact("f2", 200.0)]
+    )
+    facts = self._facts_in(serialize_to_xbrl_21(bundle))
+    assert {f.text for f in facts} == {"100", "200"}
 
 
 @pytest.mark.parametrize(

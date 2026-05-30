@@ -2,9 +2,9 @@
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `seattle-method-case-1.zip` (7,195 bytes)
-- **Files in zip**: 5 (`instance.xml, report-cal.xml, report-def.xml, report-pre.xml, report.xsd`)
-- **Facts loaded by Arelle**: 46
+- **Package**: `seattle-method-case-1.zip` (12,446 bytes)
+- **Files in zip**: 5 (`instance.xml, report-cal.xml, report-lab.xml, report-pre.xml, report.xsd`)
+- **Facts loaded by Arelle**: 41
 - **Load errors**: 0
 - **Validation errors**: 0
 

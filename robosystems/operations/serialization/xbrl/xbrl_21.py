@@ -44,6 +44,7 @@ NS_LINK = "http://www.xbrl.org/2003/linkbase"
 NS_XLINK = "http://www.w3.org/1999/xlink"
 NS_XSI = "http://www.w3.org/2001/XMLSchema-instance"
 NS_XS = "http://www.w3.org/2001/XMLSchema"
+NS_XML = "http://www.w3.org/XML/1998/namespace"
 NS_ISO4217 = "http://www.xbrl.org/2003/iso4217"
 # rs-gaap is the canonical reporting taxonomy emitted into report.xsd
 # under its published namespace IRI; concepts referenced from other
@@ -83,9 +84,20 @@ def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
   with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("instance.xml", _serialize_xml(_build_instance(bundle)))
     zf.writestr("report.xsd", _serialize_xml(_build_schema(bundle)))
-    zf.writestr("report-pre.xml", _serialize_xml(_build_presentation_linkbase(bundle)))
-    zf.writestr("report-cal.xml", _serialize_xml(_build_calculation_linkbase(bundle)))
-    zf.writestr("report-def.xml", _serialize_xml(_build_definition_linkbase(bundle)))
+    # Only emit linkbase files that actually carry arcs/labels. An empty
+    # ``<link:linkbase/>`` is valid XML but useless noise that reads as a
+    # missing-relations bug to a reviewing XBRL processor — and each
+    # linkbaseRef is already gated on the same condition in ``_build_schema``.
+    if bundle.linkbases.presentation_links:
+      zf.writestr(
+        "report-pre.xml", _serialize_xml(_build_presentation_linkbase(bundle))
+      )
+    if bundle.linkbases.calculation_links:
+      zf.writestr("report-cal.xml", _serialize_xml(_build_calculation_linkbase(bundle)))
+    if bundle.linkbases.definition_links:
+      zf.writestr("report-def.xml", _serialize_xml(_build_definition_linkbase(bundle)))
+    if _has_labels(bundle):
+      zf.writestr("report-lab.xml", _serialize_xml(_build_label_linkbase(bundle)))
   return buf.getvalue()
 
 
@@ -129,8 +141,26 @@ def _build_instance(bundle: StatementBundle) -> etree._Element:
     _append_context(root, ctx)
   for unit in bundle.units:
     _append_unit(root, unit)
+  # Collapse redundant facts. The same concept value legitimately appears in
+  # several FactSets (e.g. NetIncomeLoss flows through IS, CF and SE), but in a
+  # single instance that yields identical <concept contextRef unitRef>value
+  # tuples — which XBRL Cloud / Arelle flag as duplicate facts. We dedupe on
+  # the FULL tuple including value+decimals, so a genuine inconsistency (same
+  # aspects, different value) is preserved for the validator to surface.
+  seen: set[tuple[str, str, str, str, str]] = set()
   for fact in bundle.facts:
-    _append_fact(root, fact, ctx_for_period[fact.period_ref])
+    context_ref = ctx_for_period[fact.period_ref]
+    key = (
+      fact.element_qname,
+      context_ref,
+      fact.unit_ref,
+      _format_value(fact.value),
+      fact.decimals,
+    )
+    if key in seen:
+      continue
+    seen.add(key)
+    _append_fact(root, fact, context_ref)
 
   return root
 
@@ -324,6 +354,8 @@ def _build_schema(bundle: StatementBundle) -> etree._Element:
     _append_linkbase_ref(appinfo, "report-cal.xml", "calculationLinkbaseRef")
   if bundle.linkbases.definition_links:
     _append_linkbase_ref(appinfo, "report-def.xml", "definitionLinkbaseRef")
+  if _has_labels(bundle):
+    _append_linkbase_ref(appinfo, "report-lab.xml", "labelLinkbaseRef")
 
   return root
 
@@ -523,6 +555,105 @@ def _build_definition_linkbase(bundle: StatementBundle) -> etree._Element:
     arc_local="definitionArc",
     include_weight=False,
   )
+
+
+# Standard XBRL label-linkbase role/arcrole URIs (XBRL 2.1 §5.2.2).
+_ROLE_LINK = "http://www.xbrl.org/2003/role/link"
+_ROLE_LABEL = "http://www.xbrl.org/2003/role/label"
+_ARCROLE_CONCEPT_LABEL = "http://www.xbrl.org/2003/arcrole/concept-label"
+
+
+def _concept_label(concept: BundleElement) -> str | None:
+  """The human-readable label for a concept, or ``None`` when there's
+  nothing worth labelling.
+
+  Prefers the authored label (``description``) and falls back to the
+  element ``name`` (which for taxonomy concepts is the display label,
+  e.g. ``"Natural Gas, Storage [Member]"``). A ``name`` that merely
+  echoes the QName local part (``"Assets"`` for ``rs-gaap:Assets``)
+  adds nothing over the element declaration, so it's skipped rather
+  than emitting a redundant label.
+  """
+  authored = (concept.label or "").strip()
+  if authored:
+    return authored
+  name = (concept.name or "").strip()
+  if name and name != _local_name(concept.qname):
+    return name
+  return None
+
+
+def _has_labels(bundle: StatementBundle) -> bool:
+  """Whether any concept has a meaningful label worth a label linkbase."""
+  return any(_concept_label(c) is not None for c in bundle.schema_concepts)
+
+
+def _build_label_linkbase(bundle: StatementBundle) -> etree._Element:
+  """Build ``report-lab.xml`` — one standard ``label`` per concept.
+
+  Shape per XBRL 2.1 §5.2.2: a single ``<link:labelLink>`` holding, for
+  each concept, a ``<link:loc>`` to its schema declaration, a
+  ``<link:label>`` resource carrying the text (standard label role,
+  ``xml:lang="en"``), and a ``<link:labelArc>`` (``concept-label``
+  arcrole) wiring loc → label. Locators reuse the same
+  ``report.xsd#<qname_to_id>`` scheme as the other linkbases so they
+  resolve against the bundled schema.
+  """
+  nsmap: dict[str | None, str] = {"link": NS_LINK, "xlink": NS_XLINK, "xsi": NS_XSI}
+  root = etree.Element(
+    f"{{{NS_LINK}}}linkbase",
+    nsmap=nsmap,
+    attrib={
+      f"{{{NS_XSI}}}schemaLocation": (
+        f"{NS_LINK} http://www.xbrl.org/2003/xbrl-linkbase-2003-12-31.xsd"
+      ),
+    },
+  )
+  label_link = etree.SubElement(
+    root,
+    f"{{{NS_LINK}}}labelLink",
+    attrib={f"{{{NS_XLINK}}}type": "extended", f"{{{NS_XLINK}}}role": _ROLE_LINK},
+  )
+  # Deterministic order; one loc + label + arc per concept with a meaningful
+  # label. Concepts whose only text echoes the QName are left unlabelled.
+  for concept in sorted(bundle.schema_concepts, key=lambda c: c.qname):
+    label_text = _concept_label(concept)
+    if label_text is None:
+      continue
+    cid = _qname_to_id(concept.qname)
+    loc_label = _qname_to_label(concept.qname)
+    res_label = f"{loc_label}_lbl"
+    etree.SubElement(
+      label_link,
+      f"{{{NS_LINK}}}loc",
+      attrib={
+        f"{{{NS_XLINK}}}type": "locator",
+        f"{{{NS_XLINK}}}href": f"report.xsd#{cid}",
+        f"{{{NS_XLINK}}}label": loc_label,
+      },
+    )
+    label_el = etree.SubElement(
+      label_link,
+      f"{{{NS_LINK}}}label",
+      attrib={
+        f"{{{NS_XLINK}}}type": "resource",
+        f"{{{NS_XLINK}}}label": res_label,
+        f"{{{NS_XLINK}}}role": _ROLE_LABEL,
+        f"{{{NS_XML}}}lang": "en",
+      },
+    )
+    label_el.text = label_text
+    etree.SubElement(
+      label_link,
+      f"{{{NS_LINK}}}labelArc",
+      attrib={
+        f"{{{NS_XLINK}}}type": "arc",
+        f"{{{NS_XLINK}}}arcrole": _ARCROLE_CONCEPT_LABEL,
+        f"{{{NS_XLINK}}}from": loc_label,
+        f"{{{NS_XLINK}}}to": res_label,
+      },
+    )
+  return root
 
 
 def _build_linkbase(

@@ -1,6 +1,6 @@
 # The World Online — Cross-Taxonomy Reconciliation
 
-**Graph**: `kg19e756f386fd2f6b4dcf`  
+**Graph**: `kg19e75cd88a3785aae2c6`  
 **Dataset**: Charlie Hoffman's *The World Online* — 22,288 GL lines, 3,389 journal entries, opening 12/31/2023 through 2028  
 **Source vocabulary**: `mini` (Seattle Method MINI 2026)  
 **Reference**: `SummaryOfTransactions.csv` (`StandardLineItem × StandardBusinessEvent` pivot)  

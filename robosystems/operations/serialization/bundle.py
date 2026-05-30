@@ -32,6 +32,7 @@ spec including ``@context`` mapping tables and migration path.
 from __future__ import annotations
 
 from datetime import date, datetime
+from types import SimpleNamespace
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -504,6 +505,17 @@ def build_report_bundle(
       ).scalars():
         elements_by_id[str(e.id)] = e
 
+    # Calculation arcs live on separate rs-gaap-calculation Structures, not on
+    # the rendered presentation Networks — so without this they never reach the
+    # bundle and the XBRL calculation linkbase ships empty. Pull calc arcs whose
+    # BOTH endpoints are concepts we already declare, and bind each to the
+    # rendered Network (ELR) that carries both endpoints: it inherits that
+    # Network's role (conventional shared presentation/calculation ELR) and
+    # references only declared concepts, so the emitted linkbase is Arelle-safe.
+    associations.extend(
+      _source_calculation_arcs(session, associations, structures_by_id, elements_by_id)
+    )
+
   # Per-statement IB envelopes — reuse the read-side renderer so the
   # bundle's per-Network payload matches the API response shape exactly.
   ib_envelopes: list[Any] = []
@@ -662,6 +674,122 @@ def _element_to_bundle(e: Any) -> BundleElement:
     substitution_group=e.substitution_group,
     source=str(e.source),
   )
+
+
+def _source_calculation_arcs(
+  session: Session,
+  presentation_associations: list[Any],
+  structures_by_id: dict[str, Any],
+  elements_by_id: dict[str, Any],
+) -> list[Any]:
+  """Return calculation arcs (as lightweight stand-ins) for the report's
+  concepts, each bound to a rendered Network so it shares that Network's ELR.
+
+  Calc relationships live on dedicated rs-gaap-calculation Structures; the
+  bundle otherwise only loads arcs on the rendered presentation Networks. We
+  pull calc associations whose endpoints are BOTH already declared
+  (``elements_by_id``) and host each under the rendered Network whose
+  presentation concepts contain both endpoints (deterministic statement
+  order). Stand-ins — not ORM rows — avoid dirtying the session with a
+  reassigned ``structure_id``.
+  """
+  from robosystems.models.extensions.association import Association
+
+  declared_ids = set(elements_by_id)
+  if not declared_ids:
+    return []
+
+  pres_concepts_by_structure: dict[str, set[str]] = {}
+  for a in presentation_associations:
+    pres_concepts_by_structure.setdefault(str(a.structure_id), set()).update(
+      (str(a.from_element_id), str(a.to_element_id))
+    )
+  if not pres_concepts_by_structure:
+    return []
+
+  block_order = {bt: i for i, bt in enumerate(_STATEMENT_BLOCK_TYPES)}
+  ordered_structures = sorted(
+    pres_concepts_by_structure,
+    key=lambda sid: (
+      block_order.get(str(getattr(structures_by_id.get(sid), "block_type", "")), 99),
+      sid,
+    ),
+  )
+
+  calc_rows = list(
+    session.execute(
+      select(Association).where(
+        Association.association_type == "calculation",
+        Association.from_element_id.in_(declared_ids),
+        Association.to_element_id.in_(declared_ids),
+      )
+    ).scalars()
+  )
+
+  # Host each arc under a rendered Network and group by (host, subtotal).
+  groups: dict[tuple[str, str], list[Any]] = {}
+  seen: set[tuple[str, str, str]] = set()
+  for a in calc_rows:
+    frm, to = str(a.from_element_id), str(a.to_element_id)
+    host = next(
+      (
+        sid
+        for sid in ordered_structures
+        if frm in pres_concepts_by_structure[sid]
+        and to in pres_concepts_by_structure[sid]
+      ),
+      None,
+    )
+    if host is None:
+      continue
+    key = (host, frm, to)
+    if key in seen:
+      continue
+    seen.add(key)
+    groups.setdefault((host, frm), []).append(a)
+
+  def _balance(element_id: str) -> str | None:
+    return getattr(elements_by_id.get(element_id), "balance_type", None)
+
+  # Emit a subtotal's children only when EVERY child's stored weight sign
+  # agrees with the XBRL balance-derived legal sign (§5.1.1.2 Table 6: same
+  # balance -> +weight, opposite -> -weight). Filtering per subtotal (not per
+  # arc) keeps each emitted summation complete so it still foots. This drops
+  # the cash-flow rollups — whose indirect-method children mix debit/credit
+  # under a cash subtotal, the canonical case where XBRL calc weights are
+  # illegal and real filers omit the calculation linkbase — while keeping the
+  # well-behaved balance-sheet / income-statement summations.
+  sourced: list[Any] = []
+  for (host, subtotal), arcs in groups.items():
+    parent_balance = _balance(subtotal)
+    if parent_balance not in ("debit", "credit"):
+      continue
+    legal = True
+    for a in arcs:
+      child_balance = _balance(str(a.to_element_id))
+      if child_balance not in ("debit", "credit"):
+        legal = False
+        break
+      legal_positive = parent_balance == child_balance
+      stored_weight = float(a.weight) if a.weight is not None else 1.0
+      if (stored_weight >= 0) is not legal_positive:
+        legal = False
+        break
+    if not legal:
+      continue
+    for a in arcs:
+      sourced.append(
+        SimpleNamespace(
+          association_type="calculation",
+          structure_id=host,
+          from_element_id=a.from_element_id,
+          to_element_id=a.to_element_id,
+          arcrole=a.arcrole,
+          order_value=a.order_value,
+          weight=a.weight,
+        )
+      )
+  return sourced
 
 
 def _associations_to_linkbases(

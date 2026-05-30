@@ -3,9 +3,9 @@
 ## Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
 - **Bundle**: `world-online.jsonld`
-- **Graph triples**: 2,327
+- **Graph triples**: 2,885
 - **rs:Fact nodes**: 55
-- **rs:Association nodes**: 88
+- **rs:Association nodes**: 150
 - **rs:Element nodes**: 87
 - **SHACL shapes checked**: 8 (positive instance shapes + negative shapes banning the retired dialects)
 
