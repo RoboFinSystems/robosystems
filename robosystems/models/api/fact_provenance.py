@@ -45,7 +45,10 @@ class PivotProvenance(BaseModel):
   )
   period: str = Field(
     ...,
-    description="Period key this FactSet pivots (e.g. 'YYYY-MM-DD/YYYY-MM-DD').",
+    description=(
+      "Period key this FactSet pivots — 'YYYY-MM-DD/YYYY-MM-DD' for a "
+      "duration envelope, or a single 'YYYY-MM-DD' for an instant-only one."
+    ),
   )
   arc_type: str | None = Field(
     None,

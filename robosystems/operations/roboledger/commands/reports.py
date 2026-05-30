@@ -325,8 +325,12 @@ def _pre_create_report_fact_sets(
   envelope_end = max(p.end for p in periods)
 
   # Report facts are pivoted from the posted ledger via the CoA→framework
-  # mapping; one provenance descriptor per Network's FactSet.
-  period_key = f"{envelope_start or ''}/{envelope_end}"
+  # mapping; one provenance descriptor per Network's FactSet. Duration
+  # envelopes use ``start/end``; an instant-only envelope (no start) carries
+  # the single end date rather than a leading-slash ``/end``.
+  period_key = (
+    f"{envelope_start}/{envelope_end}" if envelope_start else str(envelope_end)
+  )
   for structure_id, fact_set_id in structure_to_factset.items():
     create_fact_set(
       session,
