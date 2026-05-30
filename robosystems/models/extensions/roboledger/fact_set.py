@@ -24,11 +24,24 @@ from sqlalchemy import (
   ForeignKey,
   Index,
   String,
+  event,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
+
+
+class ProvenanceRequiredError(ValueError):
+  """Raised when a FactSet is inserted without a provenance descriptor.
+
+  Every FactSet must record how its facts were constructed (the
+  auditability spine — see ``models/api/fact_provenance``). Stamping is
+  mandatory at emission the way double-entry balance is mandatory: the
+  blessed ``operations/roboledger/fact_set.create_fact_set`` helper sets
+  it, and the ``before_insert`` backstop below makes an unstamped insert
+  fail rather than silently produce an ungrounded fact.
+  """
 
 
 class FactSet(ExtensionsBase):
@@ -73,9 +86,17 @@ class FactSet(ExtensionsBase):
   # facts created via ``create_report`` always populate it.
   report_id = Column(String, nullable=True)
 
-  # Provenance + free-form metadata (render config pins, template id at
-  # creation time, agent prompt, etc.).
+  # Free-form metadata (render config pins, template id at creation time,
+  # agent prompt, etc.). NOTE: typed fact provenance lives on its own
+  # first-class ``provenance`` column below, not in this bag.
   metadata_ = Column("metadata", JSONB, nullable=False, default=dict)
+
+  # Typed ``FactProvenance`` descriptor (discriminated on ``origin``) —
+  # how this FactSet's facts were constructed. Nullable in the DB so
+  # pre-feature historical rows stay valid; mandatoriness for *new*
+  # inserts is enforced at the application boundary (the ``before_insert``
+  # backstop below + the ``create_fact_set`` helper), not by a DB NOT NULL.
+  provenance = Column(JSONB, nullable=True)
 
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
   updated_at = Column(
@@ -90,4 +111,22 @@ class FactSet(ExtensionsBase):
     return (
       f"<FactSet {self.id} structure={self.structure_id} "
       f"period={self.period_start}→{self.period_end} type={self.factset_type}>"
+    )
+
+
+@event.listens_for(FactSet, "before_insert")
+def _require_provenance(_mapper, _connection, target: FactSet) -> None:
+  """Mandatory-at-emission backstop: a new FactSet must carry provenance.
+
+  Fires only on INSERT, so historical rows (``provenance IS NULL``) are
+  never re-validated — an UPDATE of a legacy row does not trip this. A
+  cheap presence guard (not a full re-parse): the typed union is already
+  validated in ``create_fact_set`` before the value lands here.
+  """
+  prov = target.provenance
+  if not prov or not isinstance(prov, dict) or "origin" not in prov:
+    raise ProvenanceRequiredError(
+      f"FactSet {target.id!r} (type={target.factset_type!r}) inserted without a "
+      "provenance descriptor. Construct it via "
+      "operations.roboledger.fact_set.create_fact_set so it is stamped."
     )

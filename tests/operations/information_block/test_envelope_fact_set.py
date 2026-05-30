@@ -28,6 +28,7 @@ def _make_fact_set(
   factset_type: str = "report",
   entity_id: str = "ent_demo",
   report_id: str | None = None,
+  provenance: dict | None = None,
 ) -> MagicMock:
   row = MagicMock()
   row.id = fs_id
@@ -37,12 +38,14 @@ def _make_fact_set(
   row.factset_type = factset_type
   row.entity_id = entity_id
   row.report_id = report_id
+  row.provenance = provenance
   return row
 
 
 class TestFactSetToLite:
   def test_projects_all_fields(self) -> None:
-    lite = fact_set_to_lite(_make_fact_set(report_id="rep_42"))
+    prov = {"origin": "pivot", "mapping_id": "map_1", "period": "p"}
+    lite = fact_set_to_lite(_make_fact_set(report_id="rep_42", provenance=prov))
     assert isinstance(lite, FactSetLite)
     assert lite.id == "fs_2026Q1"
     assert lite.structure_id == "struct_bs"
@@ -51,6 +54,7 @@ class TestFactSetToLite:
     assert lite.factset_type == "report"
     assert lite.entity_id == "ent_demo"
     assert lite.report_id == "rep_42"
+    assert lite.provenance == prov
 
   def test_optional_fields_null(self) -> None:
     row = _make_fact_set(
@@ -61,6 +65,8 @@ class TestFactSetToLite:
     assert lite.period_start is None
     assert lite.report_id is None
     assert lite.factset_type == "schedule"
+    # Pre-feature / unstamped FactSets project a null provenance.
+    assert lite.provenance is None
 
 
 class TestLoadLatestFactSetForStructure:

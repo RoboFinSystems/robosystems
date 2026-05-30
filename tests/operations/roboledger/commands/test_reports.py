@@ -218,7 +218,9 @@ def test_pre_create_report_fact_sets_one_row_per_picked_structure() -> None:
     "struct_se": "fs_SE",
   }
 
-  _pre_create_report_fact_sets(session, "rep_01", "ent_01", "usr_test", periods, fs_map)
+  _pre_create_report_fact_sets(
+    session, "rep_01", "ent_01", "usr_test", periods, fs_map, "map_01"
+  )
 
   added = [c[0][0] for c in session.add.call_args_list]
   # Every picked Network gets a row — including ones with no facts.
@@ -239,6 +241,14 @@ def test_pre_create_report_fact_sets_one_row_per_picked_structure() -> None:
   # Envelope spans the full period range from `periods`.
   assert is_row.period_start == date(2025, 10, 1)
   assert is_row.period_end == date(2026, 3, 31)
+  # Report facts are pivoted from the posted ledger via the mapping.
+  assert is_row.provenance == {
+    "origin": "pivot",
+    "mapping_id": "map_01",
+    "period": "2025-10-01/2026-03-31",
+    "arc_type": None,
+    "posting_filter": None,
+  }
 
 
 def test_pre_create_report_fact_sets_noop_on_empty_inputs() -> None:
@@ -246,7 +256,7 @@ def test_pre_create_report_fact_sets_noop_on_empty_inputs() -> None:
   either (we'd have nothing to envelope)."""
   session = MagicMock()
   _pre_create_report_fact_sets(
-    session, "rep_01", "ent_01", "usr_test", [], {"struct_x": "fs_x"}
+    session, "rep_01", "ent_01", "usr_test", [], {"struct_x": "fs_x"}, "map_01"
   )
   assert session.add.call_count == 0
 
@@ -258,6 +268,7 @@ def test_pre_create_report_fact_sets_noop_on_empty_inputs() -> None:
     "usr_test",
     [_FakePeriod(date(2026, 1, 1), date(2026, 3, 31))],
     {},
+    "map_01",
   )
   assert session2.add.call_count == 0
 

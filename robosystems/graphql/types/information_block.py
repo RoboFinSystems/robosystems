@@ -109,6 +109,11 @@ class InformationBlockFact:
 class InformationBlockFactSet:
   """Period-specific instantiation of the Structure."""
 
+  # The typed FactProvenance descriptor is a discriminated union on
+  # ``origin``; exposed as ``scalars.JSON`` (same treatment as artifact
+  # mechanics) with the ``origin`` tag embedded in the payload.
+  provenance: strawberry.scalars.JSON | None
+
 
 @pydantic_type(model=PydanticInformationModel, all_fields=True)
 class InformationModel:

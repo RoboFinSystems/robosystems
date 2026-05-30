@@ -198,6 +198,15 @@ class FactSetLite(BaseModel):
       "lives on facts. Drops out once the retirement migration lands."
     ),
   )
+  provenance: dict | None = Field(
+    None,
+    description=(
+      "Typed ``FactProvenance`` descriptor (discriminated on ``origin``: "
+      "pivot | schedule | derived | asserted) recording how this FactSet's "
+      "facts were constructed. Surfaced as JSON, mirroring how mechanics "
+      "is exposed. Null for pre-feature historical FactSets."
+    ),
+  )
 
 
 class RuleTargetLite(BaseModel):

@@ -304,6 +304,11 @@ class TestBuildEnvelope:
     fact_set.factset_type = "report"
     fact_set.entity_id = "ent_demo"
     fact_set.report_id = "rep_latest"
+    fact_set.provenance = {
+      "origin": "pivot",
+      "mapping_id": "map_1",
+      "period": "2026-01-01/2026-03-31",
+    }
 
     fact = MagicMock()
     fact.id = "fact_1"
