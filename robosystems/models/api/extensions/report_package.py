@@ -1,8 +1,7 @@
 """Report package mode — request/response models.
 
 A Report is the package container (see
-``models/extensions/roboledger/report.py`` and
-``local/docs/specs/financial-viewer.md`` §"Report Block"). Its items
+``models/extensions/roboledger/report.py``). Its items
 are its FactSets, found via ``fact_sets.report_id``. Reading a Report
 in package mode rehydrates each FactSet into a full
 ``InformationBlockEnvelope`` so the frontend renders the package

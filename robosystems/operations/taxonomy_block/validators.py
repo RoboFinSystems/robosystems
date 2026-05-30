@@ -6,7 +6,7 @@ checks and surfaces them as a single
 one response, not the first-fail shape the inline handler checks
 produced.
 
-Checks (see ``local/docs/specs/taxonomy-block.md`` §3.1):
+Checks:
 
 * Reference resolution — parent_ref / structure_ref / from_ref /
   to_ref / rule targets all resolve locally or (for

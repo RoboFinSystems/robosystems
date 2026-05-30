@@ -24,9 +24,6 @@ verification, provenance) carries everything XBRL has no standard
 for. The XBRL 2.1 emitter walks the same bundle, ignores the ``rs:``
 extensions when projecting to XML, and produces a valid XBRL instance
 + linkbase set.
-
-See ``local/docs/specs/bundle-ontology-v1.md`` for the full ontology
-spec including ``@context`` mapping tables and migration path.
 """
 
 from __future__ import annotations

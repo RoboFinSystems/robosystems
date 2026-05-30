@@ -1,8 +1,7 @@
 """API response models for the Information Block envelope.
 
-Wire-facing types for the cross-domain Information Block construct
-(see ``local/docs/specs/information-block.md``). Used by the REST
-``create-information-block`` operation, the GraphQL ``informationBlock``/
+Wire-facing types for the cross-domain Information Block construct.
+Used by the REST ``create-information-block`` operation, the GraphQL ``informationBlock``/
 ``informationBlocks`` fields, and the MCP read tools.
 
 Adding a block type: register its ``*Mechanics`` model and add it to

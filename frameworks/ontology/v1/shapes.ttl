@@ -8,7 +8,8 @@
 #################################################################
 # RoboSystems RDF Ontology v1 — SHACL shapes.
 #
-# Authority: local/docs/specs/rdf-ontology.md §6.
+# Authority: this file is the canonical SHACL shape set for RDF Ontology
+# v1 (paired with ``ontology.ttl`` for the class/property declarations).
 # Positive shapes assert the canonical instance/arc shape; NEGATIVE
 # shapes turn the three retired dialects (XBRL context syntax, the
 # reified arc* dialect, the direct-predicate relationship dialect)

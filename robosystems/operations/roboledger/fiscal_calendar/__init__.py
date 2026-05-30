@@ -2,8 +2,6 @@
 
 The fiscal calendar tracks where a graph's books stand: which periods are
 closed, which is the next target, what's required to close the next one.
-
-See `local/docs/specs/ledger-close-workflow.md` for the full design.
 """
 
 from .close_service import (

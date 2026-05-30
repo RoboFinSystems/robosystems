@@ -90,15 +90,13 @@ def _build_query_type() -> type:
   session's search_path, which is implicit in the URL's graph_id.
 
   `InformationBlockQuery` is always composed for the same reason — the
-  Information Block construct is cross-domain (see
-  `local/docs/specs/information-block.md`). Schedule blocks surface
+  Information Block construct is cross-domain. Schedule blocks surface
   only on tenant graphs because their atoms live in the tenant schema;
   on the library sentinel only block types with
   `surfaces_in_library=True` surface (currently none — Schedule is
   tenant-only).
 
-  `TaxonomyBlockQuery` follows the same always-on pattern (see
-  `local/docs/specs/taxonomy-block.md`). Library reporting standards
+  `TaxonomyBlockQuery` follows the same always-on pattern. Library reporting standards
   surface on the sentinel; tenant CoA / custom_ontology / extensions
   surface on the tenant graph_id via search_path.
   """

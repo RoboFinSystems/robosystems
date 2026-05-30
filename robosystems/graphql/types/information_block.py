@@ -207,9 +207,8 @@ class Artifact:
 class InformationBlock:
   """Information Block envelope — the molecular exchange format.
 
-  See ``local/docs/specs/information-block.md`` §2 for the envelope
-  contract. Consumers (agents via MCP, the React `FinancialViewer`,
-  SDK clients) receive the same shape regardless of the block_type.
+  Consumers (agents via MCP, the React `FinancialViewer`, SDK clients)
+  receive the same envelope shape regardless of the block_type.
   """
 
   id: strawberry.ID

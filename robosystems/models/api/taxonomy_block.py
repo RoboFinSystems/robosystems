@@ -1,7 +1,7 @@
 """API models for the Taxonomy Block envelope.
 
-Wire-facing types for the cross-domain Taxonomy Block construct
-(see ``local/docs/specs/taxonomy-block.md``). Taxonomy Blocks curate
+Wire-facing types for the cross-domain Taxonomy Block construct.
+Taxonomy Blocks curate
 ontology atomically — elements + structures + associations + rules in
 one transactional envelope — mirroring the Information Block pattern
 that curates business-logic artifacts.

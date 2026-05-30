@@ -235,4 +235,4 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 ---
 
-*Reconciliation produced by `examples/seattle_method_demo/reconcile.py` against the Phase 2 MVP rollforward filter engine. See `examples/seattle_method_demo/README.md` for the full methodology and `local/docs/specs/cross-taxonomy-projection.md` for the architectural pattern this test validates.*
+*Reconciliation produced by `examples/seattle_method_demo/reconcile.py` against the Phase 2 MVP rollforward filter engine. See `examples/seattle_method_demo/README.md` for the full methodology and the architectural pattern this test validates.*

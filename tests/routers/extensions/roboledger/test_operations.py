@@ -401,7 +401,7 @@ class TestAutoMapElementsOp:
 # The 12 raw CRUD ops (create/update/delete-taxonomy, create/update/delete-
 # structure, create/update/delete-element, create-associations, update/delete-
 # association) were retired from the public REST + MCP surface in Phase 1 of
-# the Taxonomy Block refactor (spec: local/docs/specs/taxonomy-block.md). The
+# the Taxonomy Block refactor. The
 # underlying `cmd_*` functions remain for internal seeders and continue to be
 # covered by `tests/operations/roboledger/commands/test_{taxonomies,elements}.py`.
 # Phase 2 introduces the Taxonomy Block envelope and its own test suite.

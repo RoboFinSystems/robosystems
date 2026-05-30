@@ -2,7 +2,7 @@
 
 The Information Block subsystem provides a registry-driven, type-safe system for constructing and reading structured financial data blocks — schedules, statements, rollforwards, reconciliations, metrics, and policies.
 
-**Architectural context**: `local/docs/specs/information-block.md` has the full spec. This README is the code-level orientation.
+This README is the code-level orientation for the Information Block subsystem.
 
 ## What is an Information Block?
 

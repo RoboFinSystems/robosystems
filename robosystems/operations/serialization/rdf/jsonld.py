@@ -9,7 +9,7 @@ Builds an :class:`rdflib.Graph` from the bundle and serializes it as JSON-LD
 using the canonical ``CANONICAL_CONTEXT`` (``robosystems/arelle/context.py``),
 so the export bundle speaks the *same* vocabulary as the framework seeds.
 
-Shape (per ``local/docs/specs/{rdf-ontology,bundle-ontology-v2}.md``):
+Shape:
 * Concepts are ``rs:Element`` nodes carrying XBRL item attributes
   (``xbrli:balance`` / ``xbrli:periodType``).
 * Taxonomy arcs are reified ``rs:Association`` nodes (``xlink:from``/``to`` +

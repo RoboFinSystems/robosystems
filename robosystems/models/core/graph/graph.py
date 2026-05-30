@@ -185,7 +185,7 @@ class Graph(Model):
   # picker uses it to resolve which Network fills each statement-type
   # slot via ``reporting_style_networks``. NOT NULL because every entity
   # graph must have a Reporting Style the way it has a fiscal year start
-  # month — see ``local/docs/specs/roadmap.md`` §3.2. No DB-level FK
+  # month. No DB-level FK
   # because ``structures`` lives in a separate database (extensions);
   # validated at application layer.
   reporting_style_id = Column(

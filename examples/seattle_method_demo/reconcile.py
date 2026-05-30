@@ -10,8 +10,8 @@ Equity, Net Income, Net Cash Change), and writes a markdown report
 to ``examples/seattle_method_demo/output/seattle-method-case-1.md``.
 
 **Architecture note** — this is hand-written GraphQL consumption.
-Forward work in [`python-client-graphql.md`](../../local/docs/specs/python-client-graphql.md)
-replaces the hand-written Python GraphQL query strings + ``dict[str, Any]``
+Forward work (the python-client-graphql initiative) replaces the
+hand-written Python GraphQL query strings + ``dict[str, Any]``
 returns with codegen-generated Pydantic models via ``ariadne-codegen``.
 The trigger condition the spec calls out ("a new GraphQL surface that
 the Python client genuinely needs to consume — e.g. rollforward
@@ -20,8 +20,7 @@ RollforwardMechanics") has now fired. Phase 1 of that work
 → dict`` hop here with a typed Pydantic response.
 
 The filter engine itself still runs against a direct SQLAlchemy
-session — that's the Phase 2 MVP boundary documented in
-[`information-block.md`](../../local/docs/specs/information-block.md) §4.5.
+session — that's the Phase 2 MVP boundary.
 Phase 3 wires filter evaluation into ``build_envelope`` so the
 attributed facts arrive populated in the IB envelope; this script
 becomes purely API-driven at that point.
@@ -963,8 +962,7 @@ def render_markdown(report: ReconciliationReport) -> str:
              "`examples/seattle_method_demo/reconcile.py` against the "
              "Phase 2 MVP rollforward filter engine. See "
              "`examples/seattle_method_demo/README.md` for the full "
-             "methodology and `local/docs/specs/cross-taxonomy-projection.md` "
-             "for the architectural pattern this test validates.*")
+             "methodology and the architectural pattern this test validates.*")
 
   return "\n".join(out) + "\n"
 

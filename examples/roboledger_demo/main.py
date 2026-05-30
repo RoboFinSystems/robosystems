@@ -1030,8 +1030,7 @@ def generate_fy2025_report(graph_id: str) -> str | None:
   # Download both bundle flavors via the SDK so the demo finishes with a
   # tangible artifact on disk that the customer can open immediately.
   # JSON-LD is the canonical projection; XBRL 2.1 is the filing-grade
-  # equivalent. Same Report, same fact set, two serializations — see
-  # local/docs/ref/serialization.md.
+  # equivalent. Same Report, same fact set, two serializations.
   from .download_bundles import download_bundles_for_report
 
   download_bundles_for_report(client, graph_id, report_id)

@@ -1,7 +1,7 @@
 """add bundle_url and generation_count to reports
 
 Two additive, nullable-or-defaulted columns on ``reports`` to support the
-serialization MVP capstone (spec: local/docs/specs/serialization.md):
+serialization MVP capstone:
 
 * ``generation_count`` — monotonically incremented on each (re)generation
   so each Report's exported bundle stays addressable per-version in object

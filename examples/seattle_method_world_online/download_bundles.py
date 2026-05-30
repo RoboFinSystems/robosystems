@@ -14,7 +14,6 @@ demo's ``output/`` folder:
 
 Same shape as ``examples/seattle_method_demo/download_bundles.py``;
 the two are intentionally parallel so each demo is self-contained.
-See ``local/docs/ref/serialization.md`` for the design.
 
 Usage:
     uv run python -m examples.seattle_method_world_online.download_bundles <graph_id>

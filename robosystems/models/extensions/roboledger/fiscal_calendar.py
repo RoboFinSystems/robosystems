@@ -16,8 +16,6 @@ calendar state — target changes, period closes, reopens. Every mutation throug
 Both tables are **tenant-scoped**: they live in each `kg*` schema alongside
 the per-tenant OLTP data. The `graph_id` column on both is retained as a
 defensive discriminator but tenant isolation comes from the schema boundary.
-
-See: local/docs/specs/ledger-close-workflow.md
 """
 
 from datetime import UTC, datetime
