@@ -29,6 +29,7 @@ class DeprovisionResult:
   backup_path: str | None = None
   subgraphs_deleted: int = 0
   database_deleted: bool = False
+  extensions_schema_dropped: bool = False
   registry_deallocated: bool = False
   records_cleaned: bool = False
   errors: list[str] = field(default_factory=list)
@@ -132,6 +133,9 @@ class GraphDeprovisionService:
 
     # --- 3. Delete parent database ---
     await self._delete_database(graph_id, result)
+
+    # --- 3b. Drop extensions OLTP schema (financial-data removal) ---
+    self._drop_extensions_schema(graph_id, result)
 
     # --- 4. Deallocate DynamoDB registry ---
     await self._deallocate_registry(graph_id, result)
@@ -242,6 +246,25 @@ class GraphDeprovisionService:
         await graph_client.close()
     except Exception as e:
       error_msg = f"Database deletion failed: {e}"
+      result.errors.append(error_msg)
+      logger.warning(error_msg, extra={"graph_id": graph_id})
+
+  def _drop_extensions_schema(self, graph_id: str, result: DeprovisionResult) -> None:
+    """Drop the tenant's extensions OLTP schema (financial-data removal).
+
+    Counterpart to ``provision_tenant_schema``. Without this, a deprovisioned
+    tenant's transactions/entries/facts persist in the extensions database.
+    No-op for subgraphs and extensions-disabled deployments (drop returns
+    False). Best-effort: a failure is recorded but does not block teardown.
+    """
+    try:
+      from ...db.extensions import drop_tenant_schema
+
+      result.extensions_schema_dropped = drop_tenant_schema(graph_id)
+      if result.extensions_schema_dropped:
+        logger.info(f"Dropped extensions OLTP schema for graph {graph_id}")
+    except Exception as e:
+      error_msg = f"Extensions schema drop failed: {e}"
       result.errors.append(error_msg)
       logger.warning(error_msg, extra={"graph_id": graph_id})
 

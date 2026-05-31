@@ -52,12 +52,17 @@ def _create_extensions_engine():
   Lazy creation to avoid connection attempts during import
   in contexts that don't need the extensions database (e.g., graph instances).
   """
+  # Pool sizing is SSM-tunable (was hardcoded 3 + 5 = 8, which a single client
+  # could exhaust and wedge the API). Lazy import keeps the tuning/SSM layer out
+  # of this module's import path until an engine is actually created.
+  from robosystems.config.tuning import TuningConfig
+
   return create_engine(
     get_extensions_database_url(),
-    pool_size=3,
-    max_overflow=5,
-    pool_timeout=30,
-    pool_recycle=3600,
+    pool_size=TuningConfig.get_extensions_pool_size(),
+    max_overflow=TuningConfig.get_extensions_max_overflow(),
+    pool_timeout=TuningConfig.get_database_pool_timeout(),
+    pool_recycle=TuningConfig.get_database_pool_recycle(),
     pool_pre_ping=True,
     echo=env.DATABASE_ECHO,
   )
@@ -400,3 +405,39 @@ def provision_tenant_schema(graph_id: str) -> None:
     _install_library_immutability_triggers(conn, schema)
 
     conn.commit()
+
+
+def drop_tenant_schema(graph_id: str) -> bool:
+  """Drop a tenant's extensions OLTP schema and everything in it.
+
+  The teardown counterpart to :func:`provision_tenant_schema`, called from the
+  graph deprovisioning flow. Without it, a deprovisioned tenant's financial
+  data (transactions, entries, facts, the per-tenant library copy, …) persists
+  in the extensions database indefinitely. ``DROP SCHEMA … CASCADE`` removes
+  the schema, every tenant table in it, and the per-schema immutability
+  triggers that reference those tables.
+
+  No-op (returns ``False``) when no extension domain is enabled (no extensions
+  database to drop from) or when ``graph_id`` is not a tenant-schema id —
+  subgraphs (``kg…_name``) share the parent graph's schema and have none of
+  their own, so there is nothing to drop.
+
+  Args:
+      graph_id: The graph ID whose tenant schema should be dropped.
+
+  Returns:
+      ``True`` if a ``DROP SCHEMA`` executed, ``False`` if skipped.
+  """
+  if not env.EXTENSIONS_ENABLED:
+    return False
+  # Reuse the schema-name validator as a guard: a non-matching id (subgraph,
+  # repository, etc.) has no tenant schema of its own → nothing to drop.
+  if not _VALID_SCHEMA_PATTERN.match(graph_id):
+    return False
+
+  engine = _get_engine()
+  with engine.connect() as conn:
+    # graph_id is pattern-validated above (^kg[0-9a-f]{16,}$), safe to inline.
+    conn.execute(text(f'DROP SCHEMA IF EXISTS "{graph_id}" CASCADE'))
+    conn.commit()
+  return True
