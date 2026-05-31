@@ -23,7 +23,45 @@ Usage in a migration::
 
 from collections.abc import Callable
 
-from sqlalchemy import Connection, text
+from alembic import op
+from sqlalchemy import Column, Connection, text
+
+
+def add_tenant_column(
+  table: str,
+  column: Column,
+  type_sql: str,
+  *,
+  nullable: bool = True,
+  default: str | None = None,
+) -> None:
+  """Add a column to ``table`` in public AND every existing tenant schema.
+
+  The one-call form of the ``op.add_column`` + ``for_each_tenant_schema``
+  fan-out pattern, so a migration cannot accidentally update only ``public``
+  and leave the column missing in every already-provisioned tenant schema
+  (the silent-in-dev / fails-in-prod trap — see pre-onboarding-readiness §3.9
+  and ``tests/migrations/test_extensions_tenant_fanout.py``). Prefer this over
+  a bare ``op.add_column`` for any tenant table.
+
+  Args:
+      table: Table name.
+      column: A :class:`sqlalchemy.Column` for the public-schema Alembic op
+          (carries its own nullable/default for ``public``).
+      type_sql: The equivalent PostgreSQL type for the per-tenant raw ``ALTER``
+          (e.g. ``"JSONB"``, ``"TEXT"``, ``"BIGINT"``) — Alembic needs a
+          SQLAlchemy type, the raw tenant DDL needs a SQL type string.
+      nullable: Applied to the tenant-schema DDL.
+      default: Optional SQL default applied to the tenant-schema DDL.
+  """
+  op.add_column(table, column)
+
+  def _apply(conn: Connection, schema: str) -> None:
+    TenantOps(conn, schema).add_column(
+      table, column.name, type_sql, nullable=nullable, default=default
+    )
+
+  for_each_tenant_schema(op.get_bind(), _apply)
 
 
 def for_each_tenant_schema(
