@@ -90,6 +90,36 @@ class QuickBooksOAuthProvider:
       logger.error(f"QuickBooks connection validation failed: {e}")
       return False
 
+  @property
+  def revoke_url(self) -> str:
+    """Intuit OAuth2 token revocation endpoint (same host for sandbox/prod)."""
+    return "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
+
+  async def revoke_token(self, token: str) -> bool:
+    """Revoke an Intuit OAuth token at the provider.
+
+    Revoking the **refresh** token invalidates the entire grant (access +
+    refresh), fully tearing the authorization down on Intuit's side — not just
+    locally. Mirrors the Basic-auth shape of ``OAuthHandler.refresh_tokens``.
+
+    Returns True on success (HTTP 200); logs and returns False otherwise so the
+    caller can proceed with local teardown regardless.
+    """
+    async with httpx.AsyncClient() as client:
+      response = await client.post(
+        self.revoke_url,
+        json={"token": token},
+        auth=(self.client_id, self.client_secret),
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+      )
+
+    if response.status_code == 200:
+      return True
+    logger.warning(
+      f"Intuit token revocation returned {response.status_code}: {response.text[:200]}"
+    )
+    return False
+
 
 # Global QuickBooks OAuth handler
 quickbooks_oauth_provider = QuickBooksOAuthProvider()
@@ -197,7 +227,51 @@ async def sync_quickbooks_connection(
 async def cleanup_quickbooks_connection(
   connection: dict[str, Any], graph_id: str
 ) -> None:
-  """Clean up QuickBooks connection."""
-  # QuickBooks cleanup would involve revoking OAuth tokens
-  # For now, just log the cleanup
-  logger.info(f"QuickBooks connection cleanup for entity {connection['entity_id']}")
+  """Clean up a QuickBooks connection by revoking its Intuit OAuth grant.
+
+  Called on disconnect BEFORE the connection + credentials are deleted. Loads
+  the stored refresh token and revokes it at Intuit so the authorization is
+  fully torn down provider-side (deleting the local credential alone stops sync
+  but leaves the grant live at Intuit). Best-effort: any failure is logged but
+  does not block connection deletion.
+  """
+  from ...database import platform_session
+  from ...models.core import ConnectionCredentials
+
+  connection_id = connection.get("connection_id") or connection.get("id")
+  entity_id = connection.get("entity_id")
+
+  if not connection_id:
+    logger.warning(
+      "QuickBooks cleanup: connection payload has no id; cannot revoke tokens "
+      f"(entity={entity_id})"
+    )
+    return
+
+  try:
+    # Load + decrypt the refresh token inside a short-lived session, then close
+    # it before the network call (don't hold a DB connection across HTTP).
+    token: str | None = None
+    with platform_session() as db:
+      creds = ConnectionCredentials.get_by_connection_id(connection_id, db)
+      if creds:
+        data = creds.get_credentials()
+        token = data.get("refresh_token") or data.get("access_token")
+
+    if not token:
+      logger.info(
+        f"QuickBooks cleanup: no stored token for connection {connection_id}; "
+        "nothing to revoke"
+      )
+      return
+
+    revoked = await quickbooks_oauth_provider.revoke_token(token)
+    logger.info(
+      f"QuickBooks cleanup for connection {connection_id} (entity={entity_id}): "
+      f"Intuit token revoke {'succeeded' if revoked else 'failed'}"
+    )
+  except Exception as e:
+    logger.warning(
+      f"QuickBooks token revocation errored for connection {connection_id} "
+      f"(entity={entity_id}): {e}"
+    )
