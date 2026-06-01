@@ -2,7 +2,7 @@
   "rules": [
     {
       "rulePriority": 10,
-      "description": "Keep production/staging/latest tags forever",
+      "description": "Never expire prod/staging/latest: count>99999 never triggers, and matching here (lowest priority) shields these tags from the cleanup rules below",
       "selection": {
         "tagStatus": "tagged",
         "tagPrefixList": ["prod", "staging", "latest", "lambda-prod", "lambda-staging"],
