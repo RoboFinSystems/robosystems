@@ -287,8 +287,8 @@ setup-bedrock:
 # Single source of truth: bin/setup/ecr-lifecycle-policy.json (also applied by
 # bootstrap when the robust option is chosen). Use this recipe to reconcile the
 # live repo after editing that file, without re-running full bootstrap.
-# Usage: just ecr-lifecycle [repo] [region]
-ecr-lifecycle repo="robosystems" region="us-east-1":
+# Usage: just bootstrap-ecr-lifecycle [repo] [region]
+bootstrap-ecr-lifecycle repo="robosystems" region="us-east-1":
     @echo "Applying ECR lifecycle policy to {{repo}} ({{region}})..."
     @aws ecr put-lifecycle-policy \
         --repository-name "{{repo}}" \
