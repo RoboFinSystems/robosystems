@@ -72,9 +72,27 @@ GRAPH_API_DURATION_BUCKETS = (
 )
 
 
+# FastAPIInstrumentor's http.server.* metrics default to recording the
+# client-supplied Host header as http.server_name / http.host attributes. Internet
+# scanners hit the public ALB with unbounded junk Host values (e.g.
+# "ssrf.cve-2024-34351.detect"), and each unique value mints ~48 new series across
+# the three histogram-bucket metrics — exploding Amazon Managed Prometheus sample
+# count (and cost) with no bound. Restrict these instruments to a bounded,
+# server-controlled attribute allowlist so client-controlled labels are dropped.
+_HTTP_SERVER_ATTRIBUTE_ALLOWLIST = frozenset(
+  {
+    "http.method",
+    "http.status_code",
+    "http.target",  # FastAPIInstrumentor sets this to the templated route, e.g. /v1/graphs/{graph_id}/...
+    "http.scheme",
+    "http.flavor",
+  }
+)
+
+
 def get_metric_views() -> list[View]:
   """Return View configurations for custom histogram buckets."""
-  return [
+  views = [
     View(
       instrument_name="robosystems_api_request_duration_seconds",
       aggregation=ExplicitBucketHistogramAggregation(boundaries=API_DURATION_BUCKETS),
@@ -94,6 +112,21 @@ def get_metric_views() -> list[View]:
       ),
     ),
   ]
+  # Strip client-controlled (Host-header-derived) attributes from the auto-generated
+  # HTTP server metrics to cap their cardinality.
+  for instrument in (
+    "http.server.duration",
+    "http.server.request.size",
+    "http.server.response.size",
+    "http.server.active_requests",
+  ):
+    views.append(
+      View(
+        instrument_name=instrument,
+        attribute_keys=_HTTP_SERVER_ATTRIBUTE_ALLOWLIST,
+      )
+    )
+  return views
 
 
 class MetricType(Enum):
