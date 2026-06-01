@@ -51,9 +51,22 @@ def add_tenant_column(
       type_sql: The equivalent PostgreSQL type for the per-tenant raw ``ALTER``
           (e.g. ``"JSONB"``, ``"TEXT"``, ``"BIGINT"``) — Alembic needs a
           SQLAlchemy type, the raw tenant DDL needs a SQL type string.
-      nullable: Applied to the tenant-schema DDL.
+      nullable: Applied to the tenant-schema DDL. Must match ``column.nullable``.
       default: Optional SQL default applied to the tenant-schema DDL.
+
+  Raises:
+      ValueError: if ``column.nullable`` disagrees with ``nullable`` — otherwise
+          ``public`` and every tenant schema would silently diverge. (``default``
+          is not cross-checked: ``server_default``'s clause shape doesn't compare
+          cleanly to the raw SQL string, so keep those in sync by hand.)
   """
+  if bool(column.nullable) != nullable:
+    raise ValueError(
+      f"add_tenant_column({table}.{column.name}): public column nullable="
+      f"{column.nullable} disagrees with tenant nullable={nullable}; public and "
+      "tenant schemas would diverge"
+    )
+
   op.add_column(table, column)
 
   def _apply(conn: Connection, schema: str) -> None:
