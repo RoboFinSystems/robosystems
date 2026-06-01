@@ -72,9 +72,27 @@ GRAPH_API_DURATION_BUCKETS = (
 )
 
 
+# FastAPIInstrumentor's http.server.* metrics default to recording the
+# client-supplied Host header as http.server_name / http.host attributes. Internet
+# scanners hit the public ALB with unbounded junk Host values (e.g.
+# "ssrf.cve-2024-34351.detect"), and each unique value mints ~48 new series across
+# the three histogram-bucket metrics — exploding Amazon Managed Prometheus sample
+# count (and cost) with no bound. Restrict these instruments to a bounded,
+# server-controlled attribute allowlist so client-controlled labels are dropped.
+_HTTP_SERVER_ATTRIBUTE_ALLOWLIST = frozenset(
+  {
+    "http.method",
+    "http.status_code",
+    "http.target",  # FastAPIInstrumentor sets this to the templated route, e.g. /v1/graphs/{graph_id}/...
+    "http.scheme",
+    "http.flavor",
+  }
+)
+
+
 def get_metric_views() -> list[View]:
   """Return View configurations for custom histogram buckets."""
-  return [
+  views = [
     View(
       instrument_name="robosystems_api_request_duration_seconds",
       aggregation=ExplicitBucketHistogramAggregation(boundaries=API_DURATION_BUCKETS),
@@ -94,6 +112,21 @@ def get_metric_views() -> list[View]:
       ),
     ),
   ]
+  # Strip client-controlled (Host-header-derived) attributes from the auto-generated
+  # HTTP server metrics to cap their cardinality.
+  for instrument in (
+    "http.server.duration",
+    "http.server.request.size",
+    "http.server.response.size",
+    "http.server.active_requests",
+  ):
+    views.append(
+      View(
+        instrument_name=instrument,
+        attribute_keys=_HTTP_SERVER_ATTRIBUTE_ALLOWLIST,
+      )
+    )
+  return views
 
 
 class MetricType(Enum):
@@ -352,10 +385,10 @@ class EndpointMetrics:
       "endpoint": endpoint,
       "method": method,
       "status_code": str(status_code),
+      # Bounded flag instead of the raw user_id, which is unbounded and would
+      # multiply series by the user count (see record_query_submission).
+      "user_authenticated": "true" if user_id else "false",
     }
-
-    if user_id:
-      attributes["user_id"] = user_id
 
     if self._request_duration is not None:
       self._request_duration.record(duration, attributes)
@@ -377,11 +410,9 @@ class EndpointMetrics:
       "method": method,
       "auth_type": auth_type,
       "success": success,
+      # Bounded flag instead of the raw user_id (unbounded, grows with users).
+      "user_authenticated": "true" if user_id else "false",
     }
-
-    # Include user_id if provided
-    if user_id:
-      base_attributes["user_id"] = user_id
 
     # Record attempt
     if self._auth_attempts is not None:
@@ -440,19 +471,18 @@ class EndpointMetrics:
 
     self._ensure_instruments()
 
+    # event_data is intentionally NOT flattened into metric labels. Arbitrary
+    # payloads (execution times, row counts, ids, byte sizes) are unbounded
+    # cardinality values; emitting them as labels explodes the active-series
+    # count and AMP ingestion cost. event_data stays for logs/traces only;
+    # the metric is dimensioned solely by the bounded fields below.
     attributes = {
       "endpoint": endpoint,
       "method": method,
       "event_type": event_type,
+      # Bounded flag instead of the raw user_id (unbounded, grows with users).
+      "user_authenticated": "true" if user_id else "false",
     }
-
-    if user_id:
-      attributes["user_id"] = user_id
-
-    if event_data:
-      # Flatten event data into attributes (convert values to strings)
-      for key, value in event_data.items():
-        attributes[f"event_{key}"] = str(value)
 
     if self._business_counter is not None:
       self._business_counter.add(1, attributes)
@@ -469,12 +499,12 @@ class EndpointMetrics:
     """Record graph database metrics."""
     self._ensure_instruments()
 
+    # graph_id is the intrinsic dimension of these per-graph gauges and is
+    # bounded by the operator-controlled graph count, so it stays. user_id is
+    # dropped: it adds no useful gauge dimension and is unbounded.
     base_attributes = {
       "graph_id": graph_id,
     }
-
-    if user_id:
-      base_attributes["user_id"] = user_id
 
     if additional_attributes:
       base_attributes.update(additional_attributes)

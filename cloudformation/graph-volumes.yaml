@@ -492,6 +492,97 @@ Resources:
         - !Ref VolumeAlertTopic
 
   # ========================================
+  # LAMBDA LIVENESS ALARMS
+  # ========================================
+  # These watch AWS-emitted metrics (Lambda Invocations, EventBridge
+  # FailedInvocations) rather than metrics the volume Lambdas publish
+  # themselves — so they still fire when a Lambda is dead/Inactive (e.g. a
+  # deleted container image), the exact failure that previously went silent.
+
+  # Heartbeat: the scheduled monitor runs every 15 min (4+/hour). No invocations
+  # in an hour means it has silently stopped for some reason. Missing data is
+  # breaching precisely because "no Invocations datapoint at all" is the symptom.
+  VolumeMonitorHeartbeatAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-monitor-not-running"
+      AlarmDescription: Volume monitor Lambda has not been invoked in the last hour (expected every 15 min) — likely Inactive/dead
+      MetricName: Invocations
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref VolumeMonitorFunction
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
+  # EventBridge could not invoke the scheduled monitor (e.g. dead/Inactive target).
+  ScheduledMonitoringFailedInvocationsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-scheduled-monitor-failed-invocations"
+      AlarmDescription: EventBridge failed to invoke the volume monitor Lambda
+      MetricName: FailedInvocations
+      Namespace: AWS/Events
+      Dimensions:
+        - Name: RuleName
+          Value: !Ref ScheduledVolumeMonitoringRule
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
+  # Volume monitor runtime errors (normal execution failures).
+  VolumeMonitorErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-monitor-errors"
+      AlarmDescription: Volume monitor Lambda is returning execution errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref VolumeMonitorFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
+  # EventBridge could not invoke the detachment handler on instance-termination
+  # events — catches the detach Lambda being dead even when it logs nothing.
+  VolumeDetachmentFailedInvocationsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-detachment-failed-invocations"
+      AlarmDescription: EventBridge failed to invoke the volume detachment Lambda
+      MetricName: FailedInvocations
+      Namespace: AWS/Events
+      Dimensions:
+        - Name: RuleName
+          Value: !Ref VolumeDetachmentEventRule
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
+  # ========================================
   # DISK USAGE ALARMS
   # ========================================
 

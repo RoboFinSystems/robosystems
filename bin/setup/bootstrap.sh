@@ -582,47 +582,79 @@ setup_ecr_repository() {
     local ecr_repo_name
     ecr_repo_name=$(echo "${GITHUB_REPO}" | tr '[:upper:]' '[:lower:]')
 
+    # Resolve the bundled operational policy file (lives alongside this script)
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local policy_file="${script_dir}/ecr-lifecycle-policy.json"
+
     echo "ECR Repository: ${ecr_repo_name}"
     echo ""
 
-    # Check if repository already exists - don't modify existing repos
+    # Create the repository if it does not exist yet (never modifies an existing one)
     if aws ecr describe-repositories --repository-names "${ecr_repo_name}" --region "${AWS_REGION}" >/dev/null 2>&1; then
         print_success "ECR repository already exists"
-        return 0
+    else
+        print_step "Creating ECR repository..."
+        aws ecr create-repository \
+            --repository-name "${ecr_repo_name}" \
+            --region "${AWS_REGION}" \
+            --image-scanning-configuration scanOnPush=true \
+            --encryption-configuration encryptionType=AES256 \
+            --tags Key=Project,Value=RoboSystems Key=ManagedBy,Value=Bootstrap >/dev/null
+        print_success "ECR repository created: ${ecr_repo_name}"
     fi
 
-    print_step "Creating ECR repository..."
+    # Choose the lifecycle policy. Honors a non-interactive override:
+    #   ECR_LIFECYCLE_POLICY=robust|basic
+    # The policy is always (re)applied so re-running bootstrap reconciles it
+    # after edits to ecr-lifecycle-policy.json.
+    local policy_choice="${ECR_LIFECYCLE_POLICY:-}"
+    if [ -z "$policy_choice" ]; then
+        echo ""
+        echo "Which ECR image lifecycle policy do you want to apply?"
+        echo "  1) Robust - full operational policy, count-based dev-image retention (recommended)"
+        echo "  2) Basic  - minimal, keep last 20 untagged images only"
+        echo ""
+        read -p "Select [1]: " lc_choice
+        lc_choice=${lc_choice:-1}
+        case "$lc_choice" in
+            2) policy_choice="basic" ;;
+            *) policy_choice="robust" ;;
+        esac
+    fi
 
-    aws ecr create-repository \
-        --repository-name "${ecr_repo_name}" \
-        --region "${AWS_REGION}" \
-        --image-scanning-configuration scanOnPush=true \
-        --encryption-configuration encryptionType=AES256 \
-        --tags Key=Project,Value=RoboSystems Key=ManagedBy,Value=Bootstrap >/dev/null
+    if [ "$policy_choice" = "basic" ]; then
+        print_step "Applying basic lifecycle policy..."
+        aws ecr put-lifecycle-policy \
+            --repository-name "${ecr_repo_name}" \
+            --region "${AWS_REGION}" \
+            --lifecycle-policy-text '{
+                "rules": [
+                    {
+                        "rulePriority": 1,
+                        "description": "Keep last 20 untagged images",
+                        "selection": {
+                            "tagStatus": "untagged",
+                            "countType": "imageCountMoreThan",
+                            "countNumber": 20
+                        },
+                        "action": { "type": "expire" }
+                    }
+                ]
+            }' >/dev/null
+    else
+        if [ ! -f "$policy_file" ]; then
+            print_error "Operational policy file not found: ${policy_file}"
+            return 1
+        fi
+        print_step "Applying robust lifecycle policy (${policy_file})..."
+        aws ecr put-lifecycle-policy \
+            --repository-name "${ecr_repo_name}" \
+            --region "${AWS_REGION}" \
+            --lifecycle-policy-text "file://${policy_file}" >/dev/null
+    fi
 
-    print_success "ECR repository created: ${ecr_repo_name}"
-
-    # Set basic lifecycle policy for new repos (keeps things tidy)
-    print_step "Setting basic lifecycle policy..."
-    aws ecr put-lifecycle-policy \
-        --repository-name "${ecr_repo_name}" \
-        --region "${AWS_REGION}" \
-        --lifecycle-policy-text '{
-            "rules": [
-                {
-                    "rulePriority": 1,
-                    "description": "Keep last 20 untagged images",
-                    "selection": {
-                        "tagStatus": "untagged",
-                        "countType": "imageCountMoreThan",
-                        "countNumber": 20
-                    },
-                    "action": { "type": "expire" }
-                }
-            ]
-        }' >/dev/null
-
-    print_success "ECR repository ready"
+    print_success "ECR repository ready (${policy_choice} lifecycle policy)"
 }
 
 # =============================================================================

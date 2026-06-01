@@ -365,6 +365,20 @@ class TuningConfig:
     return cls.get_int("database/MAX_OVERFLOW", DatabaseDefaults.MAX_OVERFLOW)
 
   @classmethod
+  def get_extensions_pool_size(cls) -> int:
+    """Get the extensions OLTP pool size (baseline connections per task)."""
+    return cls.get_int(
+      "database/EXTENSIONS_POOL_SIZE", DatabaseDefaults.EXTENSIONS_POOL_SIZE
+    )
+
+  @classmethod
+  def get_extensions_max_overflow(cls) -> int:
+    """Get the extensions OLTP max overflow (burst connections above pool_size)."""
+    return cls.get_int(
+      "database/EXTENSIONS_MAX_OVERFLOW", DatabaseDefaults.EXTENSIONS_MAX_OVERFLOW
+    )
+
+  @classmethod
   def get_database_pool_timeout(cls) -> int:
     """Get seconds to wait for a connection from the pool."""
     return cls.get_int("database/POOL_TIMEOUT", DatabaseDefaults.POOL_TIMEOUT)

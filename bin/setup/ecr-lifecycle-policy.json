@@ -1,0 +1,92 @@
+{
+  "rules": [
+    {
+      "rulePriority": 10,
+      "description": "Never expire prod/staging/latest: count>99999 never triggers, and matching here (lowest priority) shields these tags from the cleanup rules below",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["prod", "staging", "latest", "lambda-prod", "lambda-staging"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 99999
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 20,
+      "description": "Keep last 10 release versions (v*.*.*)",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["v"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 10
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 25,
+      "description": "Keep last 10 lambda release versions (lambda-v*.*.*)",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["lambda-v"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 10
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 30,
+      "description": "Keep last 50 git-* development builds (count-based: a deployed image is never expired by age alone)",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["git-"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 50
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 35,
+      "description": "Keep last 30 lambda-git-* development builds (count-based: infra Lambdas pinned to a lambda-git tag are not orphaned by age)",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["lambda-git-"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 30
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 40,
+      "description": "Keep build cache tags for 7 days",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["buildcache", "deps-cache", "lambda-cache"],
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 7
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 50,
+      "description": "Keep last 20 untagged images",
+      "selection": {
+        "tagStatus": "untagged",
+        "countType": "imageCountMoreThan",
+        "countNumber": 20
+      },
+      "action": { "type": "expire" }
+    },
+    {
+      "rulePriority": 100,
+      "description": "Remove any other tagged images older than 90 days",
+      "selection": {
+        "tagStatus": "any",
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 90
+      },
+      "action": { "type": "expire" }
+    }
+  ]
+}

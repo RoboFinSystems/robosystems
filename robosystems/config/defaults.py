@@ -36,6 +36,13 @@ class DatabaseDefaults:
   POOL_TIMEOUT = 30  # Seconds to wait for a connection from the pool
   POOL_RECYCLE = 3600  # Recycle connections after 1 hour (handles RDS drops)
 
+  # Extensions OLTP database — a separate engine/pool from the platform DB.
+  # The per-graph OLTP write path (journal entries, etc.) is the hot path, so
+  # this is tuned independently. Previously hardcoded at 3 + 5 = 8, which a
+  # single client could exhaust; now SSM-tunable (raise per RDS instance size).
+  EXTENSIONS_POOL_SIZE = 5
+  EXTENSIONS_MAX_OVERFLOW = 10
+
 
 class CacheDefaults:
   """
@@ -245,4 +252,6 @@ SSM_TUNING_PATHS = {
   "database/MAX_OVERFLOW": DatabaseDefaults.MAX_OVERFLOW,
   "database/POOL_TIMEOUT": DatabaseDefaults.POOL_TIMEOUT,
   "database/POOL_RECYCLE": DatabaseDefaults.POOL_RECYCLE,
+  "database/EXTENSIONS_POOL_SIZE": DatabaseDefaults.EXTENSIONS_POOL_SIZE,
+  "database/EXTENSIONS_MAX_OVERFLOW": DatabaseDefaults.EXTENSIONS_MAX_OVERFLOW,
 }
