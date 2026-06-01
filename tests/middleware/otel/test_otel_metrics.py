@@ -222,14 +222,15 @@ class TestEndpointMetricsClass:
       event_data={"user_id": "test123"},
     )
 
-    # Verify counter was incremented
+    # event_data is intentionally NOT flattened into labels (unbounded
+    # cardinality); the metric carries only bounded dimensions.
     counter.add.assert_called_with(
       1,
       {
         "endpoint": "/auth/register",
         "method": "POST",
         "event_type": "user_registered",
-        "event_user_id": "test123",
+        "user_authenticated": "false",
       },
     )
 
@@ -245,7 +246,7 @@ class TestEndpointMetricsClass:
       user_id="user123",
     )
 
-    # Verify counter was incremented (using the mocked counter from fixture)
+    # user_id is recorded as a bounded user_authenticated flag, not a raw label.
     counter.add.assert_called_with(
       1,
       {
@@ -253,7 +254,7 @@ class TestEndpointMetricsClass:
         "method": "POST",
         "auth_type": "email_password",
         "success": True,
-        "user_id": "user123",
+        "user_authenticated": "true",
       },
     )
 
@@ -273,7 +274,13 @@ class TestEndpointMetricsClass:
 
     # Verify histogram was recorded with str-typed status_code
     histogram.record.assert_called_with(
-      0.125, {"endpoint": "/api/test", "method": "GET", "status_code": "200"}
+      0.125,
+      {
+        "endpoint": "/api/test",
+        "method": "GET",
+        "status_code": "200",
+        "user_authenticated": "false",
+      },
     )
 
   def test_record_error(self, endpoint_metrics):
@@ -367,14 +374,15 @@ class TestBusinessEventMetrics:
         event_data={"source": "web"},
       )
 
-      # Verify counter was called with correct attributes
+      # event_data ("source") is not flattened into labels; only bounded
+      # dimensions are recorded.
       mock_counter.add.assert_called_with(
         1,
         {
           "endpoint": "/auth/register",
           "method": "POST",
           "event_type": "user_registered",
-          "event_source": "web",
+          "user_authenticated": "false",
         },
       )
 
@@ -406,18 +414,16 @@ class TestBusinessEventMetrics:
         user_id="user123",
       )
 
-      # Verify counter was called with flattened attributes
+      # event_data (user_id/entity_id/graph_id/action) is intentionally NOT
+      # flattened into labels — those are unbounded. Only bounded dimensions
+      # remain, with user_id collapsed to a user_authenticated flag.
       mock_counter.add.assert_called_with(
         1,
         {
           "endpoint": "/api/entity",
           "method": "POST",
           "event_type": "entity_created",
-          "user_id": "user123",
-          "event_user_id": "user123",
-          "event_entity_id": "comp456",
-          "event_graph_id": "graph789",
-          "event_action": "create",
+          "user_authenticated": "true",
         },
       )
 

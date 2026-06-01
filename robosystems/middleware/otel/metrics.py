@@ -385,10 +385,10 @@ class EndpointMetrics:
       "endpoint": endpoint,
       "method": method,
       "status_code": str(status_code),
+      # Bounded flag instead of the raw user_id, which is unbounded and would
+      # multiply series by the user count (see record_query_submission).
+      "user_authenticated": "true" if user_id else "false",
     }
-
-    if user_id:
-      attributes["user_id"] = user_id
 
     if self._request_duration is not None:
       self._request_duration.record(duration, attributes)
@@ -410,11 +410,9 @@ class EndpointMetrics:
       "method": method,
       "auth_type": auth_type,
       "success": success,
+      # Bounded flag instead of the raw user_id (unbounded, grows with users).
+      "user_authenticated": "true" if user_id else "false",
     }
-
-    # Include user_id if provided
-    if user_id:
-      base_attributes["user_id"] = user_id
 
     # Record attempt
     if self._auth_attempts is not None:
@@ -473,19 +471,18 @@ class EndpointMetrics:
 
     self._ensure_instruments()
 
+    # event_data is intentionally NOT flattened into metric labels. Arbitrary
+    # payloads (execution times, row counts, ids, byte sizes) are unbounded
+    # cardinality values; emitting them as labels explodes the active-series
+    # count and AMP ingestion cost. event_data stays for logs/traces only;
+    # the metric is dimensioned solely by the bounded fields below.
     attributes = {
       "endpoint": endpoint,
       "method": method,
       "event_type": event_type,
+      # Bounded flag instead of the raw user_id (unbounded, grows with users).
+      "user_authenticated": "true" if user_id else "false",
     }
-
-    if user_id:
-      attributes["user_id"] = user_id
-
-    if event_data:
-      # Flatten event data into attributes (convert values to strings)
-      for key, value in event_data.items():
-        attributes[f"event_{key}"] = str(value)
 
     if self._business_counter is not None:
       self._business_counter.add(1, attributes)
@@ -502,12 +499,12 @@ class EndpointMetrics:
     """Record graph database metrics."""
     self._ensure_instruments()
 
+    # graph_id is the intrinsic dimension of these per-graph gauges and is
+    # bounded by the operator-controlled graph count, so it stays. user_id is
+    # dropped: it adds no useful gauge dimension and is unbounded.
     base_attributes = {
       "graph_id": graph_id,
     }
-
-    if user_id:
-      base_attributes["user_id"] = user_id
 
     if additional_attributes:
       base_attributes.update(additional_attributes)
