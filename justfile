@@ -282,6 +282,20 @@ setup-gha:
 # Bedrock local development setup (creates IAM user, updates .env)
 setup-bedrock:
     @bin/setup/bedrock.sh
+
+# Apply the operational ECR image lifecycle policy (idempotent reconcile)
+# Single source of truth: bin/setup/ecr-lifecycle-policy.json (also applied by
+# bootstrap when the robust option is chosen). Use this recipe to reconcile the
+# live repo after editing that file, without re-running full bootstrap.
+# Usage: just ecr-lifecycle [repo] [region]
+ecr-lifecycle repo="robosystems" region="us-east-1":
+    @echo "Applying ECR lifecycle policy to {{repo}} ({{region}})..."
+    @aws ecr put-lifecycle-policy \
+        --repository-name "{{repo}}" \
+        --region "{{region}}" \
+        --lifecycle-policy-text "file://bin/setup/ecr-lifecycle-policy.json" \
+        --query 'repositoryName' --output text
+
 # Generate a secure random key for a single secret
 generate-key:
     @echo "Generated secure 32-byte base64 key:"
