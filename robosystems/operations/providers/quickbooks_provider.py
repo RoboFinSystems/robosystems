@@ -105,7 +105,8 @@ class QuickBooksOAuthProvider:
     Returns True on success (HTTP 200); logs and returns False otherwise so the
     caller can proceed with local teardown regardless.
     """
-    async with httpx.AsyncClient() as client:
+    # Explicit timeout: a slow Intuit endpoint shouldn't stall disconnect.
+    async with httpx.AsyncClient(timeout=10.0) as client:
       response = await client.post(
         self.revoke_url,
         json={"token": token},
