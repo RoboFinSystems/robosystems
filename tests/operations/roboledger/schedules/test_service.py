@@ -391,12 +391,18 @@ class TestCreateScheduleSumEqualsRule:
     assert rules[0].target_kind == "structure"
     assert rules[0].target_structure_id == structure.id
 
-  def test_sum_equals_rule_variable_uses_debit_qname(self):
+  def test_sum_equals_rule_variable_binds_debit_element(self):
     session = _mock_session()
     added = self._run(session)
     rules = [o for o in added if type(o).__name__ == "Rule"]
+    # Binds the debit element by id (works for CoA accounts whose qname is
+    # null) and records the qname for display when present.
     assert rules[0].rule_variables == [
-      {"variable_name": "periodic_amount", "variable_qname": "fac:DeprExpense"}
+      {
+        "variable_name": "periodic_amount",
+        "variable_qname": "fac:DeprExpense",
+        "variable_element_id": "elem_depr_expense",
+      }
     ]
 
   def test_no_sum_equals_rule_when_no_original_amount(self):
@@ -1615,3 +1621,46 @@ class TestTruncateSchedule:
         reason="test",
         updated_by="usr_test",
       )
+
+
+def test_sumequals_rule_generates_for_coa_debit_with_null_qname() -> None:
+  """Regression: the auto-generated SumEquals guardrail must be created even
+  when the debit element is a tenant CoA account (null qname) — the normal
+  case. Previously the rule was gated on the debit qname, so it silently never
+  generated for CoA-debited schedules. It now binds the element by id."""
+  from robosystems.models.extensions.rule import Rule
+
+  session = _mock_session()
+  # taxonomy lookup → id; debit qname lookup → None (CoA account has no qname)
+  session.execute.return_value.fetchone.return_value = MagicMock(id="tax_01")
+  session.execute.return_value.scalar.return_value = None
+
+  svc = ScheduleService()
+  with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+    svc.create_schedule(
+      session,
+      name="Prepaid Insurance Amortization",
+      taxonomy_id=None,
+      element_ids=["elem_insurance", "elem_prepaid"],
+      period_start=date(2026, 1, 1),
+      period_end=date(2026, 3, 31),
+      monthly_amount=10000,
+      entry_template=EntryTemplate(
+        debit_element_id="elem_insurance",
+        credit_element_id="elem_prepaid",
+        entry_type="adjusting",
+      ),
+      schedule_metadata=ScheduleMetadata(
+        method="straight_line",
+        original_amount=30000,
+        asset_element_id="elem_prepaid",
+      ),
+      created_by="usr_test",
+    )
+
+  added = [call[0][0] for call in session.add.call_args_list]
+  rules = [a for a in added if isinstance(a, Rule)]
+  assert len(rules) == 1, "SumEquals rule should generate despite null debit qname"
+  rule = rules[0]
+  assert rule.rule_pattern == "SumEquals"
+  assert rule.rule_variables[0]["variable_element_id"] == "elem_insurance"

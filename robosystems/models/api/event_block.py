@@ -135,7 +135,7 @@ class CreateEventBlockRequest(BaseModel):
             "event_category": "control",
             "event_class": "support",
             "occurred_at": "2026-05-06T16:00:00Z",
-            "source": "native",
+            "source": "manual",
             "description": "Monthly bank reconciliation completed",
             "metadata": {
               "control_id": "ctl_bank_recon_monthly",
@@ -216,7 +216,8 @@ class CreateEventBlockRequest(BaseModel):
 
   # Provenance
   source: str = Field(
-    ..., description="'quickbooks' | 'xero' | 'plaid' | 'native' | 'scheduled' | ..."
+    ...,
+    description="'manual' | 'system' | 'schedule' | 'quickbooks' | 'xero' | 'plaid'",
   )
   external_id: str | None = Field(
     None,
@@ -346,8 +347,8 @@ class EventBlockEnvelope(BaseModel):
   source: str = Field(
     ...,
     description=(
-      "Capture source (`quickbooks`, `xero`, `plaid`, `native`, "
-      "`scheduled`, …). Used for adapter routing."
+      "Capture source (`manual`, `system`, `schedule`, `quickbooks`, "
+      "`xero`, `plaid`). Used for adapter routing."
     ),
   )
   external_id: str | None = Field(
