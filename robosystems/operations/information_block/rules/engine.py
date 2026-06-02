@@ -70,9 +70,15 @@ def _bind_variables(
     if not name:
       continue
 
-    element_id: str | None = session.execute(
-      select(Element.id).where(Element.qname == qname).limit(1)
-    ).scalar()
+    # Prefer an explicit element id when the rule carries one. Tenant CoA
+    # elements have a null qname (they key on `code`), so qname resolution
+    # can't bind them — schedule rules pass `variable_element_id` directly.
+    element_id: str | None = (
+      var.get("variable_element_id")
+      or session.execute(
+        select(Element.id).where(Element.qname == qname).limit(1)
+      ).scalar()
+    )
 
     if element_id is None:
       bindings[name] = None
@@ -113,9 +119,14 @@ def _bind_sum_variables(
     qname = var.get("variable_qname", "")
     if not name:
       continue
-    element_id: str | None = session.execute(
-      select(Element.id).where(Element.qname == qname).limit(1)
-    ).scalar()
+    # Prefer an explicit element id (CoA elements have null qname — see
+    # _bind_variables); schedule SumEquals rules carry variable_element_id.
+    element_id: str | None = (
+      var.get("variable_element_id")
+      or session.execute(
+        select(Element.id).where(Element.qname == qname).limit(1)
+      ).scalar()
+    )
     if element_id is None:
       bindings[name] = None
       continue

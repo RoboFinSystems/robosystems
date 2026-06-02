@@ -401,30 +401,39 @@ class ScheduleService:
         )
 
     # Auto-generate a SumEquals rule so the engine can verify that
-    # the sum of period debit facts equals original_amount.
+    # the sum of period debit facts equals original_amount. The rule binds
+    # the debit element by id (via variable_element_id) — tenant CoA accounts
+    # carry a null qname, so qname-only binding would skip the rule entirely
+    # for the normal case (a schedule debiting a CoA expense account). qname
+    # is still recorded for display when present.
     if original_dollars is not None:
       debit_qname: str | None = session.execute(
         select(Element.qname)
         .where(Element.id == entry_template.debit_element_id)
         .limit(1)
       ).scalar()
-      if debit_qname:
-        var_name = "periodic_amount"
-        session.add(
-          Rule(
-            taxonomy_id=structure.taxonomy_id,
-            rule_category="ReportingSystemSpecificRule",
-            rule_pattern="SumEquals",
-            rule_expression=f"sum(${var_name}) = {original_dollars}",
-            rule_severity="error",
-            rule_origin="native",
-            target_kind="structure",
-            target_structure_id=structure.id,
-            rule_variables=[{"variable_name": var_name, "variable_qname": debit_qname}],
-            metadata_={"expected_total": original_dollars},
-            created_by=created_by,
-          )
+      var_name = "periodic_amount"
+      session.add(
+        Rule(
+          taxonomy_id=structure.taxonomy_id,
+          rule_category="ReportingSystemSpecificRule",
+          rule_pattern="SumEquals",
+          rule_expression=f"sum(${var_name}) = {original_dollars}",
+          rule_severity="error",
+          rule_origin="native",
+          target_kind="structure",
+          target_structure_id=structure.id,
+          rule_variables=[
+            {
+              "variable_name": var_name,
+              "variable_qname": debit_qname,
+              "variable_element_id": entry_template.debit_element_id,
+            }
+          ],
+          metadata_={"expected_total": original_dollars},
+          created_by=created_by,
         )
+      )
 
     # Materialize the obligation register: one `schedule_created` event
     # (originator) + one `pending` `schedule_entry_due` event per period,
