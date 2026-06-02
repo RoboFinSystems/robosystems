@@ -36,7 +36,7 @@ dependencies = [
     "starlette>=0.52.0,<1.0",
     "sse-starlette>=3.3.0,<4.0",
     "strawberry-graphql[fastapi]>=0.314.0,<1.0",
-    "uvicorn>=0.44.0,<1.0",
+    "uvicorn>=0.48.0,<1.0",
     "uvloop>=0.21.0,<1.0",
     # Cloud Service (AWS)
     "boto3>=1.42.0,<2.0",
