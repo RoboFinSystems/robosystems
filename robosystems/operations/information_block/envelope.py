@@ -328,7 +328,8 @@ def rule_to_lite(rule: Rule) -> RuleLite:
   variables = [
     RuleVariableLite(
       variable_name=v.get("variable_name", ""),
-      variable_qname=v.get("variable_qname", ""),
+      variable_qname=v.get("variable_qname"),
+      variable_element_id=v.get("variable_element_id"),
     )
     for v in raw_vars
   ]
