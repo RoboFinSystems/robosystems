@@ -74,7 +74,7 @@ dependencies = [
     "stripe>=11.1.0,<12.0",
     # Observability
     "opentelemetry-api>=1.41.0,<2.0",
-    "opentelemetry-exporter-otlp>=1.41.0,<2.0",
+    "opentelemetry-exporter-otlp>=1.42.1,<2.0",
     "opentelemetry-sdk>=1.41.0,<2.0",
     "opentelemetry-instrumentation-aiohttp-client>=0.55b0,<1.0",
     "opentelemetry-instrumentation-fastapi>=0.55b0,<1.0",
