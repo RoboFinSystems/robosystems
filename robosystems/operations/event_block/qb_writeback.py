@@ -48,7 +48,9 @@ from sqlalchemy.orm import Session
 from robosystems.adapters.quickbooks.client.api import _QB_RETRY
 from robosystems.logger import logger
 from robosystems.models.extensions.element import Element
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.event import Event
+from robosystems.models.extensions.roboledger.line_item import LineItem
 
 
 class QBWritebackError(Exception):
@@ -194,6 +196,48 @@ def _build_qb_journal_entry(
   return je
 
 
+def _entries_from_draft_rows(session: Session, event_id: str) -> list[dict[str, Any]]:
+  """Build nested-shape entry dicts from the draft GL rows linked to an event.
+
+  Handler-materialized closing entries (schedule_entry_due, manual closing
+  entries) keep their GL lines on the draft ``Entry`` / ``LineItem`` rows
+  (linked by ``triggered_by_event_id``), NOT in ``event.metadata`` — unlike
+  ``journal_entry_recorded`` events, whose lines ride in metadata. Without
+  this fallback the write-back posts an empty QB JournalEntry and QB rejects
+  it ("2020 Required param missing"). Returns one entry dict per linked Entry.
+  """
+  entries = (
+    session.query(Entry)
+    .filter(Entry.triggered_by_event_id == event_id)
+    .order_by(Entry.created_at)
+    .all()
+  )
+  result: list[dict[str, Any]] = []
+  for entry in entries:
+    lines = (
+      session.query(LineItem)
+      .filter(LineItem.entry_id == entry.id)
+      .order_by(LineItem.line_order)
+      .all()
+    )
+    result.append(
+      {
+        "posting_date": entry.posting_date,
+        "memo": entry.memo,
+        "line_items": [
+          {
+            "element_id": li.element_id,
+            "debit_amount": int(li.debit_amount or 0),
+            "credit_amount": int(li.credit_amount or 0),
+            "description": li.description,
+          }
+          for li in lines
+        ],
+      }
+    )
+  return result
+
+
 def post_event_to_qb(
   session: Session,
   event: Event,
@@ -212,32 +256,52 @@ def post_event_to_qb(
   retry-safe within QB's ~5-minute dedup window.
   """
   metadata = dict(event.metadata_ or {})
-  nested_entries = metadata.get("entries")
   qb_txn_ids: list[str] = []
 
-  if isinstance(nested_entries, list) and nested_entries:
-    # Nested shape — one QB JE per entry.
-    for idx, entry in enumerate(nested_entries):
-      je = _build_qb_journal_entry(
-        session,
-        posting_date=entry.get("posting_date"),
-        memo=entry.get("memo"),
-        line_items=entry.get("line_items") or [],
-      )
-      # Suffix per-entry so multi-entry events have distinct request_ids
-      # but the per-call write is still retry-safe via QB's dedup window.
-      request_id = f"{event.id}-e{idx}"
-      qb_id = _save_with_retry(je, qb_client, request_id, event.id)
-      qb_txn_ids.append(f"JournalEntry_{qb_id}")
-  else:
-    # Flat shape — single QB JE.
+  # Resolve the entries to post, in priority order:
+  #   1. metadata["entries"]      — nested shape (one dict per entry)
+  #   2. metadata["line_items"]   — flat shape (a single entry in metadata)
+  #   3. draft Entry/LineItem rows — handler-materialized closing entries
+  #      (schedule_entry_due, manual) whose lines live on the GL rows, not
+  #      in metadata. Without (3) these post an empty JE → QB 2020 reject.
+  nested_entries = metadata.get("entries")
+  if not (isinstance(nested_entries, list) and nested_entries):
+    if metadata.get("line_items"):
+      nested_entries = [
+        {
+          "posting_date": metadata.get("posting_date"),
+          "memo": metadata.get("memo"),
+          "line_items": metadata.get("line_items"),
+        }
+      ]
+    else:
+      nested_entries = _entries_from_draft_rows(session, str(event.id))
+
+  if not nested_entries:
+    raise QBWritebackError(
+      {
+        "code": "no_line_items",
+        "message": (
+          f"Event {event.id} has no line items in metadata and no linked "
+          f"draft entries — nothing to publish to QuickBooks."
+        ),
+      }
+    )
+
+  # One QB JournalEntry per entry. Single-entry events keep request_id =
+  # event.id (original idempotency key); multi-entry events suffix per
+  # entry so each call has a distinct key but stays retry-safe in QB's
+  # ~5-minute dedup window.
+  single = len(nested_entries) == 1
+  for idx, entry in enumerate(nested_entries):
     je = _build_qb_journal_entry(
       session,
-      posting_date=metadata.get("posting_date"),
-      memo=metadata.get("memo"),
-      line_items=metadata.get("line_items") or [],
+      posting_date=entry.get("posting_date"),
+      memo=entry.get("memo"),
+      line_items=entry.get("line_items") or [],
     )
-    qb_id = _save_with_retry(je, qb_client, event.id, event.id)
+    request_id = str(event.id) if single else f"{event.id}-e{idx}"
+    qb_id = _save_with_retry(je, qb_client, request_id, event.id)
     qb_txn_ids.append(f"JournalEntry_{qb_id}")
 
   # Prefix the bare QB Id with the entity type ("JournalEntry_") so the
