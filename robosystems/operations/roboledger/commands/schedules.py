@@ -7,6 +7,8 @@ translate request bodies to service calls and assemble responses.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
@@ -275,8 +277,6 @@ def promote_obligations(
   tenant graph); the sweep is idempotent (re-running skips already-classified
   rows and reconciles to existing drafts).
   """
-  from datetime import UTC, datetime
-
   from robosystems.operations.event_block.promotion import promote_pending_obligations
 
   result = promote_pending_obligations(

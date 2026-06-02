@@ -10,7 +10,7 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (36) — in logical workflow order:**
+**Registered (37) — in logical workflow order:**
 
 - Setup: `initialize`, `update-entity`
 - Ontology / Taxonomy Blocks: `create-taxonomy-block`,

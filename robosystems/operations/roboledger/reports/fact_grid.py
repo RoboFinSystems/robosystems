@@ -1592,6 +1592,15 @@ def _reconcile_operating_to_cash(
   unrealized MTM, …) into their own lines is a future enrichment. The plugged
   amount is logged so it stays visible rather than silently absorbed.
 
+  TRADEOFF — this foots the CF *by construction*, which makes the downstream
+  ``_check_cash_flow_tie_out`` residual ~0 and therefore effectively silent.
+  The benefit is a CF that always articulates to actual cash; the cost is that
+  a *future* investing/financing misclassification would be absorbed into this
+  operating reconciling line instead of surfacing as a tie-out warning. Mitigation
+  for later: warn (not just log) when the plugged amount is large relative to
+  operating cash, so a genuine misclassification still trips an alarm. For now
+  the log line is the audit trail.
+
   Runs AFTER ``_derive_cash_flow_facts`` / ``_emit_flow_facts`` (the CF leaves
   must exist) and BEFORE ``_emit_subtotal_facts`` (so the subtotals pick up the
   adjustment). No-op for <2 periods or when the cash-anchor balance is absent
