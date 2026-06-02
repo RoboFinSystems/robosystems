@@ -141,11 +141,15 @@ class ListPeriodDraftsTool:
 **RETURNS:**
 - draft_count, total_debit, total_credit, all_balanced
 - drafts: full list with entry_id, posting_date, memo, source schedule name, line items (element name/code, debit/credit in cents), per-entry balance check
+- will_publish_to_qb (per draft): whether closing the period will publish this draft to QuickBooks (vs. post locally only)
+- qb_publish_count / local_only_count: how many drafts publish to QuickBooks on close vs. post locally only
+- qb_writeback_connection_id / qb_write_policy: the QB connection close would publish to, or null when the graph has no qb_authoritative/hybrid QB connection
 
 **NOTES:**
 - Read-only — no side effects, safe to call repeatedly
 - Returns an empty list if no drafts exist for the period
-- Line amounts are in cents (divide by 100 for dollar display)""",
+- Line amounts are in cents (divide by 100 for dollar display)
+- This is the close-review *outbox*: surface will_publish_to_qb + the qb_publish_count/local_only_count summary so the user sees what close will write to QuickBooks before committing""",
       "inputSchema": {
         "type": "object",
         "properties": {

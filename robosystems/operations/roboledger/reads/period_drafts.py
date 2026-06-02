@@ -69,9 +69,15 @@ def list_period_drafts(
   period_start, period_end = period_date_range(period)
 
   # Drafts that close would publish to QB — but only actually publish if
-  # a write-back connection exists (the `writeback` arg).
-  eligible_ids = writeback_eligible_entry_ids(session, period_start, period_end)
+  # a write-back connection exists. Skip the eligibility query entirely
+  # when there's no connection (the common native/no-connection case),
+  # since the result would be discarded.
   has_writeback = writeback is not None
+  eligible_ids = (
+    writeback_eligible_entry_ids(session, period_start, period_end)
+    if has_writeback
+    else set()
+  )
 
   rows = session.execute(
     _DRAFT_ENTRIES_SQL,

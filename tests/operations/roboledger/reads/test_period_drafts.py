@@ -95,7 +95,6 @@ class TestPeriodDraftsDisposition:
 
     resp = list_period_drafts(session, "2026-01", writeback=None)
 
-    _by_id(resp)
     assert all(not d.will_publish_to_qb for d in resp.drafts)
     assert resp.qb_publish_count == 0
     assert resp.local_only_count == 2
