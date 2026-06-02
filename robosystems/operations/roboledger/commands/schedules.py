@@ -16,6 +16,8 @@ from robosystems.models.api.extensions.schedules import (
   CreateManualClosingEntryRequest,
   CreateScheduleRequest,
   DeleteScheduleRequest,
+  PromoteObligationsRequest,
+  PromoteObligationsResponse,
   ScheduleCreatedResponse,
   UpdateScheduleRequest,
 )
@@ -256,6 +258,42 @@ def create_closing_entry(
   )
   session.commit()
   return _build_closing_entry_response(result)
+
+
+def promote_obligations(
+  session: Session,
+  body: PromoteObligationsRequest,
+  created_by: str,
+) -> PromoteObligationsResponse:
+  """On-demand obligation-promotion sweep (the `scheduled_obligation_promoter`
+  Dagster sensor's function, exposed for interactive / MCP-co-pilot use).
+
+  Flips matured `pending` `schedule_entry_due` events to `classified` and,
+  when ``dispatch_handlers`` is set, drafts their closing entries — so a
+  schedule-driven close can be completed in one session without waiting for
+  the background sensor. The data scope is the session's search_path (the
+  tenant graph); the sweep is idempotent (re-running skips already-classified
+  rows and reconciles to existing drafts).
+  """
+  from datetime import UTC, datetime
+
+  from robosystems.operations.event_block.promotion import promote_pending_obligations
+
+  result = promote_pending_obligations(
+    session,
+    graph_id="(on-demand)",  # logging-only; data scope is the session search_path
+    as_of=datetime.now(UTC),
+    dispatch_handlers=body.dispatch_handlers,
+    created_by=created_by,
+  )
+  session.commit()
+  return PromoteObligationsResponse(
+    classified_count=result.classified_count,
+    dispatched_count=result.dispatched_count,
+    error_count=result.error_count,
+    classified_event_ids=result.classified_event_ids,
+    errors=[{"event_id": eid, "error": msg} for eid, msg in result.errors],
+  )
 
 
 def create_manual_closing_entry(

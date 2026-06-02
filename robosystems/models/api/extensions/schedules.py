@@ -97,6 +97,49 @@ class CreateScheduleRequest(BaseModel):
   )
 
 
+class PromoteObligationsRequest(BaseModel):
+  """On-demand trigger for the obligation-promotion sweep.
+
+  Mirrors what the ``scheduled_obligation_promoter`` Dagster sensor does
+  on its tick, but lets an interactive caller or an MCP close co-pilot
+  run it now instead of waiting for the background cadence — required to
+  drive a schedule-driven close to completion in a single session.
+  Flips matured ``pending`` ``schedule_entry_due`` events (period boundary
+  passed) to ``classified``; with ``dispatch_handlers`` it also drafts the
+  closing entries in the same transaction (idempotent — reconciles to an
+  existing draft).
+  """
+
+  dispatch_handlers: bool = Field(
+    True,
+    description=(
+      "When True (default), also fire the schedule_entry_due handler for "
+      "each promoted obligation so the draft closing entry materializes "
+      "immediately (autopilot). When False, flip status only (co-pilot) — "
+      "the draft is created separately."
+    ),
+  )
+
+
+class PromoteObligationsResponse(BaseModel):
+  """Counts from a single on-demand promotion sweep."""
+
+  classified_count: int = Field(
+    ..., description="Matured obligations flipped pending → classified."
+  )
+  dispatched_count: int = Field(
+    ..., description="Obligations whose closing entry was drafted this run."
+  )
+  error_count: int = Field(
+    ..., description="Per-obligation handler errors (non-fatal)."
+  )
+  classified_event_ids: list[str] = Field(default_factory=list)
+  errors: list[dict[str, str]] = Field(
+    default_factory=list,
+    description="Per-obligation errors as {event_id, error}; the sweep continues past them.",
+  )
+
+
 class CreateClosingEntryRequest(BaseModel):
   posting_date: date = Field(..., description="Posting date for the entry")
   period_start: date = Field(..., description="Period start")

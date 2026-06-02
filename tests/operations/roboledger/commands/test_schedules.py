@@ -297,3 +297,43 @@ def test_update_schedule_identical_template_skips_supersession() -> None:
     )
 
   supersede.assert_not_called()
+
+
+def test_promote_obligations_maps_result_and_commits() -> None:
+  """The on-demand promote-obligations command wraps the same
+  ``promote_pending_obligations`` sweep the Dagster sensor uses, threads
+  ``dispatch_handlers`` + actor through, commits, and maps the
+  PromotionResult to the response envelope."""
+  from unittest.mock import patch
+
+  from robosystems.models.api.extensions.schedules import PromoteObligationsRequest
+  from robosystems.operations.event_block.promotion import PromotionResult
+  from robosystems.operations.roboledger.commands.schedules import promote_obligations
+
+  session = MagicMock()
+  fake = PromotionResult(
+    graph_id="g",
+    classified_event_ids=["evt_a", "evt_b"],
+    dispatched_event_ids=["evt_a"],
+    errors=[("evt_b", "boom")],
+  )
+
+  with patch(
+    "robosystems.operations.event_block.promotion.promote_pending_obligations",
+    return_value=fake,
+  ) as mock_promote:
+    resp = promote_obligations(
+      session,
+      PromoteObligationsRequest(dispatch_handlers=False),
+      created_by="user_1",
+    )
+
+  assert mock_promote.call_args.kwargs["dispatch_handlers"] is False
+  assert mock_promote.call_args.kwargs["created_by"] == "user_1"
+  session.commit.assert_called_once()
+
+  assert resp.classified_count == 2
+  assert resp.dispatched_count == 1
+  assert resp.error_count == 1
+  assert resp.classified_event_ids == ["evt_a", "evt_b"]
+  assert resp.errors == [{"event_id": "evt_b", "error": "boom"}]

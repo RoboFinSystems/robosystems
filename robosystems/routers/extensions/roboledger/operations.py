@@ -155,6 +155,10 @@ from robosystems.models.api.extensions.reports import (
   ShareReportRequest,
   ShareReportResponse,
 )
+from robosystems.models.api.extensions.schedules import (
+  PromoteObligationsRequest,
+  PromoteObligationsResponse,
+)
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
   CreateMappingAssociationOperation,
@@ -338,6 +342,9 @@ from robosystems.operations.roboledger.commands.reports import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   ScheduleNotFoundError,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  promote_obligations as cmd_promote_obligations,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   AssociationNotFoundError,
@@ -1374,6 +1381,35 @@ delete_journal_entry_op = _registrar.register(
     requires_created_by=False,
   )
 )
+
+# On-demand obligation promotion. Normally the `scheduled_obligation_promoter`
+# Dagster sensor runs this every few minutes; this operation exposes the same
+# `promote_pending_obligations` sweep so an interactive caller or an MCP close
+# co-pilot can promote matured schedule obligations now instead of waiting for
+# the background cadence — required to drive a schedule-driven close to
+# completion in a single session. Idempotent (skips already-classified rows,
+# reconciles to existing drafts).
+promote_obligations_op = _registrar.register(
+  OperationSpec(
+    name="promote-obligations",
+    summary="Promote Due Schedule Obligations",
+    description=(
+      "Promote matured pending schedule obligations (schedule_entry_due "
+      "events whose period boundary has passed) to 'classified', and — when "
+      "dispatch_handlers=true (default) — draft their closing entries in the "
+      "same transaction. This is the on-demand form of the background "
+      "obligation-promotion sweep; run it before close-period when a schedule "
+      "was just created or when you can't wait for the Dagster sensor. "
+      "Idempotent: re-running skips already-classified obligations and "
+      "reconciles to existing drafts."
+    ),
+    command=cmd_promote_obligations,
+    request_model=PromoteObligationsRequest,
+    result_type=PromoteObligationsResponse,
+    error_map={ValueError: 422},
+  )
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Close Workflow
