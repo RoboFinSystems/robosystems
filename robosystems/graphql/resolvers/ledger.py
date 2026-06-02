@@ -766,10 +766,26 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     period: str,
   ) -> PeriodDrafts | None:
-    """All draft entries for a fiscal period, ready for review before close."""
+    """All draft entries for a fiscal period, ready for review before close.
+
+    The close-review *outbox*: each draft is annotated with its QB
+    write-back disposition (``willPublishToQb``) and the response carries
+    a publish summary — which drafts `close-period` will push to
+    QuickBooks vs. post locally only.
+    """
+    from robosystems.db.platform import platform_session
+    from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+      resolve_writeback_connection,
+    )
+
+    graph_id = require_graph_id(info)
     try:
+      with platform_session() as platform_db:
+        writeback = resolve_writeback_connection(platform_db, graph_id)
       with _open_session(info, "roboledger") as session:
-        response = reads_period_drafts.list_period_drafts(session, period)
+        response = reads_period_drafts.list_period_drafts(
+          session, period, writeback=writeback
+        )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
     return PeriodDrafts.from_pydantic(response)

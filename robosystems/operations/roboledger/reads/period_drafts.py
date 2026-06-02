@@ -18,6 +18,10 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   PeriodDraftsResponse,
 )
 from robosystems.operations.roboledger.fiscal_calendar import period_date_range
+from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+  WritebackConnection,
+  writeback_eligible_entry_ids,
+)
 
 _DRAFT_ENTRIES_SQL = text("""
   SELECT
@@ -46,9 +50,28 @@ _DRAFT_ENTRIES_SQL = text("""
 """)
 
 
-def list_period_drafts(session: Session, period: str) -> PeriodDraftsResponse:
-  """Return all draft entries for review within a given YYYY-MM period."""
+def list_period_drafts(
+  session: Session,
+  period: str,
+  writeback: WritebackConnection | None = None,
+) -> PeriodDraftsResponse:
+  """Return all draft entries for review within a given YYYY-MM period.
+
+  This is the close-review *outbox*: every queued draft entry, plus —
+  when ``writeback`` is supplied (the qb_authoritative/hybrid QB
+  connection the caller resolved against the platform DB) — a
+  ``will_publish_to_qb`` flag per draft and a publish summary on the
+  response. The publish predicate is shared with the actual close write
+  (``qb_writeback.py``), so the preview cannot drift from what
+  ``close-period`` does. When ``writeback`` is None (no write-back
+  connection), every draft is local-only.
+  """
   period_start, period_end = period_date_range(period)
+
+  # Drafts that close would publish to QB — but only actually publish if
+  # a write-back connection exists (the `writeback` arg).
+  eligible_ids = writeback_eligible_entry_ids(session, period_start, period_end)
+  has_writeback = writeback is not None
 
   rows = session.execute(
     _DRAFT_ENTRIES_SQL,
@@ -86,6 +109,7 @@ def list_period_drafts(session: Session, period: str) -> PeriodDraftsResponse:
   total_debit = 0
   total_credit = 0
   all_balanced = True
+  qb_publish_count = 0
   for entry_data in by_entry.values():
     line_items = entry_data["line_items"]
     entry_debit = sum(li.debit_amount for li in line_items)
@@ -95,6 +119,11 @@ def list_period_drafts(session: Session, period: str) -> PeriodDraftsResponse:
       all_balanced = False
     total_debit += entry_debit
     total_credit += entry_credit
+    # Publishes on close only if both halves of the predicate hold:
+    # a write-back connection exists AND this draft is eligible.
+    will_publish = has_writeback and entry_data["entry_id"] in eligible_ids
+    if will_publish:
+      qb_publish_count += 1
     drafts.append(
       DraftEntryResponse(
         entry_id=entry_data["entry_id"],
@@ -108,6 +137,7 @@ def list_period_drafts(session: Session, period: str) -> PeriodDraftsResponse:
         total_debit=entry_debit,
         total_credit=entry_credit,
         balanced=balanced,
+        will_publish_to_qb=will_publish,
       )
     )
 
@@ -119,5 +149,9 @@ def list_period_drafts(session: Session, period: str) -> PeriodDraftsResponse:
     total_debit=total_debit,
     total_credit=total_credit,
     all_balanced=all_balanced,
+    qb_writeback_connection_id=writeback.connection_id if writeback else None,
+    qb_write_policy=writeback.write_policy if writeback else None,
+    qb_publish_count=qb_publish_count,
+    local_only_count=len(drafts) - qb_publish_count,
     drafts=drafts,
   )

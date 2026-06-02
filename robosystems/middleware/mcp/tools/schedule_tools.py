@@ -160,12 +160,19 @@ class ListPeriodDraftsTool:
     }
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
+    from robosystems.db.platform import platform_session
+    from robosystems.operations.roboledger.fiscal_calendar.qb_writeback import (
+      resolve_writeback_connection,
+    )
+
     graph_id = self.client.graph_id
     period = arguments["period"]
 
     try:
+      with platform_session() as platform_db:
+        writeback = resolve_writeback_connection(platform_db, graph_id)
       with extensions_session(graph_id) as session:
-        response = list_period_drafts(session, period)
+        response = list_period_drafts(session, period, writeback=writeback)
         return response.model_dump(mode="json")
     except Exception as exc:
       logger.warning(f"list-period-drafts failed: {exc}")
