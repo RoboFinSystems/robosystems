@@ -39,6 +39,7 @@ from .graph_tools import (
   GetGraphSyncStatusTool,
   ListSubgraphsTool,
   MaterializeTool,
+  SetWritePolicyTool,
   SwitchWorkspaceTool,
 )
 from .graphql_tool import GraphqlQueryTool, GraphqlSchemaTool
@@ -225,6 +226,13 @@ class GraphMCPTools:
     ):
       self.get_graph_sync_status_tool = GetGraphSyncStatusTool(graph_client)
       self.materialize_tool = MaterializeTool(graph_client)
+
+    # Connection write-policy — the outbound write-back opt-in. Platform-DB,
+    # writable user graphs only: shared repos have no editable connections,
+    # and read-only graphs can't change policy.
+    self.set_write_policy_tool = None
+    if not read_only and not self._is_shared_repository():
+      self.set_write_policy_tool = SetWritePolicyTool(graph_client)
 
     # Layer 2: Period-workflow read tools (gated by roboledger extension
     # + ROBOLEDGER_ENABLED). Schedule-specific reads were retired in
@@ -699,6 +707,8 @@ class GraphMCPTools:
 
     # Layer 3: Infrastructure tools (feature-flag gated)
     tools.extend(self._get_workspace_tool_definitions())
+    if self.set_write_policy_tool is not None:
+      tools.append(self.set_write_policy_tool.get_tool_definition())
     tools.extend(self._get_memory_tool_definitions())
     tools.extend(self._get_search_tool_definitions())
     tools.extend(self._get_document_tool_definitions())
@@ -883,6 +893,15 @@ class GraphMCPTools:
             self._tool_unavailable_reason("create-backup", "MCP_WORKSPACE_ENABLED")
           )
         result = await self.create_backup_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "set-write-policy":
+        if self.set_write_policy_tool is None:
+          raise ValueError(
+            "set-write-policy tool is not available on this read-only or "
+            "shared-repository graph."
+          )
+        result = await self.set_write_policy_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "write-graph-cypher":

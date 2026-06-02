@@ -16,6 +16,7 @@ from robosystems.routers.graphs.connections.management import (
   delete_connection,
   get_connection,
   list_connections,
+  set_connection_write_policy,
 )
 
 MANAGEMENT_MODULE = "robosystems.routers.graphs.connections.management"
@@ -1003,3 +1004,89 @@ class TestDeleteConnection:
         )
 
     assert exc_info.value.status_code == 403
+
+
+class TestSetConnectionWritePolicy:
+  """Tests for the set_connection_write_policy endpoint."""
+
+  def _request(self, write_policy: str = "qb_authoritative"):
+    from robosystems.models.api.graphs.connections import SetWritePolicyRequest
+
+    return SetWritePolicyRequest(write_policy=write_policy)
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_success_surfaces_write_policy(self):
+    """Happy path: service returns the updated connection; write_policy
+    is surfaced in the response."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+    connection_dict = _make_connection_dict()
+    connection_dict["write_policy"] = "qb_authoritative"
+
+    with patch(
+      f"{MANAGEMENT_MODULE}.ConnectionService.set_write_policy",
+      new_callable=AsyncMock,
+      return_value=connection_dict,
+    ) as mock_set:
+      result = await set_connection_write_policy(
+        graph_id=GRAPH_ID,
+        connection_id=CONNECTION_ID,
+        request=self._request("qb_authoritative"),
+        current_user=mock_user,
+        db=mock_db,
+        _rate_limit=None,
+      )
+
+    assert result.connection_id == CONNECTION_ID
+    assert result.write_policy == "qb_authoritative"
+    # graph_id is passed for scoping (IDOR guard).
+    assert mock_set.call_args.kwargs["graph_id"] == GRAPH_ID
+    assert mock_set.call_args.kwargs["write_policy"] == "qb_authoritative"
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_not_found_raises_404(self):
+    """Service returns None (missing / wrong graph / wrong user) → 404."""
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+
+    with patch(
+      f"{MANAGEMENT_MODULE}.ConnectionService.set_write_policy",
+      new_callable=AsyncMock,
+      return_value=None,
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await set_connection_write_policy(
+          graph_id=GRAPH_ID,
+          connection_id="nonexistent",
+          request=self._request("native"),
+          current_user=mock_user,
+          db=mock_db,
+          _rate_limit=None,
+        )
+
+    assert exc_info.value.status_code == 404
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_service_error_raises_500(self):
+    mock_user = _make_mock_user()
+    mock_db = MagicMock()
+
+    with patch(
+      f"{MANAGEMENT_MODULE}.ConnectionService.set_write_policy",
+      new_callable=AsyncMock,
+      side_effect=RuntimeError("boom"),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await set_connection_write_policy(
+          graph_id=GRAPH_ID,
+          connection_id=CONNECTION_ID,
+          request=self._request(),
+          current_user=mock_user,
+          db=mock_db,
+          _rate_limit=None,
+        )
+
+    assert exc_info.value.status_code == 500

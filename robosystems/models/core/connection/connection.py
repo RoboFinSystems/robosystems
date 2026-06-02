@@ -351,6 +351,28 @@ class Connection(Model):
       session.rollback()
       raise
 
+  def set_write_policy(self, session: Session, write_policy: str) -> None:
+    """Set the source-of-truth write policy (Phase 4 §4.2 opt-in surface).
+
+    This is the explicit operator opt-in `connection_service` references:
+    flipping a connection to ``qb_authoritative`` is what enables outbound
+    write-back via ``execute-event-block``. ``HYBRID`` is rejected until its
+    code path ships (see `WritePolicy`).
+    """
+    allowed = {WritePolicy.NATIVE.value, WritePolicy.QB_AUTHORITATIVE.value}
+    if write_policy not in allowed:
+      raise ValueError(
+        f"Unsupported write_policy '{write_policy}'. Allowed: {sorted(allowed)}."
+      )
+    self.write_policy = write_policy
+    self.updated_at = datetime.now(UTC)
+    try:
+      session.commit()
+      session.refresh(self)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
   def delete(self, session: Session) -> None:
     """Hard-delete the connection row.
 

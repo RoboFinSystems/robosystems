@@ -109,7 +109,31 @@ class ConnectionResponse(BaseModel):
   created_at: datetime | str = Field(..., description="Creation timestamp")
   updated_at: datetime | str | None = Field(None, description="Last update timestamp")
   last_sync: datetime | str | None = Field(None, description="Last sync timestamp")
+  write_policy: str | None = Field(
+    None,
+    description=(
+      "Source-of-truth write policy: 'native' (RoboSystems is authoritative; "
+      "no outbound write-back) or 'qb_authoritative' (QuickBooks is "
+      "authoritative; RoboSystems-originated entries publish to QB). "
+      "Set via the write-policy endpoint."
+    ),
+  )
   metadata: dict[str, object] = Field(..., description="Provider-specific metadata")
+
+
+class SetWritePolicyRequest(BaseModel):
+  """Request to set a connection's source-of-truth write policy.
+
+  The explicit operator opt-in for outbound write-back. `hybrid` is omitted
+  until its code path ships."""
+
+  write_policy: Literal["native", "qb_authoritative"] = Field(
+    ...,
+    description=(
+      "'native' = RoboSystems authoritative, no write-back; "
+      "'qb_authoritative' = QuickBooks authoritative, entries publish to QB."
+    ),
+  )
 
 
 class SyncConnectionRequest(BaseModel):

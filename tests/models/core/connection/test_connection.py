@@ -367,6 +367,52 @@ class TestConnectionUpdateMetadata:
     with pytest.raises(SQLAlchemyError):
       conn.update_metadata(session, status="error")
 
+
+@pytest.mark.unit
+class TestConnectionSetWritePolicy:
+  def test_sets_qb_authoritative(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    conn.set_write_policy(session, "qb_authoritative")
+
+    assert conn.write_policy == "qb_authoritative"
+    session.commit.assert_called_once()
+    session.refresh.assert_called_once_with(conn)
+
+  def test_sets_native(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    conn.set_write_policy(session, "native")
+
+    assert conn.write_policy == "native"
+    session.commit.assert_called_once()
+
+  def test_rejects_hybrid(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    with pytest.raises(ValueError, match="Unsupported write_policy"):
+      conn.set_write_policy(session, "hybrid")
+    session.commit.assert_not_called()
+
+  def test_rejects_unknown_value(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    with pytest.raises(ValueError, match="Unsupported write_policy"):
+      conn.set_write_policy(session, "bogus")
+
+  def test_rollback_on_error(self):
+    session = MagicMock()
+    session.commit.side_effect = SQLAlchemyError("db error")
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    with pytest.raises(SQLAlchemyError):
+      conn.set_write_policy(session, "qb_authoritative")
+    session.rollback.assert_called_once()
+
     session.rollback.assert_called_once()
 
 
