@@ -979,3 +979,100 @@ class TestMarkNeedsReauthSync:
         db_session=mock_session,
       )
     assert result is False
+
+
+class TestSetWritePolicy:
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_sets_policy_for_matching_graph(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_test", user_id="usr_123")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.set_write_policy(
+        connection_id="conn_test123",
+        write_policy="qb_authoritative",
+        user_id="usr_123",
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert result is not None
+    assert result["connection_id"] == "conn_test123"
+    mock_conn.set_write_policy.assert_called_once_with(mock_session, "qb_authoritative")
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_not_found_returns_none(self):
+    mock_session = MagicMock()
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = None
+      result = await ConnectionService.set_write_policy(
+        connection_id="missing",
+        write_policy="native",
+        user_id="usr_123",
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+    assert result is None
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_wrong_graph_returns_none(self):
+    """A connection in a different graph must not be reachable by guessing
+    its id from another graph's scope (IDOR guard)."""
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_other", user_id="usr_123")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+      result = await ConnectionService.set_write_policy(
+        connection_id="conn_test123",
+        write_policy="qb_authoritative",
+        user_id="usr_123",
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert result is None
+    mock_conn.set_write_policy.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_wrong_user_returns_none(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_test", user_id="usr_other")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+      result = await ConnectionService.set_write_policy(
+        connection_id="conn_test123",
+        write_policy="native",
+        user_id="usr_123",
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert result is None
+    mock_conn.set_write_policy.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_system_user_bypasses_user_check(self):
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_test", user_id="usr_other")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+      result = await ConnectionService.set_write_policy(
+        connection_id="conn_test123",
+        write_policy="qb_authoritative",
+        user_id=SYSTEM_USER_ID,
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert result is not None
+    mock_conn.set_write_policy.assert_called_once_with(mock_session, "qb_authoritative")

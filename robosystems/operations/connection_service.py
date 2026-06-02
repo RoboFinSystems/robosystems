@@ -71,13 +71,14 @@ class ConnectionService:
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
       )
 
-      # `write_policy` governs the OUTBOUND (write-back) direction only,
-      # and defaults to the column's `'native'` — no writes back to the
-      # source system without an explicit operator opt-in. Inbound
-      # sync-down is decoupled: QB rows auto-commit to GL via the loader's
-      # source-keyed rule (`_source_auto_commits_on_sync`) regardless of
-      # this policy, so a `native` QB connection still mirrors QB into a
-      # populated ledger ("sync down, don't write back").
+      # `write_policy` governs the OUTBOUND (write-back) direction only and
+      # defaults per provider (`Connection.create` →
+      # `default_write_policy_for_provider`): a QuickBooks connection is
+      # `qb_authoritative` (QB is the GL, so RL-originated entries write
+      # back), everything else is `native`. Inbound sync-down is decoupled —
+      # QB rows auto-commit to GL via the loader's source-keyed rule
+      # regardless of this policy. Flip to `native` via `set_write_policy`
+      # to pause write-back (e.g. a setup/review window).
 
       # Store credentials if provided
       if credentials:
@@ -510,6 +511,54 @@ class ConnectionService:
     except Exception:
       logger.error("Failed to update connection %s", connection_id, exc_info=True)
       return False
+    finally:
+      if session_created:
+        session.close()
+
+  @staticmethod
+  async def set_write_policy(
+    connection_id: str,
+    write_policy: str,
+    user_id: str,
+    graph_id: str,
+    db_session: Session | None = None,
+  ) -> dict[str, Any] | None:
+    """Set a connection's source-of-truth `write_policy` (Phase 4 §4.2).
+
+    Graph-scoped on purpose: the connection must belong to `graph_id` (the
+    URL scope the caller already authorized) — this prevents flipping
+    another graph's connection into write-back via a guessed connection_id.
+    Returns the updated connection dict, or None when the connection is
+    missing, belongs to a different graph, or isn't owned by the user.
+    Raises ValueError for an unsupported policy value (the model validates).
+
+    Args:
+        connection_id: Connection identifier
+        write_policy: New policy ('native' | 'qb_authoritative')
+        user_id: User performing the change (SYSTEM_USER_ID bypasses)
+        graph_id: Graph the connection must belong to
+        db_session: Optional existing database session
+    """
+    session = db_session or SessionFactory()
+    session_created = db_session is None
+
+    try:
+      conn = Connection.get_by_id(connection_id, session)
+      if not conn:
+        logger.warning("Connection not found: %s", connection_id)
+        return None
+      if conn.graph_id != graph_id:
+        logger.warning(
+          "Connection %s does not belong to graph %s", connection_id, graph_id
+        )
+        return None
+      if user_id and user_id != SYSTEM_USER_ID and conn.user_id != user_id:
+        logger.warning("User not authorized for connection %s", connection_id)
+        return None
+
+      conn.set_write_policy(session, write_policy)
+      logger.info("Set write_policy=%s on connection %s", write_policy, connection_id)
+      return conn.to_dict()
     finally:
       if session_created:
         session.close()

@@ -7,7 +7,11 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.models.core.connection.connection import Connection, ConnectionStatus
+from robosystems.models.core.connection.connection import (
+  Connection,
+  ConnectionStatus,
+  default_write_policy_for_provider,
+)
 
 
 @pytest.mark.unit
@@ -367,6 +371,85 @@ class TestConnectionUpdateMetadata:
     with pytest.raises(SQLAlchemyError):
       conn.update_metadata(session, status="error")
 
+
+@pytest.mark.unit
+class TestProviderWritePolicyDefault:
+  def test_quickbooks_defaults_to_qb_authoritative(self):
+    assert default_write_policy_for_provider("quickbooks") == "qb_authoritative"
+
+  def test_other_providers_default_to_native(self):
+    assert default_write_policy_for_provider("sec") == "native"
+    assert default_write_policy_for_provider("plaid") == "native"
+
+  def test_create_quickbooks_sets_qb_authoritative(self):
+    session = MagicMock()
+    conn = Connection.create(
+      graph_id="kg_test", user_id="usr_1", provider="quickbooks", session=session
+    )
+    assert conn.write_policy == "qb_authoritative"
+
+  def test_create_sec_stays_native(self):
+    session = MagicMock()
+    conn = Connection.create(
+      graph_id="kg_test", user_id="usr_1", provider="sec", session=session
+    )
+    assert conn.write_policy == "native"
+
+  def test_explicit_write_policy_overrides_provider_default(self):
+    session = MagicMock()
+    conn = Connection.create(
+      graph_id="kg_test",
+      user_id="usr_1",
+      provider="quickbooks",
+      session=session,
+      write_policy="native",
+    )
+    assert conn.write_policy == "native"
+
+
+@pytest.mark.unit
+class TestConnectionSetWritePolicy:
+  def test_sets_qb_authoritative(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    conn.set_write_policy(session, "qb_authoritative")
+
+    assert conn.write_policy == "qb_authoritative"
+    session.commit.assert_called_once()
+    session.refresh.assert_called_once_with(conn)
+
+  def test_sets_native(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    conn.set_write_policy(session, "native")
+
+    assert conn.write_policy == "native"
+    session.commit.assert_called_once()
+
+  def test_rejects_hybrid(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    with pytest.raises(ValueError, match="Unsupported write_policy"):
+      conn.set_write_policy(session, "hybrid")
+    session.commit.assert_not_called()
+
+  def test_rejects_unknown_value(self):
+    session = MagicMock()
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    with pytest.raises(ValueError, match="Unsupported write_policy"):
+      conn.set_write_policy(session, "bogus")
+
+  def test_rollback_on_error(self):
+    session = MagicMock()
+    session.commit.side_effect = SQLAlchemyError("db error")
+    conn = Connection(graph_id="kg_test", user_id="usr_1", provider="quickbooks")
+
+    with pytest.raises(SQLAlchemyError):
+      conn.set_write_policy(session, "qb_authoritative")
     session.rollback.assert_called_once()
 
 

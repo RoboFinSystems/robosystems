@@ -22,6 +22,7 @@ from robosystems.models.api.graphs.connections import (
   ConnectionResponse,
   CreateConnectionRequest,
   ProviderType,
+  SetWritePolicyRequest,
 )
 from robosystems.models.core import User
 from robosystems.operations.connection_service import ConnectionService
@@ -177,6 +178,7 @@ async def create_connection(
       created_at=connection["created_at"],
       updated_at=connection.get("updated_at"),
       last_sync=connection["metadata"].get("last_sync"),
+      write_policy=connection.get("write_policy"),
       metadata=connection["metadata"],
     )
 
@@ -287,6 +289,7 @@ async def list_connections(
           created_at=conn["created_at"],
           updated_at=conn.get("updated_at"),
           last_sync=conn["metadata"].get("last_sync"),
+          write_policy=conn.get("write_policy"),
           metadata=conn["metadata"],
         )
       )
@@ -336,6 +339,7 @@ async def get_connection(
       created_at=connection["created_at"],
       updated_at=connection.get("updated_at"),
       last_sync=connection["metadata"].get("last_sync"),
+      write_policy=connection.get("write_policy"),
       metadata=connection["metadata"],
     )
 
@@ -346,6 +350,76 @@ async def get_connection(
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to get connection",
+      code=ErrorCode.INTERNAL_ERROR,
+    )
+
+
+@router.put(
+  "/{connection_id}/write-policy",
+  response_model=ConnectionResponse,
+  summary="Set Connection Write Policy",
+  operation_id="setConnectionWritePolicy",
+  description=(
+    "Opt a connection into or out of outbound write-back. "
+    "'qb_authoritative' makes QuickBooks the source of truth — "
+    "RoboSystems-originated entries (manual JEs, schedule drafts) publish "
+    "to QuickBooks when executed or at close. 'native' keeps RoboSystems "
+    "authoritative with no write-back. This is the explicit operator opt-in "
+    "for writing to your books of record."
+  ),
+  responses={**RESOURCE_ERROR_RESPONSES},
+)
+async def set_connection_write_policy(
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
+  ),
+  connection_id: str = Path(..., description="Unique connection identifier"),
+  request: SetWritePolicyRequest = ...,
+  current_user: User = Depends(get_current_user_with_graph),
+  db: Session = Depends(get_db_session),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+) -> ConnectionResponse:
+  try:
+    connection = await ConnectionService.set_write_policy(
+      connection_id=connection_id,
+      write_policy=request.write_policy,
+      user_id=current_user.id,
+      graph_id=graph_id,
+    )
+
+    if not connection:
+      raise create_error_response(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Connection not found",
+        code=ErrorCode.NOT_FOUND,
+      )
+
+    logger.info(
+      "Set write_policy=%s on connection %s (graph %s)",
+      request.write_policy,
+      connection_id,
+      graph_id,
+    )
+
+    return ConnectionResponse(
+      connection_id=connection["connection_id"],
+      provider=connection["provider"].lower(),
+      entity_id=connection.get("entity_id"),
+      status=connection["status"],
+      created_at=connection["created_at"],
+      updated_at=connection.get("updated_at"),
+      last_sync=connection["metadata"].get("last_sync"),
+      write_policy=connection.get("write_policy"),
+      metadata=connection["metadata"],
+    )
+
+  except HTTPException:
+    raise
+  except Exception:
+    logger.error("Failed to set connection write policy", exc_info=True)
+    raise create_error_response(
+      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+      detail="Failed to set connection write policy",
       code=ErrorCode.INTERNAL_ERROR,
     )
 

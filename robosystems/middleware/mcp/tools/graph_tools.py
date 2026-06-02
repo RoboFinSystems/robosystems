@@ -9,6 +9,11 @@ Five tools that mirror a subset of the REST graph lifecycle surface at
 4. `materialize` — rebuild LadybugDB from OLTP (extensions) or staging
 5. `create-backup` — enqueue a full-dump backup (admin)
 
+Plus one platform-DB connection tool that shares the same hand-written
+rationale (platform DB, graph-scoped auth, no extensions registrar):
+
+6. `set-write-policy` — opt a connection into / out of outbound write-back
+
 **Deliberately NOT exposed on MCP:**
 
 - `change-tier` — destructive 3-5 minute EBS migration with billing
@@ -755,4 +760,107 @@ class SwitchWorkspaceTool:
         "switch-workspace is a client-side tool. The MCP client should "
         "intercept it locally rather than calling the server."
       ),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# set-write-policy
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class SetWritePolicyTool:
+  """Set a connection's source-of-truth write policy (the write-back opt-in).
+
+  Platform-DB, hand-written (same rationale as the lifecycle tools above):
+  `Connection` lives in the platform DB and the op is graph-scoped via the
+  service rather than the extensions registrar (which carries no graph_id).
+  """
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "set-write-policy",
+      "description": (
+        "Set whether a connection writes back to its source system — the "
+        "explicit opt-in for outbound write-back.\n\n"
+        "**WHAT IT CONTROLS:**\n"
+        "- `native`: RoboSystems is the source of truth. No write-back; "
+        "RoboSystems-originated entries (manual JEs, schedule drafts) post "
+        "locally only.\n"
+        "- `qb_authoritative`: QuickBooks is the source of truth. "
+        "RoboSystems-originated entries publish to QuickBooks when executed "
+        "(`execute-event-block`) or at period close, then post locally.\n\n"
+        "**WHEN TO USE:** Flip a QuickBooks connection to `qb_authoritative` "
+        "before relying on write-back so drafts round-trip into QB; flip "
+        "back to `native` to disable write-back. (`hybrid` is not yet "
+        "supported.)\n\n"
+        "**RETURNS:** the updated connection (including `write_policy`)."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "description": "Connection to update (must belong to this graph).",
+          },
+          "write_policy": {
+            "type": "string",
+            "enum": ["native", "qb_authoritative"],
+            "description": "New write policy.",
+          },
+        },
+        "required": ["connection_id", "write_policy"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.operations.connection_service import ConnectionService
+
+    user = _require_user(self.client)
+    if user is None:
+      return _user_missing_err()
+
+    graph_id = self.client.graph_id
+    repo_err = _block_shared_repo(graph_id)
+    if repo_err:
+      return repo_err
+
+    connection_id = arguments.get("connection_id") or ""
+    write_policy = arguments.get("write_policy") or ""
+    if not connection_id:
+      return {"error": "invalid_arguments", "message": "connection_id is required."}
+    if write_policy not in ("native", "qb_authoritative"):
+      return {
+        "error": "invalid_arguments",
+        "message": "write_policy must be 'native' or 'qb_authoritative'.",
+      }
+
+    try:
+      connection = await ConnectionService.set_write_policy(
+        connection_id=connection_id,
+        write_policy=write_policy,
+        user_id=str(user.id),
+        graph_id=graph_id,
+      )
+    except Exception as exc:
+      logger.error("set-write-policy failed for %s: %s", connection_id, exc)
+      return {"error": "command_failed", "message": str(exc)}
+
+    if connection is None:
+      return {
+        "error": "connection_not_found",
+        "message": (
+          f"Connection {connection_id} not found in graph {graph_id} "
+          "(or not accessible)."
+        ),
+      }
+
+    return {
+      "connection_id": connection["connection_id"],
+      "provider": connection["provider"],
+      "status": connection["status"],
+      "write_policy": connection.get("write_policy"),
     }

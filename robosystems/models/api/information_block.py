@@ -239,8 +239,20 @@ class RuleVariableLite(BaseModel):
   variable_name: str = Field(
     ..., description="Local name in the rule expression, e.g. 'Assets'."
   )
-  variable_qname: str = Field(
-    ..., description="Concept qname the variable resolves to, e.g. 'fac:Assets'."
+  variable_qname: str | None = Field(
+    None,
+    description=(
+      "Concept qname the variable resolves to, e.g. 'fac:Assets'. Null for "
+      "tenant CoA elements (which key on `code`/`element_id`, not qname) — "
+      "in that case the binding is carried by `variable_element_id`."
+    ),
+  )
+  variable_element_id: str | None = Field(
+    None,
+    description=(
+      "Element id the variable binds to directly. Set for schedule SumEquals "
+      "rules over CoA-debit elements that have no qname; null otherwise."
+    ),
   )
 
 

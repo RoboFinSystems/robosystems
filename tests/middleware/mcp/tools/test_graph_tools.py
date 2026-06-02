@@ -9,7 +9,8 @@ Covers the six tools in `middleware/mcp/tools/graph_tools.py`:
 5. `CreateBackupTool`
 6. `GetGraphSyncStatusTool`
 
-Plus the client-side sentinel `SwitchWorkspaceTool`.
+Plus the client-side sentinel `SwitchWorkspaceTool` and the platform-DB
+connection tool `SetWritePolicyTool`.
 
 Shared-repo gate coverage (the primary defense-in-depth concern) lives
 in `tests/routers/graphs/test_ops_shared_repo_gates.py`. This file
@@ -31,6 +32,7 @@ from robosystems.middleware.mcp.tools.graph_tools import (
   GetGraphSyncStatusTool,
   ListSubgraphsTool,
   MaterializeTool,
+  SetWritePolicyTool,
   SwitchWorkspaceTool,
 )
 
@@ -469,3 +471,79 @@ class TestSwitchWorkspace:
     for the "client-side tool" contract documented in the description."""
     result = await SwitchWorkspaceTool(_client()).execute({"workspace_id": "primary"})
     assert result["error"] == "client_side_tool"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SetWritePolicyTool
+# ══════════════════════════════════════════════════════════════════════════
+
+CONN_MODULE = "robosystems.operations.connection_service"
+
+
+class TestSetWritePolicyDefinition:
+  def test_definition_shape(self) -> None:
+    defn = SetWritePolicyTool(_client()).get_tool_definition()
+    assert defn["name"] == "set-write-policy"
+    required = defn["inputSchema"]["required"]
+    assert "connection_id" in required
+    assert "write_policy" in required
+    assert defn["inputSchema"]["properties"]["write_policy"]["enum"] == [
+      "native",
+      "qb_authoritative",
+    ]
+
+
+class TestSetWritePolicyExecute:
+  @pytest.mark.asyncio
+  async def test_missing_user(self) -> None:
+    client = _client()
+    client.user = None
+    result = await SetWritePolicyTool(client).execute(
+      {"connection_id": "conn_1", "write_policy": "native"}
+    )
+    assert result["error"] == "authentication_required"
+
+  @pytest.mark.asyncio
+  async def test_invalid_policy_rejected_pre_service(self) -> None:
+    result = await SetWritePolicyTool(_client()).execute(
+      {"connection_id": "conn_1", "write_policy": "hybrid"}
+    )
+    assert result["error"] == "invalid_arguments"
+
+  @pytest.mark.asyncio
+  async def test_missing_connection_id(self) -> None:
+    result = await SetWritePolicyTool(_client()).execute({"write_policy": "native"})
+    assert result["error"] == "invalid_arguments"
+
+  @pytest.mark.asyncio
+  async def test_happy_path_delegates_to_service(self) -> None:
+    updated = {
+      "connection_id": "conn_1",
+      "provider": "quickbooks",
+      "status": "connected",
+      "write_policy": "qb_authoritative",
+    }
+    with patch(
+      f"{CONN_MODULE}.ConnectionService.set_write_policy",
+      new=AsyncMock(return_value=updated),
+    ) as mock_set:
+      result = await SetWritePolicyTool(_client()).execute(
+        {"connection_id": "conn_1", "write_policy": "qb_authoritative"}
+      )
+
+    assert result["write_policy"] == "qb_authoritative"
+    assert result["connection_id"] == "conn_1"
+    # graph_id from the client is passed through for scoping.
+    assert mock_set.call_args.kwargs["graph_id"] == GRAPH_ID
+    assert mock_set.call_args.kwargs["connection_id"] == "conn_1"
+
+  @pytest.mark.asyncio
+  async def test_connection_not_found(self) -> None:
+    with patch(
+      f"{CONN_MODULE}.ConnectionService.set_write_policy",
+      new=AsyncMock(return_value=None),
+    ):
+      result = await SetWritePolicyTool(_client()).execute(
+        {"connection_id": "conn_x", "write_policy": "native"}
+      )
+    assert result["error"] == "connection_not_found"
