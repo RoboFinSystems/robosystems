@@ -60,6 +60,29 @@ class WritePolicy(str, Enum):
   HYBRID = "hybrid"
 
 
+# Per-provider default for the OUTBOUND write-back policy. An active
+# QuickBooks connection is authoritative by nature — QB is the general
+# ledger, so RoboLedger-originated entries (manual JEs, schedule drafts)
+# write back to it. There is no steady state where you keep QB connected
+# but deliberately diverge the two ledgers. Other providers have no
+# external GL to write to (SEC repos; the future Plaid/native-accounting
+# world), so they stay NATIVE. `native` therefore describes a graph with no
+# active authoritative external connection — pre-connect, post-disconnect
+# (the connection's events lose their connection_id and `execute_event_block`
+# no-ops), or native-accounting — NOT a "connected-but-don't-write" choice.
+# Inbound sync-down is decoupled from this and mirrors QB regardless.
+_PROVIDER_WRITE_POLICY_DEFAULTS: dict[str, str] = {
+  "quickbooks": WritePolicy.QB_AUTHORITATIVE.value,
+}
+
+
+def default_write_policy_for_provider(provider: str) -> str:
+  """Resolve the default outbound write policy for a newly-created
+  connection of ``provider``. QuickBooks → ``qb_authoritative``; everything
+  else → ``native`` (the column's server_default)."""
+  return _PROVIDER_WRITE_POLICY_DEFAULTS.get(provider, WritePolicy.NATIVE.value)
+
+
 class Connection(Model):
   """Data source connection metadata."""
 
@@ -152,8 +175,13 @@ class Connection(Model):
     entity_name: str | None = None,
     institution_name: str | None = None,
     auto_sync_enabled: bool = True,
+    write_policy: str | None = None,
   ) -> "Connection":
-    """Create a new connection."""
+    """Create a new connection.
+
+    ``write_policy`` defaults per provider (QuickBooks → ``qb_authoritative``,
+    others → ``native``); pass an explicit value to override.
+    """
     conn = cls(
       graph_id=graph_id,
       user_id=user_id,
@@ -165,6 +193,7 @@ class Connection(Model):
       entity_name=entity_name,
       institution_name=institution_name,
       auto_sync_enabled=auto_sync_enabled,
+      write_policy=write_policy or default_write_policy_for_provider(provider),
     )
     session.add(conn)
     try:

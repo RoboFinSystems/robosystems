@@ -71,13 +71,14 @@ class ConnectionService:
         auto_sync_enabled=metadata.get("auto_sync_enabled", True),
       )
 
-      # `write_policy` governs the OUTBOUND (write-back) direction only,
-      # and defaults to the column's `'native'` — no writes back to the
-      # source system without an explicit operator opt-in. Inbound
-      # sync-down is decoupled: QB rows auto-commit to GL via the loader's
-      # source-keyed rule (`_source_auto_commits_on_sync`) regardless of
-      # this policy, so a `native` QB connection still mirrors QB into a
-      # populated ledger ("sync down, don't write back").
+      # `write_policy` governs the OUTBOUND (write-back) direction only and
+      # defaults per provider (`Connection.create` →
+      # `default_write_policy_for_provider`): a QuickBooks connection is
+      # `qb_authoritative` (QB is the GL, so RL-originated entries write
+      # back), everything else is `native`. Inbound sync-down is decoupled —
+      # QB rows auto-commit to GL via the loader's source-keyed rule
+      # regardless of this policy. Flip to `native` via `set_write_policy`
+      # to pause write-back (e.g. a setup/review window).
 
       # Store credentials if provided
       if credentials:
