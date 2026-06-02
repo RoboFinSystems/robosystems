@@ -6,10 +6,6 @@
       "Bash(git diff:*)",
       "Bash(git show:*)",
       "Bash(git log:*)",
-      "Bash(git branch --list:*)",
-      "Bash(git branch -a:*)",
-      "Bash(git branch -r:*)",
-      "Bash(git branch -v:*)",
       "Bash(ls:*)",
       "Bash(tree:*)",
       "Bash(wc:*)",
@@ -118,6 +114,11 @@
       "mcp__robosystems__switch-workspace"
     ],
     "ask": [
+      "Bash(git branch --show-current:*)",
+      "Bash(git branch --list:*)",
+      "Bash(git branch -a:*)",
+      "Bash(git branch -r:*)",
+      "Bash(git branch -v:*)",
       "Bash(just gha-set:*)",
       "Bash(just gha-delete:*)",
       "Bash(just ssm-set:*)",

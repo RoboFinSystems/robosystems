@@ -332,51 +332,30 @@ class PeriodCloseService:
     """
     from robosystems.database import SessionFactory as _PlatformSessionFactory
     from robosystems.models.api.event_block import ExecuteEventBlockRequest
-    from robosystems.models.core.connection.connection import Connection
-    from robosystems.models.extensions.roboledger.event import Event
     from robosystems.operations.event_block.commands import execute_event_block
 
-    # Find the first QB connection in qb_authoritative / hybrid mode on
-    # this graph. Most graphs have at most one QB connection; if a
-    # graph has multiple, v1 picks the first by created_at desc.
-    qb_connection_id: str | None = None
-    with _PlatformSessionFactory() as platform_session:
-      candidate = (
-        platform_session.query(Connection)
-        .filter(
-          Connection.graph_id == graph_id,
-          Connection.provider == "quickbooks",
-          Connection.write_policy.in_(("qb_authoritative", "hybrid")),
-          Connection.deleted_at.is_(None),
-        )
-        .order_by(Connection.created_at.desc())
-        .first()
-      )
-      if candidate is None:
-        logger.debug(
-          f"No qb_authoritative QB connection on graph {graph_id}; "
-          f"skipping close-period pre-publish step"
-        )
-        return
-      qb_connection_id = str(candidate.id)
+    from .qb_writeback import (
+      resolve_writeback_connection,
+      select_writeback_eligible_entries,
+    )
 
-    # Find in-period draft entries from RL-originated events.
-    drafts_to_publish = (
-      session.query(Entry, Event)
-      .join(Event, Event.id == Entry.triggered_by_event_id)
-      .filter(
-        Entry.posting_date >= period_start,
-        Entry.posting_date <= period_end,
-        Entry.status == "draft",
-        Event.source.in_(("schedule", "manual")),
-        # Skip events that already have a QB-side id (a previous
-        # close-period attempt or operator-triggered execute-event-block
-        # already published this event — re-attempt would create
-        # duplicate QB entries even with RequestId dedup if the
-        # request_id differs).
-        Event.metadata_["qb_external_id"].astext.is_(None),
+    # Resolve the QB connection close publishes to. Shared with the
+    # outbox read (`list_period_drafts`) so the preview of "what will
+    # publish" can't drift from this actual write.
+    with _PlatformSessionFactory() as platform_session:
+      writeback = resolve_writeback_connection(platform_session, graph_id)
+    if writeback is None:
+      logger.debug(
+        f"No qb_authoritative QB connection on graph {graph_id}; "
+        f"skipping close-period pre-publish step"
       )
-      .all()
+      return
+    qb_connection_id = writeback.connection_id
+
+    # In-period draft entries from RL-originated events not already in QB
+    # (same predicate the outbox read previews — see qb_writeback.py).
+    drafts_to_publish = select_writeback_eligible_entries(
+      session, period_start, period_end
     )
 
     if not drafts_to_publish:

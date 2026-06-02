@@ -357,6 +357,15 @@ class DraftEntryResponse(BaseModel):
   total_debit: int = Field(..., description="Sum of debit amounts in cents")
   total_credit: int = Field(..., description="Sum of credit amounts in cents")
   balanced: bool = Field(..., description="True if total_debit == total_credit")
+  will_publish_to_qb: bool = Field(
+    False,
+    description=(
+      "True if closing the period will publish this draft to QuickBooks — "
+      "i.e. the graph has a qb_authoritative/hybrid QB connection AND this "
+      "is an RL-originated draft (schedule/manual) not already in QB. False "
+      "means it posts locally only."
+    ),
+  )
 
 
 class PeriodDraftsResponse(BaseModel):
@@ -370,5 +379,28 @@ class PeriodDraftsResponse(BaseModel):
   total_credit: int = Field(..., description="Sum across all drafts, in cents")
   all_balanced: bool = Field(
     ..., description="True if every draft entry has debit == credit"
+  )
+  qb_writeback_connection_id: str | None = Field(
+    None,
+    description=(
+      "Id of the QuickBooks connection these drafts publish to on close, or "
+      "null when the graph has no qb_authoritative/hybrid QB connection (the "
+      "drafts post locally only)."
+    ),
+  )
+  qb_write_policy: str | None = Field(
+    None,
+    description=(
+      "write_policy of the publishing QB connection ('qb_authoritative' / "
+      "'hybrid'), or null when there is no write-back connection."
+    ),
+  )
+  qb_publish_count: int = Field(
+    0,
+    description="Number of drafts that will publish to QuickBooks on close.",
+  )
+  local_only_count: int = Field(
+    0,
+    description="Number of drafts that post locally only (no QB write-back).",
   )
   drafts: list[DraftEntryResponse]
