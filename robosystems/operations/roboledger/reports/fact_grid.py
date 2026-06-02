@@ -232,6 +232,14 @@ def generate_report_facts(
   # financing were already emitted from flow concepts above.
   _derive_cash_flow_facts(session, facts, periods)
 
+  # Foot the CF to the actual cash movement. Investing/financing come from
+  # actual cash-paired postings and ΔCash is known from the cash-anchor instant
+  # facts, so the operating non-cash adjustment that reconciles net income to
+  # operating cash is exactly ΔCash - Investing - Financing - (NI + DDA + ΔWC).
+  # Book it on an operating leaf so the statement foots to actual cash. Runs
+  # before the subtotal roll-up so the subtotals foot.
+  _reconcile_operating_to_cash(session, facts, periods)
+
   # Persist the calc-DAG subtotals (Assets, Revenues, GrossProfit,
   # StockholdersEquity, …) as facts. Runs last so every leaf + derived
   # fact above is in place; the rollup reads them and emits one subtotal
@@ -457,6 +465,27 @@ def _roll_up_facts_to_structure(
   if not facts:
     return facts
 
+  # An in-structure element that already carries its own fact for a period
+  # (a derived subtotal from ``_emit_subtotal_facts``, or a directly-mapped
+  # balance) is authoritative for that node — exactly as ``_build_rows``
+  # prefers a direct fact over a child rollup. Out-of-structure detail that
+  # resolves *up* to such an ancestor is redundant with that fact and must
+  # NOT be summed on top of it, or the node double-counts. This is the
+  # structure-dependent sibling of ``audit_only``: e.g. in the equity
+  # roll-forward (which lists equity as a StockholdersEquity total + flows,
+  # not by component) the AdditionalPaidInCapital + RetainedEarnings leaves
+  # are out-of-structure and roll up to StockholdersEquity, which already
+  # has its subtotal fact — without this guard the total renders at 2x.
+  # Keyed per-period so a subtotal only suppresses roll-up for the period
+  # it actually covers. (In the balance sheet those same leaves are
+  # in-structure, so they pass through as their own rows and never reach
+  # this path — the BS is unaffected.)
+  direct_keys = {
+    (f.element_id, f.period_start, f.period_end)
+    for f in facts
+    if not f.audit_only and f.element_id in in_structure
+  }
+
   cache: dict[str, str | None] = {}
   rolled: list[ReportFact] = []
   for fact in facts:
@@ -473,6 +502,10 @@ def _roll_up_facts_to_structure(
       session, fact.element_id, in_structure, cache
     )
     if ancestor is None:
+      continue
+    if (ancestor, fact.period_start, fact.period_end) in direct_keys:
+      # Ancestor already carries an authoritative fact for this period;
+      # rolling this detail onto it would double-count (see direct_keys).
       continue
     # Reuse fact metadata; only the element_id pointer changes.
     rolled.append(
@@ -1206,6 +1239,13 @@ _CASH_ANCHOR_QNAMES: frozenset[str] = frozenset(
   }
 )
 
+# The CF net-change bottom line (Operating + Investing + Financing) and the
+# operating-section leaf the cash-anchored reconciliation lands on. The leaf
+# is present in both the rs-gaap CF calc DAG and the Indirect presentation, so
+# the adjustment both foots the subtotal and renders as a line.
+_CF_NET_CHANGE_QNAME = "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+_CF_RECONCILING_LEAF_QNAME = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+
 
 def _emit_flow_facts(
   session: Session,
@@ -1525,6 +1565,142 @@ def _derive_cash_flow_facts(
           period_type="duration",
         )
       )
+
+
+def _reconcile_operating_to_cash(
+  session: Session,
+  facts: list[ReportFact],
+  periods: list[PeriodSpec],
+) -> None:
+  """Foot the indirect CF to the actual cash-balance movement.
+
+  The indirect operating section (``NetIncome + DDA + ΣΔWC``) reverses only
+  depreciation among non-cash items. A non-cash gain/loss embedded in net
+  income — a distribution-in-kind loss, an unrealized mark-to-market gain, a
+  write-off — flows straight through, so the computed CF net change diverges
+  from the real period-over-period cash movement (the residual
+  ``_check_cash_flow_tie_out`` warns about).
+
+  Investing/financing are already attributed from actual cash-paired postings
+  (``_emit_flow_facts``), and ΔCash is known from the cash-anchor instant
+  facts, so true operating cash is ``ΔCash - Investing - Financing``. We emit
+  the gap between that and the computed CF as a single grounded reconciling
+  adjustment on ``IncreaseDecreaseInOtherOperatingCapitalNet`` — an operating
+  leaf present in both the rs-gaap CF calc and the Indirect presentation — so
+  the statement foots to actual cash. The adjustment IS the aggregate non-cash
+  operating reconciliation; itemizing its components (gain/loss on disposal,
+  unrealized MTM, …) into their own lines is a future enrichment. The plugged
+  amount is logged so it stays visible rather than silently absorbed.
+
+  TRADEOFF — this foots the CF *by construction*, which makes the downstream
+  ``_check_cash_flow_tie_out`` residual ~0 and therefore effectively silent.
+  The benefit is a CF that always articulates to actual cash; the cost is that
+  a *future* investing/financing misclassification would be absorbed into this
+  operating reconciling line instead of surfacing as a tie-out warning. Mitigation
+  for later: warn (not just log) when the plugged amount is large relative to
+  operating cash, so a genuine misclassification still trips an alarm. For now
+  the log line is the audit trail.
+
+  Runs AFTER ``_derive_cash_flow_facts`` / ``_emit_flow_facts`` (the CF leaves
+  must exist) and BEFORE ``_emit_subtotal_facts`` (so the subtotals pick up the
+  adjustment). No-op for <2 periods or when the cash-anchor balance is absent
+  for a period (can't reconcile — the tie-out check then warns). Mutates
+  ``facts``.
+  """
+  if len(periods) < 2:
+    return
+
+  id_rows = session.execute(
+    text("SELECT id, qname, name, balance_type FROM elements WHERE qname = ANY(:q)"),
+    {"q": [_CF_NET_CHANGE_QNAME, _CF_RECONCILING_LEAF_QNAME]},
+  ).fetchall()
+  by_qname = {r.qname: r for r in id_rows}
+  net_change = by_qname.get(_CF_NET_CHANGE_QNAME)
+  recon = by_qname.get(_CF_RECONCILING_LEAF_QNAME)
+  if net_change is None or recon is None:
+    # Framework missing the CF net-change or the reconciling leaf — nothing to
+    # foot against. Leave the CF as derived; the tie-out check surfaces the gap.
+    return
+  net_change_id = net_change.id
+  recon_leaf_id = recon.id
+
+  # rs-gaap-calculations DAG — same source/resolution as _emit_subtotal_facts,
+  # so the net-change we compute here matches what the renderer will show.
+  rows = session.execute(
+    text("""
+      SELECT a.from_element_id AS parent, a.to_element_id AS child, a.weight
+      FROM associations a
+      JOIN structures s ON s.id = a.structure_id
+      JOIN taxonomies t ON t.id = s.taxonomy_id
+      WHERE a.association_type = 'calculation'
+        AND t.standard = 'rs-gaap-calculations'
+      ORDER BY a.order_value
+    """)
+  ).fetchall()
+  if not rows:
+    return
+  calculations: dict[str, list[tuple[str, float]]] = {}
+  for r in rows:
+    weight = float(r.weight) if r.weight is not None else 1.0
+    calculations.setdefault(r.parent, []).append((r.child, weight))
+  order = _topo_sort_calculations(calculations)
+
+  # Cash-balance (instant) anchors by period boundary — a period's end is the
+  # next period's opening, same prior-period-end delta basis as the tie-out.
+  cash_by_date: dict[date, float] = {}
+  for f in facts:
+    if f.period_type == "instant" and f.element_qname in _CASH_ANCHOR_QNAMES:
+      cash_by_date[f.period_end] = cash_by_date.get(f.period_end, 0.0) + f.value
+
+  ordered = sorted(periods, key=lambda p: p.end)
+  for i in range(1, len(ordered)):
+    current, prior = ordered[i], ordered[i - 1]
+    cash_end = cash_by_date.get(current.end)
+    if cash_end is None:
+      continue
+    cash_delta = cash_end - cash_by_date.get(prior.end, 0.0)
+
+    # Resolve the CF net-change the renderer would show: direct fact wins,
+    # else Σ child·weight (identical to _emit_subtotal_facts / _build_rows).
+    balances: dict[str, float] = {}
+    present: set[str] = set()
+    for f in facts:
+      if f.period_start == current.start and f.period_end == current.end:
+        balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
+        present.add(f.element_id)
+    computed: dict[str, float] = dict(balances)
+    for elem_id in order:
+      direct = computed.get(elem_id, 0.0)
+      summed = sum(computed.get(src, 0.0) * w for src, w in calculations[elem_id])
+      computed[elem_id] = direct if elem_id in present else summed
+    derived_net_change = computed.get(net_change_id, 0.0)
+
+    residual = cash_delta - derived_net_change
+    if abs(residual) <= 0.005:
+      continue
+    logger.info(
+      "CF reconciled to cash for period ending %s: non-cash operating "
+      "adjustment %.2f (derived net change %.2f, actual cash movement %.2f). "
+      "Booked to %s; itemizing its components is a future enrichment.",
+      current.end,
+      residual,
+      derived_net_change,
+      cash_delta,
+      _CF_RECONCILING_LEAF_QNAME,
+    )
+    facts.append(
+      ReportFact(
+        element_id=recon_leaf_id,
+        element_qname=_CF_RECONCILING_LEAF_QNAME,
+        element_name=recon.name or _CF_RECONCILING_LEAF_QNAME,
+        classification=None,
+        balance_type=recon.balance_type or "debit",
+        value=residual,
+        period_start=current.start,
+        period_end=current.end,
+        period_type="duration",
+      )
+    )
 
 
 def _check_cash_flow_tie_out(
