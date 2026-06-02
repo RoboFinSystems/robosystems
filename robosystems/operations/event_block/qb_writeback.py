@@ -209,7 +209,7 @@ def _entries_from_draft_rows(session: Session, event_id: str) -> list[dict[str, 
   entries = (
     session.query(Entry)
     .filter(Entry.triggered_by_event_id == event_id)
-    .order_by(Entry.created_at)
+    .order_by(Entry.created_at, Entry.id)
     .all()
   )
   result: list[dict[str, Any]] = []

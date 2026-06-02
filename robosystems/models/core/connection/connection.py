@@ -193,7 +193,11 @@ class Connection(Model):
       entity_name=entity_name,
       institution_name=institution_name,
       auto_sync_enabled=auto_sync_enabled,
-      write_policy=write_policy or default_write_policy_for_provider(provider),
+      write_policy=(
+        write_policy
+        if write_policy is not None
+        else default_write_policy_for_provider(provider)
+      ),
     )
     session.add(conn)
     try:

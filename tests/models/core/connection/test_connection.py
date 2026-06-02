@@ -452,8 +452,6 @@ class TestConnectionSetWritePolicy:
       conn.set_write_policy(session, "qb_authoritative")
     session.rollback.assert_called_once()
 
-    session.rollback.assert_called_once()
-
 
 @pytest.mark.unit
 class TestConnectionDelete:
