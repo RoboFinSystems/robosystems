@@ -208,3 +208,63 @@ def test_rollup_handles_empty_input():
   result = _roll_up_facts_to_structure(session, [], {"a", "b"})
   assert result == []
   session.execute.assert_not_called()
+
+
+def _fact_period(element_id: str, value: float, start: date, end: date) -> ReportFact:
+  return ReportFact(
+    element_id=element_id,
+    element_qname=f"rs-gaap:{element_id}",
+    element_name=element_id,
+    classification="equity",
+    balance_type="credit",
+    value=value,
+    period_start=start,
+    period_end=end,
+    period_type="duration",
+  )
+
+
+def test_rollup_suppresses_redundant_detail_when_ancestor_has_direct_fact():
+  """Regression: the equity roll-forward 2x double-count.
+
+  When an in-structure ancestor already carries its own authoritative
+  fact for a period (a derived subtotal, e.g. StockholdersEquity from
+  _emit_subtotal_facts), out-of-structure component leaves that resolve
+  up to it (AdditionalPaidInCapital + RetainedEarnings) must NOT be
+  summed on top — they're already represented by the subtotal. Without
+  the guard the total renders at 2x.
+  """
+  p0, p1 = date(2025, 1, 1), date(2025, 12, 31)
+  session = _ancestor_session({"apic": ["equity"], "re": ["equity"]})
+  facts = [
+    _fact_period("equity", 122420.97, p0, p1),  # in-structure subtotal fact
+    _fact_period("apic", 74339.73, p0, p1),  # out-of-structure leaf
+    _fact_period("re", 48081.24, p0, p1),  # out-of-structure leaf
+  ]
+  result = _roll_up_facts_to_structure(session, facts, {"equity"})
+  # Only the authoritative subtotal survives; the redundant leaves are
+  # suppressed rather than summed on top (which would yield ~244,841.94).
+  assert len(result) == 1
+  assert result[0].element_id == "equity"
+  assert result[0].value == 122420.97
+
+
+def test_rollup_suppression_is_period_scoped():
+  """A direct fact in one period suppresses roll-up only for that period.
+
+  A leaf in a period the ancestor has no direct fact for still rolls up
+  normally — the guard keys on (ancestor, period), not the ancestor alone.
+  """
+  pa0, pa1 = date(2025, 1, 1), date(2025, 12, 31)
+  pb0, pb1 = date(2024, 1, 1), date(2024, 12, 31)
+  session = _ancestor_session({"apic": ["equity"]})
+  facts = [
+    _fact_period("equity", 122420.97, pa0, pa1),  # direct fact, 2025 only
+    _fact_period("apic", 74339.73, pa0, pa1),  # 2025 leaf — suppressed
+    _fact_period("apic", 29183.73, pb0, pb1),  # 2024 leaf — rolls up
+  ]
+  result = _roll_up_facts_to_structure(session, facts, {"equity"})
+  assert len(result) == 2
+  by_period = {(f.period_start, f.period_end): f for f in result}
+  assert by_period[(pa0, pa1)].value == 122420.97  # subtotal kept
+  assert by_period[(pb0, pb1)].value == 29183.73  # 2024 leaf rolled up

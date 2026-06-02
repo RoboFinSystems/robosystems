@@ -27,6 +27,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   _infer_period_type,
   _is_equity_flow_reducer,
   _natural_sign,
+  _reconcile_operating_to_cash,
   _roll_up_facts_to_structure,
   _root_sort_key,
   _synthesize_ppe_net_facts,
@@ -2131,6 +2132,116 @@ class TestCheckCashFlowTieOut:
     with patch(self._LOGGER) as log:
       _check_cash_flow_tie_out(facts, self._periods())
     assert log.warning.called
+
+
+class TestReconcileOperatingToCash:
+  """``_reconcile_operating_to_cash`` — foot the CF to actual ΔCash.
+
+  The indirect operating section reverses only depreciation, so non-cash
+  gains/losses in net income leave the derived CF net change ≠ ΔCash. This
+  emits the gap as a grounded adjustment on the operating catch-all leaf so
+  the statement foots to the real cash-balance movement.
+  """
+
+  P0 = date(2024, 12, 31)
+  P1 = date(2025, 12, 31)
+  NET_CHANGE_Q = "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+  RECON_Q = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+
+  def _periods(self):
+    return [
+      PeriodSpec(date(2024, 1, 1), self.P0, "Prior"),
+      PeriodSpec(date(2025, 1, 1), self.P1, "Current"),
+    ]
+
+  def _session(self):
+    # Element-id lookup + a minimal rs-gaap-calculations DAG:
+    #   net_change = operating ;  operating = NetIncome + OtherOperatingCapital
+    def execute(stmt, params=None):
+      sql = str(stmt)
+      result = MagicMock()
+      if "FROM elements" in sql:
+        result.fetchall.return_value = [
+          SimpleNamespace(
+            id="nc", qname=self.NET_CHANGE_Q, name="Net change", balance_type="credit"
+          ),
+          SimpleNamespace(
+            id="ooc",
+            qname=self.RECON_Q,
+            name="Other Operating, Net",
+            balance_type="debit",
+          ),
+        ]
+      elif "calculation" in sql:
+        result.fetchall.return_value = [
+          SimpleNamespace(parent="nc", child="op", weight=1),
+          SimpleNamespace(parent="op", child="ni", weight=1),
+          SimpleNamespace(parent="op", child="ooc", weight=1),
+        ]
+      else:
+        result.fetchall.return_value = []
+      return result
+
+    session = MagicMock()
+    session.execute.side_effect = execute
+    return session
+
+  def _cash(self, value, end):
+    return ReportFact(
+      element_id=f"cash-{end}",
+      element_qname="rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+      element_name="Cash",
+      classification=None,
+      balance_type="debit",
+      value=value,
+      period_start=None,
+      period_end=end,
+      period_type="instant",
+    )
+
+  def _ni(self, value):
+    return ReportFact(
+      element_id="ni",
+      element_qname="rs-gaap:NetIncomeLoss",
+      element_name="NI",
+      classification=None,
+      balance_type="credit",
+      value=value,
+      period_start=date(2025, 1, 1),
+      period_end=self.P1,
+      period_type="duration",
+    )
+
+  def test_emits_reconciling_adjustment(self):
+    # Cash 150 → 100 ⇒ ΔCash = -50. Derived net change = NI = -80.
+    # Residual = -50 - (-80) = +30 booked to the operating catch-all so the
+    # bottom line foots to -50.
+    facts = [self._cash(150.0, self.P0), self._cash(100.0, self.P1), self._ni(-80.0)]
+    _reconcile_operating_to_cash(self._session(), facts, self._periods())
+    recon = [f for f in facts if f.element_id == "ooc"]
+    assert len(recon) == 1
+    assert recon[0].value == 30.0
+    assert recon[0].period_end == self.P1
+    assert recon[0].element_qname == self.RECON_Q
+
+  def test_no_adjustment_when_already_ties(self):
+    # Derived net change (-50) already equals ΔCash (-50) ⇒ no fact added.
+    facts = [self._cash(150.0, self.P0), self._cash(100.0, self.P1), self._ni(-50.0)]
+    _reconcile_operating_to_cash(self._session(), facts, self._periods())
+    assert not [f for f in facts if f.element_id == "ooc"]
+
+  def test_noop_when_no_cash_anchor(self):
+    # No instant cash balance for the period ⇒ can't reconcile ⇒ no fact.
+    facts = [self._ni(-80.0)]
+    _reconcile_operating_to_cash(self._session(), facts, self._periods())
+    assert not [f for f in facts if f.element_id == "ooc"]
+
+  def test_single_period_noop(self):
+    facts = [self._cash(100.0, self.P1), self._ni(-80.0)]
+    _reconcile_operating_to_cash(
+      self._session(), facts, [PeriodSpec(date(2025, 1, 1), self.P1, "Only")]
+    )
+    assert not [f for f in facts if f.element_id == "ooc"]
 
 
 class TestDeriveCashFlowFacts:
