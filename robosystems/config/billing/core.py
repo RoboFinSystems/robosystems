@@ -33,7 +33,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "name": "ladybug-standard",
     "display_name": "LadybugDB Standard",
     "description": "Dedicated m7g.large LadybugDB infrastructure with subgraph support",
-    "base_price_cents": 9900,  # $99/month
+    "base_price_cents": 14900,  # $149/month
     "monthly_credit_allocation": 8000,  # ~200 agent calls/month
     "backup_downloads_per_month": 10,
     "max_documents": 100,
