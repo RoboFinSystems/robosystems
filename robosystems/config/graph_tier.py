@@ -597,9 +597,9 @@ class GraphTierConfig:
 
       # Add display name based on tier
       display_names = {
-        "ladybug-standard": "LadybugDB Standard",
-        "ladybug-large": "LadybugDB Large",
-        "ladybug-xlarge": "LadybugDB XLarge",
+        "ladybug-standard": "Standard",
+        "ladybug-large": "Large",
+        "ladybug-xlarge": "XLarge",
         "ladybug-shared": "Shared Repository",
       }
       tier_info["display_name"] = display_names.get(tier_name, writer.get("name"))

@@ -34,6 +34,7 @@ def _renew_subscriptions(
   4. Generate a renewal invoice
   5. Log an audit event
   """
+  from robosystems.config.billing import BillingConfig
   from robosystems.models.core.billing import (
     BillingAuditLog,
     BillingCustomer,
@@ -100,10 +101,14 @@ def _renew_subscriptions(
         old_period_end = subscription.current_period_end
         subscription.renew_period(session)
 
+        plan_config = BillingConfig.get_subscription_plan(subscription.plan_name)
+        tier_label = (
+          plan_config["display_name"] if plan_config else subscription.plan_name
+        )
         invoice = generate_subscription_invoice(
           subscription=subscription,
           customer=customer,
-          description=f"{subscription.plan_name} subscription renewal",
+          description=f"Graph subscription renewal — {tier_label}",
           session=session,
         )
 
