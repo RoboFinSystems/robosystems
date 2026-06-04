@@ -70,7 +70,9 @@ packages/
 ├── rs-gaap-hierarchy/v1/             forked  — rs-gaap class hierarchy
 ├── rs-gaap-presentation/v1/          native  — rs-gaap presentation hierarchies
 ├── rs-gaap-calculations/v1/          native  — rs-gaap calc DAG (composes with fac-calculations)
-├── rs-gaap-type-subtype/v1/          forked  — rs-gaap classification linkbase (general-special arcs + ASC citations)
+├── rs-gaap-type-subtype/v1/          forked  — rs-gaap classification linkbase (general-special arcs)
+├── rs-gaap-references/v1/            forked  — ASC citation reference linkbase (attach-by-qname)
+├── rs-gaap-labels/v1/                forked  — supplementary + total-role label linkbase (attach-by-qname)
 ├── rs-gaap-disclosures/v1/           native  — named Disclosures (~30)
 ├── rs-gaap-disclosure-mechanics/v1/  native  — DM rules per Disclosure
 ├── rs-gaap-reporting-checklist/v1/   native  — DR rules per report type
@@ -89,10 +91,24 @@ fac-traits vocabulary.
 
 ## Notes on specific packages
 
-**`rs-gaap-type-subtype`** is Charlie's classification linkbase pattern.
-Theoretically reusable, but currently scoped to rs-gaap; if/when
-another framework needs the same pattern, promote to `fac@v1` or
-extract to its own framework.
+**`rs-gaap-type-subtype`** is Charlie's classification linkbase pattern —
+the general-special (type/subtype) arcs only. Theoretically reusable, but
+currently scoped to rs-gaap; if/when another framework needs the same
+pattern, promote to `fac@v1` or extract to its own framework.
+
+**`rs-gaap-references`** and **`rs-gaap-labels`** are pure linkbases split
+out of `rs-gaap-type-subtype` (which originally clumped arcs + ASC citations
++ labels + a redundant re-definition of every concept). They define **no
+concepts** — each node references a concept defined in the `rs-gaap` base
+**by qname** (the XBRL reference/label-linkbase pattern). The loader emits
+them as `reference_assignments` / `label_assignments`; the seeder attaches
+them in the cross-package arcs pass (same as trait assignments) once every
+element exists, so the deterministic label/reference ids
+(`uuid5(element_id:role:language)` / `uuid5(element_id:citation)`) reseed
+byte-identically to inline labels/refs. Regenerate with
+`robosystems/taxonomy/scripts/split_type_subtype.py` if the upstream
+type-subtype source is re-ingested. Both are `tenant_copy: true` — tenants
+get the citations and labels for the concepts they keep.
 
 **`rs-gaap-reporting-styles`** is THE vertical-flavor surface. New
 industries (Mining, Cannabis, Cooperative, B-Corp, etc.) are added

@@ -14,11 +14,13 @@
     {"standard": "rs-gaap-presentation",         "version": "v1", "ordinal": 3, "is_required": true},
     {"standard": "rs-gaap-calculations",         "version": "v1", "ordinal": 4, "is_required": true},
     {"standard": "rs-gaap-type-subtype",         "version": "v1", "ordinal": 5, "is_required": true},
-    {"standard": "rs-gaap-disclosures",          "version": "v1", "ordinal": 6, "is_required": true},
-    {"standard": "rs-gaap-disclosure-mechanics", "version": "v1", "ordinal": 7, "is_required": true, "tenant_copy": false},
-    {"standard": "rs-gaap-reporting-checklist",  "version": "v1", "ordinal": 8, "is_required": true, "tenant_copy": false},
-    {"standard": "rs-gaap-reporting-styles",     "version": "v1", "ordinal": 9, "is_required": true},
-    {"standard": "rs-gaap-rollup-rules",         "version": "v1", "ordinal": 10, "is_required": true}
+    {"standard": "rs-gaap-references",           "version": "v1", "ordinal": 6, "is_required": true},
+    {"standard": "rs-gaap-labels",               "version": "v1", "ordinal": 7, "is_required": true},
+    {"standard": "rs-gaap-disclosures",          "version": "v1", "ordinal": 8, "is_required": true},
+    {"standard": "rs-gaap-disclosure-mechanics", "version": "v1", "ordinal": 9, "is_required": true, "tenant_copy": false},
+    {"standard": "rs-gaap-reporting-checklist",  "version": "v1", "ordinal": 10, "is_required": true, "tenant_copy": false},
+    {"standard": "rs-gaap-reporting-styles",     "version": "v1", "ordinal": 11, "is_required": true},
+    {"standard": "rs-gaap-rollup-rules",         "version": "v1", "ordinal": 12, "is_required": true}
   ],
   "bridges": [
     {"bridge": "fac-to-rs-gaap",                            "version": "v1", "ordinal": 0, "is_required": true},

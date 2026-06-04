@@ -86,7 +86,9 @@ frameworks/
     │   ├── rs-gaap-hierarchy/v1/
     │   ├── rs-gaap-presentation/v1/
     │   ├── rs-gaap-calculations/v1/
-    │   ├── rs-gaap-type-subtype/v1/       general-special arcs + ASC citations
+    │   ├── rs-gaap-type-subtype/v1/       general-special (type/subtype) arcs
+    │   ├── rs-gaap-references/v1/         ASC citation reference linkbase (attach-by-qname)
+    │   ├── rs-gaap-labels/v1/             supplementary + total-role label linkbase (attach-by-qname)
     │   ├── rs-gaap-disclosures/v1/
     │   ├── rs-gaap-disclosure-mechanics/v1/
     │   ├── rs-gaap-reporting-checklist/v1/
