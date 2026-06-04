@@ -1081,6 +1081,9 @@
           "@id": "trait:elementsOfFinancialStatements/expense"
         },
         {
+          "@id": "trait:flowClassification/accrual"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         },
         {
@@ -1088,9 +1091,6 @@
         },
         {
           "@id": "trait:use/allocation"
-        },
-        {
-          "@id": "trait:flowClassification/outflow"
         }
       ]
     },
@@ -14975,13 +14975,13 @@
           "@id": "trait:elementsOfFinancialStatements/expense"
         },
         {
+          "@id": "trait:flowClassification/accrual"
+        },
+        {
           "@id": "trait:recordedValue/recordedAsEstimate"
         },
         {
           "@id": "trait:use/allocation"
-        },
-        {
-          "@id": "trait:flowClassification/outflow"
         }
       ]
     },

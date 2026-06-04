@@ -56,6 +56,29 @@ def test_no_stock_concept_carries_activity_type(
 
 
 @pytest.mark.unit
+def test_noncash_allocation_concepts_are_not_cash_flows(
+  traits_by_qname: dict[str, set[str]],
+) -> None:
+  """A ``use=allocation`` concept (depreciation / amortization / depletion /
+  accretion) is a NONCASH systematic allocation — its flowClassification is
+  ``accrual``, never a cash ``inflow``/``outflow``. AdjustmentForAmortization
+  and one insurance amortization concept were mis-tagged ``outflow`` against the
+  9 correctly-``accrual`` allocation peers; guard so a regeneration can't
+  reintroduce a cash-flavored allocation."""
+  offenders = sorted(
+    q
+    for q, traits in traits_by_qname.items()
+    if "use=allocation" in traits
+    and (
+      "flowClassification=inflow" in traits or "flowClassification=outflow" in traits
+    )
+  )
+  assert not offenders, (
+    f"{len(offenders)} noncash-allocation concept(s) tagged as a cash flow: {offenders}"
+  )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
   "qname,required",
   [
