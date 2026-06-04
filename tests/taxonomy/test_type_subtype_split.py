@@ -84,10 +84,16 @@ class TestLabelLinkbase:
   def test_attaches_by_qname_defines_no_concepts(self, labels: TaxonomyPackage) -> None:
     assert labels.elements == []
     assert labels.reference_assignments == []
-    assert len(labels.label_assignments) > 1000
+    assert len(labels.label_assignments) > 500
     assert all(
       la.element_qname.startswith("rs-gaap:") for la in labels.label_assignments
     )
+
+  def test_all_labels_consolidated_to_en(self, labels: TaxonomyPackage) -> None:
+    """After the en/en-US consolidation the linkbase carries a single language —
+    every label is ``en`` (the older ``en-US`` vintage was deduped against the
+    base ``en`` labels or relabeled)."""
+    assert {la.language for la in labels.label_assignments} == {"en"}
 
   def test_total_role_labels_present(self, labels: TaxonomyPackage) -> None:
     """The supplementary linkbase carries the ``total`` role labels that have
@@ -150,7 +156,7 @@ def test_split_assignments_collapse_to_deterministic_seed_rows(
   assert 0 < len(ref_ids) <= len(references.reference_assignments)
   assert 0 < len(lbl_ids) <= len(labels.label_assignments)
   assert len(ref_ids) > 3000
-  assert len(lbl_ids) > 1000
+  assert len(lbl_ids) > 500
   # Arcs package contributes no labels/refs; the split is clean.
   assert arcs.label_assignments == []
   assert arcs.reference_assignments == []

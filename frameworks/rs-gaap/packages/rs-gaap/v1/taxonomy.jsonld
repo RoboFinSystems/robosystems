@@ -3986,13 +3986,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Administrative assistance, including, but not limited to, accounting, tax, legal, regulatory filing, and share registration of managed fund and investment account of independent third party, and related and affiliated entity."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Administrative Service [Member]"
         }
       ],
@@ -5338,13 +5338,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Power generated from source other than fossil fuel. Source includes, but is not limited to, ethanol, biomass, solar, geothermal, and wind power."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Alternative Energy [Member]"
         }
       ],
@@ -6539,13 +6539,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Asset held in trust."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Asset Held in Trust [Member]"
         }
       ],
@@ -6648,13 +6648,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Management of investment fund portfolio. Excludes investment advisory, distribution and servicing, and performance fee."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Asset Management [Member]"
         }
       ],
@@ -6714,13 +6714,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Contractual agreement in which asset, held for investment purpose, is managed by another party. Includes, but is not limited to, investment advisory, distribution and servicing, and fee."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Asset Management Arrangement [Member]"
         }
       ],
@@ -6826,13 +6826,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Asset not pledged as collateral."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Asset Not Pledged as Collateral [Member]"
         }
       ],
@@ -6889,13 +6889,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Asset pledged as collateral."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Asset Pledged as Collateral [Member]"
         }
       ],
@@ -7948,13 +7948,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Collection and processing of payment on mortgage, credit card and other financial asset held by others."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Bank Servicing [Member]"
         }
       ],
@@ -8005,13 +8005,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Financial institution accepting customer deposits and providing other financial services. Services include, but are not limited to, lending; issuing credit and debit cards; offering deposit account, mortgage, and guarantee; and bank servicing."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Banking [Member]"
         }
       ],
@@ -10296,13 +10296,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Change in accounting principle, classified as other. Excludes change from amendment to accounting standards."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Change in Accounting Principle, Other [Member]"
         }
       ],
@@ -10348,7 +10348,7 @@
       "@id": "rs-gaap:ChangeInValuationTechniqueAbstract",
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Change in Valuation Technique [Abstract]"
         }
       ],
@@ -10399,13 +10399,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Change in valuation technique because current appraisal was unobtainable."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Change in Valuation Technique, Reason, Current Appraisal Unobtainable [Member]"
         }
       ],
@@ -10456,13 +10456,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Change in valuation technique because quoted price is no longer associated with active market."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Change in Valuation Technique, Reason, Inactive Market [Member]"
         }
       ],
@@ -10617,13 +10617,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Matching of all buy and sell orders to reconcile transactions, ensure delivery of order and record transfer of funds. Includes, but is not limited to, delivery and creation of futures position from option exercise or assignment, Exchange for Physicals (EFP), block trades and transfer trades."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Clearing Service [Member]"
         }
       ],
@@ -10867,13 +10867,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Arrangement collectively bargained, classified as other."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Collective-Bargaining Arrangement, Other [Member]"
         }
       ],
@@ -11991,13 +11991,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Right to operate business within specified premises. Includes, but is not limited to, right to sell souvenir, food, or beverage at venue."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Concessions [Member]"
         }
       ],
@@ -12256,13 +12256,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Building or developing real estate. Includes, but is not limited to, improvement to land for drainage, utilities, grading and subdividing."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Construction [Member]"
         }
       ],
@@ -13838,13 +13838,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Security clearing, custody, deposit, fund transfer and settlement provided by financial institution for another financial institution."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Correspondent Clearing [Member]"
         }
       ],
@@ -13942,13 +13942,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Cost of labor directly related to good produced and service rendered. Includes, but is not limited to, payroll cost and equity-based compensation."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Cost, Direct Labor"
         }
       ],
@@ -15148,13 +15148,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Card issued to user to facilitate payment for purchase of product and service paid directly to merchant by issuer, or from user's checking account."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Credit and Debit Card [Member]"
         }
       ],
@@ -15257,13 +15257,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Card issued to user to facilitate payment for purchase of product and service, paid directly to merchant by card issuer, and later paid by cardholder to card issuer."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Credit Card [Member]"
         }
       ],
@@ -15314,13 +15314,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Charge to merchant for cardholder's use of credit card. Excludes interest income earned on credit card balance, transaction and credit card service."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Credit Card, Merchant Discount [Member]"
         }
       ],
@@ -15507,7 +15507,7 @@
       "@id": "rs-gaap:CreditQualityIndicatorUpdatedAbstract",
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Credit Quality Indicator, Updated [Abstract]"
         }
       ],
@@ -15558,13 +15558,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Credit quality indicator updated on annual basis."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Credit Quality Indicator, Updated Annually [Member]"
         }
       ],
@@ -15615,13 +15615,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Credit quality indicator updated on quarterly basis."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Credit Quality Indicator, Updated Quarterly [Member]"
         }
       ],
@@ -16125,13 +16125,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Card issued to user to facilitate payment for purchase of product and service, directly from user's checking account."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Debit Card [Member]"
         }
       ],
@@ -16380,7 +16380,7 @@
       "@id": "rs-gaap:DebtSecuritiesAvailableForSaleCostOfSecuritySoldMethodAbstract",
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Debt Securities, Available-for-sale, Cost of Security Sold, Method [Abstract]"
         }
       ],
@@ -16431,13 +16431,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Average cost method used to determine cost basis of investment in debt security measured at fair value with change in fair value recognized in other comprehensive income (available-for-sale), sold or transferred."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Debt Securities, Available-for-sale, Cost of Security Sold or Transferred, Method, Average Cost [Member]"
         }
       ],
@@ -16488,13 +16488,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Specific identification used to determine cost basis of investment in debt security measured at fair value with change in fair value recognized in other comprehensive income (available-for-sale), sold or transferred."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Debt Securities, Available-for-sale, Cost of Security Sold or Transferred, Method, Specific Identification [Member]"
         }
       ],
@@ -16540,13 +16540,13 @@
       "@id": "rs-gaap:DebtSecuritiesMaturityAllocationAverageRemainingLifeMember",
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Maturity allocation basis using average remaining life for investment in debt security without single maturity date."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Debt Securities, Maturity Allocation, Average Remaining Life [Member]"
         }
       ],
@@ -16592,13 +16592,13 @@
       "@id": "rs-gaap:DebtSecuritiesMaturityAllocationContractualMaturityMember",
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Maturity allocation basis using contractual maturity for investment in debt security without single maturity date."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Debt Securities, Maturity Allocation, Contractual Maturity [Member]"
         }
       ],
@@ -16644,7 +16644,7 @@
       "@id": "rs-gaap:DebtSecuritiesMaturityAllocationDomain",
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Debt Securities, Maturity Allocation [Domain]"
         }
       ],
@@ -16690,13 +16690,13 @@
       "@id": "rs-gaap:DebtSecuritiesMaturityAllocationExpectedMaturityMember",
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Maturity allocation basis using expected maturity for investment in debt security without single maturity date."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Debt Securities, Maturity Allocation, Expected Maturity [Member]"
         }
       ],
@@ -19817,13 +19817,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Bank account at depository institution allowing money to be withdrawn or deposited by account holder."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Deposit Account [Member]"
         }
       ],
@@ -23192,13 +23192,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Distribution and shareholder assistance. Distribution assistance includes, but is not limited to, marketing and selling fund shares, advertising, printing and mailing of prospectus and sale literature to investor. Shareholder assistance includes, but is not limited to, answering shareholder inquiry and providing shareholder with investment information."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Distribution and Shareholder Service [Member]"
         }
       ],
@@ -23353,13 +23353,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Distribution assistance, including, but not limited to, marketing and selling fund shares, advertising, printing and mailing of prospectus and sale literature to investor."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Distribution Service [Member]"
         }
       ],
@@ -25943,13 +25943,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process of producing electric energy by transforming other forms of energy, including, but not limited to, nuclear, fossil fuel, solar, geothermal, hydro and wind."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Electricity, Generation [Member]"
         }
       ],
@@ -26000,13 +26000,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Generation, transmission and distribution of electric energy."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Electricity [Member]"
         }
       ],
@@ -26057,13 +26057,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Electric energy purchased from another party."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Electricity, Purchased [Member]"
         }
       ],
@@ -26114,13 +26114,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Generation, transmission and distribution of electric energy regulated by government or agency in United States (US)."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Electricity, US Regulated [Member]"
         }
       ],
@@ -26379,13 +26379,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Energy provided from operation of on-site facility or cogeneration plant and by procurement service to energy purchaser, and marketing and trading of energy commodity and derivative."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Energy Commodities and Service [Member]"
         }
       ],
@@ -27211,13 +27211,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Energy provided from operation of on-site facility or cogeneration plant and by procurement service to energy purchaser."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Energy Service [Member]"
         }
       ],
@@ -27838,13 +27838,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Error correction to previously issued financial statement classified as other."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Error Correction, Other [Member]"
         }
       ],
@@ -28608,13 +28608,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Fair value measurement input including quoted price in active market for identical asset or liability reporting entity can access at measurement date (level 1), input other than quoted price included within level 1 either directly or indirectly observable for asset or liability (level 2) and unobservable input reflecting entity's own assumption (level 3)."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Fair Value, Inputs, Level 1, 2 and 3 [Member]"
         }
       ],
@@ -28812,13 +28812,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Fair value measured at net asset value per share as practical expedient."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Fair Value Measured at Net Asset Value Per Share [Member]"
         }
       ],
@@ -29223,13 +29223,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Person or entity with legal duty to act in best interest of client or beneficiary of trust and fiduciary relationship in which one party gives another party right to hold title to asset for benefit of beneficiary."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Fiduciary and Trust [Member]"
         }
       ],
@@ -29644,13 +29644,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Financial assistance, including, but not limited to, management and maintenance of depositor account, credit card, merchant discount, trust, investment and insurance."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Financial Service [Member]"
         }
       ],
@@ -29701,13 +29701,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Financial assistance, including, but not limited to, management and maintenance of depositor account, credit card, merchant discount, trust, investment and insurance, classified as other."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Financial Service, Other [Member]"
         }
       ],
@@ -31382,13 +31382,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Right granted by another party to operate business using grantor's name, merchandise, service, methodology, promotional support, marketing and supplies."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Franchise [Member]"
         }
       ],
@@ -31543,13 +31543,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Party granting right to another party to operate business using grantor's name, merchandise, service, methodology, promotional support, marketing and supplies."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Franchisor [Member]"
         }
       ],
@@ -31600,13 +31600,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Facility, similar to franchised outlet, owned and operated by franchisor."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Franchisor Owned Outlet [Member]"
         }
       ],
@@ -35079,13 +35079,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Person or company contracted to manage project with responsibility for coordinating activity, including, but not limited to, acquiring material and hiring subcontractor."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "General Contractor [Member]"
         }
       ],
@@ -35240,13 +35240,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Yellow metallic chemical element that is highly ductile and malleable and not subject to oxidation or corrosion."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Gold [Member]"
         }
       ],
@@ -35651,13 +35651,13 @@
       "@id": "rs-gaap:GranteeStatusDomain",
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Status of recipient to whom award is granted."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Grantee Status [Domain]"
         }
       ],
@@ -35911,13 +35911,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Service provided for prevention, maintenance, diagnosis or treatment of physical and mental health."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Health Care [Member]"
         }
       ],
@@ -36176,13 +36176,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Service provided for maintenance, diagnosis and treatment of physical and mental health, classified as other."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Health Care, Other [Member]"
         }
       ],
@@ -36233,13 +36233,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Service provided to patient for maintenance, diagnosis and treatment of physical and mental health. Excludes service to resident in health care facility."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Health Care, Patient Service [Member]"
         }
       ],
@@ -36290,13 +36290,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Money received from insurance for service provided for maintenance, diagnosis and treatment of physical and mental health."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Health Care, Premium [Member]"
         }
       ],
@@ -36347,13 +36347,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Service provided to resident in health care facility, for maintenance, diagnosis and treatment of physical and mental health."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Health Care, Resident Service [Member]"
         }
       ],
@@ -36894,13 +36894,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Design, development, general contracting, and renovation of residential building, including, but not limited to, single-family housing, multifamily housing, townhouse, apartment, and modular housing."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Home Building [Member]"
         }
       ],
@@ -56800,13 +56800,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Investment recommendation and research provided to customer."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Investment Advice [Member]"
         }
       ],
@@ -56909,13 +56909,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Investment advisory, asset management and administrative service. Includes, but is not limited to, distribution and shareholder service; and accounting, tax, legal, regulatory filing, share registration and shareholder correspondence activities."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Investment Advisory, Management and Administrative Service [Member]"
         }
       ],
@@ -57538,13 +57538,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Result achieved from investment. Excludes non-performance related result from asset under management."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Investment Performance [Member]"
         }
       ],
@@ -59735,13 +59735,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Right to use intangible asset and process of preserving asset. Intangible asset includes, but is not limited to, patent, copyright, technology, manufacturing process, software or trademark."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "License and Maintenance [Member]"
         }
       ],
@@ -59792,13 +59792,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Right to use intangible asset and performance of related service. Intangible asset includes, but is not limited to, patent, copyright, technology, manufacturing process, software or trademark."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "License and Service [Member]"
         }
       ],
@@ -62019,13 +62019,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process of preserving asset, including, but not limited to, building, machinery and software."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Maintenance [Member]"
         }
       ],
@@ -62388,13 +62388,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Contractually stipulated right to receive base compensation for operating and managing business."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Management Service, Base [Member]"
         }
       ],
@@ -62445,13 +62445,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Contractually stipulated right to receive incentive compensation for operating and managing business."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Management Service, Incentive [Member]"
         }
       ],
@@ -62502,13 +62502,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Contractually stipulated right to receive compensation for operating and managing business."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Management Service [Member]"
         }
       ],
@@ -62559,13 +62559,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Article or substance produced by labor or machinery, classified as other."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Manufactured Product, Other [Member]"
         }
       ],
@@ -63391,13 +63391,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Assessment of area to discover naturally occurring inorganic substance with definite chemical composition and regular internal structure."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Mineral, Exploration [Member]"
         }
       ],
@@ -63448,13 +63448,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Naturally occurring inorganic substance with definite chemical composition and regular internal structure."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Mineral [Member]"
         }
       ],
@@ -63817,13 +63817,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Origination or servicing of loan secured by real property."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Mortgage Banking [Member]"
         }
       ],
@@ -64025,13 +64025,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process related to midstream and downstream activity for flammable gas occurring naturally underground. Activity includes, but is not limited to, refining, marketing, gathering from well, processing to remove impurity, storage, transmission, and sale of natural gas and related products."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Natural Gas, Gathering, Transportation, Marketing and Processing [Member]"
         }
       ],
@@ -64082,13 +64082,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process related to midstream activity for flammable gas occurring naturally underground. Activity includes, but is not limited to, gathering from well, processing to remove impurity, storage, transmission, and sale of natural gas and related products."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Natural Gas, Midstream [Member]"
         }
       ],
@@ -64139,13 +64139,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process of obtaining and processing of flammable gas occurring naturally underground."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Natural Gas, Production [Member]"
         }
       ],
@@ -64248,13 +64248,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process of maintaining flammable gas occurring naturally underground in facility for future use."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Natural Gas, Storage [Member]"
         }
       ],
@@ -64305,13 +64305,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Generation, transmission and distribution of flammable gas occurring naturally underground regulated by government or agency in United States."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Natural Gas, US Regulated [Member]"
         }
       ],
@@ -65381,13 +65381,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Amount of expense (reversal of expense) for net periodic benefit cost components, excluding service cost component, of defined benefit plan. Amount includes, but is not limited to, interest cost, expected (return) loss on plan asset, amortization of prior service cost (credit), amortization of (gain) loss, amortization of transition (asset) obligation, settlement (gain) loss, curtailment (gain) loss and certain termination benefits."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Net Periodic Defined Benefits Expense (Reversal of Expense), Excluding Service Cost Component"
         }
       ],
@@ -66164,13 +66164,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Liability for which creditor does not have recourse to debtor but rather has recourse only to property used for collateral in transaction or other specific property."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Nonrecourse [Member]"
         }
       ],
@@ -67204,13 +67204,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Viscous liquid derived from petroleum and product of conversion of gas into liquid during production."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Oil and Condensate [Member]"
         }
       ],
@@ -67261,13 +67261,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process related to upstream activity for viscous liquid derived from petroleum and flammable gas occurring naturally underground. Activity includes, but is not limited to, exploration, development and production."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Oil and Gas, Exploration and Production [Member]"
         }
       ],
@@ -67422,13 +67422,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Viscous liquid derived from petroleum and flammable gas occurring naturally underground."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Oil and Gas [Member]"
         }
       ],
@@ -67479,13 +67479,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process related to operation and maintenance of wells and related equipment and facility used for production of viscous liquid derived from petroleum and flammable gas occurring naturally underground. Includes, but is not limited to, depreciation and applicable operating cost to support equipment and facility."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Oil and Gas, Operation and Maintenance [Member]"
         }
       ],
@@ -67952,13 +67952,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Potential trap of viscous liquid derived from petroleum and flammable gas occurring naturally underground identified during exploratory and developmental stage."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Oil and Gas Prospect [Member]"
         }
       ],
@@ -68009,13 +68009,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Viscous liquid derived from petroleum and flammable gas occurring naturally underground, purchased from another party."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Oil and Gas, Purchased [Member]"
         }
       ],
@@ -68118,13 +68118,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Process related to downstream activity for viscous liquid derived from petroleum and flammable gas occurring naturally underground. Activity includes, but is not limited to, marketing and distribution."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Oil and Gas, Refining and Marketing [Member]"
         }
       ],
@@ -68331,13 +68331,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Service for oil and gas activity, including, but not limited to, drilling, analytic evaluation, transportation, and other supporting contractor activity."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Oil and Gas Service [Member]"
         }
       ],
@@ -69733,13 +69733,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Amount, after tax and before reclassification, of gain (loss) from derivative instrument designated and qualifying as cash flow hedge included in assessment of hedge effectiveness."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Other Comprehensive Income (Loss), Cash Flow Hedge, Gain (Loss), before Reclassification, after Tax"
         }
       ],
@@ -69807,13 +69807,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Amount, before tax and reclassification, of gain (loss) from derivative instrument designated and qualifying cash flow hedge included in assessment of hedge effectiveness."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Other Comprehensive Income (Loss), Cash Flow Hedge, Gain (Loss), before Reclassification and Tax"
         }
       ],
@@ -69878,13 +69878,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Amount, after tax and before adjustments, of gain (loss) from increase (decrease) in value of excluded component of derivative designated and qualifying as hedge. Adjustments include, but are not limited to, reclassifications for sale and settlement, and amounts recognized under systematic and rational method."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Other Comprehensive Income (Loss), Derivative, Excluded Component, Increase (Decrease), before Adjustments, after Tax"
         }
       ],
@@ -69952,13 +69952,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Amount, before tax and adjustments, of gain (loss) from increase (decrease) in value of excluded component of derivative designated and qualifying as hedge. Adjustments include, but are not limited to, reclassifications for sale and settlement, and amounts recognized under systematic and rational method."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Other Comprehensive Income (Loss), Derivative, Excluded Component, Increase (Decrease), before Adjustments and Tax"
         }
       ],
@@ -73983,13 +73983,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Space used for parking equipment used primarily for road transportation."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Parking [Member]"
         }
       ],
@@ -83185,13 +83185,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Pledged or not pledged status of asset owned by entity."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Pledged Status [Domain]"
         }
       ],
@@ -96947,13 +96947,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Property consisting of land, land improvement and buildings, classified as other."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Real Estate, Other [Member]"
         }
       ],
@@ -97576,13 +97576,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Reclassification affecting comparability of financial statement, classified as other. Excludes amendment to accounting standards, other change in accounting principle, and correction of error."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Reclassification, Other [Member]"
         }
       ],
@@ -97633,13 +97633,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Type of reclassification adjustment affecting comparability of financial statement. Excludes amendment to accounting standards, other change in accounting principle, and correction of error."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Reclassification, Type [Domain]"
         }
       ],
@@ -97693,13 +97693,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Liability for which creditor has recourse to debtor."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Recourse [Member]"
         }
       ],
@@ -97753,13 +97753,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Recourse or nonrecourse status of liability."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Recourse Status [Domain]"
         }
       ],
@@ -101529,13 +101529,13 @@
       "@id": "rs-gaap:RestrictionTypeDomain",
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Agreed upon restriction."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Restriction Type [Domain]"
         }
       ],
@@ -102408,13 +102408,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Retirement plan not separately disclosed by name classified as other."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Retirement Plan Name, Other [Member]"
         }
       ],
@@ -105383,13 +105383,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Assistance, including, but not limited to, technology, license and maintenance, license and service, maintenance, oil and gas, and financial service."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Service [Member]"
         }
       ],
@@ -105440,13 +105440,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Assistance, including, but not limited to, technology, license and maintenance, license and service, maintenance, oil and gas, financial service, and other financial service, classified as other."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Service, Other [Member]"
         }
       ],
@@ -105708,13 +105708,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Recipient, of award granted under share-based payment arrangement, over whom grantor exercises or has right to exercise sufficient control to establish employer-employee relationship based on law of pertinent jurisdiction. Includes, but is not limited to, nonemployee director treated as employee when acting as member of board of directors, if elected by grantor's shareholders or appointed to board position to be filled by shareholder election when existing term expires."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Share-based Payment Arrangement, Employee [Member]"
         }
       ],
@@ -105768,13 +105768,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Recipient, of award granted under share-based payment arrangement, over whom grantor does not exercise nor has right to exercise sufficient control to establish employer-employee relationship based on law of pertinent jurisdiction. Excludes nonemployee director treated as employee when acting as member of board of directors, if elected by grantor's shareholders or appointed to board position to be filled by shareholder election when existing term expires."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Share-based Payment Arrangement, Nonemployee [Member]"
         }
       ],
@@ -105825,13 +105825,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Shareholder assistance, including, but not limited to, answering shareholder inquiry and providing shareholder with information about investment."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Shareholder Service [Member]"
         }
       ],
@@ -107864,13 +107864,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Technology assistance, including but not limited to, training, installation, engineering, and software design."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Technology Service [Member]"
         }
       ],
@@ -108181,13 +108181,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Contract providing death benefit payment in event of death within period specified in contract."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Term Life Insurance [Member]"
         }
       ],
@@ -108441,13 +108441,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Divided property ownership entitling each owner right to use property for specified time interval."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Time Share [Member]"
         }
       ],
@@ -108800,13 +108800,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Financial institution maintaining investor record, account balance and company's stock transaction."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Transfer Agent [Member]"
         }
       ],
@@ -110897,13 +110897,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Valuation technique combining analyst price estimates."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Valuation Technique, Consensus Pricing Model [Member]"
         }
       ],
@@ -110954,13 +110954,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Valuation technique calculating present value of future cash flows."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Valuation Technique, Discounted Cash Flow [Member]"
         }
       ],
@@ -111058,13 +111058,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Valuation technique interpolating value from similar instruments arranged in matrix."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Valuation Technique, Matrix Pricing [Member]"
         }
       ],
@@ -111115,13 +111115,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Valuation technique calculating price of option."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Valuation Technique, Option Pricing Model [Member]"
         }
       ],
@@ -111373,13 +111373,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Contract providing life insurance that combines both adjustability of premium, coverage and investment features, and variability of benefit payable upon death or surrender from investment experience of separate account supporting contract."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Variable Universal Life [Member]"
         }
       ],
@@ -111875,13 +111875,13 @@
       ],
       "http://www.w3.org/2000/01/rdf-schema#comment": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Contract providing payment over life of insured and upon death of insured."
         }
       ],
       "http://www.w3.org/2000/01/rdf-schema#label": [
         {
-          "@language": "en-US",
+          "@language": "en",
           "@value": "Whole Life Insurance [Member]"
         }
       ],
