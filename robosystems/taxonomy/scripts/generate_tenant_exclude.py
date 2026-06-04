@@ -33,15 +33,13 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 from sqlalchemy import text
 
 from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
+from robosystems.taxonomy.discovery import FRAMEWORKS_DIR
 
-_ARTIFACT = (
-  Path(__file__).resolve().parent.parent / "data" / "tenant_exclude_rs_gaap_v1.json"
-)
+_ARTIFACT = FRAMEWORKS_DIR / "rs-gaap" / "tenant-exclude" / "v1.json"
 
 # Industry-vertical keyword matcher. Deliberately conservative — these are
 # concepts that belong in peer frameworks (rs-call-report, rs-statutory,

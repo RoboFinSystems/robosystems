@@ -16,16 +16,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from robosystems.taxonomy.discovery import FRAMEWORKS_DIR
 from robosystems.taxonomy.pins import DEFAULT_TAXONOMY_PIN
 
-_TENANT_EXCLUDE_PATH = (
-  Path(__file__).resolve().parent / "data" / "tenant_exclude_rs_gaap_v1.json"
-)
+_TENANT_EXCLUDE_PATH = FRAMEWORKS_DIR / "rs-gaap" / "tenant-exclude" / "v1.json"
 
 
 @lru_cache(maxsize=1)
