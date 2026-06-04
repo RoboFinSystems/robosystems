@@ -29,6 +29,33 @@ def traits_by_qname() -> dict[str, set[str]]:
 
 
 @pytest.mark.unit
+def test_no_stock_concept_carries_activity_type(
+  traits_by_qname: dict[str, set[str]],
+) -> None:
+  """``activityType`` (operating/investing/financing) is the cash-flow activity
+  axis — it belongs on flow concepts and is read off the flow concept by the CF
+  renderer (``fact_grid``) and flow validation (``journal_entries``), never off a
+  balance-sheet stock. A stock (EFS asset/liability/equity/contraEquity) carrying
+  it is misapplied data: unused by the CF path, and it pollutes the library
+  trait-filter (a BS asset showing up under an 'operating activity' filter)."""
+  stock = {
+    "elementsOfFinancialStatements=asset",
+    "elementsOfFinancialStatements=liability",
+    "elementsOfFinancialStatements=equity",
+    "elementsOfFinancialStatements=contraEquity",
+  }
+  offenders = sorted(
+    q
+    for q, traits in traits_by_qname.items()
+    if (traits & stock) and any(t.startswith("activityType=") for t in traits)
+  )
+  assert not offenders, (
+    f"{len(offenders)} stock concept(s) carry activityType (a flow trait): "
+    f"{offenders[:8]}"
+  )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
   "qname,required",
   [
