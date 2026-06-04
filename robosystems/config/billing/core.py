@@ -203,7 +203,7 @@ class BillingConfig:
   ) -> str:
     """Resolve a plan's internal name to its human-readable display name.
 
-    For graphs: "ladybug-standard" -> "LadybugDB Standard"
+    For graphs: "ladybug-standard" -> "Standard"
     For repos:  "sec-advanced"     -> "SEC EDGAR Filings - Pro"
 
     Falls back to the raw plan name when no display mapping is found.

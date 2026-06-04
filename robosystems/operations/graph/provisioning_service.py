@@ -154,7 +154,7 @@ async def run_graph_provisioning(
           generate_subscription_invoice(
             subscription=subscription,
             customer=customer,
-            description=f"Graph subscription — {tier_label}",
+            description=f"Graph subscription - {tier_label}",
             session=db,
           )
           logger.info(f"Generated invoice for subscription {subscription_id}")

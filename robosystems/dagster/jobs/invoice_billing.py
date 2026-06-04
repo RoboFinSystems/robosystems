@@ -108,7 +108,7 @@ def _renew_subscriptions(
         invoice = generate_subscription_invoice(
           subscription=subscription,
           customer=customer,
-          description=f"Graph subscription renewal — {tier_label}",
+          description=f"Graph subscription renewal - {tier_label}",
           session=session,
         )
 
