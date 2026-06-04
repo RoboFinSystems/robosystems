@@ -193,6 +193,14 @@ def expand_framework_to_pin(
   framework's packages overlay on top, letting a downstream framework
   pin a different version of a dependency-owned package via override.
   Cycles raise ``ValueError``.
+
+  An entry marked ``tenant_copy: false`` is **omitted** from the pin: it
+  is still seeded into the public library (``list_framework_seed_paths``
+  keys off file presence, not this flag) but is not copied into per-tenant
+  schemas by ``writer.copy_library_into_tenant``. This is how a dormant /
+  parked package stays canonical in the library without bloating (and
+  freezing into) every immutable tenant schema. Flip it back to ``true``
+  and re-sync to promote a public-only package into existing tenants.
   """
   seen = _seen if _seen is not None else set()
   key = (manifest["framework"], manifest["version"])
@@ -207,8 +215,12 @@ def expand_framework_to_pin(
     dep_manifest = load_framework_manifest(dep["framework"], dep["version"], root)
     pin.update(expand_framework_to_pin(dep_manifest, root=root, _seen=seen))
   for pkg in manifest.get("packages", []):
+    if not pkg.get("tenant_copy", True):
+      continue  # public-only: seeded into the library, not copied per-tenant
     pin[pkg["standard"]] = pkg["version"]
   for brg in manifest.get("bridges", []):
+    if not brg.get("tenant_copy", True):
+      continue  # public-only: seeded into the library, not copied per-tenant
     pin[brg["bridge"]] = brg["version"]
   return pin
 
