@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-standard",
-    "display_name": "LadybugDB Standard",
-    "description": "Dedicated m7g.large LadybugDB infrastructure with subgraph support",
-    "base_price_cents": 9900,  # $99/month
+    "display_name": "Standard",
+    "description": "Dedicated m7g.large infrastructure with subgraph support",
+    "base_price_cents": 14900,  # $149/month
     "monthly_credit_allocation": 8000,  # ~200 agent calls/month
     "backup_downloads_per_month": 10,
     "max_documents": 100,
@@ -41,7 +41,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   },
   {
     "name": "ladybug-large",
-    "display_name": "LadybugDB Large",
+    "display_name": "Large",
     "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
     "base_price_cents": 29900,  # $299/month
     "monthly_credit_allocation": 32000,  # ~800 agent calls/month
@@ -51,7 +51,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   },
   {
     "name": "ladybug-xlarge",
-    "display_name": "LadybugDB XLarge",
+    "display_name": "XLarge",
     "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
     "base_price_cents": 69900,  # $699/month
     "monthly_credit_allocation": 100000,  # ~2,600 agent calls/month
@@ -203,7 +203,7 @@ class BillingConfig:
   ) -> str:
     """Resolve a plan's internal name to its human-readable display name.
 
-    For graphs: "ladybug-standard" -> "LadybugDB Standard"
+    For graphs: "ladybug-standard" -> "Standard"
     For repos:  "sec-advanced"     -> "SEC EDGAR Filings - Pro"
 
     Falls back to the raw plan name when no display mapping is found.

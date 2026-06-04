@@ -145,10 +145,16 @@ async def run_graph_provisioning(
       if not subscription.stripe_subscription_id:
         customer = BillingCustomer.get_by_user_id(user_id, db)
         if customer and customer.invoice_billing_enabled:
+          from robosystems.config.billing import BillingConfig
+
+          plan_config = BillingConfig.get_subscription_plan(subscription.plan_name)
+          tier_label = (
+            plan_config["display_name"] if plan_config else subscription.plan_name
+          )
           generate_subscription_invoice(
             subscription=subscription,
             customer=customer,
-            description=f"Graph Database Subscription - {subscription.plan_name}",
+            description=f"Graph subscription - {tier_label}",
             session=db,
           )
           logger.info(f"Generated invoice for subscription {subscription_id}")
