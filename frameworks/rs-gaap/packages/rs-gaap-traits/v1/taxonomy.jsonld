@@ -11404,6 +11404,9 @@
       "@id": "rs-gaap:NonoperatingIncomeExpense",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:elementsOfFinancialStatements/metric"
+        },
+        {
           "@id": "trait:operatingNonoperating/nonoperating"
         }
       ]
@@ -11812,6 +11815,9 @@
     {
       "@id": "rs-gaap:OperatingIncomeLoss",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:elementsOfFinancialStatements/metric"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
@@ -20036,6 +20042,34 @@
         },
         {
           "@id": "trait:flowClassification/outflow"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:OtherSalesRevenueNet",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:elementsOfFinancialStatements/revenue"
+        },
+        {
+          "@id": "trait:flowClassification/inflow"
+        },
+        {
+          "@id": "trait:operatingNonoperating/operating"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:SalesRevenueNet",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:elementsOfFinancialStatements/revenue"
+        },
+        {
+          "@id": "trait:flowClassification/inflow"
+        },
+        {
+          "@id": "trait:operatingNonoperating/operating"
         }
       ]
     }
