@@ -39,7 +39,7 @@ def _tenant_exclude_qnames() -> tuple[str, ...]:
   """
   try:
     data = json.loads(_TENANT_EXCLUDE_PATH.read_text())
-  except (FileNotFoundError, ValueError):
+  except FileNotFoundError:
     return ()
   return tuple(data.get("excluded_qnames", ()))
 
@@ -356,7 +356,6 @@ def copy_library_into_tenant(
       WHERE association_id IN (SELECT id FROM {schema}.associations)
       ON CONFLICT (association_id, classification_id) DO NOTHING
     """),
-    pin_params,
   )
 
   # Rules — by taxonomy_id. Depends on the copied structures / elements /
@@ -626,7 +625,6 @@ def resync_library_into_tenant(
       WHERE association_id IN (SELECT id FROM {schema}.associations)
       ON CONFLICT (association_id, classification_id) DO NOTHING
     """),
-    pin_params,
   )
 
   rule_result = connection.execute(
