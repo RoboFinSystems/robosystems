@@ -87,10 +87,16 @@ def test_noncash_allocation_concepts_are_not_cash_flows(
     # the reported symptom).
     ("rs-gaap:OperatingIncomeLoss", "elementsOfFinancialStatements=metric"),
     ("rs-gaap:NonoperatingIncomeExpense", "elementsOfFinancialStatements=metric"),
-    # Revenue lines — must carry EFS=revenue like Revenues, or they render on the
-    # income statement but are not offered as mapping candidates.
-    ("rs-gaap:SalesRevenueNet", "elementsOfFinancialStatements=revenue"),
-    ("rs-gaap:OtherSalesRevenueNet", "elementsOfFinancialStatements=revenue"),
+    # Revenue / COGS leaves — must carry their EFS, or they render on the
+    # income statement but are not offered as mapping candidates. After the
+    # deprecated-leaf swap, the working-set IS leaves are the modern ASC 606 /
+    # ASC 705 concepts (the us-gaap-deprecated SalesRevenueNet / CostOfGoodsSold
+    # leaves were retired from the rollups).
+    (
+      "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+      "elementsOfFinancialStatements=revenue",
+    ),
+    ("rs-gaap:CostOfGoodsAndServicesSold", "elementsOfFinancialStatements=expense"),
   ],
 )
 def test_working_set_efs_bindings_present(

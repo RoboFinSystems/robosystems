@@ -807,6 +807,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Accounts Payable, Related Parties, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -852,6 +858,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Accounts Payable, Related Parties, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -1263,6 +1275,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Accounts Receivable, Related Parties, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -1308,6 +1326,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Accounts Receivable, Related Parties, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -3014,6 +3038,12 @@
           "@value": "Amount of accumulated depreciation, depletion, and amortization of property, plant, and equipment. Includes, but is not limited to, land and land improvement; building; machinery and equipment; furniture and fixture; and work of art, historical treasure, or similar asset classified as collection.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Accumulated Depreciation, Depletion and Amortization, Property, Plant, and Equipment",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -3214,6 +3244,12 @@
       "rdfs:comment": [
         {
           "@value": "Accumulated adjustment, net of tax, that results from the process of translating subsidiary financial statements and foreign equity investments into the reporting currency from the functional currency of the reporting entity, net of reclassification of realized foreign currency translation gains or losses.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Accumulated Other Comprehensive Income (Loss), Foreign Currency Translation Adjustment, Net of Tax",
           "@language": "en"
         }
       ]
@@ -4042,6 +4078,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Admissions Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -4347,6 +4389,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Advertising Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -4706,6 +4754,12 @@
           "@value": "Amount of expense for leasing aircraft from third party and cost incurred at airport in which airline conducts flight operation. Includes, but is not limited to, fee paid to airport authority for takeoff and landing, gate space and facility, security, fuel storage facility, and other terminal costs.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Aircraft Rental and Landing Fees",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -4750,6 +4804,12 @@
       "rdfs:comment": [
         {
           "@value": "Gross amount, as of the balance sheet date, of merchandise, goods, commodities, or supplies to be used in air transport of passengers and freight.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Airline Related Inventory, Gross",
           "@language": "en"
         }
       ]
@@ -6571,6 +6631,12 @@
           "@value": "Amount of impairment loss for asset. Includes, but is not limited to, tangible and intangible assets and goodwill.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Asset Impairment Charges",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -6739,6 +6805,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Asset Management Fees (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -9160,6 +9232,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cargo and Freight Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -9362,6 +9440,12 @@
           "@value": "Amount of cash and cash equivalent. Cash includes, but is not limited to, currency on hand, demand deposit with financial institution, and account with general characteristic of demand deposit. Cash equivalent includes, but is not limited to, short-term, highly liquid investment that is both readily convertible to known amount of cash and so near maturity that it presents insignificant risk of change in value because of change in interest rate.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cash and Cash Equivalents, at Carrying Value",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -9408,6 +9492,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cash and Cash Equivalents, Period Increase (Decrease)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -9453,6 +9543,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cash and Cash Equivalents, Period Increase (Decrease), Excluding Exchange Rate Effect",
+          "@language": "en"
         }
       ]
     },
@@ -9863,6 +9959,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cash, Period Increase (Decrease)",
+          "@language": "en"
         }
       ]
     },
@@ -10498,6 +10600,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Clearing Fees Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -10600,6 +10708,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Coal Products and Services Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -12125,6 +12239,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Construction Materials Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -12691,6 +12811,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Contract Revenue Cost (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -13085,6 +13211,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Contracts Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -13907,6 +14039,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Gold Products and Services (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -14161,6 +14299,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Goods Sold (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -14206,6 +14350,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Goods Sold, Direct Materials (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -14253,6 +14403,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Goods Sold, Electric (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -14298,6 +14454,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Goods Sold, Excluding Depreciation, Depletion, and Amortization (Deprecated 2019-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -14345,6 +14507,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Goods Sold, Oil and Gas (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -14391,6 +14559,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Merchandise Sales, Buying and Occupancy Costs (Deprecated 2019-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -14436,6 +14610,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Natural Gas Purchases (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -14535,6 +14715,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Real Estate Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -14580,6 +14766,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Real Estate Sales (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -14679,6 +14871,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Services (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -14725,6 +14923,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Services, Excluding Depreciation, Depletion, and Amortization (Deprecated 2019-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -14770,6 +14974,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Cost of Services, Oil and Gas (Deprecated 2019-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -20266,6 +20476,12 @@
           "@value": "Sum as of the balance sheet date of the (a) fair values of all liabilities resulting from contracts that meet the criteria of being accounted for as derivative instruments, and (b) the carrying amounts of the liabilities arising from financial instruments or contracts used to mitigate a specified risk (hedge), and which are expected to be extinguished or otherwise disposed of within a year or the normal operating cycle, if longer, net of the effects of master netting arrangements.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Derivative Instruments and Hedges, Liabilities",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -20671,6 +20887,12 @@
           "@value": "The aggregate costs of direct communications and utilities incurred during the reporting period.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Direct Communications and Utilities Costs",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -20716,6 +20938,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Direct Costs of Hotels (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -21229,6 +21457,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount after tax of an increase (decrease) to a gain (loss) previously reported in discontinued operations in a prior period.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Discontinued Operation, Amount of Adjustment to Prior Period Gain (Loss) on Disposal, Net of Tax",
           "@language": "en"
         }
       ]
@@ -23622,6 +23856,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Affiliate, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -23667,6 +23907,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Affiliate, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -23766,6 +24012,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Employees, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -23811,6 +24063,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Employees, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -23858,6 +24116,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Joint Ventures, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -23903,6 +24167,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Joint Ventures, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -23950,6 +24220,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Officers or Stockholders, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -23995,6 +24271,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Officers or Stockholders, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -24042,6 +24324,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Other Related Parties, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24087,6 +24375,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Other Related Parties, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -24134,6 +24428,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Related Parties",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24179,6 +24479,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Related Parties, Current",
+          "@language": "en"
         }
       ]
     },
@@ -24226,6 +24532,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due from Related Parties, Noncurrent",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24271,6 +24583,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Affiliate, Current",
+          "@language": "en"
         }
       ]
     },
@@ -24318,6 +24636,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Affiliate, Noncurrent",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24363,6 +24687,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Employees, Current",
+          "@language": "en"
         }
       ]
     },
@@ -24410,6 +24740,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Employees, Noncurrent",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24455,6 +24791,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Officers or Stockholders, Current",
+          "@language": "en"
         }
       ]
     },
@@ -24502,6 +24844,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Officers or Stockholders, Noncurrent",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24547,6 +24895,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Other Related Parties, Current",
+          "@language": "en"
         }
       ]
     },
@@ -24594,6 +24948,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Other Related Parties, Noncurrent",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24640,6 +25000,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Related Parties, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24685,6 +25051,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Due to Related Parties, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -24836,6 +25208,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Effect of Exchange Rate on Cash",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24881,6 +25259,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Effect of Exchange Rate on Cash and Cash Equivalents",
+          "@language": "en"
         }
       ]
     },
@@ -24928,6 +25312,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Effect of Exchange Rate on Cash and Cash Equivalents, Continuing Operations",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -24973,6 +25363,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Effect of Exchange Rate on Cash and Cash Equivalents, Discontinued Operations",
+          "@language": "en"
         }
       ]
     },
@@ -25176,6 +25572,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Effect of Exchange Rate on Cash, Continuing Operations",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -25321,6 +25723,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Electric Domestic Regulated Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -25414,6 +25822,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Electric Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -25460,6 +25874,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Electrical Generation Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -25505,6 +25925,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Electrical Transmission and Distribution Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -27231,6 +27657,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Equity Method Investment, Summarized Financial Information, Net Income (Loss) (Deprecated 2020-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -27644,6 +28076,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Excess Tax Benefit from Share-based Compensation, Financing Activities",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -27689,6 +28127,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Excess Tax Benefit from Share-based Compensation, Operating Activities",
+          "@language": "en"
         }
       ]
     },
@@ -27990,6 +28434,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Exploration Expense, Mining (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -28652,6 +29102,12 @@
           "@value": "Amount of Affordable Housing Program (AHP) assessments and Congressionally mandated Federal Home Loan Bank (FHLBank) assessments.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Federal Home Loan Bank Assessments",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -28749,6 +29205,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Fees and Commissions (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -29331,6 +29793,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Financial Services Costs (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -29376,6 +29844,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Financial Services Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -29839,6 +30313,12 @@
           "@value": "Amount, before accumulated amortization, of finite-lived intangible asset. Excludes goodwill and capitalized cost for software to be sold, leased, or marketed.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Finite-Lived Intangible Assets, Gross",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -29883,6 +30363,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount, after accumulated amortization, of finite-lived intangible asset. Excludes goodwill and capitalized cost for software to be sold, leased, or marketed.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Finite-Lived Intangible Assets, Net",
           "@language": "en"
         }
       ]
@@ -30488,6 +30974,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Food and Beverage Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -30982,6 +31474,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Franchise Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -31026,6 +31524,12 @@
       "rdfs:comment": [
         {
           "@value": "Aggregate costs incurred that are directly related to activities, including but not limited to, generating franchise revenues from franchisor owned outlets and franchised outlets.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Franchisor Costs",
           "@language": "en"
         }
       ]
@@ -31187,6 +31691,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Franchisor Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -32055,6 +32565,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Gain (Loss) on Non-Recourse Debt",
+          "@language": "en"
         }
       ]
     },
@@ -33038,6 +33554,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Gain (Loss) on Sale of Properties, Net of Applicable Income Taxes (Deprecated 2020-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -34020,6 +34542,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Gains (Losses) on Recourse Debt",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -34326,6 +34854,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Gas Domestic Regulated Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -34371,6 +34905,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Gas Gathering, Transportation, Marketing and Processing Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -34792,6 +35332,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Gold Products and Services Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -34836,6 +35382,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount, after accumulated impairment loss, of asset representing future economic benefit arising from other asset acquired in business combination or from joint venture formation or both, that is not individually identified and separately recognized.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Goodwill",
           "@language": "en"
         }
       ]
@@ -35451,6 +36003,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Health Care Organization, Patient Service Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -35548,6 +36106,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Health Care Organization, Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -36422,6 +36986,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Home Building Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -36612,6 +37182,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount of impairment loss for finite- and indefinite-lived intangible assets and capitalized cost for software to be sold, leased, or marketed. Excludes goodwill.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Impairment of Intangible Assets (Excluding Goodwill)",
           "@language": "en"
         }
       ]
@@ -36814,6 +37390,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount of impairment loss for long-lived asset held and used. Includes, but is not limited to, impairment loss for long-lived asset to be disposed of other than by sale.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Impairment of Long-Lived Assets Held-for-use",
           "@language": "en"
         }
       ]
@@ -37324,6 +37906,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Income (Loss) from Operations before Extraordinary Items (Deprecated 2019-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -40370,6 +40958,12 @@
           "@value": "The increase (decrease) during the reporting period in carrying amount of capitalized fuel costs of a regulated entity that are expected to be recoverable through rate adjustments within one year or the normal operating cycle, if longer.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Increase (Decrease) in Deferred Fuel Costs",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -41664,6 +42258,12 @@
           "@value": "The increase (decrease) during the reporting period in the aggregate amount of obligations to be paid to the following types of related parties: a parent company and its subsidiaries; subsidiaries of a common parent; an entity and trust for the benefit of employees, such as pension and profit-sharing trusts that are managed by or under the trusteeship of the entities' management; an entity and its principal owners, management, or member of their immediate families, affiliates, or other parties with the ability to exert significant influence.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Increase (Decrease) in Due to Related Parties, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -42334,6 +42934,12 @@
           "@value": "The increase (decrease) during the reporting period in the value of fossil fuel held in inventory.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Increase (Decrease) in Fossil Fuel Inventories",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -42794,6 +43400,12 @@
       "rdfs:comment": [
         {
           "@value": "The increase (decrease) in the beginning and end of period in insurance industry assets which are classified as cash flows from operating activities.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Increase (Decrease) in Insurance Assets",
           "@language": "en"
         }
       ]
@@ -44296,6 +44908,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount of increase (decrease) in asset and (increase) decrease in liability, used in operating activity in reconciling net income to reflect cash provided by (used in) operating activity when indirect cash flow method is applied.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Increase (Decrease) in Operating Capital",
           "@language": "en"
         }
       ]
@@ -48972,6 +49590,12 @@
           "@value": "Amount of indefinite-lived intangible asset. Excludes goodwill.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Indefinite-lived Intangible Assets (Excluding Goodwill)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -49897,6 +50521,12 @@
           "@value": "Amount, after accumulated amortization, of finite- and indefinite-lived intangible assets and capitalized cost for software to be sold, leased, or marketed. Excludes goodwill.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Intangible Assets, Net (Excluding Goodwill)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -49941,6 +50571,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount, after accumulated amortization, of finite- and indefinite-lived intangible assets, goodwill, and capitalized cost for software to be sold, leased, or marketed.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Intangible Assets, Net (Including Goodwill)",
           "@language": "en"
         }
       ]
@@ -50145,6 +50781,12 @@
           "@value": "The aggregate interest and fee income generated by: (1) loans the Entity has positive intent and ability to hold for the foreseeable future, or until maturity or payoff, including commercial and consumer loans, whether domestic or foreign, which may consist of: (a) industrial and agricultural; (b) real estate; and (c) real estate construction loans; (d) trade financing; (e) lease financing; (f) home equity lines-of-credit; (g) automobile and other vehicle loans; and (h) credit card and other revolving-type loans and (2) loans and leases held-for-sale which may include mortgage loans, direct financing, and sales-type leases.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Interest and Fee Income, Loans and Leases",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -50191,6 +50833,12 @@
           "@value": "The amount of interest and fee income earned from loans held-for-sale, including mortgage loans, and interest earned from direct financing and sales-type leases held-for-sale.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Interest and Fee Income, Loans and Leases Held-for-sale",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -50235,6 +50883,12 @@
       "rdfs:comment": [
         {
           "@value": "Interest and fee income generated by loans the Entity intends and has the ability to hold for the foreseeable future, or until maturity or payoff, including commercial and consumer loans, whether domestic or foreign, which may consist of: (1) industrial and agricultural; (2) real estate; and (3) real estate construction loans; (4) trade financing; (5) lease financing; (6) home equity lines-of-credit; (7) automobile and other vehicle loans; and (8) credit card and other revolving-type loans. Also includes interest income for leases held by the Entity.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Interest and Fee Income, Loans and Leases Held-in-portfolio",
           "@language": "en"
         }
       ]
@@ -52259,6 +52913,12 @@
           "@value": "Total interest expense on long-term debt and capital securities.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Interest Expense, Long-term Debt and Capital Securities",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -52720,6 +53380,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Interest Expense, Related Party",
+          "@language": "en"
         }
       ]
     },
@@ -53962,6 +54628,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Interest Income, Related Party",
+          "@language": "en"
         }
       ]
     },
@@ -56220,6 +56892,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Investment Advisory, Management and Administrative Fees (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -57622,6 +58300,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Land Sales (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -59200,6 +59884,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "License and Services Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -59245,6 +59935,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Licenses Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -62626,6 +63322,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Membership Dues Revenue, On-going (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -62836,6 +63538,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount of equity (deficit) attributable to noncontrolling interest. Excludes temporary equity.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Stockholders' Equity Attributable to Noncontrolling Interest",
           "@language": "en"
         }
       ]
@@ -63522,6 +64230,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Natural Gas Production Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -65076,6 +65790,12 @@
           "@value": "Total aggregate amount of all noninterest expense.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Noninterest Expense",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -66051,6 +66771,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Notes Payable, Related Parties, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -66096,6 +66822,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Notes Payable, Related Parties, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -66247,6 +66979,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Notes Receivable, Related Parties, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -66292,6 +67030,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Notes Receivable, Related Parties, Noncurrent",
+          "@language": "en"
         }
       ]
     },
@@ -67466,6 +68210,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Oil and Gas Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -67563,6 +68313,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Oil and Gas Sales Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -72804,6 +73560,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Other Revenue, Net (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -73412,6 +74174,12 @@
           "@value": "The amount of ownership interest of different classes of partners in limited partnership.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Partners' Capital",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -73561,6 +74329,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Passenger Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -75116,6 +75890,12 @@
           "@value": "The net cash outflow or inflow from derivative instruments during the period, which are classified as investing activities, excluding those designated as hedging instruments.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Payments for (Proceeds from) Derivative Instrument, Investing Activities",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -75628,6 +76408,12 @@
       "rdfs:comment": [
         {
           "@value": "The net cash inflow or outflow from any material that is commonly used in the generation of nuclear energy.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Payments for (Proceeds from) Nuclear Fuel",
           "@language": "en"
         }
       ]
@@ -81810,6 +82596,12 @@
       "rdfs:comment": [
         {
           "@value": "The aggregate cash outflow used to purchase all loans that are held with the intention to resell in the near future.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Payments to Purchase Loans Held-for-sale",
           "@language": "en"
         }
       ]
@@ -89059,6 +89851,12 @@
           "@value": "The net cash inflow or outflow from payments to deposit account and application of deposits to retire or pay down debt during the period.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Proceeds from (Payments for) Deposits Applied to Debt Retirements",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -90509,6 +91307,12 @@
           "@value": "The cash inflow from sale proceeds and collection of repayments from borrowers on loans classified as held-for-sale, including proceeds from loans sold through mortgage securitization; includes mortgages and other types of loans.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Proceeds from Sale and Collection of Loans Held-for-sale",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -90709,6 +91513,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount of cash inflow from the sale and collection of receivables classified as other.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Proceeds from Sale and Collection of Other Receivables",
           "@language": "en"
         }
       ]
@@ -92055,6 +92865,12 @@
       "rdfs:comment": [
         {
           "@value": "The cash inflow resulting from the sale of loans classified as held-for-sale, including proceeds from loans sold through mortgage securitization.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Proceeds from Sale of Loans Held-for-sale",
           "@language": "en"
         }
       ]
@@ -94787,6 +95603,12 @@
           "@value": "Amount, before accumulated depreciation, depletion, and amortization, of property, plant, and equipment. Includes, but is not limited to, land and land improvement; building; machinery and equipment; furniture and fixture; and work of art, historical treasure, or similar asset classified as collection.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Property, Plant and Equipment, Gross",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -94831,6 +95653,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount, after accumulated depreciation, depletion, and amortization, of property, plant, and equipment. Includes, but is not limited to, land and land improvement; building; machinery and equipment; furniture and fixture; and work of art, historical treasure, or similar asset classified as collection.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Property, Plant and Equipment, Net",
           "@language": "en"
         }
       ]
@@ -95034,6 +95862,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Provision for Lease Losses",
+          "@language": "en"
         }
       ]
     },
@@ -95945,6 +96779,12 @@
           "@value": "Carrying amount as of the balance sheet date of interest costs that were capitalized to properties under development during the land development and construction period of a project, and which are included in inventory.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Real Estate Inventory, Capitalized Interest Costs",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -96302,6 +97142,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Real Estate Revenue, Net (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -97103,6 +97949,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Recycling Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -97251,6 +98103,12 @@
       "rdfs:comment": [
         {
           "@value": "The aggregate fair value as of the reporting date of all noncontrolling interests which are redeemable by the (parent) entity (1) at a fixed or determinable price on a fixed or determinable date, (2) at the option of the holder of the noncontrolling interest, or (3) upon occurrence of an event that is not solely within the control of the (parent) entity. This item includes noncontrolling interest holder's ownership (or holders' ownership) regardless of the type of equity interest (common, preferred, other) including all potential organizational (legal) forms of the investee entity.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Redeemable Noncontrolling Interest, Equity, Fair Value",
           "@language": "en"
         }
       ]
@@ -97502,6 +98360,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Refining and Marketing Costs (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -97548,6 +98412,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Refining and Marketing Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -97592,6 +98462,12 @@
       "rdfs:comment": [
         {
           "@value": "The total amount of operating revenues recognized during the period.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Regulated and Unregulated Operating Revenue",
           "@language": "en"
         }
       ]
@@ -97952,6 +98828,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Reimbursement Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -97996,6 +98878,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount of recovery (expense) related to provision for policy benefits and costs incurred for policies assumed and ceded.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Policyholder Benefits and Claims Incurred, Assumed and Ceded",
           "@language": "en"
         }
       ]
@@ -100010,6 +100898,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Research and Development in Process",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -100103,6 +100997,12 @@
           "@value": "Amount of cash and cash equivalent restricted as to withdrawal or usage, classified as current. Cash includes, but is not limited to, currency on hand, demand deposit with financial institution, and account with general characteristic of demand deposit. Cash equivalent includes, but is not limited to, short-term, highly liquid investment that is both readily convertible to known amount of cash and so near maturity that it presents insignificant risk of change in value because of change in interest rate.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Restricted Cash and Cash Equivalents, Current",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -100147,6 +101047,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount of cash and cash equivalent restricted as to withdrawal or usage, classified as noncurrent. Cash includes, but is not limited to, currency on hand, demand deposit with financial institution, and account with general characteristic of demand deposit. Cash equivalent includes, but is not limited to, short-term, highly liquid investment that is both readily convertible to known amount of cash and so near maturity that it presents insignificant risk of change in value because of change in interest rate.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Restricted Cash and Cash Equivalents, Noncurrent",
           "@language": "en"
         }
       ]
@@ -101235,6 +102141,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Retail Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -101833,6 +102745,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue from Enrollment and Registration Fees, Excluding Hospitality Enterprises (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -101878,6 +102796,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue from Grants (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -101925,6 +102849,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue from Hotels (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -101970,6 +102900,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue from Purchased Oil and Gas (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -102017,6 +102953,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue from Related Parties",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -102062,6 +103004,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue Mineral Sales (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -102109,6 +103057,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue, Oil and Gas Services (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -102155,6 +103109,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue Other Manufactured Products (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -102200,6 +103160,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue Steam Products and Services (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -102506,6 +103472,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Royalty Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -102959,6 +103931,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Sales of Oil and Gas Prospects (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -103004,6 +103982,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Sales of Real Estate (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -103051,6 +104035,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Sales Revenue, Energy Services (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -103096,6 +104086,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Sales Revenue from Energy Commodities and Services (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -103143,6 +104139,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Sales Revenue, Goods, Net (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -103189,6 +104191,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Revenue, Net (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -103234,6 +104242,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Sales Revenue, Services, Net (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -105007,6 +106021,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Shipping and Handling Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -105906,6 +106926,12 @@
           "@value": "Amount of equity (deficit) attributable to parent. Excludes temporary equity and equity attributable to noncontrolling interest.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Stockholders' Equity Attributable to Parent",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -105950,6 +106976,12 @@
       "rdfs:comment": [
         {
           "@value": "Amount of equity (deficit) attributable to parent and noncontrolling interest. Excludes temporary equity.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Stockholders' Equity, Including Portion Attributable to Noncontrolling Interest",
           "@language": "en"
         }
       ]
@@ -106309,6 +107341,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Subscription and Circulation Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -106705,6 +107743,12 @@
           "@value": "All taxes not related to income of the entity or excise or sales taxes levied on the revenue of the entity that are not reported elsewhere. These taxes could include production, real estate, personal property, and pump tax.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Taxes, Miscellaneous",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -106912,6 +107956,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Technology Services Costs (Deprecated 2018-01-31)",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -106957,6 +108007,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Technology Services Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -107054,6 +108110,12 @@
       "rdfs:comment": [
         {
           "@value": "Carrying amount, attributable to parent and noncontrolling interests, of an entity's issued and outstanding stock which is not included within permanent equity. Temporary equity is a security with redemption features that are outside the control of the issuer, is not classified as an asset or liability in conformity with GAAP, and is not mandatorily redeemable. Includes any type of security that is redeemable at a fixed or determinable price or on a fixed or determinable date or dates, is redeemable at the option of the holder, or has conditions for redemption which are not solely within the control of the issuer. Includes stock with a put option held by an ESOP and stock redeemable by a holder only in the event of a change in control of the issuer.",
+          "@language": "en"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Temporary Equity, Carrying Amount, Including Portion Attributable to Noncontrolling Interests",
           "@language": "en"
         }
       ]
@@ -107262,6 +108324,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Timber Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },
@@ -109656,6 +110724,12 @@
           "@value": "Amount of operating expense of regulated operation.",
           "@language": "en"
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Utilities Operating Expense",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -109753,6 +110827,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Electric and Gas Revenue (Deprecated 2018-01-31)",
+          "@language": "en"
         }
       ]
     },

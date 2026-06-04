@@ -42,6 +42,9 @@ import re
 from sqlalchemy import text
 
 from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
+from robosystems.operations.operators.implementations.mapping.constants import (
+  RS_GAAP_SYNTHESIZED_DETAIL_ALLOW,
+)
 from robosystems.taxonomy.discovery import FRAMEWORKS_DIR
 
 _ARTIFACT = FRAMEWORKS_DIR / "rs-gaap" / "tenant-exclude" / "v1.json"
@@ -150,7 +153,18 @@ def compute_exclude() -> dict:
     qname_to_id[q] for q in rule_var_qnames if q in qname_to_id
   }
 
-  keep_critical = working | calc | ancestors | rule_refs
+  # Synthesized-detail mapping grains (PP&E Gross + its accumulated-depreciation
+  # contra). The renderer synthesizes PropertyPlantAndEquipmentNet = Gross - AD
+  # and the CF Investing derivation reads ΔGross as capex, so a CoA fixed-asset
+  # account maps to these even though Net is what the BS presents — they are NOT
+  # in the working set's presentation networks (AD is a general-special leaf, so
+  # it would otherwise be excluded) but MUST be in every tenant. Mirrors
+  # ``mapping/constants.py::RS_GAAP_SYNTHESIZED_DETAIL_ALLOW``.
+  synthesized_detail = {
+    qname_to_id[q] for q in RS_GAAP_SYNTHESIZED_DETAIL_ALLOW if q in qname_to_id
+  }
+
+  keep_critical = working | calc | ancestors | rule_refs | synthesized_detail
 
   # Undirected general-special connectivity to the working set.
   adj: dict[str, set[str]] = {}

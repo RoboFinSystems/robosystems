@@ -18618,6 +18618,9 @@
           "@id": "trait:elementsOfFinancialStatements/revenue"
         },
         {
+          "@id": "trait:operatingNonoperating/operating"
+        },
+        {
           "@id": "trait:flowClassification/inflow"
         }
       ]

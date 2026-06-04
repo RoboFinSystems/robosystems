@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import pytest
 
+from robosystems.operations.operators.implementations.mapping.constants import (
+  RS_GAAP_SYNTHESIZED_DETAIL_ALLOW,
+)
 from robosystems.taxonomy.writer import _tenant_exclude_qnames
 
 
@@ -81,3 +84,41 @@ def test_high_level_aggregates_kept_leaf_detail_dropped() -> None:
     "rs-gaap:AccruedPayrollTaxesCurrent",
   ):
     assert dropped in excluded, f"{dropped} is leaf detail — should be deferred"
+
+
+@pytest.mark.unit
+def test_revenue_cogs_leaves_are_the_modern_concepts() -> None:
+  """The IS revenue/COGS rollups were repointed off the us-gaap-deprecated
+  leaves (deprecated 2018/2019) onto their modern ASC 606 / ASC 705
+  equivalents. The deprecated leaves must now be excluded from tenants (they
+  stay in the public mapping mirror) and the modern leaves — the wired calc
+  children a CoA maps to — must be kept."""
+  excluded = set(_tenant_exclude_qnames())
+  for kept in (
+    "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+    "rs-gaap:CostOfGoodsAndServicesSold",
+    "rs-gaap:OtherCostOfOperatingRevenue",
+  ):
+    assert kept not in excluded, f"{kept} is a wired IS leaf — must stay"
+  for dropped in (
+    "rs-gaap:SalesRevenueNet",
+    "rs-gaap:OtherSalesRevenueNet",
+    "rs-gaap:CostOfGoodsSold",
+    "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization",
+  ):
+    assert dropped in excluded, (
+      f"{dropped} is a retired deprecated leaf — should be excluded"
+    )
+
+
+@pytest.mark.unit
+def test_synthesized_detail_grains_are_kept() -> None:
+  """PP&E Gross + its accumulated-depreciation contra are CoA mapping grains
+  (the renderer synthesizes PropertyPlantAndEquipmentNet = Gross - AD and the CF
+  Investing derivation reads ΔGross as capex). AD is a general-special leaf, so
+  it would be dropped by the leaf-level curation — keep-critical must protect the
+  whole RS_GAAP_SYNTHESIZED_DETAIL_ALLOW set, or a tenant can't map fixed assets
+  ('not found in library')."""
+  excluded = set(_tenant_exclude_qnames())
+  for q in RS_GAAP_SYNTHESIZED_DETAIL_ALLOW:
+    assert q not in excluded, f"{q} is a synthesized-detail mapping grain — must stay"

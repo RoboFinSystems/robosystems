@@ -59,10 +59,16 @@ class TestFallbackBucketsWired:
     )
 
   def test_revenue_and_cogs_buckets_are_the_operating_catch_alls(self) -> None:
-    """Regression for the QB revenue/COGS gap: the fallback must point at
-    the operating-revenue / operating-cost catch-all leaves wired under
-    Revenues / CostOfRevenue — NOT OtherIncome (non-operating, unwired)."""
-    assert FAC_TO_RS_GAAP_FALLBACK["fac:Revenues"] == "rs-gaap:OtherSalesRevenueNet"
+    """Regression for the QB revenue/COGS gap: the fallback must point at an
+    operating-revenue / operating-cost leaf wired under Revenues /
+    CostOfRevenue — NOT OtherIncome (non-operating, unwired). After the
+    deprecated-leaf swap, RevenueFromContractWithCustomerExcludingAssessedTax
+    is the sole (ASC 606 primary) revenue leaf, so it doubles as the fallback;
+    OtherCostOfOperatingRevenue remains the COGS catch-all leaf."""
+    assert (
+      FAC_TO_RS_GAAP_FALLBACK["fac:Revenues"]
+      == "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    )
     assert (
       FAC_TO_RS_GAAP_FALLBACK["fac:CostOfRevenue"]
       == "rs-gaap:OtherCostOfOperatingRevenue"

@@ -838,7 +838,7 @@
       "@id": "_:rs-gaap-rollup-is-cor",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$CostOfRevenue = ($CostOfGoodsSold + $CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization + $OtherCostOfOperatingRevenue)",
+      "ruleExpression": "$CostOfRevenue = ($CostOfGoodsAndServicesSold + $OtherCostOfOperatingRevenue)",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:CostOfRevenue"
@@ -849,12 +849,8 @@
           "variableQname": "rs-gaap:CostOfRevenue"
         },
         {
-          "variableName": "CostOfGoodsSold",
-          "variableQname": "rs-gaap:CostOfGoodsSold"
-        },
-        {
-          "variableName": "CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization",
-          "variableQname": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
+          "variableName": "CostOfGoodsAndServicesSold",
+          "variableQname": "rs-gaap:CostOfGoodsAndServicesSold"
         },
         {
           "variableName": "OtherCostOfOperatingRevenue",
@@ -1047,7 +1043,7 @@
       "@id": "_:rs-gaap-rollup-is-rev",
       "ruleCategory": "FundamentalAccountingConceptRelation",
       "rulePattern": "RollUp",
-      "ruleExpression": "$Revenues = ($SalesRevenueNet + $RevenueFromContractWithCustomerExcludingAssessedTax + $OtherSalesRevenueNet)",
+      "ruleExpression": "$Revenues = $RevenueFromContractWithCustomerExcludingAssessedTax",
       "ruleTarget": {
         "targetKind": "element",
         "targetRef": "rs-gaap:Revenues"
@@ -1058,16 +1054,8 @@
           "variableQname": "rs-gaap:Revenues"
         },
         {
-          "variableName": "SalesRevenueNet",
-          "variableQname": "rs-gaap:SalesRevenueNet"
-        },
-        {
           "variableName": "RevenueFromContractWithCustomerExcludingAssessedTax",
           "variableQname": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
-        },
-        {
-          "variableName": "OtherSalesRevenueNet",
-          "variableQname": "rs-gaap:OtherSalesRevenueNet"
         }
       ],
       "ruleMessage": "Calculation rollup: rs-gaap:Revenues = Σ rs-gaap revenue leaves",
