@@ -202,6 +202,34 @@ class TestExpandFrameworkToPin:
     pin = expand_framework_to_pin(m, root=tmp_path)
     assert pin["shared"] == "v2"
 
+  @pytest.mark.unit
+  def test_tenant_copy_false_excluded_from_pin(self, tmp_path: Path) -> None:
+    """A package/bridge marked ``tenant_copy: false`` is omitted from the
+    pin — it seeds into the public library but is not copied per-tenant.
+    ``tenant_copy`` defaults to true (absent == included)."""
+    _write_manifest(
+      tmp_path,
+      "rs-gaap",
+      packages=[
+        {"standard": "rs-gaap", "version": "v1"},
+        {"standard": "rs-gaap-default-true", "version": "v1", "tenant_copy": True},
+        {"standard": "rs-gaap-parked", "version": "v1", "tenant_copy": False},
+      ],
+      bridges=[
+        {"bridge": "kept-bridge", "version": "v1"},
+        {"bridge": "parked-bridge", "version": "v1", "tenant_copy": False},
+      ],
+    )
+    m = load_framework_manifest("rs-gaap", "v1", root=tmp_path)
+    pin = expand_framework_to_pin(m, root=tmp_path)
+    assert pin == {
+      "rs-gaap": "v1",
+      "rs-gaap-default-true": "v1",
+      "kept-bridge": "v1",
+    }
+    assert "rs-gaap-parked" not in pin
+    assert "parked-bridge" not in pin
+
 
 class TestListFrameworkSeedPaths:
   @pytest.mark.unit
@@ -250,6 +278,26 @@ class TestListFrameworkSeedPaths:
     m = load_framework_manifest("fac", "v1", root=tmp_path)
     paths = list_framework_seed_paths(m, root=tmp_path, skip_missing_optional=True)
     assert [p.parent.parent.name for p in paths] == ["present"]
+
+  @pytest.mark.unit
+  def test_tenant_copy_orthogonal_to_seed_paths(self, tmp_path: Path) -> None:
+    """``tenant_copy`` governs the per-tenant copy, NOT the public seed: a
+    present file for a ``tenant_copy: false`` package is still returned as a
+    seed path (it lands in the public library; only ``expand_framework_to_pin``
+    drops it so the per-tenant copy skips it)."""
+    _write_manifest(
+      tmp_path,
+      "fac",
+      packages=[
+        {"standard": "kept", "version": "v1"},
+        {"standard": "public-only", "version": "v1", "tenant_copy": False},
+      ],
+    )
+    _write_package(tmp_path, "fac", "kept")
+    _write_package(tmp_path, "fac", "public-only")
+    m = load_framework_manifest("fac", "v1", root=tmp_path)
+    paths = list_framework_seed_paths(m, root=tmp_path)
+    assert {p.parent.parent.name for p in paths} == {"kept", "public-only"}
 
   @pytest.mark.unit
   def test_missing_required_raises(self, tmp_path: Path) -> None:

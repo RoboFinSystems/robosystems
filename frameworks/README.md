@@ -156,6 +156,20 @@ Fields:
     next phase starts; ordinal is for display and human review.
   - `is_required: false` lets the migration skip an entry whose
     `taxonomy.jsonld` doesn't exist on disk yet.
+  - `tenant_copy` (default `true`) is an **orthogonal** axis to
+    `is_required`. It governs the *per-tenant copy*, not the public seed:
+    a present `taxonomy.jsonld` is always seeded into the public library
+    (the seeder keys off file presence + `is_required`, not this flag),
+    but `tenant_copy: false` omits the package from
+    `expand_framework_to_pin`, so `writer.copy_library_into_tenant`
+    **does not copy it into per-tenant schemas**. Use it for content that
+    should stay canonical in the library but is dormant / parked at MVP —
+    keeping it out of every immutable tenant schema (and off the COGS
+    line) without losing the definition. Promote later by flipping it back
+    to `true` and running `operations/taxonomy_block/resync.py` (the copy
+    gates each association on both element endpoints existing locally, so
+    a cross-package arc into a `tenant_copy: false` package self-skips
+    rather than dangling a NOT NULL FK).
 - **`bridges[]`** — equivalence taxonomies owned by this framework
   (typically bridges *out of* a dependency framework's namespace into
   this one's). Same tuple shape as packages.

@@ -145,6 +145,28 @@ def _build_pin_clause(resolved_pin: dict[str, str]) -> tuple[str, dict[str, str]
   return pin_values_sql, pin_params
 
 
+def _assoc_endpoints_present(schema: str) -> str:
+  """SQL fragment gating an association copy on BOTH element endpoints
+  already existing in the tenant.
+
+  ``associations.from_element_id`` / ``to_element_id`` are NOT NULL FKs to
+  ``elements.id``. A ``tenant_copy: false`` package (or any partial pin)
+  leaves its elements out of the tenant, so an arc *owned by a copied
+  package but pointing at an excluded one* (e.g. the kept rs-gaap-reporting-
+  styles ``reportingStyleComposesDisclosure`` arcs into a public-only
+  disclosures package) would violate the FK. This gate skips such an arc
+  instead — the same defensive posture the ``reporting_style_networks``
+  copy already takes on its structure endpoints. Safe because elements are
+  inserted before associations in both the copy and the re-sync fan-out,
+  and a no-op for a full pin (every endpoint is present). Assumes the
+  source ``public.associations`` row is aliased ``a``.
+  """
+  return (
+    f" AND EXISTS (SELECT 1 FROM {schema}.elements e WHERE e.id = a.from_element_id)"
+    f" AND EXISTS (SELECT 1 FROM {schema}.elements e WHERE e.id = a.to_element_id)"
+  )
+
+
 def copy_library_into_tenant(
   connection: Connection,
   schema: str,
@@ -253,14 +275,15 @@ def copy_library_into_tenant(
   assoc_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.associations ({_ASSOCIATION_COLS})
-      SELECT {_ASSOCIATION_COLS} FROM public.associations
-      WHERE structure_id IN (
+      SELECT {_ASSOCIATION_COLS} FROM public.associations a
+      WHERE a.structure_id IN (
         SELECT id FROM public.structures
         WHERE taxonomy_id IN (
           SELECT id FROM public.taxonomies
           WHERE (standard, version) IN (VALUES {pin_values_sql})
         )
       )
+      {_assoc_endpoints_present(schema)}
       ON CONFLICT (id) DO NOTHING
     """),
     pin_params,
@@ -548,14 +571,15 @@ def resync_library_into_tenant(
   assoc_result = connection.execute(
     text(f"""
       INSERT INTO {schema}.associations ({_ASSOCIATION_COLS})
-      SELECT {_ASSOCIATION_COLS} FROM public.associations
-      WHERE structure_id IN (
+      SELECT {_ASSOCIATION_COLS} FROM public.associations a
+      WHERE a.structure_id IN (
         SELECT id FROM public.structures
         WHERE taxonomy_id IN (
           SELECT id FROM public.taxonomies
           WHERE (standard, version) IN (VALUES {pin_values_sql})
         )
       )
+      {_assoc_endpoints_present(schema)}
       {_RESYNC_ASSOCIATION_CONFLICT}
     """),
     pin_params,
