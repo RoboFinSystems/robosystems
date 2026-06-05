@@ -24,6 +24,7 @@ from robosystems.operations.taxonomy_block.library_creator import (
   create_library_arcs,
   create_library_rules,
   create_library_taxonomy_elements,
+  prune_empty_default_structures,
 )
 from robosystems.taxonomy.model import (
   AssociationSpec,
@@ -382,3 +383,39 @@ class TestCreateLibraryRules:
     counts = create_library_rules(session, package)
     assert counts["rules"] == 0
     assert counts["rules_skipped"] == 1
+
+
+class TestPruneEmptyDefaultStructures:
+  """Regression guard: the prune must scope to the auto-created
+  ``"… — default structure"`` rows only. A blanket "empty custom structure"
+  delete also matches the ``rs-gaap-reporting-styles`` "… Style — Composition"
+  anchors (custom, arc-less, rule-less — they compose via
+  ``reporting_style_networks``), and deleting them dangles every composition
+  row and breaks all statement/report rendering."""
+
+  def _emitted_sql(self) -> str:
+    session = MagicMock()
+    session.execute.return_value.rowcount = 0
+    prune_empty_default_structures(session)
+    stmt = session.execute.call_args[0][0]
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+  def test_scopes_to_auto_default_name(self) -> None:
+    # The em-dash-suffixed name keeps reporting-style "Composition" anchors safe.
+    assert "— default structure" in self._emitted_sql()
+
+  def test_keeps_empty_and_unruled_guards(self) -> None:
+    sql = self._emitted_sql().lower()
+    assert "block_type" in sql  # only custom defaults
+    assert "associations" in sql  # only arc-less
+    assert "rules" in sql  # only non-rule-targeted
+
+  def test_does_not_reference_reporting_style_networks(self) -> None:
+    # That table is created later (migration 0008); a subquery against it here
+    # would break the 0002 seed. The name scope must stand in for it.
+    assert "reporting_style_networks" not in self._emitted_sql().lower()
+
+  def test_returns_rowcount(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.rowcount = 4
+    assert prune_empty_default_structures(session) == 4
