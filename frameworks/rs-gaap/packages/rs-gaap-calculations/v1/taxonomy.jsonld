@@ -351,21 +351,6 @@
       "conceptArrangementPattern": "arithmetic"
     },
     {
-      "@id": "_:rs-gaap-calc-is-rev-arc-1",
-      "from": {
-        "@id": "rs-gaap:Revenues"
-      },
-      "to": {
-        "@id": "rs-gaap:SalesRevenueNet"
-      },
-      "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
-      "weight": 1.0,
-      "order": 100.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
       "@id": "_:rs-gaap-calc-is-rev-arc-2",
       "from": {
         "@id": "rs-gaap:Revenues"
@@ -376,22 +361,7 @@
       "associationType": "calculation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
       "weight": 1.0,
-      "order": 200.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-rev-arc-3",
-      "from": {
-        "@id": "rs-gaap:Revenues"
-      },
-      "to": {
-        "@id": "rs-gaap:OtherSalesRevenueNet"
-      },
-      "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
-      "weight": 1.0,
-      "order": 300.0,
+      "order": 100.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
@@ -401,36 +371,6 @@
       "structureName": "rs-gaap calc IS-COR — rs-gaap:CostOfRevenue = Σ rs-gaap COGS leaves",
       "blockType": "validation_rules",
       "conceptArrangementPattern": "arithmetic"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-cor-arc-1",
-      "from": {
-        "@id": "rs-gaap:CostOfRevenue"
-      },
-      "to": {
-        "@id": "rs-gaap:CostOfGoodsSold"
-      },
-      "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
-      "weight": 1.0,
-      "order": 100.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-cor-arc-2",
-      "from": {
-        "@id": "rs-gaap:CostOfRevenue"
-      },
-      "to": {
-        "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
-      },
-      "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
-      "weight": 1.0,
-      "order": 200.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
       "@id": "_:rs-gaap-calc-is-cor-arc-3",
@@ -443,7 +383,7 @@
       "associationType": "calculation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
       "weight": 1.0,
-      "order": 300.0,
+      "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
@@ -2110,6 +2050,21 @@
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
       "weight": 1.0,
       "order": 400.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is-cor-arc-cogs-services",
+      "from": {
+        "@id": "rs-gaap:CostOfRevenue"
+      },
+      "to": {
+        "@id": "rs-gaap:CostOfGoodsAndServicesSold"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "weight": 1.0,
+      "order": 100.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     }

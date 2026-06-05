@@ -459,16 +459,24 @@ def create_library_arcs(
   package: TaxonomyPackage,
   created_by: str = "library-seeder",
 ) -> dict[str, int]:
-  """Insert Associations + TraitAssignments for one package.
+  """Insert Associations + Trait/Label/Reference assignments for one package.
 
   Resolves qnames + traits via DB lookup so cross-package arcs work
-  regardless of which seed defined the target element.
+  regardless of which seed defined the target element. Label / reference
+  assignments (the label- and reference-linkbase packages, e.g.
+  ``rs-gaap-labels`` / ``rs-gaap-references``) attach to a concept defined
+  in another package by qname — resolved here in the arcs pass for the same
+  reason trait assignments are: every package's elements exist by now.
   """
   counts: dict[str, int] = {
     "associations": 0,
     "associations_skipped": 0,
     "trait_assignments": 0,
     "trait_assignments_skipped": 0,
+    "label_assignments": 0,
+    "label_assignments_skipped": 0,
+    "reference_assignments": 0,
+    "reference_assignments_skipped": 0,
     # AssociationClassification seed-time loading is not yet implemented;
     # TaxonomyPackage has no classification_assignments field, so these
     # counters always stay 0.  Reserved for when that path is added.
@@ -487,10 +495,13 @@ def create_library_arcs(
     block_type_to_id.setdefault(spec.block_type, sid)
   arc_router = _build_arc_router(block_type_to_id)
 
-  # Bulk-resolve all qnames needed by associations and trait assignments
-  # in one query to avoid O(N) round trips for large packages.
+  # Bulk-resolve all qnames needed by associations, trait assignments,
+  # and label / reference assignments in one query to avoid O(N) round
+  # trips for large packages.
   all_qnames = {q for a in package.associations for q in (a.from_qname, a.to_qname)}
   all_qnames |= {asn.element_qname for asn in package.trait_assignments}
+  all_qnames |= {la.element_qname for la in package.label_assignments}
+  all_qnames |= {ra.element_qname for ra in package.reference_assignments}
   element_id_map = _bulk_resolve_element_ids(session, all_qnames)
 
   # Bulk-resolve period_types only when a router is active — saves a
@@ -603,6 +614,70 @@ def create_library_arcs(
       ""
       if len(skipped_trait_assignments) <= 5
       else f" (+{len(skipped_trait_assignments) - 5} more)",
+    )
+
+  # Label assignments — label-linkbase entries that attach to a concept
+  # defined in another package. The id matches an inline label exactly
+  # (uuid5 of element_id:role:language), so a label moved out of its
+  # concept into rs-gaap-labels reseeds to a byte-identical row.
+  skipped_label_qnames: list[str] = []
+  for la in package.label_assignments:
+    elem_id = element_id_map.get(la.element_qname)
+    if elem_id is None:
+      skipped_label_qnames.append(la.element_qname)
+      continue
+    session.execute(
+      pg_insert(ElementLabel.__table__)
+      .values(
+        id=_label_id(elem_id, la.role, la.language),
+        element_id=elem_id,
+        role=la.role,
+        language=la.language,
+        text=la.text,
+        created_by=created_by,
+      )
+      .on_conflict_do_nothing(index_elements=["id"])
+    )
+    counts["label_assignments"] += 1
+  counts["label_assignments_skipped"] = len(skipped_label_qnames)
+  if skipped_label_qnames:
+    logger.warning(
+      "[%s] %d label assignment(s) skipped — element qname not in library. Sample: %s",
+      package.name,
+      len(skipped_label_qnames),
+      ", ".join(skipped_label_qnames[:5]),
+    )
+
+  # Reference assignments — reference-linkbase entries (ASC citations, …),
+  # same by-qname attach. id = uuid5(element_id:citation), so a citation
+  # moved into rs-gaap-references reseeds byte-identically.
+  skipped_ref_qnames: list[str] = []
+  for ra in package.reference_assignments:
+    elem_id = element_id_map.get(ra.element_qname)
+    if elem_id is None:
+      skipped_ref_qnames.append(ra.element_qname)
+      continue
+    session.execute(
+      pg_insert(ElementReference.__table__)
+      .values(
+        id=_reference_id(elem_id, ra.citation),
+        element_id=elem_id,
+        ref_type=ra.ref_type,
+        citation=ra.citation,
+        uri=ra.uri,
+        attributes=ra.attributes,
+        created_by=created_by,
+      )
+      .on_conflict_do_nothing(index_elements=["id"])
+    )
+    counts["reference_assignments"] += 1
+  counts["reference_assignments_skipped"] = len(skipped_ref_qnames)
+  if skipped_ref_qnames:
+    logger.warning(
+      "[%s] %d reference assignment(s) skipped — element qname not in library. Sample: %s",
+      package.name,
+      len(skipped_ref_qnames),
+      ", ".join(skipped_ref_qnames[:5]),
     )
 
   return counts

@@ -46,6 +46,47 @@ class ReferenceSpec(BaseModel):
   )
 
 
+class LabelAssignmentSpec(BaseModel):
+  """A label attached to an existing element *by qname* — an XBRL label
+  linkbase entry that references a concept defined in another package
+  without redefining it.
+
+  Emitted by the loader for label-only nodes (no balance / periodType /
+  elementType, so not an ElementSpec) in a label-linkbase package such as
+  ``rs-gaap-labels``. The seeder resolves ``element_qname`` to the
+  deterministic element id (same id the concept's owning package minted)
+  and inserts the label — yielding a row identical to one carried inline on
+  the concept. Mirrors :class:`TraitAssignmentSpec`'s by-qname attach so it
+  resolves in the cross-package arcs pass after every element exists.
+  """
+
+  element_qname: str = Field(..., description="Element qname the label attaches to")
+  role: str = Field("standard", description="Label role (standard, documentation, …)")
+  language: str = Field("en", description="ISO 639-1 language code")
+  text: str = Field(..., description="The label text")
+
+
+class ReferenceAssignmentSpec(BaseModel):
+  """A reference attached to an existing element *by qname* — an XBRL
+  reference linkbase entry (FASB ASC citation, SEC reg, …) that points at a
+  concept defined in another package without redefining it.
+
+  The by-qname counterpart to :class:`ReferenceSpec`; emitted by the loader
+  for reference-only nodes in a reference-linkbase package such as
+  ``rs-gaap-references`` and attached in the seeder's arcs pass.
+  """
+
+  element_qname: str = Field(..., description="Element qname the reference attaches to")
+  ref_type: str | None = Field(None, description="'ASC' | 'SEC' | 'SFAC' | …")
+  citation: str = Field(
+    ..., description="Free-form citation, e.g. 'FASB ASC 842-10-25-1'"
+  )
+  uri: str | None = Field(None, description="Dereferenceable URL if available")
+  attributes: str | None = Field(
+    None, description="Raw attributes from the source linkbase"
+  )
+
+
 class ElementSpec(BaseModel):
   """A single taxonomy element (XBRL concept).
 
@@ -312,6 +353,8 @@ class TaxonomyPackage(BaseModel):
   structures: list[StructureSpec] = Field(default_factory=list)
   traits: list[TraitSpec] = Field(default_factory=list)
   trait_assignments: list[TraitAssignmentSpec] = Field(default_factory=list)
+  label_assignments: list[LabelAssignmentSpec] = Field(default_factory=list)
+  reference_assignments: list[ReferenceAssignmentSpec] = Field(default_factory=list)
   rules: list[RuleSpec] = Field(default_factory=list)
 
   taxonomy_type: str = Field(

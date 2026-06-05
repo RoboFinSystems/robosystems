@@ -347,9 +347,6 @@
       "@id": "rs-gaap:AccountsNotesAndLoansReceivableNetCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -479,9 +476,6 @@
       "@id": "rs-gaap:AccountsReceivableFromSecuritization",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -492,9 +486,6 @@
     {
       "@id": "rs-gaap:AccountsReceivableGrossCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -526,9 +517,6 @@
     {
       "@id": "rs-gaap:AccountsReceivableNetCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -1093,6 +1081,9 @@
           "@id": "trait:elementsOfFinancialStatements/expense"
         },
         {
+          "@id": "trait:flowClassification/accrual"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         },
         {
@@ -1100,9 +1091,6 @@
         },
         {
           "@id": "trait:use/allocation"
-        },
-        {
-          "@id": "trait:flowClassification/outflow"
         }
       ]
     },
@@ -2134,9 +2122,6 @@
       "@id": "rs-gaap:Cash",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -2236,9 +2221,6 @@
       "@id": "rs-gaap:CashFDICInsuredAmount",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -2276,9 +2258,6 @@
     {
       "@id": "rs-gaap:CashUninsuredAmount",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -2590,9 +2569,6 @@
     {
       "@id": "rs-gaap:ContractReceivableDueOneYearOrLess",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -6454,9 +6430,6 @@
       "@id": "rs-gaap:GrantsReceivableCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -6865,9 +6838,6 @@
     {
       "@id": "rs-gaap:IncomeTaxesReceivable",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -8501,9 +8471,6 @@
       "@id": "rs-gaap:InsuranceReceivableForMalpracticeCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -8536,9 +8503,6 @@
     {
       "@id": "rs-gaap:InsuranceSettlementsReceivableCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -9550,9 +9514,6 @@
     {
       "@id": "rs-gaap:InterestReceivableCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -10912,9 +10873,6 @@
       "@id": "rs-gaap:MarketableSecuritiesCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/investingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -11404,6 +11362,9 @@
       "@id": "rs-gaap:NonoperatingIncomeExpense",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:elementsOfFinancialStatements/metric"
+        },
+        {
           "@id": "trait:operatingNonoperating/nonoperating"
         }
       ]
@@ -11419,9 +11380,6 @@
     {
       "@id": "rs-gaap:NontradeReceivablesCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -11459,9 +11417,6 @@
       "@id": "rs-gaap:NotesAndLoansReceivableGrossCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -11492,9 +11447,6 @@
     {
       "@id": "rs-gaap:NotesAndLoansReceivableNetCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -11624,9 +11576,6 @@
     {
       "@id": "rs-gaap:OilAndGasJointInterestBillingReceivablesCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -11812,6 +11761,9 @@
     {
       "@id": "rs-gaap:OperatingIncomeLoss",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:elementsOfFinancialStatements/metric"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
@@ -12737,9 +12689,6 @@
       "@id": "rs-gaap:OtherReceivablesNetCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -12825,9 +12774,6 @@
     {
       "@id": "rs-gaap:OtherShortTermInvestments",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/investingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -15029,13 +14975,13 @@
           "@id": "trait:elementsOfFinancialStatements/expense"
         },
         {
+          "@id": "trait:flowClassification/accrual"
+        },
+        {
           "@id": "trait:recordedValue/recordedAsEstimate"
         },
         {
           "@id": "trait:use/allocation"
-        },
-        {
-          "@id": "trait:flowClassification/outflow"
         }
       ]
     },
@@ -17717,9 +17663,6 @@
       "@id": "rs-gaap:ReceivablesLongTermContractsOrPrograms",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -17730,9 +17673,6 @@
     {
       "@id": "rs-gaap:ReceivablesNetCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
-        {
-          "@id": "trait:activityType/operatingActivity"
-        },
         {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
@@ -18678,6 +18618,9 @@
           "@id": "trait:elementsOfFinancialStatements/revenue"
         },
         {
+          "@id": "trait:operatingNonoperating/operating"
+        },
+        {
           "@id": "trait:flowClassification/inflow"
         }
       ]
@@ -19194,9 +19137,6 @@
       "@id": "rs-gaap:ShortTermInvestments",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/investingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -19692,9 +19632,6 @@
       "@id": "rs-gaap:UnbilledReceivablesCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -19916,9 +19853,6 @@
       "@id": "rs-gaap:ValueAddedTaxReceivableCurrent",
       "https://robosystems.ai/vocab/hasTrait": [
         {
-          "@id": "trait:activityType/operatingActivity"
-        },
-        {
           "@id": "trait:elementsOfFinancialStatements/asset"
         },
         {
@@ -20036,6 +19970,34 @@
         },
         {
           "@id": "trait:flowClassification/outflow"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:OtherSalesRevenueNet",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:elementsOfFinancialStatements/revenue"
+        },
+        {
+          "@id": "trait:flowClassification/inflow"
+        },
+        {
+          "@id": "trait:operatingNonoperating/operating"
+        }
+      ]
+    },
+    {
+      "@id": "rs-gaap:SalesRevenueNet",
+      "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:elementsOfFinancialStatements/revenue"
+        },
+        {
+          "@id": "trait:flowClassification/inflow"
+        },
+        {
+          "@id": "trait:operatingNonoperating/operating"
         }
       ]
     }
