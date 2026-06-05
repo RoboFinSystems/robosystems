@@ -74,8 +74,7 @@ frameworks/
 │       ├── fac-traits/v1/      universal trait vocabulary (24 axes; seeds `traits`)
 │       ├── fac/v1/             FAC concepts (Assets, Liabilities, Equity, …)
 │       ├── fac-presentation/v1/
-│       ├── fac-calculations/v1/
-│       └── fac-rules/v1/       Seattle Method verification rules
+│       └── fac-calculations/v1/
 │
 └── rs-gaap/                    US GAAP curation; depends_on fac@v1
     ├── v1.json                 framework manifest
@@ -92,7 +91,9 @@ frameworks/
     │   ├── rs-gaap-disclosures/v1/
     │   ├── rs-gaap-disclosure-mechanics/v1/
     │   ├── rs-gaap-reporting-checklist/v1/
-    │   └── rs-gaap-reporting-styles/v1/   ★ vertical / filer-profile surface
+    │   ├── rs-gaap-reporting-styles/v1/   ★ vertical / filer-profile surface
+    │   ├── rs-gaap-rollup-rules/v1/       L2 rollup-shaped consistency rules
+    │   └── rs-gaap-rules/v1/              L1 cross-tree consistency rules (rs-gaap-targeted; moved from fac)
     ├── bridges/
     │   ├── README.md
     │   ├── fac-to-rs-gaap/v1/

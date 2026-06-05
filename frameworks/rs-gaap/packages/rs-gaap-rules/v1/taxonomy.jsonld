@@ -335,9 +335,9 @@
       "@id": "https://robosystems.ai/vocab/targetRef"
     }
   },
-  "standard": "fac-rules",
+  "standard": "rs-gaap-rules",
   "version": "v1",
-  "namespace_uri": "http://www.xbrlsite.com/fac/rules/",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/rules/",
   "taxonomy_type": "rules",
   "default_block_type": "validation_rules",
   "forked_from": {
@@ -347,7 +347,7 @@
   },
   "forked_at": "2026-05-21",
   "upstream_tracking": "frozen",
-  "description": "L1 cross-tree consistency identities harvested from Charlie Hoffman's PROOF fac/rules-consistency and rewritten to rs-gaap subtotal concepts (info-block §6.1 Package II.a). EqualTo rules, element-scoped to the LHS subtotal so they fire against any rendered statement presenting it. Only the genuine cross-tree identities are kept (BS0 Assets=L+E, BS01 Assets=LiabilitiesAndEquity, IS04 CI=NI+OCI); rollup-shaped Consistency rules (BS02/03/04, CF01) are covered by the rs-gaap-rollup-rules L2 package, and FAC/SFAC6-aggregate rules (BS06 NetAssets, IS02, IS03) have no rs-gaap subtotal target. Regenerate via local/scripts/harvest_proof_rules.py.",
+  "description": "L1 cross-tree consistency identities harvested from Charlie Hoffman's PROOF fac/rules-consistency and rewritten to rs-gaap subtotal concepts (info-block §6.1 Package II.a). EqualTo rules, element-scoped to the LHS subtotal so they fire against any rendered statement presenting it. Only the genuine cross-tree identities are kept (BS0 Assets=L+E, BS01 Assets=LiabilitiesAndEquity, IS04 CI=NI+OCI); rollup-shaped Consistency rules (BS02/03/04, CF01) are covered by the rs-gaap-rollup-rules L2 package, and FAC/SFAC6-aggregate rules (BS06 NetAssets, IS02, IS03) have no rs-gaap subtotal target. Lives in the rs-gaap framework (not fac): these rules target rs-gaap: subtotal concepts, so they are framework-specific content — fac stays the framework-neutral substrate that future rs-* frameworks inherit without dragging rs-gaap-keyed rules along. Regenerate via local/scripts/harvest_proof_rules.py.",
   "@graph": [
     {
       "@id": "_:rs-gaap-rule-bs-identity",

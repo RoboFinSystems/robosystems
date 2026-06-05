@@ -3,8 +3,14 @@
 This directory holds the **packages owned by the `fac@v1` framework** —
 Charlie Hoffman's universal Fundamental Accounting Concepts substrate
 (Assets, Liabilities, Equity, Revenues, Expenses, Income, Cash Flow)
-plus its presentation hierarchies, calculation identities, and
-verification rules.
+plus its presentation hierarchies and calculation identities.
+
+`fac` is deliberately **framework-neutral**: it carries no codification
+references (FASB ASC, IAS/IFRS, IRC) and no validation rules that target a
+specific framework's concepts. Those are regime-specific and live with the
+dependent framework — e.g. the cross-tree consistency rules that target
+`rs-gaap:` subtotals were moved to `rs-gaap-rules` (see
+`frameworks/rs-gaap/packages/`).
 
 `fac@v1` is the **dependency root** for every accounting framework in
 this library. `rs-gaap` depends on it today; future peer frameworks
@@ -40,12 +46,14 @@ packages/
 │                                      25 categories — elementsOfFinancialStatements,
 │                                      liquidity, activityType, recordedValue,
 │                                      flowClassification, …); seeds the `traits` table
-├── fac/v1/                  forked  — FAC fundamental concepts (~177 elements)
+├── fac/v1/                  forked  — FAC fundamental concepts (~175 elements)
 ├── fac-presentation/v1/     native  — FAC multi-variant presentation hierarchies
-├── fac-calculations/v1/     native  — FAC BS/IS/CF accounting identities
-└── fac-rules/v1/            forked  — Seattle Method verification rules (14 rules,
-                                       3 categories, 5 patterns)
+└── fac-calculations/v1/     native  — FAC BS/IS/CF accounting identities
 ```
+
+Verification rules are **not** a fac package: the L1 cross-tree consistency
+identities target `rs-gaap:` subtotals, so they live in the rs-gaap framework
+(`rs-gaap-rules`, 3 rules) alongside the L2 `rs-gaap-rollup-rules`.
 
 ## Notes on `fac-traits`
 
@@ -63,7 +71,7 @@ Per-element trait assignments live in each framework's
 `*-traits/v1/` package (today: `rs-gaap-traits/v1/`).
 A future `rs-ifrs-traits/v1/` would bind ifrs elements to the
 same axes; jurisdiction-specific enum values would extend the trait
-catalog if the existing 95 members don't cover them.
+catalog if the existing 99 members don't cover them.
 
 ## Editing packages
 

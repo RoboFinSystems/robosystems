@@ -214,7 +214,7 @@ CANONICAL_CONTEXT: dict = {
   "reportingStyleNetworks": {"@id": f"{RS_VOCAB}reportingStyleNetworks"},
   "statementType": {"@id": f"{RS_VOCAB}statementType"},
   "networkRoleUri": {"@id": f"{RS_VOCAB}networkRoleUri"},
-  # Validation-rule terms (fac-rules / rollup-rules packages)
+  # Validation-rule terms (rs-gaap-rules / rollup-rules packages)
   "ruleTarget": {"@id": f"{RS_VOCAB}ruleTarget"},
   "ruleCategory": {"@id": f"{RS_VOCAB}ruleCategory"},
   "rulePattern": {"@id": f"{RS_VOCAB}rulePattern"},
