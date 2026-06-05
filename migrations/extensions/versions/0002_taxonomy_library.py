@@ -1320,6 +1320,7 @@ def upgrade() -> None:
     create_library_arcs,
     create_library_rules,
     create_library_taxonomy_elements,
+    prune_empty_default_structures,
   )
   from robosystems.taxonomy import load_taxonomy_package
 
@@ -1367,6 +1368,15 @@ def upgrade() -> None:
         f"  [phase 3] {package.name}: "
         f"rules={counts['rules']} (skipped={counts['rules_skipped']})"
       )
+
+    # Phase 4 — prune the empty catch-all default structures. Arc-routing now
+    # lands every arc on a named structure, leaving each package's seeded
+    # "default structure" fallback empty; drop them here (after rules load, so
+    # a rule-targeted default is never removed) so they aren't copied into
+    # every tenant library.
+    pruned = prune_empty_default_structures(session)
+    session.flush()
+    print(f"  [phase 4] pruned {pruned} empty default structure(s)")
   finally:
     session.close()
 

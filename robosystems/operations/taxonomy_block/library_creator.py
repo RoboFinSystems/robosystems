@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -346,6 +346,50 @@ def create_library_taxonomy_elements(
     counts["traits"] += 1
 
   return taxonomy_id, counts
+
+
+def prune_empty_default_structures(session: Session) -> int:
+  """Delete auto-created catch-all "default structure" rows that ended up empty.
+
+  ``create_library_taxonomy_elements`` seeds one ``block_type='custom'`` default
+  structure per package as a fallback for arcs that can't be routed to a named
+  structure (see ``_default_role_uri`` / ``_build_arc_router``). Once routing
+  places every arc into a named structure, that fallback holds zero
+  associations — an empty artifact that would otherwise be copied into every
+  (immutable) tenant library.
+
+  Scope is deliberately narrow on TWO axes so nothing load-bearing is swept up:
+
+    1. Match ONLY the auto-created defaults themselves, by their deterministic
+       ``"{package} — default structure"`` name (the format assigned above) —
+       never other ``block_type='custom'`` structures. This is what keeps the
+       ``rs-gaap-reporting-styles`` "… Style — Composition" anchors safe: they
+       are ``custom`` with NO arcs and NO rules (they compose their
+       per-statement Networks via the ``reporting_style_networks`` table, not
+       via associations), so a blanket "empty custom" prune deletes them and
+       leaves every composition row dangling — which breaks statement/report
+       rendering (the tenant-copy gate in ``taxonomy/writer.py`` then drops the
+       composition because its style endpoint no longer exists locally).
+
+    2. Only defaults with no associations and not targeted by any rule, so a
+       default that legitimately caught an arc — or a rule target — is kept.
+
+  The reporting-style protection is a NAME scope rather than an ``exists`` guard
+  against ``reporting_style_networks`` on purpose: that table does not exist yet
+  when this prune runs in migration 0002 — it is created later in 0008 — so a
+  subquery against it would fail (the same reason there is no
+  ``verification_results`` guard). Call after every package's arcs AND rules are
+  loaded so a rule-targeted default is never pruned. Returns the count deleted.
+  """
+  result = session.execute(
+    delete(Structure)
+    .where(Structure.block_type == "custom")
+    .where(Structure.name.like("% — default structure"))
+    .where(~exists().where(Association.structure_id == Structure.id))
+    .where(~exists().where(Rule.target_structure_id == Structure.id))
+    .execution_options(synchronize_session=False)
+  )
+  return result.rowcount or 0
 
 
 # ── Cross-package arcs ────────────────────────────────────────────────────────

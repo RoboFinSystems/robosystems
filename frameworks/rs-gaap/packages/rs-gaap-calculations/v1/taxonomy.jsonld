@@ -344,10 +344,24 @@
   "description": "RoboSystems calculation arcs for rs-gaap. Pure rs-gaap-on-rs-gaap: every parent and every child is a rs-gaap concept. Defines the reporting-layer calc DAG that turns mapped leaves into curated subtotals and the final NetIncomeLoss / Assets = LiabilitiesAndStockholdersEquity bottom lines. FAC structural anchors are out of the reporting layer; FAC's role is CoA classification only.",
   "@graph": [
     {
-      "@id": "_:rs-gaap-calc-is-rev",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
-      "structureName": "rs-gaap calc IS-Rev — rs-gaap:Revenues = Σ rs-gaap revenue leaves",
-      "blockType": "validation_rules",
+      "@id": "_:rs-gaap-calc-bs",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "structureName": "rs-gaap — Balance Sheet calculation",
+      "blockType": "balance_sheet",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-is",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "structureName": "rs-gaap — Income Statement calculation",
+      "blockType": "income_statement",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "_:rs-gaap-calc-cf",
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
+      "structureName": "rs-gaap — Cash Flow Statement calculation",
+      "blockType": "cash_flow_statement",
       "conceptArrangementPattern": "arithmetic"
     },
     {
@@ -359,18 +373,11 @@
         "@id": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-Rev",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-cor",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
-      "structureName": "rs-gaap calc IS-COR — rs-gaap:CostOfRevenue = Σ rs-gaap COGS leaves",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is-cor-arc-3",
@@ -381,18 +388,11 @@
         "@id": "rs-gaap:OtherCostOfOperatingRevenue"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-gross",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-GrossProfit",
-      "structureName": "rs-gaap calc IS-GrossProfit — rs-gaap:GrossProfit = rs-gaap:Revenues − rs-gaap:CostOfRevenue",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is-gross-arc-1",
@@ -403,7 +403,7 @@
         "@id": "rs-gaap:Revenues"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-GrossProfit",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -418,18 +418,11 @@
         "@id": "rs-gaap:CostOfRevenue"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-GrossProfit",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": -1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-opex",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
-      "structureName": "rs-gaap calc IS-OpEx — rs-gaap:OperatingExpenses = Σ rs-gaap operating expense leaves",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is-opex-arc-1",
@@ -440,7 +433,7 @@
         "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -455,7 +448,7 @@
         "@id": "rs-gaap:ResearchAndDevelopmentExpense"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -470,7 +463,7 @@
         "@id": "rs-gaap:DepreciationDepletionAndAmortization"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -485,18 +478,11 @@
         "@id": "rs-gaap:OtherCostAndExpenseOperating"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OpEx",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-opinc",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OperatingIncome",
-      "structureName": "rs-gaap calc IS-OperatingIncome — rs-gaap:OperatingIncomeLoss = rs-gaap:GrossProfit − rs-gaap:OperatingExpenses",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is-opinc-arc-1",
@@ -507,7 +493,7 @@
         "@id": "rs-gaap:GrossProfit"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OperatingIncome",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -522,18 +508,11 @@
         "@id": "rs-gaap:OperatingExpenses"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-OperatingIncome",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": -1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-nonop",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
-      "structureName": "rs-gaap calc IS-NonOp — rs-gaap:NonoperatingIncomeExpense = Σ rs-gaap nonoperating leaves",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is-nonop-arc-1",
@@ -544,7 +523,7 @@
         "@id": "rs-gaap:InvestmentIncomeInterest"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -559,7 +538,7 @@
         "@id": "rs-gaap:InterestExpense"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": -1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -574,7 +553,7 @@
         "@id": "rs-gaap:GainLossOnDispositionOfAssets"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -589,18 +568,11 @@
         "@id": "rs-gaap:OtherNonoperatingIncomeExpense"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NonOp",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-pretax",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
-      "structureName": "rs-gaap calc IS-PreTax — rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxes... = OperatingIncomeLoss + NonoperatingIncomeExpense − InterestExpense",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is-pretax-arc-1",
@@ -611,7 +583,7 @@
         "@id": "rs-gaap:OperatingIncomeLoss"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -626,18 +598,11 @@
         "@id": "rs-gaap:NonoperatingIncomeExpense"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-PreTax",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-conops",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-ContinuingOps",
-      "structureName": "rs-gaap calc IS-ContinuingOps — rs-gaap:IncomeLossFromContinuingOperations = PreTax − IncomeTaxExpenseBenefit",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is-conops-arc-1",
@@ -648,7 +613,7 @@
         "@id": "rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-ContinuingOps",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -663,18 +628,11 @@
         "@id": "rs-gaap:IncomeTaxExpenseBenefit"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-ContinuingOps",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": -1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-is-netinc",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NetIncome",
-      "structureName": "rs-gaap calc IS-NetIncome — rs-gaap:NetIncomeLoss = ContinuingOps + DiscontinuedOps",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-is-netinc-arc-1",
@@ -685,7 +643,7 @@
         "@id": "rs-gaap:IncomeLossFromContinuingOperations"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NetIncome",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -700,18 +658,11 @@
         "@id": "rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-NetIncome",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-assets",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Assets",
-      "structureName": "rs-gaap calc BS-Assets — rs-gaap:Assets = rs-gaap:AssetsCurrent + rs-gaap:AssetsNoncurrent",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-bs-assets-arc-1",
@@ -722,7 +673,7 @@
         "@id": "rs-gaap:AssetsCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Assets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -737,18 +688,11 @@
         "@id": "rs-gaap:AssetsNoncurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Assets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-current-assets",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
-      "structureName": "rs-gaap calc BS-CurrentAssets — rs-gaap:AssetsCurrent = Σ rs-gaap current-asset leaves",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-assets-arc-1",
@@ -759,7 +703,7 @@
         "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -774,7 +718,7 @@
         "@id": "rs-gaap:ReceivablesNetCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -789,7 +733,7 @@
         "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -804,7 +748,7 @@
         "@id": "rs-gaap:PrepaidExpenseCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
@@ -819,7 +763,7 @@
         "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 500.0,
       "@type": "rs:Association",
@@ -834,18 +778,11 @@
         "@id": "rs-gaap:OtherAssetsCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 600.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-noncurrent-assets",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
-      "structureName": "rs-gaap calc BS-NoncurrentAssets — rs-gaap:AssetsNoncurrent = Σ rs-gaap noncurrent-asset leaves",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-1",
@@ -856,7 +793,7 @@
         "@id": "rs-gaap:PropertyPlantAndEquipmentNet"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -871,7 +808,7 @@
         "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -886,7 +823,7 @@
         "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -901,7 +838,7 @@
         "@id": "rs-gaap:OperatingLeaseRightOfUseAsset"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
@@ -916,7 +853,7 @@
         "@id": "rs-gaap:FinanceLeaseRightOfUseAsset"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 500.0,
       "@type": "rs:Association",
@@ -931,18 +868,11 @@
         "@id": "rs-gaap:OtherAssetsNoncurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 600.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-liabilities",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Liabilities",
-      "structureName": "rs-gaap calc BS-Liabilities — rs-gaap:Liabilities = rs-gaap:LiabilitiesCurrent + rs-gaap:LiabilitiesNoncurrent",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-bs-liabilities-arc-1",
@@ -953,7 +883,7 @@
         "@id": "rs-gaap:LiabilitiesCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Liabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -968,18 +898,11 @@
         "@id": "rs-gaap:LiabilitiesNoncurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Liabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-current-liab",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
-      "structureName": "rs-gaap calc BS-CurrentLiabilities — rs-gaap:LiabilitiesCurrent = Σ rs-gaap current-liability leaves",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-bs-current-liab-arc-1",
@@ -990,7 +913,7 @@
         "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -1005,7 +928,7 @@
         "@id": "rs-gaap:DebtCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -1020,7 +943,7 @@
         "@id": "rs-gaap:DeferredRevenueCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -1035,7 +958,7 @@
         "@id": "rs-gaap:FinanceLeaseLiabilityCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
@@ -1050,18 +973,11 @@
         "@id": "rs-gaap:OtherLiabilitiesCurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-CurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 500.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-noncurrent-liab",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
-      "structureName": "rs-gaap calc BS-NoncurrentLiabilities — rs-gaap:LiabilitiesNoncurrent = Σ rs-gaap noncurrent-liability leaves",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-bs-noncurrent-liab-arc-1",
@@ -1072,7 +988,7 @@
         "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligations"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -1087,7 +1003,7 @@
         "@id": "rs-gaap:DeferredIncomeTaxLiabilitiesNet"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -1102,7 +1018,7 @@
         "@id": "rs-gaap:DeferredRevenueNoncurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -1117,7 +1033,7 @@
         "@id": "rs-gaap:OperatingLeaseLiabilityNoncurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
@@ -1132,18 +1048,11 @@
         "@id": "rs-gaap:OtherLiabilitiesNoncurrent"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-NoncurrentLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 500.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-equity",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
-      "structureName": "rs-gaap calc BS-Equity — rs-gaap:StockholdersEquity = Σ rs-gaap equity leaves (Treasury weight=-1)",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-bs-equity-arc-1",
@@ -1154,7 +1063,7 @@
         "@id": "rs-gaap:CommonStockValue"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -1169,7 +1078,7 @@
         "@id": "rs-gaap:PreferredStockValue"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -1184,7 +1093,7 @@
         "@id": "rs-gaap:AdditionalPaidInCapital"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -1199,7 +1108,7 @@
         "@id": "rs-gaap:RetainedEarningsAccumulatedDeficit"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
@@ -1214,7 +1123,7 @@
         "@id": "rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 500.0,
       "@type": "rs:Association",
@@ -1229,7 +1138,7 @@
         "@id": "rs-gaap:TreasuryStockValue"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": -1.0,
       "order": 600.0,
       "@type": "rs:Association",
@@ -1244,7 +1153,7 @@
         "@id": "rs-gaap:PartnersCapital"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 700.0,
       "@type": "rs:Association",
@@ -1259,18 +1168,11 @@
         "@id": "rs-gaap:MembersEquity"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-Equity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 800.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-liab-equity",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-LiabilitiesAndStockholdersEquity",
-      "structureName": "rs-gaap calc BS-LiabilitiesAndStockholdersEquity — rs-gaap:LiabilitiesAndStockholdersEquity = rs-gaap:Liabilities + rs-gaap:StockholdersEquity",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-bs-liab-equity-arc-1",
@@ -1281,7 +1183,7 @@
         "@id": "rs-gaap:Liabilities"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-LiabilitiesAndStockholdersEquity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -1296,18 +1198,11 @@
         "@id": "rs-gaap:StockholdersEquity"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BS-LiabilitiesAndStockholdersEquity",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-cf-net-change",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
-      "structureName": "rs-gaap calc CF-NetChange — rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease = Op + Inv + Fin + Exchange",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-cf-net-change-arc-1",
@@ -1318,7 +1213,7 @@
         "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -1333,7 +1228,7 @@
         "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -1348,7 +1243,7 @@
         "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -1363,18 +1258,11 @@
         "@id": "rs-gaap:EffectOfExchangeRateOnCash"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-NetChange",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-cf-operating",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
-      "structureName": "rs-gaap calc CF-Operating — rs-gaap:NetCashProvidedByUsedInOperatingActivities = NetIncomeLoss + DDA + Σ working-capital deltas (indirect method)",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-cf-operating-arc-1",
@@ -1385,7 +1273,7 @@
         "@id": "rs-gaap:NetIncomeLoss"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -1400,7 +1288,7 @@
         "@id": "rs-gaap:DepreciationDepletionAndAmortization"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -1415,7 +1303,7 @@
         "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -1430,7 +1318,7 @@
         "@id": "rs-gaap:IncreaseDecreaseInInventories"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
@@ -1445,7 +1333,7 @@
         "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 500.0,
       "@type": "rs:Association",
@@ -1460,7 +1348,7 @@
         "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 600.0,
       "@type": "rs:Association",
@@ -1475,18 +1363,11 @@
         "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 700.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-ar",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsReceivable",
-      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInAccountsReceivable = -Δ(ReceivablesNetCurrent) [asset up = cash use]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ar-arc-1",
@@ -1497,17 +1378,10 @@
         "@id": "rs-gaap:ReceivablesNetCurrent"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsReceivable",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-inventory",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-Inventory",
-      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInInventories = -Δ(InventoryNetOfAllowances...) [asset up = cash use]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-inventory-arc-1",
@@ -1518,17 +1392,10 @@
         "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-Inventory",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-prepaid",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PrepaidExpense",
-      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInPrepaidExpense = -Δ(PrepaidExpenseCurrent) [asset up = cash use]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-prepaid-arc-1",
@@ -1539,17 +1406,10 @@
         "@id": "rs-gaap:PrepaidExpenseCurrent"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PrepaidExpense",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-ap",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsPayable",
-      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInAccountsPayableAndAccruedLiabilities = +Δ(AccountsPayableAndAccruedLiabilitiesCurrent) [liab up = cash source]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ap-arc-1",
@@ -1560,17 +1420,10 @@
         "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccountsPayable",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-other-op",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-OtherOperatingCapital",
-      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInOtherOperatingCapitalNet = +Δ(OtherLiabilitiesCurrent) [catch-all working capital]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-other-op-arc-1",
@@ -1581,17 +1434,10 @@
         "@id": "rs-gaap:OtherLiabilitiesCurrent"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-OtherOperatingCapital",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-calc-cf-investing",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
-      "structureName": "rs-gaap calc CF-Investing — rs-gaap:NetCashProvidedByUsedInInvestingActivities = Σ Investing leaves (each pre-signed: outflows negative, proceeds positive)",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-cf-investing-arc-1",
@@ -1602,7 +1448,7 @@
         "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
@@ -1617,7 +1463,7 @@
         "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -1632,7 +1478,7 @@
         "@id": "rs-gaap:PaymentsToAcquireInvestments"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -1647,7 +1493,7 @@
         "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
@@ -1662,7 +1508,7 @@
         "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 500.0,
       "@type": "rs:Association",
@@ -1677,18 +1523,11 @@
         "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Investing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 600.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-cf-financing",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
-      "structureName": "rs-gaap calc CF-Financing — rs-gaap:NetCashProvidedByUsedInFinancingActivities = Σ proceeds − Σ payments",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-calc-cf-financing-arc-1",
@@ -1699,18 +1538,11 @@
         "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-ppe-purchases",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
-      "structureName": "rs-gaap derivation CF — PaymentsToAcquirePropertyPlantAndEquipment = -Δ(PropertyPlantAndEquipmentGross) [purchases of gross PP&E = cash outflow; PPE Gross is the right BS source because ΔGross isolates purchases from depreciation activity, unlike ΔNet which conflates them]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ppe-purchases-arc-1",
@@ -1721,17 +1553,10 @@
         "@id": "rs-gaap:PropertyPlantAndEquipmentGross"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquirePropertyPlantAndEquipment",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-stock-proceeds",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfCommonStock",
-      "structureName": "rs-gaap derivation CF — ProceedsFromIssuanceOfCommonStock = +Δ(AdditionalPaidInCapital) [APIC up = stock issuance proceeds, rendered positive in Financing section]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-stock-proceeds-arc-1",
@@ -1742,17 +1567,10 @@
         "@id": "rs-gaap:AdditionalPaidInCapital"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfCommonStock",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-accrued-liabilities",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccruedLiabilities",
-      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInAccruedLiabilities = +Δ(AccruedLiabilitiesCurrent) [liab up = cash source]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-accrued-liabilities-arc-1",
@@ -1763,17 +1581,10 @@
         "@id": "rs-gaap:AccruedLiabilitiesCurrent"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-AccruedLiabilities",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-income-taxes-payable",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-IncomeTaxesPayable",
-      "structureName": "rs-gaap derivation CF — IncreaseDecreaseInAccruedIncomeTaxesPayable = +Δ(AccruedIncomeTaxesCurrent) [liab up = cash source]",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-income-taxes-payable-arc-1",
@@ -1784,17 +1595,10 @@
         "@id": "rs-gaap:AccruedIncomeTaxesCurrent"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-IncomeTaxesPayable",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-dda-from-accum",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-DDA-FromAccumulated",
-      "structureName": "rs-gaap derivation CF — DepreciationDepletionAndAmortization = +Δ(AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment) [contra-asset up = expense incurred, add-back to NI]. Fallback when tenant maps Accumulated Depreciation as a BS leaf instead of mapping Depreciation Expense to DDA directly; the double-count guard in _derive_cash_flow_facts skips if a direct DDA fact already exists from the IS side.",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-dda-from-accum-arc-1",
@@ -1805,17 +1609,10 @@
         "@id": "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-DDA-FromAccumulated",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-ppe-sales",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfPropertyPlantAndEquipment",
-      "structureName": "rs-gaap default-flow CF — ProceedsFromSaleOfPropertyPlantAndEquipment is the investing INFLOW default for PropertyPlantAndEquipmentGross. arcWeight sign = cash direction (+1 inflow); paired with PaymentsToAcquirePropertyPlantAndEquipment (-1 outflow). Consumed by the line-level flow fallback in _emit_flow_facts when LineItem.flow_element_id is NULL, NOT by _derive_cash_flow_facts (investing/financing arcs are excluded from net-delta).",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-ppe-sales-arc-1",
@@ -1826,17 +1623,10 @@
         "@id": "rs-gaap:PropertyPlantAndEquipmentGross"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfPropertyPlantAndEquipment",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-investments-purchases",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireInvestments",
-      "structureName": "rs-gaap default-flow CF — PaymentsToAcquireInvestments is the investing OUTFLOW default for LongTermInvestmentsAndReceivablesNet. arcWeight -1 = outflow (investment line is a debit/increase). Line-level fallback only (cash-gated, so non-cash MTM remeasurements are excluded); the inflow side keys on cost basis, not proceeds — a gain/loss split is a future investment-accounting refinement.",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-investments-purchases-arc-1",
@@ -1847,17 +1637,10 @@
         "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireInvestments",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-investments-sales",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleMaturityAndCollectionsOfInvestments",
-      "structureName": "rs-gaap default-flow CF — ProceedsFromSaleMaturityAndCollectionsOfInvestments is the investing INFLOW default for LongTermInvestmentsAndReceivablesNet. arcWeight +1 = inflow (investment line is a credit/decrease); paired with PaymentsToAcquireInvestments (-1 outflow). Line-level fallback only.",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-investments-sales-arc-1",
@@ -1868,17 +1651,10 @@
         "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleMaturityAndCollectionsOfInvestments",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-intangibles-purchases",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireIntangibleAssets",
-      "structureName": "rs-gaap default-flow CF — PaymentsToAcquireIntangibleAssets is the investing OUTFLOW default for IntangibleAssetsNetIncludingGoodwill. arcWeight -1 = outflow (intangible line is a debit/increase). Line-level fallback only (cash-gated, so non-cash amortization is excluded).",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-intangibles-purchases-arc-1",
@@ -1889,17 +1665,10 @@
         "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsToAcquireIntangibleAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-intangibles-sales",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfIntangibleAssets",
-      "structureName": "rs-gaap default-flow CF — ProceedsFromSaleOfIntangibleAssets is the investing INFLOW default for IntangibleAssetsNetIncludingGoodwill. arcWeight +1 = inflow (intangible line is a credit/decrease); paired with PaymentsToAcquireIntangibleAssets (-1 outflow). Line-level fallback only.",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-intangibles-sales-arc-1",
@@ -1910,17 +1679,10 @@
         "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromSaleOfIntangibleAssets",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-debt-issuance",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfLongTermDebt",
-      "structureName": "rs-gaap default-flow CF — ProceedsFromIssuanceOfLongTermDebt is the financing INFLOW default for LongTermDebtNoncurrent. arcWeight +1 = inflow (debt line is a credit/increase); paired with RepaymentsOfLongTermDebt (-1 outflow) for gross presentation per ASC 230. Line-level fallback only.",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-debt-issuance-arc-1",
@@ -1931,17 +1693,10 @@
         "@id": "rs-gaap:LongTermDebtNoncurrent"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-ProceedsFromIssuanceOfLongTermDebt",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-debt-repayment",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-RepaymentsOfLongTermDebt",
-      "structureName": "rs-gaap default-flow CF — RepaymentsOfLongTermDebt is the financing OUTFLOW default for LongTermDebtNoncurrent. arcWeight -1 = outflow (debt line is a debit/decrease). Line-level fallback only.",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-debt-repayment-arc-1",
@@ -1952,17 +1707,10 @@
         "@id": "rs-gaap:LongTermDebtNoncurrent"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-RepaymentsOfLongTermDebt",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 200.0,
       "@type": "rs:Association"
-    },
-    {
-      "@id": "_:rs-gaap-deriv-cf-stock-repurchase",
-      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsForRepurchaseOfCommonStock",
-      "structureName": "rs-gaap default-flow CF — PaymentsForRepurchaseOfCommonStock is the financing OUTFLOW default for AdditionalPaidInCapital. arcWeight -1 = outflow (equity line is a debit/decrease); paired with ProceedsFromIssuanceOfCommonStock (+1 inflow). Line-level fallback only.",
-      "blockType": "validation_rules",
-      "conceptArrangementPattern": "arithmetic"
     },
     {
       "@id": "_:rs-gaap-deriv-cf-stock-repurchase-arc-1",
@@ -1973,7 +1721,7 @@
         "@id": "rs-gaap:AdditionalPaidInCapital"
       },
       "associationType": "derivation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-derivations/CF-PaymentsForRepurchaseOfCommonStock",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": -1.0,
       "order": 100.0,
       "@type": "rs:Association"
@@ -1987,7 +1735,7 @@
         "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 800.0,
       "@type": "rs:Association",
@@ -2002,7 +1750,7 @@
         "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Operating",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 900.0,
       "@type": "rs:Association",
@@ -2017,7 +1765,7 @@
         "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 200.0,
       "@type": "rs:Association",
@@ -2032,7 +1780,7 @@
         "@id": "rs-gaap:RepaymentsOfLongTermDebt"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 300.0,
       "@type": "rs:Association",
@@ -2047,7 +1795,7 @@
         "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CF-Financing",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/CashFlowStatement",
       "weight": 1.0,
       "order": 400.0,
       "@type": "rs:Association",
@@ -2062,7 +1810,7 @@
         "@id": "rs-gaap:CostOfGoodsAndServicesSold"
       },
       "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IS-COR",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
       "@type": "rs:Association",
