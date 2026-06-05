@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -346,6 +346,35 @@ def create_library_taxonomy_elements(
     counts["traits"] += 1
 
   return taxonomy_id, counts
+
+
+def prune_empty_default_structures(session: Session) -> int:
+  """Delete auto-created catch-all "default structure" rows that ended up empty.
+
+  ``create_library_taxonomy_elements`` seeds one ``block_type='custom'`` default
+  structure per package as a fallback for arcs that can't be routed to a named
+  structure (see ``_default_role_uri`` / ``_build_arc_router``). Once routing
+  places every arc into a named structure, that fallback holds zero
+  associations — an empty artifact that would otherwise be copied into every
+  (immutable) tenant library.
+
+  Scope is deliberately narrow: only ``custom`` defaults with no associations
+  and not targeted by any rule are removed, so named structures that are
+  legitimately arc-less (e.g. dimensional ``[Table]`` disclosures) are left
+  untouched. Call after every package's arcs AND rules are loaded, so a
+  rule-targeted default is never pruned. (No ``verification_results`` guard:
+  none exist at seed time, the only caller, and that table is created by a
+  later migration; a default with no associations and no rule target can't be
+  referenced by one anyway.) Returns the number of structures deleted.
+  """
+  result = session.execute(
+    delete(Structure)
+    .where(Structure.block_type == "custom")
+    .where(~exists().where(Association.structure_id == Structure.id))
+    .where(~exists().where(Rule.target_structure_id == Structure.id))
+    .execution_options(synchronize_session=False)
+  )
+  return result.rowcount or 0
 
 
 # ── Cross-package arcs ────────────────────────────────────────────────────────
