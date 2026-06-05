@@ -119,11 +119,6 @@ FAC_TO_RS_GAAP_FALLBACK: dict[str, str] = {
   "fac:ExciseAndSalesTaxes": "rs-gaap:OtherCostAndExpenseOperating",
 }
 
-# Confidence stamp for fallback-driven mappings. Below
-# CONFIDENCE_AUTO_APPROVE — the user sees these as low-confidence in
-# the CoA UI and can correct them.
-FALLBACK_CONFIDENCE: float = 0.40
-
 
 # Deterministic CoA-name → rs-gaap overrides for synthesized-detail
 # concepts (see RS_GAAP_SYNTHESIZED_DETAIL_ALLOW). The AI refinement

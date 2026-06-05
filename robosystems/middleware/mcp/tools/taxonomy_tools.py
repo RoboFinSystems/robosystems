@@ -115,6 +115,7 @@ class GetUnmappedElementsTool:
 **RETURNS:**
 - List of unmapped CoA elements with id, code, name, classification, balance_type
 - EFS trait (asset/liability/equity/revenue/expense) helps narrow the target reporting concept
+- liquidity (current/noncurrent, assets/liabilities only) narrows further to the right BS section
 
 **WORKFLOW:**
 1. Call this tool to see unmapped elements
@@ -194,6 +195,11 @@ class SuggestMappingTool:
             "type": "string",
             "description": "Override classification filter (asset, liability, equity, revenue, expense). Defaults to the element's own classification.",
           },
+          "liquidity": {
+            "type": "string",
+            "enum": ["current", "noncurrent"],
+            "description": "Optional liquidity narrowing (assets/liabilities). Drops candidates of the opposite liquidity. Defaults to the element's own liquidity trait.",
+          },
         },
         "required": ["element_id"],
       },
@@ -223,6 +229,14 @@ class SuggestMappingTool:
           return {"error": f"Element {element_id} not found"}
 
         classification = classification_override or source.trait
+        # Liquidity: explicit override (the auto-map agent passes the CoA
+        # element's liquidity) else derive from the element's own trait so
+        # manual MCP calls narrow too. None → EFS-only (backward compatible).
+        liquidity = arguments.get("liquidity")
+        if liquidity is None:
+          from robosystems.operations.library.reads import liquidity_by_element
+
+          liquidity = liquidity_by_element(session, [element_id]).get(element_id)
         if not classification:
           return {
             "source_element": {
@@ -230,6 +244,7 @@ class SuggestMappingTool:
               "code": source.code,
               "name": source.name,
               "trait": source.trait,
+              "liquidity": liquidity,
             },
             "candidates": [],
           }
@@ -239,6 +254,7 @@ class SuggestMappingTool:
           trait=classification,
           element_id=element_id,
           reporting_style_id=reporting_style_id,
+          liquidity=liquidity,
         )
 
         return {
@@ -247,6 +263,7 @@ class SuggestMappingTool:
             "code": source.code,
             "name": source.name,
             "trait": source.trait,
+            "liquidity": liquidity,
           },
           "candidates": [
             {
@@ -351,8 +368,8 @@ class ExpandToRsGaapCandidatesTool:
 rs-gaap parent, then return rs-gaap-type-subtype children as specific filing-level candidates.
 
 **WHEN TO USE:**
-- After confirming a CoA → FAC mapping (second pass)
-- To get the most specific rs-gaap tag for a CoA account
+- When you have a FAC concept and want its specific rs-gaap filing candidates
+- To drill from a FAC summary level down to the rs-gaap-type-subtype variants
 
 **RETURNS:**
 - rs_gaap_parent: the direct rs-gaap equivalent of the FAC concept
@@ -394,7 +411,7 @@ rs-gaap parent, then return rs-gaap-type-subtype children as specific filing-lev
 
 
 class CreateMappingAssociationTool:
-  """Write a CoA → FAC mapping association."""
+  """Write a CoA → rs-gaap mapping association."""
 
   def __init__(self, graph_client):
     self.client = graph_client
@@ -402,19 +419,18 @@ class CreateMappingAssociationTool:
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "create-mapping-association",
-      "description": """Write a confirmed CoA → target mapping association.
+      "description": """Write a confirmed CoA → rs-gaap mapping association.
 
 **WHEN TO USE:**
-- After choosing the best FAC candidate for a CoA element (primary pass; `association_type='mapping'`)
-- Or after refining a FAC-classified account to a specific rs-gaap tag (`association_type='equivalence'`)
+- After choosing the best rs-gaap candidate for a CoA element (`association_type='mapping'` — the canonical arc the renderer follows)
 - Confidence ≥ 0.70 is required; skip below that threshold
 
 **INPUTS:**
 - mapping_id: The coa_mapping structure ID (from get-unmapped-elements)
 - from_element_id: CoA element ID (source)
-- to_element_id: Target element ID (FAC for primary, rs-gaap for equivalence)
+- to_element_id: rs-gaap element ID (the reporting concept)
 - confidence: Float 0.0–1.0 (AI confidence in the match)
-- association_type: 'mapping' (primary FAC rollup) or 'equivalence' (rs-gaap refinement). Defaults to 'mapping'.""",
+- association_type: 'mapping' (CoA→rs-gaap, the primary arc the renderer follows) or 'equivalence' (alternate cross-taxonomy arc). Defaults to 'mapping'.""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -428,7 +444,7 @@ class CreateMappingAssociationTool:
           },
           "to_element_id": {
             "type": "string",
-            "description": "Target element ID (FAC for primary, rs-gaap for equivalence)",
+            "description": "rs-gaap element ID (the reporting concept)",
           },
           "confidence": {
             "type": "number",
@@ -437,7 +453,7 @@ class CreateMappingAssociationTool:
           "association_type": {
             "type": "string",
             "enum": ["mapping", "equivalence"],
-            "description": "'mapping' for primary FAC rollup, 'equivalence' for rs-gaap refinement. Defaults to 'mapping'.",
+            "description": "'mapping' = CoA→rs-gaap (primary, what the renderer follows); 'equivalence' = alternate cross-taxonomy arc. Defaults to 'mapping'.",
           },
         },
         "required": ["mapping_id", "from_element_id", "to_element_id", "confidence"],

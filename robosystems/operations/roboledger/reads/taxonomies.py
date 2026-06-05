@@ -31,7 +31,10 @@ from robosystems.models.extensions import (
   Taxonomy,
   Trait,
 )
-from robosystems.operations.library.reads import efs_trait_by_element
+from robosystems.operations.library.reads import (
+  efs_trait_by_element,
+  liquidity_by_element,
+)
 
 _COA_SOURCES = ("quickbooks", "xero", "plaid", "native", "import")
 
@@ -88,9 +91,11 @@ def get_reporting_taxonomy(session: Session) -> TaxonomyResponse | None:
 # ── Elements ──────────────────────────────────────────────────────────────
 
 
-# Local alias for the shared library helper — keeps call sites terse and
-# makes the import site searchable (grep for ``_efs_by_element``).
+# Local aliases for the shared library helpers — keep call sites terse and
+# make the import sites searchable (grep for ``_efs_by_element`` /
+# ``_liquidity_by_element``).
 _efs_by_element = efs_trait_by_element
+_liquidity_by_element = liquidity_by_element
 
 
 def element_to_response(row: Element, trait: str | None = None) -> ElementResponse:
@@ -212,8 +217,10 @@ def suggest_mapping_candidates(
   trait: str | None = None,
   element_id: str | None = None,
   reporting_style_id: str | None = None,
+  liquidity: str | None = None,
 ) -> list[ElementResponse]:
-  """Return rs-gaap candidates for a CoA element, narrowed by EFS trait.
+  """Return rs-gaap candidates for a CoA element, narrowed by EFS trait
+  (and ``liquidity`` when supplied).
 
   Filters active ``rs-gaap`` elements by the FASB
   elementsOfFinancialStatements trait (via element_traits), restricted
@@ -238,7 +245,7 @@ def suggest_mapping_candidates(
   docstring's "guaranteed to render" promise real.
 
   ``element_id`` is reserved for future per-element overrides but is
-  currently unused — trait alone drives the filter.
+  currently unused — ``trait`` (+ optional ``liquidity``) drive the filter.
   """
   del element_id  # reserved for future per-element narrowing
   if trait is None:
@@ -275,6 +282,17 @@ def suggest_mapping_candidates(
     .scalars()
     .all()
   )
+
+  # Liquidity narrowing (current / noncurrent): when the CoA element
+  # carries a liquidity trait, drop candidates whose liquidity *contradicts*
+  # it (a "Bank" / current account never surfaces noncurrent-asset
+  # candidates, and vice versa). Candidates with no liquidity trait are
+  # kept — absence isn't a contradiction, and the EFS filter still applies.
+  # No-op when liquidity is None (manual elements that didn't set it, or
+  # equity/revenue/expense which have no liquidity axis).
+  if liquidity:
+    candidate_liquidity = _liquidity_by_element(session, [r.id for r in rows])
+    rows = [r for r in rows if candidate_liquidity.get(r.id) in (None, liquidity)]
 
   # Structure-aware rollup guard (info-block §3.7.2): when a Reporting
   # Style is active and seeded, deny a target only if it actually rolls
@@ -335,7 +353,9 @@ def list_unmapped_elements(
   mapped_ids = set(session.execute(mapped_query).scalars().all())
 
   unmapped = [e for e in coa_elements if e.id not in mapped_ids]
-  efs_map = _efs_by_element(session, [e.id for e in unmapped])
+  unmapped_ids = [e.id for e in unmapped]
+  efs_map = _efs_by_element(session, unmapped_ids)
+  liquidity_map = _liquidity_by_element(session, unmapped_ids)
 
   return [
     UnmappedElementResponse(
@@ -343,6 +363,7 @@ def list_unmapped_elements(
       code=e.code,
       name=e.name,
       trait=efs_map.get(e.id),
+      liquidity=liquidity_map.get(e.id),
       balance_type=e.balance_type,
       external_source=e.external_source,
     )

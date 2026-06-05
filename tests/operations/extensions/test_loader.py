@@ -1055,6 +1055,42 @@ class TestApplySourceElementTraits:
     assert inserted == 3
     session.execute.assert_called_once()
 
+  def test_qb_account_type_also_translates_to_liquidity_trait(self):
+    """Assets/liabilities get a liquidity (current/noncurrent) trait in
+    addition to EFS; equity/revenue/expense get EFS only (no liquidity
+    axis). This is what lets the auto-map agent narrow asset candidates to
+    the right balance-sheet section instead of guessing from the name."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    elem_bank = MagicMock(id="elem_1", metadata_={"account_type": "Bank"})
+    elem_ltl = MagicMock(id="elem_2", metadata_={"account_type": "Long Term Liability"})
+    elem_eq = MagicMock(id="elem_3", metadata_={"account_type": "Equity"})
+
+    traits = [
+      self._trait("asset", "trt_asset"),
+      self._trait("liability", "trt_liab"),
+      self._trait("equity", "trt_eq"),
+      self._trait("current", "trt_current"),
+      self._trait("noncurrent", "trt_noncurrent"),
+    ]
+    session = self._make_loader_session(
+      {"elem_1": elem_bank, "elem_2": elem_ltl, "elem_3": elem_eq}, traits
+    )
+
+    loader = OLTPLoader()
+    inserted = loader._apply_source_element_traits(
+      session,
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Bank → asset + current (2); Long Term Liability → liability +
+    # noncurrent (2); Equity → equity only, no liquidity (1) = 5. Without
+    # liquidity this would be 3; a stray equity-liquidity row would be 6.
+    assert inserted == 5
+
   def test_unknown_account_type_logs_warning_and_skips(self):
     """An AccountType not in the QB→EFS map is logged and skipped — the
     element is silently untraited, but the sync log surfaces it."""

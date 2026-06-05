@@ -699,8 +699,10 @@ def _read_mapped_balances(
   """Read mapped trial balance — same join as the /trial-balance/mapped endpoint.
 
   ``arc_type`` selects which CoA→target arc-type to follow:
-  ``'mapping'`` (CoA→FAC, default for fac-presentation reports) or
-  ``'equivalence'`` (CoA→rs-gaap, for rs-gaap-presentation reports).
+  ``'mapping'`` (CoA→rs-gaap — the canonical arc the MappingOperator
+  writes and the rs-gaap reporting layer follows; see
+  ``_arc_type_for_taxonomy``) or ``'equivalence'`` (an alternate
+  cross-taxonomy CoA arc, used for equivalence-direct rendering).
 
   Cumulative-vs-windowed loading keys off the concept's intrinsic
   ``period_type``: **instant** concepts (every balance-sheet item,

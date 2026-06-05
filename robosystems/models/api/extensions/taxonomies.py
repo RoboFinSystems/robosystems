@@ -353,6 +353,7 @@ class UnmappedElementResponse(BaseModel):
   code: str | None = None
   name: str
   trait: str | None = None
+  liquidity: str | None = None
   balance_type: str
   external_source: str | None = None
   suggested_targets: list[SuggestedTarget] = Field(default_factory=list)
@@ -517,6 +518,10 @@ class CreateElementRequest(BaseModel):
   ]
   balance_type: Literal["debit", "credit"] = "debit"
   period_type: Literal["duration", "instant"] = "duration"
+  liquidity: Literal["current", "noncurrent"] | None = None
+  """Optional liquidity classification (assets/liabilities only). Narrows
+  rs-gaap mapping candidates within the EFS bucket; ignored / harmless for
+  equity/revenue/expense accounts."""
   element_type: Literal["concept", "abstract", "axis", "member", "hypercube"] = (
     "concept"
   )

@@ -90,6 +90,35 @@ _QB_ACCOUNT_TYPE_TO_TRAIT: dict[str, str] = {
 }
 
 
+# QuickBooks AccountType → FASB ``liquidity`` trait identifier
+# (current / noncurrent). QB encodes liquidity directly in the type name
+# ("Other CURRENT Asset", "FIXED Asset", "LONG TERM Liability"), so the
+# mapping is unambiguous. Only assets and liabilities carry a liquidity
+# axis — equity / revenue / expense accounts are deliberately absent (no
+# liquidity trait is emitted for them).
+#
+# Captured alongside the EFS trait so the auto-map agent can narrow
+# rs-gaap candidates by current-vs-noncurrent instead of guessing it from
+# the account name (e.g. a "Bank" account no longer surfaces noncurrent
+# asset candidates). The rendered statement classification stays
+# structural; this trait is an advisory narrowing signal for mapping.
+_QB_ACCOUNT_TYPE_TO_LIQUIDITY: dict[str, str] = {
+  # Current assets
+  "Bank": "current",
+  "Accounts Receivable": "current",
+  "Other Current Asset": "current",
+  # Noncurrent assets
+  "Fixed Asset": "noncurrent",
+  "Other Asset": "noncurrent",
+  # Current liabilities
+  "Accounts Payable": "current",
+  "Credit Card": "current",
+  "Other Current Liability": "current",
+  # Noncurrent liabilities
+  "Long Term Liability": "noncurrent",
+}
+
+
 def _parse_metadata(raw) -> dict:
   """Parse metadata from dbt output — may be a dict, JSON string, or None."""
   if isinstance(raw, dict):
@@ -758,13 +787,16 @@ class OLTPLoader:
     now: datetime,
   ) -> int:
     """Translate source-system account classifications into FASB EFS
-    traits on the freshly-inserted elements.
+    (+ liquidity) traits on the freshly-inserted elements.
 
     For each element scoped to ``(source, connection_id)`` whose
     ``metadata.account_type`` matches a known source-system type,
     insert an ``ElementTrait`` row pointing at the corresponding
-    ``elementsOfFinancialStatements`` trait. Returns the number of
-    rows actually inserted.
+    ``elementsOfFinancialStatements`` trait, and — for assets and
+    liabilities — a second row for the ``liquidity`` (current /
+    noncurrent) trait so the auto-map agent can narrow candidates by
+    liquidity instead of inferring it from the account name. Returns the
+    number of rows actually inserted (EFS + liquidity).
 
     Idempotent: skips elements that already carry an EFS trait (could
     happen if a downstream classifier ran first), and uses an INSERT
@@ -775,29 +807,40 @@ class OLTPLoader:
     pattern is the same: the source's native account taxonomy is the
     seed, FASB EFS is the canonical target.
     """
-    type_to_trait_id = _QB_ACCOUNT_TYPE_TO_TRAIT if source == "quickbooks" else None
-    if type_to_trait_id is None:
+    if source != "quickbooks":
       return 0
+    type_to_efs = _QB_ACCOUNT_TYPE_TO_TRAIT
+    type_to_liquidity = _QB_ACCOUNT_TYPE_TO_LIQUIDITY
 
     from robosystems.models.extensions import Element
     from robosystems.models.extensions.element_trait import ElementTrait
     from robosystems.models.extensions.trait import Trait
 
-    # Resolve trait identifiers → trait_ids once.
-    trait_id_by_identifier: dict[str, str] = {
-      t.identifier: t.id
-      for t in session.query(Trait).filter(
-        Trait.category == "elementsOfFinancialStatements",
-        Trait.identifier.in_(set(type_to_trait_id.values())),
-      )
-    }
-    if not trait_id_by_identifier:
+    def _resolve_trait_ids(category: str, identifiers: set[str]) -> dict[str, str]:
+      return {
+        t.identifier: t.id
+        for t in session.query(Trait).filter(
+          Trait.category == category,
+          Trait.identifier.in_(identifiers),
+        )
+      }
+
+    # EFS is required (it's the trait the auto-map agent narrows on);
+    # liquidity is an additive narrowing signal — if its trait rows are
+    # absent we still emit EFS rather than skipping the element.
+    efs_id_by_identifier = _resolve_trait_ids(
+      "elementsOfFinancialStatements", set(type_to_efs.values())
+    )
+    if not efs_id_by_identifier:
       logger.warning(
         "No elementsOfFinancialStatements traits found in graph — "
         "skipping %s trait translation",
         source,
       )
       return 0
+    liquidity_id_by_identifier = _resolve_trait_ids(
+      "liquidity", set(type_to_liquidity.values())
+    )
 
     # Fetch the source's elements with their metadata.
     elements = (
@@ -810,13 +853,26 @@ class OLTPLoader:
     )
 
     rows: list[ElementTrait] = []
+
+    def _trait_row(element_id: str, trait_id: str) -> ElementTrait:
+      return ElementTrait(
+        element_id=element_id,
+        trait_id=trait_id,
+        is_primary=True,
+        confidence=1.0,
+        source=source,
+        created_at=now,
+        updated_at=now,
+        created_by=created_by,
+      )
+
     for elem in elements:
       meta = elem.metadata_ or {}
       acct_type = meta.get("account_type")
       if not acct_type:
         continue
-      trait_identifier = type_to_trait_id.get(acct_type)
-      if trait_identifier is None:
+      efs_identifier = type_to_efs.get(acct_type)
+      if efs_identifier is None:
         # Unknown source-system AccountType — log so unmapped types
         # surface in sync logs rather than silently producing
         # untraited elements.
@@ -827,21 +883,17 @@ class OLTPLoader:
           elem.id,
         )
         continue
-      trait_id = trait_id_by_identifier.get(trait_identifier)
-      if trait_id is None:
-        continue
-      rows.append(
-        ElementTrait(
-          element_id=elem.id,
-          trait_id=trait_id,
-          is_primary=True,
-          confidence=1.0,
-          source=source,
-          created_at=now,
-          updated_at=now,
-          created_by=created_by,
-        )
-      )
+      efs_trait_id = efs_id_by_identifier.get(efs_identifier)
+      if efs_trait_id is not None:
+        rows.append(_trait_row(elem.id, efs_trait_id))
+
+      # Liquidity (current / noncurrent) — assets & liabilities only;
+      # absent for equity / revenue / expense. Additive narrowing signal.
+      liquidity_identifier = type_to_liquidity.get(acct_type)
+      if liquidity_identifier is not None:
+        liquidity_trait_id = liquidity_id_by_identifier.get(liquidity_identifier)
+        if liquidity_trait_id is not None:
+          rows.append(_trait_row(elem.id, liquidity_trait_id))
 
     if not rows:
       return 0
