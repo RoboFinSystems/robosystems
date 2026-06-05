@@ -24,7 +24,7 @@
     {"standard": "rs-gaap-rules",                "version": "v1", "ordinal": 13, "is_required": true}
   ],
   "bridges": [
-    {"bridge": "fac-to-rs-gaap",                            "version": "v1", "ordinal": 0, "is_required": true},
+    {"bridge": "fac-to-rs-gaap",                            "version": "v1", "ordinal": 0, "is_required": true, "tenant_copy": false},
     {"bridge": "rs-gaap-disclosures-to-rs-gaap-textblocks", "version": "v1", "ordinal": 1, "is_required": true, "tenant_copy": false}
   ]
 }

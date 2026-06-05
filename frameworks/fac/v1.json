@@ -7,7 +7,7 @@
   "depends_on": [],
   "packages": [
     {"standard": "fac-traits",       "version": "v1", "ordinal": 0, "is_required": true},
-    {"standard": "fac",              "version": "v1", "ordinal": 1, "is_required": true},
+    {"standard": "fac",              "version": "v1", "ordinal": 1, "is_required": true, "tenant_copy": false},
     {"standard": "fac-presentation", "version": "v1", "ordinal": 2, "is_required": true, "tenant_copy": false},
     {"standard": "fac-calculations", "version": "v1", "ordinal": 3, "is_required": true, "tenant_copy": false}
   ],

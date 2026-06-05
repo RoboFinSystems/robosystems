@@ -55,6 +55,24 @@ Verification rules are **not** a fac package: the L1 cross-tree consistency
 identities target `rs-gaap:` subtotals, so they live in the rs-gaap framework
 (`rs-gaap-rules`, 3 rules) alongside the L2 `rs-gaap-rollup-rules`.
 
+## Tenant copy: only the vocabulary, not the substrate
+
+Of fac's packages, **only `fac-traits` is copied into each tenant schema**
+(`tenant_copy: true`). It must be — every `element_traits` row (rs-gaap
+bindings *and* the CoA accounts' EFS + liquidity traits) FKs into the `traits`
+table it seeds.
+
+`fac` (concepts), `fac-presentation`, `fac-calculations`, and the
+`fac-to-rs-gaap` bridge are all **`tenant_copy: false`** — seeded into the
+public library but *not* copied per-tenant. They're the dormant cross-framework
+substrate: nothing in a tenant's live render or CoA→rs-gaap mapping path reads
+them (the reporting tier is rs-gaap-canonical; the FAC "summary view" that would
+project rs-gaap detail back through the bridge isn't built yet). Keeping them
+public-only means they stay evolvable — a tenant library is immutable once
+provisioned, so anything copied in is frozen, whereas a public-only package can
+be re-curated and resync-added later. Promote one by flipping its
+`tenant_copy` back to `true` and re-syncing.
+
 ## Notes on `fac-traits`
 
 The trait vocabulary was originally forked from FASB's us-gaap 2026
