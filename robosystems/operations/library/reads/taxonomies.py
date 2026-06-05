@@ -15,6 +15,7 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.library.reads.elements import efs_trait_by_element
 
 
 def _taxonomy_to_response(
@@ -140,8 +141,10 @@ def list_taxonomy_arcs(
       Structure.name.label("structure_name"),
       from_elem.qname.label("from_qname"),
       from_elem.name.label("from_name"),
+      from_elem.is_abstract.label("from_is_abstract"),
       to_elem.qname.label("to_qname"),
       to_elem.name.label("to_name"),
+      to_elem.is_abstract.label("to_is_abstract"),
     )
     .join(Structure, Association.structure_id == Structure.id)
     .join(from_elem, Association.from_element_id == from_elem.id)
@@ -162,6 +165,15 @@ def list_taxonomy_arcs(
   )
 
   rows = session.execute(query).all()
+
+  # Batch-load the primary EFS trait for every element on either end of an
+  # arc so the hierarchy view can colour nodes (and badge abstracts) without a
+  # round-trip per node. One query for the whole page.
+  element_ids = {row.Association.from_element_id for row in rows} | {
+    row.Association.to_element_id for row in rows
+  }
+  efs = efs_trait_by_element(session, list(element_ids))
+
   return [
     LibraryAssociationResponse(
       id=row.Association.id,
@@ -170,9 +182,13 @@ def list_taxonomy_arcs(
       from_element_id=row.Association.from_element_id,
       from_element_qname=row.from_qname,
       from_element_name=row.from_name,
+      from_element_trait=efs.get(row.Association.from_element_id),
+      from_element_is_abstract=row.from_is_abstract,
       to_element_id=row.Association.to_element_id,
       to_element_qname=row.to_qname,
       to_element_name=row.to_name,
+      to_element_trait=efs.get(row.Association.to_element_id),
+      to_element_is_abstract=row.to_is_abstract,
       association_type=row.Association.association_type,
       arcrole=row.Association.arcrole,
       order_value=row.Association.order_value,

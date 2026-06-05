@@ -104,9 +104,19 @@ class LibraryAssociationResponse(BaseModel):
   from_element_id: str
   from_element_qname: str | None = None
   from_element_name: str | None = None
+  from_element_trait: str | None = Field(
+    None,
+    description="Primary elementsOfFinancialStatements trait (for node coloring)",
+  )
+  from_element_is_abstract: bool | None = None
   to_element_id: str
   to_element_qname: str | None = None
   to_element_name: str | None = None
+  to_element_trait: str | None = Field(
+    None,
+    description="Primary elementsOfFinancialStatements trait (for node coloring)",
+  )
+  to_element_is_abstract: bool | None = None
   association_type: str = Field(
     ...,
     description=(
