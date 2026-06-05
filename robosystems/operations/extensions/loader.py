@@ -1518,7 +1518,7 @@ class OLTPLoader:
     Idempotent — skips creation of each piece if it already exists.
     """
     from robosystems.db.extensions import extensions_session
-    from robosystems.models.extensions import EntityTaxonomy
+    from robosystems.models.extensions import Element, EntityTaxonomy
     from robosystems.models.extensions.entity import Entity
     from robosystems.models.extensions.roboledger import Structure, Taxonomy
     from robosystems.utils.ulid import generate_prefixed_ulid
@@ -1546,6 +1546,28 @@ class OLTPLoader:
           session.add(existing_coa)
           session.flush()
           logger.info(f"Created CoA taxonomy for {graph_id}: {existing_coa.id}")
+
+        # Link the source's synced accounts to the CoA taxonomy. The element
+        # load runs before this taxonomy exists, so synced accounts land with
+        # taxonomy_id=NULL — and then never surface under the taxonomy in the
+        # Library UI (which filters by taxonomy_id). Backfill here so they do.
+        # This matches the manual create-element path (which sets taxonomy_id
+        # directly); without it the sync path diverges from the manual one.
+        # Scoped to NULL so re-syncs leave already-linked rows untouched.
+        relinked = (
+          session.query(Element)
+          .filter(
+            Element.external_source == source,
+            Element.taxonomy_id.is_(None),
+          )
+          .update({Element.taxonomy_id: existing_coa.id}, synchronize_session=False)
+        )
+        if relinked:
+          session.flush()
+          logger.info(
+            f"Linked {relinked} {source} CoA element(s) → taxonomy "
+            f"{existing_coa.id} for {graph_id}"
+          )
 
         # Ensure the graph's entity is linked to the CoA taxonomy as its
         # primary chart_of_accounts basis. This materializes to
