@@ -11,7 +11,7 @@ Revenue / COGS / SG&A / R&D / D&A / Interest / Other Nonoperating /
 Tax). For a services firm like Cascade with no goods sold or R&D, the
 common rollups are:
 
-- **Revenue** → ``rs-gaap:SalesRevenueNet``
+- **Revenue** → ``rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax``
 - **Operating expenses (everything not D&A or interest)** →
   ``rs-gaap:SellingGeneralAndAdministrativeExpense``
 - **Depreciation** → ``rs-gaap:DepreciationDepletionAndAmortization``
@@ -68,10 +68,20 @@ MAPPINGS: list[tuple[str, str]] = [
   # Equity
   ("3000", "rs-gaap:AdditionalPaidInCapital"),  # Owner's Equity
   ("3100", "rs-gaap:RetainedEarningsAccumulatedDeficit"),  # Retained Earnings
-  # Revenue — services firm, no goods sold; everything is net service revenue
-  ("4000", "rs-gaap:SalesRevenueNet"),  # Consulting Revenue
-  ("4100", "rs-gaap:SalesRevenueNet"),  # Strategy Advisory Revenue
-  ("4200", "rs-gaap:SalesRevenueNet"),  # Implementation Services Revenue
+  # Revenue — services firm, no goods sold; everything is revenue from
+  # contracts with customers (ASC 606)
+  (
+    "4000",
+    "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+  ),  # Consulting Revenue
+  (
+    "4100",
+    "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+  ),  # Strategy Advisory Revenue
+  (
+    "4200",
+    "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+  ),  # Implementation Services Revenue
   # Operating expenses — Multi-step IS Network only admits SG&A as the
   # operating-expense bucket for non-COGS / non-D&A items. Everything
   # below rolls into SG&A. Depreciation gets its own line.

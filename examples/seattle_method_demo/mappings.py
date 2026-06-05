@@ -53,11 +53,11 @@ BS_IS_MAPPINGS: list[tuple[str, str]] = [
   ("mini:PaidInCapital", "rs-gaap:AdditionalPaidInCapital"),
   # Income statement — duration / monetary
   ("mini:Sales", "rs-gaap:Revenues"),
-  # NOTE: mini:CostsOfSales conflates COGS and services-cost. rs-gaap
-  # splits these; pick CostOfGoodsSold as the dominant case for Charlie's
-  # lemonade-stand fixtures (contractor labor in JE-205 is mis-tagged
-  # per the README's data-quality findings).
-  ("mini:CostsOfSales", "rs-gaap:CostOfGoodsSold"),
+  # NOTE: mini:CostsOfSales conflates COGS and services-cost.
+  # CostOfGoodsAndServicesSold (ASC 705) is the modern leaf covering both —
+  # the right target for Charlie's lemonade-stand fixtures (contractor labor
+  # in JE-205 is mis-tagged per the README's data-quality findings).
+  ("mini:CostsOfSales", "rs-gaap:CostOfGoodsAndServicesSold"),
   # SG&A — not exercised by the 14-JE lemonade stand, but the World
   # Online dataset (examples/seattle_method_world_online) has 7,822 SG&A
   # lines. Additive: Case 1 simply never touches this concept.

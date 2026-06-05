@@ -23,7 +23,9 @@ from robosystems.logger import logger
 from robosystems.taxonomy.model import (
   AssociationSpec,
   ElementSpec,
+  LabelAssignmentSpec,
   LabelSpec,
+  ReferenceAssignmentSpec,
   ReferenceSpec,
   RuleSpec,
   RuleTargetSpec,
@@ -721,9 +723,17 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
 
   # Find concepts + trait nodes. A subject is one or the other,
   # not both (traits have category+identifier, concepts have
-  # balance/period/elementType).
+  # balance/period/elementType). A third case — an IRI node that is
+  # neither (no concept attrs, not a trait) but carries labels /
+  # references — is a label-/reference-linkbase entry: it attaches to a
+  # concept defined in another package by qname (the label / reference
+  # linkbase pattern). Emit those as by-qname assignments resolved in the
+  # arcs pass, never as elements (so they don't clobber the owning
+  # package's balance/periodType via the element upsert).
   elements: list[ElementSpec] = []
   traits: list[TraitSpec] = []
+  label_assignments: list[LabelAssignmentSpec] = []
+  reference_assignments: list[ReferenceAssignmentSpec] = []
   seen_subjects: set[str] = set()
   for subject in graph.subjects():
     if not isinstance(subject, URIRef):
@@ -740,6 +750,29 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
       element = _extract_element(graph, subject)
       if element is not None:
         elements.append(element)
+    else:
+      qname = _iri_to_qname(subject_str, CANONICAL_CONTEXT)
+      if not qname:
+        continue
+      for lbl in _extract_labels(graph, subject):
+        label_assignments.append(
+          LabelAssignmentSpec(
+            element_qname=qname,
+            role=lbl.role,
+            language=lbl.language,
+            text=lbl.text,
+          )
+        )
+      for ref in _extract_references(graph, subject):
+        reference_assignments.append(
+          ReferenceAssignmentSpec(
+            element_qname=qname,
+            ref_type=ref.ref_type,
+            citation=ref.citation,
+            uri=ref.uri,
+            attributes=ref.attributes,
+          )
+        )
 
   associations = _extract_associations(graph)
   structures = _extract_structures(graph, default_block_type=default_block_type)
@@ -751,6 +784,8 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     f"{len(associations)} associations, {len(structures)} structures, "
     f"{len(traits)} traits, "
     f"{len(trait_assignments)} trait assignments, "
+    f"{len(label_assignments)} label assignments, "
+    f"{len(reference_assignments)} reference assignments, "
     f"{len(rules)} rules"
   )
 
@@ -774,6 +809,8 @@ def load_taxonomy_package(path: Path | str) -> TaxonomyPackage:
     structures=structures,
     traits=traits,
     trait_assignments=trait_assignments,
+    label_assignments=label_assignments,
+    reference_assignments=reference_assignments,
     rules=rules,
     taxonomy_type=taxonomy_type,
     default_block_type=default_block_type,

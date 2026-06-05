@@ -2057,20 +2057,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-2",
-      "from": {
-        "@id": "rs-gaap:Revenues"
-      },
-      "to": {
-        "@id": "rs-gaap:SalesRevenueNet"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "order": 10110.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-is-multistep-arc-3",
       "from": {
         "@id": "rs-gaap:Revenues"
@@ -2085,20 +2071,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-rev-other",
-      "from": {
-        "@id": "rs-gaap:Revenues"
-      },
-      "to": {
-        "@id": "rs-gaap:OtherSalesRevenueNet"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "order": 10130.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-is-multistep-arc-4",
       "from": {
         "@id": "rs-gaap:IncomeStatementAbstract"
@@ -2109,34 +2081,6 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
       "order": 10200.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-5",
-      "from": {
-        "@id": "rs-gaap:CostOfRevenue"
-      },
-      "to": {
-        "@id": "rs-gaap:CostOfGoodsSold"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "order": 10210.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-6",
-      "from": {
-        "@id": "rs-gaap:CostOfRevenue"
-      },
-      "to": {
-        "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "order": 10220.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -2414,20 +2358,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-is-singlestep-arc-2",
-      "from": {
-        "@id": "rs-gaap:Revenues"
-      },
-      "to": {
-        "@id": "rs-gaap:SalesRevenueNet"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
-      "order": 10110.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-is-singlestep-arc-3",
       "from": {
         "@id": "rs-gaap:Revenues"
@@ -2442,20 +2372,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-is-singlestep-arc-rev-other",
-      "from": {
-        "@id": "rs-gaap:Revenues"
-      },
-      "to": {
-        "@id": "rs-gaap:OtherSalesRevenueNet"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
-      "order": 10130.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-is-singlestep-arc-4",
       "from": {
         "@id": "rs-gaap:IncomeStatementAbstract"
@@ -2466,34 +2382,6 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
       "order": 10200.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-singlestep-arc-5",
-      "from": {
-        "@id": "rs-gaap:CostOfRevenue"
-      },
-      "to": {
-        "@id": "rs-gaap:CostOfGoodsSold"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
-      "order": 10210.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-singlestep-arc-6",
-      "from": {
-        "@id": "rs-gaap:CostOfRevenue"
-      },
-      "to": {
-        "@id": "rs-gaap:CostOfGoodsSoldExcludingDepreciationDepletionAndAmortization"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
-      "order": 10220.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -19127,6 +19015,34 @@
       "from": "rs-gaap:UnusualOrInfrequentItemNetOfInsuranceProceeds",
       "to": "rs-gaap:UnusualOrInfrequentItemLossGross",
       "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-multistep-arc-cor-cogs-services",
+      "from": {
+        "@id": "rs-gaap:CostOfRevenue"
+      },
+      "to": {
+        "@id": "rs-gaap:CostOfGoodsAndServicesSold"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10210.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:rs-gaap-pres-is-singlestep-arc-cor-cogs-services",
+      "from": {
+        "@id": "rs-gaap:CostOfRevenue"
+      },
+      "to": {
+        "@id": "rs-gaap:CostOfGoodsAndServicesSold"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
+      "order": 10210.0,
+      "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     }
   ]

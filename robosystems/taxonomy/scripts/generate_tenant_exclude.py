@@ -8,18 +8,23 @@ verticals (oil & gas, insurance, banking, utilities, …) belong in *peer*
 frameworks (rs-call-report, rs-statutory, rs-ferc), and XBRL dimension
 members/domains are never CoA line-item targets.
 
-This script computes the **clear-cut, zero-rollup-risk** exclusion set and writes
-it to ``robosystems/taxonomy/data/tenant_exclude_rs_gaap_v1.json``. The copy path
+This script computes the **MVP-core, zero-rollup-risk** exclusion set and writes
+it to ``frameworks/rs-gaap/tenant-exclude/v1.json``. The copy path
 (``writer.copy_library_into_tenant`` / ``resync_library_into_tenant``) reads that
 artifact and omits the listed concepts from each tenant schema; the public
 library is untouched. Promotion is reversible: drop a qname from the list and
 re-sync.
 
 Exclusion = (dimension Member/Domain + general-special-disconnected + industry
-verticals) **minus** KEEP-CRITICAL (the working set + its upward rollup ancestors
-+ the calc DAG + every concept referenced by a library rule). The keep-critical
-subtraction guarantees we never drop a concept the render ancestor-rollup
-(``_resolve_renderable_ancestor``) or a rule (target/operand) could need.
+verticals + general-special LEAVES) **minus** KEEP-CRITICAL (the working set +
+its upward rollup ancestors + the calc DAG + every concept referenced by a
+library rule). The leaf level is the finest disaggregation detail of the
+aggregation lattice; it is inert until the granularity-selection feature ships
+(mapping is capped at the renderable working set today), so we defer it and keep
+only the high-level aggregates — adding disaggregation levels back later via
+resync. The keep-critical subtraction guarantees we never drop a concept the
+render ancestor-rollup (``_resolve_renderable_ancestor``) or a rule
+(target/operand) could need.
 
 Run against a seeded library DB (mirrors ``generate_rollup_rules.py``):
 
@@ -37,6 +42,9 @@ import re
 from sqlalchemy import text
 
 from robosystems.db.extensions import LIBRARY_GRAPH_ID, extensions_session
+from robosystems.operations.operators.implementations.mapping.constants import (
+  RS_GAAP_SYNTHESIZED_DETAIL_ALLOW,
+)
 from robosystems.taxonomy.discovery import FRAMEWORKS_DIR
 
 _ARTIFACT = FRAMEWORKS_DIR / "rs-gaap" / "tenant-exclude" / "v1.json"
@@ -145,7 +153,18 @@ def compute_exclude() -> dict:
     qname_to_id[q] for q in rule_var_qnames if q in qname_to_id
   }
 
-  keep_critical = working | calc | ancestors | rule_refs
+  # Synthesized-detail mapping grains (PP&E Gross + its accumulated-depreciation
+  # contra). The renderer synthesizes PropertyPlantAndEquipmentNet = Gross - AD
+  # and the CF Investing derivation reads ΔGross as capex, so a CoA fixed-asset
+  # account maps to these even though Net is what the BS presents — they are NOT
+  # in the working set's presentation networks (AD is a general-special leaf, so
+  # it would otherwise be excluded) but MUST be in every tenant. Mirrors
+  # ``mapping/constants.py::RS_GAAP_SYNTHESIZED_DETAIL_ALLOW``.
+  synthesized_detail = {
+    qname_to_id[q] for q in RS_GAAP_SYNTHESIZED_DETAIL_ALLOW if q in qname_to_id
+  }
+
+  keep_critical = working | calc | ancestors | rule_refs | synthesized_detail
 
   # Undirected general-special connectivity to the working set.
   adj: dict[str, set[str]] = {}
@@ -167,7 +186,23 @@ def compute_exclude() -> dict:
   members = {i for i, q in qname.items() if q.endswith(("Member", "Domain"))}
   verticals = {i for i, q in qname.items() if _VERTICAL.search(q)}
 
-  candidate = members | disconnected | verticals
+  # Disaggregation leaves — the MVP curation (Sprint 3). The general-special
+  # tree is the aggregation lattice: a preparer picks report granularity by
+  # mapping a CoA account to a higher (aggregate) or lower (disaggregated) node.
+  # The leaf level is the finest detail. Today it is INERT — mapping candidates
+  # are capped at the renderable working set and the renderer only walks the
+  # aggregate level (see operations/roboledger/reads/taxonomies.py, the
+  # 2026-05-17 narrowing), so a tenant cannot map to or render a leaf. Shipping
+  # the leaves buys no capability now but makes them un-deletable once the
+  # granularity-selection feature lands and customers map to them. So defer the
+  # leaf detail: keep the high-level aggregates (intermediates with children),
+  # and add disaggregation levels back later via resync ("we added a deeper
+  # level so your reports can be denser"). Add is cheap; delete after use isn't.
+  gs_parents = {f for f, _ in gs}
+  gs_children = {t for _, t in gs}
+  disaggregation_leaves = (gs_children - gs_parents) & rg  # child-only in the lattice
+
+  candidate = members | disconnected | verticals | disaggregation_leaves
   final_drop = candidate - keep_critical  # never drop a rollup-critical concept
 
   def cat(i: str) -> str:
@@ -175,18 +210,28 @@ def compute_exclude() -> dict:
       return "dimension_member_domain"
     if i in disconnected:
       return "type_subtype_disconnected"
-    return "industry_vertical"
+    if i in verticals:
+      return "industry_vertical"
+    return "disaggregation_leaf"
+
+  by_category: dict[str, int] = {}
+  for i in final_drop:
+    by_category[cat(i)] = by_category.get(cat(i), 0) + 1
 
   excluded = sorted(qname[i] for i in final_drop)
   return {
     "framework": "rs-gaap",
     "version": "v1",
-    "policy": "tenant_exclude_clear_cut",
+    "policy": "tenant_exclude_mvp_core",
     "description": (
       "rs-gaap concepts kept in the public library but NOT copied into tenant "
-      "schemas (Sprint 2 clear-cut curation). Dimension members/domains + "
-      "general-special-disconnected + industry verticals, minus keep-critical "
-      "(working set + rollup ancestors + calc DAG)."
+      "schemas. The MVP-core curation: drop dimension members/domains, "
+      "general-special-disconnected concepts, industry verticals, AND the "
+      "general-special leaf level (the finest disaggregation detail, inert "
+      "until the granularity-selection feature ships) — minus keep-critical "
+      "(working set + rollup ancestors + calc DAG + rule refs). Keeps the "
+      "high-level aggregates; disaggregation levels are added back later via "
+      "resync (add is cheap; delete after a tenant maps to a concept is not)."
     ),
     "counts": {
       "rs_gaap_total": len(rg),
@@ -194,15 +239,7 @@ def compute_exclude() -> dict:
       "keep_critical": len(keep_critical),
       "excluded": len(final_drop),
       "tenant_kept": len(rg) - len(final_drop),
-      "by_category": {
-        "dimension_member_domain": sum(1 for i in final_drop if i in members),
-        "type_subtype_disconnected": sum(
-          1 for i in final_drop if i in disconnected and i not in members
-        ),
-        "industry_vertical": sum(
-          1 for i in final_drop if cat(i) == "industry_vertical"
-        ),
-      },
+      "by_category": by_category,
     },
     "excluded_qnames": excluded,
     "excluded_by_category": {q: cat(i) for i in final_drop for q in (qname[i],)},

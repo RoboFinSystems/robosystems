@@ -100,10 +100,12 @@ FAC_TO_RS_GAAP_FALLBACK: dict[str, str] = {
   # paid-in catch-all that isn't a rollup.
   "fac:Equity": "rs-gaap:AdditionalPaidInCapital",
   "fac:EquityAttributableToParent": "rs-gaap:AdditionalPaidInCapital",
-  # Revenues — OtherSalesRevenueNet is the operating-revenue catch-all
-  # leaf wired under rs-gaap:Revenues (NOT OtherIncome, which is
-  # non-operating and isn't a child of the Revenues rollup → would drop).
-  "fac:Revenues": "rs-gaap:OtherSalesRevenueNet",
+  # Revenues — RevenueFromContractWithCustomerExcludingAssessedTax is the
+  # sole operating-revenue leaf wired under rs-gaap:Revenues (the ASC 606
+  # primary; the us-gaap-deprecated SalesRevenueNet/OtherSalesRevenueNet
+  # leaves were retired). NOT OtherIncome, which is non-operating and isn't
+  # a child of the Revenues rollup → would drop.
+  "fac:Revenues": "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
   "fac:OtherOperatingIncomeExpenses": "rs-gaap:OtherCostAndExpenseOperating",
   "fac:NonoperatingIncomeLoss": "rs-gaap:OtherNonoperatingIncomeExpense",
   # Cost of Revenue — rs-gaap:CostOfRevenue itself is a rollup;
