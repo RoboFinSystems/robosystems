@@ -2,15 +2,14 @@
   "framework": "fac",
   "version": "v1",
   "title": "Fundamental Accounting Concepts (FAC)",
-  "description": "Universal accounting substrate: Charlie Hoffman's Fundamental Accounting Concepts (Assets, Liabilities, Equity, Revenues, Expenses, Income, Cash Flow) plus their presentation hierarchies, calculation identities, verification rules, and the universal trait vocabulary that classifies elements along orthogonal axes (elementsOfFinancialStatements, liquidity, activityType, recordedValue, …). Designed to be the shared foundation that every accounting reporting framework (rs-gaap, rs-ifrs, rs-call-report, rs-statutory, rs-irs, rs-ferc) inherits via depends_on. FAC concepts forked from Seattle Method; trait vocabulary (fac-traits) forked from FASB us-gaap 2026 metamodel publication; both now maintained natively as JSON-LD.",
+  "description": "Universal accounting substrate: Charlie Hoffman's Fundamental Accounting Concepts (Assets, Liabilities, Equity, Revenues, Expenses, Income, Cash Flow) plus their presentation hierarchies, calculation identities, and the universal trait vocabulary that classifies elements along orthogonal axes (elementsOfFinancialStatements, liquidity, activityType, recordedValue, …). Designed to be the framework-neutral foundation that every accounting reporting framework (rs-gaap, rs-ifrs, rs-call-report, rs-statutory, rs-irs, rs-ferc) inherits via depends_on. Deliberately carries NO framework-specific content: codification references (FASB ASC, IAS/IFRS, IRC) and validation rules that target a framework's own concepts live with that framework (e.g. rs-gaap-rules, rs-gaap-references), never here — so a downstream framework inheriting fac never drags another regime's rules/citations along. FAC concepts forked from Seattle Method; trait vocabulary (fac-traits) forked from FASB us-gaap 2026 metamodel publication; both now maintained natively as JSON-LD.",
   "framework_type": "reporting",
   "depends_on": [],
   "packages": [
     {"standard": "fac-traits",       "version": "v1", "ordinal": 0, "is_required": true},
-    {"standard": "fac",              "version": "v1", "ordinal": 1, "is_required": true},
+    {"standard": "fac",              "version": "v1", "ordinal": 1, "is_required": true, "tenant_copy": false},
     {"standard": "fac-presentation", "version": "v1", "ordinal": 2, "is_required": true, "tenant_copy": false},
-    {"standard": "fac-calculations", "version": "v1", "ordinal": 3, "is_required": true, "tenant_copy": false},
-    {"standard": "fac-rules",        "version": "v1", "ordinal": 4, "is_required": true}
+    {"standard": "fac-calculations", "version": "v1", "ordinal": 3, "is_required": true, "tenant_copy": false}
   ],
   "bridges": []
 }

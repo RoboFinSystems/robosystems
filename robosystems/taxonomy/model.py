@@ -369,7 +369,7 @@ class TaxonomyPackage(BaseModel):
       "arc packs (fac, rs-gaap-hierarchy) are 'mapping'; the universal "
       "trait vocabulary (fac-traits) is 'trait-vocabulary'; per-element "
       "trait binding packs (rs-gaap-traits) are 'trait-assignment'; "
-      "verification-rule packs (fac-rules) are 'rules'."
+      "verification-rule packs (rs-gaap-rules) are 'rules'."
     ),
   )
   is_shared: bool = Field(True, description="Shared across tenants (library-origin)")

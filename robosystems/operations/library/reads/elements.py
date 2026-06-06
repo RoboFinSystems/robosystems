@@ -91,18 +91,21 @@ def _labels_by_element(
   return grouped
 
 
-def efs_trait_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
-  """Batch-load FASB elementsOfFinancialStatements trait identifier.
+def primary_trait_by_element(
+  session: Session, element_ids: list[str], category: str
+) -> dict[str, str]:
+  """Batch-load the primary trait identifier for a given trait ``category``.
 
-  Returns ``{element_id: identifier}`` — e.g., ``{"elem_xyz": "asset"}``.
-  Elements without an EFS trait assignment are absent from the map
-  (callers should default to ``None``).
+  Returns ``{element_id: identifier}`` — e.g., for
+  ``elementsOfFinancialStatements``, ``{"elem_xyz": "asset"}``. Elements
+  without an assignment in that category are absent from the map (callers
+  should default to ``None``).
 
-  ``ORDER BY is_primary DESC`` ensures the primary EFS assignment wins
-  when multiple rows exist for one element (the junction supports a
-  single primary plus alternates). This is the single source of truth
-  for EFS lookups — any read path that needs the primary EFS tag should
-  import this instead of re-implementing the query.
+  ``ORDER BY is_primary DESC`` ensures the primary assignment wins when
+  multiple rows exist for one element in the category (the junction
+  supports a single primary plus alternates). Single source of truth for
+  primary-trait lookups — any read path that needs the primary tag for a
+  category should call this instead of re-implementing the query.
   """
   result: dict[str, str] = {}
   if not element_ids:
@@ -112,13 +115,26 @@ def efs_trait_by_element(session: Session, element_ids: list[str]) -> dict[str, 
     .join(Trait, Trait.id == ElementTrait.trait_id)
     .where(
       ElementTrait.element_id.in_(element_ids),
-      Trait.category == "elementsOfFinancialStatements",
+      Trait.category == category,
     )
     .order_by(ElementTrait.is_primary.desc())
   ).all()
   for element_id, identifier in rows:
     result.setdefault(element_id, identifier)
   return result
+
+
+def efs_trait_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
+  """Batch-load the primary FASB elementsOfFinancialStatements trait
+  identifier — ``{element_id: "asset" | "liability" | …}``."""
+  return primary_trait_by_element(session, element_ids, "elementsOfFinancialStatements")
+
+
+def liquidity_by_element(session: Session, element_ids: list[str]) -> dict[str, str]:
+  """Batch-load the primary liquidity trait identifier —
+  ``{element_id: "current" | "noncurrent"}``. Absent for elements with no
+  liquidity assignment (equity / revenue / expense, or unclassified)."""
+  return primary_trait_by_element(session, element_ids, "liquidity")
 
 
 _efs_trait_by_element = efs_trait_by_element
@@ -216,6 +232,7 @@ def list_elements(
   offset: int = 0,
   include_labels: bool = False,
   include_references: bool = False,
+  include_inactive: bool = False,
 ) -> list[LibraryElementResponse]:
   """List library elements with filters + pagination.
 
@@ -231,6 +248,9 @@ def list_elements(
 
   `is_abstract=True` returns only abstract grouping concepts; `False`
   returns only concrete. `None` returns both.
+
+  `include_inactive=False` (default) hides deactivated elements (e.g. CoA
+  accounts synced as inactive); set `True` for admin/debug views.
   """
   limit = max(1, min(limit, MAX_ELEMENT_LIMIT))
 
@@ -251,6 +271,12 @@ def list_elements(
     query = query.where(Element.element_type == element_type)
   if is_abstract is not None:
     query = query.where(Element.is_abstract.is_(is_abstract))
+  if not include_inactive:
+    # Hide deactivated elements by default — tenant CoA elements synced from
+    # a source (e.g. QuickBooks "(deleted)" accounts) carry is_active=False;
+    # library-seeded elements are all active, so this is a no-op for them.
+    # Mirrors the roboledger CoA reads, which filter is_active.
+    query = query.where(Element.is_active.is_(True))
   query = query.order_by(Element.qname.asc()).limit(limit).offset(offset)
 
   elements = session.execute(query).scalars().all()

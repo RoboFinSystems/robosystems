@@ -1,11 +1,16 @@
-"""MappingOperator — autonomous CoA → FAC mapping.
+"""MappingOperator — autonomous CoA → rs-gaap mapping.
 
 Iterates through unmapped Chart of Accounts elements, calls Bedrock to
-match each to a FAC (Fundamental Accounting Concepts) concept, and writes
-confirmed mappings via MCP tool classes (direct instantiation). FAC is
-the primary semantic target; filing-specific rs-gaap / us-gaap variants
-are derived from the FAC match via deterministic equivalence-arc
-expansion downstream.
+match each to an rs-gaap reporting concept, and writes confirmed mappings
+(``association_type='mapping'``) via MCP tool classes (direct
+instantiation). This is the rs-gaap-anchored model: rs-gaap is the
+canonical reporting target the renderer consumes, and the FAC view is
+*derived* from each CoA → rs-gaap arc through the fac-to-rs-gaap
+equivalence bridge — never stored as a separate per-tenant CoA → FAC arc.
+
+Candidates are narrowed by the CoA element's EFS trait and (for
+assets/liabilities) its liquidity trait, so the AI chooses among a tight,
+section-correct candidate set rather than guessing current-vs-noncurrent.
 
 Uses the same MCP tool classes as cowork (Claude Desktop) — instantiated
 in-process via DirectToolAccess.
@@ -18,7 +23,6 @@ import json
 import logging
 import re
 from collections import defaultdict
-from typing import Any
 
 from robosystems.operations.operators.ai_client import AIMessage
 from robosystems.operations.operators.base import (
@@ -31,16 +35,11 @@ from robosystems.operations.operators.base import (
   OperatorSpec,
 )
 from robosystems.operations.operators.implementations.mapping.constants import (
-  FAC_TO_RS_GAAP_FALLBACK,
-  FALLBACK_CONFIDENCE,
   RS_GAAP_NAME_PATTERN_OVERRIDES,
-  RS_GAAP_SUBTOTAL_DENYLIST,
 )
 from robosystems.operations.operators.implementations.mapping.prompt import (
   MAPPING_SYSTEM_PROMPT,
-  RS_GAAP_REFINEMENT_SYSTEM_PROMPT,
   build_mapping_prompt,
-  build_rs_gaap_refinement_prompt,
 )
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.operator_registry import register_operator
@@ -86,11 +85,11 @@ def _deterministic_rs_gaap_override(coa_elem: dict) -> str | None:
 
 @register_operator("mapping")
 class MappingOperator(Operator):
-  """Autonomous CoA → FAC mapping via Bedrock AI and MCP tools."""
+  """Autonomous CoA → rs-gaap mapping via Bedrock AI and MCP tools."""
 
   spec = OperatorSpec(
     name="Mapping Operator",
-    description="Autonomous Chart of Accounts to FAC (Fundamental Accounting Concepts) mapping",
+    description="Autonomous Chart of Accounts to rs-gaap reporting-concept mapping",
     capabilities=[OperatorCapability.FINANCIAL_ANALYSIS],
     version="1.0.0",
     requires_credits=True,
@@ -206,7 +205,6 @@ class MappingOperator(Operator):
     # Import and instantiate MCP tool classes via DirectToolAccess
     from robosystems.middleware.mcp.tools.taxonomy_tools import (
       CreateMappingAssociationTool,
-      ExpandToRsGaapCandidatesTool,
       GetMappingSummaryTool,
       GetUnmappedElementsTool,
       SuggestMappingTool,
@@ -215,7 +213,6 @@ class MappingOperator(Operator):
     unmapped_tool = ctx.tools.get_tool_instance(GetUnmappedElementsTool)
     suggest_tool = ctx.tools.get_tool_instance(SuggestMappingTool)
     create_tool = ctx.tools.get_tool_instance(CreateMappingAssociationTool)
-    expand_tool = ctx.tools.get_tool_instance(ExpandToRsGaapCandidatesTool)
     summary_tool = ctx.tools.get_tool_instance(GetMappingSummaryTool)
 
     # 1. Get unmapped elements
@@ -246,42 +243,46 @@ class MappingOperator(Operator):
     mapped, flagged, skipped = 0, 0, 0
     processed = 0
 
-    # Accumulate confirmed FAC mappings for the rs-gaap refinement pass:
-    # [(coa_element_dict, fac_element_id)]
-    confirmed_fac: list[tuple[dict, str]] = []
-
-    # 2. Group by trait for efficient candidate lookup. Elements
-    # without a trait can't be narrowed structurally — skip them
-    # rather than invent a default.
-    by_classification: dict[str, list[dict]] = defaultdict(list)
+    # 2. Group by (EFS trait, liquidity) for candidate lookup. Liquidity
+    # (current/noncurrent) narrows asset/liability candidates to the right
+    # balance-sheet section; it is None for equity/revenue/expense and for
+    # accounts that never received a liquidity trait (→ EFS-only candidates,
+    # backward compatible). Elements without an EFS trait can't be narrowed
+    # at all — collect them as ``unclassified`` and surface them to the
+    # caller rather than silently folding them into ``skipped``.
+    unclassified: list[dict] = []
+    by_group: dict[tuple[str, str | None], list[dict]] = defaultdict(list)
     for elem in elements:
       cls = elem.get("trait")
       if cls is None:
-        skipped += 1
+        unclassified.append(elem)
         continue
-      by_classification[cls].append(elem)
+      by_group[(cls, elem.get("liquidity"))].append(elem)
 
-    # Build an id→element lookup for the refinement pass.
+    # Build an id→element lookup for the deterministic-override path.
     elem_by_id: dict[str, dict] = {e["id"]: e for e in elements}
 
-    # 3. Get candidates per trait via suggest-mapping tool
-    candidates_by_cls: dict[str, list[dict]] = {}
-    for cls, cls_elements in by_classification.items():
+    # 3. Get candidates per (trait, liquidity) via suggest-mapping tool.
+    candidates_by_group: dict[tuple[str, str | None], list[dict]] = {}
+    for (cls, liq), group_elements in by_group.items():
       suggest_result = await suggest_tool.execute(
-        {"element_id": cls_elements[0]["id"], "classification": cls}
+        {
+          "element_id": group_elements[0]["id"],
+          "classification": cls,
+          **({"liquidity": liq} if liq else {}),
+        }
       )
-      candidates_by_cls[cls] = suggest_result.get("candidates", [])
+      candidates_by_group[(cls, liq)] = suggest_result.get("candidates", [])
 
-    # 4. Process elements in batches per classification. Each confirmed /
-    # flagged FAC mapping is persisted to coa_mapping as
-    # association_type='mapping' — this is the primary rollup target that
-    # fact_grid, trial balance, and coverage readers all consume. The
-    # rs-gaap refinement pass in step 4b writes a second arc per element
-    # with association_type='equivalence' so the filing-specific tag is
-    # captured without double-counting line items in the 'mapping' rollup.
+    # 4. Process elements in batches per (trait, liquidity) group. Each
+    # confirmed / flagged mapping is persisted to coa_mapping as
+    # association_type='mapping' — the CoA → rs-gaap arc that fact_grid,
+    # trial balance, and coverage readers all consume (the rs-gaap-anchored
+    # model: the FAC view is derived from this via the fac-to-rs-gaap
+    # bridge, never stored per-tenant).
 
-    for cls, cls_elements in by_classification.items():
-      candidates = candidates_by_cls.get(cls, [])
+    for (cls, liq), cls_elements in by_group.items():
+      candidates = candidates_by_group.get((cls, liq), [])
       if not candidates:
         skipped += len(cls_elements)
         processed += len(cls_elements)
@@ -369,7 +370,6 @@ class MappingOperator(Operator):
                   "association_type": "mapping",
                 }
               )
-              confirmed_fac.append((elem_by_id[m["element_id"]], target))
             except Exception as e:
               logger.warning(
                 f"rs-gaap mapping create failed for {m['element_id']}: {e}"
@@ -385,14 +385,6 @@ class MappingOperator(Operator):
           percent=(processed / total) * 100,
         )
 
-    # 4b. rs-gaap refinement pass — follow FAC → rs-gaap equivalence + rs-gaap-type-subtype
-    # for every confirmed FAC mapping, grouped by FAC element to minimise AI calls.
-    if confirmed_fac and not await ctx.progress.is_cancelled():
-      await ctx.progress.report("Running rs-gaap refinement pass…", percent=90)
-      await self._refine_to_rs_gaap(
-        ctx, confirmed_fac, mapping_id, expand_tool, create_tool
-      )
-
     # 5. Get final coverage
     try:
       summary = await summary_tool.execute({"mapping_id": mapping_id})
@@ -400,231 +392,44 @@ class MappingOperator(Operator):
     except Exception:
       coverage_percent = ((mapped + flagged) / total * 100) if total > 0 else 0
 
+    # Surface accounts that carry no EFS trait — they can't be narrowed or
+    # mapped until classified. Distinct from ``skipped`` (which the agent
+    # could classify but didn't auto-approve); these need a classification
+    # upstream (QB AccountType gap, or a manual element created trait-less).
+    content = (
+      f"Mapped {mapped} elements, flagged {flagged} for review, skipped {skipped}"
+    )
+    if unclassified:
+      content += (
+        f"; {len(unclassified)} unclassified (no EFS trait — needs classification)"
+      )
+
     return OperatorResult(
-      content=f"Mapped {mapped} elements, flagged {flagged} for review, skipped {skipped}",
+      content=content,
       metadata={
         "mapped": mapped,
         "flagged": flagged,
         "skipped": skipped,
+        "unclassified": len(unclassified),
+        "unclassified_elements": [
+          {"id": e["id"], "name": e.get("name")} for e in unclassified[:50]
+        ],
         "coverage_percent": coverage_percent,
       },
     )
-
-  async def _map_batch(
-    self,
-    ctx: OperatorContext,
-    elements: list[dict],
-    candidates: list[dict],
-  ) -> list[dict]:
-    """Classify a batch of CoA elements against FAC candidates.
-
-    FAC is the primary semantic anchor: the AI picks among ~7-40 clean
-    FAC concepts rather than ~2,000 rs-gaap variants. The orchestrator
-    persists each accepted result as a CoA → FAC arc with
-    ``association_type='mapping'`` (the primary rollup target), and the
-    second pass (``_refine_to_rs_gaap``) layers a CoA → rs-gaap arc with
-    ``association_type='equivalence'`` so filing-specific tags are
-    captured without inflating trial-balance rows.
-    """
-    prompt = build_mapping_prompt(elements, candidates)
-
-    # 8000 tokens accommodates a full BATCH_SIZE=10 response with verbose
-    # `reasoning` fields. The previous 4000 ceiling truncated liability
-    # batches mid-string ("Unterminated string starting at: line 241")
-    # so the JSON parser raised and the entire batch was dropped — every
-    # liability CoA fell to "skipped" and the BS imbalance traced back
-    # to Notes Payable being unmapped (carrying a $25k QB credit).
-    response = await ctx.ai.create_message(
-      messages=[AIMessage(role="user", content=prompt)],
-      system=MAPPING_SYSTEM_PROMPT,
-      max_tokens=8000,
-      temperature=0.3,
-      operator_type="mapping",
-      operation_description="CoA to FAC mapping",
-    )
-
-    return self._parse_response(response.content, elements)
-
-  async def _refine_to_rs_gaap(
-    self,
-    ctx: OperatorContext,
-    confirmed_fac: list[tuple[dict, str]],
-    mapping_id: str,
-    expand_tool: Any,
-    create_tool: Any,
-  ) -> None:
-    """Second pass: write CoA → rs-gaap arcs as `association_type='equivalence'`.
-
-    The FAC arc from pass 1 is the primary rollup target
-    (`association_type='mapping'`); this pass layers a second arc per CoA
-    element that names the specific rs-gaap filing tag. Readers that walk
-    `association_type='mapping'` see only the FAC level (no double-count);
-    readers that want filing granularity walk
-    `association_type='equivalence'`.
-
-    Groups confirmed mappings by FAC element ID so one expand_tool call
-    (and one AI call) serves all CoA accounts that share the same FAC parent.
-    """
-    # Group CoA elements by their FAC target — deduped on (coa_id,
-    # fac_id) so even if an upstream caller passes the same pair
-    # twice, the refinement runs once per element. The operator's own
-    # FAC pass dedupes too; this is belt-and-suspenders against the
-    # 5-minute insert loop we hit when Claude returned a duplicated
-    # batch and pre-dedupe ``confirmed_fac`` carried each pair N times.
-    by_fac: dict[str, dict[str, dict]] = defaultdict(dict)
-    for coa_elem, fac_id in confirmed_fac:
-      by_fac[fac_id].setdefault(coa_elem["id"], coa_elem)
-    by_fac_list: dict[str, list[dict]] = {
-      fid: list(elems.values()) for fid, elems in by_fac.items()
-    }
-
-    # Pre-fetch FAC qnames so the fallback path can route each CoA to
-    # its per-FAC Other bucket even when ``expand_to_rs_gaap_candidates``
-    # returns an error (e.g. the FAC concept's wide equivalence set was
-    # entirely filtered out by the presentation-set + denylist filters).
-    # Without this, every CoA in such a group silently misses its
-    # rs-gaap mapping.
-    fac_qnames = await self._fetch_fac_qnames(ctx, list(by_fac_list.keys()))
-
-    for fac_id, coa_elements in by_fac_list.items():
-      if await ctx.progress.is_cancelled():
-        break
-
-      # Expand FAC → rs-gaap parent + rs-gaap-type-subtype children
-      expand_result = await expand_tool.execute({"fac_element_id": fac_id})
-      expand_failed = "error" in expand_result
-      if expand_failed:
-        logger.debug(f"No rs-gaap expansion for {fac_id}: {expand_result['error']}")
-        rs_gaap_parent = None
-        candidates: list[dict] = []
-        fac_qname = fac_qnames.get(fac_id, fac_id)
-      else:
-        rs_gaap_parent = expand_result["rs_gaap_parent"]
-        candidates = expand_result["candidates"]
-        fac_qname = expand_result.get("fac_qname", fac_id)
-
-      # One AI call per CoA element in this FAC group. Skip the AI
-      # entirely when no candidates exist (expand failed) — the
-      # fallback path below routes the CoA to its per-FAC Other bucket
-      # without burning a Bedrock call.
-      for coa_elem in coa_elements:
-        rs_gaap_id: str | None = None
-        rs_gaap_conf: float = 0.0
-        if candidates:
-          try:
-            prompt = build_rs_gaap_refinement_prompt(
-              coa_elem, fac_qname, rs_gaap_parent, candidates
-            )
-            response = await ctx.ai.create_message(
-              messages=[AIMessage(role="user", content=prompt)],
-              system=RS_GAAP_REFINEMENT_SYSTEM_PROMPT,
-              max_tokens=500,
-              temperature=0.2,
-              operator_type="mapping",
-              operation_description="CoA to rs-gaap refinement",
-            )
-
-            result = self._parse_rs_gaap_response(response.content)
-            # Use a lower threshold here — the FAC pass already confirmed the
-            # semantic bucket; the refinement is just picking the specific tag.
-            if (
-              result
-              and result.get("rs_gaap_id")
-              and result.get("confidence", 0) >= 0.50
-              # Belt-and-suspenders: even if the prompt instructed
-              # "no rollups", filter the AI's pick against the denylist
-              # in case it ignored the instruction.
-              and result.get("rs_gaap_qname") not in RS_GAAP_SUBTOTAL_DENYLIST
-            ):
-              rs_gaap_id = result["rs_gaap_id"]
-              rs_gaap_conf = result["confidence"]
-            else:
-              logger.info(
-                "rs-gaap refinement REJECTED for %s (FAC=%s): result=%s — falling back",
-                coa_elem.get("name", coa_elem["id"]),
-                fac_qname,
-                result,
-              )
-
-          except Exception as e:
-            logger.warning(f"rs-gaap refinement failed for {coa_elem['id']}: {e}")
-
-        # Fallback chain when the AI returned nothing usable:
-        #   1. The narrow-case parent equivalent (if not denylisted).
-        #      Already filtered upstream in expand_to_rs_gaap_candidates,
-        #      but the explicit guard here is belt-and-suspenders for
-        #      callers that bypass the filter.
-        #   2. The per-FAC "Other" bucket (FAC_TO_RS_GAAP_FALLBACK) at
-        #      a low ``FALLBACK_CONFIDENCE`` so the user sees it as a
-        #      placeholder mapping in the CoA UI and can correct it.
-        if not rs_gaap_id and rs_gaap_parent:
-          parent_qname = rs_gaap_parent.get("qname", "")
-          if parent_qname not in RS_GAAP_SUBTOTAL_DENYLIST:
-            rs_gaap_id = rs_gaap_parent["id"]
-            rs_gaap_conf = 0.60
-
-        if not rs_gaap_id:
-          fallback_qname = FAC_TO_RS_GAAP_FALLBACK.get(fac_qname)
-          if fallback_qname:
-            fallback_id = await self._resolve_qname_to_id(ctx, fallback_qname)
-            if fallback_id:
-              rs_gaap_id = fallback_id
-              rs_gaap_conf = FALLBACK_CONFIDENCE
-              logger.info(
-                "rs-gaap fallback for %s (FAC=%s): %s @ confidence=%.2f",
-                coa_elem.get("qname", coa_elem["id"]),
-                fac_qname,
-                fallback_qname,
-                FALLBACK_CONFIDENCE,
-              )
-
-        if rs_gaap_id:
-          try:
-            await create_tool.execute(
-              {
-                "mapping_id": mapping_id,
-                "from_element_id": coa_elem["id"],
-                "to_element_id": rs_gaap_id,
-                "confidence": rs_gaap_conf,
-                "association_type": "equivalence",
-              }
-            )
-          except Exception as e:
-            logger.warning(f"rs-gaap create failed for {coa_elem['id']}: {e}")
-
-  async def _fetch_fac_qnames(
-    self, ctx: OperatorContext, fac_ids: list[str]
-  ) -> dict[str, str]:
-    """Bulk-resolve a list of FAC element ids → qnames in one query.
-
-    Used by ``_refine_to_rs_gaap`` so the per-FAC fallback (look up
-    ``FAC_TO_RS_GAAP_FALLBACK[fac_qname]``) works even when
-    ``expand_to_rs_gaap_candidates`` returns an error and we don't have
-    a ``fac_qname`` from the expand result.
-    """
-    if not fac_ids:
-      return {}
-
-    from sqlalchemy import text
-
-    from robosystems.db.extensions import extensions_session
-
-    with extensions_session(ctx.graph_id) as session:
-      rows = session.execute(
-        text("SELECT id, qname FROM elements WHERE id = ANY(:ids)"),
-        {"ids": fac_ids},
-      ).fetchall()
-    return {r.id: r.qname for r in rows}
 
   async def _resolve_qname_to_id(self, ctx: OperatorContext, qname: str) -> str | None:
     """Resolve an rs-gaap qname → element_id within the operator's tenant
     schema.
 
-    Cached on the operator instance for the duration of a single ``run()``
-    call so the fallback path doesn't re-query for every CoA element
-    that lands on the same Other bucket. Returns ``None`` when the
-    qname isn't seeded — surfaces missing taxonomy data instead of
-    silently falling through.
+    Backs the deterministic name-pattern override (e.g. "Accumulated
+    Depreciation" → ``rs-gaap:AccumulatedDepreciation…``): the override
+    names a target qname directly, independent of the AI candidate set, so
+    it has to be resolved to the tenant's element_id before persisting the
+    arc. Cached on the operator instance for the duration of a single
+    ``run()`` so repeated overrides don't re-query for the same qname.
+    Returns ``None`` when the qname isn't seeded — surfaces missing taxonomy
+    data instead of silently falling through.
     """
     if not hasattr(self, "_qname_cache"):
       self._qname_cache: dict[str, str | None] = {}
@@ -644,25 +449,45 @@ class MappingOperator(Operator):
     self._qname_cache[qname] = elem_id
     if elem_id is None:
       logger.warning(
-        "rs-gaap fallback target %r not found in graph %s — fallback skipped",
+        "rs-gaap override target %r not found in graph %s — override skipped",
         qname,
         ctx.graph_id,
       )
     return elem_id
 
-  def _parse_rs_gaap_response(self, content: str) -> dict | None:
-    """Parse the single-object JSON from the rs-gaap refinement pass."""
-    try:
-      text = content.strip()
-      if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-          text = text[:-3]
-        text = text.strip()
-      return json.loads(text)
-    except (json.JSONDecodeError, TypeError) as e:
-      logger.warning(f"Failed to parse rs-gaap refinement response: {e}")
-      return None
+  async def _map_batch(
+    self,
+    ctx: OperatorContext,
+    elements: list[dict],
+    candidates: list[dict],
+  ) -> list[dict]:
+    """Classify a batch of CoA elements against rs-gaap candidates.
+
+    ``candidates`` is the EFS- (+ liquidity-) narrowed rs-gaap set from
+    ``suggest-mapping`` — a tight, section-correct slate rather than the
+    full ~2,000 rs-gaap variants. The orchestrator persists each accepted
+    result as a CoA → rs-gaap arc with ``association_type='mapping'`` — the
+    primary rollup target the renderer consumes. The FAC view is derived
+    from that arc via the fac-to-rs-gaap bridge, not stored separately.
+    """
+    prompt = build_mapping_prompt(elements, candidates)
+
+    # 8000 tokens accommodates a full BATCH_SIZE=10 response with verbose
+    # `reasoning` fields. The previous 4000 ceiling truncated liability
+    # batches mid-string ("Unterminated string starting at: line 241")
+    # so the JSON parser raised and the entire batch was dropped — every
+    # liability CoA fell to "skipped" and the BS imbalance traced back
+    # to Notes Payable being unmapped (carrying a $25k QB credit).
+    response = await ctx.ai.create_message(
+      messages=[AIMessage(role="user", content=prompt)],
+      system=MAPPING_SYSTEM_PROMPT,
+      max_tokens=8000,
+      temperature=0.3,
+      operator_type="mapping",
+      operation_description="CoA to rs-gaap mapping",
+    )
+
+    return self._parse_response(response.content, elements)
 
   def _parse_response(self, content: str, elements: list[dict]) -> list[dict]:
     """Parse Bedrock JSON response into mapping results.

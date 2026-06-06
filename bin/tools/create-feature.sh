@@ -93,7 +93,7 @@ echo "📝 Next steps:"
 echo "  1. Make your changes and commit them"
 echo "  2. Push your changes: git push"
 echo "  3. Create a PR: gh pr create --base $BASE_BRANCH --title \"Your PR title\" --body \"Your PR description\""
-echo "     or use: just create-pr $BASE_BRANCH $BRANCH_TYPE"
+echo "     or in a Claude Code session: /create-pr"
 
 # Check if we had stashed changes and auto-apply them
 if git stash list | grep -q "Auto-stash before creating branch $FULL_BRANCH"; then

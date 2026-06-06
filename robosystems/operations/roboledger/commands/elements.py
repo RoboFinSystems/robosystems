@@ -274,21 +274,27 @@ def create_element(
   # see the native account's economic nature.
   _assign_efs_classification(session, element.id, body.trait)
 
+  # Optional liquidity (current / noncurrent) — narrows rs-gaap mapping
+  # candidates within the EFS bucket. Only meaningful for assets and
+  # liabilities; `_assign_trait` no-ops if the identifier has no trait row.
+  if body.liquidity:
+    _assign_trait(session, element.id, "liquidity", body.liquidity)
+
   return _element_to_response(element, body.trait)
 
 
-def _assign_efs_classification(
-  session: Session, element_id: str, efs_identifier: str
+def _assign_trait(
+  session: Session, element_id: str, category: str, identifier: str
 ) -> None:
-  """Link a native element to the matching FASB EFS trait.
+  """Link a native element to the matching library trait by (category, identifier).
 
-  No-op if the EFS Trait row is missing (e.g., in tests that
-  don't seed the library).
+  No-op if the Trait row is missing (e.g., in tests that don't seed the
+  library, or a liquidity identifier passed for a non-asset/liability).
   """
   trait_row = session.execute(
     select(Trait).where(
-      Trait.category == "elementsOfFinancialStatements",
-      Trait.identifier == efs_identifier,
+      Trait.category == category,
+      Trait.identifier == identifier,
     )
   ).scalar_one_or_none()
   if trait_row is None:
@@ -301,6 +307,13 @@ def _assign_efs_classification(
     )
   )
   session.flush()
+
+
+def _assign_efs_classification(
+  session: Session, element_id: str, efs_identifier: str
+) -> None:
+  """Link a native element to the matching FASB EFS trait."""
+  _assign_trait(session, element_id, "elementsOfFinancialStatements", efs_identifier)
 
 
 def update_element(session: Session, body: UpdateElementRequest) -> ElementResponse:

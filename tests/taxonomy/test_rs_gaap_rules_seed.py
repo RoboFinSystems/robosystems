@@ -1,4 +1,4 @@
-"""Tests for the fac-rules/v1 JSON-LD seed.
+"""Tests for the rs-gaap-rules/v1 JSON-LD seed.
 
 Pure data tests — parses the seed via
 :func:`robosystems.taxonomy.loader.load_taxonomy_package` and asserts the
@@ -9,6 +9,9 @@ that presents the subtotal (info-block §6.1). The prior FAC-keyed,
 structure-scoped 14-rule seed (which evaluated to ``skipped`` because our
 facts are rs-gaap-keyed) is superseded; rollup-shaped identities now live
 in ``rs-gaap-rollup-rules/v1`` (L2).
+
+These rules target ``rs-gaap:`` subtotal concepts, so the package lives in
+the **rs-gaap** framework (moved out of fac, which stays framework-neutral).
 """
 
 from __future__ import annotations
@@ -25,7 +28,9 @@ from robosystems.taxonomy.loader import (
 )
 from robosystems.taxonomy.model import RuleSpec, TaxonomyPackage
 
-SEED_PATH = framework_root("fac") / "packages" / "fac-rules" / "v1" / "taxonomy.jsonld"
+SEED_PATH = (
+  framework_root("rs-gaap") / "packages" / "rs-gaap-rules" / "v1" / "taxonomy.jsonld"
+)
 
 VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -41,8 +46,8 @@ def rules(package: TaxonomyPackage) -> list[RuleSpec]:
 
 
 class TestPackageMetadata:
-  def test_standard_is_fac_rules(self, package: TaxonomyPackage) -> None:
-    assert package.standard == "fac-rules"
+  def test_standard_is_rs_gaap_rules(self, package: TaxonomyPackage) -> None:
+    assert package.standard == "rs-gaap-rules"
 
   def test_version_is_v1(self, package: TaxonomyPackage) -> None:
     assert package.version == "v1"
@@ -53,7 +58,7 @@ class TestPackageMetadata:
   def test_package_carries_no_elements_or_associations(
     self, package: TaxonomyPackage
   ) -> None:
-    """fac-rules/v1 is rule-only. Elements are seeded by rs-gaap/v1."""
+    """rs-gaap-rules/v1 is rule-only. Elements are seeded by rs-gaap/v1."""
     assert package.elements == []
     assert package.associations == []
 

@@ -15,7 +15,9 @@ from robosystems.operations.library.reads.elements import (
   get_element_equivalents,
   get_element_traits,
   get_element_tree,
+  liquidity_by_element,
   list_elements,
+  primary_trait_by_element,
   search_elements,
 )
 from robosystems.operations.library.reads.structures import (
@@ -40,9 +42,11 @@ __all__ = [
   "get_element_tree",
   "get_structure",
   "get_taxonomy",
+  "liquidity_by_element",
   "list_elements",
   "list_structures",
   "list_taxonomies",
   "list_taxonomy_arcs",
+  "primary_trait_by_element",
   "search_elements",
 ]

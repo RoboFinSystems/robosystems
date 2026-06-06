@@ -953,7 +953,6 @@ check_github_secrets() {
         echo "  ACTIONS_TOKEN enables:"
         echo "    - Push to protected branches (create-release.yml)"
         echo "    - Push tags and create GitHub releases (tag-release.yml)"
-        echo "    - PRs that auto-trigger CI workflows (create-pr.yml)"
         echo "    - Org-level self-hosted runner checks (claude.yml)"
         echo ""
         echo "  Without it, workflows fall back to github.token with limitations:"

@@ -7,12 +7,12 @@ could otherwise drift out of alignment:
 
 - Immutability trigger includes ``rules`` so library-seeded rows stay
   read-only in tenant schemas.
-- ``_WIDENED_TAXONOMY_TYPE_CHECK`` allows ``'rules'`` so the fac-rules
+- ``_WIDENED_TAXONOMY_TYPE_CHECK`` allows ``'rules'`` so the rs-gaap-rules
   seed row can be inserted into ``public.taxonomies``.
-- The fac-rules seed path is registered in ``SEED_FILES``.
+- The rs-gaap-rules seed path is registered in ``SEED_FILES``.
 - The tenant-copy column list matches the seed-writer column list
   (shape symmetry for the public → tenant INSERT...SELECT).
-- ``DEFAULT_TAXONOMY_PIN`` includes ``fac-rules`` so tenant copies
+- ``DEFAULT_TAXONOMY_PIN`` includes ``rs-gaap-rules`` so tenant copies
   actually fetch rule rows.
 """
 
@@ -60,11 +60,11 @@ class TestImmutableTables:
 class TestTaxonomyTypeCheck:
   def test_rules_type_is_allowed(self) -> None:
     """The widened CHECK constraint on ``public.taxonomies.taxonomy_type``
-    must include ``'rules'`` so the fac-rules seed row can be written."""
+    must include ``'rules'`` so the rs-gaap-rules seed row can be written."""
     assert "'rules'" in mig_0002._WIDENED_TAXONOMY_TYPE_CHECK
 
   def test_existing_tenant_backfill_widens_taxonomy_type(self) -> None:
-    """Existing tenant schemas copy the fac-rules taxonomy during 0002;
+    """Existing tenant schemas copy the rs-gaap-rules taxonomy during 0002;
     their CHECK must widen before that copy runs."""
 
     class _Conn:
@@ -86,8 +86,8 @@ class TestTaxonomyTypeCheck:
 
 
 class TestSeedFiles:
-  def test_fac_rules_seed_is_registered(self) -> None:
-    """The fac-rules/v1 JSON-LD seed must be in the SEED_FILES tuple —
+  def test_rs_gaap_rules_seed_is_registered(self) -> None:
+    """The rs-gaap-rules/v1 JSON-LD seed must be in the SEED_FILES tuple —
     missing it silently skips the rules seeder in every migration run."""
     seeded_names = {path.name for path in mig_0002.SEED_FILES}
     # Every seed is named ``taxonomy.jsonld`` — distinguish by parent dir.
@@ -95,7 +95,7 @@ class TestSeedFiles:
       (path.parent.parent.name, path.parent.name) for path in mig_0002.SEED_FILES
     }
     assert "taxonomy.jsonld" in seeded_names
-    assert ("fac-rules", "v1") in seeded_paths
+    assert ("rs-gaap-rules", "v1") in seeded_paths
 
   def test_phase_c_packages_pinned_in_framework_manifest(self) -> None:
     """The four Phase C packages + bridge are declared in
@@ -167,11 +167,11 @@ class TestRuleCheckConstraints:
 
 
 class TestTenantPin:
-  def test_default_pin_includes_fac_rules(self) -> None:
+  def test_default_pin_includes_rs_gaap_rules(self) -> None:
     """Without this pin entry, ``copy_library_into_tenant`` would filter
     ``public.rules`` by the pinned (standard, version) pairs and exclude
-    the fac-rules seed rows — tenant schemas would ship empty."""
-    assert DEFAULT_TAXONOMY_PIN.get("fac-rules") == "v1"
+    the rs-gaap-rules seed rows — tenant schemas would ship empty."""
+    assert DEFAULT_TAXONOMY_PIN.get("rs-gaap-rules") == "v1"
 
 
 class TestTenantWriterRuleCols:
