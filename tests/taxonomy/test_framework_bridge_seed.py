@@ -157,7 +157,10 @@ class TestResolvePinDispatch:
 
     pin = resolve_pin(_G())  # type: ignore[arg-type]
     assert pin["rs-gaap"] == "v999"
-    assert pin["fac"] == "v1"  # untouched by override
+    # The depends_on fac chain still expands (fac-traits is copied) and is
+    # untouched by the override. The `fac` package itself is tenant_copy:false,
+    # so it is intentionally omitted from the copy-pin (see discovery.py).
+    assert pin["fac-traits"] == "v1"
 
   def test_legacy_flat_dict_returned_asis(self) -> None:
     from robosystems.taxonomy.pins import resolve_pin
