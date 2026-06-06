@@ -132,7 +132,7 @@ while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
           echo "  2. To deploy to staging:"
           echo "     gh workflow run staging.yml --ref $BRANCH_NAME"
           echo "  3. To deploy to production:"
-          echo "     Create a PR to merge into main: just create-pr main release"
+          echo "     Create a PR to merge into main with the /create-pr Claude Code command (or gh pr create)"
         fi
 
         exit 0

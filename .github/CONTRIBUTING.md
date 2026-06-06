@@ -289,25 +289,25 @@ API documentation is auto-generated from FastAPI routes. Ensure:
 
 ### Creating a Pull Request
 
-We use an automated Claude-powered PR creation process:
+From a Claude Code session, run the `/create-pr` slash command:
 
-```bash
-# Create a PR with Claude analysis and review (default)
-just create-pr
+```text
+# Create a PR targeting main (default), authored from session context
+/create-pr
 
-# Create a PR targeting main with Claude review
-just create-pr main true
+# Target a different branch
+/create-pr staging
 
-# Create a PR without Claude review (faster)
-just create-pr main false
+# Also request a @claude review on the PR
+/create-pr review
 ```
 
 This will:
 
-1. Analyze your changes using Claude AI
-2. Generate a comprehensive PR description
-3. Include test results and impact analysis
-4. Create the PR on GitHub automatically
+1. Author the PR title and description from the actual work done in the session
+2. Cross-check every claim against `git diff <target>...<branch>` so the description stays truthful
+3. Run preflight checks (never PR from the default branch, push the feature branch) and detect any existing PR to update instead of duplicating
+4. Create the PR on GitHub via `gh pr create`
 
 ### Before Creating a PR
 

@@ -245,10 +245,6 @@ demo-world-online-statement-reconcile *args="":
 create-feature type="feature" name="" base="main" update="yes":
     @bin/tools/create-feature.sh {{type}} {{name}} {{base}} {{update}}
 
-# Create a pull request
-create-pr target="main" review="true":
-    @bin/tools/create-pr.sh {{target}} {{review}}
-
 # Create a release branch from main with deployment option
 create-release version="patch" deploy="staging":
     @bin/tools/create-release.sh {{version}} {{deploy}}

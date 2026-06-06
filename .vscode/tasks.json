@@ -207,13 +207,6 @@
       "problemMatcher": []
     },
     {
-      "label": "Create PR",
-      "type": "shell",
-      "command": "just",
-      "args": ["create-pr", "${input:targetBranch}", "${input:claudeReview}"],
-      "problemMatcher": []
-    },
-    {
       "label": "Create Release",
       "type": "shell",
       "command": "just",
@@ -399,19 +392,6 @@
       "description": "Choose initial deployment target:",
       "default": "staging",
       "options": ["staging", "prod", "all", "none"]
-    },
-    {
-      "id": "targetBranch",
-      "type": "promptString",
-      "description": "Choose target branch:",
-      "default": "main"
-    },
-    {
-      "id": "claudeReview",
-      "type": "pickString",
-      "description": "Request Claude review automatically:",
-      "default": "true",
-      "options": ["true", "false"]
     },
     {
       "id": "awsProfile",
