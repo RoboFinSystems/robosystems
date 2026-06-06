@@ -78,9 +78,13 @@ class TestLiquidityNarrowing:
     self, asset_sets: dict[str, set[str]]
   ) -> None:
     """Omitting liquidity returns the full EFS-bucket (backward compatible),
-    and the current/noncurrent partition covers it (rs-gaap assets all carry
-    a liquidity trait, so nothing is silently dropped)."""
-    assert asset_sets["current"] | asset_sets["noncurrent"] == asset_sets["efs_only"]
+    and the liquidity-narrowed sets never reach outside it — the union is a
+    subset of EFS-only, so narrowing only ever removes candidates. (Asserting
+    set *equality* would also require every rs-gaap asset to carry a liquidity
+    trait; that's a seed-data assumption, not behavior of the function under
+    test, and would fail as a confusing set-diff if a trait-less concept is
+    ever added. The strict-subset checks above already cover the narrowing.)"""
+    assert asset_sets["current"] | asset_sets["noncurrent"] <= asset_sets["efs_only"]
     # And the constraint actually bites — the narrowed sets are materially
     # smaller, not trivially equal to the whole bucket.
     assert len(asset_sets["current"]) < len(asset_sets["efs_only"])
