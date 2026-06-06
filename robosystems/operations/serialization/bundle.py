@@ -412,6 +412,7 @@ def build_report_bundle(
   from robosystems.models.core.graph.graph import Graph
   from robosystems.models.extensions.association import Association
   from robosystems.models.extensions.element import Element
+  from robosystems.models.extensions.element_label import ElementLabel
   from robosystems.models.extensions.entity import Entity
   from robosystems.models.extensions.roboledger.fact import Fact
   from robosystems.models.extensions.roboledger.fact_set import FactSet
@@ -553,8 +554,27 @@ def build_report_bundle(
     country=entity.address_country,
   )
 
+  # Standard display labels (role=standard, en) for the bundled concepts — the
+  # XBRL label-linkbase + JSON-LD skos:prefLabel source. element.name is the
+  # human label for most concepts but the bare localname for single-word
+  # fundamentals (Assets, Cash, Liabilities, Revenues, Goodwill, …); sourcing
+  # the standard label here keeps those from collapsing to the QName in arelle.
+  standard_label_by_id: dict[str, str] = {}
+  if elements_by_id:
+    standard_label_by_id = {
+      str(eid): txt
+      for eid, txt in session.execute(
+        select(ElementLabel.element_id, ElementLabel.text).where(
+          ElementLabel.element_id.in_(list(elements_by_id)),
+          ElementLabel.role == "standard",
+          ElementLabel.language == "en",
+        )
+      )
+    }
+
   schema_concepts = [
-    _element_to_bundle(elements_by_id[eid]) for eid in sorted(elements_by_id)
+    _element_to_bundle(elements_by_id[eid], standard_label_by_id.get(eid))
+    for eid in sorted(elements_by_id)
   ]
   linkbases = _associations_to_linkbases(associations, structures_by_id, elements_by_id)
   period_nodes, period_ref_for_fact = _mint_periods(facts)
@@ -656,13 +676,16 @@ def _period_metas_for_report(report: Any, fact_sets: list[Any]) -> list[PeriodMe
   return []
 
 
-def _element_to_bundle(e: Any) -> BundleElement:
+def _element_to_bundle(e: Any, standard_label: str | None = None) -> BundleElement:
   return BundleElement(
     id=str(e.id),
     qname=str(e.qname or e.name),
     namespace=e.namespace,
     name=str(e.name),
-    label=e.description,
+    # The standard label linkbase entry is the authoritative display label
+    # (skos:prefLabel / XBRL standard label); fall back to the element's
+    # description only when no standard label exists.
+    label=standard_label or e.description,
     balance_type=e.balance_type if e.balance_type in {"debit", "credit"} else None,
     period_type=str(e.period_type),
     is_abstract=bool(e.is_abstract),

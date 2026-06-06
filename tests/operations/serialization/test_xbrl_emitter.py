@@ -696,6 +696,18 @@ class TestLabelLinkbase:
     assert arc.get(f"{{{NS_XLINK}}}from") == loc.get(f"{{{NS_XLINK}}}label")
     assert arc.get(f"{{{NS_XLINK}}}to") == label_el.get(f"{{{NS_XLINK}}}label")
 
+  def test_single_word_label_equal_to_localname_is_emitted(self) -> None:
+    # Regression: a fundamental whose standard label equals its QName local
+    # part ("Assets" for rs-gaap:Assets) must still emit a label. The bundle
+    # now sources the standard label (bundle._element_to_bundle), so arelle
+    # shows "Assets" rather than falling back to "rs-gaap:Assets".
+    bundle = _single_concept_bundle(label="Assets", facts=[_fact("f1", 100.0)])
+    root = _parse(serialize_to_xbrl_21(bundle), "report-lab.xml")
+    link = root.find(f"{{{NS_LINK}}}labelLink")
+    assert link is not None
+    label_el = link.find(f"{{{NS_LINK}}}label")
+    assert label_el is not None and label_el.text == "Assets"
+
 
 class TestFactDedup:
   def _facts_in(self, zip_bytes: bytes) -> list[etree._Element]:
