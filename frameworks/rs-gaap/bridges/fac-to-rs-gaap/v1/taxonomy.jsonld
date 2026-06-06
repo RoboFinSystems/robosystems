@@ -474,6 +474,9 @@
         },
         {
           "@id": "rs-gaap:TechnologyServicesCosts"
+        },
+        {
+          "@id": "rs-gaap:OtherCostOfOperatingRevenue"
         }
       ]
     },
@@ -515,6 +518,30 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:AssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+        },
+        {
+          "@id": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"
+        },
+        {
+          "@id": "rs-gaap:OtherAssetsCurrent"
+        },
+        {
+          "@id": "rs-gaap:PrepaidExpenseCurrent"
+        },
+        {
+          "@id": "rs-gaap:ReceivablesNetCurrent"
+        },
+        {
+          "@id": "rs-gaap:RestrictedCashAndInvestmentsCurrent"
+        },
+        {
+          "@id": "rs-gaap:ShortTermInvestments"
+        },
+        {
+          "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
         }
       ]
     },
@@ -523,6 +550,30 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:LiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccruedLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:DebtCurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredRevenueCurrent"
+        },
+        {
+          "@id": "rs-gaap:FinanceLeaseLiabilityCurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
+        },
+        {
+          "@id": "rs-gaap:LongTermDebtAndCapitalLeaseObligationsCurrent"
         }
       ]
     },
@@ -589,6 +640,24 @@
         },
         {
           "@id": "rs-gaap:StockholdersEquity"
+        },
+        {
+          "@id": "rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax"
+        },
+        {
+          "@id": "rs-gaap:AdditionalPaidInCapital"
+        },
+        {
+          "@id": "rs-gaap:CommonStockValue"
+        },
+        {
+          "@id": "rs-gaap:PreferredStockValue"
+        },
+        {
+          "@id": "rs-gaap:RetainedEarningsAccumulatedDeficit"
+        },
+        {
+          "@id": "rs-gaap:TreasuryStockValue"
         }
       ]
     },
@@ -961,6 +1030,45 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:NetCashProvidedByUsedInFinancingActivities"
+        },
+        {
+          "@id": "rs-gaap:PaymentsForRepurchaseOfCommonStock"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromIssuanceOfCommonStock"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebt"
+        },
+        {
+          "@id": "rs-gaap:RepaymentsOfLongTermDebt"
+        },
+        {
+          "@id": "rs-gaap:PaymentsForRepurchaseOfEquity"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromIssuanceOfLongTermDebtAndCapitalSecuritiesNet"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromIssuanceOrSaleOfEquity"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromRepaymentsOfDebt"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromRepaymentsOfLongTermDebtAndCapitalSecurities"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromRepurchaseOfEquity"
+        },
+        {
+          "@id": "rs-gaap:RepaymentsOfLongTermDebtAndCapitalSecurities"
+        },
+        {
+          "@id": "rs-gaap:PaymentsOfDividends"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromPartnershipContribution"
         }
       ]
     },
@@ -985,6 +1093,36 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:NetCashProvidedByUsedInInvestingActivities"
+        },
+        {
+          "@id": "rs-gaap:PaymentsToAcquireIntangibleAssets"
+        },
+        {
+          "@id": "rs-gaap:PaymentsToAcquireInvestments"
+        },
+        {
+          "@id": "rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromSaleOfIntangibleAssets"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment"
+        },
+        {
+          "@id": "rs-gaap:PaymentsForProceedsFromInvestments"
+        },
+        {
+          "@id": "rs-gaap:PaymentsForProceedsFromProductiveAssets"
+        },
+        {
+          "@id": "rs-gaap:PaymentsToAcquireProductiveAssets"
+        },
+        {
+          "@id": "rs-gaap:ProceedsFromSaleOfProductiveAssets"
         }
       ]
     },
@@ -1009,6 +1147,60 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+        },
+        {
+          "@id": "rs-gaap:DepreciationDepletionAndAmortization"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInInventories"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInAccountsAndNotesReceivable"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInAccruedTaxesPayable"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInOperatingAssets"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInOperatingCapital"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInOperatingLiabilities"
+        },
+        {
+          "@id": "rs-gaap:IncreaseDecreaseInReceivables"
+        },
+        {
+          "@id": "rs-gaap:AdjustmentsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivities"
+        },
+        {
+          "@id": "rs-gaap:AdjustmentsNoncashItemsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivities"
+        },
+        {
+          "@id": "rs-gaap:ShareBasedCompensation"
+        },
+        {
+          "@id": "rs-gaap:EmployeeBenefitsAndShareBasedCompensationNoncash"
         }
       ]
     },
@@ -1116,6 +1308,33 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:AssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:FinanceLeaseRightOfUseAsset"
+        },
+        {
+          "@id": "rs-gaap:Goodwill"
+        },
+        {
+          "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
+        },
+        {
+          "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
+        },
+        {
+          "@id": "rs-gaap:LongTermInvestmentsAndReceivablesNet"
+        },
+        {
+          "@id": "rs-gaap:OperatingLeaseRightOfUseAsset"
+        },
+        {
+          "@id": "rs-gaap:OtherAssetsNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:PropertyPlantAndEquipmentGross"
+        },
+        {
+          "@id": "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment"
         }
       ]
     },
@@ -1124,6 +1343,21 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:LiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:DeferredIncomeTaxLiabilitiesNet"
+        },
+        {
+          "@id": "rs-gaap:DeferredRevenueNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OperatingLeaseLiabilityNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:OtherLiabilitiesNoncurrent"
+        },
+        {
+          "@id": "rs-gaap:LiabilitiesOtherThanLongtermDebtNoncurrent"
         }
       ]
     },
@@ -1162,6 +1396,36 @@
       "http://www.w3.org/2002/07/owl#equivalentClass": [
         {
           "@id": "rs-gaap:NonoperatingIncomeExpense"
+        },
+        {
+          "@id": "rs-gaap:ForeignCurrencyTransactionGainLossBeforeTax"
+        },
+        {
+          "@id": "rs-gaap:GainLossOnDispositionOfAssets"
+        },
+        {
+          "@id": "rs-gaap:GainLossOnDispositionOfAssets1"
+        },
+        {
+          "@id": "rs-gaap:GainLossOnSaleOfPropertyPlantEquipment"
+        },
+        {
+          "@id": "rs-gaap:GainsLossesOnExtinguishmentOfDebt"
+        },
+        {
+          "@id": "rs-gaap:InvestmentIncomeInterest"
+        },
+        {
+          "@id": "rs-gaap:OtherNonoperatingIncomeExpense"
+        },
+        {
+          "@id": "rs-gaap:InvestmentIncomeInterestAndDividend"
+        },
+        {
+          "@id": "rs-gaap:InvestmentIncomeNet"
+        },
+        {
+          "@id": "rs-gaap:InvestmentIncomeNonoperating"
         }
       ]
     },
@@ -1358,6 +1622,30 @@
         },
         {
           "@id": "rs-gaap:UtilitiesOperatingExpense"
+        },
+        {
+          "@id": "rs-gaap:AssetImpairmentCharges"
+        },
+        {
+          "@id": "rs-gaap:OtherCostAndExpenseOperating"
+        },
+        {
+          "@id": "rs-gaap:ResearchAndDevelopmentExpense"
+        },
+        {
+          "@id": "rs-gaap:RestructuringCharges"
+        },
+        {
+          "@id": "rs-gaap:SellingAndMarketingExpense"
+        },
+        {
+          "@id": "rs-gaap:RestructuringCosts"
+        },
+        {
+          "@id": "rs-gaap:RestructuringCostsAndAssetImpairmentCharges"
+        },
+        {
+          "@id": "rs-gaap:RestructuringSettlementAndImpairmentProvisions"
         }
       ]
     },
