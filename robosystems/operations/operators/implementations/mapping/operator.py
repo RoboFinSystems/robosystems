@@ -418,6 +418,43 @@ class MappingOperator(Operator):
       },
     )
 
+  async def _resolve_qname_to_id(self, ctx: OperatorContext, qname: str) -> str | None:
+    """Resolve an rs-gaap qname → element_id within the operator's tenant
+    schema.
+
+    Backs the deterministic name-pattern override (e.g. "Accumulated
+    Depreciation" → ``rs-gaap:AccumulatedDepreciation…``): the override
+    names a target qname directly, independent of the AI candidate set, so
+    it has to be resolved to the tenant's element_id before persisting the
+    arc. Cached on the operator instance for the duration of a single
+    ``run()`` so repeated overrides don't re-query for the same qname.
+    Returns ``None`` when the qname isn't seeded — surfaces missing taxonomy
+    data instead of silently falling through.
+    """
+    if not hasattr(self, "_qname_cache"):
+      self._qname_cache: dict[str, str | None] = {}
+    if qname in self._qname_cache:
+      return self._qname_cache[qname]
+
+    from sqlalchemy import text
+
+    from robosystems.db.extensions import extensions_session
+
+    with extensions_session(ctx.graph_id) as session:
+      row = session.execute(
+        text("SELECT id FROM elements WHERE qname = :qname LIMIT 1"),
+        {"qname": qname},
+      ).fetchone()
+    elem_id = row.id if row else None
+    self._qname_cache[qname] = elem_id
+    if elem_id is None:
+      logger.warning(
+        "rs-gaap override target %r not found in graph %s — override skipped",
+        qname,
+        ctx.graph_id,
+      )
+    return elem_id
+
   async def _map_batch(
     self,
     ctx: OperatorContext,
@@ -447,7 +484,7 @@ class MappingOperator(Operator):
       max_tokens=8000,
       temperature=0.3,
       operator_type="mapping",
-      operation_description="CoA to FAC mapping",
+      operation_description="CoA to rs-gaap mapping",
     )
 
     return self._parse_response(response.content, elements)
