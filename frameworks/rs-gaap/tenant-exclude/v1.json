@@ -11,10 +11,10 @@
     "tenant_kept": 143,
     "by_category": {
       "dimension_member_domain": 266,
-      "industry_vertical": 484,
       "disaggregation_leaf": 918,
-      "unanchored_intermediate": 163,
-      "type_subtype_disconnected": 181
+      "industry_vertical": 484,
+      "type_subtype_disconnected": 181,
+      "unanchored_intermediate": 163
     }
   },
   "excluded_qnames": [

@@ -84,8 +84,8 @@ _VERTICAL = re.compile(
   # broker-dealer
   r"|Brokerage|Clearing|TradingGainsLosses|PrincipalTransaction|SecuritiesSoldUnder"
   r"|SecuritiesPurchasedUnder|UnderwritingFee|CommissionsRevenue"
-  # insurance (→ rs-statutory)
-  r"|Reinsuranc|ContractHolders|DeferredPolicyAcquisition|PolicyLoan|SeparateAccount"
+  # insurance (→ rs-statutory; Reinsuranc/Annuit/Policyholder already in the base block)
+  r"|ContractHolders|DeferredPolicyAcquisition|PolicyLoan|SeparateAccount"
   r"|Underwriting|UnpaidClaim|RealizedInvestmentGains|NetInvestmentIncome"
   r"|InvestmentIncomeNet|DividendIncomeOperating"
   # mortgage servicing / leveraged & direct-financing lease / securitization
@@ -307,7 +307,7 @@ def compute_exclude() -> dict:
       "keep_critical": len(keep_critical),
       "excluded": len(final_drop),
       "tenant_kept": len(rg) - len(final_drop),
-      "by_category": by_category,
+      "by_category": dict(sorted(by_category.items())),  # sorted → deterministic regen
     },
     "excluded_qnames": excluded,
     "excluded_by_category": {q: cat(i) for i in final_drop for q in (qname[i],)},

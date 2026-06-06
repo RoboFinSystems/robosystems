@@ -75,12 +75,24 @@ def test_wired_concepts_kept_inert_dropped() -> None:
   detail are inert, so they drop; both re-add via resync if a deeper Style wires
   them."""
   excluded = set(_tenant_exclude_qnames())
+  # All 13 lines the 2026-06 split wired into the Default Style — every one must
+  # stay kept, or a future Style edit that silently un-wires one goes uncaught.
   for kept in (
+    # BS splits
+    "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+    "rs-gaap:ShortTermInvestments",
+    "rs-gaap:Goodwill",
+    "rs-gaap:IntangibleAssetsNetExcludingGoodwill",
     "rs-gaap:AccountsPayableCurrent",
     "rs-gaap:AccruedLiabilitiesCurrent",
-    "rs-gaap:Goodwill",
-    "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+    "rs-gaap:LongTermDebtCurrent",
+    # IS split + adds
     "rs-gaap:GeneralAndAdministrativeExpense",
+    "rs-gaap:SellingAndMarketingExpense",
+    "rs-gaap:RestructuringCharges",
+    "rs-gaap:AssetImpairmentCharges",
+    "rs-gaap:ForeignCurrencyTransactionGainLossBeforeTax",
+    "rs-gaap:GainsLossesOnExtinguishmentOfDebt",
   ):
     assert kept not in excluded, f"{kept} renders under the Default Style — must stay"
   for dropped in (
