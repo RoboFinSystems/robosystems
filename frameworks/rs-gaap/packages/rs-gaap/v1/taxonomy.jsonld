@@ -38676,6 +38676,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Income Tax Expense (Benefit), Continuing Operations",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -59070,6 +59076,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Liabilities and Partners' Capital",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -65213,6 +65225,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Net Interest Income (Loss) After Provision for Loan Losses",
+          "@language": "en"
         }
       ]
     },
@@ -104607,6 +104625,12 @@
           "@type": "xsd:boolean",
           "@value": true
         }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Secondary Processing Revenue",
+          "@language": "en"
+        }
       ]
     },
     {
@@ -111511,6 +111535,12 @@
         {
           "@type": "xsd:boolean",
           "@value": true
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "Vehicle Toll Revenue",
+          "@language": "en"
         }
       ]
     },

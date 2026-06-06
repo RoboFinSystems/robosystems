@@ -147,6 +147,23 @@ class TestElementToBundle:
     b = _element_to_bundle(e)
     assert b.balance_type is None
 
+  def test_standard_label_overrides_description(self) -> None:
+    """The standard label-linkbase entry is authoritative over the element's
+    description as the concept's display label."""
+    e = _FakeElement(
+      id="elem_01", qname="rs-gaap:Assets", name="Assets", description="Total Assets"
+    )
+    assert _element_to_bundle(e, "Assets").label == "Assets"
+
+  def test_standard_label_sourced_when_name_equals_localname(self) -> None:
+    """Regression: a single-word fundamental (name == QName localpart, no
+    description) carries no label without a sourced standard label — which is
+    why Assets/Cash/Liabilities/Revenues collapsed to their QName in the
+    XBRL/JSON-LD export. With the standard label sourced, it survives."""
+    e = _FakeElement(id="elem_01", qname="rs-gaap:Assets", name="Assets")
+    assert _element_to_bundle(e, None).label is None  # pre-fix behaviour
+    assert _element_to_bundle(e, "Assets").label == "Assets"  # the fix
+
 
 # ── _associations_to_linkbases ────────────────────────────────────────
 
