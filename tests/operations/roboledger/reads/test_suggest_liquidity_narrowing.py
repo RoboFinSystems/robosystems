@@ -12,6 +12,7 @@ filter falls back to EFS-only, backward compatible.
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import text as sa_text
 
 from robosystems.db.extensions import extensions_session
 from robosystems.operations.roboledger.reads.taxonomies import (
@@ -20,6 +21,24 @@ from robosystems.operations.roboledger.reads.taxonomies import (
 
 _PPE = "rs-gaap:PropertyPlantAndEquipmentNet"  # noncurrent asset
 _CASH = "rs-gaap:CashAndCashEquivalentsAtCarryingValue"  # current asset
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _require_extensions_db() -> None:
+  """Skip the whole file when the extensions DB isn't reachable.
+
+  These assertions need a live, migrated + seeded extensions library
+  database. CI runs the unit suite against a bare postgres that only has
+  ``robosystems_test`` (no ``extensions`` DB), so skip cleanly there
+  instead of erroring out — same guard as ``test_framework_bridge_seed``.
+  """
+  from sqlalchemy.exc import OperationalError
+
+  try:
+    with extensions_session("library") as s:
+      s.execute(sa_text("SELECT 1"))
+  except OperationalError as exc:
+    pytest.skip(f"extensions DB unavailable: {exc.orig}")
 
 
 @pytest.fixture(scope="module")
