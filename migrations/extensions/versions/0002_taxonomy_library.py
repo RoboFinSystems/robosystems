@@ -17,8 +17,8 @@ Schema changes (public schema):
 
 - CREATE TABLE public.element_labels (XBRL label linkbase)
 - CREATE TABLE public.element_references (XBRL reference linkbase)
-- CREATE TABLE public.traits (FASB metamodel vocabulary — 25 element-side
-  categories: 24 trait axes + flowClassification)
+- CREATE TABLE public.traits (FASB metamodel vocabulary — 26 element-side
+  categories: 24 trait axes + flowClassification + the RS `recurrence` axis)
 - CREATE TABLE public.element_traits (element ↔ trait many-to-many junction)
 - CREATE TABLE public.classifications (association structural patterns —
   3 categories: concept_arrangement, member_arrangement, named_disclosure)
@@ -275,8 +275,13 @@ _RULE_TARGET_POLYMORPHISM_CHECK = (
   ")"
 )
 
-# 25 FASB metamodel trait axes (24 axes + flowClassification).
-# Matches check_trait_category on public.traits.category.
+# 25 FASB metamodel trait axes (24 axes + flowClassification) + the RS
+# `recurrence` analytical extension. Matches check_trait_category on
+# public.traits.category (robosystems/models/extensions/trait.py). The
+# content-driven library seed in this same migration inserts the
+# `recurrence/nonrecurring` member from fac-traits.jsonld, so the CHECK
+# created here must already admit it on a fresh DB; migration 0019 applies
+# the same widen to DBs that ran an earlier version of this constraint.
 _TRAIT_CATEGORY_CHECK = (
   "category IN ("
   "'elementsOfFinancialStatements', 'liquidity', 'activityType', "
@@ -287,7 +292,8 @@ _TRAIT_CATEGORY_CHECK = (
   "'accrualOrPayable', 'priority', 'estimatedFutureActivity', "
   "'statisticalMeasurement', 'taxComponents', 'threshold', 'use', "
   "'indirectCashFlowReconcilingItem', "
-  "'flowClassification'"
+  "'flowClassification', "
+  "'recurrence'"
   ")"
 )
 

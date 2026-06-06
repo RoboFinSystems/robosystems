@@ -57,7 +57,9 @@ class Trait(ExtensionsBase):
       "'statisticalMeasurement', 'taxComponents', 'threshold', 'use', "
       "'indirectCashFlowReconcilingItem', "
       # Flow classification (FASB instant-* arcroles)
-      "'flowClassification'"
+      "'flowClassification', "
+      # RS analytical extension — earnings persistence (normalized earnings / NOPAT)
+      "'recurrence'"
       ")",
       name="check_trait_category",
     ),
