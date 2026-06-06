@@ -62,9 +62,16 @@ def list_taxonomies(
 
   counts: dict[str, int] = {}
   if include_element_count and taxonomies:
+    # Count active elements only, matching what the element browser shows by
+    # default — deactivated source-system elements (QuickBooks "(deleted)"
+    # accounts) are imported so transactions referencing them resolve, but are
+    # hidden from the library, so the chip must not count them.
     count_query = (
       select(Element.taxonomy_id, func.count(Element.id))
-      .where(Element.taxonomy_id.in_([t.id for t in taxonomies]))
+      .where(
+        Element.taxonomy_id.in_([t.id for t in taxonomies]),
+        Element.is_active.is_(True),
+      )
       .group_by(Element.taxonomy_id)
     )
     counts = {str(tid): int(cnt) for tid, cnt in session.execute(count_query).all()}
@@ -102,9 +109,13 @@ def get_taxonomy(
 
   element_count: int | None = None
   if include_element_count:
+    # Active-only, matching the element browser (see list_taxonomies).
     element_count = (
       session.execute(
-        select(func.count(Element.id)).where(Element.taxonomy_id == taxonomy.id)
+        select(func.count(Element.id)).where(
+          Element.taxonomy_id == taxonomy.id,
+          Element.is_active.is_(True),
+        )
       ).scalar()
       or 0
     )
