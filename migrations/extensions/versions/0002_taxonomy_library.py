@@ -34,7 +34,7 @@ Data changes (public schema):
 
 - DELETE 0001-seeded library rows
 - INSERT from JSON-LD seeds: fac, rs-gaap (concept taxonomies);
-  fac-traits (trait vocabulary, 99 traits across 25 categories;
+  fac-traits (trait vocabulary, 100 traits across 26 categories;
   inherited from fac framework via depends_on);
   rs-gaap-traits (per-element trait bindings, ~1.7k arcs);
   rs-gaap-hierarchy (class-subclass); fac-to-rs-gaap, fac-calculations,
@@ -280,8 +280,9 @@ _RULE_TARGET_POLYMORPHISM_CHECK = (
 # public.traits.category (robosystems/models/extensions/trait.py). The
 # content-driven library seed in this same migration inserts the
 # `recurrence/nonrecurring` member from fac-traits.jsonld, so the CHECK
-# created here must already admit it on a fresh DB; migration 0019 applies
-# the same widen to DBs that ran an earlier version of this constraint.
+# created here must already admit it on a fresh DB. No deployment had run an
+# earlier version of this migration when `recurrence` was added, so no
+# separate widen migration for existing DBs was needed.
 _TRAIT_CATEGORY_CHECK = (
   "category IN ("
   "'elementsOfFinancialStatements', 'liquidity', 'activityType', "
@@ -669,7 +670,7 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
     )
   )
 
-  # traits: FASB metamodel vocabulary (25 element-side categories).
+  # traits: FASB metamodel vocabulary (26 element-side categories).
   conn.execute(
     text(f"""
       CREATE TABLE IF NOT EXISTS {schema}.traits (
@@ -1112,7 +1113,7 @@ def upgrade() -> None:
   # ──────────────────────────────────────────────────────────────────────
   # 6. Trait vocabulary + element_traits junction + classification + assoc junction.
   # ──────────────────────────────────────────────────────────────────────
-  # traits: FASB metamodel vocabulary (25 element-side categories).
+  # traits: FASB metamodel vocabulary (26 element-side categories).
   op.create_table(
     "traits",
     sa.Column("id", sa.String(), nullable=False),

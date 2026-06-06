@@ -5,8 +5,9 @@ A Trait is a named member of a controlled classification vocabulary axis:
 ``(category='liquidity', identifier='current')``,
 ``(category='flowClassification', identifier='inflow')``, etc.
 
-The 25 categories cover the 24 orthogonal FASB metamodel trait axes plus
-``flowClassification`` (derived from FASB instant-* arcroles). Element
+The 26 categories cover the 24 orthogonal FASB metamodel trait axes plus
+``flowClassification`` (derived from FASB instant-* arcroles) and the RS
+``recurrence`` analytical axis (earnings persistence / NOPAT). Element
 assignments live in ``element_traits`` via :class:`ElementTrait`.
 
 This is distinct from :class:`Classification` (association-side), which
