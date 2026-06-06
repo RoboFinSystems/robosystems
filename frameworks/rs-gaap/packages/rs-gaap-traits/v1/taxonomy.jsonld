@@ -1724,6 +1724,12 @@
       "@id": "rs-gaap:AssetImpairmentCharges",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:recurrence/nonrecurring"
+        },
+        {
+          "@id": "trait:use/remeasurement"
+        },
+        {
           "@id": "trait:elementsOfFinancialStatements/loss"
         },
         {
@@ -5733,6 +5739,9 @@
       "@id": "rs-gaap:GainLossOnDispositionOfAssets",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:recurrence/nonrecurring"
+        },
+        {
           "@id": "trait:elementsOfFinancialStatements/gain"
         },
         {
@@ -5746,6 +5755,9 @@
     {
       "@id": "rs-gaap:GainLossOnDispositionOfAssets1",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:recurrence/nonrecurring"
+        },
         {
           "@id": "trait:elementsOfFinancialStatements/gain"
         },
@@ -6030,6 +6042,9 @@
       "@id": "rs-gaap:GainLossOnSaleOfPropertyPlantEquipment",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:recurrence/nonrecurring"
+        },
+        {
           "@id": "trait:elementsOfFinancialStatements/gain"
         },
         {
@@ -6200,6 +6215,9 @@
     {
       "@id": "rs-gaap:GainsLossesOnExtinguishmentOfDebt",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:recurrence/nonrecurring"
+        },
         {
           "@id": "trait:elementsOfFinancialStatements/gain"
         },
@@ -6896,6 +6914,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInAccountsAndNotesReceivable",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -6911,6 +6932,9 @@
     {
       "@id": "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
@@ -6944,6 +6968,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInAccountsReceivable",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -6976,6 +7003,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -7000,6 +7030,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInAccruedLiabilities",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -7015,6 +7048,9 @@
     {
       "@id": "rs-gaap:IncreaseDecreaseInAccruedTaxesPayable",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
@@ -7594,6 +7630,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInInventories",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -7746,6 +7785,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInOperatingAssets",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -7754,6 +7796,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInOperatingCapital",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -7761,6 +7806,9 @@
     {
       "@id": "rs-gaap:IncreaseDecreaseInOperatingLiabilities",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
@@ -7912,6 +7960,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -8056,6 +8107,9 @@
       "@id": "rs-gaap:IncreaseDecreaseInPrepaidExpense",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         }
       ]
@@ -8151,6 +8205,9 @@
     {
       "@id": "rs-gaap:IncreaseDecreaseInReceivables",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:indirectCashFlowReconcilingItem/indirectCashFlowMethodReconcilingItem"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
@@ -18467,6 +18524,9 @@
       "@id": "rs-gaap:RestructuringCharges",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:recurrence/nonrecurring"
+        },
+        {
           "@id": "trait:elementsOfFinancialStatements/expense"
         },
         {
@@ -18481,6 +18541,9 @@
       "@id": "rs-gaap:RestructuringCosts",
       "https://robosystems.ai/vocab/hasTrait": [
         {
+          "@id": "trait:recurrence/nonrecurring"
+        },
+        {
           "@id": "trait:operatingNonoperating/operating"
         },
         {
@@ -18491,6 +18554,12 @@
     {
       "@id": "rs-gaap:RestructuringCostsAndAssetImpairmentCharges",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:recurrence/nonrecurring"
+        },
+        {
+          "@id": "trait:use/remeasurement"
+        },
         {
           "@id": "trait:operatingNonoperating/operating"
         }
@@ -18521,6 +18590,12 @@
     {
       "@id": "rs-gaap:RestructuringSettlementAndImpairmentProvisions",
       "https://robosystems.ai/vocab/hasTrait": [
+        {
+          "@id": "trait:recurrence/nonrecurring"
+        },
+        {
+          "@id": "trait:use/remeasurement"
+        },
         {
           "@id": "trait:elementsOfFinancialStatements/loss"
         },

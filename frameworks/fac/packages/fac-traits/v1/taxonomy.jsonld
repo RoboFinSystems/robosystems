@@ -345,7 +345,7 @@
     "format": "XBRL metamodel (traits + domains + members)"
   },
   "forked_at": "2026-04-20",
-  "description": "Universal accounting-element trait vocabulary — 24 orthogonal classification axes (elementsOfFinancialStatements, liquidity, activityType, operatingNonoperating, recordedValue, realizationStatus, hedging, leaseType, …) covering 95 trait members, plus the flowClassification axis (inflow/outflow/accrual/contra) derived from FASB's instant-* arcroles. Seeds the `traits` table — each member is a (category, identifier) pair. Forked from the FASB us-gaap 2026 metamodel; the axes themselves describe how *any* accounting element gets classified, not just us-gaap, so the vocabulary lives in the fac framework as the dependency root and is inherited by every rs-* curation that depends on fac. Per-element trait bindings (seeding the `element_traits` junction) live in each framework's `*-traits/v1/` package — today: `rs-gaap-traits/v1/`.",
+  "description": "Universal accounting-element trait vocabulary — 24 orthogonal classification axes (elementsOfFinancialStatements, liquidity, activityType, operatingNonoperating, recordedValue, realizationStatus, hedging, leaseType, …) covering 95 trait members, plus the flowClassification axis (inflow/outflow/accrual/contra) derived from FASB's instant-* arcroles, plus the RS analytical-extension axis `recurrence` (nonrecurring) for earnings-persistence / NOPAT normalization — 26 categories, 100 members in total. Seeds the `traits` table — each member is a (category, identifier) pair. Forked from the FASB us-gaap 2026 metamodel; the axes themselves describe how *any* accounting element gets classified, not just us-gaap, so the vocabulary lives in the fac framework as the dependency root and is inherited by every rs-* curation that depends on fac. Per-element trait bindings (seeding the `element_traits` junction) live in each framework's `*-traits/v1/` package — today: `rs-gaap-traits/v1/`.",
   "@graph": [
     {
       "@id": "trait:statisticalMeasurement/arithmeticAverage",
@@ -1743,6 +1743,31 @@
       "rdfs:label": [
         {
           "@value": "remeasurement",
+          "@language": "en"
+        }
+      ]
+    },
+    {
+      "@id": "trait:recurrence/nonrecurring",
+      "@type": "rs:Trait",
+      "https://robosystems.ai/vocab/category": [
+        {
+          "@value": "recurrence"
+        }
+      ],
+      "https://robosystems.ai/vocab/identifier": [
+        {
+          "@value": "nonrecurring"
+        }
+      ],
+      "https://robosystems.ai/vocab/source": [
+        {
+          "@value": "fac-traits"
+        }
+      ],
+      "rdfs:label": [
+        {
+          "@value": "nonrecurring",
           "@language": "en"
         }
       ]

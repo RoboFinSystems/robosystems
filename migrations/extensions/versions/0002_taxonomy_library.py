@@ -17,8 +17,8 @@ Schema changes (public schema):
 
 - CREATE TABLE public.element_labels (XBRL label linkbase)
 - CREATE TABLE public.element_references (XBRL reference linkbase)
-- CREATE TABLE public.traits (FASB metamodel vocabulary — 25 element-side
-  categories: 24 trait axes + flowClassification)
+- CREATE TABLE public.traits (FASB metamodel vocabulary — 26 element-side
+  categories: 24 trait axes + flowClassification + the RS `recurrence` axis)
 - CREATE TABLE public.element_traits (element ↔ trait many-to-many junction)
 - CREATE TABLE public.classifications (association structural patterns —
   3 categories: concept_arrangement, member_arrangement, named_disclosure)
@@ -34,7 +34,7 @@ Data changes (public schema):
 
 - DELETE 0001-seeded library rows
 - INSERT from JSON-LD seeds: fac, rs-gaap (concept taxonomies);
-  fac-traits (trait vocabulary, 99 traits across 25 categories;
+  fac-traits (trait vocabulary, 100 traits across 26 categories;
   inherited from fac framework via depends_on);
   rs-gaap-traits (per-element trait bindings, ~1.7k arcs);
   rs-gaap-hierarchy (class-subclass); fac-to-rs-gaap, fac-calculations,
@@ -275,8 +275,14 @@ _RULE_TARGET_POLYMORPHISM_CHECK = (
   ")"
 )
 
-# 25 FASB metamodel trait axes (24 axes + flowClassification).
-# Matches check_trait_category on public.traits.category.
+# 25 FASB metamodel trait axes (24 axes + flowClassification) + the RS
+# `recurrence` analytical extension. Matches check_trait_category on
+# public.traits.category (robosystems/models/extensions/trait.py). The
+# content-driven library seed in this same migration inserts the
+# `recurrence/nonrecurring` member from fac-traits.jsonld, so the CHECK
+# created here must already admit it on a fresh DB. No deployment had run an
+# earlier version of this migration when `recurrence` was added, so no
+# separate widen migration for existing DBs was needed.
 _TRAIT_CATEGORY_CHECK = (
   "category IN ("
   "'elementsOfFinancialStatements', 'liquidity', 'activityType', "
@@ -287,7 +293,8 @@ _TRAIT_CATEGORY_CHECK = (
   "'accrualOrPayable', 'priority', 'estimatedFutureActivity', "
   "'statisticalMeasurement', 'taxComponents', 'threshold', 'use', "
   "'indirectCashFlowReconcilingItem', "
-  "'flowClassification'"
+  "'flowClassification', "
+  "'recurrence'"
   ")"
 )
 
@@ -663,7 +670,7 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
     )
   )
 
-  # traits: FASB metamodel vocabulary (25 element-side categories).
+  # traits: FASB metamodel vocabulary (26 element-side categories).
   conn.execute(
     text(f"""
       CREATE TABLE IF NOT EXISTS {schema}.traits (
@@ -1106,7 +1113,7 @@ def upgrade() -> None:
   # ──────────────────────────────────────────────────────────────────────
   # 6. Trait vocabulary + element_traits junction + classification + assoc junction.
   # ──────────────────────────────────────────────────────────────────────
-  # traits: FASB metamodel vocabulary (25 element-side categories).
+  # traits: FASB metamodel vocabulary (26 element-side categories).
   op.create_table(
     "traits",
     sa.Column("id", sa.String(), nullable=False),
