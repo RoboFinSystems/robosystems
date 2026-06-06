@@ -33,22 +33,19 @@ from __future__ import annotations
 BS_IS_MAPPINGS: list[tuple[str, str]] = [
   # Balance sheet — instant / monetary. Targets must be leaves in the
   # rs-gaap BS-Classified presentation network used by the Default
-  # Reporting Style. The earlier set targeted leaf-cousins (e.g.
-  # rs-gaap:AccountsPayableCurrent) that the renderer rolled up to a
-  # parent NOT in the BS path — producing facts that displayed but
-  # didn't aggregate into Assets / L+E subtotals.
-  ("mini:CashAndCashEquivalents", "rs-gaap:CashCashEquivalentsAndShortTermInvestments"),
+  # Reporting Style — the visible leaves the renderer aggregates into the
+  # Assets / L+E subtotals.
+  ("mini:CashAndCashEquivalents", "rs-gaap:CashAndCashEquivalentsAtCarryingValue"),
   ("mini:Receivables", "rs-gaap:ReceivablesNetCurrent"),
   (
     "mini:Inventories",
     "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings",
   ),
   ("mini:PropertyPlantAndEquipment", "rs-gaap:PropertyPlantAndEquipmentNet"),
-  # AP and Accrued both roll into the same combined BS-Classified leaf
-  # (the rs-gaap presentation network doesn't expose them separately
-  # at the visible-leaf layer).
-  ("mini:AccountsPayable", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),
-  ("mini:AccruedExpenses", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),
+  # AP and Accrued are separate BS-Classified leaves (the 2026-06 split of
+  # the combined AccountsPayableAndAccruedLiabilitiesCurrent line).
+  ("mini:AccountsPayable", "rs-gaap:AccountsPayableCurrent"),
+  ("mini:AccruedExpenses", "rs-gaap:AccruedLiabilitiesCurrent"),
   ("mini:LongtermDebt", "rs-gaap:LongTermDebtAndCapitalLeaseObligations"),
   ("mini:PaidInCapital", "rs-gaap:AdditionalPaidInCapital"),
   # Income statement — duration / monetary
@@ -63,7 +60,7 @@ BS_IS_MAPPINGS: list[tuple[str, str]] = [
   # lines. Additive: Case 1 simply never touches this concept.
   (
     "mini:SalesGeneralAndAdministrativeExpenses",
-    "rs-gaap:SellingGeneralAndAdministrativeExpense",
+    "rs-gaap:GeneralAndAdministrativeExpense",
   ),
   ("mini:DepreciationAndAmortization", "rs-gaap:DepreciationDepletionAndAmortization"),
   ("mini:InterestExpense", "rs-gaap:InterestExpense"),

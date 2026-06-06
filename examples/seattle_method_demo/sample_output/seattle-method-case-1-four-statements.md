@@ -1,7 +1,7 @@
 # Seattle Method Cross-Taxonomy — Test Case 1: Four-Statement Report
 
-**Graph**: `kg19e75cc61281a81d622f`
-**Report**: `rpt_01KSV87C3PYP3APRH5XMWPS0ZX` (published)
+**Graph**: `kg19e9b82353aed511343b`
+**Report**: `rpt_01KTDR4JFECMQWRA5ZHNT81XB6` (published)
 **Entity**: Lemonade Stand (Charlie Hoffman Test Case 1)
 **Period**: 2024-01-01 → 2024-03-31 (Current)
 **Comparative**: 2023-10-02 → 2023-12-31 (Prior — zero opening balances)
@@ -71,25 +71,26 @@ The architectural piece that powers this lives in
 
 - **Structure**: `rs-gaap — Balance Sheet — Classified`
 - **Block type**: `balance_sheet`
-- **Row count**: 15
+- **Row count**: 16
 - **Unmapped elements**: 0
 
 | QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
 |---|---|---: | ---:|
-| `rs-gaap:CashCashEquivalentsAndShortTermInvestments` |     Cash, Cash Equivalents, and Short-Term Investments | $10,850.00 | $0.00 |
+| `rs-gaap:CashAndCashEquivalentsAtCarryingValue` |     Cash and Cash Equivalents, at Carrying Value | $10,850.00 | $0.00 |
 | `rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings` |     Inventory, Net of Allowances, Customer Advances and Progress Billings | $2,700.00 | $0.00 |
 | `rs-gaap:AssetsCurrent` |   **Assets, Current** | $13,550.00 | $0.00 |
-| `rs-gaap:PropertyPlantAndEquipmentNet` |     PropertyPlantAndEquipmentNet | $900.00 | $0.00 |
+| `rs-gaap:PropertyPlantAndEquipmentNet` |     Property, Plant and Equipment, Net | $900.00 | $0.00 |
 | `rs-gaap:AssetsNoncurrent` |   **Assets, Noncurrent** | $900.00 | $0.00 |
 | `rs-gaap:Assets` | **Assets** | $14,450.00 | $0.00 |
-| `rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent` |       Accounts Payable and Accrued Liabilities, Current | $1,400.00 | $0.00 |
+| `rs-gaap:AccountsPayableCurrent` |       Accounts Payable, Current | $1,000.00 | $0.00 |
+| `rs-gaap:AccruedLiabilitiesCurrent` |       Accrued Liabilities, Current | $400.00 | $0.00 |
 | `rs-gaap:LiabilitiesCurrent` |     **Liabilities, Current** | $1,400.00 | $0.00 |
 | `rs-gaap:LongTermDebtAndCapitalLeaseObligations` |       Long-Term Debt and Lease Obligation | $1,000.00 | $0.00 |
 | `rs-gaap:LiabilitiesNoncurrent` |     **Liabilities, Noncurrent** | $1,000.00 | $0.00 |
 | `rs-gaap:Liabilities` |   **Liabilities** | $2,400.00 | $0.00 |
 | `rs-gaap:AdditionalPaidInCapital` |     Additional Paid in Capital | $10,000.00 | $0.00 |
 | `rs-gaap:RetainedEarningsAccumulatedDeficit` |     Retained Earnings (Accumulated Deficit) | $2,050.00 | $0.00 |
-| `rs-gaap:StockholdersEquity` |   **StockholdersEquity** | $12,050.00 | $0.00 |
+| `rs-gaap:StockholdersEquity` |   **Stockholders' Equity Attributable to Parent** | $12,050.00 | $0.00 |
 | `rs-gaap:LiabilitiesAndStockholdersEquity` | **Liabilities and Equity** | $14,450.00 | $0.00 |
 
 ---
@@ -104,7 +105,7 @@ The architectural piece that powers this lives in
 | QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
 |---|---|---: | ---:|
 | `rs-gaap:Revenues` |   **Revenues** | $8,000.00 | $0.00 |
-| `rs-gaap:CostOfGoodsSold` |     CostOfGoodsSold | $5,300.00 | $0.00 |
+| `rs-gaap:CostOfGoodsAndServicesSold` |     Cost of Product and Service Sold | $5,300.00 | $0.00 |
 | `rs-gaap:CostOfRevenue` |   **Cost of Revenue** | $5,300.00 | $0.00 |
 | `rs-gaap:GrossProfit` |   **Gross Profit** | $2,700.00 | $0.00 |
 | `rs-gaap:DepreciationDepletionAndAmortization` |     Depreciation, Depletion and Amortization | $100.00 | $0.00 |
@@ -122,7 +123,7 @@ The architectural piece that powers this lives in
 
 - **Structure**: `rs-gaap — Cash Flow Statement — Indirect`
 - **Block type**: `cash_flow_statement`
-- **Row count**: 12
+- **Row count**: 13
 - **Unmapped elements**: 0
 
 | QName | Concept | Current (2024-01-01 → 2024-03-31) | Prior (2023-10-02 → 2023-12-31) |
@@ -130,7 +131,8 @@ The architectural piece that powers this lives in
 | `rs-gaap:NetIncomeLoss` |     Net Income (Loss) Attributable to Parent | $2,050.00 | $0.00 |
 | `rs-gaap:DepreciationDepletionAndAmortization` |     Depreciation, Depletion and Amortization | $100.00 | $0.00 |
 | `rs-gaap:IncreaseDecreaseInInventories` |     Increase (Decrease) in Inventories | $(2,700.00) | $0.00 |
-| `rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities` |     Increase (Decrease) in Accounts Payable and Accrued Liabilities | $1,400.00 | $0.00 |
+| `rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet` |     Increase (Decrease) in Other Operating Assets and Liabilities, Net | $1,000.00 | $0.00 |
+| `rs-gaap:IncreaseDecreaseInAccruedLiabilities` |     Increase (Decrease) in Accrued Liabilities | $400.00 | $0.00 |
 | `rs-gaap:NetCashProvidedByUsedInOperatingActivities` |   **Cash Provided by (Used in) Operating Activity, Including Discontinued Operation** | $850.00 | $0.00 |
 | `rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment` |     Payments to Acquire Property, Plant, and Equipment | $(1,000.00) | $0.00 |
 | `rs-gaap:NetCashProvidedByUsedInInvestingActivities` |   **Cash Provided by (Used in) Investing Activity, Including Discontinued Operation** | $(1,000.00) | $0.00 |
@@ -138,7 +140,7 @@ The architectural piece that powers this lives in
 | `rs-gaap:ProceedsFromIssuanceOfLongTermDebt` |     Proceeds from Issuance of Long-Term Debt | $2,000.00 | $0.00 |
 | `rs-gaap:RepaymentsOfLongTermDebt` |     Repayments of Long-Term Debt | $(1,000.00) | $0.00 |
 | `rs-gaap:NetCashProvidedByUsedInFinancingActivities` |   **Cash Provided by (Used in) Financing Activity, Including Discontinued Operation** | $11,000.00 | $0.00 |
-| `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **CashAndCashEquivalentsPeriodIncreaseDecrease** | $10,850.00 | $0.00 |
+| `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **Cash and Cash Equivalents, Period Increase (Decrease)** | $10,850.00 | $0.00 |
 
 ---
 
@@ -153,18 +155,18 @@ The architectural piece that powers this lives in
 |---|---|---: | ---:|
 | `rs-gaap:NetIncomeLoss` |   Net Income (Loss) Attributable to Parent | $2,050.00 | $0.00 |
 | `rs-gaap:ProceedsFromIssuanceOfCommonStock` |   Proceeds from Issuance of Common Stock | $10,000.00 | $0.00 |
-| `rs-gaap:StockholdersEquity` | **StockholdersEquity** | $12,050.00 | $0.00 |
+| `rs-gaap:StockholdersEquity` | **Stockholders' Equity Attributable to Parent** | $12,050.00 | $0.00 |
 
 ---
 
 ## Provenance
 
-- **Report ID**: `rpt_01KSV87C3PYP3APRH5XMWPS0ZX`
-- **Graph**: `kg19e75cc61281a81d622f`
+- **Report ID**: `rpt_01KTDR4JFECMQWRA5ZHNT81XB6`
+- **Graph**: `kg19e9b82353aed511343b`
 - **Taxonomy**: `rs-gaap` (resolved at create-report time)
-- **Mapping**: `struct_01KSTWRXSQS0N0EH5ZKF8TQQ4T`
-- **Created**: 2026-05-30T01:33:22.422165
-- **Last generated**: 2026-05-30T01:33:22.874674
+- **Mapping**: `struct_01KTDR4FRC08BJ62ECSK8TP83G`
+- **Created**: 2026-06-06T05:57:47.630146
+- **Last generated**: 2026-06-06T05:57:47.871851
 
 ### How to reproduce
 

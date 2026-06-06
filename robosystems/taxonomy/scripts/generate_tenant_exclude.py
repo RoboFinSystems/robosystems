@@ -8,23 +8,27 @@ verticals (oil & gas, insurance, banking, utilities, …) belong in *peer*
 frameworks (rs-call-report, rs-statutory, rs-ferc), and XBRL dimension
 members/domains are never CoA line-item targets.
 
-This script computes the **MVP-core, zero-rollup-risk** exclusion set and writes
-it to ``frameworks/rs-gaap/tenant-exclude/v1.json``. The copy path
+This script computes the **keep-critical (sharp), zero-rollup-risk** exclusion
+set and writes it to ``frameworks/rs-gaap/tenant-exclude/v1.json``. The copy path
 (``writer.copy_library_into_tenant`` / ``resync_library_into_tenant``) reads that
 artifact and omits the listed concepts from each tenant schema; the public
 library is untouched. Promotion is reversible: drop a qname from the list and
 re-sync.
 
-Exclusion = (dimension Member/Domain + general-special-disconnected + industry
-verticals + general-special LEAVES) **minus** KEEP-CRITICAL (the working set +
-its upward rollup ancestors + the calc DAG + every concept referenced by a
-library rule). The leaf level is the finest disaggregation detail of the
-aggregation lattice; it is inert until the granularity-selection feature ships
-(mapping is capped at the renderable working set today), so we defer it and keep
-only the high-level aggregates — adding disaggregation levels back later via
-resync. The keep-critical subtraction guarantees we never drop a concept the
-render ancestor-rollup (``_resolve_renderable_ancestor``) or a rule
-(target/operand) could need.
+Exclusion = library **minus** KEEP-CRITICAL — i.e. a tenant keeps EXACTLY the
+working set (concepts that render under the active Reporting Style's Networks)
+plus its structural scaffolding: the upward rollup ancestors, the calc DAG,
+every concept a library rule references (target/operand), and the synthesized
+PP&E grains. Everything else is inert — mapping candidates are capped at the
+renderable working set and the renderer only walks anchored concepts, so an
+un-anchored concept renders nowhere and cannot be mapped. "Kept ⟺ used": it is
+dropped, and re-added via resync the moment a future Reporting Style or deeper
+breakdown wires it (add is cheap; delete after a tenant maps to a concept is
+not). The drop is partitioned for audit (members/domains, disconnected,
+industry/specialist verticals, general-special leaves, unanchored intermediate
+aggregates) but the gate is simply non-membership in keep-critical, so the
+subtraction can never drop a concept the render ancestor-rollup
+(``_resolve_renderable_ancestor``) or a rule could need.
 
 Run against a seeded library DB (mirrors ``generate_rollup_rules.py``):
 
@@ -49,16 +53,61 @@ from robosystems.taxonomy.discovery import FRAMEWORKS_DIR
 
 _ARTIFACT = FRAMEWORKS_DIR / "rs-gaap" / "tenant-exclude" / "v1.json"
 
-# Industry-vertical keyword matcher. Deliberately conservative — these are
-# concepts that belong in peer frameworks (rs-call-report, rs-statutory,
-# rs-ferc, …), not a general-purpose GL framework. Leases (ASC 842) and income
-# tax are intentionally NOT here: they apply to every entity.
+# Industry-vertical / specialist-domain keyword matcher. These are concepts that
+# belong in peer frameworks (rs-call-report, rs-statutory, rs-ferc, …) or
+# specialist modules, NOT a general-purpose GL framework. Leases (ASC 842) and
+# income tax are intentionally NOT here: they apply to every entity.
+#
+# The base block caught the obvious verticals; the 2026-06-05 expansion adds the
+# financial-institution / insurance / derivative / pension domains. Their
+# INTERMEDIATE aggregates (non-leaf, so they slipped the disaggregation-leaf
+# filter; not vertical-keyword'd, so they slipped this matcher) were being copied
+# into every tenant despite rendering in no Reporting Style — e.g. servicing-
+# financial-asset fees, leveraged leases, deposit interest, loan-loss provisions,
+# derivative/hedge positions, defined-benefit pension liabilities. General
+# private-company lines (notes & loans payable/receivable, related-party
+# balances, share-based comp, FX gains) are deliberately NOT matched — they stay
+# in the tenant as wire-in stock for a future granular/vertical Style. Conservative
+# bias: when a concept is plausibly general, leave it unmatched (kept).
 _VERTICAL = re.compile(
   r"(OilAndGas|NaturalGas|Aircraft|Airline|Regulated"
   r"|AllowanceForFundsUsedDuringConstruction|PublicUtilit|Mineral|Mining"
   r"|OreReserves?|Drilling|Timber|Insurance|Reinsuranc|Policyholder|Annuit"
   r"|Ceded|NOWAccount|FederalFunds|TimeDeposit|DemandDeposit|LoansAndLeases"
-  r"|AllowanceForLoanAndLease|CappingClosure|Landfill|RealEstateInvestmentTrust)",
+  r"|AllowanceForLoanAndLease|CappingClosure|Landfill|RealEstateInvestmentTrust"
+  # banking / depository (→ rs-call-report)
+  r"|Deposit(s|or)?|InterestAndFeeIncomeLoans|InterestAndDividendsReceivable"
+  r"|ProvisionForLoan|AllowanceForLoan|GainLossOnSalesOfLoans|FinancingReceivable"
+  r"|BankOwned|CoreDeposit|TrustFee|FederalHomeLoan|LoansHeldForSale|LoansHeldforsale"
+  r"|FederalReserveBank|LoanAndLeaseOrigination|OriginationAndPurchasesOfLoans"
+  r"|PurchaseLoansHeldForSale"
+  # broker-dealer
+  r"|Brokerage|Clearing|TradingGainsLosses|PrincipalTransaction|SecuritiesSoldUnder"
+  r"|SecuritiesPurchasedUnder|UnderwritingFee|CommissionsRevenue"
+  # insurance (→ rs-statutory; Reinsuranc/Annuit/Policyholder already in the base block)
+  r"|ContractHolders|DeferredPolicyAcquisition|PolicyLoan|SeparateAccount"
+  r"|Underwriting|UnpaidClaim|RealizedInvestmentGains|NetInvestmentIncome"
+  r"|InvestmentIncomeNet|DividendIncomeOperating"
+  # mortgage servicing / leveraged & direct-financing lease / securitization
+  r"|Servicing.*FinancialAsset|MortgageServic|ServicingFee|ServicingAsset"
+  r"|ServicingLiabilit|ContractuallySpecifiedServicing|LeveragedLease"
+  r"|DirectFinancingLease|SalesTypeLease|Securitiz|VariableInterestEntity|BeneficialInterest"
+  # extractive (beyond the base) / regulated utility
+  r"|Exploration|Petroleum|Coal|ProvedProperty|UnprovedProperty|FossilFuel|FuelInventor"
+  r"|DeferredFuel|RateDeferral|StormReserve|DecommissioningFund|NuclearFuel|EmissionCredit"
+  r"|PowerContract|PurchasedPower|WaterAndWasteWater|EnergyRelated|EnergyRecovery|OverUnderEnergy"
+  # real estate / construction operator
+  r"|RealEstate|OperativeBuilders|TenantReimbursement|StraightLineRent|AboveMarketLease"
+  r"|InPlaceLease|FundsFromOperations|ContractReceivableDue"
+  # specialist derivatives / hedging
+  r"|Derivative|Hedg|InterestRateSwap|BasisSwap|CurrencySwap|CreditDefault"
+  r"|CommodityContract|PriceRiskManagement"
+  # defined-benefit pension & OPEB
+  r"|DefinedBenefit|Pension|Postretirement|SupplementalRetirement"
+  # other specialist (agriculture, airline, hospitality, healthcare, exotic financing)
+  r"|Agricultur|Livestock|Cargo|Freight|Vessel|Charter|Franchis|Casino|Gaming"
+  r"|Hospitality|DirectCostsOfHotels|Concession|FoodAndBeverage|Malpractice|Medicare"
+  r"|Medicaid|ConvertibleSubordinated|MandatorilyRedeemable|BridgeLoan|TrustPreferred)",
   re.IGNORECASE,
 )
 
@@ -202,8 +251,19 @@ def compute_exclude() -> dict:
   gs_children = {t for _, t in gs}
   disaggregation_leaves = (gs_children - gs_parents) & rg  # child-only in the lattice
 
-  candidate = members | disconnected | verticals | disaggregation_leaves
-  final_drop = candidate - keep_critical  # never drop a rollup-critical concept
+  # SHARP policy (2026-06): a tenant keeps EXACTLY keep-critical — the working
+  # set that renders under the active Reporting Style plus its structural
+  # scaffolding (calc DAG, rollup ancestors, rule operands, synthesized PP&E
+  # grains). Everything else is inert today — mapping candidates are capped at
+  # the renderable working set and the renderer only walks anchored concepts, so
+  # an un-anchored concept renders nowhere and can't be mapped. "Kept ⟺ used":
+  # drop it, and re-add via resync the moment a future Reporting Style / deeper
+  # breakdown wires it (add is cheap; delete after a tenant maps to a concept is
+  # not). The members / disconnected / verticals / leaves sets are retained only
+  # to LABEL the drop reason for the audit metadata; the residual — connected
+  # non-leaf aggregates outside the active Style (unwired BS/IS disaggregations,
+  # finer CF detail, replaced combined leaves) — is ``unanchored_intermediate``.
+  final_drop = rg - keep_critical  # keep only what renders + its scaffolding
 
   def cat(i: str) -> str:
     if i in members:
@@ -212,7 +272,9 @@ def compute_exclude() -> dict:
       return "type_subtype_disconnected"
     if i in verticals:
       return "industry_vertical"
-    return "disaggregation_leaf"
+    if i in disaggregation_leaves:
+      return "disaggregation_leaf"
+    return "unanchored_intermediate"
 
   by_category: dict[str, int] = {}
   for i in final_drop:
@@ -222,16 +284,22 @@ def compute_exclude() -> dict:
   return {
     "framework": "rs-gaap",
     "version": "v1",
-    "policy": "tenant_exclude_mvp_core",
+    "policy": "tenant_exclude_keep_critical",
     "description": (
       "rs-gaap concepts kept in the public library but NOT copied into tenant "
-      "schemas. The MVP-core curation: drop dimension members/domains, "
-      "general-special-disconnected concepts, industry verticals, AND the "
-      "general-special leaf level (the finest disaggregation detail, inert "
-      "until the granularity-selection feature ships) — minus keep-critical "
-      "(working set + rollup ancestors + calc DAG + rule refs). Keeps the "
-      "high-level aggregates; disaggregation levels are added back later via "
-      "resync (add is cheap; delete after a tenant maps to a concept is not)."
+      "schemas. The keep-critical (sharp) curation: a tenant keeps EXACTLY the "
+      "concepts that render under the active Reporting Style (the working set) "
+      "plus their structural scaffolding — the calc DAG, rollup ancestors, rule "
+      "operands, and the synthesized PP&E grains. Everything else renders nowhere "
+      "and cannot be mapped (mapping candidates are capped at the renderable "
+      "working set), so it is dropped: 'kept ⟺ used'. The excluded set is the "
+      "library minus keep-critical, broken down for audit into dimension members/"
+      "domains, general-special-disconnected concepts, industry/specialist "
+      "verticals (peer-framework material), general-special leaves, and "
+      "unanchored intermediate aggregates (unwired BS/IS disaggregations, finer "
+      "CF detail, replaced combined leaves). Any concept is re-added via resync "
+      "the moment a future Reporting Style or deeper breakdown wires it (add is "
+      "cheap; delete after a tenant maps to a concept is not)."
     ),
     "counts": {
       "rs_gaap_total": len(rg),
@@ -239,7 +307,7 @@ def compute_exclude() -> dict:
       "keep_critical": len(keep_critical),
       "excluded": len(final_drop),
       "tenant_kept": len(rg) - len(final_drop),
-      "by_category": by_category,
+      "by_category": dict(sorted(by_category.items())),  # sorted → deterministic regen
     },
     "excluded_qnames": excluded,
     "excluded_by_category": {q: cat(i) for i in final_drop for q in (qname[i],)},

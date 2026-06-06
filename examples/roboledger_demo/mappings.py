@@ -13,12 +13,14 @@ common rollups are:
 
 - **Revenue** → ``rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax``
 - **Operating expenses (everything not D&A or interest)** →
-  ``rs-gaap:SellingGeneralAndAdministrativeExpense``
+  ``rs-gaap:GeneralAndAdministrativeExpense`` (its sibling
+  ``rs-gaap:SellingAndMarketingExpense`` is unused by this back-office firm)
 - **Depreciation** → ``rs-gaap:DepreciationDepletionAndAmortization``
 
 The Classified BS admits a richer set of rs-gaap rollups:
 
-- **Cash** → ``rs-gaap:CashCashEquivalentsAndShortTermInvestments``
+- **Cash** → ``rs-gaap:CashAndCashEquivalentsAtCarryingValue`` (its sibling
+  ``rs-gaap:ShortTermInvestments`` is unused here)
 - **AR** → ``rs-gaap:ReceivablesNetCurrent``
 - **Prepaids** → ``rs-gaap:PrepaidExpenseCurrent``
 - **PP&E gross** → ``rs-gaap:PropertyPlantAndEquipmentGross``
@@ -27,14 +29,16 @@ The Classified BS admits a richer set of rs-gaap rollups:
   depreciation activity)
 - **Accumulated Depreciation** → ``rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment``
   (BS Net = Gross - AD synthesized at fact-generation time)
-- **AP / Accrued** → ``rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent``
+- **AP** → ``rs-gaap:AccountsPayableCurrent``; **Accrued / Payroll Taxes** →
+  ``rs-gaap:AccruedLiabilitiesCurrent``
 - **APIC** → ``rs-gaap:AdditionalPaidInCapital``
 - **Retained Earnings** → ``rs-gaap:RetainedEarningsAccumulatedDeficit``
 
-Finer rs-gaap concepts (CashAndCashEquivalentsAtCarryingValue,
-AccountsReceivableNetCurrent, AccountsPayableCurrent, PrepaidInsurance,
-SalariesAndWages, OccupancyNet, etc.) exist in the broader rs-gaap
-presentation library but are NOT in the Default Style's composed
+The Default Style was split into standard SMB granularity (2026-06): Cash
+and Short-Term Investments, Goodwill and Intangibles, Accounts Payable and
+Accrued Liabilities, and G&A and Selling & Marketing each render as their
+own line. Still-finer concepts (PrepaidInsurance, SalariesAndWages, etc.)
+remain in the broader rs-gaap library but outside the Default Style's
 Networks — they won't render until a richer Reporting Style is picked.
 
 The demo resolves rs-gaap qnames → element IDs at runtime against the
@@ -44,7 +48,7 @@ library in the entity graph.
 # (coa_code, rs_gaap_qname)
 MAPPINGS: list[tuple[str, str]] = [
   # Assets
-  ("1000", "rs-gaap:CashCashEquivalentsAndShortTermInvestments"),  # Cash
+  ("1000", "rs-gaap:CashAndCashEquivalentsAtCarryingValue"),  # Cash
   ("1100", "rs-gaap:ReceivablesNetCurrent"),  # Accounts Receivable
   ("1200", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid Insurance
   ("1210", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid Software
@@ -56,15 +60,9 @@ MAPPINGS: list[tuple[str, str]] = [
     "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
   ),  # Accumulated Depreciation (contra-asset)
   # Liabilities
-  ("2000", "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"),  # Accounts Payable
-  (
-    "2100",
-    "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent",
-  ),  # Accrued Liabilities
-  (
-    "2200",
-    "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent",
-  ),  # Payroll Taxes Payable
+  ("2000", "rs-gaap:AccountsPayableCurrent"),  # Accounts Payable
+  ("2100", "rs-gaap:AccruedLiabilitiesCurrent"),  # Accrued Liabilities
+  ("2200", "rs-gaap:AccruedLiabilitiesCurrent"),  # Payroll Taxes Payable
   # Equity
   ("3000", "rs-gaap:AdditionalPaidInCapital"),  # Owner's Equity
   ("3100", "rs-gaap:RetainedEarningsAccumulatedDeficit"),  # Retained Earnings
@@ -82,22 +80,19 @@ MAPPINGS: list[tuple[str, str]] = [
     "4200",
     "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
   ),  # Implementation Services Revenue
-  # Operating expenses — Multi-step IS Network only admits SG&A as the
-  # operating-expense bucket for non-COGS / non-D&A items. Everything
-  # below rolls into SG&A. Depreciation gets its own line.
-  ("5000", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Salaries & Wages
-  ("5100", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Payroll Taxes
-  ("5200", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Health Insurance
-  ("6000", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Office Rent
-  ("6100", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Software Subscriptions
-  ("6200", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Cloud Hosting
-  (
-    "6300",
-    "rs-gaap:SellingGeneralAndAdministrativeExpense",
-  ),  # Professional Development
-  ("6400", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Business Insurance
-  ("6500", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Office Supplies
-  ("6600", "rs-gaap:SellingGeneralAndAdministrativeExpense"),  # Travel & Entertainment
+  # Operating expenses — this back-office services firm's costs are all
+  # General & Administrative (Selling & Marketing is a sibling line, unused
+  # here). Depreciation gets its own line.
+  ("5000", "rs-gaap:GeneralAndAdministrativeExpense"),  # Salaries & Wages
+  ("5100", "rs-gaap:GeneralAndAdministrativeExpense"),  # Payroll Taxes
+  ("5200", "rs-gaap:GeneralAndAdministrativeExpense"),  # Health Insurance
+  ("6000", "rs-gaap:GeneralAndAdministrativeExpense"),  # Office Rent
+  ("6100", "rs-gaap:GeneralAndAdministrativeExpense"),  # Software Subscriptions
+  ("6200", "rs-gaap:GeneralAndAdministrativeExpense"),  # Cloud Hosting
+  ("6300", "rs-gaap:GeneralAndAdministrativeExpense"),  # Professional Development
+  ("6400", "rs-gaap:GeneralAndAdministrativeExpense"),  # Business Insurance
+  ("6500", "rs-gaap:GeneralAndAdministrativeExpense"),  # Office Supplies
+  ("6600", "rs-gaap:GeneralAndAdministrativeExpense"),  # Travel & Entertainment
   ("7000", "rs-gaap:DepreciationDepletionAndAmortization"),  # Depreciation Expense
 ]
 
