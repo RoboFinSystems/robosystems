@@ -232,6 +232,7 @@ def list_elements(
   offset: int = 0,
   include_labels: bool = False,
   include_references: bool = False,
+  include_inactive: bool = False,
 ) -> list[LibraryElementResponse]:
   """List library elements with filters + pagination.
 
@@ -247,6 +248,9 @@ def list_elements(
 
   `is_abstract=True` returns only abstract grouping concepts; `False`
   returns only concrete. `None` returns both.
+
+  `include_inactive=False` (default) hides deactivated elements (e.g. CoA
+  accounts synced as inactive); set `True` for admin/debug views.
   """
   limit = max(1, min(limit, MAX_ELEMENT_LIMIT))
 
@@ -267,6 +271,12 @@ def list_elements(
     query = query.where(Element.element_type == element_type)
   if is_abstract is not None:
     query = query.where(Element.is_abstract.is_(is_abstract))
+  if not include_inactive:
+    # Hide deactivated elements by default — tenant CoA elements synced from
+    # a source (e.g. QuickBooks "(deleted)" accounts) carry is_active=False;
+    # library-seeded elements are all active, so this is a no-op for them.
+    # Mirrors the roboledger CoA reads, which filter is_active.
+    query = query.where(Element.is_active.is_(True))
   query = query.order_by(Element.qname.asc()).limit(limit).offset(offset)
 
   elements = session.execute(query).scalars().all()
