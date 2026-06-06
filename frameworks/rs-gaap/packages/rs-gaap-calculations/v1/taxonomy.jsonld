@@ -425,21 +425,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
-      "@id": "_:rs-gaap-calc-is-opex-arc-1",
-      "from": {
-        "@id": "rs-gaap:OperatingExpenses"
-      },
-      "to": {
-        "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense"
-      },
-      "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
-      "weight": 1.0,
-      "order": 100.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
       "@id": "_:rs-gaap-calc-is-opex-arc-2",
       "from": {
         "@id": "rs-gaap:OperatingExpenses"
@@ -695,21 +680,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
-      "@id": "_:rs-gaap-calc-bs-current-assets-arc-1",
-      "from": {
-        "@id": "rs-gaap:AssetsCurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
-      },
-      "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
-      "weight": 1.0,
-      "order": 100.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
       "@id": "_:rs-gaap-calc-bs-current-assets-arc-2",
       "from": {
         "@id": "rs-gaap:AssetsCurrent"
@@ -800,21 +770,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
     {
-      "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-2",
-      "from": {
-        "@id": "rs-gaap:AssetsNoncurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
-      },
-      "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
-      "weight": 1.0,
-      "order": 200.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
       "@id": "_:rs-gaap-calc-bs-noncurrent-assets-arc-3",
       "from": {
         "@id": "rs-gaap:AssetsNoncurrent"
@@ -901,21 +856,6 @@
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
       "weight": 1.0,
       "order": 200.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
-    },
-    {
-      "@id": "_:rs-gaap-calc-bs-current-liab-arc-1",
-      "from": {
-        "@id": "rs-gaap:LiabilitiesCurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
-      },
-      "associationType": "calculation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
-      "weight": 1.0,
-      "order": 100.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     },
@@ -1813,6 +1753,201 @@
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
       "weight": 1.0,
       "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-balance_sheet-CashAndCashEquivalentsAtCarryingValue",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-balance_sheet-ShortTermInvestments",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:ShortTermInvestments"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "weight": 1.0,
+      "order": 150.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-balance_sheet-Goodwill",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:Goodwill"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "weight": 1.0,
+      "order": 200.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-balance_sheet-IntangibleAssetsNetExcludingGoodwill",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "weight": 1.0,
+      "order": 250.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-balance_sheet-AccountsPayableCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccountsPayableCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-balance_sheet-AccruedLiabilitiesCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccruedLiabilitiesCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "weight": 1.0,
+      "order": 150.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-balance_sheet-LongTermDebtCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtCurrent"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/BalanceSheet",
+      "weight": 1.0,
+      "order": 250.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-income_statement-GeneralAndAdministrativeExpense",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:GeneralAndAdministrativeExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 100.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-income_statement-SellingAndMarketingExpense",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:SellingAndMarketingExpense"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 150.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-income_statement-RestructuringCharges",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:RestructuringCharges"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 403.3333,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-income_statement-AssetImpairmentCharges",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:AssetImpairmentCharges"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 406.6667,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-income_statement-ForeignCurrencyTransactionGainLossBeforeTax",
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:ForeignCurrencyTransactionGainLossBeforeTax"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 403.3333,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
+    },
+    {
+      "@id": "_:wirein-calc-calc-income_statement-GainsLossesOnExtinguishmentOfDebt",
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:GainsLossesOnExtinguishmentOfDebt"
+      },
+      "associationType": "calculation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-calculations/IncomeStatement",
+      "weight": 1.0,
+      "order": 406.6667,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/summation-item"
     }

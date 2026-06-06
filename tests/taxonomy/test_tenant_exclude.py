@@ -65,25 +65,31 @@ def test_clear_cut_categories_present() -> None:
 
 
 @pytest.mark.unit
-def test_high_level_aggregates_kept_leaf_detail_dropped() -> None:
-  """MVP-core: keep the high-level accounting concept, defer its leaf-level
-  disaggregation detail (addable later via resync). The aggregate
-  ``AccountsPayableCurrent`` (a parent in the general-special lattice) stays;
-  its leaf children (``…TradeCurrent`` / accrual line items) are dropped."""
+def test_wired_concepts_kept_inert_dropped() -> None:
+  """Sharp (keep-critical) policy: a tenant keeps EXACTLY what renders under the
+  active Style plus its scaffolding. The 2026-06 split wired the component leaves
+  (AccountsPayableCurrent, AccruedLiabilitiesCurrent, Goodwill,
+  CashAndCashEquivalentsAtCarryingValue, GeneralAndAdministrativeExpense) into
+  the Default Style, so they stay. An aggregate the Style does NOT render
+  (``InventoryNet`` — the Style uses ``InventoryNetOfAllowances…``) and leaf
+  detail are inert, so they drop; both re-add via resync if a deeper Style wires
+  them."""
   excluded = set(_tenant_exclude_qnames())
   for kept in (
     "rs-gaap:AccountsPayableCurrent",
     "rs-gaap:AccruedLiabilitiesCurrent",
-    "rs-gaap:InventoryNet",
     "rs-gaap:Goodwill",
+    "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
+    "rs-gaap:GeneralAndAdministrativeExpense",
   ):
-    assert kept not in excluded, f"{kept} is a high-level aggregate — must stay"
+    assert kept not in excluded, f"{kept} renders under the Default Style — must stay"
   for dropped in (
+    "rs-gaap:InventoryNet",  # inert; the Style renders InventoryNetOfAllowances…
     "rs-gaap:AccountsPayableTradeCurrent",
     "rs-gaap:AccruedBonusesCurrent",
     "rs-gaap:AccruedPayrollTaxesCurrent",
   ):
-    assert dropped in excluded, f"{dropped} is leaf detail — should be deferred"
+    assert dropped in excluded, f"{dropped} renders nowhere — should be dropped"
 
 
 @pytest.mark.unit

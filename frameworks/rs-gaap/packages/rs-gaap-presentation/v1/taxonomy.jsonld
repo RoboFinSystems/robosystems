@@ -1574,20 +1574,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-2",
-      "from": {
-        "@id": "rs-gaap:AssetsCurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "order": 20110.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-bs-classified-arc-3",
       "from": {
         "@id": "rs-gaap:AssetsCurrent"
@@ -1686,20 +1672,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-10",
-      "from": {
-        "@id": "rs-gaap:AssetsNoncurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "order": 20220.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-bs-classified-arc-11",
       "from": {
         "@id": "rs-gaap:AssetsNoncurrent"
@@ -1780,20 +1752,6 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
       "order": 20310.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-arc-17",
-      "from": {
-        "@id": "rs-gaap:LiabilitiesCurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
-      "order": 20311.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -2123,20 +2081,6 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
       "order": 10400.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
-      "@id": "_:rs-gaap-pres-is-multistep-arc-9",
-      "from": {
-        "@id": "rs-gaap:OperatingExpenses"
-      },
-      "to": {
-        "@id": "rs-gaap:SellingGeneralAndAdministrativeExpense"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
-      "order": 10410.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -2981,20 +2925,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-part-arc-2",
-      "from": {
-        "@id": "rs-gaap:AssetsCurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
-      "order": 20110.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-bs-classified-part-arc-3",
       "from": {
         "@id": "rs-gaap:AssetsCurrent"
@@ -3093,20 +3023,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-part-arc-10",
-      "from": {
-        "@id": "rs-gaap:AssetsNoncurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
-      "order": 20220.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-bs-classified-part-arc-11",
       "from": {
         "@id": "rs-gaap:AssetsNoncurrent"
@@ -3187,20 +3103,6 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
       "order": 20310.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-part-arc-17",
-      "from": {
-        "@id": "rs-gaap:LiabilitiesCurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
-      "order": 20311.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -3394,20 +3296,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-llc-arc-2",
-      "from": {
-        "@id": "rs-gaap:AssetsCurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:CashCashEquivalentsAndShortTermInvestments"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
-      "order": 20110.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-bs-classified-llc-arc-3",
       "from": {
         "@id": "rs-gaap:AssetsCurrent"
@@ -3506,20 +3394,6 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
     {
-      "@id": "_:rs-gaap-pres-bs-classified-llc-arc-10",
-      "from": {
-        "@id": "rs-gaap:AssetsNoncurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:IntangibleAssetsNetIncludingGoodwill"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
-      "order": 20220.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
       "@id": "_:rs-gaap-pres-bs-classified-llc-arc-11",
       "from": {
         "@id": "rs-gaap:AssetsNoncurrent"
@@ -3600,20 +3474,6 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
       "order": 20310.0,
-      "@type": "rs:Association",
-      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
-    },
-    {
-      "@id": "_:rs-gaap-pres-bs-classified-llc-arc-17",
-      "from": {
-        "@id": "rs-gaap:LiabilitiesCurrent"
-      },
-      "to": {
-        "@id": "rs-gaap:AccountsPayableAndAccruedLiabilitiesCurrent"
-      },
-      "associationType": "presentation",
-      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
-      "order": 20311.0,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     },
@@ -19042,6 +18902,384 @@
       "associationType": "presentation",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-singlestep",
       "order": 10210.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Classified-CashAndCashEquivalentsAtCarryingValue",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20110.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Classified-ShortTermInvestments",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:ShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20115.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedLLC-CashAndCashEquivalentsAtCarryingValue",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20110.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedLLC-ShortTermInvestments",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:ShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20115.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedPartnership-CashAndCashEquivalentsAtCarryingValue",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20110.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedPartnership-ShortTermInvestments",
+      "from": {
+        "@id": "rs-gaap:AssetsCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:ShortTermInvestments"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20115.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Classified-Goodwill",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:Goodwill"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20220.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Classified-IntangibleAssetsNetExcludingGoodwill",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20225.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedLLC-Goodwill",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:Goodwill"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20220.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedLLC-IntangibleAssetsNetExcludingGoodwill",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20225.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedPartnership-Goodwill",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:Goodwill"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20220.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedPartnership-IntangibleAssetsNetExcludingGoodwill",
+      "from": {
+        "@id": "rs-gaap:AssetsNoncurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:IntangibleAssetsNetExcludingGoodwill"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20225.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Classified-AccountsPayableCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccountsPayableCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20311.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Classified-AccruedLiabilitiesCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccruedLiabilitiesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20311.5,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedLLC-AccountsPayableCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccountsPayableCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20311.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedLLC-AccruedLiabilitiesCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccruedLiabilitiesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20311.5,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedPartnership-AccountsPayableCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccountsPayableCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20311.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedPartnership-AccruedLiabilitiesCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:AccruedLiabilitiesCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20311.5,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Classified-LongTermDebtCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified",
+      "order": 20312.5,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedLLC-LongTermDebtCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-LLC",
+      "order": 20312.5,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-ClassifiedPartnership-LongTermDebtCurrent",
+      "from": {
+        "@id": "rs-gaap:LiabilitiesCurrent"
+      },
+      "to": {
+        "@id": "rs-gaap:LongTermDebtCurrent"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified-PART",
+      "order": 20312.5,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Multi-step-GeneralAndAdministrativeExpense",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:GeneralAndAdministrativeExpense"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10410.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Multi-step-SellingAndMarketingExpense",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:SellingAndMarketingExpense"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10415.0,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Multi-step-RestructuringCharges",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:RestructuringCharges"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10443.3333,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Multi-step-AssetImpairmentCharges",
+      "from": {
+        "@id": "rs-gaap:OperatingExpenses"
+      },
+      "to": {
+        "@id": "rs-gaap:AssetImpairmentCharges"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10446.6667,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Multi-step-ForeignCurrencyTransactionGainLossBeforeTax",
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:ForeignCurrencyTransactionGainLossBeforeTax"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10643.3333,
+      "@type": "rs:Association",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
+    },
+    {
+      "@id": "_:wirein-pres-pres-Multi-step-GainsLossesOnExtinguishmentOfDebt",
+      "from": {
+        "@id": "rs-gaap:NonoperatingIncomeExpense"
+      },
+      "to": {
+        "@id": "rs-gaap:GainsLossesOnExtinguishmentOfDebt"
+      },
+      "associationType": "presentation",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep",
+      "order": 10646.6667,
       "@type": "rs:Association",
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child"
     }
