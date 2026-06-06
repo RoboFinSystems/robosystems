@@ -430,3 +430,41 @@ class TestSemanticChecks:
     result = validate_report("unknown_type", [])
     assert result.passed is True
     assert "no_validation_rules" in result.checks
+
+
+class TestCashFlowOperatingPlug:
+  """`_check_operating_plug` — warn when the reconciling plug dwarfs operating cash."""
+
+  _OP = "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+  _PLUG = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+
+  def _cf(self, op_value: float, plug_value: float) -> list[FactRow]:
+    # Plain (non-subtotal, single-period) rows so the other CF checks stay quiet
+    # and only _check_operating_plug can speak.
+    return [
+      _row("Operating", op_value, qname=self._OP),
+      _row("Other operating capital net", plug_value, qname=self._PLUG),
+    ]
+
+  def test_large_plug_warns(self):
+    # 400 / 1000 = 40% > 25% threshold
+    result = validate_report("cash_flow_statement", self._cf(1000.0, 400.0))
+    assert "operating_plug" in result.checks
+    assert any("Other operating capital" in w for w in result.warnings)
+
+  def test_small_plug_is_silent(self):
+    # 100 / 1000 = 10% < 25% threshold
+    result = validate_report("cash_flow_statement", self._cf(1000.0, 100.0))
+    assert "operating_plug" in result.checks
+    assert not any("Other operating capital" in w for w in result.warnings)
+
+  def test_material_plug_with_zero_operating_warns(self):
+    # operating ≈ 0 but a material plug is the worst case — must surface.
+    result = validate_report("cash_flow_statement", self._cf(0.0, 500.0))
+    assert any("Other operating capital" in w for w in result.warnings)
+
+  def test_no_plug_row_is_silent(self):
+    result = validate_report(
+      "cash_flow_statement", [_row("Operating", 1000.0, qname=self._OP)]
+    )
+    assert not any("Other operating capital" in w for w in result.warnings)

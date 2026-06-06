@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .fact_grid import FactRow, _infer_classification
+from .fact_grid import (
+  _CF_OPERATING_SUBTOTAL_QNAME,
+  _CF_PLUG_WARN_RATIO,
+  _CF_RECONCILING_LEAF_QNAME,
+  FactRow,
+  _infer_classification,
+)
 
 # Rounding tolerance for balance checks (dollars)
 _TOLERANCE = 0.01
@@ -314,6 +320,7 @@ def _validate_cash_flow(rows: list[FactRow]) -> ValidationResult:
   _check_totals_foot(rows, result)
   _check_zero_subtotals(rows, result)
   _check_comparative_data(rows, result)
+  _check_operating_plug(rows, result)
 
   return result
 
@@ -378,4 +385,40 @@ def _check_comparative_data(rows: list[FactRow], result: ValidationResult) -> No
     if all_zero:
       result.warnings.append(
         f"Period column {col_idx + 1} has no data — column will be empty"
+      )
+
+
+def _check_operating_plug(rows: list[FactRow], result: ValidationResult) -> None:
+  """Warn when the operating-CF reconciling plug is large vs operating cash.
+
+  ``fact_grid._reconcile_operating_to_cash`` foots the indirect CF to actual
+  cash by booking the aggregate non-cash operating adjustment (gain/loss on
+  disposal, unrealized MTM, write-offs, …) onto
+  ``IncreaseDecreaseInOtherOperatingCapitalNet``. That makes the statement
+  articulate *by construction* — and so silently absorbs any investing/financing
+  misclassification too. A plug that dwarfs operating cash is the signal that a
+  material item is un-itemized or mis-tagged; surface it so it isn't invisible.
+
+  Row-level approximation: that line also carries any tenant-mapped "other
+  operating capital" content, but it's a system catch-all rarely mapped
+  directly, so the row value ≈ the plug in practice. Warning-only — the CF still
+  foots and renders.
+  """
+  result.checks.append("operating_plug")
+  plug = next((r for r in rows if r.element_qname == _CF_RECONCILING_LEAF_QNAME), None)
+  op = next((r for r in rows if r.element_qname == _CF_OPERATING_SUBTOTAL_QNAME), None)
+  if plug is None or op is None:
+    return
+  for col in range(len(plug.values)):
+    plug_val = (plug.values[col] or 0.0) if col < len(plug.values) else 0.0
+    if abs(plug_val) <= _TOLERANCE:
+      continue
+    op_val = (op.values[col] or 0.0) if col < len(op.values) else 0.0
+    if abs(op_val) < _TOLERANCE or abs(plug_val) > _CF_PLUG_WARN_RATIO * abs(op_val):
+      result.warnings.append(
+        f"Operating cash flow (period column {col + 1}) carries a large "
+        f"unattributed reconciling adjustment in 'Other operating capital, net' "
+        f"({plug_val:.2f} vs operating cash {op_val:.2f}) — likely an "
+        f"un-itemized non-cash item (gain/loss on disposal, etc.) or a flow "
+        f"misclassification; review."
       )

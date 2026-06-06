@@ -1247,6 +1247,14 @@ _CASH_ANCHOR_QNAMES: frozenset[str] = frozenset(
 # the adjustment both foots the subtotal and renders as a line.
 _CF_NET_CHANGE_QNAME = "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
 _CF_RECONCILING_LEAF_QNAME = "rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet"
+_CF_OPERATING_SUBTOTAL_QNAME = "rs-gaap:NetCashProvidedByUsedInOperatingActivities"
+
+# A reconciling plug larger than this fraction of operating cash is the signal
+# that a material non-cash item is un-itemized (gain/loss on disposal, unrealized
+# MTM, …) — or that an investing/financing flow was misclassified and silently
+# absorbed by `_reconcile_operating_to_cash`. Shared with guard_rails so the
+# render-time validator and the fact-bundle log threshold stay in lockstep.
+_CF_PLUG_WARN_RATIO = 0.25
 
 
 def _emit_flow_facts(
@@ -1614,11 +1622,19 @@ def _reconcile_operating_to_cash(
 
   id_rows = session.execute(
     text("SELECT id, qname, name, balance_type FROM elements WHERE qname = ANY(:q)"),
-    {"q": [_CF_NET_CHANGE_QNAME, _CF_RECONCILING_LEAF_QNAME]},
+    {
+      "q": [
+        _CF_NET_CHANGE_QNAME,
+        _CF_RECONCILING_LEAF_QNAME,
+        _CF_OPERATING_SUBTOTAL_QNAME,
+      ]
+    },
   ).fetchall()
   by_qname = {r.qname: r for r in id_rows}
   net_change = by_qname.get(_CF_NET_CHANGE_QNAME)
   recon = by_qname.get(_CF_RECONCILING_LEAF_QNAME)
+  operating = by_qname.get(_CF_OPERATING_SUBTOTAL_QNAME)
+  operating_id = operating.id if operating is not None else None
   if net_change is None or recon is None:
     # Framework missing the CF net-change or the reconciling leaf — nothing to
     # foot against. Leave the CF as derived; the tie-out check surfaces the gap.
@@ -1680,15 +1696,32 @@ def _reconcile_operating_to_cash(
     residual = cash_delta - derived_net_change
     if abs(residual) <= 0.005:
       continue
-    logger.info(
+    # Elevate to a warning when the plug dwarfs operating cash — the signal that
+    # a material non-cash item is un-itemized or a flow was misclassified and
+    # silently absorbed here (see the TRADEOFF note above). Basis is post-plug
+    # operating cash, floored by ΔCash so a near-zero operating section can't
+    # divide-by-zero.
+    derived_operating = computed.get(operating_id, 0.0) if operating_id else 0.0
+    true_operating = derived_operating + residual
+    denom = max(abs(true_operating), abs(cash_delta))
+    large = denom > 0.005 and abs(residual) > _CF_PLUG_WARN_RATIO * denom
+    suffix = (
+      " — LARGE relative to operating cash (%.0f%%); review for an un-itemized "
+      "non-cash item (gain/loss on disposal, …) or a flow misclassification."
+      % (100 * abs(residual) / denom)
+      if large
+      else "; itemizing its components is a future enrichment."
+    )
+    (logger.warning if large else logger.info)(
       "CF reconciled to cash for period ending %s: non-cash operating "
       "adjustment %.2f (derived net change %.2f, actual cash movement %.2f). "
-      "Booked to %s; itemizing its components is a future enrichment.",
+      "Booked to %s%s",
       current.end,
       residual,
       derived_net_change,
       cash_delta,
       _CF_RECONCILING_LEAF_QNAME,
+      suffix,
     )
     facts.append(
       ReportFact(
