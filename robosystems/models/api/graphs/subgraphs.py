@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field, field_validator
 class SubgraphType(str, Enum):
   """Types of subgraphs."""
 
-  STATIC = "static"  # Phase 1: Traditional environment-based subgraphs
-  TEMPORAL = "temporal"  # Phase 2: Short-lived memory contexts (future)
-  VERSIONED = "versioned"  # Phase 3: Git-like version control (future)
-  MEMORY = "memory"  # Phase 3: Memory layer subgraphs (future)
+  STATIC = "static"  # Traditional environment-based subgraphs
+  TEMPORAL = "temporal"  # Short-lived memory contexts (future)
+  VERSIONED = "versioned"  # Git-like version control (future)
+  MEMORY = "memory"  # Memory layer subgraphs (future)
 
 
 class CreateSubgraphRequest(BaseModel):

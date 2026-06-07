@@ -8,19 +8,41 @@ This directory contains centralized Pydantic models for all REST API request and
 models/api/
 ├── README.md                   # This file
 ├── __init__.py                 # Exports all API models
-├── agent.py                    # AI agent interaction models
 ├── auth.py                     # Authentication models (login, register, SSO)
-├── billing.py                  # Billing and payment models
 ├── common.py                   # Shared models (errors, pagination, health)
-├── connection.py               # External service connection models
-├── credits.py                  # Credit system models
-├── graph.py                    # Graph database operation models
-├── mcp.py                      # Model Context Protocol models
+├── entity_graph.py             # Entity graph operation models
+├── event_block.py              # Event Block envelope models (REA business events)
+├── event_handler.py            # Event handler (DSL rule) models
+├── fact_provenance.py          # Typed FactProvenance discriminated union (active surface)
+├── information_block.py        # InformationBlock envelope models (active surface)
+├── library.py                  # Taxonomy/framework library models
 ├── oauth.py                    # OAuth integration models
-├── subscription.py             # Subscription management models
-├── task.py                     # Background task models
-└── user.py                     # User profile and management models
+├── orgs.py                     # Organization models
+├── search.py                   # Document search models
+├── taxonomy_block.py           # Taxonomy Block envelope models (CoA, custom ontology)
+├── user.py                     # User profile and management models
+└── extensions/                 # RoboLedger + RoboInvestor request/response models
+    ├── account_rollups.py
+    ├── accounts.py
+    ├── agent.py
+    ├── ar_ap.py
+    ├── closing_book.py
+    ├── entity.py
+    ├── fiscal_calendar.py
+    ├── investor.py
+    ├── journal_entries.py
+    ├── publish_lists.py
+    ├── report_package.py
+    ├── reports.py
+    ├── rollforward.py
+    ├── schedules.py
+    ├── summary.py
+    ├── taxonomies.py
+    ├── transactions.py
+    └── trial_balance.py
 ```
+
+The `extensions/` subdirectory holds the RoboLedger/RoboInvestor Pydantic models. These are the same models the GraphQL read surface auto-derives Strawberry types from — the [GraphQL README](../../graphql/README.md) cross-links them as `models/api/extensions/*`. `fact_provenance.py` (the typed `FactProvenance` union) and `information_block.py` (the IB envelope) are the active cross-domain block surface.
 
 ## 🎯 Purpose
 
@@ -37,28 +59,30 @@ This directory centralizes all Pydantic models used for:
 ### Core Business Models
 
 - **`user.py`** - User profiles, API keys, usage analytics
-- **`graph.py`** - Cypher queries, backups, metrics, schema operations
+- **`orgs.py`** - Organization models
+- **`entity_graph.py`** - Entity graph operation models
 
 ### Authentication & Authorization
 
 - **`auth.py`** - Login, registration, JWT tokens, SSO flows
 - **`oauth.py`** - OAuth provider integrations (QuickBooks, etc.)
 
-### Financial & Billing
+### Block Envelopes & Provenance (active surface)
 
-- **`credits.py`** - Credit balances, transactions, storage limits
-- **`subscription.py`** - Repository subscriptions, tier management
-- **`billing.py`** - Payment processing, subscription upgrades
+- **`information_block.py`** - InformationBlock envelope (Structure + atoms + FactSet)
+- **`fact_provenance.py`** - Typed `FactProvenance` discriminated union (pivot/schedule/derived/asserted)
+- **`event_block.py`** - Event Block envelope (REA business events)
+- **`taxonomy_block.py`** - Taxonomy Block envelope (CoA, custom ontology)
+- **`event_handler.py`** - Event handler (DSL rule) models
 
-### Integration & Connectivity
+### Domain (RoboLedger / RoboInvestor)
 
-- **`connection.py`** - External service connections (SEC, QuickBooks)
-- **`mcp.py`** - Model Context Protocol for AI interactions
-- **`agent.py`** - AI agent requests and responses
+- **`extensions/`** - Per-graph request/response models (entity, accounts, reports, schedules, journal entries, trial balance, investor, etc.) — see the subdirectory listed above
 
-### Infrastructure & Operations
+### Integration & Infrastructure
 
-- **`task.py`** - Background task status and monitoring
+- **`library.py`** - Taxonomy/framework library models
+- **`search.py`** - Document search models
 - **`common.py`** - Error responses, pagination, health checks
 
 ## 🏗️ Architecture Principles
@@ -103,14 +127,13 @@ Models automatically generate OpenAPI documentation with:
 
 ```python
 # Import from centralized location
-from robosystems.models.api.credits import CreditSummaryResponse
-from robosystems.models.api.subscription import SubscriptionRequest
+from robosystems.models.api.information_block import InformationBlockEnvelope
 from robosystems.models.api.common import ErrorResponse
 
 # Use in router endpoints
-@router.get("/summary", response_model=CreditSummaryResponse)
-async def get_credit_summary(...):
-    return CreditSummaryResponse(...)
+@router.get("/block", response_model=InformationBlockEnvelope)
+async def get_block(...):
+    return InformationBlockEnvelope(...)
 ```
 
 ### Creating New Models

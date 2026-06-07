@@ -1,6 +1,6 @@
 """RDF-family encoder dispatch.
 
-Phase 1 ships JSON-LD; additional flavors slot in by adding a module
+JSON-LD is implemented; additional flavors slot in by adding a module
 and an ``elif`` arm here. The public ``serialize_to_rdf`` entry point
 keeps a stable signature regardless of which flavor is requested.
 """

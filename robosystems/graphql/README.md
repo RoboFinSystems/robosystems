@@ -221,6 +221,8 @@ The cost is that new fields on `PydanticAccountTreeNode` require a parallel edit
 
 `InformationBlock` (in `types/information_block.py`) is hand-written for a different reason — its `artifact.mechanics` field is a discriminated union on `kind` (`ScheduleMechanics | StatementMechanics | MetricMechanics`), and Strawberry's pydantic decorator can't unwrap union types cleanly. The `from_pydantic` classmethod does the union dispatch manually. New block types add a `*MechanicsType` Strawberry wrapper and extend the union in `InformationBlock.artifact_mechanics`'s return type annotation.
 
+The envelope's `FactSet` now carries a typed `provenance` field — the discriminated `FactProvenance` union (pivot/schedule/derived/asserted) — surfaced as a JSON scalar; it auto-derives like the other Pydantic fields.
+
 ## Testing
 
 Tests live under `tests/graphql/extensions/`:

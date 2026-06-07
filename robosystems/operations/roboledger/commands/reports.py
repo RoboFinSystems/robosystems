@@ -1,9 +1,8 @@
 """Write operations for report definitions.
 
-Ported from `routers/ledger/reports.py`. Includes the complex share
-path which copies a report + its facts into a target graph's tenant
-schema — that helper (`_share_to_target`) stays internal here because
-it's only used by `share_report`.
+Includes the share path which copies a report + its facts into a target
+graph's tenant schema — that helper (`_share_to_target`) stays internal
+here because it's only used by `share_report`.
 """
 
 from __future__ import annotations
@@ -166,13 +165,13 @@ def _build_structure_mapping(
   Reporting Style composed for this graph.
 
   Walks ``reporting_style_networks`` to pick one Network per statement
-  type (per §3.2 Phase 1), then enumerates each Network's association
-  rows to map elements → structure ids. An element can appear in
-  multiple structures (e.g. ``NetIncomeLoss`` is the bottom line of the
-  Income Statement AND the first calc-child of the Cash Flow Operating
-  rollup), and the fact must be stamped onto every owning structure's
-  FactSet so each block's renderer can resolve its calc rollups
-  locally. Pre-generates a fact_set_id ULID per picked structure.
+  type, then enumerates each Network's association rows to map elements →
+  structure ids. An element can appear in multiple structures (e.g.
+  ``NetIncomeLoss`` is the bottom line of the Income Statement AND the
+  first calc-child of the Cash Flow Operating rollup), and the fact must
+  be stamped onto every owning structure's FactSet so each block's
+  renderer can resolve its calc rollups locally. Pre-generates a
+  fact_set_id ULID per picked structure.
 
   Networks for statement types the Style doesn't compose are skipped
   silently — a Style is free to omit, say, the comprehensive_income
@@ -191,12 +190,12 @@ def _build_structure_mapping(
     except NoNetworkForStatementTypeError:
       # Style doesn't compose this statement type — skip silently so a
       # Style that ships without (say) an equity Network still renders.
-      # Safety net: ``change_reporting_style_cmd`` (Phase 2 of §3.2)
-      # validates that every required statement_type has a composition
-      # row before flipping ``graphs.reporting_style_id``, so by the time
-      # this loop runs the only `NoNetworkForStatementTypeError` we
-      # should see is for genuinely optional types (e.g. a Style that
-      # deliberately omits ``comprehensive_income``).
+      # Safety net: ``change_reporting_style_cmd`` validates that every
+      # required statement_type has a composition row before flipping
+      # ``graphs.reporting_style_id``, so by the time this loop runs the
+      # only `NoNetworkForStatementTypeError` we should see is for
+      # genuinely optional types (e.g. a Style that deliberately omits
+      # ``comprehensive_income``).
       continue
     picked_structure_ids.append(network.structure_id)
 
@@ -245,11 +244,11 @@ def _persist_report_facts(
   """Clear any existing facts for this report and persist the new set.
 
   Every persisted Fact is stamped with ``structure_id`` and
-  ``fact_set_id`` — the FactSet is the sole parent pointer post §3.5.
-  Facts whose element isn't reached by any Network in the picked
-  Reporting Style are skipped: there's no Network to render them
-  through, so they can't be stamped with a structure_id, and the
-  fact_set_id NOT NULL constraint would reject them.
+  ``fact_set_id`` — the FactSet is the sole parent pointer. Facts whose
+  element isn't reached by any Network in the picked Reporting Style are
+  skipped: there's no Network to render them through, so they can't be
+  stamped with a structure_id, and the fact_set_id NOT NULL constraint
+  would reject them.
 
   An element that appears in N structures (e.g. ``NetIncomeLoss`` =
   bottom-line of the IS AND first calc-child of CF Operating) gets one
@@ -303,12 +302,11 @@ def _pre_create_report_fact_sets(
 ) -> None:
   """Insert one FactSet row per picked Network — before facts are stamped.
 
-  Per §3.5/§6.5 of information-block.md: ``create_report`` creates the
-  ``fact_sets`` row first, then stamps facts referencing its id. The
-  period envelope comes from the report's ``periods`` (min start, max
-  end) rather than being derived post-hoc from filtered facts. That
-  pattern keeps the dataflow forward and lets us add a real FK from
-  ``facts.fact_set_id`` → ``fact_sets.id`` without orphan risk.
+  ``create_report`` creates the ``fact_sets`` row first, then stamps
+  facts referencing its id. The period envelope comes from the report's
+  ``periods`` (min start, max end) rather than being derived post-hoc
+  from filtered facts. That keeps the dataflow forward and lets the FK
+  ``facts.fact_set_id`` → ``fact_sets.id`` hold without orphan risk.
 
   Every picked Network gets a FactSet row, even one whose Network the
   CoA hasn't reached yet (e.g., the demo's CF Network with no
@@ -529,9 +527,9 @@ def create_report(
   element_to_structures, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )
-  # §6.5: create fact_sets rows first so the facts we stamp reference
-  # a row that already exists. Lets us enforce facts.fact_set_id →
-  # fact_sets.id at the DB layer (post-§3.5).
+  # Create fact_sets rows first so the facts we stamp reference a row
+  # that already exists, letting the DB enforce facts.fact_set_id →
+  # fact_sets.id.
   _pre_create_report_fact_sets(
     session,
     report_def.id,
@@ -653,9 +651,9 @@ def regenerate_report(
     session, reporting_style_id
   )
   # Stale rows from the prior generation must clear before fresh ULIDs
-  # land. Post §3.5 the FK `facts.fact_set_id → fact_sets.id` is
-  # ON DELETE CASCADE, so dropping the parent fact_sets cleans the
-  # child facts in one statement.
+  # land. The FK `facts.fact_set_id → fact_sets.id` is ON DELETE CASCADE,
+  # so dropping the parent fact_sets cleans the child facts in one
+  # statement.
   session.execute(
     text("DELETE FROM fact_sets WHERE report_id = :report_id"),
     {"report_id": report_def.id},
@@ -707,7 +705,7 @@ class InvalidFilingTransitionError(Exception):
   """Raised when a filing-status transition isn't on the legal lifecycle graph."""
 
 
-# Legal transitions per the Plan-C lifecycle:
+# Legal filing-status transitions:
 #   draft ↔ under_review → filed ↔ archived
 # ``filed`` is reached via :func:`file_report` so audit fields land cleanly;
 # this map covers the non-file moves available to the generic transition op.
@@ -829,7 +827,7 @@ def delete_report(session: Session, report_id: str, acting_user_id: str) -> bool
       f"retiring; deletion is only available for 'draft' or 'under_review'."
     )
 
-  # Post §3.5: facts cascade from their parent fact_sets on delete.
+  # Facts cascade from their parent fact_sets on delete.
   session.execute(
     text("DELETE FROM fact_sets WHERE report_id = :report_id"),
     {"report_id": report_id},
@@ -1003,10 +1001,10 @@ def _share_to_target(
 
       # Cross-graph share: source-graph structure_id references rows in
       # the source tenant schema and is meaningless in the target.
-      # Populating target Networks per-structure on share is expand-pass
-      # work. For now we stamp every shared fact against a single
-      # cross-graph FactSet that back-references the shared report; the
-      # period envelope spans all incoming facts.
+      # Target Networks aren't populated per-structure on share; instead
+      # every shared fact is stamped against a single cross-graph FactSet
+      # that back-references the shared report, with a period envelope
+      # spanning all incoming facts.
       starts = [
         fd["period_start"] for fd in source_facts if fd.get("period_start") is not None
       ]

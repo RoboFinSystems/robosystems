@@ -14,10 +14,10 @@ operation.
   bundle in S3. The bundle is generated at publish time and reused
   across downloads.
 * ``GET .../reports/{id}/download?format=xbrl-2.1`` — rebuilds the
-  bundle on-demand and streams an XBRL 2.1 zip directly. Not stored
-  (per spec §7); the cost of regenerating per download is acceptable
-  for v1.0 — Phase 2 introduces an async pre-generate path if
-  profiling reveals latency issues at scale.
+  bundle on-demand and streams an XBRL 2.1 zip directly. Not stored;
+  the cost of regenerating per download is acceptable, with an async
+  pre-generate path available if profiling reveals latency issues at
+  scale.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ _require_roboledger = require_graph_extension("roboledger")
 
 # Maximum lifetime of a presigned URL. Short window — clients are
 # expected to follow the redirect immediately; long-lived URLs are a
-# share path, not a download path (the share path is Phase 2).
+# share path, not a download path.
 _PRESIGN_DEFAULT_SECONDS = 300
 _PRESIGN_MAX_SECONDS = 3600
 
@@ -259,10 +259,9 @@ def _download_xbrl(
 ) -> Response:
   """XBRL path — rebuild bundle, emit zip, stream directly.
 
-  Per spec §7 Phase 1b: XBRL is on-demand emit, not stored. The cost
-  of regenerating on each download is acceptable at v1.0 scale; Phase
-  2 introduces an async pre-generate + S3-stamp path if profiling
-  reveals latency issues.
+  XBRL is an on-demand emit, not stored. The cost of regenerating on
+  each download is acceptable at current scale; an async pre-generate +
+  S3-stamp path can be added if profiling reveals latency issues.
   """
   try:
     with extensions_session(graph_id) as session:

@@ -103,7 +103,7 @@ class QBClient:
       qb_credentials: A dictionary containing 'refresh_token' and 'access_token'.
       connection_id: Optional connection ID used to persist rotated tokens
         back to ``ConnectionCredentials`` after Intuit rotates them on
-        refresh (Phase 3 A1). Without it, rotated tokens die with the
+        refresh. Without it, rotated tokens die with the
         QBClient instance and the next sync uses pre-rotation tokens —
         eventually failing once Intuit's grace window expires.
     """
@@ -136,7 +136,7 @@ class QBClient:
 
     if not refresh_token.startswith("mock_"):
       logger.info(f"Refreshing QuickBooks token for realm {self.realm_id}")
-      # Phase 3 A2: wrap refresh in typed error handling. AuthClientError
+      # Wrap refresh in typed error handling. AuthClientError
       # is auth-side (revoked / expired-beyond-grace / scope-insufficient)
       # and flips the connection to needs_reauth so the operator sees a
       # "Reconnect" CTA instead of a generic "sync failed". Transient
@@ -176,7 +176,7 @@ class QBClient:
       f"refresh_token={'yes' if self.refresh_token else 'no'}"
     )
 
-    # Phase 3 A1: persist rotated tokens back to ConnectionCredentials.
+    # Persist rotated tokens back to ConnectionCredentials.
     # Intuit rotates the refresh_token on every refresh; without this,
     # the rotated value dies when the QBClient instance goes out of
     # scope and the next sync uses the pre-rotation token. Eventually
@@ -194,7 +194,7 @@ class QBClient:
     )
 
   def _mark_needs_reauth(self) -> None:
-    """Flip the connection's status to ``needs_reauth`` (A2 + B5).
+    """Flip the connection's status to ``needs_reauth``.
 
     Best-effort: a failure to update the status row is logged but
     swallowed — the QBAuthFailedError raised by the caller is the
@@ -213,7 +213,7 @@ class QBClient:
       )
 
   def _persist_rotated_tokens(self, prior_credentials: dict[str, Any]) -> None:
-    """Write rotated tokens back to ``ConnectionCredentials`` (A1).
+    """Write rotated tokens back to ``ConnectionCredentials``.
 
     Scoped session lifecycle — opens a fresh platform-DB session just
     for this update and closes it immediately. Don't hold the session
@@ -508,7 +508,7 @@ class QBClient:
 
   @_QB_RETRY
   def get_transactions(self, start_date=None, end_date=None):
-    """Fetch JournalReport — retired in Phase 2 as the transactional source.
+    """Fetch JournalReport — no longer the transactional source.
 
     Kept for backward compat with any external callers; the QB pipeline now
     pulls Invoice / Bill / Payment / JournalEntry per-entity instead.
@@ -521,7 +521,7 @@ class QBClient:
     transactions = self.client.get_report("JournalReport", params)
     return transactions
 
-  # -- Phase 5 §4.3.4 — CDC (Change Data Capture) -----------------------
+  # -- CDC (Change Data Capture) ----------------------------------------
 
   def _cdc_base_url(self) -> str:
     """QB CDC endpoint base URL — switches between sandbox + production
@@ -536,8 +536,7 @@ class QBClient:
   def cdc(
     self, changed_since: datetime | str, entities: list[str]
   ) -> tuple[dict[str, list[Any]], bool]:
-    """Phase 5 §4.3.4 — fetch entity changes since ``changed_since`` via
-    QB's CDC endpoint.
+    """Fetch entity changes since ``changed_since`` via QB's CDC endpoint.
 
     Args:
         changed_since: tz-aware or naive datetime (naive interpreted as
@@ -555,12 +554,11 @@ class QBClient:
           ``Id`` and ``SyncToken``). Entity types with no changes return
           empty lists. **NOTE on deletions**: CDC returns deleted entities
           with ``status='Deleted'`` in the same per-entity list. Handler
-          dispatch for these is **deferred** — the loader currently has
+          dispatch for these is **not yet implemented** — the loader has
           no soft-delete path for QB-side deletions. Until that lands,
           a row that was deleted on the QB side after our initial sync
           will remain present in our extensions DB until the next full
-          rebuild. Tracked alongside the JournalReport-retirement work
-          in ``quickbooks-adapter.md`` §4.3.4 status note.
+          rebuild.
         - ``watermark_too_old`` is True when QB rejects the
           ``changedSince`` value (typically > 30 days back). Callers
           should reset the watermark and fall through to full lookback.

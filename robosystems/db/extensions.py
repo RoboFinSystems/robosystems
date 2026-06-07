@@ -174,7 +174,7 @@ _LIBRARY_IMMUTABLE_TABLES = (
   "classifications",
   "association_classifications",
   "rules",
-  # Reporting Style composition (Phase 1 of §3.2). Library-seeded rows
+  # Reporting Style composition. Library-seeded rows
   # pin Networks per statement_type for each Style; tenant writes are
   # blocked so customer-authored Styles use their own non-seeded rows.
   "reporting_style_networks",
@@ -242,7 +242,7 @@ def _widen_library_checks(conn, schema: str) -> None:
     "source IN ("
     "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
     "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-    # rs-gaap framework extension packages (Phase C) anchored to
+    # rs-gaap framework extension packages anchored to
     # sibling namespaces of rs-gaap.
     "'disclosures', 'checklist', 'styles'"
     ")"
@@ -278,7 +278,7 @@ def _widen_library_checks(conn, schema: str) -> None:
     # from presentation): formal calculation rules, named SEC/regulatory
     # disclosures, crosswalks between taxonomies.
     "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
-    # Reporting Style — the bundle a company picks (Phase 1 of §3.2);
+    # Reporting Style — the bundle a company picks;
     # composes Networks per statement_type via reporting_style_networks.
     "'reporting_style', "
     # Escape hatch

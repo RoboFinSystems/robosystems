@@ -184,7 +184,7 @@ def build_package(rules: list[dict]) -> dict:
     "description": (
       "L2 calc-arc RollUp verification rules — one rule per subtotal parent "
       "in rs-gaap-calculations/v1 ($Parent = Σ weighted children). "
-      "RoboSystems-native (info-block §6.1 Package II.a). Element-scoped to the "
+      "RoboSystems-native. Element-scoped to the "
       "parent concept so the rule fires against any rendered statement that "
       "presents that subtotal, across all equity-form variants. The RollUp "
       "evaluator treats a missing RHS child as 0 (matching the renderer); a "

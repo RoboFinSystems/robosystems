@@ -133,7 +133,7 @@ def _parse_metadata(raw) -> dict:
 
 
 def _classify_dispatch_error(exc: BaseException) -> str:
-  """Map a dispatch exception to a typed error code (Phase 3 B8).
+  """Map a dispatch exception to a typed error code.
 
   The inbox UI uses this code to surface "fix and retry" prompts —
   ``element_unmapped`` → "map account X in the CoA mapping",
@@ -157,15 +157,15 @@ def _classify_dispatch_error(exc: BaseException) -> str:
 
 
 def _compare_sync_tokens(existing: str | None, incoming: str | None) -> str:
-  """Phase 5 §4.3.2 — SyncToken freshness decision for the UPSERT gate.
+  """SyncToken freshness decision for the UPSERT gate.
 
   Returns one of:
   - ``"fresh"`` — incoming SyncToken is newer; proceed with UPSERT.
   - ``"same"`` — incoming matches existing; idempotent re-sync, skip.
   - ``"stale"`` — incoming is older (out-of-order replay / webhook race); skip.
   - ``"no_info"`` — at least one side is NULL/non-numeric. Proceed without
-    gating (backfill path for pre-Phase-5 rows or JournalReport-only rows
-    that ship without SyncToken).
+    gating (backfill path for rows without a stored SyncToken or
+    JournalReport-only rows that ship without one).
 
   Compared as integers — QB SyncTokens are monotonic non-negative ints
   serialized as strings.
@@ -187,7 +187,7 @@ def _compare_sync_tokens(existing: str | None, incoming: str | None) -> str:
 
 
 def _stamp_dispatch_error(evt, exc: BaseException, now: datetime) -> None:
-  """Capture dispatch failure detail on the event's metadata blob (B8).
+  """Capture dispatch failure detail on the event's metadata blob.
 
   Mutates ``evt.metadata_`` as a new dict so SQLAlchemy detects the
   JSONB change. The error metadata lives alongside the live payload
@@ -210,9 +210,9 @@ def _stamp_dispatch_error(evt, exc: BaseException, now: datetime) -> None:
 class LoadResult:
   """Result of an OLTP load operation.
 
-  Counts after Phase 2 (event-block ingest):
+  Counts from event-block ingest:
 
-  - ``elements`` / ``dimensions``: still inserted directly (structural).
+  - ``elements`` / ``dimensions``: inserted directly (structural).
   - ``events_captured`` / ``events_updated``: per-transaction event_block
     rows written by ``_capture_transactions_as_events``. Source-of-truth
     sources (currently QuickBooks) auto-commit on sync — the registered
@@ -245,15 +245,15 @@ class LoadResult:
   events_dispatch_failed: int = 0
   agents_inserted: int = 0
   agents_updated: int = 0
-  # Wave 1 G4: counts events whose QB-side payload changed under a
+  # Counts events whose QB-side payload changed under a
   # committed/fulfilled row. Live payload stays unchanged; drift flag +
   # drift_payload land on the event for the reconciliation queue.
   events_drift_detected: int = 0
-  # Phase 4 §4.2: counts QB-inbound rows that matched a previously
+  # Counts QB-inbound rows that matched a previously
   # write-backed RL event (round-trip recognition). Each one represents
   # a "no duplicate created" event the cross-source matcher caught.
   events_cross_source_matched: int = 0
-  # Phase 5 §4.3.2: counts events skipped by the SyncToken freshness
+  # Counts events skipped by the SyncToken freshness
   # gate. ``skipped_stale`` = incoming SyncToken older than what we
   # already have (out-of-order replay / future webhook race). ``skipped_same``
   # = incoming matches current version (idempotent re-sync). Both surface
@@ -295,17 +295,17 @@ class _CaptureResult:
   updated: int = 0
   handler_dispatched: int = 0
   dispatch_failed: int = 0
-  # Wave 1 G4 — events where the incoming payload diffs from an
+  # Events where the incoming payload diffs from an
   # already-committed/fulfilled local row. Stamped on the event metadata
   # for reconciliation rather than mutating the live payload.
   drift_detected: int = 0
-  # Phase 4 §4.2 — incoming QB rows that match a previously-written
+  # Incoming QB rows that match a previously-written
   # RL-originated event via metadata.qb_external_id. The matcher skips
   # the INSERT + handler re-fire and stamps qb_sync_confirmed_at on
   # the existing event. Counter surfaces in the sync log so we can
   # confirm the round-trip is being recognised.
   cross_source_matched: int = 0
-  # Phase 5 §4.3.2 — SyncToken freshness gate decisions. ``skipped_stale``
+  # SyncToken freshness gate decisions. ``skipped_stale``
   # is incoming.sync_token < existing (out-of-order CDC, replay, future
   # webhook race); ``skipped_same`` is incoming == existing (idempotent
   # re-sync of an already-current row). Both bypass the status branches
@@ -349,7 +349,7 @@ class OLTPLoader:
   ) -> LoadResult:
     """Load dbt OLTP output into the extensions tenant schema.
 
-    Wave 1 re-sync semantics (`quickbooks-adapter.md` §2.5.1):
+    Re-sync semantics:
 
     - ``full_rebuild=True``: pre-sync DELETE wipes
       ``captured``/``classified`` rows for ``(source, connection_id)``
@@ -361,9 +361,9 @@ class OLTPLoader:
       rows in place and inserts new ones. Existing committed/fulfilled
       events get drift-flagged if the incoming payload changed.
     - Neither set (default lookback): treated as incremental — same as
-      ``since_date``. The wipe was historically unconditional; the
-      Wave 1 fix scopes it to operator-explicit full rebuilds only,
-      eliminating G2 (since_date wipes all history).
+      ``since_date``. The wipe is scoped to operator-explicit full
+      rebuilds only, so incremental syncs never wipe history outside
+      their window.
 
     Args:
         graph_id: The graph ID (maps to a PostgreSQL schema).
@@ -427,23 +427,23 @@ class OLTPLoader:
     with extensions_session(graph_id) as session:
       # ── Pre-sync deletes (full_rebuild only) ───────────────────────
       #
-      # Wave 1 (`quickbooks-adapter.md` §2.5.1) constrains this block:
+      # This block is constrained as follows:
       #
-      # - Runs ONLY on operator-explicit ``full_rebuild=True`` (G2 fix —
-      #   incremental syncs never wipe history outside their window).
+      # - Runs ONLY on operator-explicit ``full_rebuild=True`` —
+      #   incremental syncs never wipe history outside their window.
       # - Wipes only ``captured`` / ``classified`` events for
       #   ``(source, connection_id)``. Voided / committed / fulfilled
       #   events survive — operator rejections and handler-approved
-      #   entries are immutable to re-sync (G1 fix).
+      #   entries are immutable to re-sync.
       # - GL cascade (LineItem / Entry / Transaction) scopes to the
       #   captured/classified events being wiped via
       #   ``triggered_by_event_id``. Surviving fulfilled events keep
       #   their GL rows; only orphan GL from never-completed dispatches
       #   gets cleaned.
       # - Element + Dimension wipe stays here as a structural reset
-      #   (full rebuild only). Wave 1 W4 elsewhere switches the element
-      #   INSERT path to UPSERT, but on full_rebuild we still want the
-      #   reset because that's the operator-explicit "start over" mode.
+      #   (full rebuild only). The element INSERT path itself is an
+      #   UPSERT, but on full_rebuild we still want the reset because
+      #   that's the operator-explicit "start over" mode.
       #
       # Local imports: hoisting these to module top would pull the
       # roboledger model package eagerly, which in turn drags Strawberry
@@ -495,10 +495,9 @@ class OLTPLoader:
       # DO NOTHING at the upsert site). Library-seeded rows are
       # protected by the immutability trigger.
       #
-      # Wave 1 W4 NOTE: Association cascade was removed (was previously
-      # wiping user-curated CoA → us-gaap mappings). On full_rebuild we
-      # now ALSO keep associations alive — the element UPSERT below
-      # preserves elem_* ULIDs so the FK targets remain valid.
+      # Association cascade is intentionally NOT run here — full_rebuild
+      # keeps user-curated CoA → us-gaap mappings alive. The element
+      # UPSERT below preserves elem_* ULIDs so the FK targets remain valid.
       from robosystems.models.extensions.association import Association  # noqa: F401
 
       if full_rebuild:
@@ -533,8 +532,7 @@ class OLTPLoader:
 
       # --- UPSERT elements (from dbt "elements" table) ---
       #
-      # Wave 1 W4 (`quickbooks-adapter.md` §4.6.0): lookup-then-update or
-      # insert, matching the Agent UPSERT pattern at
+      # Lookup-then-update or insert, matching the Agent UPSERT pattern at
       # ``_capture_agents_from_qb``. Preserves ``elem_*`` ULIDs across
       # syncs — downstream Associations / IB Fact references hold their
       # FK targets stable. Defended at the DB level by
@@ -663,7 +661,7 @@ class OLTPLoader:
             f"AccountType metadata"
           )
 
-      # --- UPSERT agents (Phase 2) ---
+      # --- UPSERT agents ---
       #
       # Customers / vendors / employees pulled per-entity from the source
       # system. UPSERT keyed on (connection_id, source, external_id) so
@@ -688,11 +686,10 @@ class OLTPLoader:
 
       # --- CAPTURE transactions as event_blocks ---
       #
-      # Per Phase 2 (see ``quickbooks-adapter.md``): each QB transaction
-      # becomes one Event row with ``status='captured'`` and
-      # ``apply_handlers=False``. GL rows (Transaction / Entry /
-      # LineItem) are produced after approval via the inbox flow
-      # (Phase 4) by the ``journal_entry_recorded`` handler.
+      # Each QB transaction becomes one Event row with
+      # ``status='captured'`` and ``apply_handlers=False``. GL rows
+      # (Transaction / Entry / LineItem) are produced after approval via
+      # the inbox flow by the ``journal_entry_recorded`` handler.
       #
       # UPSERT semantics keyed on ``events(source, external_id)`` — the
       # unique partial index already guards uniqueness; this method
@@ -996,10 +993,9 @@ class OLTPLoader:
       agent_type = str(row.get("agent_type") or "other")
       is_1099 = bool(row.get("is_1099_recipient", False))
       is_active = bool(row.get("is_active", True))
-      # Phase 5: SyncToken capture — per spec §4.3.1, persisted as
-      # metadata_['qb_sync_token'] (JSONB-only). NULL/empty acceptable;
-      # backfilled on subsequent syncs. Step 2 (§4.3.2) will use this
-      # as the freshness gate.
+      # SyncToken capture — persisted as metadata_['qb_sync_token']
+      # (JSONB-only). NULL/empty acceptable; backfilled on subsequent
+      # syncs. The freshness gate uses this to skip stale/duplicate rows.
       qb_sync_token_raw = row.get("sync_token")
       qb_sync_token = str(qb_sync_token_raw) if qb_sync_token_raw else None
 
@@ -1160,7 +1156,7 @@ class OLTPLoader:
       .all()
     }
 
-    # 2b) Phase 4 §4.2 cross-source matcher — for each incoming QB
+    # 2b) Cross-source matcher — for each incoming QB
     # external_id, look for an RL-originated event whose
     # `metadata.qb_external_id` mentions it (either exact match or as
     # an element in the comma-joined multi-entry form). These are
@@ -1200,7 +1196,7 @@ class OLTPLoader:
         )
 
     for ext_id, txn in txns_by_ext.items():
-      # Phase 4 §4.2 — skip rows that matched the cross-source pass
+      # Skip rows that matched the cross-source pass
       # (round-trips of our own write-back). Confirmation stamp already
       # landed on the RL-originated event; no twin needed in the events
       # table.
@@ -1227,14 +1223,13 @@ class OLTPLoader:
         occurred_at.date().isoformat() if hasattr(occurred_at, "date") else None
       )
 
-      # Phase 2: source-class fidelity + agent linkage.
-      # The transactions mart now carries event_type / event_category and
+      # Source-class fidelity + agent linkage.
+      # The transactions mart carries event_type / event_category and
       # the optional agent_external_id from the per-class header join.
       event_type = str(txn.get("event_type") or "journal_entry_recorded")
       event_category = str(txn.get("event_category") or "adjustment")
-      # Canonical action verb (ontology-alignment.md §4.6). Nullable —
-      # the dbt mart falls back to NULL for unmapped QB tx_types, and
-      # the DB CHECK accepts NULL.
+      # Canonical action verb. Nullable — the dbt mart falls back to
+      # NULL for unmapped QB tx_types, and the DB CHECK accepts NULL.
       event_action_raw = txn.get("event_action")
       event_action: str | None = str(event_action_raw) if event_action_raw else None
       agent_ext_id_raw = txn.get("agent_external_id")
@@ -1341,8 +1336,8 @@ class OLTPLoader:
             e,
           )
 
-      # Phase 5: capture QB SyncToken (monotonic per-entity version) so the
-      # SyncToken-gated UPSERT in §4.3.2 can decide freshness. NULL for
+      # Capture QB SyncToken (monotonic per-entity version) so the
+      # SyncToken-gated UPSERT can decide freshness. NULL for
       # JournalReport-only rows (JournalEntry / Deposit / Transfer where we
       # don't yet fetch a header) — those backfill on next sync that fetches
       # the entity. Excluded from drift comparison below: a SyncToken bump
@@ -1371,13 +1366,13 @@ class OLTPLoader:
 
       if ext_id in existing:
         evt = existing[ext_id]
-        # Phase 5 §4.3.2 — SyncToken freshness gate. Runs BEFORE the
+        # SyncToken freshness gate. Runs BEFORE the
         # status branches: a stale or same-version incoming row skips
         # all further processing (no UPSERT, no drift check, no handler
         # re-fire). The gate is the primary defense against
-        # out-of-order CDC delivery and replayed batches that Phase 5
-        # CDC integration (§4.3.4) introduces; status branching below
-        # only runs when the gate decides "fresh" or "no_info".
+        # out-of-order CDC delivery and replayed batches; status
+        # branching below only runs when the gate decides "fresh" or
+        # "no_info".
         existing_token = (evt.metadata_ or {}).get("qb_sync_token")
         freshness = _compare_sync_tokens(existing_token, qb_sync_token)
         if freshness == "stale":
@@ -1408,7 +1403,7 @@ class OLTPLoader:
           evt.currency = txn.get("currency", "USD")
           evt.description = description
           # Preserve loader bookkeeping keys (dispatch_* counters from
-          # prior failed-dispatch attempts, B8) across UPSERT. The
+          # prior failed-dispatch attempts) across UPSERT. The
           # adapter payload supersedes everything else, but counters
           # that track "this has failed N times" must accumulate so the
           # inbox UI can surface "this is stuck — needs attention"
@@ -1419,14 +1414,14 @@ class OLTPLoader:
           evt.metadata_ = {**metadata_blob, **preserved}
           out.updated += 1
         elif evt.status in ("committed", "fulfilled"):
-          # Wave 1 G4 — adapter resurfaced a payload for an
+          # Adapter resurfaced a payload for an
           # already-approved entry. Compare incoming `metadata_blob`
           # against the live `evt.metadata_` minus drift bookkeeping.
           # If different, flag drift + stash the incoming payload
           # without mutating the live business payload (handler-approved
-          # entries are immutable to re-sync per §2.5).
+          # entries are immutable to re-sync).
           #
-          # Phase 5: exclude `qb_sync_token` from the diff — a SyncToken
+          # Exclude `qb_sync_token` from the diff — a SyncToken
           # bump alone is not drift, just a version increment. But DO
           # persist the bumped SyncToken to the live event's metadata
           # (bookkeeping field, not business payload) so the next
@@ -1528,7 +1523,7 @@ class OLTPLoader:
               evt.status = "committed"
           out.handler_dispatched += 1
         except Exception as e:
-          # Phase 3 B8: stamp typed error metadata on the event so the
+          # Stamp typed error metadata on the event so the
           # operator inbox can render "fix and retry" prompts. The
           # metadata write happens OUTSIDE the SAVEPOINT — the nested
           # transaction's rollback wipes any in-flight handler mutations

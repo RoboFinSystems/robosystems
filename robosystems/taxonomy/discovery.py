@@ -197,10 +197,10 @@ def expand_framework_to_pin(
   An entry marked ``tenant_copy: false`` is **omitted** from the pin: it
   is still seeded into the public library (``list_framework_seed_paths``
   keys off file presence, not this flag) but is not copied into per-tenant
-  schemas by ``writer.copy_library_into_tenant``. This is how a dormant /
-  parked package stays canonical in the library without bloating (and
-  freezing into) every immutable tenant schema. Flip it back to ``true``
-  and re-sync to promote a public-only package into existing tenants.
+  schemas by ``writer.copy_library_into_tenant``. This is how a dormant
+  package stays canonical in the library without bloating (and freezing
+  into) every immutable tenant schema. Flip it back to ``true`` and
+  re-sync to promote a public-only package into existing tenants.
   """
   seen = _seen if _seen is not None else set()
   key = (manifest["framework"], manifest["version"])

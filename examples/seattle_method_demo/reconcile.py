@@ -1,29 +1,17 @@
 #!/usr/bin/env python3
-"""Reconciliation harness — Step 7 of the Seattle Method demo.
+"""Reconciliation harness for the Seattle Method demo.
 
 Reads concept totals + rollforward IBs via the **GraphQL facade**
 (`LedgerClient.get_trial_balance`, `LedgerClient.list_information_blocks`),
-parses the rollforward IB's typed mechanics, invokes the Phase 2
-MVP filter engine for each rollforward against a direct DB session,
+parses the rollforward IB's typed mechanics, runs the rollforward
+filter engine for each rollforward against a direct DB session,
 computes the four anchor totals (Total Assets, Total Liabilities &
 Equity, Net Income, Net Cash Change), and writes a markdown report
 to ``examples/seattle_method_demo/output/seattle-method-case-1.md``.
 
-**Architecture note** — this is hand-written GraphQL consumption.
-Forward work (the python-client-graphql initiative) replaces the
-hand-written Python GraphQL query strings + ``dict[str, Any]``
-returns with codegen-generated Pydantic models via ``ariadne-codegen``.
-The trigger condition the spec calls out ("a new GraphQL surface that
-the Python client genuinely needs to consume — e.g. rollforward
-RollforwardMechanics") has now fired. Phase 1 of that work
-(~1 day) replaces every ``client.list_information_blocks(...)
-→ dict`` hop here with a typed Pydantic response.
-
-The filter engine itself still runs against a direct SQLAlchemy
-session — that's the Phase 2 MVP boundary.
-Phase 3 wires filter evaluation into ``build_envelope`` so the
-attributed facts arrive populated in the IB envelope; this script
-becomes purely API-driven at that point.
+Read paths go through the same GraphQL surface a frontend or MCP agent
+would consume; the rollforward filter engine runs against a direct
+SQLAlchemy session.
 
 Usage:
     uv run python -m examples.seattle_method_demo.reconcile <graph_id>
@@ -58,9 +46,7 @@ DEFAULT_REPORT_PATH = DEMO_ROOT / "output" / "seattle-method-case-1.md"
 EXPECTED_INSTANCE_PATH = (
   REPO_ROOT / "local" / "datasets" / "seattle_method" / "report" / "instance.xml"
 )
-# Filter engine needs a direct SQLAlchemy session (Phase 2 MVP boundary
-# per ``information-block.md`` §4.5; Phase 3 wires it into
-# ``build_envelope`` so we can drop this entirely). Reads
+# The filter engine needs a direct SQLAlchemy session. Reads
 # ``EXTENSIONS_DATABASE_URL`` from the process env — the
 # ``just demo-seattle-method-reconcile`` recipe loads ``.env.local``
 # which sets this. If you invoke ``reconcile.py`` outside the justfile,
@@ -329,9 +315,6 @@ def _load_concept_totals_via_graphql(
   account_type, total_debits, total_credits, net_balance}``.
   Values come back as floats in dollars; we multiply by 100 for
   internal cents-precision.
-
-  TODO: replace with codegen-generated typed response model when
-  ``python-client-graphql.md`` Phase 1 lands.
   """
   data = client.get_trial_balance(
     graph_id,
@@ -614,18 +597,11 @@ def _load_rollforward_ibs_via_graphql(
   hit. The envelope's ``artifact.mechanics`` field carries the
   typed ``RollforwardMechanics`` JSON; we re-validate it through
   Pydantic to recover the typed shape (the hand-written GraphQL
-  parser returns ``dict[str, Any]``, the documented
-  ``python-client-graphql.md`` Phase 1 work replaces that with
-  typed Pydantic on the response).
+  parser returns ``dict[str, Any]``).
 
-  Note: the IB envelope's ``facts`` field is empty in Phase 2 MVP
-  (see ``information_block/rollforward.py:build_envelope``). The
-  filter engine still runs separately to produce attributed facts —
-  Phase 3 wires that into the envelope so this script can drop the
-  direct-session step entirely.
-
-  TODO: replace with codegen-generated typed response model when
-  ``python-client-graphql.md`` Phase 1 lands.
+  Note: the IB envelope's ``facts`` field is empty here (see
+  ``information_block/rollforward.py:build_envelope``); the filter
+  engine runs separately to produce the attributed facts.
   """
   blocks = client.list_information_blocks(graph_id, block_type="rollforward")
   out: list[tuple[str, RollforwardMechanics]] = []
@@ -846,10 +822,9 @@ def render_markdown(report: ReconciliationReport) -> str:
   # Anchor totals
   out.append("## Four Anchor Totals")
   out.append("")
-  out.append("Methodology spec §4.6 exit criterion: these four lines must "
-             "match Charlie's PoC for the test to pass. All amounts are "
-             "debit-positive cents internally; presentation flips signs "
-             "per accounting convention.")
+  out.append("These four lines must match Charlie's PoC for the test to "
+             "pass. All amounts are debit-positive cents internally; "
+             "presentation flips signs per accounting convention.")
   out.append("")
   totals = _anchor_totals(report.concept_totals)
   out.append("| Anchor | Our value |")
@@ -879,7 +854,7 @@ def render_markdown(report: ReconciliationReport) -> str:
   out.append("")
 
   # Rollforward attribution detail
-  out.append("## Rollforward Attribution (Phase 2 MVP Filter Engine)")
+  out.append("## Rollforward Attribution")
   out.append("")
   out.append("Each rollforward IB decomposes its BS source's period "
              "delta across declared TDC filters. Where ``Σ filters == "
@@ -911,7 +886,7 @@ def render_markdown(report: ReconciliationReport) -> str:
     out.append("")
 
   # Findings
-  out.append("## Findings — Classification per Methodology §3.2")
+  out.append("## Findings")
   out.append("")
   out.append("**Their data quality** (source CSV inconsistencies):")
   out.append("")
@@ -950,9 +925,8 @@ def render_markdown(report: ReconciliationReport) -> str:
   out.append("")
   out.append("**Matching**: see Anchor Totals table above + line-by-line "
              "concept totals. Compare manually against Charlie's PoC "
-             "rendering at the expected-output URL — automated HTML diff "
-             "is a forward-queue enhancement (methodology §3.1 step 5 "
-             "stretch goal).")
+             "rendering at the expected-output URL — an automated HTML "
+             "diff is a possible future enhancement.")
   out.append("")
 
   # Footer
@@ -960,7 +934,7 @@ def render_markdown(report: ReconciliationReport) -> str:
   out.append("")
   out.append("*Reconciliation produced by "
              "`examples/seattle_method_demo/reconcile.py` against the "
-             "Phase 2 MVP rollforward filter engine. See "
+             "rollforward filter engine. See "
              "`examples/seattle_method_demo/README.md` for the full "
              "methodology and the architectural pattern this test validates.*")
 
@@ -1036,10 +1010,8 @@ def main() -> None:
   client = _get_ledger_client()
 
   # Read paths go through GraphQL (the same surface a frontend or
-  # MCP agent would hit). The filter engine is still invoked
-  # against a direct session — Phase 2 MVP boundary; Phase 3 wires
-  # the engine into ``build_envelope`` so the IB envelope returns
-  # populated facts and this script becomes pure-API.
+  # MCP agent would hit). The filter engine is invoked against a
+  # direct session.
   concepts = _load_concept_totals_via_graphql(
     client, graph_id, args.period_start, args.period_end
   )
@@ -1051,7 +1023,7 @@ def main() -> None:
     f"  Loaded {len(rollforwards)} rollforward IB(s) (via GraphQL informationBlocks)"
   )
 
-  # Filter engine still runs against a direct session — Phase 2 MVP.
+  # Filter engine runs against a direct session.
   session = _open_session(graph_id)
   try:
     results = _evaluate_all_rollforwards(

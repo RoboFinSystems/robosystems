@@ -128,12 +128,12 @@ uv run pytest -m "not slow"
 ### By Directory
 
 ```bash
-# All task tests
-uv run pytest tests/tasks/
+# All worker tests
+uv run pytest tests/worker/
 
-# Specific task category
-uv run pytest tests/tasks/billing/
-uv run pytest tests/tasks/data_sync/
+# Specific component category
+uv run pytest tests/middleware/billing/
+uv run pytest tests/dagster/
 
 # Business operations
 uv run pytest tests/operations/
@@ -156,13 +156,13 @@ uv run pytest tests/graph_api/
 
 ```bash
 # Specific test file
-uv run pytest tests/tasks/billing/test_storage_billing.py
+uv run pytest tests/middleware/billing/test_enforcement.py
 
 # Specific test class
-uv run pytest tests/tasks/billing/test_storage_billing.py::TestDailyStorageBilling
+uv run pytest tests/middleware/billing/test_enforcement.py::TestCheckCanProvisionGraph
 
 # Specific test function
-uv run pytest tests/tasks/billing/test_storage_billing.py::TestDailyStorageBilling::test_successful_billing
+uv run pytest tests/middleware/billing/test_enforcement.py::TestCheckCanProvisionGraph::test_can_provision_with_valid_subscription
 
 # Parametrized test case
 uv run pytest tests/routers/auth/test_login.py::test_login[success]

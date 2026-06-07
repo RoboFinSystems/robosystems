@@ -69,7 +69,7 @@ class MaterializeResult:
 NODE_TABLES = [
   "Entity",
   "Element",
-  # REA primitives (base ontology — ontology-alignment.md §4.2-§4.3).
+  # REA primitives (base ontology).
   # Agent before Event so EVENT_INVOLVES_AGENT can reference it. Event
   # before Entry so EVENT_TRIGGERS_TRANSACTION (Event→Transaction) and
   # the entry-side audit chain land in the right order.
@@ -478,7 +478,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'traits')
   """
 
-  # ── REA primitives (base ontology — ontology-alignment.md §4) ────────
+  # ── REA primitives (base ontology) ──────────────────────────────────
   # Agent + Event are universal across RoboX extensions. Skip JSONB
   # columns (Agent.address, Agent.metadata_, Event.metadata_) — graph
   # layer is a curated knowledge surface. Event.amount converts cents to
@@ -803,7 +803,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     WHERE source_structure_id IS NOT NULL
   """
 
-  # ── REA edges (ontology-alignment.md §4.2-§4.3) ──────────────────────
+  # ── REA edges ────────────────────────────────────────────────────────
   # Entity is the per-graph singleton; fan it out to every Agent / Event.
   # Sibling edges populated only when the OLTP column is non-null.
 

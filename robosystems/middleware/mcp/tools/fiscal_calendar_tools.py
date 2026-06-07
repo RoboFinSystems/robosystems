@@ -168,7 +168,7 @@ class ClosePeriodTool:
 4. Transitions the FiscalPeriod from open → closed
 5. Advances closed_through; auto-advances close_target if reached
 6. Auto-runs the rule engine for every schedule Structure with facts in
-   the closed period (§3.8). Rule outcomes ride on the response as
+   the closed period. Rule outcomes ride on the response as
    `rule_summary` / `evaluated_structure_ids` so you can report which
    schedules passed / failed to the user.
 7. Emits a period_closed audit event
@@ -269,9 +269,9 @@ class ClosePeriodTool:
           "entries_posted": result.entries_posted,
           "target_auto_advanced": result.target_auto_advanced,
           "fiscal_calendar": fc_payload,
-          # §3.8 — rule eval outcomes from the auto-run on close. Pairs
-          # with the REST `ClosePeriodResponse` shape so agents and
-          # REST consumers see the same surface.
+          # Rule eval outcomes from the auto-run on close. Pairs with
+          # the REST `ClosePeriodResponse` shape so agents and REST
+          # consumers see the same surface.
           "rule_summary": result.rule_summary,
           "evaluated_structure_ids": list(result.evaluated_structure_ids),
         }

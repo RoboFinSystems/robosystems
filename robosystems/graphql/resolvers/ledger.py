@@ -231,7 +231,7 @@ class LedgerQuery:
 
     Derived from the event duality chain: sum of unsettled
     ``invoice_issued`` / ``sales_receipt_recorded`` amounts minus
-    discharges pointed at them. See ``event-driven-ledger.md`` §5.1.
+    discharges pointed at them.
     """
     try:
       with _open_session(info, "roboledger") as session:

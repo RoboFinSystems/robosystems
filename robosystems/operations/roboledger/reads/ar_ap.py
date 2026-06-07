@@ -2,8 +2,7 @@
 
 Open balance = sum of originating-event amounts minus sum of discharging-event
 amounts that point at them. The math runs on ``events.amount`` directly,
-so the answer is one SQL query and doesn't depend on GL roll-up. See
-``event-driven-ledger.md`` §5.1 for the design rationale.
+so the answer is one SQL query and doesn't depend on GL roll-up.
 
 The originating event-type set is config — AR uses ``invoice_issued`` (+
 ``sales_receipt_recorded`` for QB-imported deposit applications); AP

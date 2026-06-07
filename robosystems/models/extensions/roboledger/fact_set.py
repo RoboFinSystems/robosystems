@@ -7,7 +7,7 @@ Information Block envelope = Structure + FactSet for a given period.
 
 The table provides one period-scoped grouping concept that statements
 and schedules share. ``create_report`` creates a FactSet row first and
-stamps all facts with ``fact_set_id`` (post §3.5 the FK on
+stamps all facts with ``fact_set_id`` (the FK on
 ``facts.fact_set_id`` is NOT NULL ON DELETE CASCADE, so deleting the
 FactSet cascades to its facts). FactSet carries its own ``report_id``
 back-pointer to the parent Report — the ``facts.report_id`` column

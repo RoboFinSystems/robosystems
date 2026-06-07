@@ -288,8 +288,8 @@ class VerificationCategorySummary(BaseModel):
   """Pass/fail/skip counts for one ``rule_category`` within a block's
   verification results.
 
-  Drives the per-category accordions in the Verification Results panel
-  (financial-viewer §7.12). ``category`` is the rule's ``rule_category``
+  Drives the per-category accordions in the Verification Results panel.
+  ``category`` is the rule's ``rule_category``
   (one of the cm:VerificationRule subclasses), resolved by joining each
   result to its Rule.
   """
@@ -308,7 +308,7 @@ class VerificationSummary(BaseModel):
   """Server-computed aggregate of a block's ``verification_results``.
 
   Overall counts plus a per-``rule_category`` breakdown, so the viewer
-  renders the grouped Verification Results panel (financial-viewer §7.12)
+  renders the grouped Verification Results panel
   without a client-side results→rules join. Status closure is
   ``pass | fail | error | skipped`` (the ``public.verification_results``
   CHECK); ``total`` is their sum.
@@ -487,18 +487,17 @@ class MetricMechanics(BaseModel):
 class RollforwardMechanics(BaseModel):
   """Filter-based attribution mechanics for ``block_type='rollforward'``.
 
-  Implements Tier 2 of the rollforward attribution design
-  (``information-block.md`` §4.5). Each block decomposes one BS
-  source element's period delta into a list of flow concepts via
-  declared :class:`AttributionFilter` predicates. The renderer
-  evaluates the filters against ledger LineItems at envelope-build
-  time, emits one attributed fact per filter per period, and arbitrates
-  any residual against the default change tag (Tier 1 fallback).
+  Filter-based attribution: each block decomposes one BS source
+  element's period delta into a list of flow concepts via declared
+  :class:`AttributionFilter` predicates. The renderer evaluates the
+  filters against ledger LineItems at envelope-build time, emits one
+  attributed fact per filter per period, and arbitrates any residual
+  against the default change tag fallback.
 
   Reads directly from the typed ``structures.artifact_mechanics`` JSONB
   column. ``attribution_filters`` rides as nested JSON; the predicate
-  union widens as new predicate shapes ship (Phase 2 MVP carries only
-  ``line_item_metadata_field``).
+  union widens as new predicate shapes are added — currently only
+  ``line_item_metadata_field`` is carried.
   """
 
   kind: Literal["rollforward"] = "rollforward"
@@ -521,7 +520,7 @@ class RollforwardMechanics(BaseModel):
   default_change_tag_element_id: str | None = Field(
     None,
     description=(
-      "Element id of the Tier 1 default change tag — the fallback flow "
+      "Element id of the default change tag — the fallback flow "
       "concept that receives any residual (Δ BS − Σ filter matches). "
       "Null when no default is declared; behavior on residual then "
       "follows ``validation_mode``."
@@ -530,7 +529,7 @@ class RollforwardMechanics(BaseModel):
   default_change_tag_qname: str | None = Field(
     None,
     description=(
-      "QName of the Tier 1 default change tag (e.g. "
+      "QName of the default change tag (e.g. "
       "``rs-gaap:IncreaseDecreaseInCashAndCashEquivalents``). "
       "Round-tripped for caller convenience and operator-readable "
       "envelopes; ``default_change_tag_element_id`` is authoritative. "

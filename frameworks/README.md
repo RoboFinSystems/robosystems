@@ -110,8 +110,9 @@ the DB** and listed in the manifest's `packages[]`; this artifact is a flat
 qname list **consumed by the copy path** (`taxonomy/writer.py`) at provision
 time to decide which rs-gaap concepts a *tenant* receives. The full rs-gaap
 catalog (~2155 concepts) stays in the **public** library (it backs the future
-SEC us-gaap bridge); a tenant gets the MVP core (~382) — the high-level
-aggregates that render/foot/map today. Omitted: XBRL dimension members/domains,
+SEC us-gaap bridge); a tenant gets the keep-critical curation (~143) under the
+`tenant_exclude_keep_critical` policy (public ~2,155 → tenant ~143) — the
+high-level aggregates that render/foot/map today. Omitted: XBRL dimension members/domains,
 general-special-disconnected concepts, industry verticals (peer-framework
 material), and the general-special **leaf** level — the finest disaggregation
 detail, inert until the granularity-selection feature ships. Disaggregation
@@ -190,9 +191,9 @@ Fields:
     but `tenant_copy: false` omits the package from
     `expand_framework_to_pin`, so `writer.copy_library_into_tenant`
     **does not copy it into per-tenant schemas**. Use it for content that
-    should stay canonical in the library but is dormant / parked at MVP —
-    keeping it out of every immutable tenant schema (and off the COGS
-    line) without losing the definition. Promote later by flipping it back
+    should stay canonical in the library but is dormant (not used by the
+    default tenant set) — keeping it out of every immutable tenant schema
+    (and off the COGS line) without losing the definition. Promote later by flipping it back
     to `true` and running `operations/taxonomy_block/resync.py` (the copy
     gates each association on both element endpoints existing locally, so
     a cross-package arc into a `tenant_copy: false` package self-skips

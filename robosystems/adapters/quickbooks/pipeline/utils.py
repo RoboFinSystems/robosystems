@@ -26,7 +26,7 @@ def get_pipeline_work_dir(graph_id: str) -> Path:
 
 
 # Ledger output tables from dbt (dependency order for FK resolution).
-# `agents` is Phase 2: UPSERTed before transactions/events so event_blocks
+# `agents` is UPSERTed before transactions/events so event_blocks
 # can resolve agent_id from the row's agent_external_id.
 QB_LEDGER_TABLES = [
   "elements",
@@ -307,7 +307,7 @@ def _flatten_party(
         "tax_id": str(tax_id) if tax_id else "",
         "is_1099_recipient": bool(data.get("Vendor1099", False)),
         "is_active": bool(data.get("Active", True)),
-        # Phase 5: SyncToken — monotonic per-entity version counter. Empty
+        # SyncToken — monotonic per-entity version counter. Empty
         # string when absent so the parquet stays a non-null str column;
         # loader treats "" same as missing.
         "sync_token": str(data.get("SyncToken", "") or ""),
@@ -399,7 +399,7 @@ def _flatten_txn_header(
         "agent_external_id": str(agent_ref.get("value", "")) if agent_ref else "",
         "agent_type": agent_type,
         "linked_txns": _extract_linked_txns(data) if extract_linked_txns else "[]",
-        # Phase 5: monotonic per-entity version counter — joined back to the
+        # Monotonic per-entity version counter — joined back to the
         # JournalReport-derived event via tx_id LEFT JOIN in transactions.sql.
         "sync_token": str(data.get("SyncToken", "") or ""),
       }
@@ -487,7 +487,7 @@ def flatten_purchase_headers(raw: list[Any]) -> list[dict[str, Any]]:
       # Purchases (cash-side expenses) are not settlements; LinkedTxn
       # is empty.
       "linked_txns": "[]",
-      # Phase 5: same SyncToken on every emitted variant for this Purchase
+      # Same SyncToken on every emitted variant for this Purchase
       # (the candidate_tx_types fan-out is just for the JOIN to match
       # JournalReport's display label — the underlying entity version is one).
       "sync_token": str(data.get("SyncToken", "") or ""),
@@ -673,7 +673,7 @@ def write_extract_parquet(
   Empty datasets are written with the expected schema so DuckDB
   can read them (parquet files with 0 columns are invalid).
 
-  Phase 2 adds party + transaction-header parquet files. Line items still
+  Writes party + transaction-header parquet files. Line items still
   come from JournalReport via raw_journal_lines.
   """
   output_dir.mkdir(parents=True, exist_ok=True)

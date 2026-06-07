@@ -303,7 +303,7 @@ class ConnectionService:
     graph_id: str | None = None,
     db_session: Session | None = None,
   ) -> bool:
-    """Soft-delete a connection and deactivate its credentials (B6).
+    """Soft-delete a connection and deactivate its credentials.
 
     The connection row is preserved with ``deleted_at`` stamped — the
     tenant-side events/agents/elements scoped to its ``connection_id``
@@ -334,7 +334,7 @@ class ConnectionService:
       if cred:
         cred.deactivate(session)
 
-      # Soft-delete connection record (B6). Hard-delete would orphan
+      # Soft-delete connection record. Hard-delete would orphan
       # connection_id-scoped tenant rows.
       conn.soft_delete(session)
       logger.info(f"Soft-deleted connection {connection_id}")
@@ -523,7 +523,7 @@ class ConnectionService:
     graph_id: str,
     db_session: Session | None = None,
   ) -> dict[str, Any] | None:
-    """Set a connection's source-of-truth `write_policy` (Phase 4 §4.2).
+    """Set a connection's source-of-truth `write_policy`.
 
     Graph-scoped on purpose: the connection must belong to `graph_id` (the
     URL scope the caller already authorized) — this prevents flipping

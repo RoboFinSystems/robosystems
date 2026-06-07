@@ -184,7 +184,7 @@ async def oauth_callback(
       )
       returned_realm_id = provider_data.get("realm_id")
 
-      # Phase 3 B6 reuse-on-re-OAuth: if a soft-deleted connection exists
+      # Reuse-on-re-OAuth: if a soft-deleted connection exists
       # for this graph+provider+realm, revive it in place rather than
       # leaving the pending connection as a brand-new row. Preserves
       # connection_id so the tenant-side events / agents / elements

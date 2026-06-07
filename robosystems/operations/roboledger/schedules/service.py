@@ -246,9 +246,9 @@ class ScheduleService:
     fact_set_id = generate_prefixed_ulid("fs")
     entity_id = self._get_entity_id(session)
 
-    # Block = Fact Set. Per §6.5: create the fact_sets row first so the
-    # facts we stamp below reference an existing parent; lets us enforce
-    # facts.fact_set_id → fact_sets.id as a real FK without orphan risk.
+    # Block = Fact Set. Create the fact_sets row first so the facts we
+    # stamp below reference an existing parent; lets the FK
+    # facts.fact_set_id → fact_sets.id hold without orphan risk.
     # Explicit flush so the FactSet row hits the DB before the bulk
     # fact INSERTs — SQLAlchemy's session-flush ordering is by INSERT
     # statement type, not by FK dependency, and would otherwise emit

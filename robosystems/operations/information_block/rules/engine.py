@@ -26,8 +26,8 @@ For each ``{variable_name, variable_qname}`` entry in
 3. Resolve ``element_id`` + period window → fact value via the facts
    table (``fact_scope = 'in_scope'``, most recent ``period_end`` first).
    Facts are filtered by ``structure_id`` (or ``fact_set_id`` when the
-   caller pins one); post §3.5 every fact has both stamped at write
-   time, so no legacy report-id fallback is needed. None on miss.
+   caller pins one); every fact has both stamped at write time, so no
+   report-id fallback is needed. None on miss.
 
 One query per variable (N+1 is fine for 3-5 variables per rule).
 """

@@ -26,7 +26,7 @@ models/core/
 │   ├── invoice.py        # BillingInvoice + BillingInvoiceLineItem
 │   └── subscription.py   # BillingSubscription — graph/org subscription state
 ├── connection/           # External data source connections (QuickBooks, Plaid, SEC)
-│   ├── connection.py           # Connection — provider, graph_id, user_id, status, sync state
+│   ├── connection.py           # Connection — provider, graph_id, user_id, status, sync state, write_policy
 │   └── connection_credentials.py # ConnectionCredentials — Fernet-encrypted OAuth tokens
 ├── document/             # Uploaded documents (policies, user content indexed in OpenSearch)
 │   └── document.py       # Document — metadata for markdown/text uploads
@@ -109,7 +109,7 @@ Migrations for this database are config'd in `migrations/platform.ini` and live 
 ## Relationship to the rest of the platform
 
 - **Graph IDs are first-class here.** The `Graph` model owns `graph_id`, tier, status, schema extensions list, and subgraph parentage. Every other subsystem (graph routing, billing, rate limiting, extensions session scoping) looks up graphs through this model.
-- **The `Connection` model is PostgreSQL-only** — there are no Connection graph nodes anymore (removed Feb 2026). OAuth credentials are stored encrypted in `ConnectionCredentials` via Fernet. See the Connection System notes in the auto-memory for the full rationale.
+- **The `Connection` model is PostgreSQL-only** — there are no Connection graph nodes anymore (removed Feb 2026). OAuth credentials are stored encrypted in `ConnectionCredentials` via Fernet. It also carries the outbound `write_policy` (enum `native` / `qb_authoritative` / `hybrid`; QuickBooks defaults to `qb_authoritative` via `default_write_policy_for_provider`, everything else to `native`), `last_cdc_watermark` for CDC delta sync, and `deleted_at` for soft-delete/restore. See the Connection System notes in the auto-memory for the full rationale.
 - **Graph subscription and credits** are platform concerns, not extension concerns. `GraphCredits` + `GraphCreditTransaction` track the credit balance; billing webhooks write through these models. Extensions consume credits via `operations/graph/credit_service.py` which reads/writes these models.
 - **Shared repository access** (SEC, etc.) lives under `user/user_repository.py`. The `repository_type` column is a plain string so new shared repos can land via adapter manifests without a DB migration.
 

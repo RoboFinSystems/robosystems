@@ -173,8 +173,8 @@ class GraphExtensionContext:
   Returned by `require_graph_extension(...)` so callers that already need
   the graph type or extension list don't reload the row.
 
-  ``reporting_style_id`` is included so the §3.2 picker doesn't need to
-  reopen a platform session per render — the statement read path can
+  ``reporting_style_id`` is included so the reporting-style picker doesn't
+  need to reopen a platform session per render — the statement read path can
   thread it through from the route / GraphQL context instead.
   """
 

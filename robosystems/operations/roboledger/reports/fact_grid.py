@@ -99,10 +99,10 @@ def _arc_type_for_taxonomy(session: Session, taxonomy_id: str) -> str:
   """Pick which CoA→target arc-type to walk for fact generation.
 
   Returns ``mapping`` unconditionally under the rs-gaap-anchored
-  architecture (roadmap §3.15). Each CoA element carries both ``mapping``
-  (CoA → rs-gaap leaf) and ``equivalence`` (cross-taxonomy bridge) arcs;
-  the rs-gaap reporting layer follows ``mapping``. Hook kept as a
-  function for per-taxonomy dispatch when custom tenant taxonomies need
+  architecture. Each CoA element carries both ``mapping`` (CoA → rs-gaap
+  leaf) and ``equivalence`` (cross-taxonomy bridge) arcs; the rs-gaap
+  reporting layer follows ``mapping``. Hook kept as a function for
+  per-taxonomy dispatch when custom tenant taxonomies need
   ``equivalence``-direct rendering.
   """
   return "mapping"
@@ -291,7 +291,7 @@ def render_structure_view(
       periods: Ordered list of period specifications for columns.
       reporting_style_id: The graph's Reporting Style id
           (``Graph.reporting_style_id``). Resolves which Network this
-          statement type renders against via the §3.2 picker.
+          statement type renders against via the Reporting Style picker.
 
   Returns:
       FactGrid with rows ordered per the structure's hierarchy.
@@ -1485,8 +1485,8 @@ def _derive_cash_flow_facts(
   # taxonomy_id filter). Derivation arcs are library-seeded into a
   # dedicated structure per (cf_leaf, source) pair and the library
   # immutability trigger blocks tenants from inserting their own. If
-  # tenant-authored derivations land later (§3.16 Phase 4), this query
-  # will need a scope (Reporting Style or taxonomy_id).
+  # tenant-authored derivations land later, this query will need a
+  # scope (Reporting Style or taxonomy_id).
   # Operating-only: investing/financing derivation arcs are intentionally
   # excluded here. Net-delta can't do gross presentation (a period with only a
   # debt issuance would still emit a spurious repayment off Δdebt) and silently
@@ -2175,16 +2175,15 @@ def _load_reporting_structure(
   """Load the reporting structure hierarchy for the given report type.
 
   Resolves the Network deterministically via the Reporting Style
-  composition layer (§3.2 Phase 1) — the renderer never picks among
-  same-typed Structures by recency / heuristics anymore. The Style's
+  composition layer — the renderer never picks among same-typed
+  Structures by recency / heuristics. The Style's
   ``reporting_style_networks`` row pins exactly one Network per
   statement_type.
 
   Returns (structure_id, structure_name, concept_arrangement, root_nodes).
-  ``concept_arrangement`` is Charlie's CAP declared on the Disclosure
-  (``arithmetic`` / ``roll_up`` / ``roll_forward`` / ``set`` / ...);
-  the renderer uses it to pick a compilation strategy. See
-  information-block.md §3.2.1 for the canonical 15-value enumeration.
+  ``concept_arrangement`` is the Concept Arrangement Pattern declared on
+  the Disclosure (``arithmetic`` / ``roll_up`` / ``roll_forward`` /
+  ``set`` / ...); the renderer uses it to pick a compilation strategy.
 
   When the Reporting Style doesn't compose a Network for this statement
   type, returns the empty tuple — callers treat that as "no statement
@@ -2764,7 +2763,7 @@ def _build_rows(
   # renders as a redundant duplicate line. Drop it in that case. Keyed on
   # qname — both concepts appear only in the income statement, so this is
   # inert for BS/CF. (Curated convention; a future trait/structure-driven
-  # rule could subsume it — see information-block.md §3.6 Track B seams.)
+  # rule could subsume it.)
   if not any(r.element_qname == _DISCONTINUED_OPS_QNAME for r in rows):
     rows = [r for r in rows if r.element_qname != _CONTINUING_OPS_QNAME]
 

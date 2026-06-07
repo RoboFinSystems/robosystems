@@ -1,15 +1,15 @@
 """Filter evaluation engine for ``rollforward`` Information Blocks.
 
-Implements **Tier 2 of the rollforward attribution design** from
-``information-block.md`` §4.5. Decompose a BS account's period change
-across declared flow concepts by matching ledger LineItems on their
-first-class ``flow_element_id`` FK. Each filter authors flow concepts by
-qname; the engine resolves those to element_ids and matches the FK.
+Implements **Tier 2 of the rollforward attribution design**. Decompose
+a BS account's period change across declared flow concepts by matching
+ledger LineItems on their first-class ``flow_element_id`` FK. Each
+filter authors flow concepts by qname; the engine resolves those to
+element_ids and matches the FK.
 
 Sibling pattern: ``fact_grid._derive_cash_flow_facts`` (Tier 1 default
-change tag derivation, shipped 2026-05-14). Where Phase 1 derives flow
-facts from period-over-period BS deltas using ``derivation`` arcs, this
-module derives them from per-LineItem flow concepts on
+change tag derivation). Where Tier 1 derives flow facts from
+period-over-period BS deltas using ``derivation`` arcs, this module
+derives them from per-LineItem flow concepts on
 ``line_items.flow_element_id``. The two are complementary — Tier 1
 handles untagged data, Tier 2 handles data with explicit flow tagging
 (Charlie Hoffman's mini data; future XBRL GL with ``GenericFlowCategory``).
@@ -121,12 +121,12 @@ def evaluate_attribution_filters(
   Returns the full fact list in declaration order, with the residual
   (if any) appended last.
 
-  **Phase 3 note (N+1)**: this implementation emits 1 (BS delta) + N
-  (one per filter) SQL queries per period evaluation. Fine at Phase 2
-  MVP scope — manually-authored filters typically run 5-15 per block,
-  and the reconciliation harness calls this once per (BS leaf, period)
-  pair. When wiring into the multi-period ``fact_grid`` rendering
-  pipeline in Phase 3, batch across periods with a single windowed
+  **N+1 note**: this implementation emits 1 (BS delta) + N (one per
+  filter) SQL queries per period evaluation. Fine at current scope —
+  manually-authored filters typically run 5-15 per block, and the
+  reconciliation harness calls this once per (BS leaf, period) pair.
+  When wiring into the multi-period ``fact_grid`` rendering pipeline,
+  batch across periods with a single windowed
   ``GROUP BY (target_qname, period)`` pass — eliminates the per-period
   round trips that would otherwise dominate render time.
   """

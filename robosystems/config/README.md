@@ -21,18 +21,22 @@ config/
 ├── env.py                   # Environment variable management
 ├── constants.py             # Fixed operational constants (never change at runtime)
 ├── defaults.py              # Centralized tunable defaults
+├── deprovisioning.py        # Graph deprovisioning policy
 ├── tuning.py                # SSM Parameter Store tuning accessors
 ├── parameter_store.py       # SSM Parameter Store client
 ├── secrets_manager.py       # AWS Secrets Manager client
+├── logging.py               # Logging configuration
+├── openapi_tags.py          # OpenAPI tag metadata
 ├── billing/                 # Billing plans and pricing
 │   ├── core.py              # Subscription tiers and base pricing
 │   ├── ai.py                # AI/token-based pricing
 │   └── repositories.py      # Repository pricing
 ├── rate_limits.py           # Burst-focused rate limiting
 ├── credits.py               # Credit costs and allocations
-├── agents.py                # Agent/AI configuration
+├── operators.py             # AI Operator configuration (Bedrock Claude models)
 ├── graph_tier.py            # Graph tier config from .github/configs/graph.yml
 ├── query_queue.py           # Query queue configuration
+├── shared_repositories.py   # Shared repository registry
 ├── validation.py            # Startup validation
 ├── valkey_registry.py       # Redis database allocation
 └── storage/                 # S3 path configuration (see storage/README.md)
@@ -163,7 +167,7 @@ Defines subscription plans, credit allocations, and AI token pricing.
 
 | Tier | Price | Monthly Credits | ~Agent Calls |
 |------|-------|----------------|-------------|
-| ladybug-standard | $99/mo | 8,000 | ~200/mo |
+| ladybug-standard | $149/mo | 8,000 | ~200/mo |
 | ladybug-large | $299/mo | 32,000 | ~800/mo |
 | ladybug-xlarge | $699/mo | 100,000 | ~2,600/mo |
 
@@ -221,16 +225,22 @@ GRAPH_WRITE: 500/min  # 30k/hour possible
 **Usage:**
 
 ```python
-from robosystems.config.rate_limits import get_rate_limit_for_tier
+from robosystems.config.rate_limits import RateLimitConfig, EndpointCategory
 
-# Get limits for tier and operation
-limit, period = get_rate_limit_for_tier("large", EndpointCategory.GRAPH_QUERY)
-# Returns: (300, RateLimitPeriod.MINUTE)
+# Get limits for tier and operation — returns (limit, window_seconds) or None
+result = RateLimitConfig.get_rate_limit("large", EndpointCategory.GRAPH_QUERY)
+limit, window_seconds = result  # e.g. (300, 60)
+
+# Or apply the tier-config multiplier
+RateLimitConfig.get_rate_limit_with_multiplier("xlarge", EndpointCategory.GRAPH_READ)
+
+# Classify a request path/method into a category
+category = RateLimitConfig.get_endpoint_category(path, method)
 
 # Apply in middleware
 @rate_limit(
     calls=limit,
-    period=period.value,
+    period=window_seconds,
     key=lambda: f"user:{user.id}"
 )
 ```
@@ -300,9 +310,9 @@ if not validator.validate_database():
     setup_fallback_database()
 ```
 
-### 6. Agent Configuration (`agents.py`)
+### 6. Operator Configuration (`operators.py`)
 
-Centralized configuration for the multi-agent AI system.
+Centralized configuration for the AI Operator system.
 
 **Features:**
 
@@ -388,7 +398,7 @@ if not validation["valid"]:
 To use a different model for a specific agent, update `OPERATOR_MODEL_OVERRIDES`:
 
 ```python
-# In robosystems/config/agents.py
+# In robosystems/config/operators.py
 OPERATOR_MODEL_OVERRIDES: Dict[str, BedrockModel] = {
     "financial": BedrockModel.SONNET_4_5,  # Use latest model for financial analysis
     "cypher": BedrockModel.SONNET_4,      # Use Sonnet 4 for Cypher queries
@@ -400,7 +410,7 @@ OPERATOR_MODEL_OVERRIDES: Dict[str, BedrockModel] = {
 To change the default model globally:
 
 ```python
-# In robosystems/config/agents.py
+# In robosystems/config/operators.py
 DEFAULT_MODEL_CONFIG = ModelConfig(
     default_model=BedrockModel.SONNET_4_6,  # Current default: Sonnet 4.6
     fallback_model=BedrockModel.SONNET_4_5, # Current fallback: Sonnet 4.5

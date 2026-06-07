@@ -189,7 +189,7 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 | **Reference**     | Authoritative element references       | value, type                                    |
 | **Taxonomy**      | Global XBRL taxonomies                 | name, version, namespace                       |
 
-`Agent` and `Event` are universal REA primitives (`ontology-alignment.md` §4.2-§4.3) — every planned RoboX extension needs them. `Event.event_action` carries the canonical 19-verb action vocabulary (`models/extensions/roboledger/event.py:EVENT_ACTIONS`) refining the coarser `event_category`. The vocabulary converges with Valueflows v1.0; canonical naming is RoboSystems-native. SEC-flavored repositories get the schema with empty tables (no rows loaded), per spec §4.5 Option A.
+`Agent` and `Event` are universal REA primitives — every planned RoboX extension needs them. `Event.event_action` carries the canonical 19-verb action vocabulary (`models/extensions/roboledger/event.py:EVENT_ACTIONS`) refining the coarser `event_category`. The vocabulary converges with Valueflows v1.0; canonical naming is RoboSystems-native. SEC-flavored repositories get the schema with empty tables (no rows loaded).
 
 ### Core Relationships
 
@@ -211,7 +211,7 @@ Fiscal calendar / fiscal period stays OLTP-only — operational state (rolling c
 
 The RoboLedger extension models the full accounting domain: financial reporting (XBRL/SEC), general ledger (transactions, journal entries), and chart of accounts (via Element/Association patterns). It uses context-aware loading to present different views depending on the use case.
 
-**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), a GraphQL read surface under `/extensions/{graph_id}/graphql` (29 fields), named command operations under `/extensions/roboledger/{graph_id}/operations/*` (23 commands), graph-backed analytical view operations over the materialized data, a QuickBooks ELT pipeline, and a dedicated frontend app.
+**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), a GraphQL read surface under `/extensions/{graph_id}/graphql` (37 fields), named command operations under `/extensions/roboledger/{graph_id}/operations/*` (~20+ commands), graph-backed analytical view operations over the materialized data, a QuickBooks ELT pipeline, and a dedicated frontend app.
 
 #### Reporting Section (SEC/XBRL)
 
@@ -239,15 +239,16 @@ loader = get_contextual_schema_loader("application", "roboledger")
 
 ### RoboInvestor — Portfolio Management
 
-The RoboInvestor extension models portfolio management, securities, trading, and risk analysis. Currently a schema extension with a dedicated frontend app; OLTP database and API routes are planned.
+The RoboInvestor extension models portfolio management, securities, and position tracking. It is a **full product extension** — secondary to RoboLedger but with the same layers: OLTP models in the `extensions` database (schema-per-tenant), an operations kernel (`operations/roboinvestor/{reads,commands}/`), a command operations router under `/extensions/roboinvestor/{graph_id}/operations/*`, 7 GraphQL fields (`InvestorQuery`), and a dedicated frontend app.
 
-- **Nodes**: Portfolio, Security, Position, Trade, Benchmark, MarketData, Dividend, Risk
-- **Relationships**: Portfolio positions, trade history, security pricing
+- **Nodes**: Portfolio, Security, Position
+- **Relationships**: Portfolio positions, security pricing, optional Security → Entity link
 - **Key Features**:
   - Multi-portfolio management
-  - Real-time position tracking
-  - Performance benchmarking
-  - Risk assessment
+  - Lot-level position tracking
+  - Cross-graph report sharing (investor access to ledger reports)
+
+> **Aspirational:** Trade, Benchmark, MarketData, Dividend, and Risk nodes are planned but not yet in the schema.
 
 ### RoboSCM — Supply Chain Management
 

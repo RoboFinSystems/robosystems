@@ -88,28 +88,16 @@ cache.invalidate_graph_credit_balance("kg1a2b3c")
 ### AI Token-Based Costs
 
 ```python
-# AI operations use actual token consumption
+# AI operations use actual token consumption.
+# Single Claude 4 Sonnet tier (config key `anthropic_claude_4_sonnet`
+# in config/billing/ai.py). This dict is illustrative — the
+# authoritative rates live in AIBillingConfig.TOKEN_PRICING.
 AI_TOKEN_COSTS = {
-    # Anthropic Claude models (per 1K tokens)
-    "claude-3-opus": {
-        "input": 15,    # 15 credits per 1K input tokens
-        "output": 75,   # 75 credits per 1K output tokens
-    },
-    "claude-3-sonnet": {
+    # Anthropic Claude 4 Sonnet (per 1K tokens)
+    "anthropic_claude_4_sonnet": {
         "input": 3,     # 3 credits per 1K input tokens
         "output": 15,   # 15 credits per 1K output tokens
     },
-    
-    # OpenAI models (per 1K tokens)
-    "gpt-4": {
-        "input": 30,    # 30 credits per 1K input tokens
-        "output": 60,   # 60 credits per 1K output tokens
-    },
-}
-
-# Storage costs
-STORAGE_COSTS = {
-    "per_gb_over_limit": 100,  # 100 credits per GB over monthly limit
 }
 
 # All database operations are included
@@ -197,7 +185,7 @@ credit_service.consume_ai_tokens(
     graph_id="kg1a2b3c",
     input_tokens=usage.input_tokens,
     output_tokens=usage.output_tokens,
-    model="claude-3-opus",
+    model="anthropic_claude_4_sonnet",
     operation_type="agent_call",
     user_id="user_456"
 )
@@ -206,13 +194,14 @@ credit_service.consume_ai_tokens(
 ### 4. Storage Overage Handling
 
 ```python
-# Storage overages are billed via credits (1 credit/GB/day)
+# Storage overages are billed in USD, NOT credits.
+# Credits are AI-only; storage is metered separately by the billing system.
 # Each tier includes storage:
 # - Standard: 10 GB included
 # - Large:    50 GB included
 # - XLarge:   100 GB included
 
-# Monthly storage billing (handled by billing system, not credits)
+# Monthly storage billing (handled by billing system, billed in USD)
 storage_gb = calculate_storage_usage(graph_id)
 limit_gb = get_storage_limit_for_tier(tier)
 

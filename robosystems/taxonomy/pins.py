@@ -23,10 +23,9 @@ consumes.
 
 This module reads the framework manifest from disk so it stays usable
 in environments where the extensions database is unreachable (tests,
-CLI tools, the loader itself). The Phase B follow-up may add a
-DB-backed expansion path that prefers the ``frameworks`` table when
-present and falls back to disk on failure; the call site signature
-does not change.
+CLI tools, the loader itself). A DB-backed expansion path that prefers
+the ``frameworks`` table when present and falls back to disk on failure
+is a possible future addition; the call site signature would not change.
 """
 
 from __future__ import annotations

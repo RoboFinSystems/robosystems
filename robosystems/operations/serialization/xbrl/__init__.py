@@ -1,6 +1,6 @@
 """XBRL-family encoder dispatch.
 
-Phase 1 ships XBRL 2.1; OIM flavors (xBRL-CSV, xBRL-JSON) slot in by
+XBRL 2.1 is implemented; OIM flavors (xBRL-CSV, xBRL-JSON) slot in by
 adding a module and an ``elif`` arm here. The public
 ``serialize_to_xbrl`` entry point keeps a stable signature regardless
 of which flavor is requested.
@@ -18,8 +18,8 @@ def serialize_to_xbrl(
 ) -> bytes:
   """Serialize a ``StatementBundle`` to an XBRL-family format.
 
-  Returns bytes — XBRL 2.1 emits a ``report.zip`` (Phase 2 packaging)
-  or a single ``instance.xml`` zipped for download (Phase 1b interim).
+  Returns bytes — XBRL 2.1 emits a flat zip of standalone files
+  (``instance.xml`` + ``report.xsd`` + linkbases) ready for download.
   OIM flavors return their canonical content (xBRL-JSON bytes,
   xBRL-CSV multi-file zip) when added later.
   """

@@ -1,22 +1,21 @@
 """XBRL 2.1 emitter — walks the v1.0 bundle, produces a flat zip.
 
-Phase 1b ships the standalone files (``instance.xml`` + ``report.xsd``
-+ ``report-pre.xml`` + ``report-cal.xml`` + ``report-def.xml``) zipped
-together. Phase 2 wraps them in the full XBRL Report Package shape
-(``META-INF/taxonomyPackage.xml`` and related). Phase 4+ adds label
-and reference linkbases.
+The output is the standalone files (``instance.xml`` + ``report.xsd``
++ ``report-pre.xml`` + ``report-cal.xml`` + ``report-def.xml`` +
+``report-lab.xml``) zipped together. The full XBRL Report Package shape
+(``META-INF/taxonomyPackage.xml`` and related) and reference linkbases
+are not yet emitted.
 
 Walks the same :class:`StatementBundle` as the JSON-LD encoder — the
-two share an envelope, not just a fact set. Per the v1.0 ontology spec
-§7, ``rs:`` extensions are dropped from the XBRL output (they have no
-place in standards-compliant XBRL); v1.0 round-trip is at the fact
-level.
+two share an envelope, not just a fact set. ``rs:`` extensions are
+dropped from the XBRL output (they have no place in standards-compliant
+XBRL); round-trip is at the fact level.
 
 Hand-emitted with lxml rather than Arelle's ``saveInstance``. Arelle's
 XBRL-emit path requires constructing ``ModelInstanceObject`` /
 ``ModelConcept`` / etc. internals; lxml builds the XML tree directly
 with ~10x less code. Arelle is used downstream for *validation* of
-emitted output (round-trip harness, Phase 1b.3).
+emitted output (round-trip harness).
 """
 
 from __future__ import annotations
@@ -77,8 +76,8 @@ def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
   """Emit the bundle as a flat-zip XBRL 2.1 Report Package.
 
   Returns the zip bytes ready to stream as a download or write to
-  storage. Phase 1b shape is a flat zip containing standalone files;
-  Phase 2 will wrap in the full Report Package META-INF directory.
+  storage. The shape is a flat zip containing standalone files; the
+  full Report Package META-INF directory is not yet wrapped around them.
   """
   buf = io.BytesIO()
   with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:

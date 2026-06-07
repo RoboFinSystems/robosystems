@@ -263,7 +263,7 @@ BASE_NODES = [
       Property(name="confidence", type="DOUBLE"),
     ],
   ),
-  # ── REA primitives (ontology-alignment.md §4.2, §4.3) ────────────────
+  # ── REA primitives ──────────────────────────────────────────────────
   # Agent + Event are universal across every planned RoboX extension.
   # Promoted to base per INVARIANT 1. Today only roboledger populates
   # them; future extensions (RoboFO, RoboSCM, RoboHRM, RoboEPM,
@@ -525,7 +525,7 @@ BASE_RELATIONSHIPS = [
       Property(name="effective_date", type="STRING"),
     ],
   ),
-  # ── REA edges (ontology-alignment.md §4.2, §4.3) ─────────────────────
+  # ── REA edges ────────────────────────────────────────────────────────
   # Entity owns its Agent/Event records. REA duality + correction chains
   # are self-referential on Event.
   Relationship(

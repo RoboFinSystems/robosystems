@@ -42,10 +42,11 @@ Each package declares its provenance in its top-level JSON-LD metadata.
 
 ```
 packages/
-├── fac-traits/v1/           forked  — universal trait vocabulary (24 axes, 99 traits,
-│                                      25 categories — elementsOfFinancialStatements,
+├── fac-traits/v1/           forked  — universal trait vocabulary (26 categories:
+│                                      24 FASB axes + flowClassification + recurrence,
+│                                      99 traits — elementsOfFinancialStatements,
 │                                      liquidity, activityType, recordedValue,
-│                                      flowClassification, …); seeds the `traits` table
+│                                      flowClassification, recurrence, …); seeds the `traits` table
 ├── fac/v1/                  forked  — FAC fundamental concepts (~175 elements)
 ├── fac-presentation/v1/     native  — FAC multi-variant presentation hierarchies
 └── fac-calculations/v1/     native  — FAC BS/IS/CF accounting identities
@@ -124,7 +125,7 @@ If the addition is genuinely universal:
    (`standard`, `version`, `taxonomy_type`, `namespace_uri`,
    `description`, and either `forked_from`/`forked_at`/`upstream_tracking`
    or `origin`/`created_at`).
-2. Add an entry to this framework's manifest at `../manifest.json`
+2. Add an entry to this framework's manifest at `../v1.json`
    under `packages[]` with an `ordinal` (load order) and `is_required`
    flag.
 

@@ -1,10 +1,10 @@
 """CoA to rs-gaap mapping definitions for Cascade Advisory Group LLC.
 
 CoA elements map to rs-gaap detail concepts that are admitted by the
-**Default Reporting Style's Networks** (§3.2). Only concepts that appear
-in the rs-gaap Balance Sheet — Classified or Income Statement —
-Multi-step Networks render through the Default Style; mapping to a
-concept outside those Networks drops the fact as "out of structure".
+**Default Reporting Style's Networks**. Only concepts that appear in the
+rs-gaap Balance Sheet — Classified or Income Statement — Multi-step
+Networks render through the Default Style; mapping to a concept outside
+those Networks drops the fact as "out of structure".
 
 The Multi-step IS deliberately presents a curated set of leaves (Sales
 Revenue / COGS / SG&A / R&D / D&A / Interest / Other Nonoperating /

@@ -231,18 +231,13 @@ def suggest_mapping_candidates(
   Subtotal rollups whose value comes from rendering, not from a leaf
   fact, are excluded via ``RS_GAAP_SUBTOTAL_DENYLIST``.
 
-  Per §3.1.5 #3 (closed 2026-05-13): the prior behaviour returned FAC
-  candidates, which made the MappingOperator surface inconsistent with
-  the renderer. Flipping the suggester to rs-gaap-only aligned the
-  typed-API and the renderer.
-
-  Per real-data audit (2026-05-17): the previous filter against
-  rs-gaap-presentation (the full taxonomy) admitted concepts the
+  Candidates are rs-gaap only, keeping this suggester consistent with the
+  renderer. The filter narrows to ``reporting_style_networks`` rather than
+  the full rs-gaap-presentation taxonomy, which would admit concepts the
   renderer never walks — e.g. ``AccountsPayableCurrent`` is in
-  rs-gaap-presentation but the BS Classified rendering structure uses
-  the more aggregated ``AccountsPayableAndAccruedLiabilitiesCurrent``.
-  Narrowing the filter to ``reporting_style_networks`` makes the
-  docstring's "guaranteed to render" promise real.
+  rs-gaap-presentation but the BS Classified rendering structure uses the
+  more aggregated ``AccountsPayableAndAccruedLiabilitiesCurrent`` — so the
+  "guaranteed to render" promise holds.
 
   ``element_id`` is reserved for future per-element overrides but is
   currently unused — ``trait`` (+ optional ``liquidity``) drive the filter.
@@ -294,11 +289,11 @@ def suggest_mapping_candidates(
     candidate_liquidity = _liquidity_by_element(session, [r.id for r in rows])
     rows = [r for r in rows if candidate_liquidity.get(r.id) in (None, liquidity)]
 
-  # Structure-aware rollup guard (info-block §3.7.2): when a Reporting
-  # Style is active and seeded, deny a target only if it actually rolls
-  # up on that Style (its children render). On a thin Style where the
-  # concept IS the leaf, mapping to it is correct. Without a seeded Style
-  # (tests / partial deployments) fall back to the static denylist.
+  # Structure-aware rollup guard: when a Reporting Style is active and
+  # seeded, deny a target only if it actually rolls up on that Style (its
+  # children render). On a thin Style where the concept IS the leaf,
+  # mapping to it is correct. Without a seeded Style (tests / partial
+  # deployments) fall back to the static denylist.
   rollup_set = (
     _load_rollup_concepts(session, reporting_style_id) if reporting_style_id else set()
   )
@@ -451,10 +446,10 @@ def _load_rollup_concepts(
   active Style, and mapping a CoA account to it is correct.
 
   This is the structure-aware replacement for the static
-  ``RS_GAAP_SUBTOTAL_DENYLIST`` (info-block §3.7.2): the static list
-  over-denies on thin Style structures where, e.g., ``rs-gaap:Revenues``
-  has no rendering children and is itself the leaf. Empty result = no Style
-  structures seeded → callers fall back to the static denylist.
+  ``RS_GAAP_SUBTOTAL_DENYLIST``: the static list over-denies on thin Style
+  structures where, e.g., ``rs-gaap:Revenues`` has no rendering children
+  and is itself the leaf. Empty result = no Style structures seeded →
+  callers fall back to the static denylist.
 
   Cached on the session keyed by reporting_style_id (same pattern as
   ``_load_renderable_concepts``).
@@ -494,7 +489,7 @@ def _is_rolled_up_at_render(
   A concept is denied as a CoA mapping target only when its presentation
   children also render on the Style's structures. If it is the leaf on the
   active Style, this returns False and mapping to it is allowed. See
-  ``_load_rollup_concepts`` (info-block §3.7.2).
+  ``_load_rollup_concepts``.
   """
   return concept_id in _load_rollup_concepts(session, reporting_style_id)
 
@@ -641,10 +636,10 @@ def expand_to_rs_gaap_candidates(
   _NARROW_THRESHOLD = 3
 
   # Identify equivalents that are themselves valid candidate targets.
-  # Structure-aware rollup guard (info-block §3.7.2): with a seeded Style,
-  # deny only concepts that roll up on that Style; otherwise fall back to
-  # the static denylist. Then require (if a presentation set exists) the
-  # target to be in the renderable set.
+  # Structure-aware rollup guard: with a seeded Style, deny only concepts
+  # that roll up on that Style; otherwise fall back to the static
+  # denylist. Then require (if a presentation set exists) the target to be
+  # in the renderable set.
   rollup_set = (
     _load_rollup_concepts(session, reporting_style_id) if reporting_style_id else set()
   )

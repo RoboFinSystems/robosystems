@@ -202,10 +202,10 @@ class _Validator:
     ]
     self._check("native SumEquals rule in envelope", len(se) == 1, f"{len(se)} found")
 
-    # verificationSummary arm (info-block §6.1.6 / financial-viewer §7.12):
-    # server-computed aggregate over verificationResults. Present when there
-    # are results; its counts must reconcile with the result rows and the
-    # per-category breakdown.
+    # verificationSummary arm: server-computed aggregate over
+    # verificationResults. Present when there are results; its counts
+    # must reconcile with the result rows and the per-category
+    # breakdown.
     vr = b.get("verificationResults", [])
     vs = b.get("verificationSummary")
     if vr:

@@ -63,7 +63,7 @@ sec/
     ├── entity_update.py         # Entity incremental update asset
     ├── text_index.py            # OpenSearch text indexing (textblocks, narratives, iXBRL)
     ├── backup.py                # Backup asset
-    ├── jobs.py                  # 21 SEC job definitions
+    ├── jobs.py                  # 18 SEC job definitions
     └── sensors.py               # 6 sensors + 1 schedule
 ```
 

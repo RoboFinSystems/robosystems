@@ -13,15 +13,15 @@ mini flow concept (normalized via ``_KNOWN_TDC_ALIASES``).
 Pre-condition: ``load_taxonomy.py``, ``seed_mappings.py``, and
 ``ingest_transactions.py`` have all run against this graph.
 
-Why auto-derive instead of hardcoding the §4.4 table:
+Why auto-derive instead of hardcoding the filter table:
 
 - Filter values stay in lockstep with the actual data. If Charlie's
   CSV gains/loses a TDC, the rollforwards re-derive correctly on
   the next run.
 - Future cross-taxonomy test cases (us-gaap, IFRS) reuse the same
   pattern by pointing at a different CSV.
-- The §4.4 table in ``cross-taxonomy-projection.md`` becomes the
-  *expected* output, which the dry-run prints for review.
+- The derived filter table becomes the *expected* output, which the
+  dry-run prints for review.
 
 The eight BS leaves (instant period_type, monetary, balance-bearing)
 in Charlie's dataset are listed in ``BS_LEAVES`` — hardcoded because
@@ -125,9 +125,8 @@ def _collect_tdcs_per_bs_leaf(csv_path: Path) -> dict[str, list[str]]:
   """Return ``{bs_qname: [unique_tdc_qnames_in_csv_order]}``.
 
   Walks the CSV and records each (account, TDC) pair. Insertion order
-  is preserved so the rollforward filters appear in the same order
-  they'd be listed in a hand-authored §4.4 table — which is the order
-  they first show up in Charlie's transaction stream.
+  is preserved so the rollforward filters appear in the order they
+  first show up in Charlie's transaction stream.
   """
   tdcs_per_account: dict[str, list[str]] = defaultdict(list)
   seen: dict[str, set[str]] = defaultdict(set)
@@ -165,10 +164,8 @@ def _build_rollforward_arm(bs_qname: str, tdcs: list[str]):
 
   Uses the typed SDK models (``CreateRollforwardArm``,
   ``CreateRollforwardRequest``, ``AttributionFilter``,
-  ``LineItemMetadataPredicate``) shipped in
-  ``robosystems-client==0.3.30+``. Replaces the prior raw-dict
-  payload that went through ``httpx`` to bypass the SDK; the SDK
-  now has the typed arm available via ``client.create_information_block``.
+  ``LineItemMetadataPredicate``) from ``robosystems-client>=0.3.30``,
+  passing the typed arm to ``client.create_information_block``.
   """
   # Lazy imports — the SDK module is heavy and the script may dry-run.
   from robosystems_client.models.attribution_filter import AttributionFilter
@@ -250,9 +247,8 @@ def author_rollforwards(
     if valid:
       filtered_per_account[bs_qname] = valid
 
-  # Typed SDK call — robosystems-client>=0.3.30 ships
-  # ``LedgerClient.create_information_block`` which accepts the
-  # discriminated-union arm directly. No raw httpx shim needed.
+  # Typed SDK call — ``LedgerClient.create_information_block`` accepts
+  # the discriminated-union arm directly.
   created = 0
   for bs_qname, tdcs in filtered_per_account.items():
     body = _build_rollforward_arm(bs_qname, tdcs)

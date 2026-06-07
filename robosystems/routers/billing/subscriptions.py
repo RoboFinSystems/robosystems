@@ -288,7 +288,7 @@ async def cancel_subscription(
     # Cancel in Stripe if there's a linked Stripe subscription. For period-end
     # we mark the Stripe sub to cancel at period end; for immediate we cancel
     # outright. Stripe.Subscription.cancel() does NOT prorate or refund by
-    # default — credit-on-account is a Phase 2 concern handled separately.
+    # default — credit-on-account is handled separately.
     if subscription.stripe_subscription_id:
       try:
         provider = get_payment_provider("stripe")

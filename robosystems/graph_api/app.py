@@ -86,7 +86,7 @@ def create_app() -> FastAPI:
             succeeded = 0
             failed = 0
 
-            # Phase 1: Label scan — pages in node label index data and
+            # Step 1: Label scan — pages in node label index data and
             # collects discovered labels for per-label property scans.
             node_labels: list[str] = []
             try:
@@ -105,7 +105,7 @@ def create_app() -> FastAPI:
               failed += 1
               logger.warning(f"Warmup [{db_name}] label scan: {e}")
 
-            # Phase 2: Per-label property scan — RETURN n LIMIT 500 forces
+            # Step 2: Per-label property scan — RETURN n LIMIT 500 forces
             # LadybugDB to read all property column files for each label.
             for label in node_labels:
               if not _valid_label.match(label):

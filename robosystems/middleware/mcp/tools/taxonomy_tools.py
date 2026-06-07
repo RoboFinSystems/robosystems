@@ -182,8 +182,9 @@ class SuggestMappingTool:
 - The classification filter (asset / liability / equity / revenue /
   expense / gain / loss) narrows candidates by ~80%.
 - Depth 1 = high-level line items; depth 2+ = detail items.
-- rs-gaap is the canonical render target (per §3.2 Reporting Style);
-  no longer a target_taxonomy parameter — only one taxonomy renders.""",
+- rs-gaap is the canonical render target (per the active Reporting
+  Style); there is no target_taxonomy parameter — only one taxonomy
+  renders.""",
       "inputSchema": {
         "type": "object",
         "properties": {

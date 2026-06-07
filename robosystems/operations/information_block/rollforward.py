@@ -1,23 +1,21 @@
 """Handlers for ``block_type='rollforward'`` — declarative-mode
 attribution block.
 
-Implements **Tier 2 of the rollforward attribution design**
-(``information-block.md`` §4.5). The user authors a Structure declaring
-a BS source element and a list of attribution filters; at render time
-the filter engine
+Implements **Tier 2 of the rollforward attribution design**. The user
+authors a Structure declaring a BS source element and a list of
+attribution filters; at render time the filter engine
 (:mod:`robosystems.operations.roboledger.reports.rollforward_filters`)
 evaluates the filters against ledger LineItems and produces attributed
 facts per period.
 
-**Phase 2 MVP scope**: this module owns the authoring surface —
-``create`` / ``update`` / ``delete`` persist the typed
-:class:`RollforwardMechanics` to ``structures.artifact_mechanics``;
-``build_envelope`` round-trips the typed mechanics and an empty facts
-list. The filter engine is callable directly from caller code (the
-cross-taxonomy reconciliation harness in
-``local/scripts/run_reconciliation.py`` is the first consumer);
-wiring filter evaluation into the live ``fact_grid`` rendering pipeline
-lands with Phase 3, which generalizes the consumption surface.
+This module owns the authoring surface — ``create`` / ``update`` /
+``delete`` persist the typed :class:`RollforwardMechanics` to
+``structures.artifact_mechanics``; ``build_envelope`` round-trips the
+typed mechanics and an empty facts list. The filter engine is callable
+directly from caller code (the cross-taxonomy reconciliation harness in
+``local/scripts/run_reconciliation.py`` is the first consumer); filter
+evaluation is not yet wired into the live ``fact_grid`` rendering
+pipeline.
 
 Pattern mirrors :mod:`robosystems.operations.information_block.schedule`
 (the canonical declarative-mode reference). Differences are:
@@ -239,10 +237,10 @@ def build_envelope(
 ) -> InformationBlockEnvelope | None:
   """Reload a rollforward Structure and pack its envelope.
 
-  ``fact_set_id`` is accepted for signature parity but unused — Phase 2
-  MVP doesn't persist rollforward facts (the filter engine is called
-  directly from the reconciliation harness; the renderer wiring lands
-  in Phase 3). The envelope's ``facts`` list is empty.
+  ``fact_set_id`` is accepted for signature parity but unused —
+  rollforward facts are not persisted (the filter engine is called
+  directly from the reconciliation harness; the renderer wiring is not
+  yet in place). The envelope's ``facts`` list is empty.
 
   Returns ``None`` when the structure doesn't exist or isn't a
   rollforward.

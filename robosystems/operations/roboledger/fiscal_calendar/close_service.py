@@ -81,8 +81,8 @@ class UnbalancedLedgerError(PeriodCloseError):
 
 
 class WritebackFailed(PeriodCloseError):
-  """Raised when the close-period pre-publish step (Phase 4 §4.2) fails
-  to write one or more in-period drafts to QuickBooks.
+  """Raised when the close-period pre-publish step fails to write one or
+  more in-period drafts to QuickBooks.
 
   Atomic: a single QB rejection rolls back the entire close — no
   half-published periods. The exception carries the offending event
@@ -112,7 +112,7 @@ class PeriodCloseResult:
   target_auto_advanced: bool
   calendar: FiscalCalendar
   was_reclose: bool
-  # §3.8 auto-run rules on close. None if no schedules with facts in the
+  # Auto-run rules on close. None if no schedules with facts in the
   # period had rules attached. Otherwise a dict tallying outcomes:
   # {"pass": int, "fail": int, "error": int, "skipped": int}.
   rule_summary: dict[str, int] | None = None
@@ -183,9 +183,9 @@ class PeriodCloseService:
     # state is mutated yet, so a mismatch just raises cleanly.
     self._preflight_bs_check(session, period_start, period_end)
 
-    # 2b. Phase 4 §4.2 pre-publish step. For graphs with a QB connection
-    # in `write_policy='qb_authoritative'` / `'hybrid'`, batch-publish
-    # every in-period draft Entry whose triggering Event has
+    # 2b. Pre-publish step. For graphs with a QB connection in
+    # `write_policy='qb_authoritative'` / `'hybrid'`, batch-publish every
+    # in-period draft Entry whose triggering Event has
     # `source IN ('schedule', 'manual')`. Atomic: any QB rejection
     # raises `WritebackFailed` before the draft→posted transition
     # below, rolling back the entire close.
@@ -268,12 +268,12 @@ class PeriodCloseService:
       and calendar.close_target_period is not None
     )
 
-    # 6. §3.8 — Auto-run rules on schedules with facts in the closing
-    # period. Rule failures are isolated from the close result: the close
-    # succeeds even if a rule errors, and the failure surfaces only in
-    # rule_summary / verification_results for downstream inspection. This
-    # keeps the close path as the "single source of truth" while letting
-    # the validation panel accumulate fresh results without an explicit
+    # 6. Auto-run rules on schedules with facts in the closing period.
+    # Rule failures are isolated from the close result: the close succeeds
+    # even if a rule errors, and the failure surfaces only in rule_summary
+    # / verification_results for downstream inspection. This keeps the
+    # close path as the "single source of truth" while letting the
+    # validation panel accumulate fresh results without an explicit
     # `POST /evaluate-rules` call.
     rule_summary, evaluated_ids = self._evaluate_schedule_rules_in_period(
       session,
@@ -310,7 +310,7 @@ class PeriodCloseService:
     *,
     actor_id: str,
   ) -> None:
-    """Phase 4 §4.2 close-period pre-publish step.
+    """Close-period pre-publish step.
 
     For graphs with at least one QB connection in
     ``write_policy='qb_authoritative'`` / ``'hybrid'``, batch-publish
@@ -373,17 +373,14 @@ class PeriodCloseService:
     # Heads-up: each publish does a synchronous QB API round-trip
     # (~1-3s) inside the open extensions session. A large batch holds
     # the extensions transaction open + consumes connection-pool
-    # capacity for the duration. A two-pass refactor (collect QB
-    # results without the session, then commit metadata mutations in
-    # a second pass) is the right v2 — until then, flag visible
-    # batches so the operational signal is in the logs.
+    # capacity for the duration. Visible batches are flagged below so
+    # the operational signal is in the logs.
     if len(drafts_to_publish) > 5:
       logger.warning(
         f"Graph {graph_id}: pre-publishing {len(drafts_to_publish)} drafts in "
         f"sequence — extensions transaction held open ~{len(drafts_to_publish) * 2}s "
         f"during the close. Consider batching the period (close in smaller "
-        f"windows) or filing follow-up to refactor _publish_drafts_to_qb to "
-        f"two-pass."
+        f"windows)."
       )
 
     # Publish each, collecting failures rather than failing fast — the
@@ -484,7 +481,7 @@ class PeriodCloseService:
     # Unqualified table names — relies on `extensions_session(graph_id)`
     # having SET the tenant's search_path before this method runs. The
     # close service is only called from that session context (REST
-    # handler + MCP tool both go through `cmd_close_period`); any future
+    # handler + MCP tool both go through `cmd_close_period`); any
     # refactor that bypasses the tenant session must qualify these
     # tables explicitly to avoid silently querying the wrong schema.
     structure_ids = (
