@@ -1,7 +1,6 @@
 """Graph content limit checking for materialization operations.
 
-Two limit categories, both hard-blocking at the write path (per
-``tier-capacity-limits.md`` §3.7 Phase 1):
+Two limit categories, both hard-blocking at the write path:
 
 1. **Aggregate storage GB** — the tier-scoped product cap. Bounds
    instance disk COGS, drives upgrades. Hit at the write path so
@@ -49,7 +48,7 @@ class IngestionLimitChecker:
   ) -> dict[str, Any]:
     """Check if materialization would exceed any tier limit.
 
-    Hard-blocks on three checks (per §3.7 Phase 1):
+    Hard-blocks on three checks:
 
     - ``max_rows_per_copy`` — OOM guardrail across all pending tables
     - ``max_single_table_rows`` — OOM guardrail per table
@@ -121,9 +120,9 @@ class IngestionLimitChecker:
 
     Sums storage for the parent graph and all subgraphs. Returns
     ``allowed=False`` with a populated ``errors`` list when the
-    aggregate exceeds the tier's ``instance_storage_limit_gb``. Per
-    §3.7 Phase 1 this is a hard product cap, blocking at the write
-    path (folded into :meth:`check_materialization_limits`).
+    aggregate exceeds the tier's ``instance_storage_limit_gb``. This is
+    a hard product cap, blocking at the write path (folded into
+    :meth:`check_materialization_limits`).
 
     Args:
         db: Database session

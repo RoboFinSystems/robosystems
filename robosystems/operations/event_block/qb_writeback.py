@@ -1,4 +1,4 @@
-"""QuickBooks write-back helpers (Phase 4 §4.2).
+"""QuickBooks write-back helpers.
 
 Translates a RoboSystems-side `Event` row's `metadata` payload into a
 `quickbooks.objects.JournalEntry` and posts it via the QB API with a

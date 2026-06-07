@@ -37,8 +37,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
-# Canonical 19-verb action vocabulary refining `event_category` per
-# `ontology-alignment.md` §4.6. Vocabulary converges with Valueflows
+# Canonical 19-verb action vocabulary refining `event_category`.
+# Vocabulary converges with Valueflows
 # (Foster / Pavlik / Haugen v1.0) — we treat that as inspiration, not
 # provenance. Canonical home is here. The 19 verbs disambiguate
 # concepts ERPs typically conflate (custody-only vs. rights-transfer
@@ -206,8 +206,8 @@ class Event(ExtensionsBase):
 
   # Drift flag: set true when an adapter re-sync surfaces a payload diff
   # against a `committed`/`fulfilled` event. The live `metadata_` payload
-  # stays unchanged (committed entries are immutable to re-sync per
-  # `quickbooks-adapter.md` §2.5); the incoming payload is stashed at
+  # stays unchanged (committed entries are immutable to re-sync); the
+  # incoming payload is stashed at
   # `metadata_['drift_payload']` for the reconciliation queue.
   payload_drift = Column(Boolean, nullable=False, default=False, server_default="false")
 

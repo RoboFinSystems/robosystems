@@ -9,15 +9,15 @@ inside a transaction that has executed ``SET LOCAL robosystems.library_resync =
 'on'`` — the GUC the immutability trigger (migration 0016) honors so the seeder,
 and only the seeder, may update library-origin rows in tenant scope.
 
-Phase C of the taxonomy-propagation work. The admin CLI surface
-(``just admin … taxonomy resync``) and the auto-propagate-on-publish hook are
-Phase E and wrap these functions; nothing here is wired to a publish event yet.
+The admin CLI surface (``just admin … taxonomy resync``) and the
+auto-propagate-on-publish hook wrap these functions; nothing here is wired to a
+publish event yet.
 
-Propagation policy (see the spec): only safe for **in-place fixes within a
-framework version** (mapping targets stay version-stable under C1; filed reports
-pin their own FactSets; live reports re-derive on next render — that is how a
-tenant *gets* the fix). Structural reorganizations belong to a new framework
-version + opt-in re-pin, never a silent re-sync.
+Propagation policy: only safe for **in-place fixes within a framework version**
+(mapping targets stay version-stable; filed reports pin their own FactSets; live
+reports re-derive on next render — that is how a tenant *gets* the fix).
+Structural reorganizations belong to a new framework version + opt-in re-pin,
+never a silent re-sync.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def resync_all_tenants(
   **Sequential by design** — `O(N)` independent transactions over the tenant
   schemas. Fine at current tenant counts (tens to low hundreds); if the fleet grows
   enough that a full-fleet re-sync becomes slow, batch or parallelize here (each
-  schema is independent). Phase E (admin CLI / publish hook) is the caller.
+  schema is independent). The admin CLI / publish hook is the caller.
   """
   schemas = list_tenant_schemas()
   logger.info("[taxonomy-resync] re-syncing %d tenant schema(s)", len(schemas))

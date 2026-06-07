@@ -35,24 +35,23 @@ class ConnectionStatus(str, Enum):
 
 
 class WritePolicy(str, Enum):
-  """Connection source-of-truth policy (Phase 4 §4.2).
+  """Connection source-of-truth (write) policy.
 
   Governs whether RoboSystems-originated entries (manual JE, schedule
   drafts) flow into the source-of-truth system on the way to posted GL.
 
   - ``NATIVE``: RoboSystems IS the source of truth. RL-originated events
     write GL rows locally on dispatch; no outbound publish. The
-    connection's inbound sync (if any) captures-to-inbox per
-    event-driven-ledger.md.
+    connection's inbound sync (if any) captures-to-inbox.
   - ``QB_AUTHORITATIVE``: QuickBooks IS the source of truth. RL-originated
     events publish to QB via ``execute-event-block``; local GL holds as
-    DRAFT until QB accepts. Inbound QB sync auto-commits (preserves
-    pre-Phase-4 behavior). The cross-source matcher recognises round-
-    tripped entries by ``metadata.qb_external_id`` and skips re-creation.
+    DRAFT until QB accepts. Inbound QB sync auto-commits. The
+    cross-source matcher recognises round-tripped entries by
+    ``metadata.qb_external_id`` and skips re-creation.
   - ``HYBRID``: QB authoritative with exception-flagging heuristics
     (low-confidence mapping, manual JE source class, amount-over-
-    threshold). v1 ships only NATIVE + QB_AUTHORITATIVE; HYBRID lands
-    when a real customer needs it.
+    threshold). Currently only NATIVE + QB_AUTHORITATIVE are wired;
+    HYBRID is reserved and not yet implemented.
   """
 
   NATIVE = "native"
@@ -92,7 +91,7 @@ class Connection(Model):
     Index("idx_connections_user", "user_id"),
     Index("idx_connections_provider", "provider"),
     Index("idx_connections_graph_provider", "graph_id", "provider"),
-    # Phase 3 B6: re-OAuth reuse path queries this index to find a
+    # The re-OAuth reuse path queries this index to find a
     # soft-deleted connection for a freshly-OAuthed realm. Partial because
     # only soft-deleted rows are interesting to that query.
     Index(
@@ -123,16 +122,14 @@ class Connection(Model):
   auto_sync_enabled = Column(Boolean, default=True, nullable=False)
   last_sync = Column(DateTime, nullable=True)
 
-  # Phase 4 §4.2 — source-of-truth policy. Default `'native'` preserves
-  # pre-Phase-4 behavior for all existing connections (no outbound writes
-  # without explicit operator opt-in via UI / API). The loader's
-  # auto-commit branch reads this column instead of the legacy
-  # `_SOURCE_AUTO_COMMITS` hardcode.
+  # Source-of-truth policy. Default `'native'` means no outbound writes
+  # without explicit operator opt-in via UI / API. The loader's
+  # auto-commit branch reads this column.
   write_policy = Column(
     String, default=WritePolicy.NATIVE.value, server_default="native", nullable=False
   )
 
-  # Phase 5 §4.3.4 — CDC watermark. Loader advances this ONLY after a
+  # CDC watermark. The loader advances this ONLY after a
   # successful batch commit; a mid-batch failure replays from the prior
   # value on the next run (combined with SyncToken-gated UPSERT, replay
   # of already-ingested rows is a no-op). NULL means "no CDC sync has
@@ -142,7 +139,7 @@ class Connection(Model):
   # which is a display-facing "when did we last try" timestamp.
   last_cdc_watermark = Column(DateTime, nullable=True)
 
-  # Soft-delete marker (B6). When non-null the row is invisible to the
+  # Soft-delete marker. When non-null the row is invisible to the
   # default lookup helpers below. Re-OAuth to the same realm revives the
   # row in place (preserves connection_id; downstream events/agents/
   # elements scoped to it stay live) rather than minting a new row and
@@ -220,7 +217,7 @@ class Connection(Model):
 
     Soft-deleted rows (`deleted_at IS NOT NULL`) are filtered out by
     default — the only callers that need to see them are the OAuth
-    re-OAuth reuse path (B6) and admin tooling.
+    re-OAuth reuse path and admin tooling.
     """
     query = session.query(cls).filter(cls.id == connection_id)
     if not include_deleted:
@@ -288,7 +285,7 @@ class Connection(Model):
     realm_id: str,
     session: Session,
   ) -> Optional["Connection"]:
-    """Find a soft-deleted connection for re-OAuth reuse (B6).
+    """Find a soft-deleted connection for re-OAuth reuse.
 
     Returns the most-recently-deleted soft-deleted connection matching
     the (graph_id, provider, realm_id) triple. Used by the OAuth
@@ -330,7 +327,7 @@ class Connection(Model):
       raise
 
   def advance_cdc_watermark(self, watermark: datetime, session: Session) -> None:
-    """Phase 5 §4.3.4 — advance the CDC watermark after a successful batch
+    """Advance the CDC watermark after a successful batch
     commit. Callers MUST only invoke this once load has succeeded; a
     mid-batch failure should leave the prior watermark in place so the
     next sync replays from there (combined with SyncToken-gated UPSERT,
@@ -385,7 +382,7 @@ class Connection(Model):
       raise
 
   def set_write_policy(self, session: Session, write_policy: str) -> None:
-    """Set the source-of-truth write policy (Phase 4 §4.2 opt-in surface).
+    """Set the source-of-truth write policy (operator opt-in surface).
 
     This is the explicit operator opt-in `connection_service` references:
     flipping a connection to ``qb_authoritative`` is what enables outbound
@@ -422,7 +419,7 @@ class Connection(Model):
       raise
 
   def soft_delete(self, session: Session) -> None:
-    """Soft-delete (B6) — mark the row deleted without removing it.
+    """Soft-delete — mark the row deleted without removing it.
 
     Default lookup helpers skip soft-deleted rows. Re-OAuth to the
     same realm can revive the row in place via ``restore``, preserving
@@ -438,7 +435,7 @@ class Connection(Model):
       raise
 
   def restore(self, session: Session) -> None:
-    """Revive a soft-deleted connection (B6 re-OAuth reuse path)."""
+    """Revive a soft-deleted connection (re-OAuth reuse path)."""
     self.deleted_at = None
     self.updated_at = datetime.now(UTC)
     try:

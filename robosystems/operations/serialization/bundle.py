@@ -76,7 +76,7 @@ class ReportMeta(BaseModel):
 
   Carries the filing-lifecycle + restatement-chain + share-provenance
   fields that distinguish a stamped Report from an ephemeral live
-  snapshot. Importer (Phase 2) uses these to drive cross-tenant
+  snapshot. A future importer uses these to drive cross-tenant
   identity reconstruction.
   """
 
@@ -91,7 +91,7 @@ class ReportMeta(BaseModel):
 
 
 class LiveMeta(BaseModel):
-  """Mode-specific metadata for ``mode='live'`` bundles (Phase 3).
+  """Mode-specific metadata for ``mode='live'`` bundles.
 
   ``non_authoritative`` is a constant ``True`` — the type itself
   carries the "cannot be imported as a Report" invariant; this field
@@ -188,7 +188,7 @@ class BundleLinkbases(BaseModel):
   """The bundle's linkbase content, grouped by link type.
 
   v1.0 carries presentation / calculation / definition; label and
-  reference linkbases are deferred to v1.1 (labels live on
+  reference linkbases are not yet carried here (labels live on
   ``BundleElement.label`` for now). Each list is a sequence of
   link-per-ELR groupings; the XBRL emitter walks each in order.
   """
@@ -279,8 +279,7 @@ class StatementBundle(BaseModel):
   S3-stamped at publish; ``mode='live'`` bundles carry ``live_meta``,
   are response-body-only, and are rejected by the (future) importer
   by construction. The mode discriminator is a first-class JSON-LD
-  type, not a flag — see ``bundle-ontology-v1.md`` §4 for the
-  structural enforcement.
+  type, not a flag, which enforces the report/live split structurally.
 
   ``ib_envelopes`` reuses :class:`InformationBlockEnvelope` from
   ``models/api/information_block.py`` directly. This is intentional
@@ -324,7 +323,7 @@ class StatementBundle(BaseModel):
   live_meta: LiveMeta | None = None
 
 
-# ── Producer (Phase 1a) ────────────────────────────────────────────────────
+# ── Producer ────────────────────────────────────────────────────────────────
 
 # The four statement Networks the bundle attempts to resolve. Equity and
 # comprehensive-income variants slot in once their Reporting Style picker
@@ -386,9 +385,9 @@ def build_report_bundle(
   rows are visible to ORM reads inside the assembler. ORM-only reads —
   no raw SQL pulls of newly-persisted rows.
 
-  Assembly produces the XBRL-aligned shape per
-  ``bundle-ontology-v1.md`` §4: concepts in ``schema_concepts``;
-  arcs grouped into ``linkbases.{presentation,calculation,definition}_links``
+  Assembly produces the XBRL-aligned shape: concepts in
+  ``schema_concepts``; arcs grouped into
+  ``linkbases.{presentation,calculation,definition}_links``
   by association_type, with each link wrapping arcs scoped to one
   Structure (ELR); contexts dedupe'd by (entity, period); units
   dedupe'd by measure; facts hold context/unit refs instead of inline

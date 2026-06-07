@@ -219,8 +219,7 @@ def build_verification_summary(
   Each result's ``rule_category`` is resolved by joining to the block's
   ``rules`` on ``rule_id`` (results carry only ``rule_id``; the category
   lives on the Rule). Returns ``None`` when there are no results so the
-  viewer can hide the panel rather than render an all-zero summary. See
-  financial-viewer.md §7.12.
+  viewer can hide the panel rather than render an all-zero summary.
   """
   if not verification_results:
     return None

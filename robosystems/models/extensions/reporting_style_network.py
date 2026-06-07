@@ -8,7 +8,7 @@ Library-seeded: each default-family Style (Default / Partnership / LLC)
 ships with 4 rows (BS / IS / CF / SE) pinned to canonical rs-gaap
 Networks. Additional styles (BSU/NET layouts, single-step IS, direct CF,
 vertical profiles) land later as pure package content or customer-authored
-Taxonomy Blocks (Phase 3 of §3.2).
+Taxonomy Blocks.
 
 No DB foreign key on ``network_id`` / ``reporting_style_id``: both are
 ``Structure.id`` values, validated at the application layer. Library

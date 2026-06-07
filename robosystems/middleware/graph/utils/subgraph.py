@@ -16,10 +16,10 @@ from ..types import SUBGRAPH_NAME_PATTERN as SUBGRAPH_NAME_PATTERN_STR
 class SubgraphType(Enum):
   """Types of subgraphs (for future expansion)."""
 
-  STATIC = "static"  # Phase 1: Traditional environment-based subgraphs
-  TEMPORAL = "temporal"  # Phase 2: Short-lived memory contexts
-  VERSIONED = "versioned"  # Phase 3: Git-like version control
-  MEMORY = "memory"  # Phase 3: Memory layer subgraphs
+  STATIC = "static"  # Traditional environment-based subgraphs
+  TEMPORAL = "temporal"  # Short-lived memory contexts (future)
+  VERSIONED = "versioned"  # Git-like version control (future)
+  MEMORY = "memory"  # Memory layer subgraphs (future)
 
 
 class SubgraphInfo(NamedTuple):

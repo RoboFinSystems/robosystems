@@ -14,8 +14,7 @@ presentation — driven by the Report architecture:
    rendered statement (rows with depth + is_subtotal).
 3. Markdown rendering with anchor totals and per-statement tables.
 
-Writes ``output/seattle-method-case-1-four-statements.md`` —
-replaces the earlier ad-hoc 4×``live-financial-statement`` script.
+Writes ``output/seattle-method-case-1-four-statements.md``.
 
 Usage:
     uv run python -m examples.seattle_method_demo.create_report <graph_id>
@@ -361,7 +360,7 @@ uv run python -m examples.seattle_method_demo.create_report
   source-vocabulary (`mini`) reconciliation, 17/17 exact match against
   Charlie Hoffman's published `luca.pacioli.ai` facts.
 - [`../README.md`](../README.md) — demo orchestrator and methodology
-  (§3.2 reconciliation classification).
+  (reconciliation classification).
 """
 
   return body

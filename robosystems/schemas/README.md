@@ -189,7 +189,7 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 | **Reference**     | Authoritative element references       | value, type                                    |
 | **Taxonomy**      | Global XBRL taxonomies                 | name, version, namespace                       |
 
-`Agent` and `Event` are universal REA primitives (`ontology-alignment.md` §4.2-§4.3) — every planned RoboX extension needs them. `Event.event_action` carries the canonical 19-verb action vocabulary (`models/extensions/roboledger/event.py:EVENT_ACTIONS`) refining the coarser `event_category`. The vocabulary converges with Valueflows v1.0; canonical naming is RoboSystems-native. SEC-flavored repositories get the schema with empty tables (no rows loaded), per spec §4.5 Option A.
+`Agent` and `Event` are universal REA primitives — every planned RoboX extension needs them. `Event.event_action` carries the canonical 19-verb action vocabulary (`models/extensions/roboledger/event.py:EVENT_ACTIONS`) refining the coarser `event_category`. The vocabulary converges with Valueflows v1.0; canonical naming is RoboSystems-native. SEC-flavored repositories get the schema with empty tables (no rows loaded).
 
 ### Core Relationships
 

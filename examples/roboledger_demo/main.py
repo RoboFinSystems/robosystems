@@ -629,10 +629,9 @@ def create_mappings(
 ) -> int:
   """Create mapping associations between CoA elements and rs-gaap reporting concepts.
 
-  CoA → rs-gaap is the canonical mapping target (§3.2 Reporting Style).
-  The Default Style's Networks resolve rs-gaap concepts up through the
-  calc-linkbase to FAC subtotals at render time; FAC subtotals are
-  derived, not mapped.
+  CoA → rs-gaap is the canonical mapping target. The Default Style's
+  Networks resolve rs-gaap concepts up through the calc-linkbase to FAC
+  subtotals at render time; FAC subtotals are derived, not mapped.
 
   Uses `LedgerClient.create_associations()` — the bulk HTTP API — to
   exercise the same path the frontend UI and MCP tools use.
@@ -952,7 +951,7 @@ def materialize_graph(graph_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 7: Generate + file FY 2025 annual report (Plan C capstone)
+# Step 7: Generate + file FY 2025 annual report
 # ---------------------------------------------------------------------------
 
 
@@ -976,7 +975,7 @@ def generate_fy2025_report(graph_id: str) -> str | None:
     return None
   mapping_id = structures[0]["id"]
 
-  # Render against rs-gaap — the canonical reporting vocabulary (§3.2). The
+  # Render against rs-gaap — the canonical reporting vocabulary. The
   # CoA was mapped CoA→rs-gaap above, and the Default Reporting Style's
   # Networks resolve rs-gaap concepts into the BS / IS / CF / Equity
   # structures, so we pass the standard name directly: create_report
@@ -1186,7 +1185,7 @@ def main() -> None:
   print("\nMaterializing to graph...")
   materialize_graph(graph_id)
 
-  # Generate + file FY 2025 annual report (Plan C capstone)
+  # Generate + file FY 2025 annual report
   print("\nGenerating FY 2025 annual report...")
   fy2025_report_id = generate_fy2025_report(graph_id)
 

@@ -848,10 +848,10 @@ async def change_tier_op(
   operation_id="opChangeReportingStyle",
   summary="Change Reporting Style",
   description=(
-    "Switches the graph's Reporting Style (Phase 2 of §3.2). Synchronous: "
-    "validates the target Style has a complete composition in the tenant "
-    "schema, then updates `graphs.reporting_style_id`. Filed Reports are "
-    "unaffected; new reports use the new Style. Idempotent on the same id."
+    "Switches the graph's Reporting Style. Synchronous: validates the "
+    "target Style has a complete composition in the tenant schema, then "
+    "updates `graphs.reporting_style_id`. Filed Reports are unaffected; "
+    "new reports use the new Style. Idempotent on the same id."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],

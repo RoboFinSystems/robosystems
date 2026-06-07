@@ -5,9 +5,8 @@ localhost env) that provisions a throwaway reference tenant, seeds the
 default-pin library, and asserts the framework is internally sound across the
 full set of renderable concepts and the three equity forms (CORP / PART / LLC)
 — not just the slice a single demo chart of accounts exercises. It's the
-front-end of the framework-completeness instrument
-(``specs/framework-completeness-and-authoring.md`` §3) and the thing
-``specs/rs-gaap-framework-alignment.md`` Phase 1 consumes.
+front-end of the framework-completeness instrument that the rs-gaap
+alignment tooling consumes.
 
 Checks (all fact-free, deterministic; they name the offending element):
 
@@ -21,7 +20,7 @@ Checks (all fact-free, deterministic; they name the offending element):
 3. **no calc cycles** — the calculation DAG is acyclic.
 
 These implement the ``rule_check_kind`` structural checks that ``auto_rules``
-declares but the rule engine does not yet evaluate (taxonomy.md §9).
+declares but the rule engine does not yet evaluate.
 
 **Why there is no per-subtotal footing check.** It was investigated and
 dropped: the renderer computes a *nesting* subtotal (e.g. Assets) as the plain

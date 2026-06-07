@@ -45,7 +45,7 @@ The `just demo-roboledger` recipe sets `UV_ENV_FILE={{_local_env}}` so the scrip
 | **Schedules** | 6 | 2 depreciation + 4 prepaid amortization schedules (staggered renewals) |
 | **Schedule Facts** | mixed | Historical (pre-target) vs in_scope (target onward) — close workflow only acts on in_scope |
 | **Documents** | 4 | Close procedures, depreciation policy, prepaid policy, revenue policy |
-| **FY 2025 Report** | 1 | Annual report — generated, packaged, and **filed** as a Plan C capstone (Report Block lifecycle end-to-end). The current period stays queued for the AI close workflow. |
+| **FY 2025 Report** | 1 | Annual report — generated, packaged, and **filed** (Report Block lifecycle end-to-end). The current period stays queued for the AI close workflow. |
 
 ### Event-type vocabulary
 

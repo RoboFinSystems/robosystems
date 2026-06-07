@@ -24,7 +24,7 @@ from ..models import Node, Property, Relationship
 # Aspects (Period, Unit, Dimension) never attach to declarative nodes like
 # Entity, Report, Taxonomy, Portfolio — that's a category error.
 
-# ── MVP Nodes (materialized from OLTP) ───────────────────────────────────
+# ── Nodes (materialized from OLTP) ───────────────────────────────────────
 
 EXTENSION_NODES = [
   Node(
@@ -109,7 +109,7 @@ EXTENSION_NODES = [
   ),
 ]
 
-# ── MVP Relationships ────────────────────────────────────────────────────
+# ── Relationships ────────────────────────────────────────────────────────
 
 EXTENSION_RELATIONSHIPS = [
   # Entity → Portfolio ownership (the investing entity)

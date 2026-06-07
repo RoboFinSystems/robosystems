@@ -69,16 +69,15 @@ class Structure(ExtensionsBase):
       name="check_block_type",
     ),
     # Concept Arrangement Pattern (CAP). 8 canonical + 5 cm.xsd
-    # text-block/detail specializations + 2 pseudo (15 total). See
-    # information-block.md §3.2.1. NULL allowed for block types that
-    # don't yet declare a default.
+    # text-block/detail specializations + 2 pseudo (15 total). NULL
+    # allowed for block types that don't declare a default.
     CheckConstraint(
       "concept_arrangement IS NULL OR concept_arrangement IN ("
       # 8 canonical CAPs
       "'set', 'roll_up', 'roll_forward', 'roll_forward_info', "
       "'adjustment', 'variance', 'arithmetic', 'text_block', "
       # 5 cm.xsd text-block / detail specializations (Charlie encodes
-      # text-block level as the CAP itself; see Blocks PDF §1.9.1).
+      # text-block level as the CAP itself).
       "'level1_textblock', 'level2_textblock', 'level3_textblock', "
       "'level4_detail', 'table_equivalent_textblock', "
       # 2 pseudo-patterns
@@ -87,8 +86,7 @@ class Structure(ExtensionsBase):
       name="check_concept_arrangement",
     ),
     # Member Arrangement Pattern (MAP). 5 canonical, from non-aggregating
-    # to fully aggregating. See information-block.md §3.2.2. NULL allowed
-    # for non-hypercube block types.
+    # to fully aggregating. NULL allowed for non-hypercube block types.
     CheckConstraint(
       "member_arrangement IS NULL OR member_arrangement IN ("
       "'is_a', 'whole_part', 'nested_whole_part', "
@@ -117,15 +115,15 @@ class Structure(ExtensionsBase):
   # State
   is_active = Column(Boolean, nullable=False, default=True)
 
-  # Information Model axis columns. See information-block.md §3.2.1-§3.2.2
-  # for the canonical Concept Arrangement Pattern and Member Arrangement
-  # Pattern enumerations from Charlie Hoffman's Seattle Method.
+  # Information Model axis columns: the canonical Concept Arrangement
+  # Pattern and Member Arrangement Pattern enumerations from Charlie
+  # Hoffman's Seattle Method.
   #
   # concept_arrangement — 8 canonical CAPs + 5 cm.xsd text-block /
   # detail specializations + 2 pseudo-patterns (15 total). The
   # specializations mirror seattlemethod/universal/cm.xsd — Charlie
   # encodes text-block "level" as a first-class CAP value, not a
-  # separate axis (Blocks PDF §1.9.1; PROOF disclosure-mechanics).
+  # separate axis (PROOF disclosure-mechanics).
   #
   #   Canonical (8):     set | roll_up | roll_forward | roll_forward_info
   #                      | adjustment | variance | arithmetic | text_block
@@ -153,7 +151,7 @@ class Structure(ExtensionsBase):
   # Renderer caveat, e.g. "(in thousands, except per share)". NOT XBRL
   # parenthetical explanation — Charlie's parenthetical is fact-level via
   # XBRL footnotes (Framework p.8). This is a Structure-level renderer
-  # hint, our extension; see information-block.md §1.7.
+  # hint, our extension.
   renderer_note = Column(String, nullable=True)
 
   # Nullable FK to ``structure_templates``. No FK constraint yet so

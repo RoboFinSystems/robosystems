@@ -28,7 +28,7 @@ def qb_load(
 ) -> MaterializeResult:
   """Load QB data from dbt DuckDB into extensions OLTP tables.
 
-  Phase 2 ingest:
+  Ingest steps:
   1. Provisions the tenant schema if needed
   2. Inserts/updates structural rows (elements, dimensions)
   3. Captures each QB transaction as an event_block row with
@@ -36,8 +36,8 @@ def qb_load(
      when the user approves the event in the inbox, which is when
      transactions/entries/line_items rows actually get created.
 
-  Releases the B7 sync lock on completion (or on exception) so the
-  next sync can fire immediately without waiting for the 30-min TTL.
+  Releases the per-connection sync lock on completion (or on exception)
+  so the next sync can fire immediately without waiting for the 30-min TTL.
 
   Returns:
       MaterializeResult with element/dimension/event counts and
@@ -61,7 +61,7 @@ def _run_qb_load(
 
   context.log.info(f"Loading QB data for graph={config.graph_id}, duckdb={duckdb_path}")
 
-  # Phase 5 §4.3.4 — CDC watermark candidate. Captured at the START of
+  # CDC watermark candidate. Captured at the START of
   # load, NOT at extract start, by design: extract has already run by
   # the time we get here, so any QB-side row touched between extract's
   # finish and this moment isn't in this sync. Setting watermark =
@@ -89,7 +89,7 @@ def _run_qb_load(
     connection_id=config.connection_id,
     duckdb_path=duckdb_path,
     created_by=config.user_id,
-    # Wave 1 G2: only operator-explicit full rebuilds trigger the
+    # Only operator-explicit full rebuilds trigger the
     # pre-sync wipe. Incremental window syncs (since_date set) and
     # default lookback (neither set) skip the wipe entirely and rely
     # on the UPSERT path.
@@ -100,7 +100,7 @@ def _run_qb_load(
   # Update last sync timestamp
   _update_last_sync(context, config)
 
-  # Phase 5 §4.3.4 — advance CDC watermark only after load success.
+  # Advance CDC watermark only after load success.
   # `result.errors` carries non-fatal load warnings already; the truly
   # fatal path raises before reaching here (and the watermark stays
   # unchanged, so the next sync re-attempts from the prior watermark).
@@ -132,7 +132,7 @@ def _run_qb_load(
     for error in result.errors[:10]:
       context.log.warning(f"Load warning: {error}")
 
-  # Phase 2 ingest: transactions/entries/line_items are produced by handlers
+  # Transactions/entries/line_items are produced by handlers
   # post-approval, not by sync — they're always 0 here. Surface the actual
   # sync outputs (events captured/updated) and data-quality drop counters.
   context.log.info(
@@ -164,7 +164,7 @@ def _run_qb_load(
 
 
 def _release_sync_lock(context: AssetExecutionContext, config: QBSyncConfig) -> None:
-  """Release the Phase 3 B7 per-connection sync lock on qb_load
+  """Release the per-connection sync lock on qb_load
   completion (success or failure).
 
   Best-effort: any error here is logged and swallowed — the lock will
@@ -227,13 +227,13 @@ def _update_last_sync(context: AssetExecutionContext, config: QBSyncConfig) -> N
 def _advance_cdc_watermark(
   context: AssetExecutionContext, config: QBSyncConfig, watermark
 ) -> None:
-  """Phase 5 §4.3.4 — advance the Connection's CDC watermark.
+  """Advance the Connection's CDC watermark.
 
   Called after a successful load. The watermark is the timestamp at the
   START of this load run, so the next CDC fetch picks up from there. If
   this helper itself fails (e.g., DB transient), we log and swallow:
   worst case the next sync re-fetches the same window, and the SyncToken
-  gate (§4.3.2) skips already-ingested rows.
+  gate skips already-ingested rows.
   """
   from robosystems.database import SessionFactory
   from robosystems.models.core.connection.connection import Connection

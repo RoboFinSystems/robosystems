@@ -501,7 +501,7 @@ def preview_event_block(
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# execute-event-block (Phase 4 §4.2 — publish to source-of-truth)
+# execute-event-block — publish to source-of-truth
 # ───────────────────────────────────────────────────────────────────────────
 
 
@@ -510,8 +510,7 @@ def execute_event_block(
   body: ExecuteEventBlockRequest,
   created_by: str,
 ) -> ExecuteEventBlockResponse:
-  """Publish an event to its connection's source-of-truth system
-  (Phase 4 §4.2).
+  """Publish an event to its connection's source-of-truth system.
 
   Flow:
   1. Load Event by id. Read `metadata.connection_id`.
@@ -592,7 +591,7 @@ def execute_event_block(
       )
 
     if connection.provider != "quickbooks":
-      # Phase 4 v1 ships QB write-back only. Other providers fast-path.
+      # Only QB write-back is implemented. Other providers fast-path.
       logger.debug(
         f"Event {event.id} on non-QB provider {connection.provider} — "
         f"write-back not implemented; status unchanged."
@@ -666,11 +665,11 @@ def execute_event_block(
   event.metadata_ = new_meta
   event.status = "fulfilled"
 
-  # Promote linked draft Entry + Transaction rows to posted. Wave 1's
-  # split between Event lifecycle and Entry/Transaction status means
-  # we promote ledger-row status here (not in the handler — the
-  # handler stamps Entry.status='draft' at create, and execute
-  # promotes after QB confirms).
+  # Promote linked draft Entry + Transaction rows to posted. The split
+  # between Event lifecycle and Entry/Transaction status means we promote
+  # ledger-row status here (not in the handler — the handler stamps
+  # Entry.status='draft' at create, and execute promotes after QB
+  # confirms).
   session.query(Entry).filter(Entry.triggered_by_event_id == event.id).update(
     {Entry.status: "posted", Entry.posted_at: datetime.now(UTC)},
     synchronize_session=False,

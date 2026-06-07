@@ -25,9 +25,9 @@ from .utils import (
 
 
 class MultiCurrencyNotSupportedError(Exception):
-  """QB returned non-USD data and the dbt mart can't preserve it (A4).
+  """QB returned non-USD data and the dbt mart can't preserve it.
 
-  Phase 3 A4 fail-loud guard: the dbt mart at
+  Fail-loud guard: the dbt mart at
   `dbt/models/ledger/transactions.sql:66` + `elements.sql:35` hardcodes
   `'USD'` even though `pipeline/utils.py` correctly extracts
   `CurrencyRef.value` into the flattened header rows. A non-USD realm
@@ -157,7 +157,7 @@ def qb_extract(
     f"Parsed: {len(journal_entries)} transactions, {len(journal_lines)} lines"
   )
 
-  # Phase 2: party entities (full snapshot, not date-filtered)
+  # Party entities (full snapshot, not date-filtered)
   customers = flatten_customers(client.get_customers())
   vendors = flatten_vendors(client.get_vendors())
   employees = flatten_employees(client.get_employees())
@@ -166,7 +166,7 @@ def qb_extract(
     f"{len(employees)} employees"
   )
 
-  # Phase 2: transaction-class headers (date-filtered, same window as JournalReport).
+  # Transaction-class headers (date-filtered, same window as JournalReport).
   # Headers carry agent refs that JournalReport flattens away — they enrich
   # JournalReport-derived events with class-specific event_type + agent_id.
   invoice_headers = flatten_invoice_headers(client.get_invoices(start_date, end_date))
@@ -194,7 +194,7 @@ def qb_extract(
     f"{len(purchase_headers)} purchases"
   )
 
-  # Phase 3 A4: multi-currency fail-loud guard. The dbt mart at
+  # Multi-currency fail-loud guard. The dbt mart at
   # `dbt/models/ledger/transactions.sql:66` and `elements.sql:35`
   # hardcodes `'USD'`, silently dropping any non-USD `CurrencyRef`
   # captured at extract time. Until currency is threaded through the

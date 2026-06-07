@@ -177,13 +177,13 @@ def create_schedule(
   # `closed_through` controls which schedule-generated periods become
   # `pending` obligations vs `voided` (historical). When the caller
   # doesn't supply one, fall back to the active fiscal calendar's
-  # `closed_through_period`. Without this default, callers (the demo,
-  # frontend, AI agents) who don't know to thread the field end up
-  # creating schedules that emit pending obligations for periods that
-  # are *already closed* — those obligations then block close-period
-  # forever because they're sealed inside a closed range yet still
-  # `pending`. The fiscal-calendar value IS the source of truth; using
-  # it as the default makes the right behavior automatic.
+  # `closed_through_period`. Without this default, callers who don't know
+  # to thread the field end up creating schedules that emit pending
+  # obligations for periods that are *already closed* — those obligations
+  # then block close-period forever because they're sealed inside a
+  # closed range yet still `pending`. The fiscal-calendar value is the
+  # source of truth; using it as the default makes the right behavior
+  # automatic.
   effective_closed_through = body.closed_through
   if effective_closed_through is None:
     effective_closed_through = _calendar_closed_through_date(session)
@@ -268,7 +268,7 @@ def promote_obligations(
   created_by: str,
 ) -> PromoteObligationsResponse:
   """On-demand obligation-promotion sweep (the `scheduled_obligation_promoter`
-  Dagster sensor's function, exposed for interactive / MCP-co-pilot use).
+  Dagster sensor's function, exposed for interactive use).
 
   Flips matured `pending` `schedule_entry_due` events to `classified` and,
   when ``dispatch_handlers`` is set, drafts their closing entries — so a
@@ -360,9 +360,9 @@ def update_schedule(
 
   When the entry template changes, all remaining `pending`
   schedule_entry_due obligations are voided and replaced with a fresh
-  set linked via `replaces_event_id` / `replaced_by_event_id` (Stream
-  2.E supersession). Already-classified / fulfilled obligations are
-  untouched — the new template applies prospectively.
+  set linked via `replaces_event_id` / `replaced_by_event_id`.
+  Already-classified / fulfilled obligations are untouched — the new
+  template applies prospectively.
 
   Raises `ScheduleNotFoundError` if the schedule does not exist.
   """
@@ -423,9 +423,9 @@ def update_schedule(
       created_by=updated_by,
     )
 
-  # §3.8 — re-run rule engine when the template changes, since the
-  # underlying fact shape may have moved. No-op when the template was
-  # unchanged (existing verification_results stay authoritative).
+  # Re-run rule engine when the template changes, since the underlying
+  # fact shape may have moved. No-op when the template was unchanged
+  # (existing verification_results stay authoritative).
   rule_summary: dict[str, int] | None = None
   if template_changed:
     rule_results = evaluate_rules_for_structure(

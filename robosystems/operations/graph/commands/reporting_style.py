@@ -1,4 +1,4 @@
-"""Change-reporting-style command (Phase 2 of roadmap §3.2).
+"""Change-reporting-style command.
 
 Synchronous platform-DB update. Validates the target Style is a
 library- or customer-authored Structure with

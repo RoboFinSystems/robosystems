@@ -11,8 +11,7 @@ Models live in their own file (instead of ``reports.py``) because
 ``InformationBlockEnvelope`` lives in ``models.api.information_block``
 and that module already pulls from ``models.api.extensions.schedules``;
 importing the envelope at module load time of any file aggregated by
-``models/api/extensions/__init__.py`` would re-create the circular
-import that bit Phase 1.
+``models/api/extensions/__init__.py`` would create a circular import.
 """
 
 from __future__ import annotations

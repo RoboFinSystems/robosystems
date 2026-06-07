@@ -309,7 +309,7 @@ class ClosePeriodResponse(BaseModel):
     description=(
       "Aggregated rule-eval outcome across every schedule Structure with "
       "facts in the closed period — keys: pass/fail/error/skipped. None when "
-      "no schedules had facts in the period (§3.8 auto-run on close)."
+      "no schedules had facts in the period (auto-run on close)."
     ),
   )
   evaluated_structure_ids: list[str] = Field(

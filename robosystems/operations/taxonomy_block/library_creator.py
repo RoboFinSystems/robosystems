@@ -19,14 +19,12 @@ Key derivation is stable *within a derivation generation*: the same input
 yields the same UUID5, so an additive re-run hits ON CONFLICT rather than
 inserting duplicates and existing seeded DBs are not disturbed.
 
-Exception — the C1 re-key (`_element_id`, below) intentionally *changed* the
-element-id derivation (it now strips the framework version segment). That is a
-one-time re-key: applying it requires a **full wipe + re-seed** of the public
-library (e.g. `reset-local`, or a fresh first run of migration 0002), NOT an
-additive re-seed onto rows created under the old formula — an additive re-run
-would mint new-id rows alongside the old ones (duplicate concepts, dangling
-FKs). Safe to do now because the public library is freely rebuildable and there
-are ~zero durable tenants; see `archive/taxonomy-propagation.md` §4.3.
+The element-id derivation (`_element_id`, below) strips the framework version
+segment so a concept keeps one id across framework versions. Changing that
+derivation requires a **full wipe + re-seed** of the public library (e.g.
+`reset-local`, or a fresh first run of migration 0002), NOT an additive re-seed
+onto rows created under the old formula — an additive re-run would mint new-id
+rows alongside the old ones (duplicate concepts, dangling FKs).
 """
 
 from __future__ import annotations
@@ -94,7 +92,7 @@ _VERSION_SEGMENT = re.compile(r"/v\d+/?$")
 
 
 def _element_id(namespace_uri: str, qname: str) -> str:
-  # C1 — version-stable concept identity. The id keys on the framework's
+  # Version-stable concept identity. The id keys on the framework's
   # version-independent namespace (``.../rs-gaap/#rs-gaap:Assets``), so a
   # concept keeps one id across rs-gaap@v1 → v2 and tenant CoA→rs-gaap
   # mappings survive a version bump. The full versioned ``namespace_uri`` is
@@ -587,7 +585,7 @@ def create_library_arcs(
         metadata={},
         created_by=created_by,
       )
-      # Gap B — calc weights / presentation order / arcrole are the churniest
+      # Calc weights / presentation order / arcrole are the churniest
       # library content; an in-place edit (id is uuid5(structure:from:to:type),
       # so weight/order/arcrole/confidence/metadata changes keep the id) must
       # re-seed cleanly. Changing from/to/type mints a new arc (additive).

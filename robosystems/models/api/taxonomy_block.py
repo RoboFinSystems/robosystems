@@ -168,8 +168,7 @@ class TaxonomyBlockRuleRequest(BaseModel):
   ``LeafHasClassification``, ``LibraryOriginImmutability``,
   ``UniqueQNameInTaxonomy``) are system-managed — they're auto-emitted
   by :func:`emit_auto_rules` at taxonomy-block creation time and
-  populate ``rules.rule_check_kind`` instead of ``rule_pattern``. See
-  information-block.md §5.2.2 for the axis split.
+  populate ``rules.rule_check_kind`` instead of ``rule_pattern``.
   """
 
   name: str = Field(..., description="Rule identifier, unique within envelope.")
@@ -562,8 +561,7 @@ class TaxonomyBlockRule(BaseModel):
 
   Exactly one of ``rule_pattern`` (arithmetic) or ``rule_check_kind``
   (model-structure) is non-null per row, enforced by the
-  ``check_rule_pattern_kind_xor`` DB constraint. See
-  information-block.md §5.2.2.
+  ``check_rule_pattern_kind_xor`` DB constraint.
   """
 
   model_config = ConfigDict(from_attributes=True)

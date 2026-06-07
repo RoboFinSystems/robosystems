@@ -9,9 +9,9 @@ The demo proves that the RoboSystems three-block architecture
 (TaxonomyBlock + EventBlock + InformationBlock) can ingest an external
 XBRL reporting taxonomy, ingest transactions tagged with that
 taxonomy's flow concepts, decompose period changes via filter-based
-attribution (the `rollforward` block-type, Phase 2 MVP), and render
-the result in both the source vocabulary AND our canonical `rs-gaap`
-vocabulary from the same fact set.
+attribution (the `rollforward` block-type), and render the result in
+both the source vocabulary AND our canonical `rs-gaap` vocabulary from
+the same fact set.
 
 The reconciliation report — comparing our output to Charlie's
 expected output at
@@ -56,7 +56,7 @@ just demo-seattle-method-create-report <graph_id>
 | `seed-mappings`       | ~36 mini→rs-gaap derivation Associations (BS/IS/CF/SE leaves touched by the 14-JE dataset)                                                   |
 | `ingest`              | 14 Events (one per JournalEntryID), 14 Entries, ~32 LineItems — each LineItem.metadata\_['transaction_description_code'] stamped from CSV    |
 | `author-rollforwards` | 8 rollforward IBs (one per BS leaf with activity) — Cash, Receivables, Inventories, PP&E, AP, Accrued, LTD, PaidInCapital                    |
-| `reconcile`           | `output/seattle-method-case-1.md` — mini-vocab line-by-line comparison vs. Charlie's PoC, classified per methodology spec §3.2               |
+| `reconcile`           | `output/seattle-method-case-1.md` — mini-vocab line-by-line comparison vs. Charlie's PoC, classified per the reconciliation categories below |
 | `create-report`       | `output/seattle-method-case-1-four-statements.md` — rs-gaap 4-IB Report (BS / IS / CF / SE) materialized via create-report + reportPackage   |
 | `download-bundles`    | `output/seattle-method-case-1.jsonld` + `output/seattle-method-case-1.zip` — JSON-LD bundle + XBRL 2.1 report package, pulled via the SDK    |
 | `validate`            | Validates the downloaded artifacts **on the host, container-free**: `output/seattle-method-case-1-xbrl-validation.md` (Arelle vs XBRL 2.1 — structural parity) + `output/seattle-method-case-1-shacl-validation.md` (pyshacl vs `frameworks/ontology/v1/shapes.ttl` — semantic parity). Reads the on-disk `.jsonld`/`.zip` we just received — no API/DB. |
@@ -98,7 +98,7 @@ it tells the reader who needs to act on what.
 | Category               | Definition                                                                                          | Owner                       |
 | ---------------------- | --------------------------------------------------------------------------------------------------- | --------------------------- |
 | **Matching**           | Our output equals expected output.                                                                  | —                           |
-| **Methodology gap**    | Architectural feature not yet shipped; documented in a known spec.                                  | RoboSystems (forward queue) |
+| **Methodology gap**    | Architectural feature not yet implemented.                                                          | RoboSystems (forward queue) |
 | **Our bug**            | Implementation error in shipped code. Needs a fix.                                                  | RoboSystems (fix)           |
 | **Their data quality** | Source data has a tagging error, vocabulary misuse, or inconsistency. Not a defect in our pipeline. | Source author               |
 
@@ -107,9 +107,9 @@ informative than an all-green one — it surfaces what each party owns.
 
 ## Known Data-Quality Findings (Pre-Reconciliation)
 
-These are identified during input review on 2026-05-19, NOT
-introduced by the reconciliation. They land in the report's
-**Their data quality** category per the classification above.
+These are identified during input review, NOT introduced by the
+reconciliation. They land in the report's **Their data quality**
+category per the classification above.
 
 | JE         | Issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -120,7 +120,7 @@ introduced by the reconciliation. They land in the report's
 
 ## Architectural Dependencies
 
-- **Phase 2 MVP rollforward block-type** — `block_type='rollforward'`,
+- **Rollforward block-type** — `block_type='rollforward'`,
   `RollforwardMechanics` Pydantic, single-predicate filter engine
   (`line_item_metadata_field`). See
   `robosystems/operations/information_block/rollforward.py` and
@@ -133,13 +133,12 @@ introduced by the reconciliation. They land in the report's
 
 ## Out of Scope
 
-- Phase 2.5 enrichment engine (the rules + Operator + manual layer
-  that populates `LineItem.metadata_['transaction_description_code']`
-  for legacy QB data without flow tags). Charlie's data ships with
-  flow tags pre-stamped; we use them as-is. For real QB data the
-  enrichment layer is the load-bearing piece.
-- Manual attribution (Tier 3) — this dataset is fully
-  transaction-attributable.
+- The enrichment engine (the rules + Operator + manual layer that
+  populates `LineItem.metadata_['transaction_description_code']` for
+  legacy QB data without flow tags). Charlie's data ships with flow
+  tags pre-stamped; we use them as-is. For real QB data the enrichment
+  layer is the load-bearing piece.
+- Manual attribution — this dataset is fully transaction-attributable.
 
 The methodology is the durable artifact; specific test cases are
 scheduled by external forcing functions (a customer, a published

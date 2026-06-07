@@ -1,11 +1,10 @@
-"""Reporting Style → Network picker (§3.2 Phase 1).
+"""Reporting Style → Network picker.
 
 The render-target resolver: given the graph's Reporting Style and a
 statement type, return the Network Structure the renderer should walk.
 Single source of truth for both the saved-report path
 (``commands/reports.py``) and the live-statement path
-(``reports/fact_grid.py``); replaces the prior "latest active by
-block_type" + CoA-coverage scoring fallbacks.
+(``reports/fact_grid.py``).
 
 Composition lives in ``reporting_style_networks`` (one row per
 ``(reporting_style_id, statement_type)``); the Default Style ships
@@ -14,9 +13,8 @@ Equity Roll Forward. Other Styles are placeholders until library or
 customer authoring fills them in.
 
 The picker runs strict: a missing composition row raises
-``NoNetworkForStatementTypeError``. Reporting Style hasn't shipped to
-prod, so there's no legacy tenant the picker needs to be lenient with;
-local dev tenants pick up the composition by re-provisioning.
+``NoNetworkForStatementTypeError``. Tenants pick up the composition by
+re-provisioning.
 """
 
 from dataclasses import dataclass
@@ -32,7 +30,7 @@ class NoNetworkForStatementTypeError(LookupError):
     super().__init__(
       f"Reporting Style {reporting_style_id} has no Network composed "
       f"for statement_type={statement_type!r}. Seed the composition in "
-      f"reporting_style_networks (Phase 1 of §3.2)."
+      f"reporting_style_networks."
     )
     self.reporting_style_id = reporting_style_id
     self.statement_type = statement_type

@@ -1,5 +1,5 @@
 """AR/AP response models — open-balance projections derived from the event
-duality chain (event-driven-ledger.md §5.1).
+duality chain.
 
 AR ("Accounts Receivable") = sum of ``invoice_issued`` events minus
 matching ``payment_received`` discharges. AP ("Accounts Payable") =

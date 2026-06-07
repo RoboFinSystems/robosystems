@@ -87,7 +87,7 @@ class DeleteGraphOp(BaseModel):
 
 
 class ChangeReportingStyleOp(BaseModel):
-  """Body for the change-reporting-style operation (Phase 2 of §3.2).
+  """Body for the change-reporting-style operation.
 
   Switches the graph to a different Reporting Style. The target Style
   must be a library- or customer-authored Structure with

@@ -5,11 +5,10 @@ Covers the three association-level categories attached to Associations via
 
 - `concept_arrangement` — Charlie's 8 canonical Concept Arrangement
   Patterns + 2 pseudo (Set, RollUp, RollForward, RollForwardInfo,
-  Adjustment, Variance, Arithmetic, TextBlock + Grid, CompoundFact per
-  information-block.md §3.2.1)
+  Adjustment, Variance, Arithmetic, TextBlock + Grid, CompoundFact)
 - `member_arrangement`  — Charlie's 5-pattern aggregation spectrum:
   IsA / WholePart / NestedWholePart / TwoDimensionAggregation /
-  ComplexAggregatingWholePart (information-block.md §3.2.2)
+  ComplexAggregatingWholePart
 - `named_disclosure`    — SEC disclosure mechanics catalog (AssetsRollUp,
   CashFlowStatement, …)
 

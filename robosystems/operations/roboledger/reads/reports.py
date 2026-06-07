@@ -1,9 +1,8 @@
 """Read operations for report definitions and rendered statements.
 
-Ported from `routers/ledger/reports.py` with the helper functions
-(`_build_periods`, `_load_structures`, `_resolve_entity_name`,
-`_report_to_response`) made module-level so both the REST router and
-the GraphQL resolver can call them.
+The helper functions (`build_periods`, `load_structures`,
+`resolve_entity_name`, `report_to_response`) are module-level so both the
+REST router and the GraphQL resolver can call them.
 """
 
 from __future__ import annotations
@@ -105,10 +104,9 @@ def generate_adhoc_private_statement(
   active CoA→GAAP mapping. Used by the `live-financial-statement`
   operation (both REST and MCP) — no saved Report needed.
 
-  The Network is resolved via the graph's Reporting Style composition
-  (§3.2 Phase 1) — the renderer doesn't pick among same-typed structures
-  by recency anymore. Pass ``Graph.reporting_style_id`` from the platform
-  DB.
+  The Network is resolved via the graph's Reporting Style composition —
+  the renderer doesn't pick among same-typed structures by recency. Pass
+  ``Graph.reporting_style_id`` from the platform DB.
 
   ``generate_report_facts`` still wants a ``taxonomy_id`` to scope its
   CoA→GAAP arc walk; rs-gaap-presentation remains the canonical target
@@ -413,12 +411,11 @@ def get_statement(
   `StatementStructureNotFoundError` when the block_type isn't in
   the report's taxonomy. The caller translates both into HTTP 404s.
 
-  ``reporting_style_id`` resolves the graph's active Style (§3.2 Phase 1).
-  Callers with the value already in scope (REST routes via
-  ``GraphExtensionContext``, GraphQL resolvers via ``info.context``)
-  should pass it explicitly to avoid the per-render platform-DB
-  round-trip; if omitted, falls back to ``load_graph_reporting_style``
-  which opens its own platform session.
+  ``reporting_style_id`` resolves the graph's active Style. Callers with
+  the value already in scope (REST routes via ``GraphExtensionContext``,
+  GraphQL resolvers via ``info.context``) should pass it explicitly to
+  avoid the per-render platform-DB round-trip; if omitted, falls back to
+  ``load_graph_reporting_style`` which opens its own platform session.
   """
   if block_type not in VALID_BLOCK_TYPES:
     raise ValueError(
@@ -659,10 +656,10 @@ def get_live_financial_statement(
   - filters subtotal rows and all-zero rows
   - caps at ``limit`` rows (marking ``truncated=True`` when capped)
 
-  ``reporting_style_id`` resolves the graph's active Style (§3.2 Phase 1).
-  Routes already loading ``GraphExtensionContext`` (which carries it)
-  should pass the value explicitly to skip the platform-DB lookup;
-  callers without it in scope fall back to ``load_graph_reporting_style``.
+  ``reporting_style_id`` resolves the graph's active Style. Routes already
+  loading ``GraphExtensionContext`` (which carries it) should pass the
+  value explicitly to skip the platform-DB lookup; callers without it in
+  scope fall back to ``load_graph_reporting_style``.
 
   Raises ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists;
   the caller translates to a user-facing tip (400/422).

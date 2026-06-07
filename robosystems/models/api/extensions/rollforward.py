@@ -6,12 +6,12 @@ typed ``RollforwardMechanics`` envelope lives in
 type mechanics shapes.
 
 The rollforward block-type implements **Tier 2 filter-based attribution**
-from ``information-block.md`` §4.5 — the operator authors filter
-predicates that match ledger LineItems by metadata field, and at render
-time the engine decomposes a BS account's period delta across the
-declared flow concepts. This Phase 2 MVP ships a single predicate kind
-(``line_item_metadata_field``); additional predicate shapes (dimension,
-counter-account, classification, expression) land with later phases.
+— the operator authors filter predicates that match ledger LineItems by
+metadata field, and at render time the engine decomposes a BS account's
+period delta across the declared flow concepts. A single predicate kind
+(``line_item_metadata_field``) is implemented; additional predicate
+shapes (dimension, counter-account, classification, expression) are not
+yet supported.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# ── Attribution predicate (Phase 2 MVP) ────────────────────────────────────
+# ── Attribution predicate ──────────────────────────────────────────────────
 
 
 class LineItemMetadataPredicate(BaseModel):

@@ -3,10 +3,10 @@
 Two encoder families share one envelope (``StatementBundle``):
 
 * ``serialize_to_rdf(bundle, flavor=RdfFlavor.JSONLD)`` — RDF-family
-  serializer. JSON-LD is the Phase 1 default; Turtle, N-Quads, RDF/XML
-  slot in as additional ``RdfFlavor`` values without API change.
+  serializer. JSON-LD is the default; Turtle, N-Quads, RDF/XML slot in
+  as additional ``RdfFlavor`` values without API change.
 * ``serialize_to_xbrl(bundle, flavor=XbrlFlavor.XBRL_2_1)`` — XBRL-family
-  serializer. XBRL 2.1 is the Phase 1 default; OIM flavors (xBRL-CSV,
+  serializer. XBRL 2.1 is the default; OIM flavors (xBRL-CSV,
   xBRL-JSON) slot in later.
 
 Producers populate the bundle:
@@ -14,8 +14,8 @@ Producers populate the bundle:
 * ``build_report_bundle(session, report_id)`` — assembles a published
   Report (FactSets + Facts + framework slice + IB envelopes) into a
   mode='report' ``StatementBundle``. Stamped at publish, stored in S3.
-* ``build_live_bundle`` is the future Phase-3 producer for mode='live'
-  ephemeral snapshots.
+* ``build_live_bundle`` is the future producer for mode='live'
+  ephemeral snapshots; not yet implemented.
 """
 
 from robosystems.operations.serialization.bundle import (

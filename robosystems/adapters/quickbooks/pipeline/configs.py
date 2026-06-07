@@ -13,7 +13,7 @@ class QBSyncConfig(Config):
   full_rebuild: bool = False
   lookback_days: int = 60
   since_date: str = ""
-  # Phase 3 B7 — Distributed-lock token acquired at the API endpoint;
+  # Distributed-lock token acquired at the API endpoint;
   # qb_load releases the lock on completion so the next sync can
   # proceed immediately rather than waiting for the 30-min TTL. Empty
   # string means no lock was acquired (rare — defensive fallback path

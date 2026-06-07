@@ -8,7 +8,7 @@ groups by ``JournalEntryID``, and posts one event per JE via
 ``create-event-block`` with ``apply_handlers=True``. Each line carries
 its ``TransactionDescriptionCode`` on
 ``metadata['transaction_description_code']`` — the field the rollforward
-filter engine matches against (Phase 2 MVP per-line metadata plumbing).
+filter engine matches against.
 
 Pre-condition: ``load_taxonomy.py`` + ``seed_mappings.py`` have run
 against this graph (the JE lines reference mini concepts by

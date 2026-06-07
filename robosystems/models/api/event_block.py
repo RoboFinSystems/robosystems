@@ -578,7 +578,7 @@ class UpdateEventBlockRequest(BaseModel):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# execute-event-block (Phase 4 §4.2 — publish event to source-of-truth)
+# execute-event-block — publish event to source-of-truth
 # ───────────────────────────────────────────────────────────────────────────
 
 

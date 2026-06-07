@@ -194,9 +194,8 @@ form-aware earnings rollup lands. `SOLE`/`NFP` need new leaf concepts
 
 ## Editing packages
 
-The JSON-LD is the source of truth. Edit it directly. We're past the
-bootstrap phase — packages are now curated and crafted by hand, not
-regenerated from canned scripts.
+The JSON-LD is the source of truth. Edit it directly — packages are
+curated and crafted by hand, not regenerated from scripts.
 
 After editing, re-run migrations against a fresh extensions database
 to confirm the packages still load cleanly:

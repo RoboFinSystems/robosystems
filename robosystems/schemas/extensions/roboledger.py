@@ -357,7 +357,7 @@ TRANSACTION_RELATIONSHIPS = [
     description="Closing entry was derived from a schedule structure",
     properties=[],
   ),
-  # ── McCarthy bridge (ontology-alignment.md §4.3) ─────────────────────
+  # ── McCarthy bridge ──────────────────────────────────────────────────
   # Event → Transaction is the realization at the graph layer of
   # McCarthy 1982's vision: "accounting should be derived from underlying
   # economic events." OLTP source: transactions.triggered_by_event_id.

@@ -35,9 +35,7 @@ Every route follows the pattern:
   GL-write origination flows through
   `create-event-block(event_type='journal_entry_recorded')`; reversal
   through `event_type='journal_entry_reversed'`. The draft-correction
-  path (update / delete on a draft entry) stays as a CRUD surface for
-  now — it migrates to the event lifecycle when correction handlers
-  ship in a later phase.
+  path (update / delete on a draft entry) is a CRUD surface.
 - Close Workflow: `set-close-target`, `close-period`, `reopen-period`.
   Closing-entry drafting goes through
   `create-event-block(event_type='schedule_entry_due')` (schedule-derived)
@@ -788,8 +786,8 @@ create_taxonomy_block_op = _registrar.register(
       "Create a taxonomy block atomically: one envelope carrying the "
       "taxonomy row plus its structures, elements, associations, and "
       "rules. Dispatches by `taxonomy_type` — `chart_of_accounts` "
-      "(declarative tenant CoA) is live; `reporting_extension` / "
-      "`custom_ontology` / `reporting_standard` land in later sub-phases."
+      "(declarative tenant CoA) is supported; `reporting_extension` / "
+      "`custom_ontology` / `reporting_standard` are not yet implemented."
     ),
     command=cmd_create_taxonomy_block,
     request_model=CreateTaxonomyBlockRequest,
@@ -1104,7 +1102,7 @@ evaluate_rules_op = _registrar.register(
       "association-scoped rules for the structure's atoms), binds "
       "$Variable references to in-scope facts via qname lookup, writes "
       "one VerificationResult row per rule, and returns the results plus "
-      "a status-keyed summary. Phase delta.3 — decoding mode, 5 patterns "
+      "a status-keyed summary. Decoding mode, 5 patterns "
       "(EqualTo, RollUp, RollForward, Exists, CoExists)."
     ),
     command=cmd_evaluate_rules,
@@ -1159,9 +1157,9 @@ update_agent_op = _registrar.register(
 # ═══════════════════════════════════════════════════════════════════════════
 # Event Blocks
 #
-# Real-world business event layer (event-driven-ledger.md). Two write
-# modes: apply_handlers=False captures the event without firing GL
-# postings; apply_handlers=True resolves an event_handler and fires its
+# Real-world business event layer. Two write modes:
+# apply_handlers=False captures the event without firing GL postings;
+# apply_handlers=True resolves an event_handler and fires its
 # transaction template atomically with the event row.
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1226,15 +1224,15 @@ update_event_block_op = _registrar.register(
 )
 
 
-# Phase 4 §4.2 — `execute-event-block` publishes an event to the
-# source-of-truth system (QuickBooks for v1). For events on a
-# connection with `write_policy='qb_authoritative'` / `'hybrid'`,
-# this posts a JE to QB via the QB API with `request_id=event.id`
-# for idempotency, captures the returned `qb_txn_id` on
-# `event.metadata.qb_external_id`, transitions status to `'fulfilled'`
-# (or `'pending'` on QB rejection), and promotes linked draft GL
-# rows to `'posted'`. The cross-source matcher in the loader
-# recognises the round-tripped entry on the next sync.
+# `execute-event-block` publishes an event to the source-of-truth
+# system (QuickBooks). For events on a connection with
+# `write_policy='qb_authoritative'` / `'hybrid'`, this posts a JE to QB
+# via the QB API with `request_id=event.id` for idempotency, captures
+# the returned `qb_txn_id` on `event.metadata.qb_external_id`,
+# transitions status to `'fulfilled'` (or `'pending'` on QB rejection),
+# and promotes linked draft GL rows to `'posted'`. The cross-source
+# matcher in the loader recognises the round-tripped entry on the next
+# sync.
 execute_event_block_op = _registrar.register(
   OperationSpec(
     name="execute-event-block",
@@ -1253,11 +1251,11 @@ execute_event_block_op = _registrar.register(
     result_type=ExecuteEventBlockResponse,
     error_map={
       EventNotFoundError: 404,
-      # Phase 3 A2: AuthClientError from Intuit (revoked / scope-
-      # insufficient / rotated past grace) surfaces as
-      # QBAuthFailedError. The connection has already been flipped to
-      # needs_reauth by the QBClient itself; 401 signals to the UI
-      # that the operator must reconnect via OAuth.
+      # AuthClientError from Intuit (revoked / scope-insufficient /
+      # rotated past grace) surfaces as QBAuthFailedError. The
+      # connection has already been flipped to needs_reauth by the
+      # QBClient itself; 401 signals to the UI that the operator must
+      # reconnect via OAuth.
       QBAuthFailedError: 401,
       ValueError: 422,
     },
@@ -1596,10 +1594,10 @@ async def close_period_op(
         ),
       )
     except WritebackFailed as e:
-      # Phase 4 §4.2 close-period pre-publish failure. Surface the
-      # structured failed-events payload so operators can see exactly
-      # which drafts QB rejected (mapping issue, balance error,
-      # closed-in-QB period, etc.) and retry the close after fixing.
+      # Close-period pre-publish failure. Surface the structured
+      # failed-events payload so operators can see exactly which drafts
+      # QB rejected (mapping issue, balance error, closed-in-QB period,
+      # etc.) and retry the close after fixing.
       raise HTTPException(
         status_code=422,
         detail={

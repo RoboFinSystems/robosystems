@@ -8,7 +8,7 @@ Every Fact belongs to exactly one FactSet (the parent envelope that pins the
 period bounds and back-references the Report or Schedule that created it).
 Reports stamp facts via ``_persist_report_facts``; schedules stamp them via
 ``ScheduleService``. Both create the FactSet row before the facts that
-reference it (§3.5/§6.5 of information-block.md).
+reference it.
 
 Written by generate_report_facts(), read by ExtensionsMaterializer and
 render_structure_view().
@@ -61,7 +61,7 @@ class Fact(ExtensionsBase):
   entity_id = Column(String, nullable=False)
   structure_id = Column(String, nullable=True)  # structure this fact belongs to
   # FK → fact_sets.id with ON DELETE CASCADE. The FactSet is created
-  # before the fact is stamped (§3.5/§6.5). The column is NOT NULL post
+  # before the fact is stamped. The column is NOT NULL as of
   # migration 0010 — every fact has exactly one parent FactSet; deleting
   # the FactSet cascades to its facts.
   fact_set_id = Column(

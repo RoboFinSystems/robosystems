@@ -1,4 +1,4 @@
-"""Generate the per-tenant rs-gaap exclusion list (Sprint 2 — copy-filter curation).
+"""Generate the per-tenant rs-gaap exclusion list (copy-filter curation).
 
 The rs-gaap catalog is a us-gaap *mapping-target mirror* (~2155 concepts) of
 which only ~90 render under the seeded Reporting Styles. The full mirror stays
@@ -8,7 +8,7 @@ verticals (oil & gas, insurance, banking, utilities, …) belong in *peer*
 frameworks (rs-call-report, rs-statutory, rs-ferc), and XBRL dimension
 members/domains are never CoA line-item targets.
 
-This script computes the **keep-critical (sharp), zero-rollup-risk** exclusion
+This script computes the **keep-critical, zero-rollup-risk** exclusion
 set and writes it to ``frameworks/rs-gaap/tenant-exclude/v1.json``. The copy path
 (``writer.copy_library_into_tenant`` / ``resync_library_into_tenant``) reads that
 artifact and omits the listed concepts from each tenant schema; the public
@@ -58,8 +58,8 @@ _ARTIFACT = FRAMEWORKS_DIR / "rs-gaap" / "tenant-exclude" / "v1.json"
 # specialist modules, NOT a general-purpose GL framework. Leases (ASC 842) and
 # income tax are intentionally NOT here: they apply to every entity.
 #
-# The base block caught the obvious verticals; the 2026-06-05 expansion adds the
-# financial-institution / insurance / derivative / pension domains. Their
+# The base block catches the obvious verticals; the financial-institution /
+# insurance / derivative / pension domains are matched here too. Their
 # INTERMEDIATE aggregates (non-leaf, so they slipped the disaggregation-leaf
 # filter; not vertical-keyword'd, so they slipped this matcher) were being copied
 # into every tenant despite rendering in no Reporting Style — e.g. servicing-
@@ -235,26 +235,26 @@ def compute_exclude() -> dict:
   members = {i for i, q in qname.items() if q.endswith(("Member", "Domain"))}
   verticals = {i for i, q in qname.items() if _VERTICAL.search(q)}
 
-  # Disaggregation leaves — the MVP curation (Sprint 3). The general-special
-  # tree is the aggregation lattice: a preparer picks report granularity by
-  # mapping a CoA account to a higher (aggregate) or lower (disaggregated) node.
-  # The leaf level is the finest detail. Today it is INERT — mapping candidates
-  # are capped at the renderable working set and the renderer only walks the
-  # aggregate level (see operations/roboledger/reads/taxonomies.py, the
-  # 2026-05-17 narrowing), so a tenant cannot map to or render a leaf. Shipping
-  # the leaves buys no capability now but makes them un-deletable once the
-  # granularity-selection feature lands and customers map to them. So defer the
-  # leaf detail: keep the high-level aggregates (intermediates with children),
-  # and add disaggregation levels back later via resync ("we added a deeper
-  # level so your reports can be denser"). Add is cheap; delete after use isn't.
+  # Disaggregation leaves. The general-special tree is the aggregation lattice:
+  # a preparer picks report granularity by mapping a CoA account to a higher
+  # (aggregate) or lower (disaggregated) node. The leaf level is the finest
+  # detail. Today it is INERT — mapping candidates are capped at the renderable
+  # working set and the renderer only walks the aggregate level (see
+  # operations/roboledger/reads/taxonomies.py), so a tenant cannot map to or
+  # render a leaf. Shipping the leaves buys no capability now but makes them
+  # un-deletable once a granularity-selection feature lands and customers map to
+  # them. So defer the leaf detail: keep the high-level aggregates (intermediates
+  # with children), and add disaggregation levels back later via resync ("we
+  # added a deeper level so your reports can be denser"). Add is cheap; delete
+  # after use isn't.
   gs_parents = {f for f, _ in gs}
   gs_children = {t for _, t in gs}
   disaggregation_leaves = (gs_children - gs_parents) & rg  # child-only in the lattice
 
-  # SHARP policy (2026-06): a tenant keeps EXACTLY keep-critical — the working
-  # set that renders under the active Reporting Style plus its structural
-  # scaffolding (calc DAG, rollup ancestors, rule operands, synthesized PP&E
-  # grains). Everything else is inert today — mapping candidates are capped at
+  # A tenant keeps EXACTLY keep-critical — the working set that renders under
+  # the active Reporting Style plus its structural scaffolding (calc DAG, rollup
+  # ancestors, rule operands, synthesized PP&E grains). Everything else is inert
+  # today — mapping candidates are capped at
   # the renderable working set and the renderer only walks anchored concepts, so
   # an un-anchored concept renders nowhere and can't be mapped. "Kept ⟺ used":
   # drop it, and re-add via resync the moment a future Reporting Style / deeper
@@ -287,7 +287,7 @@ def compute_exclude() -> dict:
     "policy": "tenant_exclude_keep_critical",
     "description": (
       "rs-gaap concepts kept in the public library but NOT copied into tenant "
-      "schemas. The keep-critical (sharp) curation: a tenant keeps EXACTLY the "
+      "schemas. The keep-critical curation: a tenant keeps EXACTLY the "
       "concepts that render under the active Reporting Style (the working set) "
       "plus their structural scaffolding — the calc DAG, rollup ancestors, rule "
       "operands, and the synthesized PP&E grains. Everything else renders nowhere "

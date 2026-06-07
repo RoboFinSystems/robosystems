@@ -295,7 +295,7 @@ class Agent:
 
 @pydantic_type(model=PydanticOpenBalanceAggregate, all_fields=True)
 class OpenBalanceAggregate:
-  """Graph-wide open AR or AP totals (event-driven-ledger.md §5.1)."""
+  """Graph-wide open AR or AP totals."""
 
 
 @pydantic_type(model=PydanticOpenBalanceByAgent, all_fields=True)
@@ -312,8 +312,8 @@ class EventBlock:
 
   Hand-written because `metadata: dict[str, Any]` needs the JSON scalar —
   Strawberry's pydantic decorator cannot map an untyped dict field. The
-  envelope is the canonical "something happened" record (per
-  ``event-driven-ledger.md``); GL rows live downstream behind a handler.
+  envelope is the canonical "something happened" record; GL rows live
+  downstream behind a handler.
   """
 
   id: str

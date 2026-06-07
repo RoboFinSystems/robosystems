@@ -191,9 +191,9 @@ Fields:
     but `tenant_copy: false` omits the package from
     `expand_framework_to_pin`, so `writer.copy_library_into_tenant`
     **does not copy it into per-tenant schemas**. Use it for content that
-    should stay canonical in the library but is dormant / parked at MVP —
-    keeping it out of every immutable tenant schema (and off the COGS
-    line) without losing the definition. Promote later by flipping it back
+    should stay canonical in the library but is dormant (not used by the
+    default tenant set) — keeping it out of every immutable tenant schema
+    (and off the COGS line) without losing the definition. Promote later by flipping it back
     to `true` and running `operations/taxonomy_block/resync.py` (the copy
     gates each association on both element endpoints existing locally, so
     a cross-package arc into a `tenant_copy: false` package self-skips

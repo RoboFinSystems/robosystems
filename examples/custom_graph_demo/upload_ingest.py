@@ -294,9 +294,9 @@ def main() -> None:
   clients = RoboSystemsClients(config)
 
   try:
-    upload_tables(clients, graph_id, node_files, "Phase 1 - Node Tables")
+    upload_tables(clients, graph_id, node_files, "Pass 1 - Node Tables")
     upload_tables(
-      clients, graph_id, relationship_files, "Phase 2 - Relationship Tables"
+      clients, graph_id, relationship_files, "Pass 2 - Relationship Tables"
     )
     # Wait for DuckDB staging to complete before materializing
     staging_ok = wait_for_staging(clients, graph_id, timeout_seconds=600)

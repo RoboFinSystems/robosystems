@@ -30,7 +30,7 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   # AR/AP duality handlers — same GL shape as journal_entry_recorded
   # plus a post-dispatch step that resolves discharges_event_id to the
   # originating invoice/bill via QB's LinkedTxn refs (with a
-  # reference_number fallback). See event-driven-ledger.md §5.1.
+  # reference_number fallback).
   PAYMENT_RECEIVED_HANDLER.event_type: PAYMENT_RECEIVED_HANDLER,
   BILL_PAID_HANDLER.event_type: BILL_PAID_HANDLER,
   # Remaining QB source-class events still dispatch through the journal
@@ -38,7 +38,7 @@ EVENT_BLOCK_PYTHON_REGISTRY: dict[str, EventBlockPythonHandler] = {
   "invoice_issued": JOURNAL_ENTRY_RECORDED_HANDLER,
   "bill_received": JOURNAL_ENTRY_RECORDED_HANDLER,
   "sales_receipt_recorded": JOURNAL_ENTRY_RECORDED_HANDLER,
-  # Additional QB source-class events (Phase 2.5, §3.14 of roadmap): the
+  # Additional QB source-class events: the
   # QB importer used to collapse 7 transaction types into
   # `journal_entry_recorded`, hiding the purchase / treasury semantic
   # that QB already carries. The dbt model now routes them to these

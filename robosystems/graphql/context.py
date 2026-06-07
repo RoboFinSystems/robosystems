@@ -103,10 +103,10 @@ class GraphQLContext(TypedDict):
   graph_id: str
   schema_extensions: tuple[str, ...]
   graph_type: str
-  # The graph's active Reporting Style (Phase 1 of §3.2). Populated from
-  # the platform DB during context build so resolvers don't reopen a
-  # platform session per render. Empty string for unauthenticated
-  # introspection traffic and the library sentinel.
+  # The graph's active Reporting Style. Populated from the platform DB
+  # during context build so resolvers don't reopen a platform session
+  # per render. Empty string for unauthenticated introspection traffic
+  # and the library sentinel.
   reporting_style_id: str
 
 

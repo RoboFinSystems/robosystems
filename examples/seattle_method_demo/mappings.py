@@ -18,7 +18,7 @@ with ``# NOTE:``. The reconciliation report's "Their data quality" /
 loses precision.
 
 Seeded via ``seed_mappings.py`` as ``association_type='derivation'``
-arcs (same arc type Phase 1 rollforward uses for default change tag
+arcs (the same arc type rollforward uses for default change tag
 derivation).
 """
 
@@ -42,8 +42,8 @@ BS_IS_MAPPINGS: list[tuple[str, str]] = [
     "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings",
   ),
   ("mini:PropertyPlantAndEquipment", "rs-gaap:PropertyPlantAndEquipmentNet"),
-  # AP and Accrued are separate BS-Classified leaves (the 2026-06 split of
-  # the combined AccountsPayableAndAccruedLiabilitiesCurrent line).
+  # AP and Accrued are separate BS-Classified leaves (split out from the
+  # combined AccountsPayableAndAccruedLiabilitiesCurrent line).
   ("mini:AccountsPayable", "rs-gaap:AccountsPayableCurrent"),
   ("mini:AccruedExpenses", "rs-gaap:AccruedLiabilitiesCurrent"),
   ("mini:LongtermDebt", "rs-gaap:LongTermDebtAndCapitalLeaseObligations"),
@@ -92,11 +92,11 @@ FLOW_MAPPINGS: list[tuple[str, str]] = [
   # the equity-side of an issuance (mini does).
   ("mini:ProceedsFromInvestmentsByOwner", "rs-gaap:ProceedsFromIssuanceOfCommonStock"),
   ("mini:InvestmentsByOwner", "rs-gaap:ProceedsFromIssuanceOfCommonStock"),
-  # Financing — debt, GROSS per ASC 230. The CF-Financing calc rollup now
+  # Financing — debt, GROSS per ASC 230. The CF-Financing calc rollup
   # carries the signed gross pair (ProceedsFromIssuanceOfLongTermDebt +
   # RepaymentsOfLongTermDebt), so issuances and repayments map to their own
-  # leaves and present separately — no longer collapsed onto the signed-net
-  # concept (the prior "lands on a leaf that renders" workaround, now obsolete).
+  # leaves and present separately rather than collapsing onto the signed-net
+  # concept.
   (
     "mini:ProceedsFromAdditionalLongtermBorrowings",
     "rs-gaap:ProceedsFromIssuanceOfLongTermDebt",

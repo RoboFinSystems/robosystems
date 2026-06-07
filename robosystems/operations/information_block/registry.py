@@ -190,8 +190,7 @@ ROLLFORWARD_BLOCK = BlockTypeRegistryEntry(
     "Statement of Changes in Equity lines). The author declares the BS "
     "source + a list of attribution filters; the renderer evaluates the "
     "filters against ledger LineItems at read time and emits one fact per "
-    "filter per period. Tier 2 of the three-tier attribution design "
-    "(information-block.md §4.5)."
+    "filter per period."
   ),
   concept_arrangement_default="roll_forward",
   member_arrangement_default=None,
@@ -248,9 +247,8 @@ METRIC_BLOCK = BlockTypeRegistryEntry(
     "`MetricMechanics` arm ships today (so callers can already query "
     'metric envelopes via `informationBlocks(blockType="metric")`), '
     "but the derivation evaluator that computes facts from source-block "
-    "FactSets lands after the rule engine stabilizes. Track progress on "
-    "the metric-block roadmap entry; no caller-side workaround is "
-    "available today.",
+    "FactSets is not yet implemented; no caller-side workaround is "
+    "available.",
   ),
   dispatch_update=make_not_implemented_handler(
     "update-metric-block",
