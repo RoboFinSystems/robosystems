@@ -1,5 +1,5 @@
 # pyright: reportGeneralTypeIssues=false, reportArgumentType=false
-"""Tests for ``change_reporting_style_cmd`` (Phase 2 of §3.2)."""
+"""Tests for ``change_reporting_style_cmd``."""
 
 from __future__ import annotations
 

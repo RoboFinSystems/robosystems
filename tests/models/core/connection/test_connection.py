@@ -96,7 +96,7 @@ class TestConnectionCreate:
 class TestConnectionGetById:
   def test_returns_connection(self):
     """The lookup chain is `.filter(id).filter(deleted_at IS NULL).first()`
-    by default — Phase 3 B6 added the deleted_at filter."""
+    by default — the deleted_at filter excludes soft-deleted rows."""
     session = MagicMock()
     mock_conn = MagicMock(spec=Connection)
     # Chain: query → filter (id) → filter (deleted_at) → first
@@ -153,7 +153,7 @@ class TestConnectionGetAllForGraph:
 class TestConnectionListFiltered:
   def test_no_filters(self):
     """Even with no explicit filters, the deleted_at IS NULL filter
-    runs by default (Phase 3 B6)."""
+    runs by default."""
     session = MagicMock()
     query = session.query.return_value
     # query.filter(deleted_at IS NULL) → order_by → all
@@ -258,7 +258,7 @@ class TestConnectionUpdateLastSync:
 
 @pytest.mark.unit
 class TestConnectionAdvanceCdcWatermark:
-  """Phase 5 §4.3.4 — CDC watermark advance helper."""
+  """CDC watermark advance helper."""
 
   def test_advances_watermark_aware_to_naive_utc(self):
     """A tz-aware datetime gets stripped to naive UTC before persisting."""
@@ -551,8 +551,8 @@ class TestConnectionRepr:
 
 @pytest.mark.unit
 class TestSoftDelete:
-  """Phase 3 B6 — soft_delete + restore preserve the row, lookups
-  filter `deleted_at IS NULL` by default."""
+  """soft_delete + restore preserve the row, lookups filter
+  `deleted_at IS NULL` by default."""
 
   def test_soft_delete_sets_deleted_at(self):
     conn = Connection(

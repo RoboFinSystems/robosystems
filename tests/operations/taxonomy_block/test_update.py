@@ -356,7 +356,7 @@ class TestValidateAssociationsToRemove:
     assert issues == []
 
 
-# ── Phase 2.4.1 — apply helper unit tests ──────────────────────────────────
+# ── Apply helper unit tests ─────────────────────────────────────────────────
 
 
 class TestApplyElementsToUpdate:

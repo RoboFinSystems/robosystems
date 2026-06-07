@@ -1,4 +1,4 @@
-"""Tests for `execute_event_block` (Phase 4 §4.2).
+"""Tests for `execute_event_block`.
 
 Covers the four observable behaviors of the write-back path:
 
@@ -296,8 +296,8 @@ class TestExecuteEventBlockQBReject:
   drafts stay draft, last_outbound_error captured."""
 
   def test_invalid_amount_type_raises_qbwritebackerror(self):
-    """H2 — non-int amounts (e.g., float) raise QBWritebackError
-    instead of silently truncating via int()."""
+    """Non-int amounts (e.g., float) raise QBWritebackError instead of
+    silently truncating via int()."""
     from unittest.mock import MagicMock
 
     from robosystems.operations.event_block.qb_writeback import (
@@ -376,8 +376,8 @@ class TestExecuteEventBlockQBReject:
 
 @pytest.mark.unit
 class TestSaveWithRetry:
-  """C1 — `_save_with_retry` retries transient transport errors and
-  wraps them as `QBWritebackError` rather than letting
+  """`_save_with_retry` retries transient transport errors and wraps them
+  as `QBWritebackError` rather than letting
   `requests.exceptions.RequestException` propagate uncaught (which
   would surface as a 500 instead of a typed write-back error)."""
 

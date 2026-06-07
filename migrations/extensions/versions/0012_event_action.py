@@ -1,10 +1,10 @@
 """Add event_action column to events with canonical 19-verb CHECK.
 
 Adopts a canonical action-verb vocabulary as the refinement of
-`event_category` per `ontology-alignment.md` §4.6. The 19 verbs
-disambiguate concepts ERPs typically conflate — `transferCustody` vs
-`transferAllRights` is the load-bearing distinction for consignment,
-drop-shipping, marketplace settlement, and escrow. The vocabulary
+`event_category`. The 19 verbs disambiguate concepts ERPs typically
+conflate — `transferCustody` vs `transferAllRights` is the load-bearing
+distinction for consignment, drop-shipping, marketplace settlement, and
+escrow. The vocabulary
 converges with Valueflows (Foster / Pavlik / Haugen v1.0), which we
 treat as inspiration; canonical naming on our side stays
 RoboSystems-native (`event_action` / `EVENT_ACTIONS`).

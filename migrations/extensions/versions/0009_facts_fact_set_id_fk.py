@@ -1,4 +1,4 @@
-"""facts.fact_set_id → fact_sets.id FK (§3.5 Phase 1 of §6.5).
+"""facts.fact_set_id → fact_sets.id FK.
 
 Promotes ``facts.fact_set_id`` from an unconstrained string to a real
 FK against ``fact_sets.id``. Pairs with the create_report /
@@ -8,7 +8,7 @@ stamping facts.
 Steps per schema (public + every tenant):
 
 1. NULL out any orphan ``fact_set_id`` values on ``facts`` that don't
-   resolve to an existing FactSet. The pre-§3.5 code path could stamp
+   resolve to an existing FactSet. The earlier code path could stamp
    a ULID on a fact even when ``_create_report_fact_sets``
    subsequently skipped the row (e.g., facts whose ``period_end`` was
    NULL). Reporting Style hasn't shipped to prod so the local-dev

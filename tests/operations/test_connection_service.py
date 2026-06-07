@@ -379,9 +379,9 @@ class TestDeleteConnection:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_soft_deletes_connection_and_deactivates_creds(self):
-    """Phase 3 B6: delete_connection now soft-deletes (preserves the row
-    with deleted_at stamped) rather than hard-deleting. Tenant-side
-    events/agents/elements scoped to the connection_id stay attached."""
+    """delete_connection soft-deletes (preserves the row with deleted_at
+    stamped) rather than hard-deleting. Tenant-side events/agents/elements
+    scoped to the connection_id stay attached."""
     mock_session = MagicMock()
     mock_conn = _make_mock_connection()
     mock_cred = _make_mock_credentials()
@@ -934,7 +934,7 @@ class TestConnectionServiceSessionManagement:
 
 
 class TestMarkNeedsReauthSync:
-  """Phase 3 B5 — sync helper flips the connection to needs_reauth."""
+  """Sync helper flips the connection to needs_reauth."""
 
   @pytest.mark.unit
   def test_helper_flips_status(self):

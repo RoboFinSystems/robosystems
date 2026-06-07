@@ -151,7 +151,7 @@ def test_update_schedule_keeps_omitted_metadata_null_in_typed_mechanics() -> Non
 
 
 def test_update_schedule_template_change_triggers_supersession() -> None:
-  """Stream 2.E: changing entry_template voids + re-materializes pending events."""
+  """Changing entry_template voids + re-materializes pending events."""
   from unittest.mock import patch
 
   from robosystems.models.api.extensions.schedules import EntryTemplateRequest
@@ -208,7 +208,7 @@ def test_update_schedule_template_change_triggers_supersession() -> None:
   kwargs = supersede.call_args.kwargs
   assert kwargs["structure"] is structure
   assert kwargs["created_by"] == "usr_admin"
-  # §3.8: template change re-runs the rule engine.
+  # Template change re-runs the rule engine.
   eval_rules.assert_called_once()
   rule_kwargs = eval_rules.call_args.kwargs
   assert eval_rules.call_args.args[1] == "struct_sched"

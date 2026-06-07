@@ -211,10 +211,10 @@ class TestOLTPLoader:
       created_by="user_123",
     )
 
-    # Phase 2: transactional dbt rows are captured as a single event_block
-    # per QB transaction (apply_handlers=False). GL rows (Transaction /
-    # Entry / LineItem) get created later by the handler at approval time;
-    # the sync itself produces 0 of them.
+    # Transactional dbt rows are captured as a single event_block per QB
+    # transaction (apply_handlers=False). GL rows (Transaction / Entry /
+    # LineItem) get created later by the handler at approval time; the
+    # sync itself produces 0 of them.
     assert result.elements == 2
     assert result.transactions == 0
     assert result.entries == 0
@@ -234,7 +234,7 @@ class TestOLTPLoader:
     mock_ext_session,
     mock_provision,
   ):
-    """`full_rebuild=True` triggers the pre-sync wipe per Wave 1 contract.
+    """`full_rebuild=True` triggers the pre-sync wipe.
 
     The wipe is scoped to captured/classified events plus GL cascade.
     Voided/committed/fulfilled events survive the wipe.
@@ -269,10 +269,10 @@ class TestOLTPLoader:
     mock_ext_session,
     mock_provision,
   ):
-    """Default (incremental) sync skips the pre-sync DELETE per Wave 1 G2.
+    """Default (incremental) sync skips the pre-sync DELETE.
 
-    Only operator-explicit `full_rebuild=True` triggers the wipe.
-    Without it, neither `since_date` nor the default lookback should
+    Contract: only operator-explicit `full_rebuild=True` triggers the
+    wipe. Without it, neither `since_date` nor the default lookback should
     fire the wipe — history outside the sync window must survive.
     """
     from robosystems.operations.extensions.loader import OLTPLoader
@@ -303,7 +303,7 @@ class TestOLTPLoader:
     )
     assert delete_call_count == 0, (
       f"Incremental sync invoked .delete() {delete_call_count} times — "
-      "Wave 1 G2 contract violated. Only full_rebuild=True should wipe."
+      "only full_rebuild=True should wipe."
     )
 
   @patch("robosystems.db.extensions.provision_tenant_schema")
@@ -367,12 +367,12 @@ class TestOLTPLoader:
     mock_ext_session,
     mock_provision,
   ):
-    """Phase 2: line_items without a parent entry/transaction are
-    silently dropped during the per-transaction grouping. The canonical
-    record is the event_block; orphan lines have no transaction context
-    to attach to and aren't actionable, so they don't generate errors —
-    the upstream dbt staging is responsible for ensuring entry/txn rows
-    exist before line_items reference them."""
+    """line_items without a parent entry/transaction are silently dropped
+    during the per-transaction grouping. The canonical record is the
+    event_block; orphan lines have no transaction context to attach to and
+    aren't actionable, so they don't generate errors — the upstream dbt
+    staging is responsible for ensuring entry/txn rows exist before
+    line_items reference them."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
     orphan_lines = [
@@ -430,7 +430,7 @@ class TestOLTPLoader:
 
 
 class TestCaptureTransactionsAsEvents:
-  """Phase 2 capture path — UPSERT semantics + post-approval safety."""
+  """Capture path — UPSERT semantics + post-approval safety."""
 
   def _dbt_data(self) -> dict:
     """Single QB JournalEntry with two line items (one debit, one credit)."""
@@ -556,10 +556,9 @@ class TestCaptureTransactionsAsEvents:
     not have its live payload overwritten by a re-sync — that would
     silently undo the user's approval and detach the resulting GL rows.
 
-    Wave 1 G4 (`quickbooks-adapter.md` §4.6.0): when the adapter
-    re-surfaces a different payload for a committed event, we set
-    `payload_drift=True` and stash the incoming payload under
-    `metadata_['drift_payload']` for the reconciliation queue. The
+    When the adapter re-surfaces a different payload for a committed
+    event, we set `payload_drift=True` and stash the incoming payload
+    under `metadata_['drift_payload']` for the reconciliation queue. The
     live fields (`evt.metadata_['entries']`, etc.) stay unchanged.
     """
     from robosystems.operations.extensions.loader import OLTPLoader
@@ -814,8 +813,8 @@ class TestCaptureAutoCommit:
     assert result.dispatch_failed == 1
     evt = session.add_all.call_args.args[0][0]
     assert evt.status == "captured"
-    # Phase 3 B8: dispatch error metadata stamped on the event so the
-    # inbox UI can show typed remediation prompts.
+    # Dispatch error metadata stamped on the event so the inbox UI can
+    # show typed remediation prompts.
     assert evt.metadata_["dispatch_error"] == "unknown_error"
     assert "element_external_id not resolved" in evt.metadata_["dispatch_error_message"]
     assert "dispatch_error_at" in evt.metadata_
@@ -823,7 +822,7 @@ class TestCaptureAutoCommit:
 
   def test_dispatch_error_classifier_maps_known_exception_types(self):
     """The classifier maps known exception type names to typed codes
-    that the inbox UI uses for remediation prompts (Phase 3 B8)."""
+    that the inbox UI uses for remediation prompts."""
     from robosystems.operations.extensions.loader import _classify_dispatch_error
 
     class ElementResolutionError(Exception):
@@ -1355,7 +1354,7 @@ class TestCaptureHardening:
 
 
 class TestCaptureAgentsFromQB:
-  """Phase 2: agent UPSERT keyed on (connection_id, source, external_id)."""
+  """Agent UPSERT keyed on (connection_id, source, external_id)."""
 
   def _agents_data(self) -> dict:
     return {
@@ -1500,8 +1499,8 @@ class TestCaptureAgentsFromQB:
     session.query.assert_called_with(Agent)
 
   def test_sync_token_persists_on_insert(self):
-    """Phase 5 step 1 (§4.3.1) — Agent insert path stamps
-    metadata_['qb_sync_token'] when the dbt row carries a SyncToken."""
+    """Agent insert path stamps metadata_['qb_sync_token'] when the dbt
+    row carries a SyncToken."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
     session = MagicMock()
@@ -1539,8 +1538,8 @@ class TestCaptureAgentsFromQB:
     assert new_agents[0].metadata_["qb_sync_token"] == "7"
 
   def test_sync_token_refreshes_on_existing_agent(self):
-    """Phase 5 step 1 — re-sync of an existing agent merges new SyncToken
-    into metadata_ in-place without dropping other JSONB keys."""
+    """Re-sync of an existing agent merges new SyncToken into metadata_
+    in-place without dropping other JSONB keys."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
     existing = MagicMock()
@@ -1583,8 +1582,8 @@ class TestCaptureAgentsFromQB:
     assert existing.metadata_["custom_field"] == "preserved"
 
   def test_missing_sync_token_leaves_existing_metadata_untouched(self):
-    """Phase 5 step 1 — when a row carries no SyncToken (e.g. pre-Phase-5
-    backfill), we don't overwrite the live metadata with a None value."""
+    """When a row carries no SyncToken (e.g. a backfill row), we don't
+    overwrite the live metadata with a None value."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
     existing = MagicMock()
@@ -1608,7 +1607,7 @@ class TestCaptureAgentsFromQB:
           "tax_id": "",
           "is_1099_recipient": False,
           "is_active": True,
-          # no sync_token field — simulates a pre-Phase-5 backfill row
+          # no sync_token field — simulates a backfill row
         }
       ],
     }
@@ -1627,7 +1626,7 @@ class TestCaptureAgentsFromQB:
 
 
 class TestCaptureWithEventTypeAndAgent:
-  """Phase 2: source-class fidelity + agent linkage from the transactions mart."""
+  """Source-class fidelity + agent linkage from the transactions mart."""
 
   def _dbt_with_invoice(self) -> dict:
     """Invoice transaction with event_type / agent_external_id from header join."""
@@ -1648,7 +1647,7 @@ class TestCaptureWithEventTypeAndAgent:
           "description": "Consulting services",
           "source_id": "Invoice_42",
           "status": "posted",
-          # Phase 2 columns from the per-class header join in transactions.sql:
+          # Columns from the per-class header join in transactions.sql:
           "event_type": "invoice_issued",
           "event_category": "sales",
           "agent_external_id": "qb_cust_1",
@@ -1741,7 +1740,7 @@ class TestCaptureWithEventTypeAndAgent:
     from robosystems.operations.extensions.loader import OLTPLoader
 
     dbt = self._dbt_with_invoice()
-    # Strip Phase 2 columns
+    # Strip the event_type / agent columns
     dbt["transactions"][0].pop("event_type", None)
     dbt["transactions"][0].pop("event_category", None)
     dbt["transactions"][0].pop("agent_external_id", None)

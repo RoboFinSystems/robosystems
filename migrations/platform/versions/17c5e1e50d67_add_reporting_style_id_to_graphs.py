@@ -1,10 +1,10 @@
 """add reporting_style_id to graphs
 
-Phase 1 of roadmap §3.2: every entity graph picks a Reporting Style
-at provision. The value is a Structure id in the per-tenant extensions
-schema (the same deterministic library UUID lives in every tenant's
-``structures`` table); the renderer picker reads this column to resolve
-which Network fills each statement-type slot.
+Every entity graph picks a Reporting Style at provision. The value is a
+Structure id in the per-tenant extensions schema (the same deterministic
+library UUID lives in every tenant's ``structures`` table); the renderer
+picker reads this column to resolve which Network fills each
+statement-type slot.
 
 NOT NULL with a server default so the column applies cleanly to any
 existing rows (Postgres uses the default to fill them before enforcing

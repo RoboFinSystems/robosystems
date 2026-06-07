@@ -103,8 +103,8 @@ class TestBindVariables:
 
   def test_structure_binding_queries_facts_table_once(self) -> None:
     """Without a pinned fact_set_id the engine queries facts by
-    structure_id only — post §3.5 every fact has structure_id stamped,
-    so no report-id fallback is needed."""
+    structure_id only — every fact has structure_id stamped, so no
+    report-id fallback is needed."""
     from robosystems.operations.information_block.rules.engine import _bind_variables
 
     session = MagicMock()

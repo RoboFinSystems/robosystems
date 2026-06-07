@@ -1,22 +1,22 @@
-"""Add events.payload_drift + elements UPSERT unique key (Wave 1).
+"""Add events.payload_drift + elements UPSERT unique key.
 
-Wave 1 re-sync fidelity per `quickbooks-adapter.md` §4.6.0 — closes the
-documented-spec-vs-actual-code gaps verified against real prod data on
+Re-sync fidelity for the QuickBooks adapter — closes the gaps between
+documented behavior and actual code, verified against real prod data on
 2026-05-18:
 
-- **G3** — `idx_elements_upsert_key`: partial UNIQUE on
+- `idx_elements_upsert_key`: partial UNIQUE on
   `(external_source, connection_id, external_id)` where both fields
   are non-null. Defense-in-depth for the loader's lookup-then-update
-  path (W4); preserves `elem_*` ULIDs across syncs so downstream
+  path; preserves `elem_*` ULIDs across syncs so downstream
   Associations and IB Fact references hold their FK targets stable.
   Closes the rare duplicate-insert race between concurrent syncs that
-  the per-connection sync lock (Phase 3 B7) will close fully.
+  the per-connection sync lock will close fully.
 
-- **G4** — `events.payload_drift`: boolean flag, default false. Set
+- `events.payload_drift`: boolean flag, default false. Set
   true when an adapter re-sync surfaces a payload diff against a
   `committed`/`fulfilled` event. Drifted payload stashes at
   `metadata_['drift_payload']`; the live payload stays unchanged
-  (handler-approved entries are immutable to re-sync per §2.5).
+  (handler-approved entries are immutable to re-sync).
 
 - `idx_events_payload_drift`: partial index for the reconciliation
   queue read path. Most events carry `drift=false` at all times so the
@@ -53,7 +53,7 @@ depends_on = None
 
 def _add_in_tenant(conn, schema: str) -> None:
   t = TenantOps(conn, schema)
-  # G4 — payload_drift column + read-path index
+  # payload_drift column + read-path index
   t.add_column(
     "events",
     "payload_drift",
@@ -67,7 +67,7 @@ def _add_in_tenant(conn, schema: str) -> None:
     ["payload_drift"],
     where="payload_drift = true",
   )
-  # G3 — Element UPSERT key
+  # Element UPSERT key
   t.create_index(
     f"idx_{schema}_elements_upsert_key",
     "elements",

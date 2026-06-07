@@ -403,13 +403,13 @@ class TestStaleSyncAudit:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# §3.8 — Auto-run rules on close
+# Auto-run rules on close
 # ────────────────────────────────────────────────────────────────────────────
 
 
 class TestCloseAutoRunsRules:
   """Verify the close service evaluates rules for schedules with facts in
-  the closing period (§3.8 rule-engine auto-run)."""
+  the closing period (rule-engine auto-run)."""
 
   def _session_with_schedules_and_rule_results(
     self, fp, schedule_ids: list[str], rule_results_per_struct: dict
@@ -421,7 +421,7 @@ class TestCloseAutoRunsRules:
     session = _mock_session_with_fp(fp)
 
     # Override session.execute to return the BS row first, then the
-    # schedule id list for the new §3.8 query.
+    # schedule id list for the rule-engine auto-run query.
     bs_row = MagicMock()
     bs_row.total_debit = 0
     bs_row.total_credit = 0
@@ -532,9 +532,8 @@ class TestCloseAutoRunsRules:
 
 
 class TestClosePrePublishWriteback:
-  """Phase 4 §4.2 — `_publish_drafts_to_qb` runs between BS pre-flight
-  and draft→posted. QB rejections raise `WritebackFailed` and roll
-  back the entire close."""
+  """`_publish_drafts_to_qb` runs between BS pre-flight and draft→posted.
+  QB rejections raise `WritebackFailed` and roll back the entire close."""
 
   def test_no_qb_authoritative_connection_skips_pre_publish(self):
     """Graph has no QB connection in qb_authoritative mode → no work

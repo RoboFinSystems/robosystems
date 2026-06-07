@@ -99,11 +99,11 @@ class TestSyncConnection:
 
   @pytest.fixture(autouse=True)
   def _bypass_sync_lock(self):
-    """Phase 3 B7 — the sync endpoint acquires a `DistributedLock`
-    against the real Valkey LOCKS database. Unit tests run sequentially
-    against shared Valkey state, so the first test's lock for
-    `conn_test456` would 409 every subsequent test for the same
-    connection_id (TTL is 30 min). Patch the lock to always acquire.
+    """The sync endpoint acquires a `DistributedLock` against the real
+    Valkey LOCKS database. Unit tests run sequentially against shared
+    Valkey state, so the first test's lock for `conn_test456` would 409
+    every subsequent test for the same connection_id (TTL is 30 min).
+    Patch the lock to always acquire.
 
     Tests that specifically cover the 409 contention path mock this
     differently per-test.
@@ -460,7 +460,7 @@ class TestSyncConnection:
     # The autouse `_bypass_sync_lock` fixture stamps a mock-acquired
     # lock_id into `effective_options` as `sync_lock_id`. Assert on
     # the subset of keys the test cares about, then verify the lock id
-    # was passed through (Phase 3 B7 release-on-completion plumbing).
+    # was passed through (release-on-completion plumbing).
     sync_mock.assert_awaited_once()
     call_args = sync_mock.await_args
     assert call_args.args[0] == "quickbooks"
@@ -512,10 +512,10 @@ class TestSyncConnection:
         cache=_make_mock_cache(),
       )
 
-    # Phase 3 B7: even with no caller-supplied sync_options, the
-    # endpoint plumbs a `sync_lock_id` through to the registry so
-    # qb_load can release the B7 lock on completion. Assert the
-    # options dict contains exactly that one key.
+    # Even with no caller-supplied sync_options, the endpoint plumbs a
+    # `sync_lock_id` through to the registry so qb_load can release the
+    # lock on completion. Assert the options dict contains exactly that
+    # one key.
     sync_mock.assert_awaited_once()
     call_args = sync_mock.await_args
     assert call_args.args[0] == "quickbooks"

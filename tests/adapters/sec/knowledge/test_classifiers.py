@@ -1,7 +1,7 @@
 """Tests for disclosure-seeded statement classification.
 
-Tests DISCLOSURE_TO_STATEMENT mapping and the Phase 2 BFS from
-disclosure root elements in StatementClassifier.
+Tests DISCLOSURE_TO_STATEMENT mapping and the BFS from disclosure root
+elements in StatementClassifier.
 """
 
 import networkit as nk

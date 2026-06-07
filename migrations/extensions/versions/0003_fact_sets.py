@@ -1,6 +1,6 @@
-"""Phase zeta — fact_sets table.
+"""fact_sets table.
 
-Data-model landing for the FactSet concept (spec §5.3). A FactSet is a
+Data-model landing for the FactSet concept. A FactSet is a
 period-specific instantiation of a Structure — one row groups the facts
 produced for that Structure in that period. Replaces the implicit
 ``report_id``-carries-period / free-string ``fact_set_id`` split with a
@@ -11,7 +11,7 @@ This migration ships only the table. Backfill of existing rows, the
 on write, and the eventual ``report_id`` retirement are expand-pass
 work. Indexes on ``structure_id``, ``period_start/end``, ``entity_id``,
 and ``report_id`` match the query patterns the envelope builder will use
-once the Phase ζ dimensional reads land.
+once the dimensional reads land.
 
 Revision ID: 0003
 Revises: 0002

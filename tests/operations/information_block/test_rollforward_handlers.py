@@ -1,4 +1,4 @@
-"""Rollforward handler tests — Phase 2 MVP authoring surface.
+"""Rollforward handler tests — authoring surface.
 
 Exercises create / update / delete / build_envelope for the
 ``rollforward`` block-type. Filter evaluation is tested separately in
@@ -231,10 +231,10 @@ class TestBuildEnvelope:
       result = rollforward_handlers.build_envelope(session, "struct_missing")
     assert result is None
 
-  def test_envelope_has_empty_facts_phase2_mvp(self) -> None:
-    """Phase 2 MVP doesn't persist rollforward facts; build_envelope
-    returns the typed mechanics + empty facts list. Filter evaluation
-    is performed directly by callers (the reconciliation harness)."""
+  def test_envelope_has_empty_facts(self) -> None:
+    """build_envelope does not persist rollforward facts; it returns the
+    typed mechanics + empty facts list. Filter evaluation is performed
+    directly by callers (the reconciliation harness)."""
     structure = MagicMock()
     structure.id = "struct_rf_01"
     structure.name = "Cash Rollforward"

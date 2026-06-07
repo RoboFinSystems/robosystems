@@ -124,10 +124,9 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   "source IN ("
   "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
   "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-  # rs-gaap framework extension packages (Phase C). Each declares
-  # a sibling namespace anchored to the rs-gaap framework. See
-  # migration 0007 for the same widen applied to already-deployed
-  # tenant schemas.
+  # rs-gaap framework extension packages. Each declares a sibling
+  # namespace anchored to the rs-gaap framework. See migration 0007
+  # for the same widen applied to already-deployed tenant schemas.
   "'disclosures', 'checklist', 'styles'"
   ")"
 )
@@ -158,11 +157,11 @@ _NARROW_ELEMENT_SOURCE_CHECK = (
   "'quickbooks', 'xero', 'plaid', 'native', 'import'"
   ")"
 )
-# Structure.block_type widens to admit the Phase g.1 block types
-# (rollforward, reconciliation, policy) required as admissible CHECK
-# values for Phase d (typed artifact_mechanics + rules) and Phase eta
-# (metric block type). Folded into 0002 rather than shipped as a
-# standalone migration since 0002 is still unreleased.
+# Structure.block_type widens to admit the working-paper / schedule block
+# types (rollforward, reconciliation, policy) required as admissible CHECK
+# values for typed artifact_mechanics + rules and the metric block type.
+# Folded into 0002 rather than shipped as a standalone migration since 0002
+# is still unreleased.
 _WIDENED_BLOCK_TYPE_CHECK = (
   "block_type IN ("
   # Renderable financial-statement presentations
@@ -190,7 +189,7 @@ _NARROW_BLOCK_TYPE_CHECK = (
   ")"
 )
 
-# Phase d.2 — Seattle Method rule taxonomy: 8 VerificationRule categories
+# Seattle Method rule taxonomy: 8 VerificationRule categories
 # x 10 BusinessRulePattern mechanisms. These match the CHECK constraints on
 # public.rules.rule_category / rule_pattern and the RULE_CATEGORY_VALUES /
 # RULE_PATTERN_VALUES frozensets in loader.py.
@@ -226,12 +225,10 @@ _RULE_PATTERN_KIND_XOR_CHECK = (
   "OR (rule_pattern IS NULL AND rule_check_kind IS NOT NULL)"
 )
 # Concept Arrangement Pattern (CAP) — 8 canonical + 5 cm.xsd
-# text-block/detail specializations + 2 pseudo (15 total) per
-# information-block.md §3.2.1. Charlie encodes text-block level as the
-# CAP itself (Blocks PDF §1.9.1; PROOF disclosure-mechanics rules
-# point disclosures at cm_LevelNTextBlock via
-# disclosure-hasConceptArrangementPattern). NULL allowed for block
-# types that don't yet declare a default.
+# text-block/detail specializations + 2 pseudo (15 total). Text-block
+# level is encoded as the CAP itself: disclosures point at
+# cm_LevelNTextBlock via disclosure-hasConceptArrangementPattern. NULL
+# allowed for block types that don't yet declare a default.
 _CONCEPT_ARRANGEMENT_CHECK = (
   "concept_arrangement IS NULL OR concept_arrangement IN ("
   "'set', 'roll_up', 'roll_forward', 'roll_forward_info', "
@@ -241,9 +238,8 @@ _CONCEPT_ARRANGEMENT_CHECK = (
   "'grid', 'compound_fact'"
   ")"
 )
-# Member Arrangement Pattern (MAP) — 5 canonical per
-# information-block.md §3.2.2. NULL allowed for non-hypercube block
-# types.
+# Member Arrangement Pattern (MAP) — 5 canonical. NULL allowed for
+# non-hypercube block types.
 _MEMBER_ARRANGEMENT_CHECK = (
   "member_arrangement IS NULL OR member_arrangement IN ("
   "'is_a', 'whole_part', 'nested_whole_part', "
@@ -434,11 +430,10 @@ def _widen_tenant_checks(conn, schema: str) -> None:
 def _backfill_reporting_standard(conn, schema: str) -> None:
   """Rename library-locked ``reporting`` rows to ``reporting_standard``.
 
-  Part of the Phase 2 Taxonomy Block rename. Library-origin reporting
-  taxonomies (``is_locked=true``) carry the new ``reporting_standard``
-  type; tenant rows created under the old ``reporting`` name (none exist
-  today but the filter is defensive) stay as-is until the narrowing step
-  in a future phase."""
+  Library-origin reporting taxonomies (``is_locked=true``) carry the new
+  ``reporting_standard`` type; tenant rows created under the old
+  ``reporting`` name (none exist today but the filter is defensive) stay
+  as-is until a later narrowing step."""
   conn.execute(
     text(
       f"UPDATE {schema}.taxonomies "
@@ -502,7 +497,7 @@ def _add_substitution_group_column(conn, schema: str) -> None:
 
 
 def _add_phase_theta_columns_to_tenant(conn, schema: str) -> None:
-  """Add Phase theta canonical-concept columns to a tenant's elements table.
+  """Add canonical-concept columns to a tenant's elements table.
 
   Three additive columns the MappingAgent + classifier use for
   cross-tenant concept unification. Nullable (or empty-list-defaulted)
@@ -529,7 +524,7 @@ def _add_phase_theta_columns_to_tenant(conn, schema: str) -> None:
 
 
 def _add_phase_d_columns_to_tenant(conn, schema: str) -> None:
-  """Add Phase d typed-mechanics columns to a tenant's structures table.
+  """Add typed-mechanics columns to a tenant's structures table.
 
   Mirror of the public-schema DDL earlier in the upgrade. Nullable so
   existing tenant Schedule rows (which only carry ``metadata_`` today)
@@ -572,7 +567,7 @@ def _backfill_tenant_schedule_mechanics(conn, schema: str) -> None:
   """Lift Schedule mechanics out of ``metadata_`` into typed columns.
 
   Schedule rows in tenant schemas carry ``entry_template`` + ``schedule_metadata``
-  inside the ``metadata_`` JSONB blob today. Phase d moves them into the
+  inside the ``metadata_`` JSONB blob today. This moves them into the
   typed ``artifact_mechanics`` column (discriminated-union-arm shape keyed
   on ``kind='closing_entry_generator'``) and stamps
   ``concept_arrangement='roll_forward'`` to match the registry default.
@@ -606,9 +601,8 @@ def _backfill_library_into_tenant(conn, schema: str) -> None:
   Order is load-bearing: schema changes first, then copy, then triggers.
   """
   _widen_tenant_checks(conn, schema)
-  # Phase 2 Taxonomy Block rename: flip any pre-existing locked
-  # ``reporting`` rows in the tenant schema to ``reporting_standard``
-  # before the library copy unions new rows in.
+  # Flip any pre-existing locked ``reporting`` rows in the tenant schema
+  # to ``reporting_standard`` before the library copy unions new rows in.
   _backfill_reporting_standard(conn, schema)
   _drop_old_element_columns(conn, schema)
   _add_substitution_group_column(conn, schema)
@@ -778,7 +772,7 @@ def _create_tenant_library_tables(conn, schema: str) -> None:
     )
   )
 
-  # Phase d.2 — verification rules. Polymorphic target (structure/element/
+  # Verification rules. Polymorphic target (structure/element/
   # association) enforced via CHECK; FKs point at the same-schema parent
   # tables so tenant rows can't reference public library ids.
   conn.execute(
@@ -913,12 +907,12 @@ def upgrade() -> None:
   )
 
   # ──────────────────────────────────────────────────────────────────────
-  # 2b. Phase theta — canonical-concept columns for cross-tenant unification.
+  # 2b. Canonical-concept columns for cross-tenant unification.
   # ──────────────────────────────────────────────────────────────────────
   # agent_id groups elements that refer to the same cross-tenant concept;
   # aliases collects alternate spellings / qname variants; embedding
   # stores a sentence embedding the MappingAgent + classifier use for
-  # similarity lookups. Seeding happens in a follow-up — the blitz only
+  # similarity lookups. Seeding happens in a follow-up — this only
   # lands the columns.
   op.add_column("elements", sa.Column("agent_id", sa.String(), nullable=True))
   op.add_column(
@@ -993,21 +987,21 @@ def upgrade() -> None:
   op.create_check_constraint(
     "check_taxonomy_type", "taxonomies", _WIDENED_TAXONOMY_TYPE_CHECK
   )
-  # Phase 2 Taxonomy Block rename: 0001-seeded library reporting rows
-  # carry ``taxonomy_type='reporting'``; flip them to the new
-  # ``reporting_standard`` value so subsequent tenant code (Block writer,
-  # library browser) sees the canonical form. The widened CHECK still
-  # admits ``'reporting'`` transitionally so this UPDATE validates.
+  # 0001-seeded library reporting rows carry ``taxonomy_type='reporting'``;
+  # flip them to the new ``reporting_standard`` value so subsequent tenant
+  # code (Block writer, library browser) sees the canonical form. The
+  # widened CHECK still admits ``'reporting'`` transitionally so this
+  # UPDATE validates.
   _backfill_reporting_standard(op.get_bind(), "public")
-  # Phase g.1: widen structures.block_type to admit rollforward,
-  # reconciliation, policy. Pure vocabulary expansion — no data change.
+  # Widen structures.block_type to admit rollforward, reconciliation,
+  # policy. Pure vocabulary expansion — no data change.
   op.drop_constraint("check_block_type", "structures", type_="check")
   op.create_check_constraint(
     "check_block_type", "structures", _WIDENED_BLOCK_TYPE_CHECK
   )
 
-  # Phase d: typed artifact_mechanics + Information-Model axis columns
-  # on public.structures. Folded into 0002 because 0002 is still
+  # Typed artifact_mechanics + Information-Model axis columns on
+  # public.structures. Folded into 0002 because 0002 is still
   # unreleased; shipping as a standalone migration would force a second
   # tenant-schema round-trip. Nullable on add so library loaders and
   # existing rows (none in public yet at this point in the upgrade, but
@@ -1224,7 +1218,7 @@ def upgrade() -> None:
   )
 
   # ──────────────────────────────────────────────────────────────────────
-  # 6b. Phase d.2 — verification rules table.
+  # 6b. Verification rules table.
   # ──────────────────────────────────────────────────────────────────────
   # Polymorphic target: nullable FKs to structures / elements /
   # associations, with a CHECK that exactly one (or none, for global
@@ -1315,9 +1309,9 @@ def upgrade() -> None:
   # ──────────────────────────────────────────────────────────────────────
   # 7. Load JSON-LD seeds — two-pass to let arcs cross package boundaries.
   # ──────────────────────────────────────────────────────────────────────
-  # Phase 1 writes every package's elements + trait vocabulary;
-  # phase 2 writes every package's associations + trait/classification
-  # assignments. Splitting the phases means an arc in one seed can
+  # Pass 1 writes every package's elements + trait vocabulary;
+  # pass 2 writes every package's associations + trait/classification
+  # assignments. Splitting the passes means an arc in one seed can
   # reference an element defined in ANY other seed regardless of the
   # SEED_FILES order — without the split, arcs targeting elements that
   # only a later seed defines are silently dropped.
@@ -1346,7 +1340,7 @@ def upgrade() -> None:
       _, counts = create_library_taxonomy_elements(session, package)
       session.flush()
       print(
-        f"    [phase 1] elements={counts['elements']} labels={counts['labels']} "
+        f"    [pass 1] elements={counts['elements']} labels={counts['labels']} "
         f"references={counts['references']} structures={counts['structures']} "
         f"traits={counts['traits']} classifications={counts['classifications']}"
       )
@@ -1355,7 +1349,7 @@ def upgrade() -> None:
       counts = create_library_arcs(session, package)
       session.flush()
       print(
-        f"  [phase 2] {package.name}: "
+        f"  [pass 2] {package.name}: "
         f"associations={counts['associations']} "
         f"(skipped={counts['associations_skipped']}) "
         f"trait_assignments={counts['trait_assignments']} "
@@ -1364,7 +1358,7 @@ def upgrade() -> None:
         f"(skipped={counts['classification_assignments_skipped']})"
       )
 
-    # Phase 3 — rules. Runs after phase 2 so association-targeted rules can
+    # Pass 3 — rules. Runs after pass 2 so association-targeted rules can
     # resolve (though none of the seeded fac-rules use that target_kind yet).
     for package in loaded_packages:
       if not package.rules:
@@ -1372,32 +1366,32 @@ def upgrade() -> None:
       counts = create_library_rules(session, package)
       session.flush()
       print(
-        f"  [phase 3] {package.name}: "
+        f"  [pass 3] {package.name}: "
         f"rules={counts['rules']} (skipped={counts['rules_skipped']})"
       )
 
-    # Phase 4 — prune the empty catch-all default structures. Arc-routing now
+    # Pass 4 — prune the empty catch-all default structures. Arc-routing now
     # lands every arc on a named structure, leaving each package's seeded
     # "default structure" fallback empty; drop them here (after rules load, so
     # a rule-targeted default is never removed) so they aren't copied into
     # every tenant library.
     pruned = prune_empty_default_structures(session)
     session.flush()
-    print(f"  [phase 4] pruned {pruned} empty default structure(s)")
+    print(f"  [pass 4] pruned {pruned} empty default structure(s)")
   finally:
     session.close()
 
-  # Phase d backfill on public.structures: set concept/member_arrangement
+  # Backfill on public.structures: set concept/member_arrangement
   # + empty statement_renderer mechanics for the four library-seeded
   # statement block types. Has to run BEFORE copy_library_into_tenant so
   # the tenant copy picks up populated values rather than NULL.
   #
   # ``concept_arrangement`` and ``member_arrangement`` are only set when
   # NULL — the seed loader (``loader._extract_structures``) already
-  # writes Charlie's Concept Arrangement Pattern (``arithmetic`` /
+  # writes the Concept Arrangement Pattern (``arithmetic`` /
   # ``roll_forward`` / etc.) explicitly per Disclosure Structure when the
   # seed declares ``conceptArrangementPattern``. This backfill is the
-  # legacy default for pre-Stage-2 seeds that don't declare a CAP.
+  # legacy default for older seeds that don't declare a CAP.
   conn.execute(
     text(
       """
@@ -1429,13 +1423,13 @@ def upgrade() -> None:
 def downgrade() -> None:
   conn = op.get_bind()
 
-  # Tenant teardown: drop triggers, restore narrow CHECKs, drop Phase d
-  # columns, restore the old classification columns (best-effort —
-  # values can't be recovered losslessly once the junction has been
-  # used, so we leave them NULL).
+  # Tenant teardown: drop triggers, restore narrow CHECKs, drop the
+  # typed-mechanics columns, restore the old classification columns
+  # (best-effort — values can't be recovered losslessly once the junction
+  # has been used, so we leave them NULL).
   def _teardown_tenant(conn, schema: str) -> None:
     _drop_triggers_for_tenant(conn, schema)
-    # Reverse the Phase 2 Taxonomy Block rename before narrowing the
+    # Reverse the reporting_standard rename before narrowing the
     # CHECK so the locked library rows pass the 0001-era constraint.
     _reverse_backfill_reporting(conn, schema)
     _restore_narrow_tenant_checks(conn, schema)
@@ -1489,7 +1483,7 @@ def downgrade() -> None:
   )
   conn.execute(text("DELETE FROM public.taxonomies WHERE is_shared = true"))
 
-  # Drop rules table (Phase d.2). IF EXISTS on the indexes because a
+  # Drop rules table. IF EXISTS on the indexes because a
   # mid-transition downgrade from a partial run might not have created them.
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_category"))
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_target_taxonomy"))
@@ -1499,7 +1493,7 @@ def downgrade() -> None:
   conn.execute(text("DROP INDEX IF EXISTS public.idx_rules_taxonomy"))
   conn.execute(text("DROP TABLE IF EXISTS public.rules"))
 
-  # Drop association_classifications junction (Phase epsilon).
+  # Drop association_classifications junction.
   op.drop_index(
     "idx_association_classifications_primary",
     table_name="association_classifications",
@@ -1544,7 +1538,7 @@ def downgrade() -> None:
   op.create_check_constraint(
     "check_element_source", "elements", _NARROW_ELEMENT_SOURCE_CHECK
   )
-  # Reverse the Phase 2 Taxonomy Block rename on public before narrowing
+  # Reverse the reporting_standard rename on public before narrowing
   # the CHECK so the locked library rows pass the 0001-era constraint.
   _reverse_backfill_reporting(op.get_bind(), "public")
   op.drop_constraint("check_taxonomy_type", "taxonomies", type_="check")
@@ -1554,17 +1548,16 @@ def downgrade() -> None:
   op.drop_constraint("check_block_type", "structures", type_="check")
   op.create_check_constraint("check_block_type", "structures", _NARROW_BLOCK_TYPE_CHECK)
 
-  # Drop Phase d CAP/MAP CHECKs before dropping the columns they
-  # constrain.
+  # Drop the CAP/MAP CHECKs before dropping the columns they constrain.
   for check in ("check_member_arrangement", "check_concept_arrangement"):
     conn.execute(
       text(f"ALTER TABLE public.structures DROP CONSTRAINT IF EXISTS {check}")
     )
 
-  # Drop Phase d columns from public.structures (tenant-schema columns
-  # were dropped above in _teardown_tenant). IF EXISTS makes this safe
-  # when downgrading from a mid-transition state where an earlier
-  # migration run installed 0002 before the Phase δ columns existed.
+  # Drop the typed-mechanics columns from public.structures (tenant-schema
+  # columns were dropped above in _teardown_tenant). IF EXISTS makes this
+  # safe when downgrading from a mid-transition state where an earlier
+  # migration run installed 0002 before those columns existed.
   for col in (
     "template_id",
     "renderer_note",
@@ -1574,7 +1567,7 @@ def downgrade() -> None:
   ):
     conn.execute(text(f"ALTER TABLE public.structures DROP COLUMN IF EXISTS {col}"))
 
-  # Drop Phase theta canonical-concept columns.
+  # Drop the canonical-concept columns.
   op.drop_index(
     "idx_elements_agent_id",
     table_name="elements",

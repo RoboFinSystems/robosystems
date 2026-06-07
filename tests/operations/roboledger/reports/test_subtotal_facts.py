@@ -2,8 +2,8 @@
 
 The function walks the rs-gaap-calculations DAG bottom-up over the
 already-emitted leaf facts and emits one fact per subtotal, so verification
-rules scoped to a subtotal can bind (info-block §6.1). The session is mocked
-so the rollup math is tested without a database.
+rules scoped to a subtotal can bind. The session is mocked so the rollup
+math is tested without a database.
 """
 
 from __future__ import annotations

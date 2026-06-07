@@ -6,7 +6,7 @@ and `frameworks/rs-gaap/bridges/` (fac-to-rs-gaap mapping).
 They exercise the serializer/loader round-trip and the TaxonomyPackage
 shape, but not the extractor (which needs a live ModelXbrl).
 
-Extractor unit tests are Phase 1 work — they require either a mocked
+Extractor unit tests are not covered here — they require either a mocked
 Arelle model or a lightweight fixture package.
 """
 
@@ -100,7 +100,7 @@ class TestFacRoundTrip:
 class TestFacMappingRoundTrip:
   """Equivalence arcs live in the `fac-to-rs-gaap/v1` mapping seed, not in
   the FAC concept seed — the architecture deliberately separates concept
-  definitions from cross-taxonomy bridges (see `taxonomy-library.md`).
+  definitions from cross-taxonomy bridges.
   """
 
   def test_has_equivalence_arcs(self) -> None:

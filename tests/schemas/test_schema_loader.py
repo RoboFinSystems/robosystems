@@ -235,13 +235,13 @@ class TestContextAwareSchemaLoader:
 
 
 class TestREAPrimitives:
-  """Phase 1 ontology alignment: Agent + Event in base, EVENT_TRIGGERS_TRANSACTION
+  """REA primitives: Agent + Event in base, EVENT_TRIGGERS_TRANSACTION
   bridge in roboledger TRANSACTION layer.
 
-  Validates that the spec §4.5 placement decision actually holds in the loader:
-  REA primitives reach every consumer (including SEC) as base nodes, while the
-  McCarthy bridge edge is correctly scoped to roboledger TRANSACTION_RELATIONSHIPS
-  and absent from SEC.
+  Validates that the placement holds in the loader: REA primitives reach
+  every consumer (including SEC) as base nodes, while the McCarthy bridge
+  edge is correctly scoped to roboledger TRANSACTION_RELATIONSHIPS and
+  absent from SEC.
   """
 
   def test_agent_and_event_in_default_loader(self):
@@ -256,7 +256,7 @@ class TestREAPrimitives:
 
   def test_agent_and_event_in_sec_repository(self):
     """Base nodes flow through to SEC. Tables stay empty (no rows
-    loaded), but the schema includes them per spec §4.5 Option A."""
+    loaded), but the schema includes them."""
     loader = ContextAwareSchemaLoader(extension="roboledger", context="sec_repository")
     assert "Agent" in loader.nodes
     assert "Event" in loader.nodes
@@ -295,9 +295,9 @@ class TestREAPrimitives:
     assert "EVENT_TRIGGERS_TRANSACTION" not in loader.relationships
 
   def test_fiscal_nodes_not_in_graph_layer(self):
-    """FiscalCalendar / FiscalPeriod stay OLTP-only per the §2.1 test
-    (operational state, not curated business truth). Guards against
-    accidental re-introduction during future graph work."""
+    """FiscalCalendar / FiscalPeriod stay OLTP-only (operational state,
+    not curated business truth). Guards against accidental
+    re-introduction during future graph work."""
     loader = get_contextual_schema_loader("application", "roboledger")
     assert "FiscalCalendar" not in loader.nodes
     assert "FiscalPeriod" not in loader.nodes

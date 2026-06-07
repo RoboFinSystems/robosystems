@@ -109,14 +109,13 @@ def test_asset_disposed_metadata_rejects_negative_proceeds() -> None:
 
 
 def test_registry_has_expected_handlers() -> None:
-  """Event types dispatched by the Python registry. Phase 2 added QB
+  """Event types dispatched by the Python registry. The set includes QB
   source-class types (invoice_issued / bill_received / payment_received /
-  bill_paid / sales_receipt_recorded) and Phase 2.5 (§3.14 of roadmap)
-  added the 6 additional types that QB JournalReport surfaces when
-  Purchase / Deposit / Credit Card Credit / Inventory Adjustment rows
-  flow through. All share the journal_entry_recorded handler — the
-  on-approve GL shape is identical; the distinct keys let the inbox
-  filter by source class."""
+  bill_paid / sales_receipt_recorded) plus the 6 additional types that
+  QB JournalReport surfaces when Purchase / Deposit / Credit Card Credit /
+  Inventory Adjustment rows flow through. All share the
+  journal_entry_recorded handler — the on-approve GL shape is identical;
+  the distinct keys let the inbox filter by source class."""
   assert set(EVENT_BLOCK_PYTHON_REGISTRY.keys()) == {
     "asset_disposed",
     "schedule_created",

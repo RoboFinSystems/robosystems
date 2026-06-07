@@ -346,9 +346,9 @@ class TestOAuthCallback:
         f"{OAUTH_MODULE}.ConnectionService.update",
         new_callable=AsyncMock,
       ),
-      # Phase 3 B6: the OAuth callback now checks for a soft-deleted
-      # prior connection matching the returned realm. Happy path: no
-      # prior match, proceed with the freshly-created connection_id.
+      # The OAuth callback checks for a soft-deleted prior connection
+      # matching the returned realm. Happy path: no prior match, proceed
+      # with the freshly-created connection_id.
       patch(
         "robosystems.models.core.connection.connection.Connection."
         "find_soft_deleted_for_realm",
@@ -381,9 +381,9 @@ class TestOAuthCallback:
   @pytest.mark.unit
   @pytest.mark.asyncio
   async def test_oauth_callback_revives_soft_deleted_connection(self):
-    """Phase 3 B6: re-OAuthing to a realm that has a soft-deleted prior
-    connection revives the prior in place rather than minting a new
-    connection_id. Preserves the tenant-side events/agents/elements."""
+    """Re-OAuthing to a realm that has a soft-deleted prior connection
+    revives the prior in place rather than minting a new connection_id.
+    Preserves the tenant-side events/agents/elements."""
     mock_user = _make_mock_user()
     mock_db = MagicMock()
     request = _make_oauth_callback_request()

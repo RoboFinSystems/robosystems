@@ -5,9 +5,9 @@ MappingOperator falls back to when AI refinement can't pick a specific
 rs-gaap concept. If a fallback target is NOT a child in the rs-gaap
 calculation DAG (or is itself a rollup parent), a CoA account routed
 there silently drops out of its subtotal at render — the exact failure
-that motivated wiring the revenue/COGS/OpEx ``Other`` leaves
-(info-block §3.7 / mapping leaves-only model). This test pins the
-invariant so the constant and the calc package can't drift apart.
+that motivated wiring the revenue/COGS/OpEx ``Other`` leaves under the
+leaves-only mapping model. This test pins the invariant so the constant
+and the calc package can't drift apart.
 """
 
 from __future__ import annotations

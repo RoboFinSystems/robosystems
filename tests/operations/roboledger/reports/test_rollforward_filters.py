@@ -1,10 +1,10 @@
-"""Tests for the rollforward filter evaluation engine (Phase 2 MVP).
+"""Tests for the rollforward filter evaluation engine.
 
 Covers :func:`evaluate_attribution_filters` aggregation, residual
 handling under each validation_mode, and audit ``event_ids[]``
 provenance. Mocks at the ``session.execute`` boundary — the engine is
 SQL-driven, and re-running the SQL through a live test DB would
-require fixtures that the rest of the Phase 2 MVP doesn't need.
+require fixtures this evaluation path doesn't otherwise need.
 """
 
 from __future__ import annotations

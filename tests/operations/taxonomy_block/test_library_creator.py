@@ -1,13 +1,14 @@
-"""Tests for the library_creator operations module (Phase 2.7).
+"""Tests for the library_creator operations module.
 
 All tests use MagicMock sessions — the module's three functions translate
 TaxonomyPackage → session.execute(pg_insert(...)) calls. We verify:
   - Deterministic ID helpers produce stable, unique values.
-  - Phase 1 writes the right number of rows for a given package.
+  - The first pass writes the right number of rows for a given package.
   - Elements with disallowed sources are skipped.
-  - Phase 2 DB-resolves qnames (via session.execute scalar) and skips
-    unresolved arcs.
-  - Phase 3 resolves polymorphic rule targets and skips unsupported kinds.
+  - The second pass DB-resolves qnames (via session.execute scalar) and
+    skips unresolved arcs.
+  - The third pass resolves polymorphic rule targets and skips
+    unsupported kinds.
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ class TestIdHelpers:
     )
 
   def test_element_id_version_stable(self) -> None:
-    # C1 — a concept keeps one id across framework versions, so tenant
+    # A concept keeps one id across framework versions, so tenant
     # CoA→rs-gaap mappings survive a version bump. The trailing /vN/ segment
     # must not participate in the derived id.
     v1 = _element_id("https://robosystems.ai/taxonomy/rs-gaap/v1/", "rs-gaap:Assets")
@@ -147,7 +148,7 @@ def _make_package(
   )
 
 
-# ── Phase 1 tests ─────────────────────────────────────────────────────────────
+# ── First-pass tests (write taxonomy + elements) ──────────────────────────────
 
 
 class TestCreateLibraryTaxonomyElements:
@@ -214,7 +215,7 @@ class TestCreateLibraryTaxonomyElements:
     assert counts["traits"] == 0
 
 
-# ── Phase 2 tests ─────────────────────────────────────────────────────────────
+# ── Second-pass tests (resolve qnames + write arcs) ───────────────────────────
 
 
 class TestCreateLibraryArcs:
@@ -259,7 +260,7 @@ class TestCreateLibraryArcs:
     assert counts["associations_skipped"] == 0
 
   def test_association_reseed_updates_value_columns(self) -> None:
-    # Gap B — re-seeding an existing arc must UPDATE its value columns in place
+    # Re-seeding an existing arc must UPDATE its value columns in place
     # (calc weight / presentation order), not silently skip on id conflict.
     from sqlalchemy.dialects import postgresql
 
@@ -312,7 +313,7 @@ class TestCreateLibraryArcs:
     assert counts["trait_assignments_skipped"] == 0
 
 
-# ── Phase 3 tests ─────────────────────────────────────────────────────────────
+# ── Third-pass tests (resolve rule targets + write rules) ─────────────────────
 
 
 class TestCreateLibraryRules:

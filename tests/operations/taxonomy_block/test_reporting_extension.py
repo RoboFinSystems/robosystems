@@ -75,7 +75,7 @@ def test_create_rejects_non_reporting_standard_parent() -> None:
 
 
 def test_update_rejects_missing_taxonomy() -> None:
-  """Phase 2.4: update is live; unknown taxonomy_id raises ValueError."""
+  """Update is live; unknown taxonomy_id raises ValueError."""
   session = MagicMock()
   session.get.return_value = None
   payload = UpdateTaxonomyBlockRequest(taxonomy_id="tx_1")
@@ -85,7 +85,7 @@ def test_update_rejects_missing_taxonomy() -> None:
 
 
 def test_delete_rejects_missing_taxonomy() -> None:
-  """Phase 2.4: delete is live; unknown taxonomy_id raises ValueError."""
+  """Delete is live; unknown taxonomy_id raises ValueError."""
   session = MagicMock()
   session.get.return_value = None
   payload = DeleteTaxonomyBlockRequest(taxonomy_id="tx_1", reason="cleanup")

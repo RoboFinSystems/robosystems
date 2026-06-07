@@ -6,7 +6,7 @@ assertions. These tests verify (a) the SQL compiles against a real
 Postgres dialect, (b) the candidate event-type sets are wired
 correctly, and (c) the response shape matches the Pydantic contract.
 Numerical correctness is validated end-to-end via the QB sandbox
-verification step (see roadmap §5.1 exit).
+verification step.
 """
 
 from __future__ import annotations

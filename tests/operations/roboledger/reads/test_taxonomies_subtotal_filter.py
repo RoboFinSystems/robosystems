@@ -258,7 +258,7 @@ def test_denylist_locks_canonical_rollups():
 
 
 # ---------------------------------------------------------------------------
-# Structure-aware rollup guard (info-block §3.7.2)
+# Structure-aware rollup guard
 #
 # The static denylist over-denies on thin Reporting Style structures: a
 # concept like rs-gaap:Revenues is a rollup in the full taxonomy but, on a

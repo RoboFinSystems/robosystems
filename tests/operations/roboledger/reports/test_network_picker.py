@@ -1,4 +1,4 @@
-"""Tests for the Reporting Style → Network picker (§3.2 Phase 1)."""
+"""Tests for the Reporting Style → Network picker."""
 
 from __future__ import annotations
 

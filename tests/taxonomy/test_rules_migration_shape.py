@@ -1,4 +1,4 @@
-"""Shape tests for Phase δ.2 rule plumbing across the migration surface.
+"""Shape tests for rule plumbing across the migration surface.
 
 Static checks — no DB round-trip. The extensions-DB migration harness
 lives in the dev loop (``just migrate-up extensions`` + CI dry runs);
@@ -98,7 +98,7 @@ class TestSeedFiles:
     assert ("rs-gaap-rules", "v1") in seeded_paths
 
   def test_phase_c_packages_pinned_in_framework_manifest(self) -> None:
-    """The four Phase C packages + bridge are declared in
+    """The four disclosure-layer packages + bridge are declared in
     rs-gaap@v1's manifest. ``is_required: false`` lets the
     framework resolve gracefully even if a deployment is missing
     them, but the manifest entries must be present."""
@@ -118,9 +118,9 @@ class TestSeedFiles:
 
 
 class TestPhaseCCheckWidens:
-  """Phase C added new namespace prefixes and a new association_type
-  that need to land in 0002's CHECK constants for fresh DBs (and 0007
-  for already-deployed tenant schemas).
+  """The disclosure-layer packages added new namespace prefixes and a new
+  association_type that need to land in 0002's CHECK constants for fresh
+  DBs (and 0007 for already-deployed tenant schemas).
 
   Drift here would surface as a CHECK violation on first INSERT — the
   most common authoring footgun when adding a new package."""

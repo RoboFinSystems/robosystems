@@ -1,22 +1,21 @@
-"""Add connections.deleted_at + write_policy (Phase 3 B6 + Phase 4 §4.2).
+"""Add connections.deleted_at + write_policy.
 
 Two cohesive additions to the `connections` table, consolidated into a
 single migration since they ship in the same branch and both shape the
-post-Wave-1 connection-lifecycle story:
+connection-lifecycle story:
 
-1. **`deleted_at`** (Phase 3 B6, `quickbooks-adapter.md` §4.6.2) —
-   nullable timestamp. When set, the row is hidden from default lookups
-   (`get_by_id`, `get_by_graph_and_provider`, `get_all_for_graph`,
-   `list_filtered`) and the user-facing API surface treats the
-   connection as gone. Replaces the old hard-delete path which orphaned
-   all connection_id-scoped tenant rows.
+1. **`deleted_at`** — nullable timestamp. When set, the row is hidden
+   from default lookups (`get_by_id`, `get_by_graph_and_provider`,
+   `get_all_for_graph`, `list_filtered`) and the user-facing API surface
+   treats the connection as gone. Replaces the old hard-delete path which
+   orphaned all connection_id-scoped tenant rows.
 
-2. **`idx_connections_soft_deleted_realm`** (Phase 3 B6 reuse-on-re-OAuth)
+2. **`idx_connections_soft_deleted_realm`** (reuse-on-re-OAuth)
    — partial index supporting the OAuth callback's reuse query: a
    re-OAuth to the same QB realm finds the prior soft-deleted row via
    `(graph_id, provider, realm_id)` and revives it in place.
 
-3. **`write_policy`** (Phase 4 §4.2) — per-connection authorization flag
+3. **`write_policy`** — per-connection authorization flag
    governing whether RoboSystems-originated events publish to the
    source-of-truth system. Replaces the loader's legacy
    `_SOURCE_AUTO_COMMITS` hardcode (`"quickbooks": True`) with a
@@ -52,7 +51,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-  # B6 — soft-delete primitives
+  # Soft-delete primitives
   op.add_column(
     "connections",
     sa.Column("deleted_at", sa.DateTime(), nullable=True),
@@ -65,7 +64,7 @@ def upgrade() -> None:
     postgresql_where="deleted_at IS NOT NULL",
   )
 
-  # Phase 4 §4.2 — write_policy authorization flag
+  # write_policy authorization flag
   op.add_column(
     "connections",
     sa.Column(

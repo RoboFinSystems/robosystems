@@ -2,10 +2,10 @@
 
 Pure data tests — parses the seed via
 :func:`robosystems.taxonomy.loader.load_taxonomy_package` and asserts the
-shape Package II.a ships: L1 cross-tree consistency identities harvested
+shape it ships: L1 cross-tree consistency identities harvested
 from Charlie Hoffman's PROOF and **rewritten to rs-gaap subtotal
 concepts**, element-scoped so they fire against any rendered statement
-that presents the subtotal (info-block §6.1). The prior FAC-keyed,
+that presents the subtotal. The prior FAC-keyed,
 structure-scoped 14-rule seed (which evaluated to ``skipped`` because our
 facts are rs-gaap-keyed) is superseded; rollup-shaped identities now live
 in ``rs-gaap-rollup-rules/v1`` (L2).
@@ -132,7 +132,7 @@ class TestRuleExpressionsBindVariables:
 
   def test_every_variable_qname_is_rs_gaap(self, rules: list[RuleSpec]) -> None:
     """Variables resolve against rs-gaap-keyed facts — the FAC->rs-gaap
-    rewrite is the whole point of the Package II.a harvest."""
+    rewrite is the whole point of the harvest."""
     for rule in rules:
       for variable in rule.rule_variables:
         assert variable.variable_qname.startswith("rs-gaap:"), (

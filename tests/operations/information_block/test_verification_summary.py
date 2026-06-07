@@ -1,4 +1,4 @@
-"""Unit tests for ``build_verification_summary`` — the §7.12 panel aggregate.
+"""Unit tests for ``build_verification_summary`` — the panel aggregate.
 
 The helper aggregates a block's verification results into overall counts
 plus a per-``rule_category`` breakdown, resolving each result's category by

@@ -141,9 +141,9 @@ class TestClosePeriodToolHappyPath:
 
   @pytest.mark.asyncio
   async def test_response_includes_rule_summary_and_evaluated_structure_ids(self):
-    """§3.8 — the MCP close-period response must carry the same rule
-    eval fields the REST ClosePeriodResponse exposes so agents can
-    report which schedule rules passed / failed after a close."""
+    """The MCP close-period response must carry the same rule eval
+    fields the REST ClosePeriodResponse exposes so agents can report
+    which schedule rules passed / failed after a close."""
     tool = ClosePeriodTool(_client(user_id="usr_abc"))
     response = _close_response(
       rule_summary={"pass": 3, "fail": 0, "error": 0, "skipped": 0},
@@ -246,8 +246,8 @@ class TestClosePeriodToolErrors:
 
   @pytest.mark.asyncio
   async def test_pending_obligations_enriches_detail(self):
-    """§3.12 follow-up: pending_obligations blocker surfaces count + sample
-    + earliest_pending_period on the close-period response."""
+    """pending_obligations blocker surfaces count + sample +
+    earliest_pending_period on the close-period response."""
     from robosystems.operations.roboledger.fiscal_calendar.service import (
       PendingObligationDetail,
     )
