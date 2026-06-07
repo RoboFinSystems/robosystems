@@ -180,8 +180,8 @@ def test_persist_report_facts_stamps_structure_and_fact_set() -> None:
   )
 
   added_facts = [c[0][0] for c in session.add.call_args_list]
-  # Unmapped fact is skipped — facts.fact_set_id is NOT NULL post §3.5 so
-  # a fact with no Network can't be persisted.
+  # Unmapped fact is skipped — facts.fact_set_id is NOT NULL so a fact
+  # with no Network can't be persisted.
   assert len(added_facts) == 2
 
   rev = next(f for f in added_facts if f.element_id == "elem_rev")

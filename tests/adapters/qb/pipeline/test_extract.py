@@ -23,7 +23,7 @@ _PATCH_WORK_DIR = (
 )
 _PATCH_WRITE = "robosystems.adapters.quickbooks.pipeline.extract.write_extract_parquet"
 
-# Phase 2 party + transaction-header flatteners — patched so the mock client's
+# Party + transaction-header flatteners — patched so the mock client's
 # auto-generated Mock() return values for get_customers / get_vendors etc. don't
 # break iteration in the flatten functions.
 _PATCH_FLATTEN_CUSTOMERS = (
@@ -56,7 +56,8 @@ _PATCH_FLATTEN_PURCHASES = (
 
 
 def _wire_phase2_client_methods(mock_client):
-  """Wire all Phase 2 client methods on a Mock so iteration doesn't break."""
+  """Wire the party + header client methods on a Mock so iteration
+  doesn't break."""
   mock_client.get_customers.return_value = []
   mock_client.get_vendors.return_value = []
   mock_client.get_employees.return_value = []
@@ -426,7 +427,7 @@ class TestQbExtractSuccess:
     MockQBClient.assert_called_once_with(
       realm_id="realm_abc",
       qb_credentials=credentials_dict,
-      # Phase 3 A1 — connection_id enables rotated-token persistence
+      # connection_id enables rotated-token persistence
       connection_id="conn_abc",
     )
 
@@ -699,7 +700,7 @@ class TestQbExtractMetadata:
 
 @pytest.mark.unit
 class TestMultiCurrencyGuard:
-  """Phase 3 A4 — non-USD realms fail loudly at extract time."""
+  """Non-USD realms fail loudly at extract time."""
 
   def test_assert_usd_only_passes_when_all_rows_are_usd(self):
     """Mixed empty + USD rows pass through silently."""

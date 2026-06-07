@@ -3,7 +3,8 @@
 These are unit tests with a stubbed session. The service's query shape is
 simple enough (`session.query(FiscalCalendar).filter(...).one_or_none()`,
 plus `session.add()` / `session.flush()`) that we can emulate it with a
-lightweight in-memory store. Full integration tests land with Phase 2.
+lightweight in-memory store. Full integration tests are not yet
+implemented.
 """
 
 from __future__ import annotations
@@ -386,7 +387,7 @@ class TestAdvanceClosedThrough:
     assert before <= calendar.last_close_at <= after
 
   def test_first_advance_rejects_non_earliest_open_period(self):
-    """F3: when closed_through is None, the first advance must match the
+    """When closed_through is None, the first advance must match the
     earliest open FiscalPeriod. Anything later strands the earlier months.
     """
     from unittest.mock import patch as _patch
@@ -398,7 +399,7 @@ class TestAdvanceClosedThrough:
         svc.advance_closed_through(session, GRAPH_ID, "2026-03", actor_id="u1")
 
   def test_first_advance_accepts_earliest_open_period(self):
-    """F3: first advance to the correct earliest open period is allowed."""
+    """First advance to the correct earliest open period is allowed."""
     from unittest.mock import patch as _patch
 
     svc, session = _service()
@@ -711,7 +712,7 @@ class TestCloseableGate:
 
   def test_first_close_must_be_earliest_open_period(self):
     """When closed_through is None, the gate must require the earliest open
-    FiscalPeriod, not accept any arbitrary period (F3).
+    FiscalPeriod, not accept any arbitrary period.
     """
     from unittest.mock import patch as _patch
 
@@ -757,13 +758,13 @@ class TestCloseableGate:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# closeable_gate — pending obligations gate (Stream 2.D)
+# closeable_gate — pending obligations gate
 # ────────────────────────────────────────────────────────────────────────────
 
 
 class TestPendingObligationsGate:
-  """Stream 2.D: a period cannot be closed while `pending` schedule_entry_due
-  events exist for any period that has occurred at or before the period_end.
+  """A period cannot be closed while `pending` schedule_entry_due events
+  exist for any period that has occurred at or before the period_end.
   """
 
   @staticmethod

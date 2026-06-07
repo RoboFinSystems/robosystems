@@ -1,8 +1,7 @@
 """Reporting Style — pick-one-at-provision composition layer.
 
-Phase 1 of roadmap §3.2: every entity graph picks a Reporting Style
-(Charlie Hoffman's term) at provision; the picker reads it deterministically
-to resolve which Network renders each statement type.
+Every entity graph picks a Reporting Style at provision; the picker reads
+it deterministically to resolve which Network renders each statement type.
 
 This migration is additive:
 

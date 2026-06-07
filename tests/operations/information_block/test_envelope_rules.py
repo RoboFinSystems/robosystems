@@ -1,4 +1,4 @@
-"""Tests for Phase δ.2 rule packing in the Information Block envelope.
+"""Tests for rule packing in the Information Block envelope.
 
 Exercises :func:`rule_to_lite` and :func:`load_rules_for_structure`
 from :mod:`robosystems.operations.information_block.envelope` with a

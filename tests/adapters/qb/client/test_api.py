@@ -345,7 +345,7 @@ class TestQBClient:
     mock_entry2 = Mock()
     mock_entry2.to_dict.return_value = {"id": "2", "amount": 200.00}
 
-    # Phase 2: get_journal_entries paginates via Entity.all() (no count).
+    # get_journal_entries paginates via Entity.all() (no count).
     mock_journal_entry.all.side_effect = [
       [mock_entry1, mock_entry2],  # First page
       [],  # Empty page → stop
@@ -426,7 +426,7 @@ class TestQBClient:
       "JournalReport", {"start_date": "2023-01-01"}
     )
 
-  # ---- Phase 5 §4.3.4 — CDC endpoint -----------------------------------
+  # ---- CDC endpoint -----------------------------------------------------
 
   def _make_cdc_client(self, realm_id="1234567890123456789"):
     """Construct a QBClient with just enough state to call cdc()."""
@@ -735,7 +735,7 @@ class TestQBClient:
 
 
 class TestTokenPersistence:
-  """Phase 3 A1 — rotated refresh tokens persist to ConnectionCredentials.
+  """Rotated refresh tokens persist to ConnectionCredentials.
 
   Intuit rotates the refresh_token on every refresh(). Without the
   persistence path, the rotated value dies with the QBClient instance
@@ -867,9 +867,9 @@ class TestTokenPersistence:
 
 
 class TestAuthFailureHandling:
-  """Phase 3 A2 — AuthClientError + transient network errors get clean
+  """AuthClientError + transient network errors get clean
   QBAuthFailedError surfaces. AuthClientError additionally flips the
-  connection to needs_reauth (B5)."""
+  connection to needs_reauth."""
 
   @patch(
     "robosystems.operations.connection_service.ConnectionService."
@@ -950,7 +950,7 @@ class TestAuthFailureHandling:
 
 
 class TestRetryBehavior:
-  """Phase 3 A3 — tenacity retries 429/5xx on every QB API call."""
+  """tenacity retries 429/5xx on every QB API call."""
 
   def test_retry_on_429_then_succeeds(self):
     """A 429 followed by a 200 should retry transparently and return

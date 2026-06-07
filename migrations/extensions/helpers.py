@@ -40,8 +40,8 @@ def add_tenant_column(
   The one-call form of the ``op.add_column`` + ``for_each_tenant_schema``
   fan-out pattern, so a migration cannot accidentally update only ``public``
   and leave the column missing in every already-provisioned tenant schema
-  (the silent-in-dev / fails-in-prod trap — see pre-onboarding-readiness §3.9
-  and ``tests/migrations/test_extensions_tenant_fanout.py``). Prefer this over
+  (the silent-in-dev / fails-in-prod trap — see
+  ``tests/migrations/test_extensions_tenant_fanout.py``). Prefer this over
   a bare ``op.add_column`` for any tenant table.
 
   Args:

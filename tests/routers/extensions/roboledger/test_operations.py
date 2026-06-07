@@ -400,11 +400,10 @@ class TestAutoMapElementsOp:
 #
 # The 12 raw CRUD ops (create/update/delete-taxonomy, create/update/delete-
 # structure, create/update/delete-element, create-associations, update/delete-
-# association) were retired from the public REST + MCP surface in Phase 1 of
-# the Taxonomy Block refactor. The
+# association) were retired from the public REST + MCP surface in favor of
+# the Taxonomy Block envelope. The
 # underlying `cmd_*` functions remain for internal seeders and continue to be
 # covered by `tests/operations/roboledger/commands/test_{taxonomies,elements}.py`.
-# Phase 2 introduces the Taxonomy Block envelope and its own test suite.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -472,7 +471,7 @@ def _balanced_lines() -> list[JournalEntryLineItemInput]:
   ]
 
 
-# TestCreateJournalEntryOp removed in Phase 4a: the `create-journal-entry`
+# TestCreateJournalEntryOp removed: the `create-journal-entry`
 # OperationSpec was retired in favor of
 # `create-event-block(event_type='journal_entry_recorded')`. See
 # tests/operations/event_block/python_handlers/
@@ -617,7 +616,7 @@ class TestDeleteJournalEntryOp:
 # for coverage of the event-driven path.
 
 
-# ── Filing lifecycle ops (Plan C) ──────────────────────────────────────────
+# ── Filing lifecycle ops ────────────────────────────────────────────────────
 
 
 def _make_filed_report_response() -> ReportResponse:
@@ -959,7 +958,7 @@ def _make_event_envelope(status: str = "committed"):
 
 class TestUpdateEventBlockOp:
   """Router-level tests for update-event-block — covers the error-map
-  contract for handler-firing failures introduced in Phase 4."""
+  contract for handler-firing failures."""
 
   def _request(self, **overrides):
     from robosystems.models.api.event_block import UpdateEventBlockRequest

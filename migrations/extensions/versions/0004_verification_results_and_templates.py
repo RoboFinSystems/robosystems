@@ -1,6 +1,6 @@
-"""Phase iota — verification_results + structure_templates tables.
+"""verification_results + structure_templates tables.
 
-Data-model landing for the Phase iota infrastructure (spec §Phase iota):
+Data-model landing for the verification infrastructure:
 
 - ``verification_results`` persists the outcome of evaluating a Rule
   against a FactSet / Structure. The engine producer ships in a
@@ -9,8 +9,8 @@ Data-model landing for the Phase iota infrastructure (spec §Phase iota):
   Results" tab have a durable home to read from.
 - ``structure_templates`` holds reusable layout / mechanics presets
   that Structures can pin via the existing
-  ``structures.template_id`` column (landed in Phase δ.1). Template
-  content is expand-pass work.
+  ``structures.template_id`` column. Template content is expand-pass
+  work.
 
 Both tables land in public + every tenant schema. FKs reference the
 same-schema parent tables so library-origin rows keep referential

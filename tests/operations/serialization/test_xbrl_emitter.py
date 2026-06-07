@@ -1,6 +1,6 @@
 """Unit tests for the XBRL 2.1 emitter (``xbrl/xbrl_21.py``).
 
-Covers each output file of the Phase 1b flat zip independently:
+Covers each output file of the flat zip independently:
 
 * ``instance.xml`` — XBRL root, schemaRef, contexts, units, facts
 * ``report.xsd`` — concept declarations + linkbaseRefs
@@ -208,7 +208,7 @@ class TestZipLayout:
 
   def test_zip_is_deflated_not_stored(self) -> None:
     """Verify the zip uses ZIP_DEFLATED for compression so payloads
-    stay small. The 5-file Phase 1b structure shouldn't approach
+    stay small. The 5-file flat-zip structure shouldn't approach
     even 100KB after compression for typical bundles."""
     zip_bytes = serialize_to_xbrl_21(_bundle(with_arcs=True))
     zf = _zip_open(zip_bytes)

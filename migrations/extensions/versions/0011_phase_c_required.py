@@ -1,4 +1,4 @@
-"""Promote Phase C disclosure packages to is_required=true (§3.6).
+"""Promote Phase C disclosure packages to is_required=true.
 
 The four Phase C entries (`rs-gaap-disclosures`,
 `rs-gaap-disclosure-mechanics`, `rs-gaap-reporting-checklist`, the
@@ -6,16 +6,15 @@ The four Phase C entries (`rs-gaap-disclosures`,
 `rs-gaap-reporting-styles` were originally seeded as `is_required=false`
 in migration 0007 while authoring was in flight. They are now fully
 authored, wired through the framework loader, and load-bearing for
-every tenant (every graph carries a `reporting_style_id` per §3.2 Phase
-1; every tenant receives the disclosure registry via
-`expand_framework_to_pin`).
+every tenant (every graph carries a `reporting_style_id`; every tenant
+receives the disclosure registry via `expand_framework_to_pin`).
 
 The runtime impact of the flag is small — `expand_framework_to_pin`
 ignores it — but admin tooling and API surfaces query
 ``framework_packages`` directly, so the database needs to reflect
 reality. This migration updates the existing rows; the
 ``rs-gaap/v1.json`` manifest is the source of truth and was
-flipped in the same PR.
+flipped alongside it.
 
 Revision ID: 0011
 Revises: 0010

@@ -101,7 +101,7 @@ def upgrade() -> None:
     ["graph_id", "start_date", "end_date"],
   )
 
-  # -- Fiscal Calendar (tenant-scoped; see specs/ledger-close-workflow.md) --
+  # -- Fiscal Calendar (tenant-scoped) --
   # Per-graph rolling close state: closed_through_period (system-maintained)
   # and close_target_period (user-settable). One row per tenant.
   op.create_table(

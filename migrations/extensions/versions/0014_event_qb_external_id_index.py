@@ -1,6 +1,6 @@
 """Add events.metadata->>'qb_external_id' partial expression index.
 
-Phase 4 §4.2 step 4 — cross-source matcher. The loader's
+Cross-source matcher. The loader's
 `_capture_transactions_as_events` checks each incoming
 `source='quickbooks'` row against this index to detect round-tripped
 RoboSystems-originated events (events whose `metadata.qb_external_id`

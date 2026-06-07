@@ -2,8 +2,8 @@
 
 The package is generated from rs-gaap-calculations/v1 by
 ``robosystems.taxonomy.scripts.generate_rollup_rules`` — one ``RollUp``
-rule per calc-arc subtotal parent (info-block §6.1 Package II.a). These
-tests pin the committed artifact's shape and the pure builder's transform.
+rule per calc-arc subtotal parent. These tests pin the committed
+artifact's shape and the pure builder's transform.
 """
 
 from __future__ import annotations

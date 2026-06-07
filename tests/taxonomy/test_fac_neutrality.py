@@ -1,7 +1,7 @@
 """Invariant: ``fac`` is the framework-neutral accounting substrate.
 
 The architecture splits responsibilities cleanly (see
-``frameworks/fac/packages/README.md`` and [[framework-scope-fac-vs-rsgaap]]):
+``frameworks/fac/packages/README.md``):
 
 - ``fac`` holds high-level concepts + the universal trait vocabulary that
   persist regardless of regulatory regime (us-gaap, ifrs, irs, …).

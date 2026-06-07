@@ -117,7 +117,7 @@ class TestStagingSql:
 
 
 class TestREAStaging:
-  """Phase 1 REA primitives — Agent + Event nodes + 7 base edges + the
+  """REA primitives — Agent + Event nodes + 7 base edges + the
   EVENT_TRIGGERS_TRANSACTION McCarthy bridge edge.
   """
 
@@ -222,7 +222,7 @@ class TestTableOrdering:
       "Taxonomy",
       "Period",
       "Unit",
-      # REA primitives — universal across RoboX extensions (ontology-alignment §4)
+      # REA primitives — universal across RoboX extensions
       "Agent",
       "Event",
     }
@@ -263,7 +263,7 @@ class TestTableOrdering:
       "ASSOCIATION_HAS_FROM_ELEMENT",
       "ASSOCIATION_HAS_TO_ELEMENT",
       "ELEMENT_HAS_TRAIT",
-      # REA edges (ontology-alignment §4.2-§4.3)
+      # REA edges
       "ENTITY_HAS_AGENT",
       "ENTITY_HAS_EVENT",
       "EVENT_INVOLVES_AGENT",

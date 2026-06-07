@@ -1,4 +1,4 @@
-"""Smoke tests for the Taxonomy Block registry after Phase 2.2 completion."""
+"""Smoke tests for the Taxonomy Block registry."""
 
 from __future__ import annotations
 

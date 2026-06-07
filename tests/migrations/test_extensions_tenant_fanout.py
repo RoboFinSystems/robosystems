@@ -11,8 +11,7 @@ tenant table WITHOUT that fan-out reaches only ``public``. It is **silent in
 dev** (dev tenants are always freshly provisioned at head, so they get the
 column from the model) and a **runtime failure in prod** (the column is missing
 in every existing customer schema). This guard fails CI before such a migration
-ships — the first ``0019+`` against a live tenant is where the trap first bites
-(see ``local/docs/specs/pre-onboarding-readiness.md`` §3.9).
+ships — the first ``0019+`` against a live tenant is where the trap first bites.
 
 Scope/limitation: this is a file-level heuristic. It catches the common trap —
 a migration that issues tenant-table DDL with *no* fan-out at all. It does not

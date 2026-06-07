@@ -1,4 +1,4 @@
-"""Tests for Phase 4 graph-lifecycle MCP tools.
+"""Tests for the graph-lifecycle MCP tools.
 
 Covers the six tools in `middleware/mcp/tools/graph_tools.py`:
 
@@ -15,7 +15,7 @@ connection tool `SetWritePolicyTool`.
 Shared-repo gate coverage (the primary defense-in-depth concern) lives
 in `tests/routers/graphs/test_ops_shared_repo_gates.py`. This file
 focuses on definition shape + non-repo error paths + happy path so the
-Phase 4 refactor is exercised beyond manager-level wiring.
+tools are exercised beyond manager-level wiring.
 """
 
 from __future__ import annotations

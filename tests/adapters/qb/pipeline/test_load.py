@@ -101,15 +101,15 @@ class TestQbLoadAsset:
       connection_id=config.connection_id,
       duckdb_path=work_dir / "quickbooks.duckdb",
       created_by=config.user_id,
-      # Wave 1 G2 — incremental sync passes the empty-string since_date as
-      # None (the asset translates the QBSyncConfig default) and the
-      # explicit full_rebuild=False so the loader skips the pre-sync wipe.
+      # Incremental sync passes the empty-string since_date as None (the
+      # asset translates the QBSyncConfig default) and the explicit
+      # full_rebuild=False so the loader skips the pre-sync wipe.
       full_rebuild=False,
       since_date=None,
     )
 
   def test_load_returns_row_counts_in_metadata(self, tmp_path):
-    """Phase 2 metadata: elements/dimensions structural + event counters."""
+    """Metadata: elements/dimensions structural + event counters."""
     from robosystems.adapters.quickbooks.pipeline.load import qb_load
 
     config = _make_config()
@@ -151,7 +151,7 @@ class TestQbLoadAsset:
     assert result.metadata["dropped_empty_transactions"] == 0
     # total_rows = elements + dimensions + events_captured + events_updated
     # + agents_inserted + agents_updated (= 3 + 1 + 7 + 2 + 4 + 1 = 18)
-    # transactions/entries/line_items always 0 in Phase 2
+    # transactions/entries/line_items are always 0 on the capture path
     assert result.metadata["total_rows"] == 18
     assert "transactions" not in result.metadata
     assert "entries" not in result.metadata
@@ -184,8 +184,8 @@ class TestQbLoadAsset:
     mock_sync.assert_called_once()
 
   def test_load_advances_cdc_watermark(self, tmp_path):
-    """Phase 5 §4.3.4 — _advance_cdc_watermark is called after a successful
-    load, with a datetime captured at load start."""
+    """_advance_cdc_watermark is called after a successful load, with a
+    datetime captured at load start."""
     from datetime import datetime
 
     from robosystems.adapters.quickbooks.pipeline.load import qb_load

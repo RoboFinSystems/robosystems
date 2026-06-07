@@ -1,8 +1,7 @@
 """Shape tests for the rs-gaap Statement of Changes in Equity presentation.
 
-Under the rs-gaap-anchored architecture (§3.2 + the rs-gaap-everything-at-the-
-reporting-layer rewrite), the roll-forward hangs directly off
-``rs-gaap:StockholdersEquity`` — no fac scaffolding. The activity arcs
+Under the rs-gaap-anchored architecture, the roll-forward hangs directly
+off ``rs-gaap:StockholdersEquity`` — no fac scaffolding. The activity arcs
 are the rs-gaap concepts the statement displays as change rows: NetIncomeLoss,
 OCI, issuance, repurchase, share-based compensation, dividends.
 
@@ -85,7 +84,7 @@ def _bs_equity_children(pkg: TaxonomyPackage, role: str) -> set[str]:
 
 
 class TestEquityFormVariants:
-  """Phase 4 equity-form axis: CORP balance sheet trimmed to corporate
+  """Equity-form axis: CORP balance sheet trimmed to corporate
   equity; dedicated PART/LLC balance-sheet + Statement-of-Changes
   structures present the form-appropriate capital concept."""
 

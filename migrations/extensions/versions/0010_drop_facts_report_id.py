@@ -1,6 +1,6 @@
-"""Drop facts.report_id (§3.5 / §6.5 final retire).
+"""Drop facts.report_id (final retire).
 
-Completes the FactSets migration started in 0009. With the §3.5 rewrite
+Completes the FactSets migration started in 0009. With the rewrite
 of ``create_report`` / ``regenerate_report`` / ``create_schedule``, every
 new ``facts`` row is stamped with both ``structure_id`` and
 ``fact_set_id`` (and the parent ``FactSet`` carries the back-pointer to
@@ -9,7 +9,7 @@ new ``facts`` row is stamped with both ``structure_id`` and
 Steps per schema (public + every tenant):
 
 1. DELETE any orphan rows where ``fact_set_id IS NULL``. These are
-   pre-§3.5 facts that 0009 already null-ed (because their fact_set_id
+   older facts that 0009 already null-ed (because their fact_set_id
    didn't resolve) or facts written before ``_persist_report_facts``
    started stamping ``fact_set_id``. Posture matches 0009 — Reporting
    Style hasn't shipped to prod, blast radius is small. Reports can be

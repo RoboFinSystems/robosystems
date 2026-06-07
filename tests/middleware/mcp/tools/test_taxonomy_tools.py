@@ -161,8 +161,8 @@ class TestSuggestMappingTool:
     source = _element(
       id="elem_1", name="Product Revenue", trait="revenue", source="quickbooks"
     )
-    # Post-§3.1.5 #3: suggest-mapping returns rs-gaap candidates only
-    # (the §3.2 Reporting Style picker targets rs-gaap Networks).
+    # suggest-mapping returns rs-gaap candidates only
+    # (the Reporting Style picker targets rs-gaap Networks).
     candidates = [
       _element(
         id="gaap_1",

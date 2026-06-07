@@ -1,5 +1,5 @@
-"""Shape tests for the four Phase C packages plus the disclosures-to-
-textblocks bridge.
+"""Shape tests for the four disclosure-layer packages plus the
+disclosures-to-textblocks bridge.
 
 These tests exercise the JSON-LD loader against each new artifact to
 confirm:
@@ -90,10 +90,9 @@ class TestDisclosuresPackage:
   def test_cap_values_use_canonical_vocabulary(
     self, disclosures: TaxonomyPackage
   ) -> None:
-    """Vocab alignment (2026-05-15) maps the seed CAPs onto Charlie's
-    canonical enumeration. `component` and `hierarchy` collapsed to
-    `set`; `level1_textblock` retained as the cm.xsd specialization.
-    See information-block.md §3.2.1."""
+    """Vocab alignment maps the seed CAPs onto the canonical enumeration.
+    `component` and `hierarchy` collapsed to `set`; `level1_textblock`
+    retained as the cm.xsd specialization."""
     cap_values = {s.concept_arrangement for s in disclosures.structures}
     assert "set" in cap_values
     assert "level1_textblock" in cap_values

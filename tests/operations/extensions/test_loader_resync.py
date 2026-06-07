@@ -1,19 +1,16 @@
-"""Wave 1 re-ingest harness — `quickbooks-adapter.md` §4.6.0 W5.
+"""Re-ingest harness for the QuickBooks loader.
 
-Asserts the four documented re-sync fidelity invariants survive a second
-loader run. Companion to the unit tests in `test_loader.py` that cover
-single-call behavior; this file specifically targets the Wave 1
-spec-vs-code gap scenarios verified on 2026-05-18.
+Asserts the four re-sync fidelity invariants survive a second loader run.
+Companion to the unit tests in `test_loader.py` that cover single-call
+behavior; this file specifically targets the re-sync fidelity scenarios:
 
-Each scenario maps to a §2.5.1 gap:
-
-- G1 — Voided events survive re-sync (`test_voided_event_survives_resync`).
-- G2 — Incremental sync skips pre-sync DELETE
+- Voided events survive re-sync (`test_voided_event_survives_resync`).
+- Incremental sync skips the pre-sync DELETE
   (`test_incremental_sync_does_not_wipe_history`; full assertion lives in
   ``test_loader.test_load_incremental_skips_pre_sync_wipe``).
-- G3 — Element UPSERT preserves `elem_*` ULIDs
+- Element UPSERT preserves `elem_*` ULIDs
   (`test_element_upsert_preserves_ulid`).
-- G4 — Payload drift on committed event flagged without mutating live
+- Payload drift on a committed event is flagged without mutating the live
   payload (covered by
   ``test_loader.test_capture_flags_drift_on_committed_event``).
 """
@@ -76,12 +73,12 @@ def _dbt_data_single_je() -> dict:
   }
 
 
-class TestG1VoidedEventSurvivesResync:
-  """G1 — operator-voided events must persist through re-sync.
+class TestVoidedEventSurvivesResync:
+  """Operator-voided events must persist through re-sync.
 
-  Today's bug: the unconditional pre-sync DELETE wipes all events for
-  the connection, including voided ones, so the rejected entry
-  re-appears in the inbox. Wave 1 W2 scopes the DELETE to
+  Failure mode this guards against: an unconditional pre-sync DELETE
+  would wipe all events for the connection, including voided ones, so the
+  rejected entry would re-appear in the inbox. The DELETE is scoped to
   ``captured``/``classified`` only.
   """
 
@@ -126,8 +123,8 @@ class TestG1VoidedEventSurvivesResync:
     session.add_all.assert_not_called()
 
 
-class TestG2IncrementalSkipsWipe:
-  """G2 — incremental sync (no `full_rebuild`) must not wipe history.
+class TestIncrementalSkipsWipe:
+  """Incremental sync (no `full_rebuild`) must not wipe history.
 
   The bulk of this assertion lives at the `load()` level in
   ``test_loader.test_load_incremental_skips_pre_sync_wipe``. This class
@@ -135,7 +132,7 @@ class TestG2IncrementalSkipsWipe:
   """
 
   def test_load_signature_supports_since_date_and_full_rebuild(self):
-    """The two Wave 1 contract params are part of `load()`'s signature."""
+    """The two contract params are part of `load()`'s signature."""
     import inspect
 
     from robosystems.operations.extensions.loader import OLTPLoader
@@ -149,9 +146,9 @@ class TestG2IncrementalSkipsWipe:
 
 
 class TestCrossSourceMatcher:
-  """Phase 4 §4.2 step 4 — cross-source matcher recognises QB rows
-  that are round-trips of a previously write-backed RL-originated
-  event. Stamps confirmation, skips INSERT + handler re-fire."""
+  """The cross-source matcher recognises QB rows that are round-trips of
+  a previously write-backed RL-originated event. Stamps confirmation,
+  skips INSERT + handler re-fire."""
 
   def _dbt_data(self):
     """One QB transaction whose external_id was already write-backed
@@ -246,13 +243,13 @@ class TestCrossSourceMatcher:
     assert result.dropped_empty_transactions == 1
 
 
-class TestG3ElementUpsertPreservesUlid:
-  """G3 — Element UPSERT keeps `elem_*` ULIDs stable across syncs.
+class TestElementUpsertPreservesUlid:
+  """Element UPSERT keeps `elem_*` ULIDs stable across syncs.
 
-  Today's bug: delete-then-insert regenerates every ULID on every sync,
-  breaking downstream FK targets (user-curated Associations, IB Facts,
-  cached element_id references). Wave 1 W4 switches the element load
-  to lookup-then-update or insert, matching the Agent UPSERT pattern.
+  Failure mode this guards against: delete-then-insert would regenerate
+  every ULID on every sync, breaking downstream FK targets (user-curated
+  Associations, IB Facts, cached element_id references). The element load
+  uses lookup-then-update or insert, matching the Agent UPSERT pattern.
   """
 
   @patch("robosystems.db.extensions.provision_tenant_schema")
@@ -335,15 +332,15 @@ class TestG3ElementUpsertPreservesUlid:
     )
 
 
-class TestPhase5SyncTokenCapture:
-  """Phase 5 step 1 (§4.3.1) — SyncToken flows from dbt transaction row
-  into Event.metadata_['qb_sync_token'].
+class TestSyncTokenCapture:
+  """SyncToken flows from the dbt transaction row into
+  Event.metadata_['qb_sync_token'].
 
-  Step 2 (§4.3.2) will add the freshness-gate UPSERT logic. This class
-  asserts the capture path only — that the value is persisted on insert
-  and on the captured/classified UPSERT branch, and that a SyncToken
-  bump on a committed event (with no other payload change) does NOT
-  trigger a false drift flag.
+  This class asserts the capture path only — that the value is persisted
+  on insert and on the captured/classified UPSERT branch, and that a
+  SyncToken bump on a committed event (with no other payload change) does
+  NOT trigger a false drift flag. The freshness-gate UPSERT logic is
+  covered separately.
   """
 
   def _dbt_data_with_sync_token(self, sync_token: str | None) -> dict:
@@ -460,12 +457,12 @@ class TestPhase5SyncTokenCapture:
     # is doing its job.
     assert result.drift_detected == 0
     assert committed.payload_drift is False
-    # Live payload untouched per §2.5 immutability.
+    # Live payload untouched — a committed event's payload is immutable.
     assert "drift_payload" not in committed.metadata_
 
 
-class TestPhase5SyncTokenGate:
-  """Phase 5 step 2 (§4.3.2) — SyncToken freshness gate on the UPSERT path.
+class TestSyncTokenGate:
+  """SyncToken freshness gate on the UPSERT path.
 
   The gate runs BEFORE the status branches:
 
@@ -570,7 +567,7 @@ class TestPhase5SyncTokenGate:
     assert captured.metadata_["qb_sync_token"] == "7"
 
   def test_null_existing_token_proceeds_backfill(self):
-    """Pre-Phase-5 row with no SyncToken in metadata_ → 'no_info' decision,
+    """A row with no SyncToken in metadata_ → 'no_info' decision,
     proceeds to UPSERT, SyncToken gets backfilled."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
@@ -578,7 +575,7 @@ class TestPhase5SyncTokenGate:
     captured.external_id = "JE_500"
     captured.status = "captured"
     captured.id = "evt_captured"
-    captured.metadata_ = {}  # pre-Phase-5: no qb_sync_token key
+    captured.metadata_ = {}  # no qb_sync_token key (backfill row)
     captured.payload_drift = False
 
     session = MagicMock()
@@ -600,9 +597,9 @@ class TestPhase5SyncTokenGate:
     assert captured.metadata_["qb_sync_token"] == "4"
 
   def test_committed_event_with_fresh_token_advances_live_token(self):
-    """Phase 5 step 2 — even when a committed event sees no business-payload
-    drift, a bumped SyncToken still advances the live event's qb_sync_token
-    so the next sync's gate comparison stays accurate."""
+    """Even when a committed event sees no business-payload drift, a
+    bumped SyncToken still advances the live event's qb_sync_token so the
+    next sync's gate comparison stays accurate."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
     # First, build what a normal capture's metadata would look like for
@@ -649,7 +646,7 @@ class TestPhase5SyncTokenGate:
 
 
 class TestCompareSyncTokens:
-  """Phase 5 §4.3.2 — pure-function freshness comparison."""
+  """Pure-function freshness comparison."""
 
   def test_decisions(self):
     from robosystems.operations.extensions.loader import _compare_sync_tokens
@@ -667,15 +664,13 @@ class TestCompareSyncTokens:
     assert _compare_sync_tokens("5", "abc") == "no_info"
 
 
-class TestPhase5IdempotentReingest:
-  """Phase 5 step 6 (§4.3.5) — idempotent re-ingest harness.
+class TestIdempotentReingest:
+  """Idempotent re-ingest harness.
 
-  Five scenarios from the spec. Implementation: synthetic dbt-data
-  fixtures hit ``_capture_transactions_as_events`` directly (no live
-  QB sandbox required for the test harness — the gate semantics are
-  the contract being asserted). When a recorded-fixture set lands
-  later (§4.3.5 future work), this class is the shape the recorded
-  test would replace.
+  Synthetic dbt-data fixtures hit ``_capture_transactions_as_events``
+  directly (no live QB sandbox required for the test harness — the gate
+  semantics are the contract being asserted). When a recorded-fixture set
+  lands later, this class is the shape the recorded test would replace.
   """
 
   def _fixture(self, sync_token: str | None) -> dict:
@@ -708,8 +703,8 @@ class TestPhase5IdempotentReingest:
     return evt
 
   def test_scenario_2_resync_identical_is_noop(self):
-    """Spec §4.3.5 scenario 2 — re-sync of an already-current row is
-    a SyncToken-gate ``same`` skip; nothing mutates."""
+    """Re-sync of an already-current row is a SyncToken-gate ``same``
+    skip; nothing mutates."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
     captured = self._make_existing_event(status="captured", sync_token="5")
@@ -733,9 +728,8 @@ class TestPhase5IdempotentReingest:
     session.add_all.assert_not_called()
 
   def test_scenario_4_out_of_order_replay_skipped_stale(self):
-    """Spec §4.3.5 scenario 4 — forged out-of-order CDC batch: live
-    token is newer than incoming. Gate flags ``stale``, nothing
-    mutates, no errors raised."""
+    """Forged out-of-order CDC batch: live token is newer than incoming.
+    Gate flags ``stale``, nothing mutates, no errors raised."""
     from robosystems.operations.extensions.loader import OLTPLoader
 
     captured = self._make_existing_event(status="captured", sync_token="12")
@@ -763,9 +757,9 @@ class TestPhase5IdempotentReingest:
     assert result.drift_detected == 0
 
   def test_scenario_5_committed_drift_flagged_live_payload_immutable(self):
-    """Spec §4.3.5 scenario 5 — a ``committed`` event whose QB-side
-    payload changed gets ``payload_drift=True`` + ``drift_payload``
-    captured in metadata, but the live business payload is untouched.
+    """A ``committed`` event whose QB-side payload changed gets
+    ``payload_drift=True`` + ``drift_payload`` captured in metadata, but
+    the live business payload is untouched.
 
     The bumped SyncToken also advances the live ``qb_sync_token`` so
     the next gate comparison reflects current state — bookkeeping
@@ -831,7 +825,7 @@ class TestPhase5IdempotentReingest:
       assert captured_blob.metadata_[key] == value
 
   def test_two_consecutive_syncs_produce_same_state(self):
-    """Spec §4.3.5 scenario 2 — running the same dbt data through
+    """Running the same dbt data through
     ``_capture_transactions_as_events`` twice leaves the snapshot
     tuple ``(external_id, qb_sync_token, status, payload_drift)``
     unchanged on the second run. The SyncToken gate flags 'same' and
@@ -841,8 +835,8 @@ class TestPhase5IdempotentReingest:
     re-tries for captured-but-stuck events) IS expected to advance
     across re-syncs — that's the intentional inbox-retry mechanism
     that lets a previously-failed event commit once mappings improve.
-    The spec's idempotency snapshot is the tuple above, not the full
-    metadata blob.
+    The idempotency snapshot is the tuple above, not the full metadata
+    blob.
     """
     from robosystems.operations.extensions.loader import OLTPLoader
 
@@ -885,7 +879,7 @@ class TestPhase5IdempotentReingest:
     assert second_result.updated == 0
     assert second_result.skipped_same_sync_token == 1
     assert second_result.drift_detected == 0
-    # The §4.3.5 snapshot tuple is unchanged across the re-sync.
+    # The snapshot tuple is unchanged across the re-sync.
     second_snapshot = {
       "external_id": new_event.external_id,
       "qb_sync_token": new_event.metadata_.get("qb_sync_token"),

@@ -620,7 +620,7 @@ class TestWriteExtractParquet:
         output_dir, accounts, journal_entries, journal_lines, company_info
       )
 
-    # Phase 2: 4 original files (accounts, journal_entries, journal_lines,
+    # 4 original files (accounts, journal_entries, journal_lines,
     # company_info) + 6 first-batch (customers, vendors, employees, invoice_headers,
     # bill_headers, payment_headers) + 2 second-batch (bill_payment_headers,
     # sales_receipt_headers) + 1 third-batch (purchase_headers) = 13 total.

@@ -1,4 +1,4 @@
-"""Tests for Phase 2.3.1 structural auto-rule emission."""
+"""Tests for structural auto-rule emission."""
 
 from __future__ import annotations
 
@@ -109,8 +109,8 @@ class TestEmitAutoRules:
 
   def test_all_auto_rules_populate_check_kind_not_pattern(self) -> None:
     """XOR contract: all auto-rules are structural (rule_check_kind set,
-    rule_pattern is None). See information-block.md §5.2.2 + the
-    check_rule_pattern_kind_xor CHECK constraint on the rules table."""
+    rule_pattern is None). Enforced by the check_rule_pattern_kind_xor
+    CHECK constraint on the rules table."""
     session = MagicMock()
     taxonomy = _fake_taxonomy("chart_of_accounts", parent_taxonomy_id="lib_1")
     emit_auto_rules(

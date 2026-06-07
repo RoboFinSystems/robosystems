@@ -92,7 +92,7 @@ class TestCheckMaterializationLimits:
 
   @pytest.mark.asyncio
   async def test_storage_over_limit_blocks_materialization(self):
-    """§3.7 Phase 1: aggregate instance storage over cap blocks materialization."""
+    """Aggregate instance storage over cap blocks materialization."""
     mock_db = MagicMock()
     with (
       patch.object(
@@ -268,14 +268,14 @@ class TestCheckInstanceStorage:
 
     assert result["status"] == "over_limit"
     assert result["usage_percentage"] == 105.0
-    # §3.7 Phase 1: over_limit populates blocking errors
+    # over_limit populates blocking errors
     assert result["allowed"] is False
     assert len(result["errors"]) == 1
     assert "exceeds" in result["errors"][0]
 
   @pytest.mark.asyncio
   async def test_healthy_status_is_allowed(self):
-    """§3.7 Phase 1: under-cap status returns allowed=True with empty errors."""
+    """Under-cap status returns allowed=True with empty errors."""
     mock_db = MagicMock()
     with (
       patch.object(
