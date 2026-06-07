@@ -6,7 +6,7 @@ This directory contains external service integrations that connect RoboSystems t
 
 **Shared repository adapters** (e.g., SEC) serve platform-wide public data. They include a `manifest.py` that declares identity, billing plans, rate limits, endpoint access, and credit costs. The manifest is the single source of truth — the registry in `config/shared_repositories.py` collects manifests and provides the query API used by billing, middleware, and operations.
 
-**Private adapters** (e.g., QuickBooks) integrate with per-user external services. They have clients and processors but no manifest, since they operate on individual user graphs rather than shared platform data.
+**Private adapters** (e.g., QuickBooks) integrate with per-user external services. They have a client and a Dagster ELT pipeline but no manifest, since they operate on individual user graphs rather than shared platform data.
 
 ## Directory Structure
 
@@ -64,15 +64,21 @@ adapters/
 │       ├── process.py           # sec_processed_filings asset
 │       ├── stage.py             # DuckDB staging assets
 │       ├── materialize.py       # LadybugDB materialization assets
-│       ├── jobs.py              # 12 SEC job definitions
+│       ├── jobs.py              # 18 SEC job definitions
 │       └── sensors.py           # 6 sensors + 1 schedule
-└── quickbooks/                  # QuickBooks adapter (private, stubbed)
-    ├── __init__.py              # QuickBooks adapter exports
+└── quickbooks/                  # QuickBooks adapter (private)
+    ├── __init__.py              # Exports QBClient only
     ├── client/                  # QuickBooks API client
-    │   └── api.py               # OAuth client
-    └── processors/              # Transaction processing
-        ├── transactions.py      # Transaction sync (stubbed)
-        └── uri_utils.py         # URI generation utilities
+    │   └── api.py               # QBClient - OAuth client
+    ├── pipeline/                # Dagster ELT pipeline
+    │   ├── configs.py           # Run configurations
+    │   ├── event_action_mapping.py # QB txn type → REA event/action mapping
+    │   ├── extract.py           # QBClient extraction (CDC + SyncToken delta sync)
+    │   ├── jobs.py              # qb_sync_job
+    │   ├── load.py              # Materialize DuckDB tables to user graph
+    │   ├── transform.py         # Invoke dbt models
+    │   └── utils.py             # Pipeline helpers
+    └── dbt/                     # dbt-on-DuckDB project (raw QB → RoboLedger schema)
 ```
 
 ## Shared Repository Manifest Pattern
@@ -140,18 +146,20 @@ filings = client.get_filings(cik="0000320193", form_type="10-K")
 
 ### QuickBooks (`quickbooks/`) — Private
 
-Small business accounting integration:
+Small business accounting integration, structured as a **dbt-on-DuckDB ELT pipeline**:
+
+- **`client/api.py`** — `QBClient`, the OAuth-authenticated QuickBooks Online API client. This is the only symbol exported from `__init__.py`.
+- **`pipeline/`** — a full Dagster ELT pipeline: `extract.py` (CDC + SyncToken delta sync via `QBClient`), `transform.py` (invokes the dbt models), `load.py` (materializes the resulting DuckDB tables into the user's LadybugDB graph), plus `event_action_mapping.py` (QB transaction types → REA event/action), `configs.py`, `jobs.py` (`qb_sync_job`), and `utils.py`.
+- **`dbt/`** — a dbt project (staging + ledger models) that transforms raw QuickBooks data into the RoboLedger schema (transactions, entries, line items, elements, agents, dimensions).
 
 ```python
-from robosystems.adapters.quickbooks import (
-    QBClient,                # QuickBooks OAuth client
-    QBTransactionsProcessor, # Transaction sync (stubbed)
-    qb_entity_uri,          # URI generation utilities
-)
+from robosystems.adapters.quickbooks import QBClient  # the only export
 
 # Initialize QuickBooks client
 client = QBClient(realm_id="123456", qb_credentials=credentials)
 ```
+
+**Outbound write-back.** QuickBooks-connected graphs support outbound write-back governed by `Connection.write_policy` (`native` / `qb_authoritative` / `hybrid`; QB defaults to `qb_authoritative`). Locally-authored events are pushed back to QuickBooks via the `execute-event-block` operation, which stamps `metadata.qb_external_id` so subsequent CDC + SyncToken delta sync can de-duplicate against the source. The close-review "outbox" surfaces `will_publish_to_qb` on the period-drafts read so a user sees what closing the period will write to QuickBooks before committing. See the [Connection model](../models/core/README.md) and the roboledger operations surface for details.
 
 ## Usage with Dagster
 
@@ -171,7 +179,7 @@ For local development:
 just sec-load NVDA 2025    # Load company via Dagster pipeline
 ```
 
-**Note:** Currently only the SEC adapter has active Dagster assets. The QuickBooks adapter is stubbed for future implementation.
+**Note:** Both the SEC and QuickBooks adapters have active Dagster pipelines — SEC via `sec/pipeline/`, QuickBooks via `quickbooks/pipeline/jobs.py` (`qb_sync_job`).
 
 ## Adding New Adapters
 
@@ -208,7 +216,7 @@ The adapter directory structure is designed as a **merge boundary** for forks. C
 ```
 adapters/
 ├── sec/                 # ← Upstream maintains, shared repository
-├── quickbooks/          # ← Upstream maintains, stubbed
+├── quickbooks/          # ← Upstream maintains, private adapter
 │
 └── custom_*/            # ← Fork namespace (upstream NEVER touches)
     ├── custom_erp/      #    Your custom ERP integration

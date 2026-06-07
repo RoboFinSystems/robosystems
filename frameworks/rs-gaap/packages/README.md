@@ -81,7 +81,7 @@ packages/
                                                 Mining, Cannabis, …)
 ```
 
-The trait vocabulary (`fac-traits/v1`, 99 traits across 25 categories)
+The trait vocabulary (`fac-traits/v1`, 99 traits across 26 categories)
 lives in the upstream `fac` framework and is inherited here via
 `depends_on`. `rs-gaap-traits/v1/` is the rs-gaap-specific binding —
 it declares which trait values apply to which rs-gaap leaves. Future
@@ -214,7 +214,7 @@ just migrate-up   extensions      # re-apply
    (`standard`, `version`, `taxonomy_type`, `namespace_uri`,
    `description`, and either `forked_from`/`forked_at`/`upstream_tracking`
    or `origin`/`created_at`).
-2. Add an entry to this framework's manifest at `../manifest.json`
+2. Add an entry to this framework's manifest at `../v1.json`
    under `packages[]` with an `ordinal` (load order) and `is_required`
    flag.
 3. If the new package introduces a new `source` value for elements or

@@ -76,30 +76,48 @@ Concepts were historically shelved under `roboledger/` because roboledger was th
 models/extensions/
 ├── __init__.py                  # Re-exports every extension model — flat namespace
 │
-├── # ── Base ontology (mirrors schemas/base.py) ──────────────────────────
+├── # ── Base ontology + taxonomy-library / reporting-style / rules layer ──
 ├── entity.py                    # Entity — single parent entity per graph for now
 ├── taxonomy.py                  # Taxonomy — grouping container (CoA, reporting, mapping, schedule)
 │                                #   + extension chain (parent_taxonomy_id, extension_type, effective_date)
 ├── element.py                   # Element — CoA elements + US GAAP reporting elements (unified)
 │                                #   + Account alias for Element (CoA terminology)
+├── element_label.py             # ElementLabel — supplementary / total-role labels (attach-by-qname)
+├── element_reference.py         # ElementReference — ASC citation references (attach-by-qname)
+├── element_trait.py             # ElementTrait — per-element bindings into the trait vocabulary
+├── trait.py                     # Trait — universal trait vocabulary (axes/categories)
 ├── dimension.py                 # Dimension — tags (department, class, location, fund, trust)
-├── association.py               # Association — CoA → GAAP mappings, presentation ordering
+├── association.py               # Association — CoA → GAAP mappings, presentation/calc ordering
+├── association_classification.py # junction binding Associations to Classifications
+├── classification.py            # Classification — structural pattern classification for associations
 ├── structure.py                 # Structure — named element collection (income statement, schedule, ...)
+├── structure_template.py        # StructureTemplate — reusable structure scaffolds
+├── reporting_style_network.py   # ReportingStyleNetwork — per-style presentation network selection
+├── framework.py                 # Framework — addressable taxonomy bundle
+├── framework_package.py         # FrameworkPackage — packages pinned by a framework
+├── framework_bridge.py          # FrameworkBridge — bridges pinned by a framework
+├── bridge.py                    # Bridge — cross-namespace equivalence overlay
+├── rule.py                      # Rule — pattern/expression validations evaluated against fact sets
+├── verification_result.py       # VerificationResult — persisted Rule evaluation outcome
 ├── entity_taxonomy.py           # EntityTaxonomy — join table for ENTITY_HAS_TAXONOMY
 │                                #   (multi-basis: reporting, CoA, mapping, schedule)
 │
 ├── # ── RoboLedger extension (accounting-specific) ──────────────────────
 ├── roboledger/
 │   ├── __init__.py              # Re-exports base concepts + domain-specific models
+│   ├── agent.py                 # Agent — REA counterparty (customer, vendor, employee)
+│   ├── event.py                 # Event — REA business event with canonical action verb
+│   ├── event_handler.py         # EventHandler — maps event types → ledger postings
+│   ├── transaction.py           # Transaction — business event (what happened in the real world)
 │   ├── entry.py                 # Entry — journal entries within a transaction (must balance)
+│   ├── line_item.py             # LineItem — individual debits/credits within an entry
 │   ├── fact.py                  # Fact — element × period × dimension → amount (XBRL-style)
+│   ├── fact_set.py              # FactSet — fact container + typed fact-provenance spine (mig 0018)
 │   ├── fiscal_calendar.py       # FiscalCalendar — one row per graph, holds close target
 │   ├── fiscal_period.py         # FiscalPeriod — monthly/quarterly period state (open/closed)
-│   ├── line_item.py             # LineItem — individual debits/credits within an entry
 │   ├── publish_list.py          # PublishList + PublishListMember — report sharing rings
 │   ├── report.py                # Report — snapshot of facts at creation time (immutable)
 │   ├── report_share.py          # ReportShare — cross-graph report shares (investor access)
-│   ├── transaction.py           # Transaction — business event (what happened in the real world)
 │   └── dimension_junctions.py   # transaction_dimensions, entry_dimensions, line_item_dimensions
 │                                #   (roboledger-specific junctions binding Dimension to ledger tables)
 │
@@ -171,8 +189,12 @@ class Transaction(ExtensionsBase):
 - **Amounts are `BIGINT` in minor currency units** (cents), not `NUMERIC`. Converted to dollars as `DOUBLE` during the materialization pipeline for graph queries. This avoids rounding drift across debit/credit legs.
 - **Timestamps are UTC-aware.**
 - **CHECK constraints, not enums** — statuses like `'pending' | 'posted' | 'void'` are enforced via `CheckConstraint` on a plain `String` column rather than PostgreSQL `ENUM` types. Same portability rationale as core models.
-- **Provenance field on every ledger row** — `Transaction` and `Entry` carry a `provenance` field (`source_sync`, `ai_generated`, `manual_entry`, `schedule_derived`, `system_computed`) enforced by a CHECK constraint. This flows through materialization to the graph so audit queries like "show me all AI-generated entries for April" work end-to-end.
+- **Origin tracking on ledger rows** — only `Entry` carries a `provenance` field. It is a **nullable `String` with no `CheckConstraint`** — the candidate values (`source_sync`, `ai_generated`, `manual_entry`, `schedule_derived`, `system_computed`) live only in a code comment, not an enforced enum. `Transaction` instead has a `source` column (`String`, default `"native"`) plus a nullable `source_id`. These flow through materialization to the graph so audit queries like "show me all AI-generated entries for April" work end-to-end. (This row-level string is distinct from the typed fact-provenance spine on `fact_sets` — see below.)
 - **Indexes are explicit** — `__table_args__` always lists the indexes the routers and resolvers actually query on. Don't rely on autogenerate to add indexes; add them when you add the column.
+
+### Typed fact-provenance spine (`fact_sets`)
+
+Distinct from the row-level `Entry.provenance` string, the **typed fact-provenance spine** lives on `fact_sets` (`roboledger/fact_set.py`). It shipped in extensions migration **0018** as a `provenance` JSONB column carrying a typed `FactProvenance` descriptor — a discriminated union (`pivot` / `schedule` / `derived` / `asserted`, dispatched on the `origin` tag; defined in `models/api/fact_provenance.py`). Every fact is emitted through a `FactSet`, so this gives each fact a typed origin without writing the descriptor onto individual fact rows. Stamping is **mandatory-at-emission**: a `before_insert` SQLAlchemy event backstop rejects any new `FactSet` inserted without a provenance descriptor (historical rows with `provenance IS NULL` are left untouched). Extensions migrations now run through **0018**.
 
 ## Materialization to LadybugDB
 
@@ -253,7 +275,7 @@ Concrete walkthrough — adding a `BankFeed` table to the roboledger domain:
        id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("bf"))
        transaction_date = Column(Date, nullable=False)
        amount = Column(BigInteger, nullable=False)  # cents
-       provenance = Column(String, nullable=False, default="source_sync")
+       provenance = Column(String, nullable=True)  # candidate values documented in a comment, not a CHECK
        created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
    ```
 

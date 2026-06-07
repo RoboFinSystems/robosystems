@@ -30,6 +30,7 @@ mcp/
 └── tools/                   # MCP tool implementations
     ├── base_tool.py         # Base tool interface
     ├── manager.py           # GraphMCPTools — layered tool registry and dispatcher
+    ├── registrar.py         # Registry-driven tool generation (infra)
     ├── constants.py         # Tool name constants
     │
     │ # Layer 1: Core tools (always available)
@@ -50,8 +51,13 @@ mcp/
     │                               # generated; schedule envelopes now surface via
     │                               # information_block_tools)
     ├── information_block_tools.py  # get-information-block, list-information-blocks
+    ├── event_block_tools.py        # get/list/create-event-block (REA business events)
+    ├── event_handler_tools.py      # get/list-event-handler (DSL rule rows)
+    ├── agent_tools.py              # get-agent, list-agents, agent-activity (REA Agent reads)
     ├── taxonomy_tools.py           # get-unmapped-elements, suggest-mapping,
     │                               # create-mapping-association, get-mapping-summary
+    ├── graph_tools.py              # create-subgraph, delete-subgraph, list-subgraphs,
+    │                               # materialize, create-backup, set-write-policy
     ├── materialization_tools.py    # get-graph-sync-status, materialize-graph
     │
     │ # Layer 3: Document search + management (SEMANTIC_SEARCH_ENABLED)
@@ -126,7 +132,7 @@ envelope machine under the hood.
 | `create-schedule` | Create a schedule structure with pre-generated facts | `commands/schedules.create_schedule` |
 | `update-schedule` | Rename or edit schedule mechanics | `commands/schedules.update_schedule` |
 | `delete-schedule` | Remove a schedule | `commands/schedules.delete_schedule` |
-| `list-period-drafts` | List pending draft entries for a period | `reads/period_drafts.list_period_drafts` |
+| `list-period-drafts` | List pending draft entries for a period — surfaces the QB-outbox disposition (`will_publish_to_qb` per draft + `qb_publish_count` / `local_only_count` summary) so the user sees what close will write to QuickBooks | `reads/period_drafts.list_period_drafts` |
 
 Closing-entry drafting (schedule-derived + manual) and schedule
 termination go through `create-event-block` — see the event block
@@ -158,6 +164,24 @@ section. The Python handler registry routes them to `schedule_entry_due`,
 |------|-------------|
 | `get-graph-sync-status` | Check if the graph needs rebuild after OLTP writes |
 | `materialize-graph` | Trigger the `mark_graph_stale` sensor to rebuild |
+
+**Event blocks and REA agents (`event_block_tools.py`, `event_handler_tools.py`, `agent_tools.py`):**
+
+| Tool | Description |
+|------|-------------|
+| `get-event-block` / `list-event-blocks` | Read REA business-event blocks |
+| `create-event-block` | Record a business event (closing-entry drafting, schedule termination, etc.) |
+| `get-event-handler` / `list-event-handlers` | Read tenant-configurable event-handler DSL rule rows |
+| `get-agent` / `list-agents` / `agent-activity` | REA Agent (counterparty) reads — entity, list, and per-agent activity |
+
+**Graph lifecycle (`graph_tools.py`):**
+
+| Tool | Description |
+|------|-------------|
+| `create-subgraph` / `delete-subgraph` / `list-subgraphs` | Subgraph lifecycle |
+| `materialize` | Trigger an OLTP→OLAP rebuild |
+| `create-backup` | Create a graph backup |
+| `set-write-policy` | Opt a graph into QB write-back (platform-DB connection scope) |
 
 ### Layer 3: Document search and management
 

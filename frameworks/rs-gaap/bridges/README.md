@@ -7,7 +7,7 @@ than fighting for a single canonical namespace.
 
 The packages tier (`../packages/`) holds atomic taxonomy units. This
 tier holds the equivalence arcs between them. The framework
-(`../manifest.json`) pins specific package + bridge versions.
+(`../v1.json`) pins specific package + bridge versions.
 
 Bridges live with the framework that **authored** the mapping. The
 `fac-to-rs-gaap` bridge lives here (under `rs-gaap`) because rs-gaap
@@ -78,7 +78,7 @@ composition level.
 1. Create `bridges/<name>/v1/taxonomy.jsonld` with the metadata fields
    above plus an `@graph` of equivalence arcs (use `arcFrom`/`arcTo`
    pointing across namespaces, `arcAssociationType: "equivalence"`).
-2. Add an entry to this framework's manifest at `../manifest.json`
+2. Add an entry to this framework's manifest at `../v1.json`
    under `bridges[]` with an `ordinal` and `is_required` flag.
 
 The migration auto-walks the framework manifest in load order; no

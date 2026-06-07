@@ -110,8 +110,9 @@ the DB** and listed in the manifest's `packages[]`; this artifact is a flat
 qname list **consumed by the copy path** (`taxonomy/writer.py`) at provision
 time to decide which rs-gaap concepts a *tenant* receives. The full rs-gaap
 catalog (~2155 concepts) stays in the **public** library (it backs the future
-SEC us-gaap bridge); a tenant gets the MVP core (~382) — the high-level
-aggregates that render/foot/map today. Omitted: XBRL dimension members/domains,
+SEC us-gaap bridge); a tenant gets the keep-critical curation (~143) under the
+`tenant_exclude_keep_critical` policy (public ~2,155 → tenant ~143) — the
+high-level aggregates that render/foot/map today. Omitted: XBRL dimension members/domains,
 general-special-disconnected concepts, industry verticals (peer-framework
 material), and the general-special **leaf** level — the finest disaggregation
 detail, inert until the granularity-selection feature ships. Disaggregation

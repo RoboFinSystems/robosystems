@@ -6,7 +6,7 @@ This README is the code-level orientation for the Information Block subsystem.
 
 ## What is an Information Block?
 
-An Information Block is a molecular view of a financial structure: a `Structure` row (the skeleton), bundled with its `Element`s, `Association`s (connections), `Fact`s, `Rule`s, `VerificationResult`s, and `FactSet`. The `InformationBlockEnvelope` (in `models/api/information_block.py`) is the wire shape.
+An Information Block is a molecular view of a financial structure: a `Structure` row (the skeleton), bundled with its `Element`s, `Association`s (connections), `Fact`s, `Rule`s, `VerificationResult`s, and `FactSet`. The `FactSet` carries a typed `provenance` field — the grounding axis (origin + temporal stance) of the facts it bundles. The `InformationBlockEnvelope` (in `models/api/information_block.py`) is the wire shape.
 
 Every block has a `block_type` that determines how it's constructed and read. The registry maps `block_type` strings to handler modules.
 
@@ -21,7 +21,8 @@ information_block/
 ├── reads.py           # get_information_block, list_information_blocks
 ├── envelope.py        # Shared ORM → Lite projection helpers used by every handler
 ├── schedule.py        # block_type='schedule' handler (declarative construction)
-├── statement.py       # block_type='balance_sheet|income_statement|...' handlers (stub)
+├── rollforward.py     # block_type='rollforward' handler (declarative construction)
+├── statement.py       # block_type='balance_sheet|income_statement|comprehensive_income|...' handlers (stub)
 ├── metric.py          # block_type='metric' handler (stub)
 ├── classify.py        # Scaffold for the association classifier (not yet implemented)
 └── rules/
@@ -37,9 +38,11 @@ Each registered block type declares one of three construction modes:
 
 | Mode | Meaning | Current example |
 |------|---------|-----------------|
-| `declarative` | User declares mechanics + seed params; the system generates atoms | `schedule` |
-| `compositional` | Atoms exist from report ingest; block is a view assembled at read time | `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement` |
+| `declarative` | User declares mechanics + seed params; the system generates atoms | `schedule`, `rollforward` |
+| `compositional` | Atoms exist from report ingest; block is a view assembled at read time | `balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income` |
 | `derivative` | Facts are computed from other blocks at read time | `metric` |
+
+Eight block types are registered: two declarative (`schedule`, `rollforward`), five compositional statements (`balance_sheet`, `income_statement`, `cash_flow_statement`, `equity_statement`, `comprehensive_income`), and one derivative (`metric`).
 
 The compositional family (statements) and the derivative family (metrics) raise `NotImplementedError` (→ HTTP 501) on the create / update / delete paths today — statements are produced via `create-report`, and the metric derivation evaluator is not yet implemented. Their `build_envelope` paths are fully wired and surface read envelopes normally.
 
@@ -99,7 +102,7 @@ The engine loads rules via `envelope.load_rules_for_structure` (so element- and 
 
 - **Rule evaluation engine**: pattern dispatchers and the safe expression parser are implemented and wired through `evaluate-rules`. Handles `EqualTo` / `RollUp` / `RollForward` / `Exists` / `CoExists` / `SumEquals`; other patterns return `skipped`.
 - **Association classifier (`classify.py`)**: not yet implemented. The current SEC-side classifier lives in `adapters/sec/processors/classify.py` and writes graph-side Classification nodes; a Postgres-backed version that runs over OLTP `associations` + `elements` and produces `association_classifications` rows for any tenant has not been ported. The `classify.py` module reserves the import path so handlers have a stable hook.
-- **FactSet expansion**: not yet implemented. Write paths do not yet stamp every fact with a `fact_set_id`, so `FactSetLite` on the envelope is `None` for blocks whose creation pre-dates FactSet stamping.
+- **FactSet construction**: the blessed mandatory path. `operations/roboledger/fact_set.py::create_fact_set` is the single place that validates a typed `FactProvenance` descriptor and writes `fact_sets.provenance`; a `ProvenanceRequiredError` plus a `before_insert` model backstop reject any unstamped insert. Three producers route through it — the report pivot, schedules, and cross-graph share. Every FactSet is therefore mandatorily stamped, and `provenance` (the discriminated pivot/schedule/derived/asserted union) surfaces on the envelope as JSON.
 - **Metric derivation evaluator**: not yet implemented. `MetricMechanics` is registered as a typed union arm; the create / update / delete paths raise `NotImplementedError` and `build_envelope` returns the typed mechanics with `facts=[]`.
 
 If `classify.py` grows into multiple files, promote it to `classify/` then — don't do it preemptively.

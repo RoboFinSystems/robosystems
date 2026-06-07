@@ -56,6 +56,7 @@ operations/
 │   ├── reads.py               # get/list_information_blocks (envelope reads)
 │   ├── envelope.py            # Cross-type atom → Lite projection helpers
 │   ├── schedule.py            # Schedule block type handler (declarative construction)
+│   ├── rollforward.py         # Rollforward block type handler (declarative construction)
 │   ├── statement.py           # Statement block type handlers (compositional, stub)
 │   ├── metric.py              # Metric block type handler (derivative, stub)
 │   ├── classify.py            # Association classifier scaffold (not yet implemented)
@@ -64,6 +65,8 @@ operations/
 │       ├── evaluators.py      # Per-pattern dispatch (EqualTo, RollUp, Exists, CoExists, …)
 │       ├── expressions.py     # Safe AST parser — no eval(); $Variable → _var_Name
 │       └── commands.py        # cmd_evaluate_rules (mounted as evaluate-rules operation)
+├── event_block/               # Cross-domain Event Block registry (REA business events)
+├── taxonomy_block/            # Cross-domain Taxonomy Block (CoA, custom ontology, library)
 ├── roboledger/                # RoboLedger domain kernel (CQRS subtree)
 │   ├── reads/                 # Pure reads: session + args → Pydantic response
 │   │   └── accounts.py, entity.py, fiscal_calendar.py, reports.py, schedules.py, ...
@@ -84,13 +87,15 @@ operations/
 │   ├── pricing_service.py               # Pricing calculations
 │   ├── metrics_service.py               # Analytics and performance metrics
 │   └── repository_subscription_service.py
-├── lbug/                      # LadybugDB infrastructure operations
-│   ├── backup_manager.py      # Database backup and restore
-│   └── ingest.py              # S3-based bulk data ingestion
+├── extensions/                # OLTP→OLAP materialization (materialize.py, loader.py, staleness.py)
+├── library/                   # Taxonomy/framework library reads (shared + tenant)
+├── search/                    # Document search (embeddings, markdown parsing, service)
+├── serialization/             # Block serialization (bundle, flavors, RDF, XBRL)
+├── aws/                       # AWS service helpers (S3, SES)
 ├── providers/                 # External provider integrations
 │   └── registry.py            # Provider registry and management
 ├── connection_service.py      # External service connection lifecycle
-└── user_limits_service.py     # User quota enforcement
+└── document_service.py        # Document lifecycle operations
 ```
 
 ## Single-Source-of-Truth Contract
@@ -134,10 +139,12 @@ The registry (`registry.py`) maps `block_type` strings to `BlockTypeRegistryEntr
 | block_type | Construction mode | Handler | surfaces_in_library |
 |------------|------------------|---------|---------------------|
 | `schedule` | declarative | `schedule.py` | No (tenant-only) |
+| `rollforward` | declarative | `rollforward.py` | No (tenant-only) |
 | `balance_sheet` | compositional | `statement.py` | Yes |
 | `income_statement` | compositional | `statement.py` | Yes |
 | `cash_flow_statement` | compositional | `statement.py` | Yes |
 | `equity_statement` | compositional | `statement.py` | Yes |
+| `comprehensive_income` | compositional | `statement.py` | Yes |
 | `metric` | derivative | `metric.py` | No |
 
 Statement and metric dispatch handlers currently raise `NotImplementedError` (→ HTTP 501) — their data models are wired, but the construction logic is not yet implemented.
@@ -152,4 +159,4 @@ Statement and metric dispatch handlers currently raise `NotImplementedError` (�
 
 ## Platform Services
 
-`graph/`, `lbug/`, `providers/`, and the top-level modules are platform infrastructure services. These predate the extension domain kernels and follow a different pattern (async service classes rather than session-in/pydantic-out functions). They handle graph lifecycle (creation, subscriptions, credits, tiers), LadybugDB backup/ingestion, and external provider management.
+`graph/`, `providers/`, `aws/`, and the top-level modules are platform infrastructure services. These predate the extension domain kernels and follow a different pattern (async service classes rather than session-in/pydantic-out functions). They handle graph lifecycle (creation, subscriptions, credits, tiers), LadybugDB backup/ingestion (under `graph/engine/`), and external provider management.
