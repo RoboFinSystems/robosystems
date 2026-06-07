@@ -185,4 +185,4 @@ uv run python -m examples.seattle_method_demo.create_report
   source-vocabulary (`mini`) reconciliation, 17/17 exact match against
   Charlie Hoffman's published `luca.pacioli.ai` facts.
 - [`../README.md`](../README.md) — demo orchestrator and methodology
-  (§3.2 reconciliation classification).
+  (reconciliation classification).

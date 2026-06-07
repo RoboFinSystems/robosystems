@@ -9,9 +9,9 @@
 # We pull from xbrlsite because that's where the URLs in the entry
 # point's linkbaseRef hrefs resolve. The GitHub repo has additional
 # context (fac/, disclosure-mechanics/, disclosures-topics/,
-# reporting-checklist/, type-subtype/) that future work — the Phase
-# δ.2 rule corpus port and the Phase 2.5 enrichment engine — will
-# want; for Test Case 1 the base-taxonomy files are sufficient.
+# reporting-checklist/, type-subtype/) that future work — the rule
+# corpus port and the enrichment engine — will want; for Test Case 1
+# the base-taxonomy files are sufficient.
 
 set -euo pipefail
 

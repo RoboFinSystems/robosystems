@@ -106,7 +106,7 @@ Charlie's instance contains **43** additional non-zero current-period concept(s)
 
 ## Four Anchor Totals
 
-Methodology spec §4.6 exit criterion: these four lines must match Charlie's PoC for the test to pass. All amounts are debit-positive cents internally; presentation flips signs per accounting convention.
+These four lines must match Charlie's PoC for the test to pass. All amounts are debit-positive cents internally; presentation flips signs per accounting convention.
 
 | Anchor | Our value |
 |---|---:|
@@ -135,7 +135,7 @@ Every mini concept with non-zero activity in the period. ``Δ debit-positive`` i
 | `mini:RetainedEarnings` | Retained Earnings | equity | instant | $(2,050.00) |
 | `mini:Sales` | Sales | revenue | duration | $(8,000.00) |
 
-## Rollforward Attribution (Phase 2 MVP Filter Engine)
+## Rollforward Attribution
 
 Each rollforward IB decomposes its BS source's period delta across declared TDC filters. Where ``Σ filters == Δ BS``, the rollforward is balanced (residual = 0). A non-zero residual indicates either an unattributed flow or a phantom TDC in the source data (logged at author time).
 
@@ -216,7 +216,7 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 | `mini:IncreaseInReceivablesFromSalesOnAccount` | $8,000.00 | 1 | evt_01KTDR4GC5Y5S042WYZN96SJTZ |
 | `mini:CollectionOfReceivables` | $(8,000.00) | 1 | evt_01KTDR4GCJMDVPTGCWZ825XJV9 |
 
-## Findings — Classification per Methodology §3.2
+## Findings
 
 **Their data quality** (source CSV inconsistencies):
 
@@ -231,8 +231,8 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 **Our bug**: none identified.
 
-**Matching**: see Anchor Totals table above + line-by-line concept totals. Compare manually against Charlie's PoC rendering at the expected-output URL — automated HTML diff is a forward-queue enhancement (methodology §3.1 step 5 stretch goal).
+**Matching**: see Anchor Totals table above + line-by-line concept totals. Compare manually against Charlie's PoC rendering at the expected-output URL — an automated HTML diff is a possible future enhancement.
 
 ---
 
-*Reconciliation produced by `examples/seattle_method_demo/reconcile.py` against the Phase 2 MVP rollforward filter engine. See `examples/seattle_method_demo/README.md` for the full methodology and the architectural pattern this test validates.*
+*Reconciliation produced by `examples/seattle_method_demo/reconcile.py` against the rollforward filter engine. See `examples/seattle_method_demo/README.md` for the full methodology and the architectural pattern this test validates.*
