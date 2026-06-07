@@ -48,7 +48,7 @@ When you connect QuickBooks to RoboSystems, four things happen end-to-end:
 
 1. **Sync** — A Dagster job pulls accounts, transactions, customers, vendors, employees, invoices, bills, payments, and purchases from the QB API, normalizes them with dbt, and loads them into a per-tenant OLTP database.
 2. **Materialize** — A sensor detects the stale graph state and projects the OLTP data into LadybugDB, the columnar graph backend used for analytical reads.
-3. **Map** — The MappingAgent proposes associations between your QB Chart of Accounts and canonical `rs-gaap:*` reporting concepts. You can accept, remap, or extend these.
+3. **Map** — The MappingOperator proposes associations between your QB Chart of Accounts and canonical `rs-gaap:*` reporting concepts. You can accept, remap, or extend these.
 4. **Report** — `create-report` generates facts across Balance Sheet, Income Statement, Cash Flow, and Statement of Equity. The renderer walks the active Reporting Style's structures and stamps every reportable fact onto the right line item.
 
 By the end of this guide you'll have all four working against either a QB sandbox or your own real company.
@@ -431,7 +431,7 @@ If any data test fails, the entire transform fails — surfacing data-quality is
 - For each transaction, creates an `Event` with `status='captured'` and rich metadata
 - For QB-authoritative connections (default), immediately fires the event handler which creates `Transaction → Entry → LineItem` rows in one transaction
 - Triggers `_bootstrap_fiscal_calendar_if_needed` (so close-period UX works on a fresh sync)
-- Triggers `_trigger_auto_map_if_needed` (the MappingAgent walks unmapped CoA elements)
+- Triggers `_trigger_auto_map_if_needed` (the MappingOperator walks unmapped CoA elements)
 - Marks the graph stale (`graph_stale=true`) so the materializer knows there's new data
 
 After `qb_load` returns, the **stale graph sensor** (a Dagster sensor running every 60 seconds) picks up the stale flag, submits an `extensions_materialize_job`, and the materializer projects the OLTP data into LadybugDB:
@@ -473,9 +473,9 @@ The sync is idempotent: events are upserted by `(source, external_id)`, so re-sy
 
 Your QB Chart of Accounts uses tenant-specific account names ("Truist Checking 6764", "Consulting Services", "Subscription Services"). Financial reports need canonical concepts (`rs-gaap:CashCashEquivalentsAndShortTermInvestments`, `rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax`, etc.). The mapping workflow bridges the two.
 
-### The MappingAgent
+### The MappingOperator
 
-On first sync, RoboSystems auto-triggers the MappingAgent (`_trigger_auto_map_if_needed` in the QB loader). The agent:
+On first sync, RoboSystems auto-triggers the MappingOperator (`_trigger_auto_map_if_needed` in the QB loader). The agent:
 
 1. Reads each unmapped CoA element along with its classification (asset / liability / equity / revenue / expense / gain / loss — derived from QB's `AccountType`)
 2. Asks the suggester (`suggest-mapping`) for renderable `rs-gaap:*` candidates that match the classification AND appear on the active Reporting Style's rendering structures
@@ -703,7 +703,7 @@ get-mapping-summary --mapping_id <id>
 # Look for unreachable_count > 0
 ```
 
-If unreachable, the MappingAgent ran against an earlier version of the renderable filter. Either:
+If unreachable, the MappingOperator ran against an earlier version of the renderable filter. Either:
 
 1. Re-run auto-map (delete the existing mappings first via SQL, then trigger `auto-map-elements`)
 2. Manually remap the unreachable accounts to renderable targets via `create-mapping-association`

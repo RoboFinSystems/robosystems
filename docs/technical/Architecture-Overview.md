@@ -107,26 +107,26 @@ Model Context Protocol server for AI integration:
 
 **See**: [MCP Middleware Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/mcp/README.md) in codebase
 
-### Agent System
+### Operator System
 
-**Location**: `/robosystems/operations/agents/`
+**Location**: `/robosystems/operations/operators/`
 
-Unified agent architecture for autonomous financial operations:
+Unified operator architecture for autonomous financial operations:
 
-- **Three-Layer Design**: Agent (domain logic), AgentContext (services), Adapters (execution lifecycle)
-- **Stateless Agents**: Declare capabilities via `AgentSpec`, receive services via `AgentContext` — no graph_id or user in constructor
+- **Three-Layer Design**: Operator (domain logic), OperatorContext (services), Adapters (execution lifecycle)
+- **Stateless Operators**: Declare capabilities via `OperatorSpec`, receive services via `OperatorContext` — no graph_id or user in constructor
 - **Automatic Credit Tracking**: `TrackedAIClient` wraps every Bedrock call with token counting and credit consumption
 - **Dual Execution**: API adapter (sync/SSE) and worker adapter (Valkey queue + SSE progress)
 - **Protocol-Based Services**: `ToolAccess`, `ProgressReporter`, `CreditConsumer` — swap implementations per context
-- **MCP Tool Integration**: Agents access graph queries, taxonomy operations, and document search via MCP tools
+- **MCP Tool Integration**: Operators access graph queries, taxonomy operations, and document search via MCP tools
 
-**See**: [Agent README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/agents/README.md) in codebase
+**See**: [Operator README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/operators/README.md) in codebase
 
 ### Background Worker
 
 **Location**: `/robosystems/worker/`
 
-Always-on ECS service for long-running agent tasks and background operations:
+Always-on ECS service for long-running operator tasks and background operations:
 
 - **Valkey Queue**: BRPOP consumer loop on DB 6 with graceful shutdown
 - **Task Registry**: `@register_task` decorator for handler discovery
@@ -893,10 +893,10 @@ See individual app repositories for specific deployment workflows.
 
 **Purpose**: AI-powered financial operations
 
-- AWS Bedrock for Claude model access (Sonnet 4.5/4)
-- Unified agent system: stateless agents with automatic credit tracking per call
-- CypherAgent for natural language graph queries, MappingAgent for autonomous CoA→GAAP taxonomy mapping
-- MCP tools provide agents with graph queries, taxonomy operations, SEC structure discovery, and document search
+- AWS Bedrock for Claude model access (Sonnet 4.6/4.5)
+- Unified operator system: stateless operators with automatic credit tracking per call
+- CypherOperator for natural language graph queries, MappingOperator for autonomous CoA→rs-gaap taxonomy mapping
+- MCP tools provide operators with graph queries, taxonomy operations, SEC structure discovery, and document search
 - Dual execution: API (sync/SSE) for interactive queries, background worker for long-running tasks
 
 ## Key Design Principles
