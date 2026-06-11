@@ -94,7 +94,7 @@ To validate the data without writing anything:
 just demo-roboledger --dry-run
 ```
 
-To provision a user + empty roboledger graph **without** the synthetic data (for connecting a real QuickBooks sandbox via the UI — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md)):
+To provision a user + empty roboledger graph **without** the synthetic data (for connecting a real QuickBooks sandbox via the UI — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)):
 
 ```bash
 just demo-roboledger --skeleton

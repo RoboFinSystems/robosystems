@@ -12,6 +12,8 @@ In RoboSystems, only AI operations consume credits — every database, graph, MC
 - [Shared Repository Credits](#shared-repository-credits)
 - [Alerts and Low-Balance Thresholds](#alerts-and-low-balance-thresholds)
 - [Storage Is Billed Separately](#storage-is-billed-separately)
+- [Organizations and Account Limits](#organizations-and-account-limits)
+- [Rate Limits](#rate-limits)
 - [Admin CLI Reference](#admin-cli-reference)
 - [Related Documentation](#related-documentation)
 
@@ -164,6 +166,23 @@ Because credits only gate AI operations, an exhausted pool stops AI Operator cal
 Storage is a distinct axis from credits. Each tier carries its own storage limits (with an optional override and auto-expand behavior), tracked independently of the credit pool. Storage is **never paid for with credits**, and storage limit fields are deliberately absent from the `/credits` response.
 
 To see storage usage, use the analytics endpoint described above — storage figures appear in its `storage_summary`, not in the credit balance. Tier storage limits are defined alongside the rest of the billing configuration; see the [Billing Configuration](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems/config/billing) and [Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml) in the codebase.
+
+## Organizations and Account Limits
+
+Every user belongs to an **organization** — the account that owns your graphs and carries billing. Today an organization is a single-user account: there is one organization per user, and it is the entity your graph subscriptions and billing attach to. (Multi-user organizations are not yet available.)
+
+The organization carries one account-level limit, independent of credits and storage: a **maximum number of graphs** it can hold (`max_graphs`, defaulting to the configured `ORG_GRAPHS_DEFAULT_LIMIT`). This caps how many graphs the account can provision at once — distinct from each graph's own storage limit and credit pool. Organization-level usage — graphs against the cap and aggregate activity — is available through the organization endpoints; see the [OpenAPI reference](https://api.robosystems.ai/docs) for the exact request and response shapes.
+
+## Rate Limits
+
+Rate limits are the third metering axis, alongside credits and storage — and the only one that throttles *free* operations. They are **burst-focused**: short sliding windows sized to absorb normal bursts while protecting shared infrastructure, rather than long-horizon quotas.
+
+- Limits are defined per **endpoint category** (queries, MCP, search, agent calls, and so on) crossed with **subscription tier** — higher tiers get higher limits.
+- A small **burst multiplier** (1.2×) allows brief spikes above the steady-state limit.
+- Tier scaling: the Large and XLarge tiers carry higher API rate multipliers than Standard (roughly 1.5× and 2.5× respectively).
+- Every rate-limited response carries standard rate-limit headers (limit, remaining, reset), so a client can back off gracefully.
+
+Rate limits and credits are **independent** — hitting a rate limit does not consume credits, and an exhausted credit pool does not change your rate limits. Shared repositories carry their own per-plan rate limits; see [Shared Repositories](Shared-Repositories).
 
 ## Admin CLI Reference
 
