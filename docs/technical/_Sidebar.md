@@ -6,6 +6,11 @@
 - [Architecture Overview](Architecture-Overview)
 - [Bootstrap Guide](Bootstrap-Guide)
 
+### Demos
+- [RoboLedger Demos](RoboLedger-Demo-Walkthrough)
+- [SEC XBRL Pipeline](SEC-XBRL-Pipeline)
+- [Custom Graph Schema](Custom-Graph-Schema)
+
 ### Operations Layer
 - [Authentication & API Keys](Authentication-and-API-Keys)
 - [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)
@@ -14,7 +19,6 @@
 - [Credits & Billing](Credits-and-Billing)
 - [AI Operators & MCP](AI-Operators-and-MCP)
 - [Pipeline Guide](Pipeline-Guide)
-- [Custom Graph Schema](Custom-Graph-Schema)
 
 ### Extensions Layer
 - [Extensions Surface Overview](Extensions-Surface-Overview)
@@ -22,7 +26,6 @@
 - [RoboLedger Operations](RoboLedger-Operations)
 - [RoboInvestor Operations](RoboInvestor-Operations)
 - [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally)
-- [RoboLedger Demos](RoboLedger-Demo-Walkthrough)
 
 ### Content & Contribution Fabric
 - [Information Blocks](Information-Blocks)
@@ -35,4 +38,3 @@
 - [Search & AI Retrieval](Search-and-AI-Retrieval)
 - [Document Management](Document-Management)
 - [File Uploads](File-Uploads)
-- [SEC XBRL Pipeline](SEC-XBRL-Pipeline)

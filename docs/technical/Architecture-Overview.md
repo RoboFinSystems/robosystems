@@ -4,9 +4,10 @@ RoboSystems is built on a modern, scalable architecture designed for enterprise 
 
 ## Documentation Map
 
-This wiki is organized into five areas:
+This wiki is organized into six areas:
 
 - **Getting Started & Platform** — orientation and self-hosting ([Quick Start](Quick-Start), [Core Concepts](Core-Concepts), [Bootstrap Guide](Bootstrap-Guide)).
+- **Demos** — hands-on walkthroughs ([RoboLedger Demos](RoboLedger-Demo-Walkthrough), [SEC XBRL Pipeline](SEC-XBRL-Pipeline), [Custom Graph Schema](Custom-Graph-Schema)).
 - **Operations Layer** — the core platform API and graph management ([Graph Operations](Graph-Operations), [Querying the Analytical Graph](Querying-the-Analytical-Graph), [AI Operators & MCP](AI-Operators-and-MCP)).
 - **Extensions Layer** — RoboLedger and RoboInvestor ([Extensions Surface Overview](Extensions-Surface-Overview), [GraphQL Reads](GraphQL-Reads), [RoboLedger Operations](RoboLedger-Operations)).
 - **Content & Contribution Fabric** — the semantic content model ([Information Blocks](Information-Blocks), [Taxonomy & Frameworks](Taxonomy-and-Frameworks), [Event-Driven Ledger](Event-Driven-Ledger), [Reporting & Rendering](Reporting-and-Rendering)).
