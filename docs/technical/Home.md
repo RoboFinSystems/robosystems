@@ -27,6 +27,7 @@ The core platform API and graph management.
 
 - **[Authentication & API Keys](Authentication-and-API-Keys)** - The X-API-Key header for technical access, and the JWT boundary
 - **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)** - The graph_id model, tiers, and subgraphs
+- **[Shared Repositories](Shared-Repositories)** - Platform-managed public datasets (SEC) you subscribe to and query
 - **[Graph Operations](Graph-Operations)** - The CQRS operation surface: backups, subgraphs, materialize
 - **[Querying the Analytical Graph](Querying-the-Analytical-Graph)** - Ad-hoc Cypher over the analytical (OLAP) graph
 - **[Credits & Billing](Credits-and-Billing)** - The credit model: only AI operations consume credits

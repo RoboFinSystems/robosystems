@@ -640,6 +640,7 @@ just sec-load NVDA 2025
 - **XBRL taxonomy**: [Taxonomy & Frameworks](Taxonomy-and-Frameworks) - The rs-gaap and fac frameworks behind the facts
 - **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph) - Ad-hoc Cypher over the SEC graph
 - **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP) - The MCP retrieval surface
+- **Shared repositories**: [Shared Repositories](Shared-Repositories) - SEC as the `ladybug-shared` tier: plans, subscription, and access
 
 ## Support
 

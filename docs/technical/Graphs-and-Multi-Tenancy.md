@@ -66,7 +66,7 @@ A tier determines the instance size, storage budget, subgraph capacity, backup l
 Notes:
 
 - **A graph and its subgraphs share one instance.** On `ladybug-standard`, that is 1 parent plus up to 3 subgraphs (4 databases total) on a single m7g.large. The subgraph cap, storage budget, and RAM are shared across the whole instance.
-- **`ladybug-shared` is platform-managed and not user-creatable.** It backs read-only public repositories such as the `sec` corpus. You consume it through queries; you do not provision it.
+- **`ladybug-shared` is platform-managed and not user-creatable.** It backs read-only public repositories such as the `sec` corpus. You consume it through queries; you do not provision it. See [Shared Repositories](Shared-Repositories) for the subscription and consumption model.
 - **Only Standard, Large, and XLarge are creatable tiers.** The `instance_tier` field on graph creation accepts `ladybug-standard`, `ladybug-large`, or `ladybug-xlarge`.
 
 Do not use marketing names such as Professional, Enterprise, or Premium — the canonical names are the technical tier identifiers above.
@@ -269,6 +269,7 @@ The main graph is read-only over Cypher.
 **Wiki Guides:**
 
 - **[Graph Operations](Graph-Operations)** - Lifecycle operations (create-subgraph, delete-subgraph, change-tier, backups, materialize) and the CQRS operation envelope
+- **[Shared Repositories](Shared-Repositories)** - The `ladybug-shared` tier, repository plans, and how to subscribe to and query public datasets
 - **[Authentication and API Keys](Authentication-and-API-Keys)** - API key creation, the `X-API-Key` header, and per-graph access control
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Designing node and relationship schemas and querying a custom graph
 

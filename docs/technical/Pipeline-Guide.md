@@ -169,6 +169,8 @@ Dagster runs on ECS Fargate (orchestration only). Heavy compute happens on the s
 
 ## Adding a Shared Repository
 
+> The consumer-facing concept — the `ladybug-shared` tier, subscription plans, and how a user subscribes to and queries a shared repository — is covered in [Shared Repositories](Shared-Repositories). This section is the producer side: defining one.
+
 Shared repositories (like SEC) are defined by adapter manifests. Each manifest declares everything about a repo: identity, data source, schema, rate limits, plans/pricing, endpoint access, and credit costs.
 
 **To add a new shared repository:**

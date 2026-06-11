@@ -14,6 +14,7 @@
 ### Operations Layer
 - [Authentication & API Keys](Authentication-and-API-Keys)
 - [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy)
+- [Shared Repositories](Shared-Repositories)
 - [Graph Operations](Graph-Operations)
 - [Querying the Analytical Graph](Querying-the-Analytical-Graph)
 - [Credits & Billing](Credits-and-Billing)
