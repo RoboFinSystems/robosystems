@@ -181,19 +181,14 @@ cat .local/config.json | grep api_key
 4. The MCP server provides these tools:
 
    **Curated Tools** (no Cypher needed):
-   - `get-financial-statement` - Structured financial statement by ticker and type (income_statement, balance_sheet, cash_flow_statement)
-   - `list-disclosures` - List disclosure types in the graph with fact counts
-   - `get-disclosure-detail` - Return facts for a specific disclosure type
+   - `financial-statement-analysis` - Structured financial statement by ticker and type (income_statement, balance_sheet, cash_flow_statement)
 
    **Graph Tools** (general purpose):
    - `read-graph-cypher` - Run Cypher queries directly
    - `get-graph-schema` - View available node and relationship types
-   - `describe-graph-structure` - Understand graph topology and counts
+   - `get-graph-info` - Inspect graph topology and node/relationship counts
    - `resolve-element` - Look up XBRL element details by name or canonical concept (uses LanceDB vector search when available)
-   - `resolve-structure` - Find structures by statement type or definition
-   - `discover-properties` - Explore node properties
-   - `discover-common-elements` - Find financial metrics (us-gaap tags)
-   - `get-example-queries` - Get sample queries
+   - `get-example-queries` - Get sample queries for common patterns
 
    **Search Tools** (requires `TEXT_SEARCH_ENABLED=true` in `.env.local`):
    - `search-documents` - Full-text search across filing narratives, MD&A, risk factors, and iXBRL disclosures
@@ -205,7 +200,7 @@ cat .local/config.json | grep api_key
 You: What revenue did NVIDIA report in 2024?
 
 The AI will use:
-1. get-financial-statement with ticker=NVDA, statement_type=income_statement
+1. financial-statement-analysis with ticker=NVDA, statement_type=income_statement
    → Returns structured revenue, expenses, net income with periods
 ```
 
@@ -500,7 +495,7 @@ Structure (canonical_type: "income_statement")
                                   └─[:FACT_HAS_ENTITY]─▶ Entity (filter by ticker)
 ```
 
-This is what `get-financial-statement` uses — a single hop from Structure through FactSet to get all facts for a statement type, filtered by company.
+This is what `financial-statement-analysis` uses — a single hop from Structure through FactSet to get all facts for a statement type, filtered by company.
 
 **Pattern 3: Taxonomy structure** (how elements relate to each other)
 
@@ -550,7 +545,7 @@ just sec-health v
 
 ### Find Available Financial Metrics
 
-Use the MCP client's `discover-common-elements` tool or query directly:
+Use the `read-graph-cypher` MCP tool, or query directly:
 
 ```bash
 # Find most common us-gaap elements
@@ -641,6 +636,10 @@ just sec-load NVDA 2025
 - **RoboSystems API**: http://localhost:8000/docs (when running locally)
 - **SEC EDGAR**: [SEC Website](https://www.sec.gov/edgar)
 - **DuckDB**: [Documentation](https://duckdb.org/docs/) - SQL database for staging
+- **Search SEC narratives**: [Search & AI Retrieval](Search-and-AI-Retrieval) - Full-text and semantic search over filing text
+- **XBRL taxonomy**: [Taxonomy & Frameworks](Taxonomy-and-Frameworks) - The rs-gaap and fac frameworks behind the facts
+- **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph) - Ad-hoc Cypher over the SEC graph
+- **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP) - The MCP retrieval surface
 
 ## Support
 

@@ -3,8 +3,10 @@
 RoboSystems uses [Dagster](https://dagster.io) for all data orchestration. Data flows from external sources through adapters, staging (DuckDB), and into the knowledge graph (LadybugDB).
 
 **Related documentation:**
-- [Architecture Overview](Architecture-Overview.md) - System architecture
-- [Bootstrap Guide](Bootstrap-Guide.md) - Deployment instructions
+- [Architecture Overview](Architecture-Overview) - System architecture
+- [Bootstrap Guide](Bootstrap-Guide) - Deployment instructions
+- [Custom Graph Schema](Custom-Graph-Schema) - Build a custom adapter and graph
+- [SEC XBRL Pipeline](SEC-XBRL-Pipeline) - The SEC ingestion pipeline in depth
 
 ---
 
@@ -14,7 +16,6 @@ RoboSystems uses [Dagster](https://dagster.io) for all data orchestration. Data 
 | ---------- | ---------------- | ------------------------------------------------------------------------ |
 | SEC        | Production-ready | [#117](https://github.com/RoboFinSystems/robosystems/issues/117)         |
 | QuickBooks | In Development   | [#118](https://github.com/RoboFinSystems/robosystems/issues/118)         |
-| Plaid      | Scaffolded       | Coming soon                                                              |
 
 **Infrastructure:**
 - Shared replicas deployment: [#113](https://github.com/RoboFinSystems/robosystems/issues/113)
@@ -36,14 +37,14 @@ XBRL Files → Arelle Processing → Parquet → DuckDB Staging → LadybugDB
 - **Why**: Arelle extracts XBRL semantics (concepts, contexts, facts) directly into graph-compatible structures
 - **No dbt needed**: Output is already graph-shaped
 
-### Pattern B: dbt-Based (QuickBooks, Plaid, Custom)
+### Pattern B: dbt-Based (QuickBooks, Custom)
 
 ```
 API JSON → S3 Raw → dbt transforms → S3 Processed → DuckDB Staging → LadybugDB
           (chunks)  (JSON → Parquet)  (graph-shaped)
 ```
 
-- **Used for**: API-based integrations (QuickBooks, Plaid, custom ERPs)
+- **Used for**: API-based integrations (QuickBooks, custom ERPs)
 - **Why**: Raw JSON needs transformation into graph-compatible node/relationship Parquet
 - **dbt provides**: SQL-based transforms, testing, documentation
 
@@ -58,7 +59,7 @@ Extensions PostgreSQL → postgres_scanner → DuckDB Staging → LadybugDB
 - **Why**: The platform owns this data — it's not derived from an external system, it's transactional state that needs to round-trip into the graph so analytical queries can see it alongside SEC/QuickBooks data
 - **Trigger**: Event-driven rather than scheduled. Writes to the extensions database fire a `mark_graph_stale` signal; a blue/green sensor picks it up and rebuilds the affected graph slice
 - **No Parquet intermediate**: DuckDB's `postgres_scanner` extension reads directly from the extensions schema via `CREATE TABLE ... AS SELECT * FROM postgres_scan(...)`, skipping the S3 round-trip that Patterns A and B need
-- **Not an adapter**: Unlike SEC and QuickBooks, there's no `adapters/extensions/` directory — this pipeline is platform-internal. See `operations/roboledger/views/` and `local/docs/ARCHITECTURE.md` Data Modes section for details
+- **Not an adapter**: Unlike SEC and QuickBooks, there's no `adapters/extensions/` directory — this pipeline is platform-internal. See [RoboLedger Operations](RoboLedger-Operations) and `operations/roboledger/views/` for details
 
 ---
 
@@ -85,17 +86,15 @@ robosystems/adapters/
 │       ├── process.py          # sec_processed_filings asset
 │       ├── stage.py            # DuckDB staging assets
 │       ├── materialize.py      # LadybugDB materialization
-│       ├── entity_update.py    # Entity incremental update
-│       ├── backup.py           # SEC backup asset
+│       ├── vector_publish.py   # LanceDB vector index S3 publishing
+│       ├── text_index.py       # OpenSearch text indexing (textblocks, narratives, iXBRL)
+│       ├── s3_publish.py       # Publish .lbug / .duckdb to S3 for replicas
 │       ├── jobs.py             # Job definitions
 │       └── sensors.py          # Sensors + schedule
-├── quickbooks/                 # QuickBooks adapter
-│   ├── client/                 # QB OAuth client
-│   ├── dbt/                    # dbt transforms (JSON → graph-shaped Parquet)
-│   └── pipeline/               # Dagster extract/transform/load assets
-└── plaid/                      # Plaid adapter (scaffolded)
-    ├── client/                 # Plaid API client
-    └── processors/             # Transaction sync
+└── quickbooks/                 # QuickBooks adapter
+    ├── client/                 # QB OAuth client
+    ├── dbt/                    # dbt transforms (JSON → graph-shaped Parquet)
+    └── pipeline/               # Dagster extract/transform/load assets
 
 robosystems/dagster/            # Platform orchestration (collector)
 ├── definitions.py              # Collects platform + adapter pipelines
@@ -230,7 +229,7 @@ All pipelines use DuckDB staging regardless of source. Patterns A and B enter st
 
 - Validation layer before graph ingestion
 - Handles S3 Parquet natively (httpfs extension) and PostgreSQL natively (postgres_scanner extension)
-- Same pattern for SEC, QuickBooks, Plaid, custom adapters, and platform-owned OLTP
+- Same pattern for SEC, QuickBooks, custom adapters, and platform-owned OLTP
 - Scale proof: If it handles SEC (1TB+), it handles any company's data
 
 **Graph API endpoints:**
@@ -296,7 +295,7 @@ All pipelines use DuckDB staging regardless of source. Patterns A and B enter st
 | **Dagster for all orchestration** | One system (eliminated Celery), one UI for pipelines + billing + infrastructure |
 | **Fargate-only Dagster**          | Dagster orchestrates, Graph API computes; no EC2 capacity provider complexity   |
 | **DuckDB-only staging**           | Standardized validation layer for all pipelines                                 |
-| **Two pipeline patterns**         | Arelle for XBRL semantics (SEC), dbt for API JSON transforms (QB/Plaid)         |
+| **Three pipeline patterns**       | Arelle for XBRL semantics (SEC), dbt for API JSON transforms (QuickBooks), postgres_scanner for OLTP materialization |
 | **GitHub repos for adapters**     | Customization is the value prop; dbt projects don't fit pip                     |
 | **S3 publish for replicas**       | Dagster publishes to S3, triggers rolling refresh; replicas download on boot    |
 

@@ -770,9 +770,10 @@ Intuit Developer Portal entries (apps, registered redirect URIs, keys) are durab
 
 Now that you have a connected company, real data flowing, and a working report:
 
-- Explore the **close-period** workflow — close the fiscal year, see what blocks the close (open AR, draft entries, missing mappings)
+- Explore the **close-period** workflow — close the fiscal year, see what blocks the close (open AR, draft entries, missing mappings). See [RoboLedger Operations](RoboLedger-Operations).
 - Try the **rule engine** — `evaluate-rules` runs structural and arithmetic checks against your statements
-- Set up the **CloseAgent** — AI-driven proposal of period-end accruals, depreciation, reclassification entries
+- Drive an **AI-assisted close** — use the MCP close co-pilot (e.g. Claude Desktop on the [AI Operators & MCP](AI-Operators-and-MCP) surface) to propose period-end accruals, depreciation, and reclassification entries
 - Connect a second company and explore **multi-entity reporting**
+- Read how the synced data is modeled — the [Event-Driven Ledger](Event-Driven-Ledger) and [GraphQL Reads](GraphQL-Reads) over the operational graph
 
 Each of these is covered in its own guide. For testing these surfaces without a connected QB account, see the synthetic demo walkthrough (which uses `just demo-roboledger` to generate fake books).

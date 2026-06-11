@@ -1,8 +1,13 @@
-# RoboLedger Demo Walkthrough
+# RoboLedger Demos
 
-The fastest way to see RoboLedger work end-to-end. Run one command, get a fully-populated tenant — 16 months of synthetic books for a consulting firm, with a filed FY annual report, mapped Chart of Accounts, depreciation and prepaid schedules, and exactly one period ready for the AI-driven close workflow.
+RoboLedger ships a suite of self-contained demos that exercise the full accounting stack — ingest, mapping, period close, reporting, and XBRL export — entirely against the local stack, with no live QuickBooks connection. They come in two flavors:
 
-No QuickBooks account needed. No Intuit Developer setup. No ngrok tunnel. The demo emulates data arriving the same way a real QB sync produces it — same typed event vocabulary, same OLTP shape, same materialized graph — without the OAuth and external-API requirements. It's the canonical surface for prospect demos, frontend evaluation, regression testing, and learning the feature set.
+- **Synthetic data** (`just demo-roboledger`) — a fully-populated tenant generated from synthetic books: 16 months for a consulting firm, a filed annual report, a mapped Chart of Accounts, schedules, and one period queued for the AI-driven close. The fastest way to see RoboLedger end-to-end (~60 seconds), and the canonical surface for prospect demos, frontend evaluation, and regression testing. **This page walks through it in detail.**
+- **Seattle Method / XBRL** (`just demo-seattle-method`, `just demo-world-online`) — built on Charlie Hoffman's *published* [Seattle Method](https://github.com/seattlemethod/prototypes) reference datasets. These prove cross-taxonomy projection and round-trip XBRL fidelity against an external reference, at both toy and realistic scale. See [Seattle Method XBRL Demos](#seattle-method-xbrl-demos) below.
+
+Connecting a *real* QuickBooks company (sandbox or production) is a live OAuth connection rather than a demo — see [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally).
+
+The synthetic demo needs no QuickBooks account, Intuit Developer setup, or ngrok tunnel. It emulates data arriving the same way a real QB sync produces it — same typed event vocabulary, same OLTP shape, same materialized graph — without the OAuth and external-API requirements.
 
 ## Table of Contents
 
@@ -21,6 +26,7 @@ No QuickBooks account needed. No Intuit Developer setup. No ngrok tunnel. The de
 - [Resetting the Demo](#resetting-the-demo)
 - [Customization](#customization)
 - [Comparison to the QuickBooks Workflow](#comparison-to-the-quickbooks-workflow)
+- [Seattle Method XBRL Demos](#seattle-method-xbrl-demos)
 - [Next Steps](#next-steps)
 
 ## Overview
@@ -367,6 +373,56 @@ Common customizations:
 
 Both paths produce the same OLTP shape, the same materialized graph, and the same Report-Block lifecycle. The demo is for showing the product; QB is for using it on your own books. See the [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally) guide for the QB workflow.
 
+## Seattle Method XBRL Demos
+
+Beyond the synthetic demo, RoboLedger ships two demos built on Charlie Hoffman's **published [Seattle Method](https://github.com/seattlemethod/prototypes) reference datasets**. Where the synthetic demo shows the product surface, these prove **cross-taxonomy projection** and **round-trip XBRL fidelity**: RoboLedger ingests an external XBRL reporting taxonomy and a ledger tagged against it, decomposes each balance's period change via `rollforward` Information Blocks, renders the result in *both* the source vocabulary and our canonical `rs-gaap`, exports an XBRL 2.1 + JSON-LD bundle, and reconciles the output against Charlie's published reference.
+
+Both exercise the three-block architecture end to end — the **Taxonomy Block** (load the external taxonomy as a Chart of Accounts), the **Event Block** (ingest the tagged journal entries), and the **Information Block** (author the rollforwards and render the statements). See [Information Blocks](Information-Blocks), [Taxonomy & Frameworks](Taxonomy-and-Frameworks), and [Event-Driven Ledger](Event-Driven-Ledger).
+
+### Lemonade Stand (Test Case 1)
+
+Charlie's 14-journal-entry Q1 2024 lemonade-stand dataset, tagged against his `mini` reporting framework — the smallest end-to-end proof of the methodology.
+
+```bash
+# Provision → load mini taxonomy → seed mini→rs-gaap mappings → ingest 14 JEs →
+# author rollforwards → reconcile → materialize the 4-statement report.
+just demo-seattle-method
+
+# A single step (pull | load | seed-mappings | ingest | author-rollforwards | reconcile | create-report)
+just demo-seattle-method --step ingest
+
+# Re-render just the artifacts against an existing graph
+just demo-seattle-method-reconcile <graph_id>
+just demo-seattle-method-create-report <graph_id>
+```
+
+It produces 239 `mini` concepts loaded as Elements, ~36 `mini → rs-gaap` mapping Associations, 14 Events/Entries (~32 LineItems) each carrying its business-event flow tag, and 8 `rollforward` Information Blocks (one per balance-sheet leaf with activity). The run then renders a line-by-line reconciliation against Charlie's published facts, the rs-gaap 4-statement Report (BS / IS / CF / SE), and a JSON-LD + XBRL 2.1 bundle — validated on the host with **Arelle** (XBRL 2.1 structural parity) and **pySHACL** (against `frameworks/ontology/v1/shapes.ttl` for semantic parity).
+
+### The World Online (at scale)
+
+The scaled-up sibling — Charlie's *The World Online* dataset: **22,288 GL lines across 3,389 journal entries**, a real 239-account chart of accounts, and opening balances, tagged against the **MINI 2026** framework. Same methodology, realistic mid-size-company scale.
+
+```bash
+# Full pipeline. The 3,389-entry ingest is the intended per-entry path and takes a
+# few minutes, with a live progress readout.
+just demo-world-online
+
+# Smoke-test the whole pipeline on a 50-entry subset first
+just demo-world-online --limit 50
+
+# Re-render individual artifacts against an existing graph
+just demo-world-online-reconcile <graph_id>            # GL pivot vs the published summary
+just demo-world-online-create-report <graph_id>        # rs-gaap 4-statement report
+just demo-world-online-trial-balance <graph_id>        # trial balance (debits = credits)
+just demo-world-online-statement-reconcile <graph_id>  # statement anchor totals vs the reference instance
+```
+
+Beyond the lemonade stand it adds a real chart of accounts collapsed to `mini` line items (the GL account and provenance preserved on each LineItem's metadata), a trial balance rendered via the `trialBalance` GraphQL query, and two reconciliations — a cell-by-cell `(line-item × business-event)` pivot against the published transaction summary, and a statement-level reconciliation of the four-statement anchor totals against the reference instance.
+
+Its load-bearing design decision is **opening balances as ordinary transactions**: the 12/31/2023 beginning-balance lines flow through `Transaction → Entry → LineItem` like any other entry, tagged with an `OpeningBalance` flow concept, so the rollforward engine attributes them as the genesis event rather than synthesizing an opening number outside the pipeline.
+
+> Both demos classify every reconciliation delta by owner — *matching*, *methodology gap*, *our bug*, or *source-data quality* — so a report with mixed categories is more informative than an all-green one: it makes explicit what each side owns.
+
 ## Next Steps
 
 Once you're comfortable with the demo:
@@ -375,5 +431,6 @@ Once you're comfortable with the demo:
 - **Customize the demo** — modify `data.py` to demo a different vertical for a specific prospect
 - **Extend the rule engine** — add domain-specific validation rules in `validate.py`
 - **Build a custom MCP workflow** — the close prompt at `examples/roboledger_demo/prompt.md` is one starting point; you can build vertical-specific agent workflows on the same MCP surface
+- **Go deeper on the model** — [RoboLedger Operations](RoboLedger-Operations) (command writes and the fact grid), [Reporting & Rendering](Reporting-and-Rendering) (how statements are built), and [Information Blocks](Information-Blocks) (the unifying envelope)
 
 If you're evaluating RoboLedger for a real engagement: run the demo, drive the AI close, inspect the rule engine output, then connect one of your own QB companies via the QB Local guide. The full evaluation arc takes ~30 minutes if everything's smooth.

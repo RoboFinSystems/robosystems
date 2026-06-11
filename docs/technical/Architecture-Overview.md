@@ -2,6 +2,28 @@
 
 RoboSystems is built on a modern, scalable architecture designed for enterprise financial data processing and knowledge graph management.
 
+## Documentation Map
+
+This wiki is organized into five areas:
+
+- **Getting Started & Platform** — orientation and self-hosting ([Quick Start](Quick-Start), [Core Concepts](Core-Concepts), [Bootstrap Guide](Bootstrap-Guide)).
+- **Operations Layer** — the core platform API and graph management ([Graph Operations](Graph-Operations), [Querying the Analytical Graph](Querying-the-Analytical-Graph), [AI Operators & MCP](AI-Operators-and-MCP)).
+- **Extensions Layer** — RoboLedger and RoboInvestor ([Extensions Surface Overview](Extensions-Surface-Overview), [GraphQL Reads](GraphQL-Reads), [RoboLedger Operations](RoboLedger-Operations)).
+- **Content & Contribution Fabric** — the semantic content model ([Information Blocks](Information-Blocks), [Taxonomy & Frameworks](Taxonomy-and-Frameworks), [Event-Driven Ledger](Event-Driven-Ledger), [Reporting & Rendering](Reporting-and-Rendering)).
+- **Documents & Search** — unstructured content and retrieval ([Search & AI Retrieval](Search-and-AI-Retrieval), [Document Management](Document-Management)).
+
+### Three Retrieval Planes
+
+AI Operators — and any MCP client — read three distinct data planes, each with a query tool and a schema tool:
+
+| Plane | Store | Query tool | Documented in |
+| --- | --- | --- | --- |
+| Operational | OLTP / extensions data | `query-graphql` | [GraphQL Reads](GraphQL-Reads) |
+| Analytical | OLAP / LadybugDB graph | `read-graph-cypher` | [Querying the Analytical Graph](Querying-the-Analytical-Graph) |
+| Unstructured | document index (BM25 + KNN) | `search-documents` | [Search & AI Retrieval](Search-and-AI-Retrieval) |
+
+An operator composes across all three — pulling a policy from the unstructured plane, a live balance from the operational plane, and a reporting fact from the analytical plane. See [AI Operators & MCP](AI-Operators-and-MCP).
+
 ## Table of Contents
 
 - [High-Level Architecture](#high-level-architecture)
@@ -86,7 +108,7 @@ Graph lifecycle writes use the same `OperationEnvelope` / idempotency / audit in
 - **delete-subgraph** — Remove a subgraph database with optional pre-delete backup
 - **create-backup** — Encrypted backup with configurable format and retention (async, returns pending envelope)
 - **restore-backup** — Restore from backup; blocked for entity graphs (OLTP is source of truth — use `materialize` instead)
-- **upgrade-tier** — Change graph infrastructure tier with Stripe billing integration (async)
+- **change-tier** — Change graph infrastructure tier with Stripe billing integration (async)
 - **materialize** — Ingest DuckDB-staged tables into the graph, direct or Dagster-orchestrated (async)
 
 Reads remain as REST GETs at their existing paths (`GET /v1/graphs/{g}/subgraphs`, `GET /v1/graphs/{g}/backups`, `GET /v1/graphs/{g}/health`, etc.). The shared dispatch infrastructure lives in `middleware/operations.py`; the extensions registrar (`middleware/extensions.py`) imports from it so both surfaces share idempotency, audit, and envelope semantics.
@@ -362,7 +384,7 @@ Business workflow orchestration and service layer. Two categories of code live h
 - **Data Ingestion**: High-performance bulk data loading using COPY operations
 - **Credit Service**: AI agent usage tracking with token-based consumption
 - **Search Service**: OpenSearch-backed full-text and semantic document search
-- **Connection Service**: Provider-agnostic connection management (QuickBooks, Plaid, SEC) with encrypted credential storage
+- **Connection Service**: Provider-agnostic connection management (QuickBooks, SEC) with encrypted credential storage
 
 **Extension domain kernels** (`operations/roboledger/`, `operations/roboinvestor/`, `operations/information_block/`):
 
@@ -523,13 +545,22 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 **Location**: `/robosystems/models/`
 
-**IAM Models** (`/robosystems/models/iam/`):
-- SQLAlchemy models for PostgreSQL database interactions
-- Foundation for Alembic migrations and schema management
-- Multi-tenant architecture with user management and access control
+The models split across two databases with independent migration histories:
+
+**Core Platform Models** (`/robosystems/models/core/`):
+- SQLAlchemy models for the platform PostgreSQL database (`robosystems`)
+- Users, orgs, permissions, graphs, billing, connections, and documents
+- Foundation for Alembic migrations and multi-tenant access control
 - Credit system and usage analytics models
 
-**See**: [IAM Models Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/iam/README.md) in codebase
+**See**: [Core Models Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/core/README.md) in codebase
+
+**Extensions OLTP Models** (`/robosystems/models/extensions/`):
+- SQLAlchemy models for the extensions PostgreSQL database (`extensions`)
+- RoboLedger and RoboInvestor transactional state with schema-per-graph-id tenancy
+- Separate `DeclarativeBase` and migration history from the core models
+
+**See**: [Extensions Models Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/extensions/README.md) in codebase
 
 **API Models** (`/robosystems/models/api/`):
 - Centralized Pydantic models for API request/response validation
@@ -577,7 +608,7 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 - **BM25 Keyword Search**: Standard analyzer for natural language queries over document text
 - **Semantic Search**: `knn_vector` field (384-dim HNSW, cosine similarity) for embedding-based retrieval
 - **Multi-Tenant Isolation**: Every query filters by `graph_id` at the client level
-- **Source Types**: SEC content (`xbrl_textblock`, `narrative_section`, `ixbrl_disclosure`); planned: `uploaded_doc`, `connection_doc`, `memory`
+- **Source Types**: SEC content (`xbrl_textblock`, `narrative_section`, `ixbrl_disclosure`), user-uploaded documents (`uploaded_doc`), synced connection documents (`connection_doc`), and agent memory (`memory`)
 - **Externalized Content**: Full text stored in S3/CDN; OpenSearch holds metadata, snippets, and embeddings
 - **Feature-Flag Gated**: `TEXT_SEARCH_ENABLED` controls availability; `SEMANTIC_SEARCH_ENABLED` controls hybrid KNN search; `tuning/indexing/ENABLE_EMBEDDINGS` controls embedding generation during indexing
 
@@ -592,13 +623,19 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 ### PostgreSQL
 
-**Purpose**: Primary relational database
+**Purpose**: Primary relational databases — two of them, on the same RDS instance with independent migration histories
 
+**Platform database (`robosystems`)** — IAM, billing, and metadata:
 - **Identity & Access Management**: Users, orgs, permissions, graphs
 - **Subscription Management**: Plans, billing, credits
 - **File Registry**: Track uploaded files per table (GraphFile, GraphTable)
 - **Schema Registry**: Graph schema definitions (GraphSchema)
 - **Dagster Orchestration**: Job runs, schedules, sensors, and asset metadata
+
+**Extensions database (`extensions`)** — per-graph OLTP for RoboLedger and RoboInvestor:
+- Transactional state (ledger entries, schedules, reports, portfolio positions) written through the `/extensions/*/operations/*` command surface
+- **Schema-per-graph-id tenancy**: each graph's data is isolated in its own PostgreSQL schema via `SET search_path`
+- Materialized into the graph (LadybugDB) for analytical queries — see the Pattern C pipeline in the [Pipeline Guide](Pipeline-Guide)
 
 ### Valkey (Redis)
 

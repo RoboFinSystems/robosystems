@@ -451,7 +451,7 @@ cat .local/config.json | grep -E "api_key|graph_id"
 5. The MCP server provides these tools:
    - `get-graph-schema` - View available node and relationship types
    - `read-graph-cypher` - Run Cypher queries
-   - `discover-properties` - Explore node properties
+   - `get-graph-info` - Inspect graph topology and node/relationship counts
    - `get-example-queries` - Get sample queries
 
 **Example MCP Usage:**
@@ -460,9 +460,8 @@ cat .local/config.json | grep -E "api_key|graph_id"
 You: Show me all people who work on multiple projects in the demo
 
 The AI will use:
-1. get-graph-schema to understand Person and Project relationships
-2. discover-properties to find relevant Person and Project properties
-3. read-graph-cypher to query for multi-project contributors
+1. get-graph-schema to understand Person and Project node types, properties, and relationships
+2. read-graph-cypher to query for multi-project contributors
 ```
 
 ```
@@ -853,6 +852,10 @@ just install
 - **G.V() Graph IDE**: [https://gdotv.com/](https://gdotv.com/)
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **RoboSystems API**: http://localhost:8000/docs
+- **Graphs & Tenancy**: [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy) - The graph_id model, tiers, and subgraphs
+- **Query the graph**: [Querying the Analytical Graph](Querying-the-Analytical-Graph) - Ad-hoc Cypher and staging tables
+- **MCP & operators**: [AI Operators & MCP](AI-Operators-and-MCP) - Access your graph through MCP tools
+- **Custom adapters**: [Pipeline Guide](Pipeline-Guide) - Ingest external data into a custom graph
 
 ## Support
 

@@ -161,9 +161,6 @@ robosystems/{env}                      # Single JSON secret per environment
   ├── INTUIT_CLIENT_SECRET
   ├── INTUIT_ENVIRONMENT               # "production" or "sandbox"
   ├── INTUIT_REDIRECT_URI
-  ├── PLAID_CLIENT_ID                  # Plaid integration
-  ├── PLAID_CLIENT_SECRET
-  ├── PLAID_ENVIRONMENT                # "production" or "sandbox"
   ├── SEC_GOV_USER_AGENT               # SEC EDGAR API identification
   ├── OPENFIGI_API_KEY                 # OpenFIGI security resolution
   ├── STRIPE_SECRET_KEY                # Stripe billing
@@ -198,6 +195,9 @@ Feature flags and tuning parameters. Uses SSM for cost efficiency (FREE tier vs 
     TEXT_SEARCH_ENABLED
     MCP_VECTOR_SEARCH_ENABLED
     MCP_MEMORY_ENABLED
+    ROBOLEDGER_ENABLED          # RoboLedger extensions surface (ops + GraphQL)
+    ROBOINVESTOR_ENABLED        # RoboInvestor extensions surface
+    EXTENSIONS_GRAPHQL_ENABLED  # GraphQL reads endpoint kill switch
     ...
   tuning/             # Runtime tunables
     cache/            # Cache TTLs (BALANCE_TTL, JWT_TTL, etc.)
