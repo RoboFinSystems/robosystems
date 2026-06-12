@@ -77,10 +77,10 @@ def _strip_html(html: str) -> str:
   if "<table" in html or "<TABLE" in html:
     html = html_tables_to_markdown(html)
   text = re.sub(
-    r"<style[^>]*>.*?</\s*style\s*>", " ", html, flags=re.DOTALL | re.IGNORECASE
+    r"<style[^>]*>.*?</\s*style\b[^>]*>", " ", html, flags=re.DOTALL | re.IGNORECASE
   )
   text = re.sub(
-    r"<script[^>]*>.*?</\s*script\s*>", " ", text, flags=re.DOTALL | re.IGNORECASE
+    r"<script[^>]*>.*?</\s*script\b[^>]*>", " ", text, flags=re.DOTALL | re.IGNORECASE
   )
   # Replace block-level tags with newlines to preserve paragraph structure
   text = re.sub(
