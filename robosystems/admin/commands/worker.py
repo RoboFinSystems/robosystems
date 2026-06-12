@@ -152,9 +152,6 @@ def worker_status(client):
     inflight_keys = list(queue.scan_iter(match="worker:inflight:*", count=100))
     inflight_total = sum(queue.llen(k) for k in inflight_keys)
 
-    # Check leader
-    leader = queue.get("worker:metrics:leader")
-
     console.print()
     console.print("[bold cyan]WORKER STATUS[/bold cyan]")
     console.print("=" * 40)
@@ -163,6 +160,5 @@ def worker_status(client):
       f"  In-flight:      {inflight_total} (across {len(inflight_keys)} workers)"
     )
     console.print(f"  DLQ:            {dlq_depth}")
-    console.print(f"  Metrics leader: {leader or 'none'}")
   finally:
     queue.close()

@@ -1,92 +1,97 @@
-"""Queue depth metric publishing with leader election.
+"""Queue depth metric publishing via a background daemon thread.
 
-Only one worker publishes queue depth to CloudWatch, elected via a
-Valkey lock with TTL. If the leader dies, the lock expires and another
-worker takes over automatically.
+Every worker runs its own publisher thread that reports the shared queue
+depth (llen of "worker:tasks") to CloudWatch once per interval. The thread
+is independent of the consume loop, so it keeps publishing even while the
+worker is blocked processing a long-running task — the consume loop only
+returns between tasks, which can be many minutes apart.
+
+All workers publish the same global depth; the scale-out/scale-in alarms
+aggregate with Statistic=Maximum, so concurrent publishers are correct
+(scale out on the peak reading, scale in only when every reading is 0).
 
 The metric powers:
 1. CloudWatch alarms for queue backup detection
 2. ECS auto-scaling policy for worker replicas
 """
 
-import time
-
-from redis.asyncio import Redis
+import threading
+from typing import Any
 
 from robosystems.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Publish at most once per interval (seconds)
-METRIC_PUBLISH_INTERVAL = 60
+# Publish queue depth once per interval (seconds).
+PUBLISH_INTERVAL = 60
 
-# Leader lock TTL — must exceed METRIC_PUBLISH_INTERVAL so the lock
-# doesn't expire between publishes during normal operation.
-LEADER_LOCK_TTL = 90
+# Reliable-queue list that the consumer pops from.
+QUEUE_KEY = "worker:tasks"
 
-LEADER_LOCK_KEY = "worker:metrics:leader"
+# Join timeout when stopping the thread on shutdown.
+STOP_JOIN_TIMEOUT = 5
 
 
-class QueueDepthReporter:
-  """Publishes worker queue depth to CloudWatch via leader election.
+class QueueDepthPublisher:
+  """Publishes worker queue depth to CloudWatch from a daemon thread.
 
-  Only the worker holding the leader lock publishes metrics. Others
-  skip silently. Call maybe_publish() on every consumer loop iteration.
+  Start with start() at worker boot and stop() on shutdown. The thread owns
+  its own synchronous Valkey and CloudWatch clients — it must not share the
+  consume loop's async client across the thread boundary.
   """
 
-  def __init__(self, queue: Redis, worker_id: str) -> None:
-    self.queue = queue
-    self.worker_id = worker_id
-    self._last_publish_time: float = 0
-    self._cloudwatch_client = None
-
-  async def maybe_publish(self) -> None:
-    """Publish queue depth if we're the leader and interval has elapsed."""
-    now = time.time()
-    if now - self._last_publish_time < METRIC_PUBLISH_INTERVAL:
-      return
-
-    # Try to acquire or confirm leader lock
-    acquired = await self.queue.set(
-      LEADER_LOCK_KEY, self.worker_id, nx=True, ex=LEADER_LOCK_TTL
+  def __init__(self) -> None:
+    self._stop = threading.Event()
+    self._thread = threading.Thread(
+      target=self._run, name="queue-depth-publisher", daemon=True
     )
-    if not acquired:
-      current_leader = await self.queue.get(LEADER_LOCK_KEY)
-      if current_leader != self.worker_id:
-        return
+    self._queue: Any = None
+    self._cloudwatch_client: Any = None
 
-    # We're the leader — refresh lock and publish
-    await self.queue.set(LEADER_LOCK_KEY, self.worker_id, ex=LEADER_LOCK_TTL)
+  def start(self) -> None:
+    self._thread.start()
 
-    depth = await self.queue.llen("worker:tasks")
-    self._last_publish_time = now
+  def stop(self) -> None:
+    self._stop.set()
+    self._thread.join(timeout=STOP_JOIN_TIMEOUT)
 
+  def _run(self) -> None:
+    """Publish immediately, then every interval until stopped."""
+    from robosystems.config.valkey_registry import (
+      ValkeyDatabase,
+      create_redis_client,
+    )
+
+    self._queue = create_redis_client(
+      ValkeyDatabase.WORKER_QUEUE, decode_responses=True
+    )
     try:
-      await self._publish_to_cloudwatch(depth)
-    except Exception as e:
-      logger.warning(f"Failed to publish queue depth metric: {e}")
+      while True:
+        try:
+          self._publish_once()
+        except Exception as e:
+          # A transient Valkey/CloudWatch error must never kill the thread.
+          logger.warning(f"Failed to publish queue depth metric: {e}")
+        if self._stop.wait(PUBLISH_INTERVAL):
+          break
+    finally:
+      try:
+        self._queue.close()
+      except Exception:
+        pass
 
-  async def _publish_to_cloudwatch(self, depth: int) -> None:
-    """Publish queue depth to CloudWatch. Skipped in dev."""
+  def _publish_once(self) -> None:
+    """Read the queue depth and publish it to CloudWatch (skipped in dev)."""
     from robosystems.config import env
+
+    depth = self._queue.llen(QUEUE_KEY)
 
     if env.ENVIRONMENT == "dev":
       logger.debug(f"Queue depth: {depth} (CloudWatch publish skipped in dev)")
       return
 
-    import asyncio
-
-    await asyncio.to_thread(self._publish_sync, depth, env.ENVIRONMENT)
-
-  def _publish_sync(self, depth: int, environment: str) -> None:
-    """Synchronous CloudWatch publish (runs in thread)."""
-    if self._cloudwatch_client is None:
-      import boto3
-
-      self._cloudwatch_client = boto3.client("cloudwatch")
-
-    namespace = f"RoboSystems/Worker/{environment}"
-    self._cloudwatch_client.put_metric_data(
+    namespace = f"RoboSystems/Worker/{env.ENVIRONMENT}"
+    self._get_cloudwatch_client().put_metric_data(
       Namespace=namespace,
       MetricData=[
         {
@@ -97,3 +102,10 @@ class QueueDepthReporter:
       ],
     )
     logger.debug(f"Published queue depth {depth} to {namespace}")
+
+  def _get_cloudwatch_client(self) -> Any:
+    if self._cloudwatch_client is None:
+      import boto3
+
+      self._cloudwatch_client = boto3.client("cloudwatch")
+    return self._cloudwatch_client
