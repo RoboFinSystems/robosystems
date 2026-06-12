@@ -76,6 +76,8 @@ class TaskProtectionManager:
       logger.warning(f"Task scale-in protection (enabled={enabled}) failed: {e}")
 
   def _set_protection_sync(self, enabled: bool) -> None:
+    # Metadata is fetched once and cached, so _load_metadata (and its
+    # retry-then-disable logic) only runs until the first success.
     if self._task_arn is None and not self._load_metadata():
       return
 
@@ -131,7 +133,7 @@ class TaskProtectionManager:
 
       # Tight timeouts + capped retries so a slow/throttled ECS control plane
       # can't stall task processing (protect() is awaited before the handler
-      # runs). Worst case ~14s rather than botocore's ~5-minute default.
+      # runs). Worst case well under 20s rather than botocore's ~5-min default.
       self._ecs_client = boto3.client(
         "ecs",
         config=Config(

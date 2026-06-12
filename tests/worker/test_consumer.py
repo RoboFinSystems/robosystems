@@ -82,6 +82,22 @@ async def test_protects_and_unprotects_around_task(mock_queue, mock_manager):
 
 
 @pytest.mark.asyncio
+async def test_short_task_skips_protection(mock_queue, mock_manager):
+  """A task below the protection threshold makes no ECS protection calls."""
+  protection = AsyncMock()
+  with (
+    patch("robosystems.worker.consumer.TASK_TIMEOUTS", {}),
+    patch("robosystems.worker.consumer.DEFAULT_TASK_TIMEOUT", 60),
+    patch("robosystems.worker.consumer.PROTECT_MIN_TIMEOUT_SECONDS", 120),
+  ):
+    await _call_process_task(
+      _make_task_data(), mock_queue, mock_manager, protection=protection
+    )
+  protection.protect.assert_not_awaited()
+  protection.unprotect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @patch("robosystems.worker.consumer.cleanup_connections")
 @patch("robosystems.worker.consumer.get_tracer")
 async def test_happy_path(mock_tracer, mock_cleanup, mock_manager, mock_queue):
