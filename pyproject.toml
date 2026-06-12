@@ -33,7 +33,7 @@ classifiers = [
 dependencies = [
     # Web Framework & API
     "fastapi>=0.135.0,<1.0",
-    "starlette>=0.52.0,<1.0",
+    "starlette>=1.3.1,<2.0",
     "sse-starlette>=3.3.0,<4.0",
     "strawberry-graphql[fastapi]>=0.314.0,<1.0",
     "uvicorn>=0.48.0,<1.0",
@@ -42,16 +42,16 @@ dependencies = [
     "boto3>=1.42.0,<2.0",
     # OLAP Staging/Vector/Graph Databases
     "duckdb==1.4.4",
-    "lancedb>=0.30.0,<1.0",
+    "lancedb>=0.30.0,<0.31",  # hold: 0.33 routes table.to_pandas() through pylance (beta-only); upgrade separately
     "real-ladybug==0.13.1",
     # OLTP Database (Postgres)
     "alembic>=1.18.0,<2.0",
     "psycopg2-binary>=2.9.0,<3.0",
     "sqlalchemy>=2.0.0,<3.0",
     # In-Memory Database (Valkey)
-    "redis>=7.0.0,<8.0",
+    "redis>=8.0.0,<9.0",
     # Document Search (OpenSearch)
-    "opensearch-py>=2.8.0,<3.0",
+    "opensearch-py>=3.0.0,<4.0",
     # Data Orchestration (Dagster)
     "dagster>=1.13.1,<2.0",
     "dagster-webserver>=1.13.3,<2.0",
@@ -66,7 +66,7 @@ dependencies = [
     "icebug>=12.0,<13.0",
     "numpy>=2.4.0,<3.0",
     "pandas>=2.3.0,<3.0",
-    "pyarrow>=23.0.0",
+    "pyarrow>=24.0.0",
     "rdflib>=7.0.0,<8.0",
     # External API Integrations
     "intuit-oauth>=1.2.0,<2.0",
@@ -82,14 +82,14 @@ dependencies = [
     "opentelemetry-instrumentation-requests>=0.55b0,<1.0",
     # Utilities
     "aiohttp>=3.14.0",
-    "bcrypt>=4.3.0,<5.0",
+    "bcrypt>=5.0.0,<6.0",
     "beautifulsoup4>=4.13.0,<5.0",
     "email-validator>=2.2.0,<3.0",
     "holidays>=0.76.0,<1.0",
     "httptools>=0.6.0,<1.0",
     "httpx-sse>=0.4.0",
     "httpx>=0.28.0",
-    "lxml>=5.4.0,<6.0",
+    "lxml>=6.1.0,<7.0",
     "pillow>=12.2.0",
     "psutil>=7.2.1,<8.0",
     "pydantic[email]>=2.11.0,<3.0",
@@ -106,10 +106,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     # RoboSystems client for demo and testing
-    "robosystems-client==0.3.35",
+    "robosystems-client==0.3.36",
 
     # Testing framework
-    "pytest>=8.4.0,<9.0",
+    "pytest>=9.0.0,<10.0",
     "pytest-asyncio>=1.4.0,<2.0",
     "pytest-cov>=6.2.0",
     "pytest-env>=1.1.0,<2.0",
@@ -125,7 +125,7 @@ dev = [
     "moto[s3]>=5.1.6,<6.0",
 
     # Development utilities
-    "rich>=14.0.0,<15.0"
+    "rich>=15.0.0,<16.0"
 ]
 
 [build-system]
@@ -138,7 +138,7 @@ build-backend = "setuptools.build_meta"
 lambda = [
     "boto3>=1.39.0,<2.0",           # AWS SDK (all Lambdas)
     "psycopg2-binary>=2.9.0,<3.0",  # PostgreSQL (postgres-init, postgres-rotation)
-    "redis>=7.0.0,<8.0",            # Valkey/Redis (valkey-rotation)
+    "redis>=8.0.0,<9.0",            # Valkey/Redis (valkey-rotation)
     "urllib3>=2.7.0,<3.0",          # HTTP client (graph-volume-monitor)
 ]
 
