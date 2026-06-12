@@ -29,7 +29,7 @@ from robosystems.middleware.sse.operation_manager import (
 )
 from robosystems.worker.cleanup import cleanup_connections
 from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
-from robosystems.worker.metrics import QueueDepthReporter
+from robosystems.worker.metrics import QueueDepthPublisher
 from robosystems.worker.tasks import get_task_handler
 
 logger = logging.getLogger(__name__)
@@ -51,14 +51,13 @@ async def run() -> None:
 
   worker_id = f"worker-{socket.gethostname()}-{os.getpid()}"
   inflight_key = f"worker:inflight:{worker_id}"
-  depth_reporter = QueueDepthReporter(queue, worker_id)
+  depth_publisher = QueueDepthPublisher()
+  depth_publisher.start()
   logger.info(f"Worker started: {worker_id}")
 
   shutdown_wait = asyncio.create_task(shutdown.wait())
   try:
     while not shutdown.is_set():
-      await depth_reporter.maybe_publish()
-
       # BLMOVE atomically pops from main queue and pushes to inflight list.
       # If the worker crashes, the task stays in inflight for the reaper.
       # Race against shutdown so SIGTERM exits without waiting for BLMOVE timeout.
@@ -91,6 +90,7 @@ async def run() -> None:
       await _process_task(task_data, task_json, queue, inflight_key, manager, worker_id)
   finally:
     logger.info(f"Worker shutting down: {worker_id}")
+    depth_publisher.stop()
     shutdown_wait.cancel()
     try:
       await queue.aclose()

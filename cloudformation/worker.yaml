@@ -517,7 +517,10 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 2
       ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
+      # Fail open: a gap in published depth errs toward adding capacity rather
+      # than silently not scaling. Scale-in stays notBreaching so a gap never
+      # wrongly scales to zero.
+      TreatMissingData: breaching
       AlarmActions:
         - !Ref WorkerScaleOutPolicy
 
