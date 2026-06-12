@@ -53,6 +53,10 @@ class PasswordSecurity:
 
   # bcrypt configuration
   BCRYPT_ROUNDS = 14  # Higher security for passwords vs API keys
+  # bcrypt only uses the first 72 bytes; 5.0+ raises instead of truncating
+  # silently. Truncating explicitly keeps long passwords working and preserves
+  # verification of hashes written under bcrypt 4.x (which truncated implicitly).
+  BCRYPT_MAX_BYTES = 72
 
   # Common weak patterns
   WEAK_PATTERNS = [
@@ -229,7 +233,7 @@ class PasswordSecurity:
         Bcrypt hash string
     """
     salt = bcrypt.gensalt(rounds=cls.BCRYPT_ROUNDS)
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+    return bcrypt.hashpw(cls._bcrypt_bytes(password), salt).decode("utf-8")
 
   @classmethod
   def verify_password(cls, password: str, hashed: str) -> bool:
@@ -244,9 +248,19 @@ class PasswordSecurity:
         True if password matches hash
     """
     try:
-      return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+      return bcrypt.checkpw(cls._bcrypt_bytes(password), hashed.encode("utf-8"))
     except (ValueError, TypeError):
       return False
+
+  @classmethod
+  def _bcrypt_bytes(cls, password: str) -> bytes:
+    """Encode a password to bcrypt's 72-byte input, truncating if needed.
+
+    bcrypt 5.0 raises on inputs longer than 72 bytes rather than silently
+    truncating like 4.x. Truncating here reproduces the legacy behavior so
+    long passwords still work and hashes stored under 4.x keep verifying.
+    """
+    return password.encode("utf-8")[: cls.BCRYPT_MAX_BYTES]
 
   @classmethod
   def generate_secure_password(cls, length: int = 16) -> str:
