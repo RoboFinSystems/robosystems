@@ -282,6 +282,12 @@ Resources:
                   - autoscaling:SetInstanceProtection
                 Resource:
                   - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/robosystems-*-writers-${Environment}-asg"
+              # ECS task scale-in protection (worker protects itself while busy)
+              - Effect: Allow
+                Action:
+                  - ecs:UpdateTaskProtection
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${DagsterClusterName}/*"
               # CloudFormation (lookup infrastructure outputs like Lambda ARNs)
               - Effect: Allow
                 Action:

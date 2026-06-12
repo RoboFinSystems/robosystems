@@ -28,6 +28,10 @@ PUBLISH_INTERVAL = 60
 # Reliable-queue list that the consumer pops from.
 QUEUE_KEY = "worker:tasks"
 
+# Dead-letter list — tasks that exhausted retries. A growing DLQ is the
+# canary for retry failures under routine scale-in.
+DLQ_KEY = "worker:dlq"
+
 # Join timeout when stopping the thread on shutdown.
 STOP_JOIN_TIMEOUT = 5
 
@@ -85,27 +89,28 @@ class QueueDepthPublisher:
         logger.debug(f"Queue client close error on shutdown: {e}")
 
   def _publish_once(self) -> None:
-    """Read the queue depth and publish it to CloudWatch (skipped in dev)."""
+    """Read queue + DLQ depth and publish them to CloudWatch (skipped in dev)."""
     from robosystems.config import env
 
     depth = self._queue.llen(QUEUE_KEY)
+    dlq_depth = self._queue.llen(DLQ_KEY)
 
     if env.ENVIRONMENT == "dev":
-      logger.debug(f"Queue depth: {depth} (CloudWatch publish skipped in dev)")
+      logger.debug(
+        f"Queue depth: {depth}, DLQ depth: {dlq_depth} "
+        "(CloudWatch publish skipped in dev)"
+      )
       return
 
     namespace = f"RoboSystems/Worker/{env.ENVIRONMENT}"
     self._get_cloudwatch_client().put_metric_data(
       Namespace=namespace,
       MetricData=[
-        {
-          "MetricName": "QueueDepth",
-          "Value": depth,
-          "Unit": "Count",
-        },
+        {"MetricName": "QueueDepth", "Value": depth, "Unit": "Count"},
+        {"MetricName": "DLQDepth", "Value": dlq_depth, "Unit": "Count"},
       ],
     )
-    logger.debug(f"Published queue depth {depth} to {namespace}")
+    logger.debug(f"Published queue depth {depth}, DLQ depth {dlq_depth} to {namespace}")
 
   def _get_cloudwatch_client(self) -> Any:
     if self._cloudwatch_client is None:

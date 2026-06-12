@@ -30,6 +30,7 @@ from robosystems.middleware.sse.operation_manager import (
 from robosystems.worker.cleanup import cleanup_connections
 from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
 from robosystems.worker.metrics import QueueDepthPublisher
+from robosystems.worker.task_protection import TaskProtectionManager
 from robosystems.worker.tasks import get_task_handler
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ async def run() -> None:
   inflight_key = f"worker:inflight:{worker_id}"
   depth_publisher = QueueDepthPublisher()
   depth_publisher.start()
+  protection = TaskProtectionManager()
   logger.info(f"Worker started: {worker_id}")
 
   shutdown_wait = asyncio.create_task(shutdown.wait())
@@ -87,7 +89,9 @@ async def run() -> None:
         await queue.lrem(inflight_key, 1, task_json)
         continue
 
-      await _process_task(task_data, task_json, queue, inflight_key, manager, worker_id)
+      await _process_task(
+        task_data, task_json, queue, inflight_key, manager, worker_id, protection
+      )
   finally:
     logger.info(f"Worker shutting down: {worker_id}")
     depth_publisher.stop()
@@ -108,6 +112,7 @@ async def _process_task(
   inflight_key: str,
   manager: OperationManager,
   worker_id: str,
+  protection: TaskProtectionManager,
 ) -> None:
   """Process a single task with full lifecycle management.
 
@@ -146,6 +151,8 @@ async def _process_task(
   ):
     timeout = TASK_TIMEOUTS.get(task_type, DEFAULT_TASK_TIMEOUT)
     try:
+      # Protect this worker from scale-in termination while it runs the task.
+      await protection.protect()
       await manager.emit_progress(task_id, "Starting...", progress_percent=0)
 
       handler = handler_cls(task_id, graph_id, user_id, params, manager)
@@ -199,6 +206,8 @@ async def _process_task(
       )
 
     finally:
+      # Clear scale-in protection — worker is idle again and safe to terminate.
+      await protection.unprotect()
       # Remove from inflight — task completed (successfully or not)
       await queue.lrem(inflight_key, 1, task_json)
       cleanup_connections()

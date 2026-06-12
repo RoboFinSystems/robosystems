@@ -63,8 +63,9 @@ async def _call_process_task(
   """Helper to call _process_task with the correct signature."""
   task_json = json.dumps(task_data)
   inflight_key = f"worker:inflight:{worker_id}"
+  protection = AsyncMock()
   await _process_task(
-    task_data, task_json, mock_queue, inflight_key, mock_manager, worker_id
+    task_data, task_json, mock_queue, inflight_key, mock_manager, worker_id, protection
   )
 
 
