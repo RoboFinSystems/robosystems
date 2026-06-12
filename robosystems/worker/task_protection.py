@@ -34,6 +34,15 @@ PROTECTION_EXPIRES_MINUTES = 90
 # Timeout for the one-shot metadata fetch.
 METADATA_TIMEOUT_SECONDS = 2
 
+# Only protect tasks whose timeout exceeds the worker's SIGTERM grace
+# (StopTimeout = 119s). Shorter tasks always drain before SIGKILL on scale-in,
+# so protecting them would just churn the ECS API.
+PROTECT_MIN_TIMEOUT_SECONDS = 120
+
+# Disable protection only after this many consecutive metadata-fetch failures,
+# so a single transient blip doesn't permanently turn it off.
+MAX_METADATA_FAILURES = 10
+
 
 class TaskProtectionManager:
   """Marks the running ECS task protected/unprotected from scale-in.
@@ -49,6 +58,7 @@ class TaskProtectionManager:
     self._cluster: str | None = None
     self._task_arn: str | None = None
     self._ecs_client: Any = None
+    self._metadata_failures = 0
 
   async def protect(self) -> None:
     await self._set_protection(True)
@@ -66,6 +76,8 @@ class TaskProtectionManager:
       logger.warning(f"Task scale-in protection (enabled={enabled}) failed: {e}")
 
   def _set_protection_sync(self, enabled: bool) -> None:
+    # Metadata is fetched once and cached, so _load_metadata (and its
+    # retry-then-disable logic) only runs until the first success.
     if self._task_arn is None and not self._load_metadata():
       return
 
@@ -90,7 +102,8 @@ class TaskProtectionManager:
   def _load_metadata(self) -> bool:
     """Fetch cluster + task ARN from the ECS metadata endpoint.
 
-    Returns False and disables the manager if metadata is unavailable.
+    Returns True on success. A transient failure returns False but leaves the
+    manager enabled so the next call retries; only repeated failures disable it.
     """
     try:
       with urllib.request.urlopen(
@@ -99,17 +112,34 @@ class TaskProtectionManager:
         meta = json.loads(resp.read())
       self._cluster = meta["Cluster"]
       self._task_arn = meta["TaskARN"]
+      self._metadata_failures = 0
       return True
     except Exception as e:
-      logger.warning(
-        f"Could not read ECS task metadata; scale-in protection disabled: {e}"
-      )
-      self._enabled = False
+      self._metadata_failures += 1
+      if self._metadata_failures >= MAX_METADATA_FAILURES:
+        self._enabled = False
+        logger.warning(
+          f"Could not read ECS task metadata after {self._metadata_failures} "
+          f"attempts; scale-in protection disabled: {e}"
+        )
+      else:
+        logger.warning(f"Could not read ECS task metadata; will retry: {e}")
       return False
 
   def _get_ecs_client(self) -> Any:
     if self._ecs_client is None:
       import boto3
+      from botocore.config import Config
 
-      self._ecs_client = boto3.client("ecs")
+      # Tight timeouts + capped retries so a slow/throttled ECS control plane
+      # can't stall task processing (protect() is awaited before the handler
+      # runs). Worst case well under 20s rather than botocore's ~5-min default.
+      self._ecs_client = boto3.client(
+        "ecs",
+        config=Config(
+          connect_timeout=2,
+          read_timeout=5,
+          retries={"max_attempts": 2, "mode": "standard"},
+        ),
+      )
     return self._ecs_client
