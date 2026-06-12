@@ -5,7 +5,9 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
+from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
 from robosystems.worker.task_protection import (
+  MAX_METADATA_FAILURES,
   METADATA_URI_ENV,
   PROTECTION_EXPIRES_MINUTES,
   TaskProtectionManager,
@@ -55,14 +57,18 @@ def test_load_metadata_parses_cluster_and_task():
   assert mgr._task_arn == TASK_ARN
 
 
-def test_metadata_failure_disables_manager():
+def test_metadata_failure_retries_then_disables():
+  """A single metadata blip retries; only repeated failures disable."""
   mgr = _enabled_manager()
   with patch(
     "robosystems.worker.task_protection.urllib.request.urlopen",
     side_effect=OSError("metadata unreachable"),
   ):
     assert mgr._load_metadata() is False
-  assert mgr._enabled is False
+    assert mgr._enabled is True  # one blip does not disable
+    for _ in range(MAX_METADATA_FAILURES):
+      mgr._load_metadata()
+  assert mgr._enabled is False  # repeated failures eventually disable
 
 
 def test_protect_calls_update_task_protection_with_expiry():
@@ -97,3 +103,23 @@ def test_unprotect_omits_expiry():
   kwargs = ecs.update_task_protection.call_args.kwargs
   assert kwargs["protectionEnabled"] is False
   assert "expiresInMinutes" not in kwargs
+
+
+def test_set_protection_swallows_client_error():
+  """A failing update_task_protection is logged, never raised (best-effort)."""
+  mgr = _enabled_manager()
+  mgr._cluster = CLUSTER
+  mgr._task_arn = TASK_ARN
+  ecs = MagicMock()
+  ecs.update_task_protection.side_effect = RuntimeError("ECS throttled")
+  mgr._ecs_client = ecs
+
+  # Must not raise.
+  asyncio.run(mgr.protect())
+  asyncio.run(mgr.unprotect())
+
+
+def test_protection_lease_outlives_longest_task():
+  """The protection lease must exceed the longest task timeout."""
+  longest = max([*TASK_TIMEOUTS.values(), DEFAULT_TASK_TIMEOUT])
+  assert longest < PROTECTION_EXPIRES_MINUTES * 60

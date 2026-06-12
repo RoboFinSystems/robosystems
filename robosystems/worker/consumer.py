@@ -30,7 +30,10 @@ from robosystems.middleware.sse.operation_manager import (
 from robosystems.worker.cleanup import cleanup_connections
 from robosystems.worker.constants import DEFAULT_TASK_TIMEOUT, TASK_TIMEOUTS
 from robosystems.worker.metrics import QueueDepthPublisher
-from robosystems.worker.task_protection import TaskProtectionManager
+from robosystems.worker.task_protection import (
+  PROTECT_MIN_TIMEOUT_SECONDS,
+  TaskProtectionManager,
+)
 from robosystems.worker.tasks import get_task_handler
 
 logger = logging.getLogger(__name__)
@@ -150,9 +153,12 @@ async def _process_task(
     },
   ):
     timeout = TASK_TIMEOUTS.get(task_type, DEFAULT_TASK_TIMEOUT)
+    # Only long tasks need scale-in protection; short ones drain within the
+    # SIGTERM grace, so protecting them would just churn the ECS API.
+    protect_task = timeout >= PROTECT_MIN_TIMEOUT_SECONDS
     try:
-      # Protect this worker from scale-in termination while it runs the task.
-      await protection.protect()
+      if protect_task:
+        await protection.protect()
       await manager.emit_progress(task_id, "Starting...", progress_percent=0)
 
       handler = handler_cls(task_id, graph_id, user_id, params, manager)
@@ -207,7 +213,8 @@ async def _process_task(
 
     finally:
       # Clear scale-in protection — worker is idle again and safe to terminate.
-      await protection.unprotect()
+      if protect_task:
+        await protection.unprotect()
       # Remove from inflight — task completed (successfully or not)
       await queue.lrem(inflight_key, 1, task_json)
       cleanup_connections()

@@ -58,15 +58,27 @@ def _make_task_data(task_type="test_success", **overrides):
 
 
 async def _call_process_task(
-  task_data, mock_queue, mock_manager, worker_id="worker-test-1"
+  task_data, mock_queue, mock_manager, worker_id="worker-test-1", protection=None
 ):
   """Helper to call _process_task with the correct signature."""
   task_json = json.dumps(task_data)
   inflight_key = f"worker:inflight:{worker_id}"
-  protection = AsyncMock()
+  protection = protection or AsyncMock()
   await _process_task(
     task_data, task_json, mock_queue, inflight_key, mock_manager, worker_id, protection
   )
+  return protection
+
+
+@pytest.mark.asyncio
+async def test_protects_and_unprotects_around_task(mock_queue, mock_manager):
+  """A protected task wraps execution in protect()/unprotect()."""
+  protection = AsyncMock()
+  await _call_process_task(
+    _make_task_data(), mock_queue, mock_manager, protection=protection
+  )
+  protection.protect.assert_awaited_once()
+  protection.unprotect.assert_awaited_once()
 
 
 @pytest.mark.asyncio
