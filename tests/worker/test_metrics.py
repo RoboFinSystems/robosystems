@@ -60,3 +60,29 @@ def test_start_then_stop_runs_and_joins_cleanly():
   # It owned and closed its own sync client.
   fake_queue.llen.assert_called_with(QUEUE_KEY)
   fake_queue.close.assert_called_once()
+
+
+def test_run_continues_after_publish_error():
+  """A failing _publish_once is caught; the loop keeps publishing."""
+  fake_queue = MagicMock()
+  publisher = QueueDepthPublisher()
+  publish_calls = []
+
+  def publish_side_effect():
+    publish_calls.append(1)
+    if len(publish_calls) == 1:
+      raise ValueError("transient CloudWatch error")
+
+  with (
+    patch(
+      "robosystems.config.valkey_registry.create_redis_client",
+      return_value=fake_queue,
+    ),
+    patch.object(publisher, "_publish_once", side_effect=publish_side_effect),
+    patch.object(publisher._stop, "wait", side_effect=[False, True]),
+  ):
+    publisher._run()
+
+  # Two iterations ran despite the first raising — the thread didn't die.
+  assert len(publish_calls) == 2
+  fake_queue.close.assert_called_once()

@@ -54,6 +54,10 @@ class QueueDepthPublisher:
   def stop(self) -> None:
     self._stop.set()
     self._thread.join(timeout=STOP_JOIN_TIMEOUT)
+    if self._thread.is_alive():
+      logger.warning(
+        f"queue-depth-publisher thread did not stop within {STOP_JOIN_TIMEOUT}s"
+      )
 
   def _run(self) -> None:
     """Publish immediately, then every interval until stopped."""
@@ -77,8 +81,8 @@ class QueueDepthPublisher:
     finally:
       try:
         self._queue.close()
-      except Exception:
-        pass
+      except Exception as e:
+        logger.debug(f"Queue client close error on shutdown: {e}")
 
   def _publish_once(self) -> None:
     """Read the queue depth and publish it to CloudWatch (skipped in dev)."""
