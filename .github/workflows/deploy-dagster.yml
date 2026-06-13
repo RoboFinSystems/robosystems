@@ -64,6 +64,11 @@ on:
         required: false
         type: string
         default: "1024"
+      webserver_desired_count:
+        description: "Webserver tasks (0 = off, scaled up on demand by tunnels.sh; 1 = always on)"
+        required: false
+        type: string
+        default: "0"
       # Run Job Profiles are hardcoded (profile name = fixed resources):
       # - Light:    512 CPU,  2048 MB (0.5 vCPU, 2 GB)  - sensors, simple jobs
       # - Standard: 2048 CPU, 8192 MB (2 vCPU, 8 GB)    - moderate ETL
@@ -308,6 +313,7 @@ jobs:
                 ParameterKey=DaemonMemory,ParameterValue=${{ inputs.daemon_memory }} \
                 ParameterKey=WebserverCpu,ParameterValue=${{ inputs.webserver_cpu }} \
                 ParameterKey=WebserverMemory,ParameterValue=${{ inputs.webserver_memory }} \
+                ParameterKey=WebserverDesiredCount,ParameterValue=${{ inputs.webserver_desired_count }} \
                 ParameterKey=RunJobCpu,ParameterValue=512 \
                 ParameterKey=RunJobMemory,ParameterValue=2048 \
                 ParameterKey=MaxConcurrentRuns,ParameterValue=${{ inputs.max_concurrent_runs }} \

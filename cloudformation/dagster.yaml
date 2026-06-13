@@ -51,6 +51,12 @@ Parameters:
     Default: "1024"
     Description: Memory in MiB for Dagster webserver
     AllowedValues: ["1024", "2048", "4096"]
+  WebserverDesiredCount:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 1
+    Description: Webserver tasks. 0 = off by default (UI-only, reached via bin/tools/tunnels.sh which scales it to 1 on demand); 1 = always on.
   # Run Job Configuration (Fargate)
   # Default task definition provides base resources. Jobs override via Dagster tags:
   #   ecs/cpu, ecs/memory, ecs/ephemeral_storage, ecs/run_task_kwargs
@@ -966,7 +972,7 @@ Resources:
     Properties:
       ServiceName: !Sub robosystems-dagster-webserver-${Environment}
       Cluster: !Ref DagsterCluster
-      DesiredCount: 1 # Always 1 - no ALB for load distribution
+      DesiredCount: !Ref WebserverDesiredCount # Default 0 (off); bin/tools/tunnels.sh scales to 1 on demand. Override via DAGSTER_WEBSERVER_DESIRED_COUNT_<ENV>
       CapacityProviderStrategy:
         - CapacityProvider: FARGATE_SPOT
           Weight: !Ref WebserverFargateSpotWeight

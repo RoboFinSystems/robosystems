@@ -20,6 +20,13 @@ API_ENDPOINT=""
 API_INTERNAL_ENDPOINT=""  # Service Discovery endpoint (bypasses ALB)
 API_ACCESS_MODE=""        # internal or public
 
+# Dagster webserver scale-on-demand tracking. The webserver defaults to 0 tasks
+# in CloudFormation (it's UI-only, reachable solely through this tunnel) so an
+# idle UI doesn't cost an on-demand Fargate task. We scale it to 1 while a
+# dagster tunnel is open, then back to 0 on exit.
+ENVIRONMENT=""
+WEBSERVER_SCALED_UP="false"
+
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,6 +42,11 @@ cleanup_on_exit() {
 
     # Kill any background SSM sessions
     pkill -f "session-manager-plugin" 2>/dev/null || true
+
+    # Scale the Dagster webserver back down if this session brought it up
+    if [[ "$WEBSERVER_SCALED_UP" == "true" && -n "${ENVIRONMENT:-}" ]]; then
+        scale_webserver_down "$ENVIRONMENT"
+    fi
 
     # Prompt user to optionally stop the bastion
     if [[ -n "${BASTION_INSTANCE_ID:-}" ]] && [[ -t 0 ]]; then
@@ -339,6 +351,52 @@ check_bastion_status() {
         echo "The instance may not have the SSM agent installed or proper IAM permissions."
         exit 1
     fi
+}
+
+scale_webserver_up() {
+    local environment=$1
+    local cluster="robosystems-dagster-${environment}-cluster"
+    local service="robosystems-dagster-webserver-${environment}"
+
+    echo -e "${BLUE}Ensuring Dagster webserver is running...${NC}"
+
+    local desired
+    desired=$(aws ecs describe-services \
+        --cluster "$cluster" --services "$service" \
+        --query 'services[0].desiredCount' --output text \
+        --region "$AWS_REGION" 2>/dev/null || echo "")
+
+    if [[ -z "$desired" || "$desired" == "None" ]]; then
+        echo -e "${YELLOW}Warning: Dagster webserver service not found; skipping scale-up${NC}"
+        return 0
+    fi
+
+    if [[ "$desired" -ge 1 ]]; then
+        echo -e "${GREEN}✓ Dagster webserver already running${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}Starting Dagster webserver (scale 0 -> 1)...${NC}"
+    aws ecs update-service \
+        --cluster "$cluster" --service "$service" \
+        --desired-count 1 --region "$AWS_REGION" >/dev/null
+    WEBSERVER_SCALED_UP="true"
+
+    echo -e "${BLUE}Waiting for Dagster webserver to become healthy (cold start ~1-2 min)...${NC}"
+    aws ecs wait services-stable \
+        --cluster "$cluster" --services "$service" \
+        --region "$AWS_REGION"
+    echo -e "${GREEN}✓ Dagster webserver is running${NC}"
+}
+
+scale_webserver_down() {
+    local environment=$1
+    echo -e "${YELLOW}Scaling Dagster webserver back down (-> 0)...${NC}"
+    aws ecs update-service \
+        --cluster "robosystems-dagster-${environment}-cluster" \
+        --service "robosystems-dagster-webserver-${environment}" \
+        --desired-count 0 --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+    echo -e "${GREEN}✓ Dagster webserver scaled to 0${NC}"
 }
 
 start_ssm_tunnel() {
@@ -734,6 +792,17 @@ main() {
 
     # Check and start bastion if needed
     check_bastion_status "$environment"
+
+    # Remember the environment so cleanup_on_exit can scale the webserver back down
+    ENVIRONMENT="$environment"
+
+    # The Dagster webserver defaults to 0 tasks (cost); bring it up on demand
+    # only for the services that actually need it.
+    case $service in
+        dagster|all)
+            scale_webserver_up "$environment"
+            ;;
+    esac
 
     # Set up tunnels based on service
     case $service in
