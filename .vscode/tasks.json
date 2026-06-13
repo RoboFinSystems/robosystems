@@ -383,7 +383,7 @@
       "id": "updateDependencies",
       "type": "pickString",
       "description": "Update dependencies after creating branch:",
-      "default": "yes",
+      "default": "no",
       "options": ["yes", "no"]
     },
     {
