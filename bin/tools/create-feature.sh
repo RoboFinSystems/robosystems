@@ -9,7 +9,7 @@ set -e
 BRANCH_TYPE=${1:-feature}
 BRANCH_NAME=${2:-}
 BASE_BRANCH=${3:-main}
-UPDATE_DEPS=${4:-yes}
+UPDATE_DEPS=${4:-no}
 
 # Validate branch type
 if [[ "$BRANCH_TYPE" != "feature" && "$BRANCH_TYPE" != "bugfix" && "$BRANCH_TYPE" != "hotfix" && "$BRANCH_TYPE" != "chore" && "$BRANCH_TYPE" != "refactor" ]]; then
@@ -80,7 +80,9 @@ git push -u origin $FULL_BRANCH
 echo ""
 echo "🎉 Successfully created and checked out $FULL_BRANCH"
 
-# Update dependencies if requested (default: yes)
+# Update dependencies only when explicitly requested (default: no).
+# Pass "yes" as the 4th arg to refresh deps on the new branch; otherwise
+# branch creation leaves the lockfile untouched.
 if [[ "$UPDATE_DEPS" == "yes" ]]; then
   echo ""
   echo "📦 Updating dependencies..."

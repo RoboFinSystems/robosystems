@@ -242,7 +242,7 @@ demo-world-online-statement-reconcile *args="":
 ## CI/CD ##
 
 # Create a feature branch
-create-feature type="feature" name="" base="main" update="yes":
+create-feature type="feature" name="" base="main" update="no":
     @bin/tools/create-feature.sh {{type}} {{name}} {{base}} {{update}}
 
 # Create a release branch from main with deployment option
