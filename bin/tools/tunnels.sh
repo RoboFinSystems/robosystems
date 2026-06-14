@@ -26,6 +26,7 @@ API_ACCESS_MODE=""        # internal or public
 # dagster tunnel is open, then back to 0 on exit.
 ENVIRONMENT=""
 WEBSERVER_SCALED_UP="false"
+WEBSERVER_WAIT_PID=""  # background `ecs wait services-stable` PID (overlaps with bastion boot)
 
 
 # Colors for output
@@ -42,6 +43,11 @@ cleanup_on_exit() {
 
     # Kill any background SSM sessions
     pkill -f "session-manager-plugin" 2>/dev/null || true
+
+    # Stop the background readiness wait if it's still running (e.g. aborted mid-boot)
+    if [[ -n "${WEBSERVER_WAIT_PID:-}" ]]; then
+        kill "$WEBSERVER_WAIT_PID" 2>/dev/null || true
+    fi
 
     # Scale the Dagster webserver back down if this session brought it up
     if [[ "$WEBSERVER_SCALED_UP" == "true" && -n "${ENVIRONMENT:-}" ]]; then
@@ -353,7 +359,12 @@ check_bastion_status() {
     fi
 }
 
-scale_webserver_up() {
+# Fire the webserver scale-up (fast: describe + update-service) and kick off the
+# readiness wait in the background, so the ~1-2 min cold start overlaps with the
+# bastion boot instead of running after it. The describe/update run synchronously
+# in the parent shell so WEBSERVER_SCALED_UP propagates to the cleanup trap;
+# only the slow `wait services-stable` is backgrounded. Join with wait_webserver_ready.
+start_webserver_scale_up() {
     local environment=$1
     local cluster="robosystems-dagster-${environment}-cluster"
     local service="robosystems-dagster-webserver-${environment}"
@@ -382,10 +393,22 @@ scale_webserver_up() {
         --desired-count 1 --region "$AWS_REGION" >/dev/null
     WEBSERVER_SCALED_UP="true"
 
-    echo -e "${BLUE}Waiting for Dagster webserver to become healthy (cold start ~1-2 min)...${NC}"
+    # Background the readiness wait so it runs concurrently with the bastion boot.
     aws ecs wait services-stable \
         --cluster "$cluster" --services "$service" \
-        --region "$AWS_REGION"
+        --region "$AWS_REGION" &
+    WEBSERVER_WAIT_PID=$!
+    echo -e "${BLUE}Dagster webserver starting in background (cold start ~1-2 min)...${NC}"
+}
+
+# Join the background readiness wait before opening the tunnel.
+wait_webserver_ready() {
+    if [[ -z "$WEBSERVER_WAIT_PID" ]]; then
+        return 0
+    fi
+    echo -e "${BLUE}Waiting for Dagster webserver to become healthy...${NC}"
+    wait "$WEBSERVER_WAIT_PID" || true
+    WEBSERVER_WAIT_PID=""
     echo -e "${GREEN}✓ Dagster webserver is running${NC}"
 }
 
@@ -790,17 +813,25 @@ main() {
     # Discover infrastructure
     discover_infrastructure "$environment" "$service"
 
-    # Check and start bastion if needed
-    check_bastion_status "$environment"
-
     # Remember the environment so cleanup_on_exit can scale the webserver back down
     ENVIRONMENT="$environment"
 
     # The Dagster webserver defaults to 0 tasks (cost); bring it up on demand
-    # only for the services that actually need it.
+    # only for the services that actually need it. Fire this BEFORE the bastion
+    # boot so the webserver cold start overlaps with it (both are independent).
     case $service in
         dagster|all)
-            scale_webserver_up "$environment"
+            start_webserver_scale_up "$environment"
+            ;;
+    esac
+
+    # Check and start bastion if needed (runs concurrently with the webserver cold start)
+    check_bastion_status "$environment"
+
+    # Join the webserver readiness wait before opening the tunnel
+    case $service in
+        dagster|all)
+            wait_webserver_ready
             ;;
     esac
 
