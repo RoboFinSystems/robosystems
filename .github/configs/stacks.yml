@@ -151,6 +151,12 @@ prod:
       webserver_service_arn: WebserverServiceArn
       dagster_url: DagsterUrl
 
+  # Background Worker (deployed alongside Dagster, shares its ECS cluster)
+  # ECS resource names remain robosystems-worker-{env} (derived from Environment
+  # in cloudformation/worker.yaml); only the CloudFormation stack name is aligned here.
+  workers:
+    stack_name: RoboSystemsWorkerProd
+
 staging:
   # Core Infrastructure (Uses shared VPC)
   vpc:
@@ -289,6 +295,12 @@ staging:
       daemon_service_arn: DaemonServiceArn
       webserver_service_arn: WebserverServiceArn
       dagster_url: DagsterUrl
+
+  # Background Worker (deployed alongside Dagster, shares its ECS cluster)
+  # ECS resource names remain robosystems-worker-{env} (derived from Environment
+  # in cloudformation/worker.yaml); only the CloudFormation stack name is aligned here.
+  workers:
+    stack_name: RoboSystemsWorkerStaging
 
 # Common patterns for dynamic stack name generation
 patterns:

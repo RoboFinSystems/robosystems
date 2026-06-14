@@ -103,6 +103,11 @@ on:
         default: "0"
 
       # Worker Configuration
+      worker_stack_name:
+        description: "CloudFormation stack name for the background worker"
+        required: false
+        type: string
+        default: ""
       worker_enabled:
         description: "Enable background worker deployment (true/false)"
         required: false
@@ -410,7 +415,12 @@ jobs:
         if: inputs.worker_enabled == 'true'
         id: deploy-worker
         run: |
-          WORKER_STACK="robosystems-worker-${{ inputs.environment }}"
+          WORKER_STACK="${{ inputs.worker_stack_name }}"
+
+          if [ -z "$WORKER_STACK" ]; then
+            echo "Error: worker_stack_name input is required when worker_enabled is true"
+            exit 1
+          fi
 
           if aws cloudformation describe-stacks --stack-name $WORKER_STACK 2>&1 | grep -q "does not exist"; then
             STACK_ACTION="create-stack"
@@ -489,6 +499,6 @@ jobs:
         if: inputs.worker_enabled == 'true'
         uses: ./.github/actions/monitor-stack-deployment
         with:
-          stack-name: robosystems-worker-${{ inputs.environment }}
+          stack-name: ${{ inputs.worker_stack_name }}
           timeout: "600"
           interval: "10"
