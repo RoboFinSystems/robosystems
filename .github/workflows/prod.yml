@@ -73,6 +73,7 @@ jobs:
       waf_stack: ${{ steps.load.outputs.waf_stack }}
       cloudtrail_stack: ${{ steps.load.outputs.cloudtrail_stack }}
       dagster_stack: ${{ steps.load.outputs.dagster_stack }}
+      worker_stack: ${{ steps.load.outputs.worker_stack }}
       opensearch_stack: ${{ steps.load.outputs.opensearch_stack }}
       domain_name_root: ${{ steps.load.outputs.domain_name_root }}
       graph_ami_id: ${{ steps.ami.outputs.ami_id }}
@@ -121,6 +122,7 @@ jobs:
           echo "waf_stack=$(./bin/tools/stack-config.sh $ENV waf)" >> $GITHUB_OUTPUT
           echo "cloudtrail_stack=$(./bin/tools/stack-config.sh $ENV cloudtrail)" >> $GITHUB_OUTPUT
           echo "dagster_stack=$(./bin/tools/stack-config.sh $ENV dagster)" >> $GITHUB_OUTPUT
+          echo "worker_stack=$(./bin/tools/stack-config.sh $ENV workers)" >> $GITHUB_OUTPUT
           echo "opensearch_stack=$(./bin/tools/stack-config.sh $ENV opensearch)" >> $GITHUB_OUTPUT
 
           # Domain configuration - leave empty for isolated deployment (no custom domains)
@@ -617,6 +619,7 @@ jobs:
       # Run Job Profiles: hardcoded in deploy-dagster.yml (Light/Standard/Compute/Heavy)
       max_concurrent_runs: ${{ vars.DAGSTER_MAX_CONCURRENT_RUNS_PROD || '20' }}
       # Worker Configuration
+      worker_stack_name: ${{ needs.stack-config.outputs.worker_stack }}
       worker_enabled: ${{ vars.WORKER_ENABLED_PROD || 'false' }}
       worker_cpu: ${{ vars.WORKER_CPU_PROD || '512' }}
       worker_memory: ${{ vars.WORKER_MEMORY_PROD || '1024' }}
