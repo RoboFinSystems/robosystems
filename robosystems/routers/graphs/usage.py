@@ -123,7 +123,7 @@ async def get_graph_metrics(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint=f"/v1/graphs/{graph_id}/analytics",
+      endpoint="/v1/graphs/{graph_id}/analytics",
       method="GET",
       event_type="graph_metrics_accessed",
       event_data={
@@ -397,7 +397,7 @@ async def get_graph_usage_analytics(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint=f"/v1/graphs/{graph_id}/usage",
+      endpoint="/v1/graphs/{graph_id}/usage",
       method="GET",
       event_type="graph_usage_accessed",
       event_data={

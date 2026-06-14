@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from robosystems.middleware.otel.metrics import (
   EndpointMetrics,
   MetricType,
+  _sanitize_endpoint,
   endpoint_metrics_context,
   get_endpoint_metrics,
   record_auth_metrics,
@@ -246,3 +247,43 @@ class TestEndpointMetricsContext:
   def test_ctx_record_business_event(self):
     with endpoint_metrics_context("/test", "POST") as ctx:
       ctx.record_business_event("custom_event", {"key": "value"})
+
+
+class TestSanitizeEndpoint:
+  """Guardrail against raw graph_id leaking into the unbounded `endpoint` label."""
+
+  def test_collapses_raw_graph_id(self):
+    assert (
+      _sanitize_endpoint("/v1/graphs/kg19ea0c7f61d75b25f1c1/analytics")
+      == "/v1/graphs/{graph_id}/analytics"
+    )
+
+  def test_collapses_subgraph_id(self):
+    assert (
+      _sanitize_endpoint("/v1/graphs/kg19ea0c7f61d75b25f1c1_dev/query")
+      == "/v1/graphs/{graph_id}/query"
+    )
+
+  def test_leaves_templated_placeholder_untouched(self):
+    templated = "/v1/graphs/{graph_id}/analytics"
+    assert _sanitize_endpoint(templated) == templated
+
+  def test_leaves_non_graph_paths_untouched(self):
+    assert _sanitize_endpoint("/v1/auth/me") == "/v1/auth/me"
+    assert _sanitize_endpoint("/") == "/"
+
+  def test_does_not_touch_shared_repo_ids(self):
+    # Shared repos (e.g. "sec") are bounded and not kg-prefixed.
+    assert _sanitize_endpoint("/v1/graphs/sec/query") == "/v1/graphs/sec/query"
+
+  def test_handles_empty_and_none(self):
+    assert _sanitize_endpoint("") == ""
+    assert _sanitize_endpoint(None) is None  # type: ignore[arg-type]
+
+  def test_record_business_event_sanitizes_label(self, metrics):
+    # Even if a caller leaks a raw graph_id, the recorded label is collapsed.
+    metrics.record_business_event(
+      endpoint="/v1/graphs/kg19ea0c7f61d75b25f1c1/analytics",
+      method="GET",
+      event_type="graph_metrics_accessed",
+    )
