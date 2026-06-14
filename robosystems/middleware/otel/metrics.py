@@ -6,6 +6,7 @@ This module provides consistent metrics patterns for observability across all AP
 
 import functools
 import inspect
+import re
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -15,6 +16,24 @@ from typing import Any
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Observation
 from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
+
+# Defense-in-depth against unbounded `endpoint` label cardinality. Callers are
+# expected to pass the *templated* route (e.g. "/v1/graphs/{graph_id}/query"),
+# but a stray f-string can interpolate a real graph_id into the label, minting a
+# new active series per graph and driving AMP ingestion cost up over time. This
+# collapses any raw graph_id (kg + >=16 hex, optional subgraph suffix) back to
+# the {graph_id} placeholder so a labeling mistake can't leak cardinality.
+# NOTE: this is only for the `endpoint` label — per-graph gauges that legitimately
+# dimension by graph_id (record_graph_metrics) are intentionally left untouched.
+_GRAPH_ID_IN_PATH_RE = re.compile(r"kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?")
+
+
+def _sanitize_endpoint(endpoint: str) -> str:
+  """Collapse raw graph_id path segments in an endpoint label to {graph_id}."""
+  if not endpoint or "kg" not in endpoint:
+    return endpoint
+  return _GRAPH_ID_IN_PATH_RE.sub("{graph_id}", endpoint)
+
 
 # Custom histogram buckets tuned for API latency distribution:
 # Dense coverage in 10ms-500ms range where most graph queries land,
@@ -343,6 +362,7 @@ class EndpointMetrics:
   ):
     """Record standard request metrics."""
     self._ensure_instruments()
+    endpoint = _sanitize_endpoint(endpoint)
 
     base_attributes = {
       "endpoint": endpoint,
@@ -380,6 +400,7 @@ class EndpointMetrics:
     Prometheus will silently split the series by attribute type.
     """
     self._ensure_instruments()
+    endpoint = _sanitize_endpoint(endpoint)
 
     attributes = {
       "endpoint": endpoint,
@@ -404,6 +425,7 @@ class EndpointMetrics:
   ):
     """Record authentication attempt metrics."""
     self._ensure_instruments()
+    endpoint = _sanitize_endpoint(endpoint)
 
     base_attributes = {
       "endpoint": endpoint,
@@ -435,6 +457,7 @@ class EndpointMetrics:
   ):
     """Record error metrics."""
     self._ensure_instruments()
+    endpoint = _sanitize_endpoint(endpoint)
 
     attributes = {
       "endpoint": endpoint,
@@ -470,6 +493,7 @@ class EndpointMetrics:
       return
 
     self._ensure_instruments()
+    endpoint = _sanitize_endpoint(endpoint)
 
     # event_data is intentionally NOT flattened into metric labels. Arbitrary
     # payloads (execution times, row counts, ids, byte sizes) are unbounded
