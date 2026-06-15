@@ -251,14 +251,14 @@ class TestCreateSchedule:
       for call in session.add.call_args_list
       if hasattr(call[0][0], "fact_scope")
     ]
-    # 2 facts per month x 12 months = 24 fact objects
-    assert len(fact_objects) == 24
+    # 2 facts per month x 12 months = 24, + 1 roll-forward opening = 25
+    assert len(fact_objects) == 25
 
     historical = [f for f in fact_objects if f.fact_scope == "historical"]
     in_scope = [f for f in fact_objects if f.fact_scope == "in_scope"]
 
-    # Jan-Jun (6 months x 2 facts = 12) = historical
-    assert len(historical) == 12
+    # Jan-Jun (6 months x 2 facts = 12) + the opening (period_end Jan 1) = 13
+    assert len(historical) == 13
     # Jul-Dec (6 months x 2 facts = 12) = in_scope
     assert len(in_scope) == 12
 
@@ -294,10 +294,10 @@ class TestCreateSchedule:
       for call in session.add.call_args_list
       if hasattr(call[0][0], "fact_scope")
     ]
-    # Jan (2 facts) + Feb (2 facts) = 4 historical. Mar (2 facts) = 2 in_scope.
+    # Jan (2) + Feb (2) + the opening (period_end Jan 1) = 5 historical. Mar (2) = 2 in_scope.
     historical = [f for f in fact_objects if f.fact_scope == "historical"]
     in_scope = [f for f in fact_objects if f.fact_scope == "in_scope"]
-    assert len(historical) == 4
+    assert len(historical) == 5
     assert len(in_scope) == 2
 
   def test_rounding_prevents_drift(self):
@@ -448,21 +448,33 @@ class TestCreateScheduleCreditDirection:
     ]
 
   def test_contra_credit_accumulates(self):
+    # opening (0) + 3 accumulating endings
     facts = self._credit_facts(_mock_session(), credit_balance_type="credit")
-    assert [f.value for f in facts] == [400.0, 800.0, 1200.0]
+    assert [f.value for f in facts] == [0.0, 400.0, 800.0, 1200.0]
 
   def test_directly_credited_asset_draws_down(self):
+    # opening (1200 gross) + 3 drawing-down endings
     facts = self._credit_facts(_mock_session(), credit_balance_type="debit")
-    assert [f.value for f in facts] == [800.0, 400.0, 0.0]
+    assert [f.value for f in facts] == [1200.0, 800.0, 400.0, 0.0]
 
   def test_asset_equals_credit_element_no_double_emit(self):
     # validate.py provisions prepaids with asset_element_id == credit_element_id.
     # The credit fact already carries the drawdown, so the NBV branch must skip
-    # to avoid a duplicate instant fact on the same element/period.
+    # to avoid a duplicate instant fact on the same element/period (opening too).
     facts = self._credit_facts(
       _mock_session(), credit_balance_type="debit", asset_element_id="elem_cr"
     )
-    assert [f.value for f in facts] == [800.0, 400.0, 0.0]
+    assert [f.value for f in facts] == [1200.0, 800.0, 400.0, 0.0]
+
+  def test_opening_balance_fact_at_schedule_start(self):
+    # A roll_forward block needs a Beginning Balance: one instant fact at the
+    # first period's start, accumulated = 0 (gross for a drawdown asset).
+    facts = self._credit_facts(_mock_session(), credit_balance_type="debit")
+    opening = facts[0]
+    assert opening.period_type == "instant"
+    assert opening.period_start is None
+    assert opening.period_end == date(2026, 1, 1)
+    assert opening.value == 1200.0
 
 
 class TestCreateScheduleSumEqualsRule:
