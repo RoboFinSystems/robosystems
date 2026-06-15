@@ -383,6 +383,56 @@ class ScheduleService:
         round(c / 100.0, 2) for c in schedule_metadata.periodic_amounts
       ]
 
+    # Roll-forward opening balances. A roll_forward block has a Beginning
+    # Balance, so every rolled balance gets one instant fact at the schedule's
+    # first-period start (accumulated = 0) — making the series Begin → movements
+    # → End rather than starting after the first movement. Same formulas as the
+    # in-loop balance/NBV facts at accumulated_debit == 0: a contra opens at 0;
+    # a directly-credited asset (and the net-book-value asset) opens at gross.
+    if periods:
+      opening_instant = periods[0][0]
+      opening_scope = (
+        "historical"
+        if closed_through and opening_instant <= closed_through
+        else "in_scope"
+      )
+      opening_credit_value = (
+        original_dollars if credit_draws_down and original_dollars is not None else 0.0
+      )
+      session.add(
+        Fact(
+          element_id=entry_template.credit_element_id,
+          value=opening_credit_value,
+          period_start=None,
+          period_end=opening_instant,
+          period_type="instant",
+          unit="USD",
+          entity_id=entity_id,
+          structure_id=structure.id,
+          fact_set_id=fact_set_id,
+          fact_scope=opening_scope,
+        )
+      )
+      if (
+        schedule_metadata
+        and schedule_metadata.asset_element_id
+        and schedule_metadata.asset_element_id != entry_template.credit_element_id
+      ):
+        session.add(
+          Fact(
+            element_id=schedule_metadata.asset_element_id,
+            value=original_dollars or amount_dollars,
+            period_start=None,
+            period_end=opening_instant,
+            period_type="instant",
+            unit="USD",
+            entity_id=entity_id,
+            structure_id=structure.id,
+            fact_set_id=fact_set_id,
+            fact_scope=opening_scope,
+          )
+        )
+
     accumulated_debit = 0.0
 
     for i, (p_start, p_end) in enumerate(periods):
