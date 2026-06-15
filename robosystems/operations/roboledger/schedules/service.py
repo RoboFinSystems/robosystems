@@ -338,6 +338,21 @@ class ScheduleService:
       else None
     )
 
+    # The credit fact tracks the running balance of the credited account, and
+    # its direction depends on that account's normal balance:
+    #   • credit-balance account (a contra-asset like Accumulated Depreciation,
+    #     or a liability) — the period credit INCREASES it, so the balance
+    #     accumulates from a zero opening: value = accumulated_debit.
+    #   • debit-balance account (a prepaid / other asset credited directly) —
+    #     the period credit DECREASES it, so the balance draws down from its
+    #     opening (the original gross outlay): value = original - accumulated.
+    # Without original_dollars there's no opening to anchor the drawdown, so
+    # fall back to the accumulating form.
+    credit_balance_type = session.execute(
+      select(Element.balance_type).where(Element.id == entry_template.credit_element_id)
+    ).scalar()
+    credit_draws_down = credit_balance_type == "debit" and original_dollars is not None
+
     # Custom amortization curve: caller supplies one integer (cents) per
     # period, pre-balanced. The generator uses the explicit values
     # instead of the straight-line formula. Use cases: day-count
@@ -408,11 +423,17 @@ class ScheduleService:
         )
       )
 
-      # Fact for the accumulated contra amount
+      # Fact for the credited account's running balance — contra accumulates,
+      # a directly-credited asset draws down (see credit_draws_down above).
+      credit_value = (
+        round(original_dollars - accumulated_debit, 2)
+        if credit_draws_down and original_dollars is not None
+        else accumulated_debit
+      )
       session.add(
         Fact(
           element_id=entry_template.credit_element_id,
-          value=accumulated_debit,
+          value=credit_value,
           period_start=p_start,
           period_end=p_end,
           period_type="instant",
@@ -424,8 +445,15 @@ class ScheduleService:
         )
       )
 
-      # Net book value if we have asset element info
-      if schedule_metadata and schedule_metadata.asset_element_id:
+      # Net book value if we have a DISTINCT asset element. Skip when the asset
+      # is the credited account itself (a direct-drawdown prepaid) — the credit
+      # fact above already carries that account's running balance, so emitting
+      # NBV here would double-stamp the same element/period.
+      if (
+        schedule_metadata
+        and schedule_metadata.asset_element_id
+        and schedule_metadata.asset_element_id != entry_template.credit_element_id
+      ):
         session.add(
           Fact(
             element_id=schedule_metadata.asset_element_id,
