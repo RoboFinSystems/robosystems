@@ -75,3 +75,23 @@ class TestMetricTypeInStructureCheck:
 
     extensions_db._widen_library_checks(FakeConn(), "kg0123456789abcdef")
     assert any("structures" in stmt and "'metric'" in stmt for stmt in statements)
+
+  def test_fresh_tenant_check_widener_admits_cm_and_has_part(self) -> None:
+    """The cm framework introduces source='cm' (cm:Debit / cm:Credit) and
+    schedule posting arcs use association_type='has-part'. Both must be in
+    the fresh-provision widener, or tenant-copy of the cm elements and
+    schedule creation fail with a CheckViolation (the graph-creation failure
+    this regression guards against)."""
+    statements: list[str] = []
+
+    class FakeConn:
+      def execute(self, statement):
+        statements.append(str(statement))
+
+    extensions_db._widen_library_checks(FakeConn(), "kg0123456789abcdef")
+    assert any("elements" in s and "'cm'" in s for s in statements), (
+      "check_element_source widener must admit source='cm'"
+    )
+    assert any("associations" in s and "'has-part'" in s for s in statements), (
+      "check_association_type widener must admit association_type='has-part'"
+    )
