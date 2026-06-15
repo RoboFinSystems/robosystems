@@ -402,22 +402,87 @@ class TestCreateScheduleHasPartArcs:
     assert has_part == []
 
 
+class TestCreateScheduleCreditDirection:
+  """The credit fact tracks the credited account's running balance: a
+  contra-asset (credit-balance) accumulates; a directly-credited debit-balance
+  asset like a prepaid draws down toward zero."""
+
+  def _credit_facts(self, session, *, credit_balance_type, asset_element_id=None):
+    svc = ScheduleService()
+    # execute order: (1) cm role lookup, (2) credit balance_type lookup,
+    # (3) SumEquals qname lookup.
+    cm_roles_row = MagicMock()
+    cm_roles_row.scalars.return_value = []
+    balance_row = MagicMock()
+    balance_row.scalar.return_value = credit_balance_type
+    qname_row = MagicMock()
+    qname_row.scalar.return_value = "fac:Expense"
+    session.execute.side_effect = [cm_roles_row, balance_row, qname_row]
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Direction Test",
+        taxonomy_id="tax_01",
+        element_ids=["elem_dr", "elem_cr"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),  # 3 monthly periods
+        monthly_amount=40_000,  # $400/mo
+        entry_template=EntryTemplate(
+          debit_element_id="elem_dr", credit_element_id="elem_cr"
+        ),
+        schedule_metadata=ScheduleMetadata(
+          method="straight_line",
+          original_amount=120_000,  # $1,200 total
+          asset_element_id=asset_element_id,
+        ),
+        created_by="usr_test",
+      )
+    added = [c[0][0] for c in session.add.call_args_list]
+    return [
+      f
+      for f in added
+      if type(f).__name__ == "Fact"
+      and f.element_id == "elem_cr"
+      and f.period_type == "instant"
+    ]
+
+  def test_contra_credit_accumulates(self):
+    facts = self._credit_facts(_mock_session(), credit_balance_type="credit")
+    assert [f.value for f in facts] == [400.0, 800.0, 1200.0]
+
+  def test_directly_credited_asset_draws_down(self):
+    facts = self._credit_facts(_mock_session(), credit_balance_type="debit")
+    assert [f.value for f in facts] == [800.0, 400.0, 0.0]
+
+  def test_asset_equals_credit_element_no_double_emit(self):
+    # validate.py provisions prepaids with asset_element_id == credit_element_id.
+    # The credit fact already carries the drawdown, so the NBV branch must skip
+    # to avoid a duplicate instant fact on the same element/period.
+    facts = self._credit_facts(
+      _mock_session(), credit_balance_type="debit", asset_element_id="elem_cr"
+    )
+    assert [f.value for f in facts] == [800.0, 400.0, 0.0]
+
+
 class TestCreateScheduleSumEqualsRule:
   """create_schedule auto-generates a SumEquals Rule when original_amount > 0."""
 
   def _run(self, session, *, original_amount: int | None = 120_000):
     svc = ScheduleService()
     # taxonomy_id is provided so _ensure_schedule_taxonomy is skipped.
-    # Two execute() calls now: (1) the cm:Debit/cm:Credit posting-role lookup
-    # for has-part arcs (no roles in the mock → arcs skipped), then (2) the
-    # Element.qname lookup for the SumEquals rule (when original_dollars is
-    # not None).
+    # Three execute() calls now: (1) the cm:Debit/cm:Credit posting-role lookup
+    # for has-part arcs (no roles in the mock → arcs skipped), (2) the credit
+    # element's balance_type lookup (a contra here → credit fact accumulates),
+    # then (3) the Element.qname lookup for the SumEquals rule.
     cm_roles_row = MagicMock()
     cm_roles_row.scalars.return_value = []
+    credit_balance_row = MagicMock()
+    credit_balance_row.scalar.return_value = "credit"
     debit_qname_row = MagicMock()
     debit_qname_row.scalar.return_value = "fac:DeprExpense"
 
-    session.execute.side_effect = [cm_roles_row, debit_qname_row]
+    session.execute.side_effect = [cm_roles_row, credit_balance_row, debit_qname_row]
 
     metadata = (
       ScheduleMetadata(
