@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from robosystems.operations.roboledger.schedules.service import (
+  CM_HAS_PART_ARCROLE,
   EntryTemplate,
   ScheduleMetadata,
   ScheduleService,
@@ -78,6 +79,10 @@ def _mock_session():
 
   session = MagicMock()
   session.execute.return_value = MagicMock()
+  # The cm:Debit/cm:Credit posting-role lookup (for has-part arcs) iterates
+  # execute().scalars(); default to empty so schedules in the mock simply skip
+  # the arcs unless a test wires the roles in explicitly.
+  session.execute.return_value.scalars.return_value = []
 
   def _stamp_structure_id(obj):
     if isinstance(obj, Structure) and getattr(obj, "id", None) is None:
@@ -326,18 +331,93 @@ class TestCreateSchedule:
         assert round(obj.value, 2) == obj.value, f"Unrounded value: {obj.value}"
 
 
+class TestCreateScheduleHasPartArcs:
+  """create_schedule emits cm:Debit/cm:Credit has-part posting arcs so the
+  debit/credit pairing is a first-class, queryable atom of the schedule IB."""
+
+  def test_emits_has_part_arcs_when_cm_roles_present(self):
+    session = _mock_session()
+    svc = ScheduleService()
+
+    cm_debit = MagicMock(id="elem_cm_debit", qname="cm:Debit")
+    cm_credit = MagicMock(id="elem_cm_credit", qname="cm:Credit")
+    cm_result = MagicMock()
+    cm_result.scalars.return_value = [cm_debit, cm_credit]
+    # taxonomy_id provided (no taxonomy lookup) and no original_amount (no
+    # SumEquals rule), so the cm role lookup is the only execute() call.
+    session.execute.return_value = cm_result
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Prepaid Amortization",
+        taxonomy_id="tax_01",
+        element_ids=["elem_expense", "elem_prepaid"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=5000,
+        entry_template=EntryTemplate(
+          debit_element_id="elem_expense",
+          credit_element_id="elem_prepaid",
+        ),
+        created_by="usr_test",
+      )
+
+    added = [call[0][0] for call in session.add.call_args_list]
+    has_part = [
+      o
+      for o in added
+      if type(o).__name__ == "Association" and o.association_type == "has-part"
+    ]
+    assert len(has_part) == 2
+    by_from = {a.from_element_id: a for a in has_part}
+    assert by_from["elem_cm_debit"].to_element_id == "elem_expense"
+    assert by_from["elem_cm_credit"].to_element_id == "elem_prepaid"
+    for a in has_part:
+      assert a.arcrole == CM_HAS_PART_ARCROLE
+      assert a.structure_id is not None
+
+  def test_no_has_part_arcs_when_cm_roles_absent(self):
+    session = _mock_session()  # default execute().scalars() → []
+    svc = ScheduleService()
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="No CM Roles",
+        taxonomy_id="tax_01",
+        element_ids=["elem_a", "elem_b"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        monthly_amount=5000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+      )
+    added = [call[0][0] for call in session.add.call_args_list]
+    has_part = [
+      o
+      for o in added
+      if type(o).__name__ == "Association"
+      and getattr(o, "association_type", None) == "has-part"
+    ]
+    assert has_part == []
+
+
 class TestCreateScheduleSumEqualsRule:
   """create_schedule auto-generates a SumEquals Rule when original_amount > 0."""
 
   def _run(self, session, *, original_amount: int | None = 120_000):
     svc = ScheduleService()
     # taxonomy_id is provided so _ensure_schedule_taxonomy is skipped.
-    # The only execute call in create_schedule is the Element.qname lookup
-    # for the SumEquals rule (when original_dollars is not None).
+    # Two execute() calls now: (1) the cm:Debit/cm:Credit posting-role lookup
+    # for has-part arcs (no roles in the mock → arcs skipped), then (2) the
+    # Element.qname lookup for the SumEquals rule (when original_dollars is
+    # not None).
+    cm_roles_row = MagicMock()
+    cm_roles_row.scalars.return_value = []
     debit_qname_row = MagicMock()
     debit_qname_row.scalar.return_value = "fac:DeprExpense"
 
-    session.execute.side_effect = [debit_qname_row]
+    session.execute.side_effect = [cm_roles_row, debit_qname_row]
 
     metadata = (
       ScheduleMetadata(

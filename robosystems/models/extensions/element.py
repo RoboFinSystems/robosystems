@@ -103,7 +103,10 @@ class Element(ExtensionsBase):
       # taxonomy seed (e.g., struct_balance_sheet) and is intentionally NOT
       # in COA_SOURCES so those rows never appear in the Chart of Accounts.
       "source IN ('fac', 'rs-gaap', 'us-gaap', 'ifrs', "
-      "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system')",
+      "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
+      # 'cm' — Conceptual Model posting-role concepts (cm:Debit/cm:Credit),
+      # tenant-copied with the default pin so schedule has-part arcs resolve.
+      "'cm')",
       name="check_element_source",
     ),
   )

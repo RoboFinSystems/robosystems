@@ -75,6 +75,11 @@ CANONICAL_CONTEXT: dict = {
   "dei": "http://xbrl.sec.gov/dei/",
   # Seattle Method conceptual-model role URIs (Charlie's CM namespace)
   "cm-roles": "http://www.xbrlsite.com/seattlemethod/conceptual-model/cm-roles/roles/",
+  # cm — Seattle Method 'universal' conceptual model (Charlie Hoffman). The
+  # Debit/Credit posting-role concepts anchor has-part arcs from Chart-of-
+  # Accounts elements. '#' fragment separator so concept IRIs compact to
+  # cm:Debit / cm:Credit.
+  "cm": "https://github.com/seattlemethod/universal/cm#",
   # RoboSystems vocabulary
   "rs": RS_VOCAB,
   # Concept attributes — XBRL vocabulary where XBRL defines the attribute

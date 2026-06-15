@@ -1,0 +1,49 @@
+{
+  "@context": {
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "rs": "https://robosystems.ai/vocab/",
+    "cm": "https://github.com/seattlemethod/universal/cm#",
+    "balance": {"@id": "xbrli:balance"},
+    "periodType": {"@id": "xbrli:periodType"},
+    "abstract": {"@id": "rs:abstract", "@type": "xsd:boolean"},
+    "monetary": {"@id": "rs:monetary", "@type": "xsd:boolean"},
+    "elementType": {"@id": "rs:elementType"},
+    "substitutionGroup": {"@id": "rs:substitutionGroup", "@type": "@id"},
+    "source": {"@id": "rs:source"},
+    "label": "rdfs:label",
+    "documentation": "rdfs:comment"
+  },
+  "standard": "cm",
+  "version": "v1",
+  "taxonomy_type": "reporting_standard",
+  "namespace_uri": "https://github.com/seattlemethod/universal/cm#",
+  "description": "Conceptual Model (CM) — minimal universal upper-vocabulary forked from Charlie Hoffman's Seattle Method 'universal' conceptual model (https://github.com/seattlemethod/universal). Seeds the Debit and Credit posting-role concepts that anchor has-part arcs from Chart-of-Accounts elements, making double-entry posting structure a first-class, queryable atom of an Information Block rather than opaque mechanics metadata. Intentionally tiny; expands additively (Thing, Event, Transaction, LineItem) when event serialization pulls them in.",
+  "@graph": [
+    {
+      "@id": "cm:Debit",
+      "label": [{"@language": "en", "@value": "Debit"}],
+      "documentation": [{"@language": "en", "@value": "Conceptual-model Debit posting role. A has-part arc from cm:Debit to a Chart-of-Accounts element declares that element as the debit leg of the structure's posting template."}],
+      "abstract": [{"@type": "xsd:boolean", "@value": true}],
+      "elementType": [{"@value": "abstract"}],
+      "balance": [{"@value": "debit"}],
+      "periodType": [{"@value": "duration"}],
+      "monetary": [{"@type": "xsd:boolean", "@value": false}],
+      "source": [{"@value": "cm"}],
+      "substitutionGroup": [{"@id": "xbrli:item"}]
+    },
+    {
+      "@id": "cm:Credit",
+      "label": [{"@language": "en", "@value": "Credit"}],
+      "documentation": [{"@language": "en", "@value": "Conceptual-model Credit posting role. A has-part arc from cm:Credit to a Chart-of-Accounts element declares that element as the credit leg of the structure's posting template."}],
+      "abstract": [{"@type": "xsd:boolean", "@value": true}],
+      "elementType": [{"@value": "abstract"}],
+      "balance": [{"@value": "credit"}],
+      "periodType": [{"@value": "duration"}],
+      "monetary": [{"@type": "xsd:boolean", "@value": false}],
+      "source": [{"@value": "cm"}],
+      "substitutionGroup": [{"@id": "xbrli:item"}]
+    }
+  ]
+}

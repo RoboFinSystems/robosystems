@@ -256,7 +256,10 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   "source IN ("
   "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
   "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-  "'disclosures', 'checklist', 'styles'"
+  # 'cm' — Conceptual Model framework (cm:Debit/cm:Credit posting roles).
+  # Re-applied here so the DROP+ADD over already-seeded public + tenant
+  # schemas (which now contain cm rows) doesn't fail constraint validation.
+  "'disclosures', 'checklist', 'styles', 'cm'"
   ")"
 )
 _PRIOR_ELEMENT_SOURCE_CHECK = (
