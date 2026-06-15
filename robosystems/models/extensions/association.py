@@ -45,7 +45,11 @@ class Association(ExtensionsBase):
     CheckConstraint(
       "association_type IN ("
       "'presentation', 'calculation', 'mapping', 'derivation', "
-      "'equivalence', 'general-special', 'essence-alias'"
+      "'equivalence', 'general-special', 'essence-alias', "
+      # 'has-part' — Conceptual Model posting arcs: cm:Debit/cm:Credit
+      # ─has-part→ a CoA element, declaring the debit/credit legs of a
+      # schedule's posting template as first-class atoms.
+      "'has-part'"
       ")",
       name="check_association_type",
     ),

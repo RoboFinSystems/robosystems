@@ -127,7 +127,9 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   # rs-gaap framework extension packages. Each declares a sibling
   # namespace anchored to the rs-gaap framework. See migration 0007
   # for the same widen applied to already-deployed tenant schemas.
-  "'disclosures', 'checklist', 'styles'"
+  # 'cm' — Conceptual Model framework (cm:Debit/cm:Credit posting roles),
+  # seeded here via rs-gaap depends_on cm and tenant-copied with the pin.
+  "'disclosures', 'checklist', 'styles', 'cm'"
   ")"
 )
 _WIDENED_TAXONOMY_TYPE_CHECK = (

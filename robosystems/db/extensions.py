@@ -222,9 +222,10 @@ def _widen_library_checks(conn, schema: str) -> None:
 
   Matches the widening applied in the 0002 migration so a fresh provision
   lands in the same state as a backfilled tenant (admits ``equivalence``,
-  ``general-special``, ``essence-alias`` association types and the
-  ``fac``/``rs-gaap`` element sources, the rules taxonomy type, and the
-  full Information Block structure-type vocabulary that the library uses).
+  ``general-special``, ``essence-alias``, ``has-part`` association types
+  and the ``fac``/``rs-gaap``/``cm`` element sources, the rules taxonomy
+  type, and the full Information Block structure-type vocabulary that the
+  library uses).
   """
   widened_assoc = (
     "association_type IN ("
@@ -235,7 +236,10 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'definition', "
     # 'derivation' arcs map BS leaves to their CF default change tags
     # (rs-gaap-calculations).
-    "'derivation'"
+    "'derivation', "
+    # 'has-part' arcs declare cm:Debit/cm:Credit posting legs on schedule
+    # structures (the cm framework).
+    "'has-part'"
     ")"
   )
   widened_source = (
@@ -244,7 +248,10 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
     # rs-gaap framework extension packages anchored to
     # sibling namespaces of rs-gaap.
-    "'disclosures', 'checklist', 'styles'"
+    "'disclosures', 'checklist', 'styles', "
+    # cm — Conceptual Model framework (cm:Debit/cm:Credit posting roles),
+    # tenant-copied with the default pin.
+    "'cm'"
     ")"
   )
   widened_taxonomy_type = (

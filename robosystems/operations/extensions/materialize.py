@@ -33,6 +33,7 @@ from robosystems.logger import logger
 #   equivalence      — FAC ↔ rs-gaap bridge
 #   definition       — XBRL definition arcs (dimensions, hypercubes)
 #   derivation       — derived-from arcs
+#   has-part         — cm:Debit/cm:Credit posting-role arcs (schedule debit/credit legs)
 # Limiting to a single type makes any of these invisible to the graph
 # renderer. Originally scoped to 'presentation' only, which made CoA→rs-gaap
 # mappings invisible (and reports empty) even when the mappings existed in
@@ -46,6 +47,7 @@ _MATERIALIZED_ASSOCIATION_TYPES: tuple[str, ...] = (
   "equivalence",
   "definition",
   "derivation",
+  "has-part",
 )
 _MATERIALIZED_ASSOCIATION_TYPES_SQL = (
   "(" + ", ".join(f"'{t}'" for t in _MATERIALIZED_ASSOCIATION_TYPES) + ")"

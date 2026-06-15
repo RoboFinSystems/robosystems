@@ -35,6 +35,11 @@ from robosystems.models.extensions.rule import Rule
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.utils.ulid import generate_prefixed_ulid
 
+# Charlie Hoffman's Seattle Method "universal" conceptual-model has-part
+# arcrole. A cm:Debit / cm:Credit ─has-part→ CoA-element arc declares that
+# element as the debit / credit leg of a schedule's posting template.
+CM_HAS_PART_ARCROLE = "https://github.com/seattlemethod/universal/cm/arcrole/has-part"
+
 # ── Data classes ─────────────────────────────────────────────────────────
 
 
@@ -241,6 +246,42 @@ class ScheduleService:
         created_by=created_by,
       )
       session.add(assoc)
+
+    # Emit Conceptual-Model has-part posting arcs so the debit/credit pairing
+    # lives as first-class, queryable atoms of the schedule IB (its envelope
+    # `connections`) rather than only as opaque entry_template mechanics:
+    #   cm:Debit  ─has-part→ debit account
+    #   cm:Credit ─has-part→ credit account
+    # Mirrors Charlie's classic-transactions posting model. Best-effort — if
+    # the cm library concepts aren't seeded in this tenant (provisioned before
+    # the cm framework landed), skip silently; entry_template remains the
+    # generation source of truth.
+    cm_role_ids = {
+      e.qname: e.id
+      for e in session.execute(
+        select(Element).where(
+          Element.source == "cm",
+          Element.qname.in_(("cm:Debit", "cm:Credit")),
+        )
+      ).scalars()
+    }
+    for role_qname, account_element_id in (
+      ("cm:Debit", entry_template.debit_element_id),
+      ("cm:Credit", entry_template.credit_element_id),
+    ):
+      role_id = cm_role_ids.get(role_qname)
+      if role_id is None or account_element_id is None:
+        continue
+      session.add(
+        Association(
+          structure_id=structure.id,
+          from_element_id=role_id,
+          to_element_id=account_element_id,
+          association_type="has-part",
+          arcrole=CM_HAS_PART_ARCROLE,
+          created_by=created_by,
+        )
+      )
 
     # Generate facts for each monthly period
     fact_set_id = generate_prefixed_ulid("fs")
