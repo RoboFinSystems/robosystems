@@ -205,7 +205,7 @@ case $DOCKER_PROFILE in
     # This mirrors the previous beat scheduler behavior
     if [[ "${RUN_MIGRATIONS:-}" == "true" ]]; then
       ensure_database_exists "${DAGSTER_POSTGRES_DB:-dagster}" || echo "Dagster database check failed, but continuing..."
-      run_db_init || echo "Database initialization failed, but continuing..."
+      run_db_init || { echo "✗ Database initialization failed — aborting daemon boot"; exit 1; }
     fi
 
     exec uv run dagster-daemon run \
