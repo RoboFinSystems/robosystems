@@ -1,0 +1,12 @@
+{
+  "framework": "cm",
+  "version": "v1",
+  "title": "Conceptual Model (CM)",
+  "description": "Minimal universal conceptual-model vocabulary forked from Charlie Hoffman's Seattle Method 'universal' model (https://github.com/seattlemethod/universal). Seeds the Debit and Credit posting-role concepts that anchor has-part arcs from Chart-of-Accounts elements, making double-entry posting structure a first-class, queryable atom of an Information Block rather than opaque mechanics metadata. NOT a reporting taxonomy — a foundational substrate. Seeded + tenant-copied with the default pin via rs-gaap depends_on cm. Expands additively (Thing, Event, Transaction, LineItem) when event serialization pulls them in.",
+  "framework_type": "reporting",
+  "depends_on": [],
+  "packages": [
+    {"standard": "cm", "version": "v1", "ordinal": 0, "is_required": true}
+  ],
+  "bridges": []
+}
