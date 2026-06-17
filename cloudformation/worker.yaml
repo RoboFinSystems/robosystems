@@ -429,8 +429,25 @@ Resources:
               - !Ref "AWS::NoValue"
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            # Dagster event-log storage — lets worker tasks report runless
+            # AssetMaterialization events to the Dagster asset catalog
+            # (graph_creation, subgraph_creation, graph_tier_upgrade,
+            # extensions_materialize). Without these the baked dagster.yaml's
+            # postgres storage can't resolve, and DagsterInstance.get() fails.
+            - Name: DAGSTER_HOME
+              Value: /app/dagster_home
+            - Name: DAGSTER_POSTGRES_HOST
+              Value: !Ref DatabaseEndpoint
+            - Name: DAGSTER_POSTGRES_PORT
+              Value: !Ref DatabasePort
+            - Name: DAGSTER_POSTGRES_USER
+              Value: "postgres"
+            - Name: DAGSTER_POSTGRES_DB
+              Value: dagster
           Secrets:
             - Name: POSTGRES_PASSWORD
+              ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
+            - Name: DAGSTER_POSTGRES_PASSWORD
               ValueFrom: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres:POSTGRES_PASSWORD::"
 
   # ========================================
