@@ -1533,6 +1533,13 @@ class ExtensionsMaterializer:
     from robosystems.db.platform import SessionFactory
     from robosystems.models.core import Graph
 
+    # Blue-green builds a transient "{graph_id}-wip" database that is not itself
+    # a row in the platform DB. Resolve the source graph so the WIP inherits the
+    # source's full extension set (e.g. roboinvestor) — otherwise the lookup
+    # misses and we fall back to roboledger-only, leaving the WIP without the
+    # roboinvestor node tables and breaking materialization of Portfolio et al.
+    graph_id = graph_id.removesuffix("-wip")
+
     try:
       with SessionFactory() as session:
         graph = session.execute(
