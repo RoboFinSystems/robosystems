@@ -86,6 +86,23 @@ def test_multiplier_can_be_skipped(monkeypatch):
     ("/v1/graphs/abc/import", "POST", EndpointCategory.GRAPH_IMPORT),
     ("/v1/graphs/abc/custom", "POST", EndpointCategory.GRAPH_WRITE),
     ("/v1/graphs/abc/custom", "GET", EndpointCategory.GRAPH_READ),
+    # Extensions surface (OLTP — distinct from LadybugDB graph categories)
+    ("/extensions/kg123/graphql", "POST", EndpointCategory.EXTENSIONS_GRAPHQL),
+    (
+      "/extensions/roboledger/kg123/operations/create-event-block",
+      "POST",
+      EndpointCategory.EXTENSIONS_WRITE,
+    ),
+    (
+      "/extensions/roboledger/kg123/operations/build-fact-grid",
+      "POST",
+      EndpointCategory.EXTENSIONS_WRITE,
+    ),
+    (
+      "/extensions/roboledger/kg123/reports/rep_1/download",
+      "GET",
+      EndpointCategory.EXTENSIONS_WRITE,
+    ),
     # Non-graph endpoints
     ("/v1/auth/login", "POST", EndpointCategory.AUTH),
     ("/v1/tasks/run", "POST", EndpointCategory.TASKS),
