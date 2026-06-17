@@ -468,3 +468,44 @@ class TestExtensionsMaterializer:
       result = await materializer.materialize(GRAPH_ID)
 
     assert result.graph_id == GRAPH_ID
+
+  @pytest.mark.asyncio
+  async def test_get_graph_extensions_strips_wip_suffix(self):
+    """Blue-green builds a transient ``{graph_id}-wip`` database that is not a
+    row in the platform DB. ``_get_graph_extensions`` must strip the ``-wip``
+    suffix and resolve the source graph so the WIP inherits the source's full
+    extension set — otherwise the lookup misses, falls back to roboledger-only,
+    and materializing roboinvestor tables (Portfolio, …) fails."""
+    from robosystems.operations.extensions.materialize import ExtensionsMaterializer
+
+    base_id = "kg19ed34f81c37ba3f31fa"
+    captured = {}
+
+    class _FakeGraph:
+      schema_extensions = ["roboledger", "roboinvestor"]
+
+    class _FakeResult:
+      def scalar_one_or_none(self):
+        return _FakeGraph() if captured.get("id") == base_id else None
+
+    class _FakeSession:
+      def __enter__(self):
+        return self
+
+      def __exit__(self, *exc):
+        return False
+
+      def execute(self, stmt):
+        captured["id"] = next(iter(stmt.compile().params.values()))
+        return _FakeResult()
+
+    materializer = ExtensionsMaterializer()
+    with patch(
+      "robosystems.db.platform.SessionFactory",
+      return_value=_FakeSession(),
+    ):
+      exts = await materializer._get_graph_extensions(f"{base_id}-wip")
+
+    # -wip stripped before the lookup, so the source graph's extensions resolve
+    assert captured["id"] == base_id
+    assert exts == ["roboledger", "roboinvestor"]
