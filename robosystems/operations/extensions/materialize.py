@@ -1424,8 +1424,12 @@ class ExtensionsMaterializer:
         logger.info(f"Cleaning up leftover WIP database {wip_id}")
         await client.delete_database(wip_id, preserve_duckdb=True)
 
-      # Step 2: Create fresh WIP database with schema
-      await self._ensure_database(client, wip_id, rebuild=False)
+      # Step 2: Create fresh WIP database with schema. Mark it is_subgraph so
+      # its creation bypasses the per-node max_databases cap — on a dedicated
+      # single-database instance the live primary already fills the quota, and
+      # the transient WIP would otherwise be rejected ("Maximum database
+      # capacity reached"). The WIP is deleted after the swap.
+      await self._ensure_database(client, wip_id, rebuild=False, is_subgraph=True)
 
       # Step 3: Look up which extensions are enabled on this graph so we only
       # stage and materialize tables whose graph node/rel tables actually exist.
@@ -1480,8 +1484,15 @@ class ExtensionsMaterializer:
     client: "GraphClient",
     graph_id: str,
     rebuild: bool,
+    is_subgraph: bool = False,
   ) -> None:
-    """Ensure the LadybugDB database exists with the graph schema."""
+    """Ensure the LadybugDB database exists with the graph schema.
+
+    ``is_subgraph=True`` makes the create bypass the per-node max_databases cap
+    (graph_api exempts is_subgraph creations in manager.py). Used for the
+    transient blue-green WIP so it can be built alongside the live primary on a
+    dedicated single-database instance; the primary still counts against the cap.
+    """
     from robosystems.schemas.loader import get_contextual_schema_loader
 
     db_exists = await client.database_exists(graph_id)
@@ -1493,7 +1504,9 @@ class ExtensionsMaterializer:
 
     if not db_exists:
       logger.info(f"Creating LadybugDB database for {graph_id}")
-      await client.create_database(graph_id, schema_type="entity")
+      await client.create_database(
+        graph_id, schema_type="entity", is_subgraph=is_subgraph
+      )
 
       # Install schemas for all extensions on this graph
       extensions = await self._get_graph_extensions(graph_id)
