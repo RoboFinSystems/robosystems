@@ -38,8 +38,19 @@ def _verify_jwt_for_rate_limiting(token: str) -> str | None:
     if not secret_key:
       return None
 
-    # Properly validate JWT signature
-    payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+    # Validate the signature, but skip audience/issuer checks. Tokens are
+    # minted with `aud`/`iss` claims (see middleware/auth/jwt.py), and PyJWT
+    # raises InvalidAudienceError when an `aud` claim is present but no
+    # `audience` is passed to decode(). That exception would be swallowed
+    # below and drop every authenticated request to the anonymous "base"
+    # rate-limit tier. For rate limiting we only need to identify the user,
+    # so the signature is what matters — not aud/iss.
+    payload = jwt.decode(
+      token,
+      secret_key,
+      algorithms=["HS256"],
+      options={"verify_aud": False, "verify_iss": False},
+    )
     return payload.get("user_id")
   except Exception:
     # If JWT is invalid, treat as unauthenticated for rate limiting

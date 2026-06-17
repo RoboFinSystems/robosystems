@@ -51,6 +51,14 @@ class EndpointCategory(str, Enum):
   GRAPH_QUERY = "graph_query"  # Direct Cypher queries
   GRAPH_IMPORT = "graph_import"  # Bulk data imports
 
+  # Extensions surface (OLTP on shared RDS — distinct from LadybugDB categories)
+  EXTENSIONS_GRAPHQL = (
+    "extensions_graphql"  # Typed GraphQL reads: /extensions/{g}/graphql
+  )
+  EXTENSIONS_WRITE = (
+    "extensions_write"  # Command writes + views: /extensions/{d}/{g}/operations/*
+  )
+
   # Table operations (DuckDB staging tables)
   TABLE_QUERY = "table_query"  # SQL queries on staging tables
   TABLE_UPLOAD = "table_upload"  # File uploads to staging tables
@@ -114,6 +122,9 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_SEARCH: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_QUERY: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_IMPORT: (2, RateLimitPeriod.MINUTE),
+      # Extensions surface (OLTP on shared RDS)
+      EndpointCategory.EXTENSIONS_GRAPHQL: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.EXTENSIONS_WRITE: (30, RateLimitPeriod.MINUTE),
       # Table operations
       EndpointCategory.TABLE_QUERY: (15, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_UPLOAD: (5, RateLimitPeriod.MINUTE),
@@ -141,6 +152,9 @@ class RateLimitConfig:
       ),  # Shared OpenSearch t3.medium
       EndpointCategory.GRAPH_QUERY: (60, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_IMPORT: (10, RateLimitPeriod.MINUTE),
+      # Extensions surface (OLTP on shared RDS)
+      EndpointCategory.EXTENSIONS_GRAPHQL: (600, RateLimitPeriod.MINUTE),
+      EndpointCategory.EXTENSIONS_WRITE: (300, RateLimitPeriod.MINUTE),
       # Table operations
       EndpointCategory.TABLE_QUERY: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
@@ -169,6 +183,9 @@ class RateLimitConfig:
       ),  # Shared OpenSearch t3.medium
       EndpointCategory.GRAPH_QUERY: (60, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_IMPORT: (10, RateLimitPeriod.MINUTE),
+      # Extensions surface (OLTP on shared RDS)
+      EndpointCategory.EXTENSIONS_GRAPHQL: (600, RateLimitPeriod.MINUTE),
+      EndpointCategory.EXTENSIONS_WRITE: (300, RateLimitPeriod.MINUTE),
       # Table operations
       EndpointCategory.TABLE_QUERY: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
@@ -197,6 +214,9 @@ class RateLimitConfig:
       ),  # Shared OpenSearch t3.medium
       EndpointCategory.GRAPH_QUERY: (60, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_IMPORT: (10, RateLimitPeriod.MINUTE),
+      # Extensions surface (OLTP on shared RDS)
+      EndpointCategory.EXTENSIONS_GRAPHQL: (600, RateLimitPeriod.MINUTE),
+      EndpointCategory.EXTENSIONS_WRITE: (300, RateLimitPeriod.MINUTE),
       # Table operations
       EndpointCategory.TABLE_QUERY: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
@@ -270,24 +290,23 @@ class RateLimitConfig:
     Returns:
         The endpoint category or None if not categorized
     """
-    # Extensions surface — both `/extensions/{graph_id}/graphql`
-    # (read) and `/extensions/{domain}/{graph_id}/operations/{op}`
-    # (write) are tenant-scoped, so they map to the same per-tier
-    # buckets as the legacy `/v1/graphs/{graph_id}/...` endpoints did.
+    # Extensions surface — OLTP on shared RDS, so it gets its own buckets
+    # (EXTENSIONS_GRAPHQL / EXTENSIONS_WRITE) independent of the LadybugDB
+    # graph categories, so the two backends can be tuned separately.
     # Checked BEFORE the `/v1/` prefix strip because the extensions
     # surface is mounted at the top level, not under `/v1/`.
     if path.startswith("/extensions/"):
       ext_parts = path[len("/extensions/") :].split("/")
-      # /extensions/{graph_id}/graphql → GRAPH_READ
+      # /extensions/{graph_id}/graphql → EXTENSIONS_GRAPHQL (typed OLTP reads)
       if len(ext_parts) >= 2 and ext_parts[1] == "graphql":
-        return EndpointCategory.GRAPH_READ
-      # /extensions/{domain}/{graph_id}/operations/{op_name} → GRAPH_WRITE
+        return EndpointCategory.EXTENSIONS_GRAPHQL
+      # /extensions/{domain}/{graph_id}/operations/{op_name} → EXTENSIONS_WRITE
+      # (command writes; analytical view operations ride here too for now).
       if len(ext_parts) >= 4 and ext_parts[2] == "operations":
-        return EndpointCategory.GRAPH_WRITE
-      # Fall through to the generic graph-write bucket for any future
-      # extensions endpoint that doesn't match the patterns above —
-      # safer than dropping out to the unbounded default.
-      return EndpointCategory.GRAPH_WRITE
+        return EndpointCategory.EXTENSIONS_WRITE
+      # Any other extensions endpoint (e.g. report bundle download) → the
+      # extensions write bucket rather than dropping to the unbounded default.
+      return EndpointCategory.EXTENSIONS_WRITE
 
     # Remove version prefix
     if path.startswith("/v1/"):

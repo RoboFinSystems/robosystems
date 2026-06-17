@@ -1,11 +1,13 @@
 """Unit tests for rate limiting module."""
 
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 
 from robosystems.middleware.rate_limits.rate_limiting import (
+  _verify_jwt_for_rate_limiting,
   create_custom_rate_limit_dependency,
   get_int_env,
   get_rate_limit_config,
@@ -87,6 +89,59 @@ class TestGetUserIdentifier:
     request = _make_request(host="1.2.3.4")
     result = get_user_identifier(request)
     assert result == "ip:1.2.3.4"
+
+
+@pytest.mark.unit
+class TestVerifyJwtForRateLimiting:
+  """Real-decode tests for _verify_jwt_for_rate_limiting (no mocks).
+
+  Regression: app tokens are minted with `aud`/`iss` claims (middleware/auth/
+  jwt.py). Decoding without passing audience/issuer must NOT raise — otherwise
+  every authenticated request silently drops to the anonymous "base" rate-limit
+  tier.
+  """
+
+  SECRET = "rate-limit-test-secret"
+
+  def _mint(self, claims):
+    import jwt as pyjwt
+
+    return pyjwt.encode(claims, self.SECRET, algorithm="HS256")
+
+  def _exp(self):
+    from datetime import datetime, timedelta
+
+    return datetime.now(UTC) + timedelta(hours=1)
+
+  def test_token_with_aud_iss_resolves_user(self):
+    from robosystems.config import env
+
+    token = self._mint(
+      {
+        "user_id": "usr_aud_iss",
+        "aud": "robosystems-aud",
+        "iss": "robosystems-iss",
+        "exp": self._exp(),
+      }
+    )
+    with patch.object(env, "JWT_SECRET_KEY", self.SECRET):
+      assert _verify_jwt_for_rate_limiting(token) == "usr_aud_iss"
+
+  def test_token_without_aud_iss_resolves_user(self):
+    from robosystems.config import env
+
+    token = self._mint({"user_id": "usr_plain", "exp": self._exp()})
+    with patch.object(env, "JWT_SECRET_KEY", self.SECRET):
+      assert _verify_jwt_for_rate_limiting(token) == "usr_plain"
+
+  def test_bad_signature_returns_none(self):
+    from robosystems.config import env
+
+    token = self._mint(
+      {"user_id": "usr_x", "aud": "robosystems-aud", "exp": self._exp()}
+    )
+    with patch.object(env, "JWT_SECRET_KEY", "a-different-secret"):
+      assert _verify_jwt_for_rate_limiting(token) is None
 
 
 @pytest.mark.unit
