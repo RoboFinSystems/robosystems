@@ -101,41 +101,41 @@ class TestSubscriptionRateLimits:
     )
 
   def test_get_endpoint_category_for_extensions(self):
-    """Extensions paths must map to GRAPH_READ / GRAPH_WRITE buckets.
+    """Extensions paths map to the dedicated EXTENSIONS_* buckets.
 
-    Without this, `subscription_aware_rate_limit_dependency` would
-    look up `None` and fall through to the generic limiter — the
-    original regression that motivated this fix.
+    The extensions surface is OLTP on shared RDS, so it has its own
+    rate-limit categories independent of the LadybugDB graph categories.
+    (Mapping to None would fall through to the generic limiter.)
     """
-    # Graph-scoped GraphQL read → GRAPH_READ
+    # Graph-scoped GraphQL read → EXTENSIONS_GRAPHQL
     assert (
       get_endpoint_category("/extensions/kg1a2b3c/graphql", "POST")
-      == EndpointCategory.GRAPH_READ
+      == EndpointCategory.EXTENSIONS_GRAPHQL
     )
     # Subgraph IDs (with underscore) work too
     assert (
       get_endpoint_category("/extensions/kg1a2b3c_dev/graphql", "POST")
-      == EndpointCategory.GRAPH_READ
+      == EndpointCategory.EXTENSIONS_GRAPHQL
     )
-    # RoboLedger operations → GRAPH_WRITE
+    # RoboLedger operations → EXTENSIONS_WRITE
     assert (
       get_endpoint_category(
         "/extensions/roboledger/kg1a2b3c/operations/update-entity", "POST"
       )
-      == EndpointCategory.GRAPH_WRITE
+      == EndpointCategory.EXTENSIONS_WRITE
     )
     assert (
       get_endpoint_category(
         "/extensions/roboledger/kg1a2b3c/operations/close-period", "POST"
       )
-      == EndpointCategory.GRAPH_WRITE
+      == EndpointCategory.EXTENSIONS_WRITE
     )
-    # RoboInvestor operations → GRAPH_WRITE
+    # RoboInvestor operations → EXTENSIONS_WRITE
     assert (
       get_endpoint_category(
         "/extensions/roboinvestor/kg1a2b3c/operations/create-portfolio", "POST"
       )
-      == EndpointCategory.GRAPH_WRITE
+      == EndpointCategory.EXTENSIONS_WRITE
     )
 
   def test_get_subscription_rate_limit(self):
