@@ -116,6 +116,33 @@ class TestStagingSql:
     assert "ChartOfAccounts" in tables["Structure"]
 
 
+class TestEdgeForeignKeyGuards:
+  """#757 — coa_mapping structures are materialized so curated 'mapping'
+  associations have a valid parent Structure, and edge tables semi-join their
+  node sets so one dangling FK can't fail the whole (transactional) COPY and
+  zero out the table."""
+
+  def test_structure_no_longer_excludes_coa_mapping(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    sql = tables["Structure"]
+    # coa_mapping must NOT be in the exclusion list — its 'mapping' associations
+    # reference it as their parent structure.
+    assert "'coa_mapping'" not in sql
+    # the real chart_of_accounts is still excluded (synthetic node replaces it).
+    assert "'chart_of_accounts'" in sql
+
+  def test_structure_has_association_guards_dangling_structure(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    sql = tables["STRUCTURE_HAS_ASSOCIATION"]
+    assert "structure_id IN (SELECT identifier FROM Structure)" in sql
+
+  def test_element_has_trait_guards_dangling_refs(self):
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    sql = tables["ELEMENT_HAS_TRAIT"]
+    assert "element_id IN (SELECT identifier FROM Element)" in sql
+    assert 'trait_id IN (SELECT identifier FROM "Trait")' in sql
+
+
 class TestREAStaging:
   """REA primitives — Agent + Event nodes + 7 base edges + the
   EVENT_TRIGGERS_TRANSACTION McCarthy bridge edge.

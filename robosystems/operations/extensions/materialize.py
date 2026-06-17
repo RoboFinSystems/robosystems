@@ -627,7 +627,13 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       1.0::DOUBLE                     AS canonical_confidence,
       NULL::FLOAT[384]                AS embedding
     FROM postgres_scan('{c}', '{s}', 'structures')
-    WHERE block_type NOT IN ('chart_of_accounts', 'coa_mapping')
+    -- Exclude only the real chart_of_accounts structure — the synthetic
+    -- '{graph_id}_coa' node above stands in for it. coa_mapping IS
+    -- materialized so the curated 'mapping' associations (CoA -> rs-gaap)
+    -- have a valid parent Structure; excluding it left every
+    -- STRUCTURE_HAS_ASSOCIATION edge with a dangling FK, failing the whole
+    -- (transactional) COPY and leaving the table empty.
+    WHERE block_type NOT IN ('chart_of_accounts')
       AND is_active = true
   """
 
@@ -723,6 +729,10 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'associations')
     -- See _MATERIALIZED_ASSOCIATION_TYPES for the curated list.
     WHERE association_type IN {_MATERIALIZED_ASSOCIATION_TYPES_SQL}
+      -- Drop edges whose structure was not materialized (e.g. inactive) so a
+      -- single dangling FK can't fail the whole transactional COPY. Structure
+      -- nodes are staged before this edge table, so the semi-join is valid.
+      AND structure_id IN (SELECT identifier FROM Structure)
   """
 
   tables["ASSOCIATION_HAS_FROM_ELEMENT"] = f"""
@@ -769,6 +779,11 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       element_id                      AS src,
       trait_id                        AS dst
     FROM postgres_scan('{c}', '{s}', 'element_traits')
+    -- Drop rows referencing an element/trait that was not materialized so a
+    -- single dangling FK can't fail the whole transactional COPY. Element and
+    -- Trait nodes are staged before this edge table.
+    WHERE element_id IN (SELECT identifier FROM Element)
+      AND trait_id IN (SELECT identifier FROM "Trait")
   """
 
   # Dimension junction tables (may be empty if no dimensions loaded yet)
