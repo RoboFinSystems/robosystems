@@ -20,10 +20,12 @@ API_ENDPOINT=""
 API_INTERNAL_ENDPOINT=""  # Service Discovery endpoint (bypasses ALB)
 API_ACCESS_MODE=""        # internal or public
 
-# Dagster webserver scale-on-demand tracking. The webserver defaults to 0 tasks
-# in CloudFormation (it's UI-only, reachable solely through this tunnel) so an
-# idle UI doesn't cost an on-demand Fargate task. We scale it to 1 while a
-# dagster tunnel is open, then back to 0 on exit.
+# Dagster webserver scale-on-demand tracking. The webserver is UI-only and
+# reachable solely through this tunnel, so when its configured desired count
+# (DAGSTER_WEBSERVER_DESIRED_COUNT_<ENV>) is 0 an idle UI costs no Fargate task.
+# We scale it to 1 while a dagster tunnel is open, then restore the configured
+# desired count on exit — so prod deployments that keep it up (for API-triggered
+# Dagster jobs) are NOT scaled back to 0.
 ENVIRONMENT=""
 WEBSERVER_SCALED_UP="false"
 WEBSERVER_WAIT_PID=""  # background `ecs wait services-stable` PID (overlaps with bastion boot)
@@ -414,12 +416,26 @@ wait_webserver_ready() {
 
 scale_webserver_down() {
     local environment=$1
-    echo -e "${YELLOW}Scaling Dagster webserver back down (-> 0)...${NC}"
+    # Restore the configured baseline desired count instead of forcing 0. When
+    # prod keeps the webserver up so API-triggered Dagster jobs (qb_sync,
+    # extensions materialize, etc.) can submit through it,
+    # DAGSTER_WEBSERVER_DESIRED_COUNT_<ENV> is >0 and the tunnel must not drop it.
+    local env_upper baseline
+    env_upper=$(echo "$environment" | tr '[:lower:]' '[:upper:]')
+    baseline=$(gh variable get "DAGSTER_WEBSERVER_DESIRED_COUNT_${env_upper}" 2>/dev/null || echo "0")
+    [[ "$baseline" =~ ^[0-9]+$ ]] || baseline=0
+
+    if [[ "$baseline" -ge 1 ]]; then
+        echo -e "${GREEN}✓ Leaving Dagster webserver at its configured desired count (${baseline})${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}Scaling Dagster webserver back down (-> ${baseline})...${NC}"
     aws ecs update-service \
         --cluster "robosystems-dagster-${environment}-cluster" \
         --service "robosystems-dagster-webserver-${environment}" \
-        --desired-count 0 --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
-    echo -e "${GREEN}✓ Dagster webserver scaled to 0${NC}"
+        --desired-count "$baseline" --region "${AWS_REGION:-us-east-1}" >/dev/null 2>&1 || true
+    echo -e "${GREEN}✓ Dagster webserver scaled to ${baseline}${NC}"
 }
 
 start_ssm_tunnel() {
