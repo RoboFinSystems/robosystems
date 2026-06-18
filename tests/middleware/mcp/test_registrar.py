@@ -138,6 +138,78 @@ class TestDeriveInputSchema:
     assert "rollforward" in schema["properties"]["block_type"]["enum"]
     assert "schedule" in schema["properties"]["block_type"]["enum"]
 
+  def test_typed_arm_union_exposes_payload_fields(self) -> None:
+    """When a discriminated-union arm carries a *typed* payload, the
+    flattener must surface that arm's real fields under a nested
+    ``payload.anyOf`` (no top-level union) so a codebase-blind MCP client
+    can construct a valid call instead of guessing field names. This is
+    the legibility fix — the opposite of the all-untyped permissive path.
+    """
+    from typing import Annotated, Literal
+
+    from pydantic import Discriminator, RootModel
+
+    class _SchedulePayload(BaseModel):
+      name: str = Field(..., description="Schedule name")
+      monthly_amount: int = Field(..., description="Amount in cents")
+
+    class _TypedArm(BaseModel):
+      kind: Literal["sched"]
+      payload: _SchedulePayload
+
+    class _UntypedArm(BaseModel):
+      kind: Literal["legacy"]
+      payload: dict[str, Any] = Field(default_factory=dict)
+
+    class _Req(RootModel[Annotated[_TypedArm | _UntypedArm, Discriminator("kind")]]):
+      """A union mixing a typed arm and an untyped one."""
+
+    schema = derive_input_schema(_Req)
+
+    # Still no top-level union — Anthropic API constraint holds.
+    assert "oneOf" not in schema
+    assert "anyOf" not in schema
+    assert "allOf" not in schema
+
+    assert set(schema["properties"]["kind"]["enum"]) == {"sched", "legacy"}
+    # payload is enriched into an anyOf because at least one arm is typed.
+    payload = schema["properties"]["payload"]
+    assert "anyOf" in payload
+    # The typed arm's real field names are present and discoverable.
+    typed_option = next(
+      o for o in payload["anyOf"] if "'sched'" in (o.get("title") or "")
+    )
+    assert set(typed_option["properties"]) == {"name", "monthly_amount"}
+    # payload becomes required once it carries structure.
+    assert schema["required"] == ["kind", "payload"]
+
+  def test_create_information_block_payload_is_legible(self) -> None:
+    """End-to-end legibility check on the production model: the schedule
+    arm's real fields and a copy-pasteable example must reach the MCP
+    boundary. Regression guard for the 2026-06-17 close-workflow
+    legibility gap — a blind agent could not author schedules because the
+    payload was an opaque ``{additionalProperties: true}`` blob.
+    """
+    from robosystems.models.api.information_block import (
+      CreateInformationBlockRequest,
+    )
+
+    schema = derive_input_schema(CreateInformationBlockRequest)
+    payload = schema["properties"]["payload"]
+    assert "anyOf" in payload
+
+    schedule_option = next(
+      o for o in payload["anyOf"] if "'schedule'" in (o.get("title") or "")
+    )
+    fields = schedule_option.get("properties") or {}
+    # The fields a caller actually needs to set, not invent.
+    for field in ("name", "taxonomy_id", "element_ids", "entry_template"):
+      assert field in fields, f"schedule field {field!r} not exposed"
+
+    # At least one copy-pasteable example body reached the envelope.
+    examples = schema.get("examples") or []
+    assert any(ex.get("block_type") == "schedule" for ex in examples)
+
 
 # ── Error translation ─────────────────────────────────────────────────────
 

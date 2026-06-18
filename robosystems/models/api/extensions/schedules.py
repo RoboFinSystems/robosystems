@@ -16,10 +16,21 @@ EntryType = Literal["standard", "adjusting", "closing", "reversing"]
 
 class EntryTemplateRequest(BaseModel):
   debit_element_id: str = Field(
-    ..., description="Element to debit (e.g., Depreciation Expense)"
+    ...,
+    description=(
+      "CoA element id to debit (e.g. Depreciation Expense). This is a "
+      "chart-of-accounts element id — the `id` returned by "
+      "get-unmapped-elements / get-graph-schema — NOT a taxonomy qname."
+    ),
   )
   credit_element_id: str = Field(
-    ..., description="Element to credit (e.g., Accumulated Depreciation)"
+    ...,
+    description=(
+      "CoA element id to credit (e.g. Accumulated Depreciation). A "
+      "chart-of-accounts element id (see get-unmapped-elements), not a "
+      "taxonomy qname. One template = one debit/credit pair; model a "
+      "multi-account entry as several schedules."
+    ),
   )
   entry_type: EntryType = Field(
     "closing", description="Entry type for generated entries"
@@ -72,7 +83,14 @@ class CreateScheduleRequest(BaseModel):
   taxonomy_id: str | None = Field(
     None, description="Taxonomy ID (auto-creates if omitted)"
   )
-  element_ids: list[str] = Field(..., description="Element IDs to include")
+  element_ids: list[str] = Field(
+    ...,
+    description=(
+      "CoA element ids the schedule touches (the `id` from "
+      "get-unmapped-elements, not taxonomy qnames) — typically the same "
+      "debit + credit ids used in entry_template."
+    ),
+  )
   period_start: date = Field(..., description="First period start")
   period_end: date = Field(..., description="Last period end")
   monthly_amount: int = Field(..., description="Monthly amount in cents")
@@ -81,10 +99,15 @@ class CreateScheduleRequest(BaseModel):
   closed_through: date | None = Field(
     None,
     description=(
-      "If provided, facts with period_end ≤ this date are flagged as "
-      "'historical' (already reflected in opening balances, ignored by "
-      "the close workflow). Used during initial ledger setup to create "
-      "schedules whose early facts have already been captured elsewhere."
+      "Watermark for onboarding. Facts with period_end ≤ this date are "
+      "flagged 'historical' and their schedule_entry_due obligations are "
+      "emitted 'voided', so the close workflow starts drafting at the first "
+      "open period. Set this to the last day of the fiscal calendar's "
+      "closed_through month (calendar '2026-05' → '2026-05-31') whether "
+      "those months were actually closed in RoboLedger or just "
+      "baseline-watermarked at initialization. Omitting it (when prior "
+      "periods exist) leaves pre-watermark periods as 'pending' obligations "
+      "that block the first close."
     ),
   )
   source_transaction_id: str | None = Field(

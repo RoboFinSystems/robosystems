@@ -2,10 +2,11 @@
 
 Hosts two sub-surfaces under `/extensions/roboledger/{graph_id}/`:
 
-- **`/operations/{op_name}`** — command writes (close-period, create-schedule,
-  etc.). Each operation runs through `execute_operation` and returns an
-  `OperationEnvelope`. Implementations live in `operations.py` and delegate
-  to `operations/roboledger/commands/*`.
+- **`/operations/{op_name}`** — command writes (close-period,
+  create-information-block, create-event-block, etc.). Each operation runs
+  through `execute_operation` and returns an `OperationEnvelope`.
+  Implementations live in `operations.py` and delegate to
+  `operations/roboledger/commands/*`.
 
 - **`/views`** — analytical graph-backed reads (XBRL hypercube fact grids).
   Queries the LadybugDB graph schema, not extensions PostgreSQL. Lives here

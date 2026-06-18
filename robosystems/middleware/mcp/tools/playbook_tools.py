@@ -1,0 +1,247 @@
+"""Workflow-playbook MCP tools.
+
+These tools carry no data and touch no database. Their only job is to
+**inform a multi-step workflow** — the canonical tool sequence, the
+decisions an operator has to make, and the gotchas that aren't obvious
+from any single tool's schema. They are the generic-workflow layer of the
+three-layer guidance model (generic playbook → per-tenant procedure doc →
+per-tenant data); see ``local/RoboSystems/specs/mcp-workflow-legibility.md``.
+
+Why a tool and not external docs: the content is **version-locked to the
+deployed build**. It ships in the same image as the tools it describes, so
+it can never drift from the actual tool names, schemas, or sequence — and
+it reaches every MCP client (Claude Code/Cowork *and* raw JSON-RPC
+callers), not just ones that happen to load a skill file.
+
+``get-close-playbook`` is the first one (the month-end close is the
+highest-value, fully-working MCP workflow today). It's a pure read, so it
+stays available on read-only graphs — an operator can learn the workflow
+before they have write access.
+"""
+
+from typing import Any
+
+# ── Playbook content (version-locked to this build) ──────────────────────────
+#
+# Authoritative source for the generic close workflow. Edit here when the
+# tool surface changes; keep tenant-specific steps in the per-tenant
+# procedures document, not in this constant.
+
+_RECURRING_SEQUENCE: list[str] = [
+  "get-fiscal-calendar — orient: read closed_through, close_target, "
+  "closeable_now, blockers, catch_up_sequence. Confirm the period you intend "
+  "to close is exactly closed_through + 1.",
+  "get-period-close-status (period_start/period_end as YYYY-MM-DD) — see "
+  "which schedules are pending / drafted / posted and their amounts.",
+  "promote-obligations (dispatch_handlers=true) — draft every matured "
+  "schedule's closing entry for the period in one sweep. This is how "
+  "schedule-derived drafts come into being; there is no create-closing-entry "
+  "tool. Idempotent.",
+  "(optional) create-event-block(event_type='journal_entry_recorded') — for "
+  "any manual / one-off adjusting entries that aren't schedule-driven.",
+  "list-period-drafts (period as YYYY-MM) — review every draft with DR/CR "
+  "detail; check all_balanced and the QB outbox fields "
+  "(will_publish_to_qb / qb_publish_count / local_only_count).",
+  "Summarize to the user (totals, balance check, per-schedule amounts, what "
+  "will publish to QuickBooks) and get explicit approval.",
+  "close-period (period as YYYY-MM) — atomic: posts the drafts, runs the "
+  "balance-sheet equation check, advances closed_through. Use "
+  "allow_stale_sync=true only when the user has verified QB is complete "
+  "despite a stale sync.",
+]
+
+_INITIATE_SEQUENCE: list[str] = [
+  "ORIENT FIRST — call get-fiscal-calendar and read `closed_through` (the "
+  "watermark) and `close_target`. `closed_through` may be a BASELINE set at "
+  "initialization (e.g. '2026-05') even when those months were never closed "
+  "period-by-period in RoboLedger — the books were maintained elsewhere "
+  "(QuickBooks) and the watermark says 'treat everything through here as "
+  "already handled'. The first close you'll run is `closed_through + 1`. "
+  "Note this date — every schedule you create must carry the matching "
+  "`closed_through` (see SCHEDULE AUTHORING).",
+  "Discover the recurring adjusting entries this company books every month "
+  "(depreciation, amortization, prepaid roll-off, accruals). Two "
+  "complementary bootstrap modes — use both:",
+  "  • Derive from history — query a prior posted close to reconstruct the "
+  "recurring entries: read-graph-cypher / financial-statement-analysis, or "
+  "list-period-drafts on an already-closed period. History gives you the "
+  "resulting amounts and the accounts touched.",
+  "  • Interview the user — history gives amounts but NOT the schedule "
+  "parameters (cost basis, useful life, method, roll-off, disposal terms) "
+  "needed for forward-looking schedules. Ask for the source schedules (e.g. "
+  "the depreciation / amortization / prepaid worksheets). You can't infer "
+  "'5-yr straight-line on $2,544' from a $42.41/mo line.",
+  "For each recurring entry, create a schedule with "
+  "create-information-block(block_type='schedule'). See "
+  "SCHEDULE AUTHORING below — especially one-pair-per-schedule and the "
+  "closed_through watermark rule (a schedule that omits it will block the "
+  "first close).",
+  "(recommended) Write a per-tenant 'Month-End Close Procedures' document "
+  "with create-document capturing THIS company's schedules, accounts, and "
+  "quirks. Have it reference this playbook for the generic mechanics. Future "
+  "closes start by reading it (search-documents).",
+  "Run the first close using the recurring sequence.",
+]
+
+_SCHEDULE_AUTHORING: list[str] = [
+  "ONE SCHEDULE = ONE debit element + ONE credit element pair. The "
+  "entry_template has a single debit_element_id and a single "
+  "credit_element_id — there is no multi-leg form. A real multi-line entry "
+  "(e.g. depreciation across several asset classes) is therefore MULTIPLE "
+  "schedules, one per asset/element pair, each with its own basis and its "
+  "own SumEquals proof. Do not try to cram several accounts into one "
+  "schedule.",
+  "USE COA ELEMENT IDs, NOT QNAMES. debit_element_id / credit_element_id / "
+  "element_ids take chart-of-accounts element ids (the `id` from "
+  "get-unmapped-elements / get-graph-schema), NOT taxonomy qnames like "
+  "'us-gaap:Depreciation'. Discover the real ids first with "
+  "get-unmapped-elements (match by name/code), get-graph-schema, "
+  "suggest-mapping, or read-graph-cypher — never invent them. (The "
+  "rollforward block type is the exception: it takes *_qname fields and "
+  "resolves them server-side.)",
+  "PERIOD HORIZON: period_start..period_end is the schedule's full life — "
+  "for depreciation/amortization that's period_start + useful life; for a "
+  "prepaid it's the roll-off horizon. These schedules are finite by design, "
+  "not open-ended; if you don't know the useful life, that's exactly what "
+  "the interview must establish (history gives the monthly amount, not the "
+  "horizon).",
+  "OMITTING schedule_metadata IS SAFE. The SumEquals proof is only generated "
+  "when you supply original_amount (cost basis); a monthly_amount-only "
+  "schedule simply books monthly_amount each period with no failing rule. "
+  "Add schedule_metadata later when you have the basis/useful life.",
+  "AMOUNTS ARE IN CENTS. monthly_amount and every schedule_metadata amount "
+  "(original_amount, residual_value) are integer cents. $194.83 → 19483.",
+  "STRAIGHT-LINE vs CUSTOM CURVE: the default method distributes "
+  "monthly_amount evenly (final period absorbs rounding). For a non-linear "
+  "curve (effective-interest amortization, variable leases) set "
+  "schedule_metadata.periodic_amounts to explicit per-period cents — its "
+  "length must match the number of months and its sum must equal "
+  "original_amount.",
+  "MATCH THE CALENDAR WATERMARK — set the schedule's closed_through to the "
+  "last day of the calendar's closed_through month (calendar '2026-05' → "
+  "schedule closed_through '2026-05-31'). This flags every period at/before "
+  "the watermark as 'historical' and emits their obligations as 'voided', so "
+  "the close workflow starts drafting at the first open period (e.g. June). "
+  "This is the SAME rule whether those prior months were actually closed in "
+  "RoboLedger or just baseline-watermarked at initialization. WARNING: if "
+  "you omit closed_through (or set it earlier), every pre-watermark period "
+  "becomes a 'pending' obligation, and the first close is BLOCKED with the "
+  "pending_obligations gate (earliest_pending_period pointing months back). "
+  "Conversely, re-drafting an already-closed month creates duplicate "
+  "entries — the watermark prevents both.",
+]
+
+_KEY_RULES: list[str] = [
+  "PERIOD IDENTIFIERS VARY BY TOOL: list-period-drafts and close-period take "
+  "period='YYYY-MM'; get-period-close-status takes "
+  "period_start/period_end='YYYY-MM-DD'; the schedule payload's "
+  "period_start/period_end are dates ('YYYY-MM-DD'). Match each tool's shape.",
+  "NO create-closing-entry TOOL. Schedule drafts come from "
+  "promote-obligations (sweep) or "
+  "create-event-block(event_type='schedule_entry_due') (single schedule); "
+  "manual entries from create-event-block(event_type='journal_entry_recorded').",
+  "block_type ENUM OVERSTATES CAPABILITY: only 'schedule' and 'rollforward' "
+  "are constructible via create-information-block. The statement types "
+  "(balance_sheet, income_statement, cash_flow_statement, equity_statement, "
+  "comprehensive_income) and 'metric' return HTTP 501 — statements are built "
+  "via create-report.",
+  "CLOSE BLOCKERS: sequence_violation (close in order), period_incomplete "
+  "(month not over yet), sync_stale (QuickBooks sync older than period end), "
+  "calendar_not_initialized, and pending_obligations (matured "
+  "schedule_entry_due events still 'pending' at/before the period — run "
+  "promote-obligations to draft them, or, if they belong to a "
+  "pre-watermark month that should never close, the schedule's "
+  "closed_through was set wrong; earliest_pending_period names the oldest "
+  "one). Resolve before close-period; get-fiscal-calendar reports them.",
+  "CHECK THE PER-TENANT PROCEDURES DOC FIRST: call search-documents for a "
+  "'close procedures' / 'month-end' document before authoring or closing. It "
+  "captures this company's specifics and should reference this playbook.",
+]
+
+
+def _build_playbook(mode: str) -> dict[str, Any]:
+  """Assemble the playbook payload for the requested mode."""
+  overview = (
+    "The month-end close turns a synced general ledger into a locked, "
+    "reported fiscal period. Recurring adjusting entries (depreciation, "
+    "amortization, prepaid roll-off) are modeled as SCHEDULES that "
+    "auto-emit period obligations; closing a period drafts those entries, "
+    "posts them, and advances the calendar. Run get-close-playbook whenever "
+    "you're unsure of the sequence — it is version-locked to this build."
+  )
+  payload: dict[str, Any] = {
+    "version_note": (
+      "Version-locked to the deployed build: tool names, the sequence, and "
+      "the rules below match the tools currently exposed by this server."
+    ),
+    "mode": mode,
+    "overview": overview,
+  }
+  if mode in ("initiate", "overview"):
+    payload["initiate_first_close"] = _INITIATE_SEQUENCE
+    payload["schedule_authoring"] = _SCHEDULE_AUTHORING
+  if mode in ("recurring", "overview"):
+    payload["recurring_close_sequence"] = _RECURRING_SEQUENCE
+  payload["key_rules"] = _KEY_RULES
+  payload["related_tools"] = [
+    "get-fiscal-calendar",
+    "get-period-close-status",
+    "create-information-block",
+    "promote-obligations",
+    "create-event-block",
+    "list-period-drafts",
+    "close-period",
+    "search-documents",
+    "get-graph-schema",
+    "get-unmapped-elements",
+    "suggest-mapping",
+  ]
+  return payload
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# get-close-playbook
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class GetClosePlaybookTool:
+  """Return the version-locked month-end close playbook (guidance only)."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "get-close-playbook",
+      "description": """Get the canonical month-end close playbook — the tool sequence, the setup decisions, and the gotchas that no single tool's schema makes obvious. **Call this FIRST when setting up or running a close** (or whenever you're unsure what to call next). Guidance only — no data, no side effects, safe on read-only graphs. Version-locked to this build, so it never drifts from the actual tools.
+
+**WHEN TO USE:**
+- Before authoring recurring schedules (depreciation/amortization/prepaid) for the first time → mode="initiate"
+- Before running a monthly close → mode="recurring"
+- Any time the close workflow is unclear → mode="overview" (default)
+
+**ALSO READ:** call `search-documents` for this company's own "close procedures" document — it captures tenant-specific accounts/quirks and references this generic playbook.
+
+**RETURNS:** the close overview, the ordered tool sequence for the chosen mode, schedule-authoring rules (incl. one-schedule-per-debit/credit-pair), and key gotchas (period-identifier shapes, amounts-in-cents, which block types 501, close blockers).""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["overview", "initiate", "recurring"],
+            "description": (
+              "Which slice of the playbook to return. 'initiate' = first-time "
+              "setup (bootstrap schedules from history + interview). "
+              "'recurring' = run a monthly close. 'overview' (default) = both."
+            ),
+          },
+        },
+        "required": [],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    mode = arguments.get("mode") or "overview"
+    if mode not in ("overview", "initiate", "recurring"):
+      mode = "overview"
+    return _build_playbook(mode)

@@ -856,24 +856,30 @@ class _CreateScheduleArm(BaseModel):
         {
           "summary": "5-year straight-line depreciation",
           "description": (
-            "Monthly depreciation schedule for a $50,000 asset "
-            "amortized over 60 months. Each in-scope period produces "
-            "a draft closing entry via `entry_template`."
+            "Monthly depreciation schedule for a $50,000 asset amortized "
+            "over 60 months. Each in-scope period produces a draft closing "
+            "entry via `entry_template`. NOTE: `element_ids` and the "
+            "`entry_template.*_element_id` fields are CoA *element ids* (the "
+            "`id` returned by get-unmapped-elements / get-graph-schema), NOT "
+            "taxonomy qnames — the placeholder tokens below stand in for real "
+            "ids. One schedule models a single debit/credit pair; a "
+            "multi-account entry is several schedules, one per pair."
           ),
           "value": {
             "block_type": "schedule",
             "payload": {
               "name": "Office Building Depreciation",
               "element_ids": [
-                "us-gaap:Depreciation",
-                "us-gaap:AccumulatedDepreciation",
+                "<depreciation_expense_element_id>",
+                "<accumulated_depreciation_element_id>",
               ],
               "period_start": "2026-01-01",
               "period_end": "2030-12-31",
               "monthly_amount": 83333,
               "entry_template": {
-                "debit_element_id": "us-gaap:Depreciation",
-                "credit_element_id": "us-gaap:AccumulatedDepreciation",
+                "debit_element_id": "<depreciation_expense_element_id>",
+                "credit_element_id": "<accumulated_depreciation_element_id>",
+                "entry_type": "adjusting",
               },
             },
           },

@@ -89,6 +89,8 @@ class GetFiscalCalendarTool:
       "name": "get-fiscal-calendar",
       "description": """Get the current fiscal calendar state — what period is next to close, what's blocking it.
 
+**NEW TO THE CLOSE? Call `get-close-playbook` first** — it lays out the full tool sequence, the schedule-setup decisions, and the gotchas this tool's output assumes you know.
+
 **WHEN TO USE:**
 - At the START of every close session — check what period you're working on
 - Before calling close-period — verify it will succeed (check `closeable_now`)
