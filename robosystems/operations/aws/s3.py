@@ -160,6 +160,64 @@ class S3Client:
       logger.error(f"Unexpected error uploading to S3: {e}")
       return False
 
+  def upload_bytes(
+    self,
+    content: bytes,
+    bucket: str,
+    key: str,
+    content_type: str | None = None,
+    metadata: dict[str, str] | None = None,
+  ) -> bool:
+    """Upload raw bytes as an S3 object.
+
+    The binary sibling of :meth:`upload_string` — for artifacts that
+    aren't UTF-8 text (e.g. the XBRL serialization zip). Retries are
+    handled by the boto3 client's adaptive retry configuration.
+
+    Args:
+        content: Byte content to upload.
+        bucket: S3 bucket name.
+        key: S3 object key.
+        content_type: MIME type for the content.
+        metadata: Additional metadata for the object.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    put_args: dict[str, Any] = {
+      "Bucket": bucket,
+      "Key": key,
+      "Body": content,
+    }
+
+    if content_type:
+      put_args["ContentType"] = content_type
+
+    if metadata:
+      put_args["Metadata"] = metadata
+
+    security_errors = {"AccessDenied"}
+
+    try:
+      self.s3_client.put_object(**put_args)
+      logger.debug(f"Successfully uploaded {len(content)} bytes to s3://{bucket}/{key}")
+      return True
+
+    except ClientError as e:
+      error_code = e.response.get("Error", {}).get("Code", "")
+      if error_code in security_errors:
+        logger.critical(
+          f"S3 SECURITY VIOLATION - {error_code}: Bucket={bucket}, Key={key}, "
+          f"Error={e!s}"
+        )
+      else:
+        logger.error(f"S3 upload failed ({error_code}): {e}")
+      return False
+
+    except Exception as e:
+      logger.error(f"Unexpected error uploading bytes to S3: {e}")
+      return False
+
   def upload_file(
     self,
     file_path: str,

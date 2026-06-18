@@ -19,6 +19,7 @@ manual reshape.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 
 import strawberry
 from strawberry.scalars import JSON
@@ -106,6 +107,9 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.api.extensions.reports import (
   PeriodSpec as PydanticPeriodSpec,
+)
+from robosystems.models.api.extensions.reports import (
+  ReportBundleDownloadResponse as PydanticReportBundleDownloadResponse,
 )
 from robosystems.models.api.extensions.reports import (
   ReportListResponse as PydanticReportListResponse,
@@ -651,6 +655,25 @@ class Report:
 @pydantic_type(model=PydanticReportListResponse, all_fields=True)
 class ReportList:
   """List of reports for a graph."""
+
+
+@strawberry.enum
+class ReportDownloadFormat(Enum):
+  """Serialization flavor for a Report bundle download.
+
+  Names map to the operations-layer ``RdfFlavor`` / ``XbrlFlavor``
+  string values (``jsonld``, ``xbrl-2.1``). The hyphenated XBRL value
+  isn't a valid GraphQL enum *name*, so the wire name is ``XBRL_2_1``
+  while the resolver forwards the ``.value`` to the ops read.
+  """
+
+  JSONLD = "jsonld"
+  XBRL_2_1 = "xbrl-2.1"
+
+
+@pydantic_type(model=PydanticReportBundleDownloadResponse, all_fields=True)
+class ReportBundleDownload:
+  """Presigned-URL envelope for a published Report's serialization bundle."""
 
 
 @pydantic_type(model=PydanticFactRowResponse, all_fields=True)

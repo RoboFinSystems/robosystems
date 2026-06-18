@@ -464,6 +464,41 @@ class ReportListResponse(BaseModel):
   )
 
 
+# ── Serialization bundle download ────────────────────────────────────────────
+
+
+class ReportBundleDownloadResponse(BaseModel):
+  """Presigned-URL response for a published Report's serialization bundle.
+
+  Every flavor resolves to a short-lived presigned URL pointing at the
+  bundle in S3 — JSON-LD is stamped at publish time, XBRL is
+  materialized on first download and cached by ``generation_count``.
+  The client follows ``download_url`` to fetch the artifact directly
+  from S3 (the API never streams the bytes). Mirrors the
+  backup-download shape the frontend already consumes.
+  """
+
+  download_url: str = Field(
+    ..., description="Presigned URL that streams the bundle directly from S3."
+  )
+  expires_at: datetime = Field(
+    ..., description="UTC timestamp at which the presigned URL stops working."
+  )
+  content_type: str = Field(
+    ..., description="MIME type of the artifact behind the URL."
+  )
+  format: str = Field(
+    ...,
+    description=(
+      "Serialization flavor delivered by this URL — one of the "
+      "``RdfFlavor`` / ``XbrlFlavor`` values (e.g. ``jsonld``, ``xbrl-2.1``)."
+    ),
+  )
+  generation_count: int = Field(
+    ..., description="Bundle generation number stamped on the Report."
+  )
+
+
 # ── Live financial statement (OLTP) ──────────────────────────────────────────
 
 

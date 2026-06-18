@@ -264,3 +264,11 @@ operations/{domain}/reads/*.py             ↓
 ```
 
 Both sides ultimately call into `operations/{domain}/*`. That's the load-bearing invariant of the subsystem: whether a caller hits the GraphQL endpoint, a named operation, or an MCP tool, the same ops-layer functions run. Adding business logic anywhere else — routers, resolvers, MCP tool handlers — is a mistake. Route it through the ops layer.
+
+### Downloads are reads (issue #751)
+
+Serialization-bundle downloads live here too, as the `reportDownloadUrl(reportId, format)` field on the `Report` query — **not** as a REST resource and **not** as a `download-report` operation. A download is a read of stored state, so it belongs on the read surface.
+
+The catch that made this non-obvious: the XBRL flavor used to stream a raw binary zip, which neither a GraphQL JSON response nor an `OperationEnvelope` can carry. The fix is that **every flavor resolves to a presigned S3 URL** — JSON-LD is stamped at publish time, XBRL is materialized + cached on first request (`operations/roboledger/reads/reports.py:get_report_download_url`). The resolver only ever returns a URL string; the client follows it to fetch the bytes directly from S3. This also keeps the read surface uniform — there's no REST GET outlier on the roboledger extensions surface anymore.
+
+There is no analytical "view operation" home for it: view operations (`build-fact-grid`, `live-financial-statement`) are LadybugDB-backed analytical queries; a presigned-URL lookup is a plain OLTP read.
