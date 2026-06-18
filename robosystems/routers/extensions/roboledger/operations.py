@@ -787,7 +787,12 @@ create_taxonomy_block_op = _registrar.register(
       "taxonomy row plus its structures, elements, associations, and "
       "rules. Dispatches by `taxonomy_type` — `chart_of_accounts` "
       "(declarative tenant CoA) is supported; `reporting_extension` / "
-      "`custom_ontology` / `reporting_standard` are not yet implemented."
+      "`custom_ontology` / `reporting_standard` are not yet implemented. "
+      "NOT the path for a functional close schedule: a structure with "
+      "block_type='schedule' here is a bare ontology row with none of the "
+      "schedule machinery (per-period facts, schedule_entry_due "
+      "obligations, closing-entry generator). To create a working "
+      "schedule use create-information-block(block_type='schedule')."
     ),
     command=cmd_create_taxonomy_block,
     request_model=CreateTaxonomyBlockRequest,
