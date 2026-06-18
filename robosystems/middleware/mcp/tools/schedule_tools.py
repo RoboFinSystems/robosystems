@@ -130,10 +130,17 @@ class ListPeriodDraftsTool:
 - To review exactly what will be committed on close
 
 **WORKFLOW:**
-1. Draft entries via create-closing-entry (one per schedule)
+1. Draft entries come into being two ways — there is no `create-closing-entry`
+   tool:
+   - **Schedule-derived** (depreciation, amortization, prepaid roll-off):
+     call `promote-obligations` to draft every matured schedule entry for the
+     period in one sweep (the on-demand form of the background promoter), or
+     `create-event-block(event_type='schedule_entry_due')` to draft a single
+     schedule's entry.
+   - **Manual adjustments**: `create-event-block(event_type='journal_entry_recorded')`.
 2. Use this tool to review every draft with DR/CR detail
 3. Summarize to the user — total debits/credits, balance check, per-schedule amounts
-4. On user approval, call the close endpoint to commit + close atomically
+4. On user approval, call `close-period` to commit + close atomically
 
 **PARAMETERS:**
 - period: YYYY-MM format (e.g., "2026-03")
