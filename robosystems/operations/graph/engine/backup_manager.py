@@ -165,10 +165,15 @@ class BackupManager:
       # Get backup record from database
       db_session = SessionLocal()
       try:
-        backup = GraphBackup.get_by_id(backup_id, db_session)
+        # Scope the lookup to graph_id — access to graph_id is authorized by
+        # the route dependency, but the backup_id is caller-supplied, so a
+        # bare get_by_id would let one graph fetch another graph's backup.
+        backup = GraphBackup.get_by_id_and_graph(backup_id, graph_id, db_session)
 
         if not backup:
-          logger.warning(f"Backup {backup_id} not found in database")
+          logger.warning(
+            f"Backup {backup_id} not found in database for graph {graph_id}"
+          )
           return None
 
         # Check if backup is completed

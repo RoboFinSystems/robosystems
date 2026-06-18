@@ -498,18 +498,20 @@ class TestBackupManager:
     ):
       mock_session = MagicMock()
       mock_session_local.return_value = mock_session
-      mock_graph_backup.get_by_id.return_value = mock_backup
+      mock_graph_backup.get_by_id_and_graph.return_value = mock_backup
 
       # Test get_backup_download_url
       url = await backup_manager.get_backup_download_url(
         graph_id, backup_id, expires_in=3600
       )
       assert url == "https://presigned-url.com"
-      mock_graph_backup.get_by_id.assert_called_once_with(backup_id, mock_session)
+      mock_graph_backup.get_by_id_and_graph.assert_called_once_with(
+        backup_id, graph_id, mock_session
+      )
 
       # Test encrypted backup download (should return None)
       mock_backup.encryption_enabled = True
-      mock_graph_backup.get_by_id.reset_mock()
+      mock_graph_backup.get_by_id_and_graph.reset_mock()
 
       url = await backup_manager.get_backup_download_url(graph_id, backup_id)
       assert url is None

@@ -152,6 +152,26 @@ class TestGraphBackupModel:
     not_found = GraphBackup.get_by_id("backup_nonexistent", db_session)
     assert not_found is None
 
+  def test_get_by_id_and_graph(self, db_session):
+    """get_by_id_and_graph scopes the lookup to the owning graph (IDOR guard)."""
+    backup = GraphBackup.create(
+      graph_id="kg_owner",
+      database_name="owner_db",
+      backup_type=BackupType.FULL.value,
+      s3_bucket="bucket",
+      s3_key="owner.tar.gz",
+      session=db_session,
+    )
+
+    # Matching graph resolves the record
+    found = GraphBackup.get_by_id_and_graph(backup.id, "kg_owner", db_session)
+    assert found is not None
+    assert found.id == backup.id
+
+    # A different graph cannot reach it even with the correct backup_id
+    wrong_graph = GraphBackup.get_by_id_and_graph(backup.id, "kg_other", db_session)
+    assert wrong_graph is None
+
   def test_get_by_graph_id(self, db_session):
     """Test getting backups for a specific graph."""
     # Create multiple backups for same graph

@@ -716,8 +716,9 @@ class TestGetConnection:
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_get_connection_passes_user_id(self):
-    """Service is called with the authenticated user's ID."""
+  async def test_get_connection_passes_user_id_and_graph_scope(self):
+    """Service is called with the authenticated user's ID and the URL graph
+    scope, so a connection_id can't reach another graph's connection."""
     mock_user = _make_mock_user(user_id="usr_specific")
     mock_db = MagicMock()
     connection_dict = _make_connection_dict()
@@ -735,7 +736,7 @@ class TestGetConnection:
         _rate_limit=None,
       )
 
-    mock_get.assert_called_once_with(CONNECTION_ID, "usr_specific")
+    mock_get.assert_called_once_with(CONNECTION_ID, "usr_specific", graph_id=GRAPH_ID)
 
 
 # ---------------------------------------------------------------------------

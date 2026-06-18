@@ -151,6 +151,20 @@ class GraphBackup(Model):
     return session.query(cls).filter(cls.id == backup_id).first()
 
   @classmethod
+  def get_by_id_and_graph(
+    cls, backup_id: str, graph_id: str, session: Session
+  ) -> Optional["GraphBackup"]:
+    """Get a backup by ID, scoped to its owning graph.
+
+    Use this for any caller that already authorized ``graph_id`` (e.g. a
+    URL path scope) — it prevents reaching another graph's backup with a
+    guessed backup_id, since the lookup never matches across graphs.
+    """
+    return (
+      session.query(cls).filter(cls.id == backup_id, cls.graph_id == graph_id).first()
+    )
+
+  @classmethod
   def get_by_graph_id(
     cls,
     graph_id: str,

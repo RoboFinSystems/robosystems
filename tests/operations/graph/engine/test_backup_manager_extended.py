@@ -302,7 +302,7 @@ class TestGetBackupDownloadUrl:
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
-      mock_gb.get_by_id.return_value = mock_backup
+      mock_gb.get_by_id_and_graph.return_value = mock_backup
 
       url = await manager.get_backup_download_url("graph1", "bk_abc", 7200)
 
@@ -316,7 +316,7 @@ class TestGetBackupDownloadUrl:
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
-      mock_gb.get_by_id.return_value = None
+      mock_gb.get_by_id_and_graph.return_value = None
 
       url = await manager.get_backup_download_url("graph1", "bk_none")
 
@@ -334,7 +334,7 @@ class TestGetBackupDownloadUrl:
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
-      mock_gb.get_by_id.return_value = mock_backup
+      mock_gb.get_by_id_and_graph.return_value = mock_backup
 
       url = await manager.get_backup_download_url("graph1", "bk_inc")
 
@@ -352,7 +352,7 @@ class TestGetBackupDownloadUrl:
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
-      mock_gb.get_by_id.return_value = mock_backup
+      mock_gb.get_by_id_and_graph.return_value = mock_backup
 
       # encrypted -> raises ValueError internally, caught and returns None
       url = await manager.get_backup_download_url("graph1", "bk_enc")
@@ -380,7 +380,7 @@ class TestGetBackupDownloadUrl:
     ):
       mock_session = MagicMock()
       mock_sl.return_value = mock_session
-      mock_gb.get_by_id.return_value = mock_backup
+      mock_gb.get_by_id_and_graph.return_value = mock_backup
 
       url = await manager.get_backup_download_url("graph1", "bk_ls")
 

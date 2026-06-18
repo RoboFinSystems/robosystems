@@ -201,6 +201,26 @@ class TestGetConnection:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_wrong_graph_returns_none(self):
+    """A connection in a different graph must not be reachable by guessing
+    its id from another graph's scope (IDOR guard)."""
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_other", user_id="usr_123")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.get_connection(
+        connection_id="conn_test123",
+        user_id="usr_123",
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert result is None
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_system_user_bypasses_access_check(self):
     mock_session = MagicMock()
     mock_conn = _make_mock_connection(user_id="usr_other")
@@ -404,6 +424,27 @@ class TestDeleteConnection:
     mock_conn.soft_delete.assert_called_once()
     # Hard-delete is NOT called — that would orphan tenant data.
     mock_conn.delete.assert_not_called()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_wrong_graph_returns_false(self):
+    """A connection in a different graph must not be deletable by guessing
+    its id from another graph's scope (IDOR guard)."""
+    mock_session = MagicMock()
+    mock_conn = _make_mock_connection(graph_id="kg_other", user_id="usr_123")
+
+    with patch(f"{MODULE}.Connection") as MockConn:
+      MockConn.get_by_id.return_value = mock_conn
+
+      result = await ConnectionService.delete_connection(
+        connection_id="conn_1",
+        user_id="usr_123",
+        graph_id="kg_test",
+        db_session=mock_session,
+      )
+
+    assert result is False
+    mock_conn.soft_delete.assert_not_called()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
