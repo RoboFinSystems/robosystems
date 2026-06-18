@@ -122,7 +122,9 @@ async def sync_connection(
     )
 
     # Get connection details
-    connection = await ConnectionService.get_connection(connection_id, current_user.id)
+    connection = await ConnectionService.get_connection(
+      connection_id, current_user.id, graph_id=graph_id
+    )
 
     if not connection:
       raise create_error_response(

@@ -49,7 +49,7 @@ async def init_oauth(
   try:
     # Get connection to verify it exists and get provider
     connection = await ConnectionService.get_connection(
-      request.connection_id, current_user.id
+      request.connection_id, current_user.id, graph_id=graph_id
     )
 
     if not connection:
@@ -149,7 +149,9 @@ async def oauth_callback(
     redirect_uri = state_data["redirect_uri"]
 
     # Get connection
-    connection = await ConnectionService.get_connection(connection_id, current_user.id)
+    connection = await ConnectionService.get_connection(
+      connection_id, current_user.id, graph_id=graph_id
+    )
 
     if not connection:
       raise create_error_response(
@@ -225,7 +227,7 @@ async def oauth_callback(
             pending.delete(db)
           # Pull the refreshed dict for downstream auto-sync.
           connection = await ConnectionService.get_connection(
-            revived_id, current_user.id, db_session=db
+            revived_id, current_user.id, graph_id=graph_id, db_session=db
           )
 
       # Route subsequent writes at the revived id if reuse happened,

@@ -5,7 +5,7 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 # Third-party
 import httpx
@@ -123,6 +123,25 @@ class OAuthHandler:
   def __init__(self, provider: OAuthProviderProtocol):
     self.provider = provider
 
+  @staticmethod
+  def _validate_redirect_uri(redirect_uri: str) -> None:
+    """Reject a client-supplied redirect_uri outside the trusted origins.
+
+    The value is echoed into the provider authorize URL and replayed at
+    token exchange, so an unconstrained value lets a caller redirect the
+    authorization code to an arbitrary host. Allow only the origins we
+    already trust for the frontends (the CORS allowlist); the server-built
+    default is exempt because it isn't caller-controlled.
+    """
+    parsed = urlparse(redirect_uri)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    if origin not in env.get_main_cors_origins():
+      logger.warning("Rejected OAuth redirect_uri outside allowed origins: %s", origin)
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="redirect_uri is not an allowed origin",
+      )
+
   def get_authorization_url(
     self, connection_id: str, user_id: str, redirect_uri: str | None = None
   ) -> tuple[str, str]:
@@ -131,6 +150,9 @@ class OAuthHandler:
     if not redirect_uri:
       base_url = env.ROBOSYSTEMS_API_URL
       redirect_uri = f"{base_url}/v1/oauth/callback/{self.provider.name}"
+    else:
+      # Caller-supplied override — must be a trusted frontend origin.
+      self._validate_redirect_uri(redirect_uri)
 
     # Create state for security validation
     state = OAuthState.create(connection_id, user_id, redirect_uri)

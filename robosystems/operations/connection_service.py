@@ -119,7 +119,9 @@ class ConnectionService:
     Args:
         connection_id: Connection identifier
         user_id: Optional user filter (SYSTEM_USER_ID bypasses)
-        graph_id: Unused (kept for backward compat)
+        graph_id: When set, the connection must belong to this graph — pass
+            the URL scope the caller already authorized so a guessed
+            connection_id can't reach another graph's connection.
         db_session: Optional existing database session
 
     Returns:
@@ -132,6 +134,11 @@ class ConnectionService:
       conn = Connection.get_by_id(connection_id, session)
       if not conn:
         logger.warning("Connection not found: %s", connection_id)
+        return None
+
+      # Enforce graph scope when provided (connection_id is caller-supplied)
+      if graph_id and conn.graph_id != graph_id:
+        logger.warning("Connection %s not in requested graph scope", connection_id)
         return None
 
       # Check user access (system user can access any connection)
@@ -314,7 +321,9 @@ class ConnectionService:
     Args:
         connection_id: Connection identifier
         user_id: User performing the deletion
-        graph_id: Unused (kept for backward compat)
+        graph_id: When set, the connection must belong to this graph — pass
+            the URL scope the caller already authorized so a guessed
+            connection_id can't delete another graph's connection.
         db_session: Optional existing database session
 
     Returns:
@@ -327,6 +336,11 @@ class ConnectionService:
       conn = Connection.get_by_id(connection_id, session)
       if not conn:
         logger.warning(f"Connection {connection_id} not found for deletion")
+        return False
+
+      # Enforce graph scope when provided (connection_id is caller-supplied)
+      if graph_id and conn.graph_id != graph_id:
+        logger.warning("Connection %s not in requested graph scope", connection_id)
         return False
 
       # Deactivate credentials (already soft-deletion via is_active=False)

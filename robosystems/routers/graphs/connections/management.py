@@ -147,7 +147,9 @@ async def create_connection(
     )
 
     # Get the created connection
-    connection = await ConnectionService.get_connection(connection_id, current_user.id)
+    connection = await ConnectionService.get_connection(
+      connection_id, current_user.id, graph_id=graph_id
+    )
 
     if not connection:
       raise create_error_response(
@@ -322,7 +324,9 @@ async def get_connection(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionResponse:
   try:
-    connection = await ConnectionService.get_connection(connection_id, current_user.id)
+    connection = await ConnectionService.get_connection(
+      connection_id, current_user.id, graph_id=graph_id
+    )
 
     if not connection:
       raise create_error_response(
@@ -443,7 +447,9 @@ async def delete_connection(
 ):
   try:
     # Get connection before deletion for cleanup
-    connection = await ConnectionService.get_connection(connection_id, current_user.id)
+    connection = await ConnectionService.get_connection(
+      connection_id, current_user.id, graph_id=graph_id
+    )
 
     if not connection:
       raise create_error_response(
