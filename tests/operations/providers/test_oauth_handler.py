@@ -131,7 +131,9 @@ class TestOAuthState:
 
 @pytest.mark.unit
 class TestOAuthHandlerAuthorizationUrl:
-  def test_generates_url_with_redirect(self):
+  @patch(f"{MODULE}.env")
+  def test_generates_url_with_redirect(self, mock_env):
+    mock_env.get_main_cors_origins.return_value = ["https://myapp.com"]
     handler = OAuthHandler(MockProvider())
 
     url, state = handler.get_authorization_url(
@@ -146,6 +148,22 @@ class TestOAuthHandlerAuthorizationUrl:
     assert "access_type=offline" in url
     assert f"state={state}" in url
     assert isinstance(state, str)
+
+  @patch(f"{MODULE}.env")
+  def test_rejects_redirect_uri_outside_allowlist(self, mock_env):
+    """A client-supplied redirect_uri outside the trusted origins is rejected
+    (open-redirect / auth-code-theft guard)."""
+    mock_env.get_main_cors_origins.return_value = ["https://roboledger.ai"]
+    handler = OAuthHandler(MockProvider())
+
+    with pytest.raises(HTTPException) as exc_info:
+      handler.get_authorization_url(
+        "conn_1", "usr_1", redirect_uri="https://attacker.example.com/callback"
+      )
+
+    assert exc_info.value.status_code == 400
+    # The flow never started — no state was persisted.
+    assert OAuthState._states == {}
 
   @patch(f"{MODULE}.env")
   def test_generates_url_with_default_redirect(self, mock_env):
