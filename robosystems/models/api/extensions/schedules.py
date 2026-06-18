@@ -99,10 +99,15 @@ class CreateScheduleRequest(BaseModel):
   closed_through: date | None = Field(
     None,
     description=(
-      "If provided, facts with period_end ≤ this date are flagged as "
-      "'historical' (already reflected in opening balances, ignored by "
-      "the close workflow). Used during initial ledger setup to create "
-      "schedules whose early facts have already been captured elsewhere."
+      "Watermark for onboarding. Facts with period_end ≤ this date are "
+      "flagged 'historical' and their schedule_entry_due obligations are "
+      "emitted 'voided', so the close workflow starts drafting at the first "
+      "open period. Set this to the last day of the fiscal calendar's "
+      "closed_through month (calendar '2026-05' → '2026-05-31') whether "
+      "those months were actually closed in RoboLedger or just "
+      "baseline-watermarked at initialization. Omitting it (when prior "
+      "periods exist) leaves pre-watermark periods as 'pending' obligations "
+      "that block the first close."
     ),
   )
   source_transaction_id: str | None = Field(

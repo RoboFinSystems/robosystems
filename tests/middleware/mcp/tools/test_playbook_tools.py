@@ -89,6 +89,25 @@ class TestGetClosePlaybookContent:
     assert "501" in blob
     # Per-tenant procedures doc convention.
     assert "search-documents" in blob
+    # Onboarding watermark rule + its failure mode (blocked first close).
+    assert "closed_through" in blob
+    assert "pending_obligations" in blob
+
+  def test_initiate_teaches_orient_then_watermark(self) -> None:
+    """The initiate track must tell the agent to read the calendar's
+    closed_through first and stamp the matching watermark on every schedule
+    — the rule that prevents both a blocked first close and duplicate
+    entries for already-handled months.
+    """
+    payload = _run("initiate")
+    init_blob = " || ".join(payload["initiate_first_close"])
+    authoring_blob = " || ".join(payload["schedule_authoring"])
+    # Orient on the calendar before authoring.
+    assert "get-fiscal-calendar" in init_blob
+    assert "closed_through" in init_blob
+    # Authoring carries the watermark-match rule + the blocked-close warning.
+    assert "closed_through" in authoring_blob
+    assert "pending" in authoring_blob.lower()
 
   def test_recurring_sequence_is_ordered_and_complete(self) -> None:
     seq = " || ".join(_run("recurring")["recurring_close_sequence"])

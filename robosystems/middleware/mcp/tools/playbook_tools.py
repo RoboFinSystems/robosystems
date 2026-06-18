@@ -51,6 +51,14 @@ _RECURRING_SEQUENCE: list[str] = [
 ]
 
 _INITIATE_SEQUENCE: list[str] = [
+  "ORIENT FIRST — call get-fiscal-calendar and read `closed_through` (the "
+  "watermark) and `close_target`. `closed_through` may be a BASELINE set at "
+  "initialization (e.g. '2026-05') even when those months were never closed "
+  "period-by-period in RoboLedger — the books were maintained elsewhere "
+  "(QuickBooks) and the watermark says 'treat everything through here as "
+  "already handled'. The first close you'll run is `closed_through + 1`. "
+  "Note this date — every schedule you create must carry the matching "
+  "`closed_through` (see SCHEDULE AUTHORING).",
   "Discover the recurring adjusting entries this company books every month "
   "(depreciation, amortization, prepaid roll-off, accruals). Two "
   "complementary bootstrap modes — use both:",
@@ -65,7 +73,9 @@ _INITIATE_SEQUENCE: list[str] = [
   "'5-yr straight-line on $2,544' from a $42.41/mo line.",
   "For each recurring entry, create a schedule with "
   "create-information-block(block_type='schedule'). See "
-  "SCHEDULE AUTHORING below — especially one-pair-per-schedule.",
+  "SCHEDULE AUTHORING below — especially one-pair-per-schedule and the "
+  "closed_through watermark rule (a schedule that omits it will block the "
+  "first close).",
   "(recommended) Write a per-tenant 'Month-End Close Procedures' document "
   "with create-document capturing THIS company's schedules, accounts, and "
   "quirks. Have it reference this playbook for the generic mechanics. Future "
@@ -107,9 +117,18 @@ _SCHEDULE_AUTHORING: list[str] = [
   "schedule_metadata.periodic_amounts to explicit per-period cents — its "
   "length must match the number of months and its sum must equal "
   "original_amount.",
-  "INITIAL SETUP: set closed_through when a schedule's early facts are "
-  "already reflected in opening balances (so the close workflow ignores "
-  "them as 'historical').",
+  "MATCH THE CALENDAR WATERMARK — set the schedule's closed_through to the "
+  "last day of the calendar's closed_through month (calendar '2026-05' → "
+  "schedule closed_through '2026-05-31'). This flags every period at/before "
+  "the watermark as 'historical' and emits their obligations as 'voided', so "
+  "the close workflow starts drafting at the first open period (e.g. June). "
+  "This is the SAME rule whether those prior months were actually closed in "
+  "RoboLedger or just baseline-watermarked at initialization. WARNING: if "
+  "you omit closed_through (or set it earlier), every pre-watermark period "
+  "becomes a 'pending' obligation, and the first close is BLOCKED with the "
+  "pending_obligations gate (earliest_pending_period pointing months back). "
+  "Conversely, re-drafting an already-closed month creates duplicate "
+  "entries — the watermark prevents both.",
 ]
 
 _KEY_RULES: list[str] = [
@@ -128,8 +147,12 @@ _KEY_RULES: list[str] = [
   "via create-report.",
   "CLOSE BLOCKERS: sequence_violation (close in order), period_incomplete "
   "(month not over yet), sync_stale (QuickBooks sync older than period end), "
-  "calendar_not_initialized. Resolve before close-period; get-fiscal-calendar "
-  "reports them.",
+  "calendar_not_initialized, and pending_obligations (matured "
+  "schedule_entry_due events still 'pending' at/before the period — run "
+  "promote-obligations to draft them, or, if they belong to a "
+  "pre-watermark month that should never close, the schedule's "
+  "closed_through was set wrong; earliest_pending_period names the oldest "
+  "one). Resolve before close-period; get-fiscal-calendar reports them.",
   "CHECK THE PER-TENANT PROCEDURES DOC FIRST: call search-documents for a "
   "'close procedures' / 'month-end' document before authoring or closing. It "
   "captures this company's specifics and should reference this playbook.",
