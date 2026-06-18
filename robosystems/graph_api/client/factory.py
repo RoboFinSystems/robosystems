@@ -621,7 +621,13 @@ class GraphClientFactory:
     cache_key = cls._get_cache_key("location", actual_graph_id)
     redis_client = await cls._get_redis()
 
-    db_location = None
+    # Routing only needs the instance's private IP and ID. We cache those two
+    # values as plain scalars rather than reconstructing a DatabaseLocation —
+    # the dataclass has required fields (graph_id, availability_zone, status,
+    # created_at) the cache never carried, so reconstruction always raised and
+    # silently disabled the cache.
+    private_ip: str | None = None
+    instance_id: str | None = None
     if redis_client:
       try:
         cached = await redis_client.get(cache_key)
@@ -629,15 +635,15 @@ class GraphClientFactory:
           location_data = json.loads(cached)
           # Verify cache is still fresh (1 minute TTL)
           if time.time() - location_data.get("timestamp", 0) < cls._instance_cache_ttl:
-            from robosystems.middleware.graph.allocation_manager import DatabaseLocation
-
-            db_location = DatabaseLocation(**location_data["location"])
+            location = location_data["location"]
+            private_ip = location["private_ip"]
+            instance_id = location["instance_id"]
             logger.debug(f"Using cached location for {graph_id}")
       except Exception as e:
         logger.warning(f"Redis cache read failed for location: {e}")
 
     # If not cached, look it up - use actual_graph_id for routing
-    if not db_location:
+    if private_ip is None:
       allocation_manager = LadybugAllocationManager(
         environment=environment or env.ENVIRONMENT
       )
@@ -656,14 +662,16 @@ class GraphClientFactory:
           )
         raise RouteError(error_msg)
 
+      private_ip = db_location.private_ip
+      instance_id = db_location.instance_id
+
       # Cache the location
       if redis_client:
         try:
           location_data = {
             "location": {
-              "instance_id": db_location.instance_id,
-              "private_ip": db_location.private_ip,
-              "database_name": db_location.graph_id,
+              "instance_id": instance_id,
+              "private_ip": private_ip,
             },
             "timestamp": time.time(),
           }
@@ -674,13 +682,10 @@ class GraphClientFactory:
           logger.warning(f"Redis cache write failed for location: {e}")
 
     # Create client with the allocated instance's endpoint
-    api_url = f"http://{db_location.private_ip}:8001"
+    api_url = f"http://{private_ip}:8001"
     api_key = env.GRAPH_API_KEY
 
-    logger.info(
-      f"Routing user graph {graph_id} to instance "
-      f"{db_location.instance_id} at {api_url}"
-    )
+    logger.info(f"Routing user graph {graph_id} to instance {instance_id} at {api_url}")
 
     if not api_key:
       logger.error("GRAPH_API_KEY is not set in environment!")
@@ -693,7 +698,7 @@ class GraphClientFactory:
     client._database_name = (
       database_name  # Actual database to use (important for subgraphs)
     )
-    client._instance_id = db_location.instance_id
+    client._instance_id = instance_id
 
     return client
 
