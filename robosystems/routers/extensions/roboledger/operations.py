@@ -1036,7 +1036,11 @@ create_information_block_op = _registrar.register(
       "the registered block type; `payload` is validated against that "
       "type's creation schema at dispatch. Schedule dispatches to the "
       "existing Schedule machinery; statement block types raise 501 "
-      "(use create-report instead)."
+      "(use create-report instead). Authoring schedules for a close? Call "
+      "`get-close-playbook` (mode='initiate') first — one schedule is a "
+      "single debit/credit element pair, so multi-line entries become "
+      "multiple schedules, and element ids must be real (discover via "
+      "get-graph-schema / get-unmapped-elements / suggest-mapping)."
     ),
     command=cmd_create_information_block,
     request_model=CreateInformationBlockRequest,

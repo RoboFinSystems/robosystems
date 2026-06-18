@@ -16,10 +16,21 @@ EntryType = Literal["standard", "adjusting", "closing", "reversing"]
 
 class EntryTemplateRequest(BaseModel):
   debit_element_id: str = Field(
-    ..., description="Element to debit (e.g., Depreciation Expense)"
+    ...,
+    description=(
+      "CoA element id to debit (e.g. Depreciation Expense). This is a "
+      "chart-of-accounts element id — the `id` returned by "
+      "get-unmapped-elements / get-graph-schema — NOT a taxonomy qname."
+    ),
   )
   credit_element_id: str = Field(
-    ..., description="Element to credit (e.g., Accumulated Depreciation)"
+    ...,
+    description=(
+      "CoA element id to credit (e.g. Accumulated Depreciation). A "
+      "chart-of-accounts element id (see get-unmapped-elements), not a "
+      "taxonomy qname. One template = one debit/credit pair; model a "
+      "multi-account entry as several schedules."
+    ),
   )
   entry_type: EntryType = Field(
     "closing", description="Entry type for generated entries"
@@ -72,7 +83,14 @@ class CreateScheduleRequest(BaseModel):
   taxonomy_id: str | None = Field(
     None, description="Taxonomy ID (auto-creates if omitted)"
   )
-  element_ids: list[str] = Field(..., description="Element IDs to include")
+  element_ids: list[str] = Field(
+    ...,
+    description=(
+      "CoA element ids the schedule touches (the `id` from "
+      "get-unmapped-elements, not taxonomy qnames) — typically the same "
+      "debit + credit ids used in entry_template."
+    ),
+  )
   period_start: date = Field(..., description="First period start")
   period_end: date = Field(..., description="Last period end")
   monthly_amount: int = Field(..., description="Monthly amount in cents")

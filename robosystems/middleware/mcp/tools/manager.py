@@ -294,6 +294,15 @@ class GraphMCPTools:
       self.get_information_block_tool = GetInformationBlockTool(graph_client)
       self.list_information_blocks_tool = ListInformationBlocksTool(graph_client)
 
+    # Workflow playbook (guidance only — version-locked to this build).
+    # Pure read with no DB access, so it stays available on read-only graphs:
+    # an operator can learn the close workflow before they have write access.
+    self.get_close_playbook_tool = None
+    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+      from .playbook_tools import GetClosePlaybookTool
+
+      self.get_close_playbook_tool = GetClosePlaybookTool(graph_client)
+
     # Agent reads (get-agent, list-agents, agent-activity)
     self.get_agent_tool = None
     self.list_agents_tool = None
@@ -554,6 +563,10 @@ class GraphMCPTools:
     surface through the generic information-block read tools.
     """
     tools = []
+    # Playbook first so it's the most prominent close-workflow entry in the
+    # listing — it tells the agent how the rest of these tools compose.
+    if self.get_close_playbook_tool is not None:
+      tools.append(self.get_close_playbook_tool.get_tool_definition())
     if self.get_period_close_status_tool is not None:
       tools.append(self.get_period_close_status_tool.get_tool_definition())
     if self.list_period_drafts_tool is not None:
@@ -976,6 +989,15 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.list_period_drafts_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "get-close-playbook":
+        if self.get_close_playbook_tool is None:
+          raise ValueError(
+            "get-close-playbook tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.get_close_playbook_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Information Block read tools (writes are registrar-generated, handled at Layer 0)
