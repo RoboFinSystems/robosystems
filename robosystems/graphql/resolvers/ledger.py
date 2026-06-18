@@ -53,6 +53,8 @@ from robosystems.graphql.types.ledger import (
   PublishListDetail,
   PublishListList,
   Report,
+  ReportBundleDownload,
+  ReportDownloadFormat,
   ReportList,
   Statement,
   StructureList,
@@ -851,6 +853,58 @@ class LedgerQuery:
     if response is None:
       return None
     return ReportPackage.from_pydantic(response)
+
+  @strawberry.field
+  def report_download_url(
+    self,
+    info: Info[GraphQLContext, None],
+    report_id: str,
+    format: ReportDownloadFormat = ReportDownloadFormat.JSONLD,
+    expires_in: int = reads_reports.PRESIGN_DEFAULT_SECONDS,
+  ) -> ReportBundleDownload | None:
+    """Presigned download URL for a published Report's serialization bundle.
+
+    Replaces the retired `GET .../reports/{id}/download` REST resource —
+    a download is a read of stored state, so it lives on the read
+    surface. Every flavor resolves to a short-lived presigned S3 URL the
+    client follows directly; JSON-LD is stamped at publish time, XBRL is
+    materialized + cached on first request. Returns null when the report
+    doesn't exist; raises a typed error when it exists but has no
+    published bundle yet.
+    """
+    if not (60 <= expires_in <= reads_reports.PRESIGN_MAX_SECONDS):
+      raise strawberry.exceptions.StrawberryGraphQLError(
+        message=(
+          f"expiresIn must be between 60 and "
+          f"{reads_reports.PRESIGN_MAX_SECONDS} seconds"
+        ),
+        extensions={"code": "INVALID_EXPIRES_IN"},
+      )
+    graph_id = require_graph_id(info)
+    try:
+      with _open_session(info, "roboledger") as session:
+        response = reads_reports.get_report_download_url(
+          session,
+          graph_id,
+          report_id,
+          flavor=format.value,
+          expires_in=expires_in,
+        )
+    except reads_reports.ReportBundleNotAvailableError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(
+        message=str(exc),
+        extensions={"code": "REPORT_BUNDLE_NOT_AVAILABLE"},
+      )
+    except reads_reports.BundleSigningError as exc:
+      raise strawberry.exceptions.StrawberryGraphQLError(
+        message=str(exc),
+        extensions={"code": "REPORT_BUNDLE_SIGNING_FAILED"},
+      )
+    except (ValueError, ProgrammingError):
+      _raise_ledger_not_initialized()
+    if response is None:
+      return None
+    return ReportBundleDownload.from_pydantic(response)
 
   @strawberry.field
   def statement(

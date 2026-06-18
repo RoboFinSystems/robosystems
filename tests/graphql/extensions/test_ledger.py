@@ -30,6 +30,7 @@ from robosystems.models.api.extensions.accounts import (
 )
 from robosystems.models.api.extensions.agent import LedgerAgentResponse
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
+from robosystems.models.api.extensions.reports import ReportBundleDownloadResponse
 
 GRAPH_ID = "kg01234567890abcdef"
 
@@ -836,3 +837,91 @@ class TestReportPackageResolver:
     err = result.errors[0]
     assert "Ledger not initialized" in err.message
     assert err.extensions == {"code": "LEDGER_NOT_INITIALIZED"}
+
+
+class TestReportDownloadUrl:
+  """`reportDownloadUrl` resolver — presigned-URL read that replaced the
+  retired `GET .../reports/{id}/download` REST endpoint."""
+
+  _TARGET = "robosystems.operations.roboledger.reads.reports.get_report_download_url"
+
+  def test_returns_presigned_url_for_jsonld(self) -> None:
+    mock_response = ReportBundleDownloadResponse(
+      download_url="https://signed.example/jsonld",
+      expires_at=datetime(2030, 1, 1, tzinfo=UTC),
+      content_type="application/ld+json",
+      format="jsonld",
+      generation_count=3,
+    )
+    with _patch_session(), patch(self._TARGET, return_value=mock_response):
+      result = schema.execute_sync(
+        'query { reportDownloadUrl(reportId: "rpt_1") '
+        "{ downloadUrl contentType format generationCount } }",
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data is not None
+    node = result.data["reportDownloadUrl"]
+    assert node["downloadUrl"] == "https://signed.example/jsonld"
+    assert node["format"] == "jsonld"
+    assert node["generationCount"] == 3
+
+  def test_passes_xbrl_format_through_to_ops(self) -> None:
+    mock_response = ReportBundleDownloadResponse(
+      download_url="https://signed.example/xbrl",
+      expires_at=datetime(2030, 1, 1, tzinfo=UTC),
+      content_type="application/zip",
+      format="xbrl-2.1",
+      generation_count=3,
+    )
+    with _patch_session(), patch(self._TARGET, return_value=mock_response) as m:
+      result = schema.execute_sync(
+        'query { reportDownloadUrl(reportId: "rpt_1", format: XBRL_2_1) '
+        "{ format contentType } }",
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    # The enum member's value ("xbrl-2.1") is forwarded to the ops read.
+    assert m.call_args.kwargs["flavor"] == "xbrl-2.1"
+
+  def test_returns_null_when_report_missing(self) -> None:
+    with _patch_session(), patch(self._TARGET, return_value=None):
+      result = schema.execute_sync(
+        'query { reportDownloadUrl(reportId: "rpt_missing") { downloadUrl } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is None
+    assert result.data == {"reportDownloadUrl": None}
+
+  def test_typed_error_when_bundle_not_available(self) -> None:
+    from robosystems.operations.roboledger.reads.reports import (
+      ReportBundleNotAvailableError,
+    )
+
+    with (
+      _patch_session(),
+      patch(self._TARGET, side_effect=ReportBundleNotAvailableError("no bundle")),
+    ):
+      result = schema.execute_sync(
+        'query { reportDownloadUrl(reportId: "rpt_1") { downloadUrl } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    err = result.errors[0]
+    assert (err.extensions or {}).get("code") == "REPORT_BUNDLE_NOT_AVAILABLE"
+
+  def test_rejects_out_of_range_expires_in(self) -> None:
+    with _patch_session(), patch(self._TARGET) as m:
+      result = schema.execute_sync(
+        'query { reportDownloadUrl(reportId: "rpt_1", expiresIn: 5) { downloadUrl } }',
+        context_value=_ctx(),
+      )
+
+    assert result.errors is not None
+    assert (result.errors[0].extensions or {}).get("code") == "INVALID_EXPIRES_IN"
+    # Guard fires before the ops read is ever called.
+    m.assert_not_called()

@@ -7,7 +7,7 @@ REST router and the GraphQL resolver can call them.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select, text
@@ -18,11 +18,14 @@ if TYPE_CHECKING:
     ReportPackageEnvelope,
   )
 
+from robosystems.config import env
+from robosystems.config.storage.graph import get_report_bundle_key
 from robosystems.models.api.extensions.reports import (
   FactRowResponse,
   LiveFinancialStatementResponse,
   LiveStatementFactRow,
   PeriodSpec,
+  ReportBundleDownloadResponse,
   ReportListResponse,
   ReportResponse,
   StatementResponse,
@@ -31,6 +34,7 @@ from robosystems.models.api.extensions.reports import (
 )
 from robosystems.models.extensions import Report
 from robosystems.models.extensions.roboledger import Structure
+from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   get_fiscal_year_start_month,
 )
@@ -49,6 +53,7 @@ from robosystems.operations.roboledger.reports.guard_rails import validate_repor
 from robosystems.operations.roboledger.reports.network_picker import (
   load_close_target_concept,
 )
+from robosystems.operations.serialization.flavors import RdfFlavor, XbrlFlavor
 
 VALID_BLOCK_TYPES = {
   "income_statement",
@@ -88,6 +93,38 @@ class StatementStructureNotFoundError(LookupError):
 
 class CoaMappingNotFoundError(LookupError):
   """Raised when no CoA→GAAP mapping exists for ad-hoc statement generation."""
+
+
+class ReportBundleNotAvailableError(LookupError):
+  """Raised when a Report exists but has no published serialization bundle.
+
+  The report was never published (or predates the serialization
+  feature), so there's no stamped JSON-LD bundle and no
+  ``generation_count`` to key an XBRL materialization on. Distinct from
+  "report not found" (which the read surfaces as ``None``).
+  """
+
+
+class BundleSigningError(RuntimeError):
+  """Raised when the bundle artifact can't be signed or materialized.
+
+  Covers a malformed stored ``bundle_url``, an S3 presign failure, or a
+  failed XBRL upload — surfaced separately from "not available" so the
+  caller can distinguish a transient/infra fault from a missing bundle.
+  """
+
+
+# Presigned-URL lifetime + ceiling. Short window — clients follow the
+# URL immediately; long-lived URLs are a share path, not a download
+# path. Mirror the bounds the retired REST endpoint enforced.
+PRESIGN_DEFAULT_SECONDS = 300
+PRESIGN_MAX_SECONDS = 3600
+
+_RDF_FLAVOR_VALUES: frozenset[str] = frozenset(f.value for f in RdfFlavor)
+_XBRL_FLAVOR_VALUES: frozenset[str] = frozenset(f.value for f in XbrlFlavor)
+_ALL_DOWNLOAD_FLAVORS: tuple[str, ...] = tuple(
+  sorted(_RDF_FLAVOR_VALUES | _XBRL_FLAVOR_VALUES)
+)
 
 
 def generate_adhoc_private_statement(
@@ -295,6 +332,184 @@ def get_report(session: Session, report_id: str) -> ReportResponse | None:
   structures = load_structures(session, report_def.taxonomy_id)
   entity_name = resolve_entity_name(session, report_def)
   return report_to_response(report_def, structures, entity_name)
+
+
+def get_report_download_url(
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  flavor: str = RdfFlavor.JSONLD.value,
+  expires_in: int = PRESIGN_DEFAULT_SECONDS,
+) -> ReportBundleDownloadResponse | None:
+  """Resolve a presigned URL for a published Report's serialization bundle.
+
+  Every flavor resolves to a short-lived presigned URL pointing at the
+  bundle in S3 — the client follows it to fetch the artifact directly
+  (the API never streams bytes). JSON-LD is stamped to S3 at publish
+  time, so the read just presigns the stored object. XBRL is
+  materialized on first download and cached under a
+  ``generation_count``-versioned key; every generation is immutable, so
+  the cache never goes stale.
+
+  Returns ``None`` when ``report_id`` doesn't resolve. Raises
+  :class:`ReportBundleNotAvailableError` when the report exists but has
+  no published bundle, :class:`BundleSigningError` on a signing /
+  materialization fault, and ``ValueError`` for an unrecognized flavor.
+  """
+  report = session.get(Report, report_id)
+  if report is None:
+    return None
+  if not report.bundle_url:
+    raise ReportBundleNotAvailableError(
+      f"Report '{report_id}' has no published bundle — publish or "
+      f"regenerate the report to produce one."
+    )
+  generation_count = int(report.generation_count or 0)
+
+  if flavor in _RDF_FLAVOR_VALUES:
+    return _presign_stored_rdf_bundle(
+      bundle_uri=str(report.bundle_url),
+      report_id=report_id,
+      flavor=RdfFlavor(flavor),
+      generation_count=generation_count,
+      expires_in=expires_in,
+    )
+  if flavor in _XBRL_FLAVOR_VALUES:
+    return _materialize_and_presign_xbrl(
+      session=session,
+      graph_id=graph_id,
+      report_id=report_id,
+      flavor=XbrlFlavor(flavor),
+      generation_count=generation_count,
+      expires_in=expires_in,
+    )
+  raise ValueError(
+    f"Unsupported download format '{flavor}'. "
+    f"Supported flavors: {', '.join(_ALL_DOWNLOAD_FLAVORS)}."
+  )
+
+
+def _presign_stored_rdf_bundle(
+  bundle_uri: str,
+  report_id: str,
+  flavor: RdfFlavor,
+  generation_count: int,
+  expires_in: int,
+) -> ReportBundleDownloadResponse:
+  """Presign the JSON-LD bundle already stamped to S3 at publish time."""
+  if flavor is not RdfFlavor.JSONLD:
+    raise ValueError(f"Format '{flavor.value}' is reserved for future use.")
+
+  bucket, key = _parse_s3_uri(bundle_uri)
+  if bucket is None or key is None:
+    raise BundleSigningError(
+      f"Bundle URL for report '{report_id}' is malformed; cannot sign a download link."
+    )
+
+  download_url = S3Client().generate_presigned_url(
+    bucket=bucket,
+    key=key,
+    expires_in=expires_in,
+    response_content_type="application/ld+json",
+    response_content_disposition=(
+      f'attachment; filename="{report_id}-g{generation_count}.jsonld"'
+    ),
+  )
+  if download_url is None:
+    raise BundleSigningError(
+      f"Failed to sign download URL for report '{report_id}' bundle."
+    )
+
+  return ReportBundleDownloadResponse(
+    download_url=download_url,
+    expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    content_type="application/ld+json",
+    format=flavor.value,
+    generation_count=generation_count,
+  )
+
+
+def _materialize_and_presign_xbrl(
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  flavor: XbrlFlavor,
+  generation_count: int,
+  expires_in: int,
+) -> ReportBundleDownloadResponse:
+  """Presign the XBRL zip, materializing + caching it on first download.
+
+  The S3 key is versioned by ``generation_count`` (immutable per
+  generation), so an existing object is always a valid cache hit. On a
+  miss, rebuild the bundle, serialize to the XBRL flavor, upload, then
+  presign. Serialization imports are deferred so the reads module stays
+  import-light for callers that never touch XBRL (Arelle stays out of
+  the hot path).
+  """
+  bucket = env.USER_DATA_BUCKET
+  key = get_report_bundle_key(graph_id, report_id, generation_count, extension=".zip")
+  s3 = S3Client()
+
+  if not s3.object_exists(bucket, key):
+    from robosystems.operations.serialization import (
+      build_report_bundle,
+      serialize_to_xbrl,
+    )
+
+    bundle = build_report_bundle(session, graph_id, report_id)
+    zip_bytes = serialize_to_xbrl(bundle, flavor)
+    uploaded = s3.upload_bytes(
+      content=zip_bytes,
+      bucket=bucket,
+      key=key,
+      content_type="application/zip",
+      metadata={"report-id": report_id, "graph-id": graph_id},
+    )
+    if not uploaded:
+      raise BundleSigningError(
+        f"Failed to materialize XBRL bundle for report '{report_id}' "
+        f"to s3://{bucket}/{key}."
+      )
+
+  download_url = s3.generate_presigned_url(
+    bucket=bucket,
+    key=key,
+    expires_in=expires_in,
+    response_content_type="application/zip",
+    response_content_disposition=(
+      f'attachment; filename="{report_id}-g{generation_count}.zip"'
+    ),
+  )
+  if download_url is None:
+    raise BundleSigningError(
+      f"Failed to sign download URL for report '{report_id}' XBRL bundle."
+    )
+
+  return ReportBundleDownloadResponse(
+    download_url=download_url,
+    expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    content_type="application/zip",
+    format=flavor.value,
+    generation_count=generation_count,
+  )
+
+
+def _parse_s3_uri(uri: str) -> tuple[str | None, str | None]:
+  """Split an ``s3://bucket/key`` URI into ``(bucket, key)``.
+
+  Returns ``(None, None)`` on malformed input so the caller has a single
+  error path. No ``env.USER_DATA_BUCKET`` cross-check — bundles stamped
+  under a legacy bucket name must still resolve.
+  """
+  if not uri.startswith("s3://"):
+    return None, None
+  remainder = uri[len("s3://") :]
+  if "/" not in remainder:
+    return None, None
+  bucket, _, key = remainder.partition("/")
+  if not bucket or not key:
+    return None, None
+  return bucket, key
 
 
 # Display order for the package mode — drives ``ReportPackageItem.display_order``
