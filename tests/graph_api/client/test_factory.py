@@ -6,6 +6,7 @@ create_client_sync, pool statistics, and cleanup.
 """
 
 import asyncio
+import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -783,6 +784,146 @@ class TestCreateUserGraphClient:
 
         with pytest.raises(RouteError, match="Parent graph kg123 not found"):
           await GraphClientFactory._create_user_graph_client("kg123_dev", "prod", None)
+
+
+class _FakeRedis:
+  """Minimal stateful async Redis stand-in for routing-cache round-trips."""
+
+  def __init__(self):
+    self.store: dict[str, str] = {}
+
+  async def get(self, key):
+    return self.store.get(key)
+
+  async def setex(self, key, _ttl, value):
+    self.store[key] = value
+
+
+@pytest.mark.unit
+class TestUserGraphLocationCache:
+  """Regression coverage for the prod/staging routing location cache (#758).
+
+  The write path stored {instance_id, private_ip, database_name} scalars while
+  the read path tried to reconstruct a DatabaseLocation dataclass — which has
+  required fields the payload never carried, so every read raised and the cache
+  was effectively dead. Routing only needs private_ip + instance_id, so both
+  paths now exchange those scalars directly.
+  """
+
+  @pytest.mark.asyncio
+  async def test_location_cache_round_trips(self):
+    """Write then read of the routing cache must round-trip (no second lookup)."""
+    fake_redis = _FakeRedis()
+
+    mock_location = MagicMock()
+    mock_location.private_ip = "10.0.7.7"
+    mock_location.instance_id = "i-roundtrip"
+
+    with patch(f"{FACTORY_MODULE}.env") as mock_env:
+      mock_env.is_development.return_value = False
+      mock_env.ENVIRONMENT = "prod"
+      mock_env.GRAPH_API_KEY = "prod-key"
+
+      with (
+        patch(f"{FACTORY_MODULE}.parse_subgraph_id", return_value=None),
+        patch.object(
+          GraphClientFactory,
+          "_get_redis",
+          new_callable=AsyncMock,
+          return_value=fake_redis,
+        ),
+        patch(f"{FACTORY_MODULE}.LadybugAllocationManager") as MockAllocManager,
+        patch(f"{FACTORY_MODULE}.GraphClient") as MockClient,
+      ):
+        mock_manager = AsyncMock()
+        MockAllocManager.return_value = mock_manager
+        mock_manager.find_database_location.return_value = mock_location
+        MockClient.return_value = MagicMock()
+
+        # First call misses → allocation lookup + cache write.
+        await GraphClientFactory._create_user_graph_client("kg123", "prod", None)
+        # Second call hits the cache → no second allocation lookup.
+        await GraphClientFactory._create_user_graph_client("kg123", "prod", None)
+
+      assert mock_manager.find_database_location.call_count == 1
+      # Both calls routed to the cached instance IP.
+      assert MockClient.call_args_list[-1].kwargs["base_url"] == "http://10.0.7.7:8001"
+
+  @pytest.mark.asyncio
+  async def test_cache_write_stores_routing_scalars(self):
+    """Cached payload carries only the scalars the read path consumes."""
+    mock_redis = AsyncMock()
+    mock_redis.get.return_value = None  # force a miss
+
+    mock_location = MagicMock()
+    mock_location.private_ip = "10.0.9.9"
+    mock_location.instance_id = "i-fresh"
+
+    with patch(f"{FACTORY_MODULE}.env") as mock_env:
+      mock_env.is_development.return_value = False
+      mock_env.ENVIRONMENT = "prod"
+      mock_env.GRAPH_API_KEY = "prod-key"
+
+      with (
+        patch(f"{FACTORY_MODULE}.parse_subgraph_id", return_value=None),
+        patch.object(
+          GraphClientFactory,
+          "_get_redis",
+          new_callable=AsyncMock,
+          return_value=mock_redis,
+        ),
+        patch(f"{FACTORY_MODULE}.LadybugAllocationManager") as MockAllocManager,
+        patch(f"{FACTORY_MODULE}.GraphClient") as MockClient,
+      ):
+        mock_manager = AsyncMock()
+        MockAllocManager.return_value = mock_manager
+        mock_manager.find_database_location.return_value = mock_location
+        MockClient.return_value = MagicMock()
+
+        await GraphClientFactory._create_user_graph_client("kg123", "prod", None)
+
+    mock_redis.setex.assert_called_once()
+    cached = json.loads(mock_redis.setex.call_args.args[2])
+    assert cached["location"] == {"instance_id": "i-fresh", "private_ip": "10.0.9.9"}
+    assert "database_name" not in cached["location"]
+
+  @pytest.mark.asyncio
+  async def test_cache_hit_skips_allocation_lookup(self):
+    """A fresh cached location routes without touching the allocation manager."""
+    mock_redis = AsyncMock()
+    mock_redis.get.return_value = json.dumps(
+      {
+        "location": {"instance_id": "i-cached", "private_ip": "10.0.5.5"},
+        "timestamp": time.time(),
+      }
+    )
+
+    with patch(f"{FACTORY_MODULE}.env") as mock_env:
+      mock_env.is_development.return_value = False
+      mock_env.ENVIRONMENT = "prod"
+      mock_env.GRAPH_API_KEY = "prod-key"
+
+      with (
+        patch(f"{FACTORY_MODULE}.parse_subgraph_id", return_value=None),
+        patch.object(
+          GraphClientFactory,
+          "_get_redis",
+          new_callable=AsyncMock,
+          return_value=mock_redis,
+        ),
+        patch(f"{FACTORY_MODULE}.LadybugAllocationManager") as MockAllocManager,
+        patch(f"{FACTORY_MODULE}.GraphClient") as MockClient,
+      ):
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        await GraphClientFactory._create_user_graph_client("kg123", "prod", None)
+
+      MockAllocManager.assert_not_called()
+      MockClient.assert_called_once_with(
+        base_url="http://10.0.5.5:8001", api_key="prod-key"
+      )
+      assert mock_client._instance_id == "i-cached"
 
 
 # ---------------------------------------------------------------------------
