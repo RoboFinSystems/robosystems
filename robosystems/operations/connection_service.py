@@ -138,9 +138,7 @@ class ConnectionService:
 
       # Enforce graph scope when provided (connection_id is caller-supplied)
       if graph_id and conn.graph_id != graph_id:
-        logger.warning(
-          "Connection %s does not belong to graph %s", connection_id, graph_id
-        )
+        logger.warning("Connection %s not in requested graph scope", connection_id)
         return None
 
       # Check user access (system user can access any connection)
@@ -342,9 +340,7 @@ class ConnectionService:
 
       # Enforce graph scope when provided (connection_id is caller-supplied)
       if graph_id and conn.graph_id != graph_id:
-        logger.warning(
-          "Connection %s does not belong to graph %s", connection_id, graph_id
-        )
+        logger.warning("Connection %s not in requested graph scope", connection_id)
         return False
 
       # Deactivate credentials (already soft-deletion via is_active=False)
