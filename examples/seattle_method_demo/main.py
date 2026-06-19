@@ -419,6 +419,34 @@ def step_validate(graph_id: str, dry_run: bool = False) -> None:
   if result.returncode != 0:
     raise SystemExit(f"validate exited with code {result.returncode}")
 
+  # DataBook: assemble the validated bundle into one self-describing markdown
+  # file (Charlie Hoffman's serialization) — report = collection of Information
+  # Blocks, each a table + an addressable turtle slice, with the SHACL/Arelle
+  # verdicts (just written above) inlined as embedded evidence.
+  databook = subprocess.run(
+    [
+      "uv",
+      "run",
+      "python",
+      "-m",
+      "examples._common.databook",
+      "--jsonld",
+      str(out_dir / "seattle-method-case-1.jsonld"),
+      "--out",
+      str(out_dir / "seattle-method-case-1.databook.md"),
+      "--shacl-md",
+      str(out_dir / "seattle-method-case-1-shacl-validation.md"),
+      "--xbrl-md",
+      str(out_dir / "seattle-method-case-1-xbrl-validation.md"),
+      "--label",
+      "Seattle Method (Test Case 1)",
+    ],
+    cwd=str(REPO_ROOT),
+    check=False,
+  )
+  if databook.returncode != 0:
+    raise SystemExit(f"databook exited with code {databook.returncode}")
+
 
 def step_create_report(graph_id: str, dry_run: bool = False) -> None:
   """Step 8 — Materialize the 4-IB rs-gaap Report + render markdown.
