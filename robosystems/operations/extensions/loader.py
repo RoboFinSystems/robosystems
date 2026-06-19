@@ -119,6 +119,57 @@ _QB_ACCOUNT_TYPE_TO_LIQUIDITY: dict[str, str] = {
 }
 
 
+# QuickBooks AccountSubType values that denote a contra-asset — an asset-
+# classified account whose balance offsets (reduces) the gross asset it
+# attaches to: accumulated depreciation/amortization/depletion and the
+# allowance for doubtful accounts. QB files these under an asset
+# AccountType ("Fixed Asset", "Other Current Asset") with an "Asset"
+# Classification, so neither ``account_type`` nor the derived
+# ``balance_type`` distinguishes them from a directly-held asset like a
+# prepaid. The AccountSubType is the only signal QB emits — we promote it
+# to the FASB ``contraAsset`` EFS trait at load (instead of the plain
+# ``asset`` trait its account_type implies) so downstream readers — the
+# auto-map agent, rollups, and the schedule roll-forward generator — can
+# tell a balance that accumulates UP toward cost from one that draws DOWN
+# to zero.
+_QB_CONTRA_ASSET_SUB_TYPES: frozenset[str] = frozenset(
+  {
+    "AccumulatedDepreciation",
+    "AccumulatedAmortization",
+    "AccumulatedDepletion",
+    "AccumulatedAmortizationOfOtherAssets",
+    "AllowanceForBadDebts",
+  }
+)
+
+
+# Accumulated-* sub-type families that are contra-ASSETS. Used as a
+# forward-compatible catch-all (QB periodically adds new variants, e.g.
+# AccumulatedDepreciationEquipment). Deliberately NOT a bare
+# ``startswith("Accumulated")`` — ``AccumulatedOtherComprehensiveIncome``
+# and ``AccumulatedAdjustment`` are QB *equity* sub-types, not contra-assets.
+_QB_CONTRA_ASSET_SUB_TYPE_PREFIXES: tuple[str, ...] = (
+  "AccumulatedDepreciation",
+  "AccumulatedAmortization",
+  "AccumulatedDepletion",
+)
+
+
+def _is_qb_contra_asset_sub_type(sub_type: str | None) -> bool:
+  """True if a QuickBooks AccountSubType denotes a contra-asset.
+
+  Matches the known contra sub-types plus the accumulated
+  depreciation/amortization/depletion families as a forward-compatible
+  catch-all. Other ``Accumulated*`` sub-types (e.g. the equity
+  ``AccumulatedOtherComprehensiveIncome``) are intentionally excluded.
+  """
+  if not sub_type:
+    return False
+  return sub_type in _QB_CONTRA_ASSET_SUB_TYPES or sub_type.startswith(
+    _QB_CONTRA_ASSET_SUB_TYPE_PREFIXES
+  )
+
+
 def _parse_metadata(raw) -> dict:
   """Parse metadata from dbt output — may be a dict, JSON string, or None."""
   if isinstance(raw, dict):
@@ -826,7 +877,11 @@ class OLTPLoader:
     # liquidity is an additive narrowing signal — if its trait rows are
     # absent we still emit EFS rather than skipping the element.
     efs_id_by_identifier = _resolve_trait_ids(
-      "elementsOfFinancialStatements", set(type_to_efs.values())
+      "elementsOfFinancialStatements",
+      # ``contraAsset`` is not a target of the account_type map (every QB
+      # asset type maps to plain ``asset``); it's selected per-element
+      # below from the AccountSubType, so resolve its id here too.
+      set(type_to_efs.values()) | {"contraAsset"},
     )
     if not efs_id_by_identifier:
       logger.warning(
@@ -880,6 +935,17 @@ class OLTPLoader:
           elem.id,
         )
         continue
+      # A contra-asset is asset-typed in QB but offsets the gross asset —
+      # override the account_type's plain ``asset`` trait with
+      # ``contraAsset`` so rollups subtract it and the schedule generator
+      # rolls it forward in the accumulate (not deplete) direction. Guard on
+      # the asset classification so a non-asset Accumulated-* sub-type (e.g.
+      # the equity AccumulatedOtherComprehensiveIncome) can never be
+      # mislabeled as a contra-asset.
+      if efs_identifier == "asset" and _is_qb_contra_asset_sub_type(
+        meta.get("account_sub_type")
+      ):
+        efs_identifier = "contraAsset"
       efs_trait_id = efs_id_by_identifier.get(efs_identifier)
       if efs_trait_id is not None:
         rows.append(_trait_row(elem.id, efs_trait_id))

@@ -21,6 +21,7 @@ from robosystems.models.api.fact_provenance import (
   AssertedProvenance,
   ScheduleProvenance,
 )
+from robosystems.models.extensions.element_trait import ElementTrait
 from robosystems.models.extensions.roboledger import (
   Association,
   Element,
@@ -32,6 +33,7 @@ from robosystems.models.extensions.roboledger import (
   Taxonomy,
 )
 from robosystems.models.extensions.rule import Rule
+from robosystems.models.extensions.trait import Trait
 from robosystems.operations.roboledger.fact_set import create_fact_set
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -339,19 +341,39 @@ class ScheduleService:
     )
 
     # The credit fact tracks the running balance of the credited account, and
-    # its direction depends on that account's normal balance:
-    #   • credit-balance account (a contra-asset like Accumulated Depreciation,
-    #     or a liability) — the period credit INCREASES it, so the balance
-    #     accumulates from a zero opening: value = accumulated_debit.
-    #   • debit-balance account (a prepaid / other asset credited directly) —
-    #     the period credit DECREASES it, so the balance draws down from its
-    #     opening (the original gross outlay): value = original - accumulated.
-    # Without original_dollars there's no opening to anchor the drawdown, so
-    # fall back to the accumulating form.
+    # its direction depends on that account's role:
+    #   • contra-asset (Accumulated Depreciation/Amortization) or a credit-
+    #     balance account (a liability) — the period credit INCREASES it, so
+    #     the balance accumulates UP from a zero opening: value = accumulated.
+    #   • directly-credited asset (a prepaid) — the period credit DECREASES it,
+    #     so the balance draws DOWN from its opening cost: value = original -
+    #     accumulated.
+    # A contra-asset is asset/debit-normal in QuickBooks, so ``balance_type``
+    # alone can't distinguish it from a prepaid — the contraAsset EFS trait
+    # (applied at sync from the CoA AccountSubType) is the authoritative role
+    # signal. Only a debit-balance, non-contra asset draws down.
     credit_balance_type = session.execute(
       select(Element.balance_type).where(Element.id == entry_template.credit_element_id)
     ).scalar()
-    credit_draws_down = credit_balance_type == "debit" and original_dollars is not None
+    # Only debit-normal accounts can be contra-assets, so skip the trait
+    # lookup for credit-balance accounts (liabilities, deferred revenue) —
+    # the common case.
+    credit_is_contra = credit_balance_type == "debit" and _element_is_contra_asset(
+      session, entry_template.credit_element_id
+    )
+    credit_draws_down = credit_balance_type == "debit" and not credit_is_contra
+    # Drawing down needs an opening cost basis. When the author didn't supply
+    # original_amount, derive it from the straight-line curve (monthly x
+    # periods) so the prepaid balance declines from cost to ~0 instead of
+    # falling back to the (wrong-for-a-prepaid) accumulating form. Custom
+    # amortization curves always carry original_amount (validated below), so
+    # this only fills the straight-line gap; contra/accumulate schedules are
+    # untouched (they open at zero and need no cost basis).
+    if credit_draws_down and original_dollars is None and periods:
+      original_dollars = round(amount_dollars * len(periods), 2)
+    # If a draw-down still has no opening (e.g. no periods), fall back to
+    # accumulate rather than emit a garbage curve.
+    credit_draws_down = credit_draws_down and original_dollars is not None
 
     # Custom amortization curve: caller supplies one integer (cents) per
     # period, pre-balanced. The generator uses the explicit values
@@ -1649,6 +1671,34 @@ class ScheduleService:
 
 
 # ── Utility ──────────────────────────────────────────────────────────────
+
+
+def _element_is_contra_asset(session: Session, element_id: str) -> bool:
+  """True if the element carries the FASB ``contraAsset`` EFS trait.
+
+  A contra-asset (accumulated depreciation/amortization, the allowance for
+  doubtful accounts) accumulates *up* toward the gross asset's cost; a
+  directly-credited asset (a prepaid) draws *down* from cost to zero. The
+  two are indistinguishable by ``balance_type`` — QuickBooks types both as
+  asset/debit-normal — so the schedule roll-forward direction is keyed off
+  this trait, which the sync applies from the source CoA's AccountSubType
+  (see ``operations/extensions/loader.py``). Reading the trait keeps this
+  generator source-agnostic rather than re-deriving from QB-specific
+  metadata strings.
+  """
+  return (
+    session.execute(
+      select(ElementTrait.element_id)
+      .join(Trait, Trait.id == ElementTrait.trait_id)
+      .where(
+        ElementTrait.element_id == element_id,
+        Trait.category == "elementsOfFinancialStatements",
+        Trait.identifier == "contraAsset",
+      )
+      .limit(1)
+    ).scalar()
+    is not None
+  )
 
 
 def _generate_monthly_periods(start: date, end: date) -> list[tuple[date, date]]:

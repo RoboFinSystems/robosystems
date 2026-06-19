@@ -407,17 +407,33 @@ class TestCreateScheduleCreditDirection:
   contra-asset (credit-balance) accumulates; a directly-credited debit-balance
   asset like a prepaid draws down toward zero."""
 
-  def _credit_facts(self, session, *, credit_balance_type, asset_element_id=None):
+  def _credit_facts(
+    self,
+    session,
+    *,
+    credit_balance_type,
+    asset_element_id=None,
+    is_contra=False,
+    original_amount=120_000,
+  ):
     svc = ScheduleService()
     # execute order: (1) cm role lookup, (2) credit balance_type lookup,
-    # (3) SumEquals qname lookup.
+    # (3) credit contraAsset-trait lookup — ONLY when balance_type=='debit'
+    # (the service short-circuits the trait query for credit-balance
+    # accounts), (4) SumEquals qname lookup.
     cm_roles_row = MagicMock()
     cm_roles_row.scalars.return_value = []
     balance_row = MagicMock()
     balance_row.scalar.return_value = credit_balance_type
+    contra_row = MagicMock()
+    contra_row.scalar.return_value = "elem_cr" if is_contra else None
     qname_row = MagicMock()
     qname_row.scalar.return_value = "fac:Expense"
-    session.execute.side_effect = [cm_roles_row, balance_row, qname_row]
+    seq = [cm_roles_row, balance_row]
+    if credit_balance_type == "debit":
+      seq.append(contra_row)
+    seq.append(qname_row)
+    session.execute.side_effect = seq
 
     with patch.object(svc, "_get_entity_id", return_value="ent_01"):
       svc.create_schedule(
@@ -433,7 +449,7 @@ class TestCreateScheduleCreditDirection:
         ),
         schedule_metadata=ScheduleMetadata(
           method="straight_line",
-          original_amount=120_000,  # $1,200 total
+          original_amount=original_amount,  # 0 ⇒ derive from monthly x periods
           asset_element_id=asset_element_id,
         ),
         created_by="usr_test",
@@ -452,9 +468,28 @@ class TestCreateScheduleCreditDirection:
     facts = self._credit_facts(_mock_session(), credit_balance_type="credit")
     assert [f.value for f in facts] == [0.0, 400.0, 800.0, 1200.0]
 
+  def test_debit_balance_contra_accumulates(self):
+    # A QuickBooks Accumulated Depreciation account is asset/debit-normal but
+    # carries the contraAsset trait — balance_type would (wrongly) say "draws
+    # down", the trait makes it accumulate UP to cost like the contra it is.
+    facts = self._credit_facts(
+      _mock_session(), credit_balance_type="debit", is_contra=True
+    )
+    assert [f.value for f in facts] == [0.0, 400.0, 800.0, 1200.0]
+
   def test_directly_credited_asset_draws_down(self):
     # opening (1200 gross) + 3 drawing-down endings
     facts = self._credit_facts(_mock_session(), credit_balance_type="debit")
+    assert [f.value for f in facts] == [1200.0, 800.0, 400.0, 0.0]
+
+  def test_prepaid_without_original_derives_opening_and_draws_down(self):
+    # The Harbinger first-close bug: a prepaid schedule created without
+    # original_amount used to fall back to accumulating (balance climbing to
+    # cost). The opening cost is now derived from monthly x periods so the
+    # prepaid balance declines from cost to zero.
+    facts = self._credit_facts(
+      _mock_session(), credit_balance_type="debit", original_amount=0
+    )
     assert [f.value for f in facts] == [1200.0, 800.0, 400.0, 0.0]
 
   def test_asset_equals_credit_element_no_double_emit(self):
@@ -483,10 +518,12 @@ class TestCreateScheduleSumEqualsRule:
   def _run(self, session, *, original_amount: int | None = 120_000):
     svc = ScheduleService()
     # taxonomy_id is provided so _ensure_schedule_taxonomy is skipped.
-    # Three execute() calls now: (1) the cm:Debit/cm:Credit posting-role lookup
+    # Three execute() calls: (1) the cm:Debit/cm:Credit posting-role lookup
     # for has-part arcs (no roles in the mock → arcs skipped), (2) the credit
-    # element's balance_type lookup (a contra here → credit fact accumulates),
-    # then (3) the Element.qname lookup for the SumEquals rule.
+    # element's balance_type lookup (a credit-balance contra here → credit
+    # fact accumulates), then (3) the Element.qname lookup for the SumEquals
+    # rule. The contraAsset-trait lookup is short-circuited because the
+    # credit account is credit-balance.
     cm_roles_row = MagicMock()
     cm_roles_row.scalars.return_value = []
     credit_balance_row = MagicMock()
@@ -494,7 +531,11 @@ class TestCreateScheduleSumEqualsRule:
     debit_qname_row = MagicMock()
     debit_qname_row.scalar.return_value = "fac:DeprExpense"
 
-    session.execute.side_effect = [cm_roles_row, credit_balance_row, debit_qname_row]
+    session.execute.side_effect = [
+      cm_roles_row,
+      credit_balance_row,
+      debit_qname_row,
+    ]
 
     metadata = (
       ScheduleMetadata(
@@ -539,6 +580,48 @@ class TestCreateScheduleSumEqualsRule:
     added = self._run(session, original_amount=120_000)
     rules = [o for o in added if type(o).__name__ == "Rule"]
     assert rules[0].metadata_["expected_total"] == 1200.0  # cents → dollars
+
+  def test_sum_equals_rule_uses_derived_total_when_no_original_amount(self):
+    """A prepaid created without original_amount (the Harbinger case) still
+    emits a SumEquals rule anchored to the derived total (monthly x periods),
+    not skipped as it would be for a contra/accumulate schedule with no cost
+    basis."""
+    session = _mock_session()
+    svc = ScheduleService()
+    # debit-balance, non-contra credit element ⇒ draws down ⇒ original is
+    # derived ⇒ SumEquals fires. execute order: cm, balance(debit),
+    # contra-trait(None), qname.
+    cm_roles_row = MagicMock()
+    cm_roles_row.scalars.return_value = []
+    balance_row = MagicMock()
+    balance_row.scalar.return_value = "debit"
+    contra_row = MagicMock()
+    contra_row.scalar.return_value = None
+    qname_row = MagicMock()
+    qname_row.scalar.return_value = "fac:Expense"
+    session.execute.side_effect = [cm_roles_row, balance_row, contra_row, qname_row]
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Prepaid no-original",
+        taxonomy_id="tax_01",
+        element_ids=["elem_dr", "elem_cr"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),  # 3 periods
+        monthly_amount=40_000,  # $400/mo → derived total $1,200
+        entry_template=EntryTemplate(
+          debit_element_id="elem_dr", credit_element_id="elem_cr"
+        ),
+        schedule_metadata=None,  # no original_amount
+        created_by="usr_test",
+      )
+
+    added = [c[0][0] for c in session.add.call_args_list]
+    rules = [o for o in added if type(o).__name__ == "Rule"]
+    assert len(rules) == 1
+    assert rules[0].rule_pattern == "SumEquals"
+    assert rules[0].metadata_["expected_total"] == 1200.0  # 400 x 3, derived
 
   def test_sum_equals_rule_targets_structure(self):
     session = _mock_session()

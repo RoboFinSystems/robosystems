@@ -992,6 +992,52 @@ class TestInboundAutoCommitDecoupledFromWritePolicy:
     assert _source_auto_commits_on_sync("netsuite") is False
 
 
+class TestIsQbContraAssetSubType:
+  """The QB AccountSubType → contra-asset predicate that drives both the
+  contraAsset trait and the schedule roll-forward direction."""
+
+  def test_known_contra_sub_types(self):
+    from robosystems.operations.extensions.loader import _is_qb_contra_asset_sub_type
+
+    for sub_type in (
+      "AccumulatedDepreciation",
+      "AccumulatedAmortization",
+      "AccumulatedDepletion",
+      "AccumulatedAmortizationOfOtherAssets",
+      "AllowanceForBadDebts",
+    ):
+      assert _is_qb_contra_asset_sub_type(sub_type) is True
+
+  def test_accumulated_asset_family_catch_all(self):
+    from robosystems.operations.extensions.loader import _is_qb_contra_asset_sub_type
+
+    # Forward-compat: unlisted depreciation/amortization/depletion variants
+    # are still contra-assets.
+    assert _is_qb_contra_asset_sub_type("AccumulatedDepreciationEquipment") is True
+    assert _is_qb_contra_asset_sub_type("AccumulatedAmortizationLeasehold") is True
+
+  def test_non_asset_accumulated_sub_types_are_not_contra(self):
+    from robosystems.operations.extensions.loader import _is_qb_contra_asset_sub_type
+
+    # AccumulatedOtherComprehensiveIncome / AccumulatedAdjustment are QB
+    # *equity* sub-types — the catch-all must NOT classify them as
+    # contra-assets.
+    assert _is_qb_contra_asset_sub_type("AccumulatedOtherComprehensiveIncome") is False
+    assert _is_qb_contra_asset_sub_type("AccumulatedAdjustment") is False
+
+  def test_direct_assets_are_not_contra(self):
+    from robosystems.operations.extensions.loader import _is_qb_contra_asset_sub_type
+
+    for sub_type in ("PrepaidExpenses", "Checking", "Inventory", "Vehicles"):
+      assert _is_qb_contra_asset_sub_type(sub_type) is False
+
+  def test_none_and_empty_are_not_contra(self):
+    from robosystems.operations.extensions.loader import _is_qb_contra_asset_sub_type
+
+    assert _is_qb_contra_asset_sub_type(None) is False
+    assert _is_qb_contra_asset_sub_type("") is False
+
+
 class TestApplySourceElementTraits:
   """QB ``AccountType`` → FASB EFS trait translation. Without this,
   QB-imported elements have ``trait IS NULL`` and the auto-map agent
@@ -1053,6 +1099,84 @@ class TestApplySourceElementTraits:
 
     assert inserted == 3
     session.execute.assert_called_once()
+
+  def test_equity_accumulated_sub_type_is_not_marked_contra_asset(self):
+    """AccumulatedOtherComprehensiveIncome is a QB *equity* sub-type; the
+    contra override is asset-scoped, so it must keep its equity trait and
+    NOT be promoted to contraAsset. Only ``contraAsset`` is resolvable, so a
+    correct run inserts 0 rows (the AOCI element → equity, unresolvable); a
+    broken override would map it to contraAsset → 1 row."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    elem_aoci = MagicMock(
+      id="elem_1",
+      metadata_={
+        "account_type": "Equity",
+        "account_sub_type": "AccumulatedOtherComprehensiveIncome",
+      },
+    )
+    traits = [self._trait("contraAsset", "trt_contra")]
+    session = self._make_loader_session({"elem_1": elem_aoci}, traits)
+
+    loader = OLTPLoader()
+    inserted = loader._apply_source_element_traits(
+      session,
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert inserted == 0
+
+  def test_contra_asset_sub_type_maps_to_contra_asset_trait(self):
+    """A QB Accumulated Depreciation account is asset-typed (→ plain
+    ``asset`` by account_type) but its AccountSubType identifies it as a
+    contra — it must get the ``contraAsset`` EFS trait so rollups subtract
+    it and the schedule generator rolls it forward as an accumulator.
+
+    Rows are bulk-inserted (not via ``session.add``), so we make the count
+    unambiguous via trait *resolvability*: only the ``contraAsset`` trait
+    id is resolvable. The contra (override → contraAsset) yields one row;
+    the prepaid (asset → not resolvable) and the noncurrent liquidity row
+    (not resolvable) yield none. A broken override would map the contra to
+    ``asset`` → not resolvable → zero rows.
+    """
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    elem_accum = MagicMock(
+      id="elem_1",
+      metadata_={
+        "account_type": "Fixed Asset",
+        "account_sub_type": "AccumulatedDepreciation",
+      },
+    )
+    elem_prepaid = MagicMock(
+      id="elem_2",
+      metadata_={
+        "account_type": "Other Current Asset",
+        "account_sub_type": "PrepaidExpenses",
+      },
+    )
+
+    traits = [self._trait("contraAsset", "trt_contra")]
+    session = self._make_loader_session(
+      {"elem_1": elem_accum, "elem_2": elem_prepaid}, traits
+    )
+
+    loader = OLTPLoader()
+    inserted = loader._apply_source_element_traits(
+      session,
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    # Only the contra resolves to contraAsset → exactly one row. (Without
+    # the override the contra would resolve to the unresolvable ``asset``
+    # and this would be zero.)
+    assert inserted == 1
 
   def test_qb_account_type_also_translates_to_liquidity_trait(self):
     """Assets/liabilities get a liquidity (current/noncurrent) trait in
