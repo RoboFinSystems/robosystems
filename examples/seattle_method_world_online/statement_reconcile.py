@@ -63,7 +63,7 @@ ANCHORS: list[tuple[str, str, str]] = [
   ("LongtermDebt", "rs-gaap:LongTermDebtAndCapitalLeaseObligations", "Long-term Debt"),
   (
     "CashAndCashEquivalents",
-    "rs-gaap:CashCashEquivalentsAndShortTermInvestments",
+    "rs-gaap:CashAndCashEquivalentsAtCarryingValue",
     "Cash & Equivalents",
   ),
 ]

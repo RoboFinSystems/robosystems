@@ -7,7 +7,7 @@ Our values are read from the **v2 graph-native bundle** (`world-online.jsonld` �
 ## Scorecard
 
 - **Anchors compared**: 7
-- **Matching (current period, within $0.50)**: 6 / 7
+- **Matching (current period, within $0.50)**: 7 / 7
 
 | Anchor | Charlie (current) | Ours (current) | Δ | Charlie (prior) | Ours (prior) | |
 |---|---:|---:|---:|---:|---:|:---:|
@@ -17,7 +17,7 @@ Our values are read from the **v2 graph-native bundle** (`world-online.jsonld` �
 | Receivables | $2,035,468.27 | $2,035,468.27 | $0.00 | $1,231,338.47 | $1,231,338.47 | ✓ |
 | Property, Plant & Equipment | $1,245,567.16 | $1,245,567.16 | $0.00 | $1,266,995.32 | $1,266,995.32 | ✓ |
 | Long-term Debt | $338,349.05 | $338,349.05 | $0.00 | $361,285.69 | $361,285.69 | ✓ |
-| Cash & Equivalents | $(648,551.94) | — | $648,551.94 | $398,937.76 | — | ✗ |
+| Cash & Equivalents | $(648,551.94) | $(648,551.94) | $0.00 | $398,937.76 | $398,937.76 | ✓ |
 
 A ✓ means the rendered statement ties to Charlie's published reference for that anchor (within the published summary's per-cell rounding). The negative ending cash is **in Charlie's reference report too** — it is a property of the source dataset's tagging (financing cash legs tagged operating), not an ingestion error; see `README.md` §"Cash flow statement".
 
