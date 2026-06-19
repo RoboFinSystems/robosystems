@@ -303,7 +303,7 @@ class UpdateScheduleRequest(BaseModel):
   NOT editable via this op: period_start, period_end, monthly_amount.
   Those require fact regeneration — fire an event block that terminates
   the schedule (e.g., `asset_disposed`) and create a fresh schedule via
-  `create-schedule`.
+  `create-information-block` (`block_type='schedule'`).
 
   Omitted fields are left unchanged.
   """

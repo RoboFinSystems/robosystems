@@ -1,6 +1,6 @@
 # Testing in RoboSystems Service
 
-This directory contains comprehensive tests for the RoboSystems Service application. With 194+ test files covering all major components, the test suite ensures reliability across the platform.
+This directory contains comprehensive tests for the RoboSystems Service application. With 500+ test files covering all major components, the test suite ensures reliability across the platform.
 
 ## Quick Start
 
@@ -49,13 +49,12 @@ The test suite is organized by component, mirroring the application structure:
   - `robustness/` - Circuit breakers, retries, health checks
   - `sse/` - Server-sent events for real-time updates
 - **`models/`** - Database models and schemas
-  - `api/` - API request/response models
-  - `billing/` - Billing and subscription models (customer, subscription, invoice, audit log)
-  - `iam/` - Identity and access management models
+  - `api/` - Pydantic API request/response models
+  - `core/` - Platform SQLAlchemy models (users, orgs, graphs, billing, connections, documents)
 - **`operations/`** - Business logic services
-  - `agents/` - AI agent operations and orchestration
+  - `operators/` - AI Operator operations and orchestration (Claude/MCP executors)
   - `graph/` - Graph database operations (credit service, entity service)
-  - `lbug/` - LadybugDB-specific operations (backup, health monitoring)
+  - `roboledger/`, `roboinvestor/` - Extensions OLTP reads/commands/views
   - `pipeline/` - Data processing pipelines
   - `providers/` - External provider integrations
 
@@ -140,7 +139,7 @@ uv run pytest tests/operations/
 
 # Middleware components
 uv run pytest tests/middleware/auth/
-uv run pytest tests/middleware/credits/
+uv run pytest tests/middleware/billing/
 
 # Adapters
 uv run pytest tests/adapters/
@@ -229,7 +228,7 @@ def test_with_database(test_db):
 
 def test_with_client(client):
     """Make HTTP requests to the API."""
-    response = client.get("/api/health")
+    response = client.get("/v1/status")
     assert response.status_code == 200
 
 def test_with_auth(client_with_mocked_auth):
@@ -256,7 +255,7 @@ Tests run in an isolated environment with specific configuration:
 ### External Services
 
 - **LocalStack**: AWS services (S3, etc.) on `http://localhost:4566`
-- **Valkey/Redis**: Cache and queues on `localhost:6379`
+- **Valkey**: Cache and queues on `localhost:6379`
 - **Graph API**: LadybugDB service on `localhost:8001`
 - **LadybugDB Databases**: Test databases in `./data/lbug-dbs`
 

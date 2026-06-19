@@ -8,7 +8,7 @@ Comprehensive examples demonstrating RoboSystems' graph database capabilities ac
 # Make sure RoboSystems is running
 just start
 
-# Run all demos in sequence
+# Run all demos in sequence (roboledger → custom-graph → sec)
 just demo
 
 # Or run individual demos
@@ -21,7 +21,41 @@ just demo-world-online
 
 ## Available Demos
 
-### 1. SEC Demo - Public Company Financial Data
+### 1. RoboLedger Demo - End-to-End Accounting Workflow
+
+Full RoboLedger workflow on synthetic data for a boutique consulting firm: bulk OLTP import, taxonomy and schedule blocks, fiscal calendar, a filed annual report, and an AI-driven month-end close. All data flows in through the same HTTP API the frontend UI and MCP tools use.
+
+**Features:**
+
+- Generates a rolling 16-month window ending at the current month
+- Creates a chart of accounts, REA Agents (customers/vendors/employees), and a typed business-event stream
+- Initializes a fiscal calendar with exactly one period ready to close on first run
+- Optional MappingOperator (`--ai`) to map the chart of accounts via the AI Operator (requires Bedrock)
+
+**Usage:**
+
+```bash
+# Run the full demo (creates graph, loads data, creates schedules, uploads policies)
+just demo-roboledger
+
+# Load into an existing graph
+just demo-roboledger <graph_id>
+
+# Skeleton: create user + empty roboledger graph only (then connect a real QuickBooks sandbox manually)
+just demo-roboledger --skeleton
+
+# Use the MappingOperator instead of hardcoded mappings (requires Bedrock)
+just demo-roboledger --ai
+
+# Validate data only
+just demo-roboledger --dry-run
+```
+
+**Location:** `/examples/roboledger_demo/`
+
+**Documentation:** See [README.md](roboledger_demo/README.md) for the full walkthrough
+
+### 2. SEC Demo - Public Company Financial Data
 
 Query real SEC XBRL financial data from public companies.
 
@@ -62,7 +96,7 @@ Any publicly traded US company with SEC filings (e.g., AAPL, MSFT, GOOGL, TSLA, 
 
 **Documentation:** See [README.md](sec_demo/README.md) for detailed guide and query examples
 
-### 2. Custom Graph Demo - Generic Graph Structure
+### 3. Custom Graph Demo - Generic Graph Structure
 
 Demonstrates custom schema creation with people, companies, and projects.
 
@@ -109,7 +143,7 @@ just demo-custom-graph --skip-queries
 
 **Customization:** Edit `schema.json` to define your own node types and relationships
 
-### 3. Seattle Method Demo - Record-to-Report (Charlie Hoffman's "mini")
+### 4. Seattle Method Demo - Record-to-Report (Charlie Hoffman's "mini")
 
 End-to-end accounting proof against Charlie Hoffman's Seattle Method "mini" record-to-report test case: ingest a 14-JE general journal (lemonade stand), map the chart of accounts to rs-gaap, and render a validated 4-statement report.
 
@@ -137,7 +171,7 @@ just demo-seattle-method-create-report
 
 **Documentation:** See [README.md](seattle_method_demo/README.md) for the walkthrough
 
-### 4. World Online Demo - Seattle Method at Scale
+### 5. World Online Demo - Seattle Method at Scale
 
 The scaled-up sibling of the `mini` demo: Charlie Hoffman's "The World Online" dataset — a real-size general ledger tagged against MINI 2026.
 

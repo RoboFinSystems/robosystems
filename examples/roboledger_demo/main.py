@@ -1157,7 +1157,7 @@ def main() -> None:
   print("\nInitializing fiscal calendar...")
   close_target = initialize_fiscal_calendar(graph_id)
 
-  # Create schedules (via HTTP API — exercises create-schedule op)
+  # Create schedules (HTTP API — exercises create-information-block op)
   print("\nCreating schedules...")
   schedule_count = create_schedules(graph_id, element_lookup)
   print(f"  Schedules:    {schedule_count}")

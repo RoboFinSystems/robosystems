@@ -77,8 +77,8 @@ def initialize_ledger(
   if body.auto_seed_schedules:
     warnings.append(
       "auto_seed_schedules=true is not yet implemented. "
-      "Schedules must be created manually via create-schedule. "
-      "SchedulerAgent support will be added in a follow-up."
+      "Schedules must be created manually via create-information-block "
+      "(block_type='schedule'). Automated seeding will be added in a follow-up."
     )
 
   calendar = service.initialize(

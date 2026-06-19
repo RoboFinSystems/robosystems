@@ -1,7 +1,8 @@
 """Tests for schedule MCP read tools.
 
-Write tools (`create-schedule`, `update-schedule`, `delete-schedule`)
-are registrar-generated — their execution path is covered by
+Schedule writes have no dedicated ops — they go through
+`create/update/delete-information-block` (`block_type='schedule'`),
+registrar-generated; their execution path is covered by
 `tests/middleware/mcp/test_registrar.py` + the ops-layer tests under
 `tests/operations/roboledger/schedules/`. Closing-entry drafting
 (schedule-derived and manual) runs through `create-event-block` with

@@ -27,9 +27,9 @@ credits/
 The platform uses a simplified credit model focused exclusively on AI operations:
 
 1. Users receive monthly AI credit allocations based on their tier
-2. ONLY AI operations (Anthropic/OpenAI) consume credits based on actual token usage
+2. ONLY AI operations (Anthropic via Bedrock) consume credits based on actual token usage
 3. All database operations are included (queries, imports, backups, etc.)
-4. Storage is billed separately in USD (not credits) for overages
+4. Storage is included per tier up to a limit; overages are not billed today (no credit or USD metering path exists in code)
 5. AI operations are blocked when credits are exhausted
 
 ### Subscription Tiers (AI Credits)
@@ -111,8 +111,8 @@ INCLUDED_OPERATIONS = [
 
 ```python
 # No multipliers in the simplified model
-# AI operations use actual token counts
-# Storage has fixed per-GB pricing per tier
+# AI operations use actual token counts (minimum charge of 1 credit applied)
+# Storage is included per tier up to a limit (not metered to a charge today)
 # All database operations are included
 ```
 
@@ -141,20 +141,18 @@ from robosystems.operations.graph import CreditService
 router = APIRouter()
 
 @router.post("/v1/graphs/{graph_id}/operator")
-async def agent_endpoint(
+async def operator_endpoint(
     graph_id: str,
     request: OperatorRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db_session)
 ):
-    # Initialize agent
-    agent = FinancialAgent(graph_id, db)
-    
-    # Execute agent (tracks tokens internally)
-    response = await agent.process(request)
-    
-    # Agent automatically consumes credits based on actual tokens
-    # No decorator needed - consumption happens post-operation
+    # The operator orchestrator selects and runs the AI Operator.
+    orchestrator = OperatorOrchestrator(graph_id, db)
+    response = await orchestrator.execute(request)
+
+    # The operator consumes credits post-operation based on actual tokens
+    # (CreditService.consume_ai_tokens). No decorator needed.
     return response
 ```
 
@@ -185,31 +183,36 @@ credit_service.consume_ai_tokens(
     graph_id="kg1a2b3c",
     input_tokens=usage.input_tokens,
     output_tokens=usage.output_tokens,
-    model="anthropic_claude_4_sonnet",
-    operation_type="agent_call",
-    user_id="user_456"
+    model="us.anthropic.claude-sonnet-4-6",  # Bedrock model id
+    operation_description="operator query",
+    user_id="user_456",
 )
 ```
 
-### 4. Storage Overage Handling
+`consume_ai_tokens` takes `operation_description` (a free-text label for the
+transaction), not an `operation_type`. The `model` argument accepts the Bedrock
+profile id (e.g. `us.anthropic.claude-sonnet-4-6`) and is mapped internally to
+the pricing key `anthropic_claude_4_sonnet` in `AIBillingConfig.TOKEN_PRICING`.
 
-```python
-# Storage overages are billed in USD, NOT credits.
-# Credits are AI-only; storage is metered separately by the billing system.
-# Each tier includes storage:
-# - Standard: 10 GB included
-# - Large:    50 GB included
-# - XLarge:   100 GB included
+### 4. Storage Handling
 
-# Monthly storage billing (handled by billing system, billed in USD)
-storage_gb = calculate_storage_usage(graph_id)
-limit_gb = get_storage_limit_for_tier(tier)
+Storage is **included with each tier up to a per-tier limit** and is **not
+billed as an overage today** — not in credits and not in USD. There is no live
+storage metering-to-billing path in the code: the only storage logic is
+limit enforcement.
 
-if storage_gb > limit_gb:
-    overage_gb = storage_gb - limit_gb
-    overage_cost_usd = overage_gb * overage_rate_for_tier(tier)
-    # Billed directly in USD, not credits
-```
+- `CreditService.check_storage_limit()` reports current usage against the
+  graph's `storage_limit_gb` (with an optional admin override). It returns
+  status/recommendations; it does **not** consume credits or compute a charge.
+- There is no storage pricing constant or metering code in the billing path —
+  storage credit metering is not implemented.
+- `consume_ai_tokens` is the only credit-consuming entry point; its inline note
+  reads "Storage is included in each tier (no metering/overage)."
+
+The "all database operations are free" guarantee is unaffected: only AI token
+usage consumes credits. If usage-based storage billing is added later, it would
+introduce a new consumption path here; until then, exceeding the limit is a
+gating/limit concern, not a billed event.
 
 ## Monitoring
 

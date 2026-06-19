@@ -1,18 +1,6 @@
 # RoboSystems
 
-RoboSystems is an open-source financial intelligence platform built on a unified operational and analytical graph architecture — a transactional Postgres backbone for ledger-grade correctness paired with an analytical LadybugDB graph for AI retrieval and reporting. Purpose-built for accounting, financial reporting, investment management, and analysis. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
-
-- **Unified Operational + Analytical Graph**: Graph workloads split the same way relational workloads do — transactional stores for writes, analytical stores for queries. Extension schemas drive both a Postgres operational backbone for ledger-grade correctness and a LadybugDB analytical graph for relationship traversal and AI retrieval, bound by a shared schema and Cypher query surface
-- **LadybugDB Graph Database**: Embedded columnar graph database with native DuckDB staging, LanceDB vector search, and tiered infrastructure
-- **Extensions**: Domain schemas that drive OLTP tables, data pipelines, and dedicated frontend apps, all surfaced through the Extensions API. Schema-per-tenant isolation in a single Postgres database; materialized to the graph for analytics
-- **Document Search**: Full-text and semantic search across SEC filings, uploaded documents, and connected sources via OpenSearch
-- **AI-Native Architecture**: Context graphs with embeddings, semantic enrichment, and confidence scoring for LLM-powered analytics
-- **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with schema-aware tools
-- **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data via dbt pipelines, and custom financial datasets
-- **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling and production-grade query management
-- **Core REST API** (`/v1`): Auth, orgs, billing, graph lifecycle, Cypher, and MCP. Reads as REST GETs; graph lifecycle writes (subgraphs, backups, materialize, tier changes) as named `OperationEnvelope` operations
-- **Extensions API** (`/extensions/{graph_id}`): Strawberry GraphQL for typed reads over extensions OLTP, plus named REST operations for domain writes and analytical views over the materialized graph
-- **Unified Write Contract**: Every write across both surfaces is a named `OperationEnvelope` operation with `Idempotency-Key` support, audit logging, and SSE progress streaming via `/v1/operations/{id}/stream`
+RoboSystems is an open-source, AI-native financial intelligence platform for accounting, financial reporting, and investment management. It gives AI agents and analysts a ledger-grade system of record they can both query and operate — closing the books, producing reports, and analyzing portfolios across accounting, market, and SEC data. Powers [RoboLedger](https://roboledger.ai) and [RoboInvestor](https://roboinvestor.ai).
 
 ## Platform
 
@@ -29,16 +17,16 @@ The platform provides the core infrastructure that all extensions build on:
 
 ## Extensions
 
-Extensions are domain-specific subsystems that bring their own schema, OLTP tables, API routes, data pipelines, and dedicated frontend apps. They share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph for analytical queries. See [Schema Extensions](/robosystems/schemas/README.md) for the authoring contract.
+Extensions are domain-specific subsystems that bring their own schema, OLTP tables, API routes, data pipelines, and dedicated frontend apps. They share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph for analytical queries.
+
+The **core platform API** lives at `/v1` — auth, orgs, billing, graph lifecycle (subgraphs, backups, materialize, tier changes), Cypher, and MCP — with reads as REST `GET`s. Every write, across both the core and extensions surfaces, is a named **`OperationEnvelope`** operation with `Idempotency-Key` support, audit logging, and SSE progress streaming via `/v1/operations/{id}/stream`.
 
 The extensions API surface is **graph-scoped at the URL level** — `graph_id` is always a path parameter, never a query argument — and splits reads from writes by transport:
 
 - **Reads** → `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL, GraphiQL in dev, schema composed dynamically from enabled domains
-- **Writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands (see Unified Write Contract above)
+- **Writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands
 
 Behind the API is a CQRS operations kernel (`reads/` + `commands/` per domain) that's the single source of truth for business logic — GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
-
-See [GraphQL Extensions](/robosystems/graphql/README.md) for the read-path implementation details, the Strawberry-Pydantic auto-derivation pattern, and the walkthrough for adding a new read field.
 
 ### [RoboLedger](https://roboledger.ai)
 
@@ -47,6 +35,28 @@ Accounting and financial reporting extension. OLTP general ledger in schema-per-
 ### [RoboInvestor](https://roboinvestor.ai)
 
 Portfolio management and investment tracking extension. OLTP database with portfolios, securities, and positions in schema-per-tenant PostgreSQL; 7 GraphQL read fields (portfolios, securities, positions, holdings) and 6 named command operations for portfolio-block CRUD and security CRUD. Securities can link to entities for cross-graph research between investor portfolios and SEC public-company data via the shared repository. Dedicated frontend app.
+
+## AI
+
+### Model Context Protocol (MCP)
+
+- **Financial Analysis**: Natural language queries across enterprise data and public benchmark data
+- **Cross-Database Queries**: Compare user graph data against SEC shared repository data
+- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, financial analysis, document search, and AI memory operations
+- **Handler Pool**: Managed MCP handler instances with resource limits
+
+### AI Operator System
+
+- Unified architecture: stateless Operators (Claude/MCP executors) with protocol-based service injection
+- Dual execution: API (sync/SSE) and background worker (Valkey queue + SSE progress)
+- Automatic credit tracking per AI call — Operators cannot forget billing
+- Extensible: add new Operators for new AI workflows; they inherit execution, credit tracking, and progress streaming automatically
+
+### Credit System
+
+- **AI Operations Only**: Credits are consumed exclusively by AI Operator calls (Anthropic Claude via AWS Bedrock)
+- **Token-Based Billing**: Credits based on actual token usage and model cost
+- **MCP Tool Access**: No credits consumed for MCP calls or database operations
 
 ## Quick Start
 
@@ -152,7 +162,7 @@ See the **[Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/B
 
 ## Architecture
 
-RoboSystems is built on a modern, scalable architecture with:
+Built end-to-end on open-source engines — PostgreSQL, a columnar graph database, DuckDB, LanceDB, OpenSearch, and Valkey — assembled into a transactional core with a materialized analytical graph and integrated vector search, with no proprietary database lock-in. The components:
 
 **Application Layer:**
 
@@ -162,7 +172,7 @@ RoboSystems is built on a modern, scalable architecture with:
 - AI Operator System for autonomous financial operations with automatic credit tracking
 - Dagster for data pipeline orchestration and background jobs
 
-**LadybugDB Graph Database:** ([configuration](/.github/configs/graph.yml))
+**LadybugDB Graph Database:**
 
 - Embedded columnar graph database purpose-built for financial analytics
 - Base + extension schema architecture — extensions define domain models
@@ -173,22 +183,17 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **Data Layer:**
 
-- PostgreSQL for IAM, graph metadata, Dagster, and extension OLTP databases (schema-per-tenant)
+- PostgreSQL (RDS) for IAM, graph metadata, Dagster, and extension OLTP databases (schema-per-tenant)
 - OpenSearch for full-text and semantic document search (BM25 + KNN)
-- Valkey for caching, SSE messaging, and rate limiting
-- AWS S3 for data lake storage and static assets
+- Valkey (ElastiCache) for caching, SSE messaging, and rate limiting
+- S3 for data lake storage and static assets
 - DynamoDB for instance/graph/volume registry
 
 **Infrastructure:**
 
+- CloudFormation deployed via GitHub Actions with OIDC
 - ECS Fargate for API and Dagster
-- EC2 ASG for LadybugDB writer clusters
-- EC2 ALB + ASG for LadybugDB shared replica clusters
-- RDS PostgreSQL + ElastiCache Valkey
-- OpenSearch for full-text and semantic document search
-- CloudFormation infrastructure deployed via GitHub Actions with OIDC
-
-**For detailed architecture documentation, see the [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) in the Wiki.**
+- EC2 (ASG) for LadybugDB writer clusters; EC2 (ALB + ASG) for shared replica clusters
 
 ## SEC Shared Repository
 
@@ -205,29 +210,6 @@ just sec-health          # Check SEC database health
 ```
 
 See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robosystems/adapters/sec/pipeline/README.md) for detailed documentation.
-
-## AI
-
-### Model Context Protocol (MCP)
-
-- **Financial Analysis**: Natural language queries across enterprise data and public benchmark data
-- **Cross-Database Queries**: Compare user graph data against SEC shared repository data
-- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, financial analysis, document search, and AI memory operations
-- **Handler Pool**: Managed MCP handler instances with resource limits
-
-### AI Operator System
-
-- Unified architecture: stateless Operators (Claude/MCP executors) with protocol-based service injection
-- Dual execution: API (sync/SSE) and background worker (Valkey queue + SSE progress)
-- Automatic credit tracking per AI call — Operators cannot forget billing
-- Extensible: new Operators implement `run(ctx)` and register with a decorator
-- See [Operator README](/robosystems/operations/operators/README.md) for details
-
-### Credit System
-
-- **AI Operations Only**: Credits are consumed exclusively by AI Operator calls (Anthropic Claude via AWS Bedrock)
-- **Token-Based Billing**: Credits based on actual token usage and model cost
-- **MCP Tool Access**: No credits consumed for MCP calls or database operations
 
 ## Client Libraries
 
@@ -271,14 +253,31 @@ pip install robosystems-client
 
 ## Documentation
 
-### User Guides (Wiki)
+### Documentation (Wiki)
 
-- **[Getting Started](https://github.com/RoboFinSystems/robosystems/wiki)** - Quick start and overview
-- **[Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide)** - Fork and deploy to your AWS account
-- **[Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview)** - System design and components
-- **[Data Pipeline Guide](https://github.com/RoboFinSystems/robosystems/wiki/Pipeline-Guide)** - Dagster data orchestration and custom integrations
-- **[SEC XBRL Pipeline](https://github.com/RoboFinSystems/robosystems/wiki/SEC-XBRL-Pipeline)** - Working with SEC financial data
-- **[Custom Graph Demo](https://github.com/RoboFinSystems/robosystems/wiki/Custom-Graph-Schema)** - Guide for creating a custom schema graph demo
+**Getting Started & Platform:**
+
+- [Home / Overview](https://github.com/RoboFinSystems/robosystems/wiki) · [Quick Start](https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start) · [Core Concepts](https://github.com/RoboFinSystems/robosystems/wiki/Core-Concepts) · [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) · [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide)
+
+**Operations Layer:**
+
+- [Graphs & Multi-Tenancy](https://github.com/RoboFinSystems/robosystems/wiki/Graphs-and-Multi-Tenancy) · [Authentication & API Keys](https://github.com/RoboFinSystems/robosystems/wiki/Authentication-and-API-Keys) · [Querying the Analytical Graph](https://github.com/RoboFinSystems/robosystems/wiki/Querying-the-Analytical-Graph) · [Graph Operations](https://github.com/RoboFinSystems/robosystems/wiki/Graph-Operations) · [AI Operators & MCP](https://github.com/RoboFinSystems/robosystems/wiki/AI-Operators-and-MCP) · [Shared Repositories](https://github.com/RoboFinSystems/robosystems/wiki/Shared-Repositories) · [Credits & Billing](https://github.com/RoboFinSystems/robosystems/wiki/Credits-and-Billing) · [Pipeline Guide](https://github.com/RoboFinSystems/robosystems/wiki/Pipeline-Guide)
+
+**Extensions Layer:**
+
+- [Extensions Surface Overview](https://github.com/RoboFinSystems/robosystems/wiki/Extensions-Surface-Overview) · [GraphQL Reads](https://github.com/RoboFinSystems/robosystems/wiki/GraphQL-Reads) · [RoboLedger Operations](https://github.com/RoboFinSystems/robosystems/wiki/RoboLedger-Operations) · [RoboInvestor Operations](https://github.com/RoboFinSystems/robosystems/wiki/RoboInvestor-Operations) · [Connecting QuickBooks Locally](https://github.com/RoboFinSystems/robosystems/wiki/Connecting-QuickBooks-Locally)
+
+**Content & Contribution Fabric:**
+
+- [Information Blocks](https://github.com/RoboFinSystems/robosystems/wiki/Information-Blocks) · [Taxonomy & Frameworks](https://github.com/RoboFinSystems/robosystems/wiki/Taxonomy-and-Frameworks) · [Event-Driven Ledger](https://github.com/RoboFinSystems/robosystems/wiki/Event-Driven-Ledger) · [Reporting & Rendering](https://github.com/RoboFinSystems/robosystems/wiki/Reporting-and-Rendering) · [Serialization & Export](https://github.com/RoboFinSystems/robosystems/wiki/Serialization-and-Export)
+
+**Documents & Search:**
+
+- [Search & AI Retrieval](https://github.com/RoboFinSystems/robosystems/wiki/Search-and-AI-Retrieval) · [Document Management](https://github.com/RoboFinSystems/robosystems/wiki/Document-Management) · [File Uploads](https://github.com/RoboFinSystems/robosystems/wiki/File-Uploads)
+
+**Demos:**
+
+- [RoboLedger Demo Walkthrough](https://github.com/RoboFinSystems/robosystems/wiki/RoboLedger-Demo-Walkthrough) · [SEC XBRL Pipeline](https://github.com/RoboFinSystems/robosystems/wiki/SEC-XBRL-Pipeline) · [Custom Graph Schema](https://github.com/RoboFinSystems/robosystems/wiki/Custom-Graph-Schema)
 
 ### Developer Documentation (Codebase)
 
@@ -286,6 +285,7 @@ pip install robosystems-client
 
 - **[Adapters](/robosystems/adapters/README.md)** - External service integrations
 - **[Operations](/robosystems/operations/README.md)** - Business workflow orchestration, CQRS reads/commands kernels for extensions
+- **[AI Operators](/robosystems/operations/operators/README.md)** - AI Operator framework: Claude/MCP executors, credit tracking, SSE streaming
 - **[Schemas](/robosystems/schemas/README.md)** - Graph schema definitions
 - **[Extensions GraphQL](/robosystems/graphql/README.md)** - Strawberry GraphQL read surface, Pydantic auto-derivation, resolver patterns
 - **[Configuration](/robosystems/config/README.md)** - Configuration management

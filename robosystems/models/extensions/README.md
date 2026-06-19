@@ -162,7 +162,7 @@ For QuickBooks-sourced data, `Transaction:Entry` is 1:1 (QB is pre-journalized).
 
 RoboLedger **does not have a dedicated `Account` model** for the chart of accounts — the CoA is modeled via `Element` nodes (the same Element model used for XBRL reporting elements). Company-specific accounts and standardized US GAAP reporting elements coexist in the same table, distinguished by their associated `Taxonomy` (`type='chart_of_accounts'` vs `type='reporting'`). The `Association` model then handles CoA → GAAP rollup mappings via the same pattern used for XBRL presentation/calculation links.
 
-This is a deliberate unification — see the Taxonomy System notes for the architectural rationale. The `account.py` file in this directory is reserved for a future split if it's ever needed.
+This is a deliberate unification — see the Taxonomy System notes for the architectural rationale. There is no `account.py` file in this directory; `Account` is simply an alias of `Element` (`Account = Element` in `element.py`) for CoA-flavored call sites.
 
 ## Base class pattern
 

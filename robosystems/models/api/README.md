@@ -21,6 +21,10 @@ models/api/
 ├── search.py                   # Document search models
 ├── taxonomy_block.py           # Taxonomy Block envelope models (CoA, custom ontology)
 ├── user.py                     # User profile and management models
+├── admin/                      # Admin CLI / dashboard models (cache, credits, graphs, invoice, orgs, subscription, users)
+├── billing/                    # Billing models (checkout, credits, customer, invoice, offering, subscription)
+├── graphs/                     # Graph platform models (core, backups, connections, health, limits, mcp, metrics, operations, operator, query, schema, subgraphs, tables, tier)
+├── views/                      # Analytical view models (fact_grid, view_config, view_response)
 └── extensions/                 # RoboLedger + RoboInvestor request/response models
     ├── account_rollups.py
     ├── accounts.py

@@ -1,10 +1,10 @@
 # Graph API
 
-High-performance HTTP API server for graph database cluster management. FastAPI-based microservice that provides REST endpoints for multi-tenant graph operations with enterprise-grade reliability and security.
+HTTP API server for graph database cluster management. FastAPI-based microservice that provides REST endpoints for multi-tenant graph operations with connection pooling, circuit breaking, and admission control.
 
 **Backend:**
 
-- **LadybugDB**: High-performance embedded graph database based on columnar storage
+- **LadybugDB**: Embedded graph database built on columnar storage
 
 ## Table of Contents
 
@@ -51,20 +51,32 @@ graph_api/
 ├── __main__.py                 # Module entry point
 │
 ├── client/                     # Python clients
-│   ├── client.py              # Async client implementation
-│   ├── sync_client.py         # Synchronous client
-│   ├── factory.py             # Intelligent routing factory
+│   ├── base.py                # Shared client base (BaseGraphClient)
+│   ├── client.py              # Async client implementation (GraphClient)
+│   ├── factory.py             # Intelligent routing factory + sync helpers
 │   ├── config.py              # Client configuration
 │   └── exceptions.py          # Custom exceptions
 │
-├── core/                      # Core services
-│   ├── ladybug_service.py    # LadybugDB service orchestration
-│   ├── database_manager.py   # Database lifecycle management
-│   ├── duckdb_manager.py     # DuckDB staging database management
-│   ├── duckdb_pool.py        # DuckDB connection pooling
-│   ├── connection_pool.py    # Graph connection pooling
-│   ├── admission_control.py  # Backpressure management
-│   └── metrics_collector.py  # Performance metrics
+├── core/                      # Core services (organized by database technology)
+│   ├── ladybug/              # LadybugDB embedded graph database
+│   │   ├── engine.py         # Low-level database driver
+│   │   ├── pool.py           # Connection pooling
+│   │   ├── manager.py        # Database lifecycle and schema
+│   │   ├── service.py        # Service orchestration
+│   │   ├── config.py         # LadybugDB configuration
+│   │   └── materialization_lock.py  # Single-writer materialization lock
+│   ├── duckdb/               # DuckDB data staging
+│   │   ├── pool.py           # DuckDB connection pooling
+│   │   └── manager.py        # Staging table management
+│   ├── lance/                # LanceDB vector storage
+│   │   └── manager.py        # Vector table management
+│   ├── admission_control.py  # CPU/memory backpressure management
+│   ├── backup_service.py     # Backup/restore service
+│   ├── memory_manager.py     # Memory budget management
+│   ├── migration_service.py  # Graph schema migration service
+│   ├── metrics_collector.py  # Performance metrics
+│   ├── task_manager.py       # Async task coordination
+│   └── task_sse.py           # Server-Sent Events for task progress
 │
 ├── routers/                   # API endpoints
 │   ├── databases/
@@ -77,9 +89,14 @@ graph_api/
 │   │   ├── schema.py         # Schema management
 │   │   ├── metrics.py        # Database metrics
 │   │   ├── backup.py         # Backup operations
-│   │   └── restore.py        # Restore operations
+│   │   ├── restore.py        # Restore operations
+│   │   ├── memory.py         # Per-database memory operations
+│   │   ├── swap.py           # Blue/green database swap
+│   │   └── vector_search.py  # LanceDB vector search
 │   ├── health.py             # Health checks
 │   ├── info.py               # Node information
+│   ├── metrics.py            # Node-level metrics
+│   ├── migration.py          # Schema migration endpoints
 │   └── tasks.py              # Background task tracking
 │
 ├── middleware/
@@ -88,8 +105,10 @@ graph_api/
 │
 └── models/                    # Pydantic models
     ├── database.py           # Database schemas
-    ├── ingestion.py          # Ingestion requests
-    ├── streaming.py          # NDJSON streaming
+    ├── tables.py             # Staging table requests/responses
+    ├── tasks.py              # Task tracking models
+    ├── migration.py          # Migration request/response models
+    ├── fork.py               # Database fork/swap models
     └── cluster.py            # Cluster configuration
 ```
 
@@ -240,7 +259,7 @@ cfn-signal --success --stack ${STACK_NAME} ...
 
 ```http
 POST /databases
-Authorization: X-Graph-API-Key: {api_key}
+X-Graph-API-Key: {api_key}
 Content-Type: application/json
 
 {
@@ -253,7 +272,7 @@ Content-Type: application/json
 
 ```http
 POST /databases/{graph_id}/query
-Authorization: X-Graph-API-Key: {api_key}
+X-Graph-API-Key: {api_key}
 Content-Type: application/json
 
 {
@@ -275,7 +294,7 @@ Content-Type: application/json
 
 ```http
 POST /databases/{graph_id}/tables
-Authorization: X-Graph-API-Key: {api_key}
+X-Graph-API-Key: {api_key}
 Content-Type: application/json
 
 {
@@ -295,7 +314,7 @@ Response: {
 
 ```http
 GET /databases/{graph_id}/tables
-Authorization: X-Graph-API-Key: {api_key}
+X-Graph-API-Key: {api_key}
 
 Response: [
   {
@@ -312,7 +331,7 @@ Response: [
 
 ```http
 POST /databases/{graph_id}/tables/query
-Authorization: X-Graph-API-Key: {api_key}
+X-Graph-API-Key: {api_key}
 Content-Type: application/json
 
 {
@@ -338,7 +357,7 @@ Supports streaming via Accept: application/x-ndjson or text/event-stream headers
 
 ```http
 POST /databases/{graph_id}/tables/{table_name}/materialize
-Authorization: X-Graph-API-Key: {api_key}
+X-Graph-API-Key: {api_key}
 Content-Type: application/json
 
 {
@@ -362,7 +381,7 @@ Use rebuild=true to regenerate the graph database from scratch (safe operation).
 
 ```http
 DELETE /databases/{graph_id}/tables/{table_name}
-Authorization: X-Graph-API-Key: {api_key}
+X-Graph-API-Key: {api_key}
 
 Response: {
   "status": "success",
@@ -415,12 +434,17 @@ Response: {
 
 ## Client Libraries
 
+`GraphClient` (`client.py`, a subclass of `BaseGraphClient`) is the single async
+client. There is no separate sync client class — synchronous access is provided
+by the `get_graph_client_sync` / `create_client_sync` helpers, which return a
+`GraphClient` usable as a sync context manager.
+
 ### Async Client
 
 ```python
-from robosystems.graph_api.client import AsyncGraphClient
+from robosystems.graph_api.client import GraphClient
 
-async with AsyncGraphClient(
+async with GraphClient(
     base_url="http://graph-api:8001",
     api_key="graph_api_..."
 ) as client:
@@ -437,35 +461,32 @@ async with AsyncGraphClient(
     )
 ```
 
-### Sync Client
-
-```python
-from robosystems.graph_api.client import GraphClient
-
-client = GraphClient(
-    base_url="http://graph-api:8001",
-    api_key="graph_api_..."
-)
-
-# Synchronous operations
-data = client.query(
-    graph_id="kg1a2b3c4d5",
-    cypher="MATCH (n) RETURN n LIMIT 10"
-)
-```
-
 ### Client Factory with Intelligent Routing
 
 ```python
-from robosystems.graph_api.client.factory import get_graph_client
+from robosystems.config.graph_tier import GraphTier
+from robosystems.graph_api.client import get_graph_client
 
-# Factory handles routing based on graph type and operation
+# Factory handles routing based on graph type and operation (async)
 client = await get_graph_client(
     graph_id="sec",              # Routes to shared infrastructure
     operation_type="read",        # Could use replica
     environment="prod",
-    tier=InstanceTier.STANDARD
+    tier=GraphTier.LADYBUG_STANDARD
 )
+```
+
+### Sync Access
+
+```python
+from robosystems.graph_api.client import get_graph_client_sync
+
+# Returns a GraphClient usable as a synchronous context manager
+with get_graph_client_sync("kg1a2b3c4d5", operation_type="read") as client:
+    data = client.query(
+        graph_id="kg1a2b3c4d5",
+        cypher="MATCH (n) RETURN n LIMIT 10"
+    )
 ```
 
 ## Configuration
@@ -476,17 +497,15 @@ client = await get_graph_client(
 # Node Configuration
 LBUG_NODE_TYPE=writer                    # writer|shared_master
 CLUSTER_TIER=ladybug-standard            # ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared
-LBUG_DATABASE_PATH=/data/lbug-dbs       # Storage location
-LBUG_PORT=8001                           # API port
+LBUG_DATABASE_PATH=/data/lbug-dbs        # Storage location
 
 # Performance Settings
-LBUG_MAX_DATABASES_PER_NODE=10          # Configuration-based limit
-LBUG_MAX_MEMORY_MB=14336                # Total memory allocation
-LBUG_MEMORY_PER_DB_MB=2048              # Per-database memory
-LBUG_CHUNK_SIZE=1000                    # Streaming chunk size
-LBUG_QUERY_TIMEOUT=30                   # Query timeout seconds
-LBUG_MAX_QUERY_LENGTH=10000             # Max query characters
-LBUG_CONNECTION_POOL_SIZE=10            # Connections per database
+LBUG_DATABASES_PER_INSTANCE=10           # Databases per instance
+LBUG_MAX_MEMORY_MB=14336                 # Total memory allocation
+LBUG_MAX_MEMORY_PER_DB_MB=2048           # Per-database memory
+LBUG_CHUNK_SIZE=1000                     # Streaming chunk size
+GRAPH_QUERY_TIMEOUT=30                   # Query timeout seconds
+LBUG_CONNECTION_POOL_SIZE=10             # Connections per database
 
 # Authentication
 GRAPH_API_KEY=                           # API key
@@ -499,10 +518,10 @@ SHARED_RAW_BUCKET=robosystems-shared-raw-dev  # S3 for shared raw data
 SHARED_PROCESSED_BUCKET=robosystems-shared-processed-dev  # S3 for shared processed data
 
 # Feature Flags
-LBUG_CIRCUIT_BREAKERS_ENABLED=true     # Enable circuit breakers
-LBUG_REDIS_CACHE_ENABLED=true          # Enable Redis caching
-LBUG_RETRY_LOGIC_ENABLED=true          # Enable automatic retries
-LBUG_HEALTH_CHECKS_ENABLED=true        # Enable health checking
+GRAPH_CIRCUIT_BREAKERS_ENABLED=true    # Enable circuit breakers
+GRAPH_REDIS_CACHE_ENABLED=true         # Enable Valkey caching of instance locations
+GRAPH_RETRY_LOGIC_ENABLED=true         # Enable automatic retries
+GRAPH_HEALTH_CHECKS_ENABLED=true       # Enable health checking
 ```
 
 ### Schema Types
@@ -778,7 +797,7 @@ aws autoscaling start-instance-refresh \
 ## Known Limitations
 
 1. **Sequential Ingestion**: Files processed one at a time per database (LadybugDB constraint)
-2. **Connection Limit**: Maximum 3 concurrent connections per database
+2. **Connection Limit**: Default 3 connections per database, configurable via `LBUG_CONNECTION_POOL_SIZE` (10 in production)
 3. **Single Writer**: Only one write operation per database at a time
 4. **No Cross-Database Queries**: Each query scoped to single database
 5. **Volume Attachment**: One EBS volume per database (no striping)

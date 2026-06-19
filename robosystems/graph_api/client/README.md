@@ -64,7 +64,7 @@ The factory is responsible for intelligent routing decisions based on:
 - **Backend Abstraction**: Consistent HTTP interface regardless of backend
 - **Circuit Breakers**: Prevents cascading failures with configurable thresholds
 - **Connection Pooling**: HTTP/2 connection reuse for efficiency
-- **Redis Caching**: Caches instance locations to reduce lookups
+- **Valkey Caching**: Caches instance locations to reduce lookups
 - **Automatic Failover**: Falls back to alternative endpoints when primary unavailable
 - **Retry Logic**: Exponential backoff with jitter for transient errors
 
@@ -152,7 +152,7 @@ from robosystems.config.graph_tier import GraphTier
 client = await GraphClientFactory.create_client(
     graph_id="kg1a2b3c4d5",           # User graph ID
     operation_type="write",            # Write operation
-    tier=GraphTier.LBUG_LARGE         # Tier determines routing
+    tier=GraphTier.LADYBUG_LARGE      # Tier determines routing
 )
 
 # Perform operations
@@ -222,7 +222,7 @@ GRAPH_API_KEY=graph_api_64chars...           # Authentication key
 GRAPH_RETRY_LOGIC_ENABLED=true               # Enable automatic retries
 GRAPH_CIRCUIT_BREAKERS_ENABLED=true          # Enable circuit breakers
 GRAPH_HEALTH_CHECKS_ENABLED=true             # Enable health checking
-GRAPH_REDIS_CACHE_ENABLED=true               # Enable Redis caching
+GRAPH_REDIS_CACHE_ENABLED=true               # Enable Valkey caching (env var name retains REDIS for compatibility)
 
 # Performance Tuning
 LBUG_CLIENT_TIMEOUT=30                       # Request timeout (seconds)
@@ -242,7 +242,7 @@ VOLUME_REGISTRY_TABLE=robosystems-graph-{env}-volume-registry
 
 ## Instance Discovery Flow
 
-1. **Check Cache**: Redis cache with 5-minute TTL
+1. **Check Cache**: Valkey cache with 5-minute TTL
 2. **Query DynamoDB**: Find instance hosting the graph
 3. **Health Check**: Verify instance is healthy
 4. **Create Client**: Initialize with discovered endpoint
@@ -251,7 +251,7 @@ VOLUME_REGISTRY_TABLE=robosystems-graph-{env}-volume-registry
 ```python
 # Internal discovery flow (handled automatically)
 1. GraphClientFactory.create_client("kg1a2b3c4d5")
-2. → Check Redis: lbug:prod:location:kg1a2b3c4d5
+2. → Check Valkey: lbug:prod:location:kg1a2b3c4d5
 3. → Query DynamoDB: GraphRegistry[graph_id=kg1a2b3c4d5]
 4. → Get instance: i-1234567890 at 10.0.1.100
 5. → Create client: http://10.0.1.100:8001
@@ -286,7 +286,7 @@ keepalive_expiry: 5.0        # Seconds before closing idle
 ### Caching Strategy
 
 ```python
-# Redis caching layers
+# Valkey caching layers
 1. Instance locations: 5-minute TTL
 2. ALB health status: 30-second TTL
 3. Shared master URL: 5-minute TTL

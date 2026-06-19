@@ -51,19 +51,27 @@ adapters/
 │   │   ├── artifact.py          # Artifact builders (element knowledge, structure profiles)
 │   │   └── framework.py         # DuckDBAnalyticsContext (sync context manager)
 │   ├── taxonomy/                # Canonical concept mappings
-│   │   ├── __init__.py          # ConceptTaxonomy registry
+│   │   ├── __init__.py          # CanonicalConcept, get_element_taxonomy, get_structure_taxonomy
 │   │   ├── concepts.py          # Concept type definitions
 │   │   ├── structures.py        # Structure type definitions
 │   │   ├── balance_sheet.py     # Balance sheet concept mappings
 │   │   ├── cash_flow.py         # Cash flow concept mappings
 │   │   └── income_statement.py  # Income statement concept mappings
 │   └── pipeline/                # Dagster orchestration
+│       ├── README.md            # Pipeline documentation
 │       ├── __init__.py          # get_dagster_components() discovery
 │       ├── configs.py           # Run configurations
 │       ├── download.py          # sec_raw_filings asset
 │       ├── process.py           # sec_processed_filings asset
 │       ├── stage.py             # DuckDB staging assets
 │       ├── materialize.py       # LadybugDB materialization assets
+│       ├── artifact.py          # Knowledge artifact generation assets
+│       ├── s3_publish.py        # LadybugDB → S3 publish assets
+│       ├── duckdb_s3_publish.py # DuckDB → S3 publish assets
+│       ├── r2_publish.py        # LadybugDB → Cloudflare R2 publish assets
+│       ├── vector_publish.py    # Vector embedding publish assets
+│       ├── text_index.py        # OpenSearch text/iXBRL indexing assets
+│       ├── entity_sync/         # Entity (company) metadata sync sub-pipeline
 │       ├── jobs.py              # 18 SEC job definitions
 │       └── sensors.py           # 6 sensors + 1 schedule
 └── quickbooks/                  # QuickBooks adapter (private)
@@ -127,7 +135,7 @@ The SEC adapter has three processing layers:
 
 1. **Core pipeline** (`client/`, `processors/`, `pipeline/`) — Downloads XBRL filings from EDGAR, transforms them into graph nodes/relationships, stages in DuckDB, and materializes into LadybugDB.
 
-2. **Enrichment** (`enrichment.py`, `taxonomy/`) — `SemanticEnricher` runs inline during filing processing to add semantic metadata: canonical concept mapping via fastembed embeddings, Structure-level `canonical_type` classification (income_statement, balance_sheet, etc.), and Association-level disclosure classification. Controlled by feature flags `XBRL_SEMANTIC_ENRICHMENT`, `XBRL_ASSOCIATION_CLASSIFICATION`, and `XBRL_GRAPH_REFINEMENT`.
+2. **Enrichment** (`enrichment.py`, `taxonomy/`) — `SemanticEnricher` runs inline during filing processing to add semantic metadata: canonical concept mapping via fastembed embeddings, Structure-level `canonical_type` classification (income_statement, balance_sheet, etc.), and Association-level disclosure classification. Controlled by the `XBRL_SEMANTIC_ENRICHMENT`, `XBRL_ASSOCIATION_CLASSIFICATION`, and `XBRL_GRAPH_REFINEMENT` flags in `adapters/sec/config.py`.
 
 3. **Knowledge artifacts** (`knowledge/`) — Offline Dagster jobs that analyze the full DuckDB corpus to generate confidence-refinement artifacts (`element_knowledge.parquet`, `structure_profiles.parquet`, `structure_consensus.parquet`). These artifacts are loaded at enrichment time to refine classification confidence — crushing bad semantic matches and boosting well-connected elements.
 

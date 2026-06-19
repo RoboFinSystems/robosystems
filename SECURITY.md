@@ -10,7 +10,7 @@ Security controls implemented at the infrastructure, application, and data level
 
 - 30-minute access token expiration (configurable via `JWT_EXPIRY_HOURS`)
 - JTI-based token revocation tracked in Valkey with TTL
-- Automatic token refresh at `/auth/refresh` with 5-second grace period for in-flight requests
+- Automatic token refresh at `/v1/auth/refresh` with 5-second grace period for in-flight requests
 - Issuer and audience claim validation
 - Fails closed on Valkey errors (treats token as revoked)
 
