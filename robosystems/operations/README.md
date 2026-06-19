@@ -57,8 +57,8 @@ operations/
 │   ├── envelope.py            # Cross-type atom → Lite projection helpers
 │   ├── schedule.py            # Schedule block type handler (declarative construction)
 │   ├── rollforward.py         # Rollforward block type handler (declarative construction)
-│   ├── statement.py           # Statement block type handlers (compositional, stub)
-│   ├── metric.py              # Metric block type handler (derivative, stub)
+│   ├── statement.py           # Statement block type handlers (compositional build + rendering; CUD stubbed)
+│   ├── metric.py              # Metric block type handler (derivative; placeholder build, facts=[]; CUD stubbed)
 │   ├── classify.py            # Association classifier scaffold (not yet implemented)
 │   └── rules/                 # Rule evaluation engine
 │       ├── engine.py          # evaluate_rules_for_structure — entry point
@@ -77,8 +77,8 @@ operations/
 │   ├── schedules/             # ScheduleService
 │   └── views/                 # Graph-backed analytical queries (build-fact-grid)
 ├── roboinvestor/              # RoboInvestor domain kernel (CQRS subtree)
-│   ├── reads/                 # portfolios, securities, positions, holdings
-│   └── commands/              # portfolios, securities, positions
+│   ├── reads/                 # portfolios, portfolio_block, securities, positions, holdings
+│   └── commands/              # portfolio_block, securities
 ├── operators/                 # AI Operator system (MappingOperator, CypherOperator, future CloseOperator)
 ├── graph/                     # Platform graph database operations
 │   ├── graph_creation_service.py        # Unified graph creation (entity + generic)
@@ -100,15 +100,17 @@ operations/
 
 ## Single-Source-of-Truth Contract
 
-The domain kernels (`roboledger/`, `roboinvestor/`, `information_block/`) are the only place domain logic lives. Three transports call the same functions:
+The domain kernels (`roboledger/`, `roboinvestor/`, `information_block/`) are the only place domain logic lives. Five transports call the same functions:
 
 | Transport | Reads | Writes |
 |-----------|-------|--------|
 | GraphQL (`/extensions/{g}/graphql`) | `resolvers/*.py` → ops `reads/*.py` | — |
 | Named command ops (`/extensions/{domain}/{g}/operations/{op}`) | — | ops `commands/*.py` |
-| MCP tools (`middleware/mcp/tools/*.py`) | same ops `reads/*.py` | same ops `commands/*.py` |
+| Analytical view ops (`/extensions/{domain}/{g}/operations/{view}`, e.g. `build-fact-grid`) | `routers/extensions/{domain}/views.py` → ops `views/*.py` | — |
+| MCP tools (`middleware/mcp/tools/*.py`) | same ops `reads/*.py` + `views/*.py` | same ops `commands/*.py` |
+| AI Operators (`operators/`) | same ops via MCP tools (`ctx.tools`) | same ops via MCP tools |
 
-Adding business logic in a router, resolver, or MCP tool file is a mistake — route it through the ops layer.
+Adding business logic in a router, resolver, view handler, MCP tool, or Operator is a mistake — route it through the ops layer.
 
 ## Extension Domain Kernels (CQRS Pattern)
 
@@ -147,7 +149,9 @@ The registry (`registry.py`) maps `block_type` strings to `BlockTypeRegistryEntr
 | `comprehensive_income` | compositional | `statement.py` | Yes |
 | `metric` | derivative | `metric.py` | No |
 
-Statement and metric dispatch handlers currently raise `NotImplementedError` (→ HTTP 501) — their data models are wired, but the construction logic is not yet implemented.
+Statements are built via `create-report`, not `create-information-block`: the statement handlers in `statement.py` implement the full compositional envelope build plus the server-computed rendering projection (`view.rendering`) on GET. Only the statement *create / update / delete* dispatch handlers are stubs (`make_not_implemented_handler` → HTTP 501).
+
+The metric handler in `metric.py` is a working placeholder — `build_envelope` packs a valid envelope with `facts=[]` until the derivation evaluator that computes metric values from source-block FactSets lands. Only its *create / update / delete* handlers raise `NotImplementedError` (→ HTTP 501).
 
 ## Rule Evaluation Engine
 

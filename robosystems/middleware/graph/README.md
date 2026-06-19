@@ -32,18 +32,23 @@ The middleware layer sits above the core services, providing routing, orchestrat
 ```
 middleware/graph/                         # Middleware layer (this module)
 ├── __init__.py                          # Module exports
-├── router.py                            # Main routing logic
-├── clusters.py                          # Cluster configuration and management
-├── repository.py                        # Repository pattern implementation
-├── dependencies.py                      # FastAPI dependency injection
-├── types.py                             # Type definitions and enums
-├── base.py                              # Base classes and interfaces
-├── query_queue.py                       # Query queue with admission control
+├── router.py                            # GraphRouter — main routing logic
+├── repository.py                        # UniversalRepository wrapper (sync/async unification)
+├── base.py                              # Base abstractions (GraphEngineInterface, GraphOperation)
+├── types.py                             # Type definitions, enums, graph-id helpers
+├── query_queue.py                       # QueryQueueManager — admission control + long polling
 ├── admission_control.py                 # System resource monitoring
-├── schema_installer.py                  # Schema installation utilities
+├── execution_strategies.py             # Strategy selection (query vs MCP, load-aware)
+├── ingestion_limits.py                 # Tier storage caps / materialization write-path limits
+├── instance_busy.py                    # DynamoDB busy counter for destructive ops
+├── streaming_wrapper.py                # Streaming query support for Graph API clients
 ├── allocation_manager.py                # DynamoDB-based database allocation
-├── multitenant_utils.py                 # Multi-tenant utilities and validation
-└── utils/                               # Utility modules
+├── dependencies/                        # FastAPI dependency injection
+│   ├── auth.py                         # Auth-checked repository/database dependencies
+│   ├── repositories.py                 # Repository dependencies
+│   └── helpers.py                      # require_entity / require_user_graph / etc.
+└── utils/                               # Utility modules (MultiTenantUtils lives here)
+    ├── __init__.py                     # MultiTenantUtils class
     ├── validation.py                    # Input validation
     ├── database.py                      # Database resolution
     ├── identity.py                      # Graph identity management
@@ -90,42 +95,33 @@ The central routing component that determines where graph operations should be e
 
 ```python
 router = GraphRouter()
-repo = router.get_repository(
+repo = await router.get_repository(   # get_repository is async
     graph_id="kg1a2b3c",
     operation_type="write",
-    tier=GraphTier.LBUG_STANDARD
+    tier=GraphTier.LADYBUG_STANDARD,
 )
 result = await repo.execute_query("MATCH (n) RETURN n LIMIT 10")
 ```
 
-### 2. Cluster Management (`clusters.py`)
+`GraphRouter.get_repository()` delegates routing to
+`graph_api.client.factory.GraphClientFactory` (or returns a direct-file
+`Repository` when `LBUG_ACCESS_PATTERN=direct_file`).
 
-Defines cluster configurations and node types.
+### 2. Graph Type Definitions (`types.py`)
 
-**Node Types:**
+`types.py` is the canonical source for graph-routing enums and graph-id
+helpers (there is no separate `clusters.py`).
 
-- `NodeType.WRITER`: Entity database writers
-- `NodeType.SHARED_MASTER`: Shared repository master (e.g., SEC)
-- `NodeType.SHARED_REPLICA`: Read-only replicas for shared data
+**Enums:**
 
-**Repository Types:**
+- `NodeType`: node roles (e.g. writer / shared master / shared replica)
+- `RepositoryType`: entity vs shared repository
+- `GraphCategory`: `USER`, `SHARED`, `SYSTEM`
+- `AccessPattern`: `READ_ONLY`, `READ_WRITE`, `RESTRICTED`
+- `ConnectionPattern`: connection routing strategy
 
-- `RepositoryType.ENTITY`: User/entity-specific graphs
-- `RepositoryType.SHARED`: Shared repositories (SEC, industry, etc.)
-
-**Cluster Configuration:**
-
-```python
-@dataclass
-class ClusterConfig:
-    cluster_id: str
-    repository_type: RepositoryType
-    writer_node: NodeConfig
-    reader_nodes: List[NodeConfig]
-    alb_endpoint: Optional[str]
-    region: str
-    tier: InstanceTier
-```
+Graph tiers (`LADYBUG_STANDARD`, `LADYBUG_LARGE`, `LADYBUG_XLARGE`) come
+from `config/graph_tier.py:GraphTier`, re-exported by this package.
 
 ### 3. Core Services Integration
 
@@ -146,7 +142,7 @@ The middleware integrates with the core services layer for database access.
 ```python
 # Via middleware routing (recommended)
 router = GraphRouter()
-repo = router.get_repository("kg1a2b3c")
+repo = await router.get_repository("kg1a2b3c")
 result = await repo.execute_query("MATCH (c:Entity) RETURN c")
 
 # Direct core service access (when needed)
@@ -161,30 +157,37 @@ response = await service.execute_query(QueryRequest(
 
 See the [Core Services README](/robosystems/graph_api/core/README.md) for detailed documentation.
 
-### 4. Repository Pattern (`repository.py`)
+### 4. Repository Wrapper (`repository.py`)
 
-Provides a unified interface for graph operations.
+`UniversalRepository` wraps either a direct `Repository` or a Graph API
+`GraphClient` and exposes a unified async (and sync) interface so callers
+don't branch on the underlying type.
 
 **Features:**
 
-- **Abstraction Layer**: Hides implementation details
-- **Async Support**: Full async/await support
-- **Error Handling**: Consistent error handling
-- **Metrics Collection**: Automatic performance tracking
+- **Unification**: Same interface for sync direct repos and async API clients
+- **Async + sync methods**: `execute_query` / `execute_query_sync`, etc.
+- **Streaming**: `execute_query_streaming`
+- **Context managers**: both `async with` and `with`
 
-**Interface:**
+**Selected methods:**
 
 ```python
-class Repository(Protocol):
-    async def execute_query(self, query: str) -> List[Dict[str, Any]]
-    async def execute_transaction(self, queries: List[str]) -> bool
-    async def get_schema(self) -> Dict[str, Any]
-    async def health_check(self) -> Dict[str, Any]
+class UniversalRepository:
+    async def execute_query(self, cypher, parameters=None, ...) -> Any
+    async def execute_query_streaming(self, cypher, ...) -> Any
+    async def execute_transaction(self, queries) -> Any
+    async def get_schema(self) -> list[dict[str, Any]]
+    async def health_check(self) -> dict[str, Any]
+    async def close(self) -> None
 ```
+
+Construct via `create_universal_repository(...)` /
+`get_universal_repository(...)` rather than instantiating directly.
 
 ### 5. Query Queue with Admission Control (`query_queue.py`)
 
-Advanced query queue with admission control and long polling.
+`QueryQueueManager` provides admission control and long polling.
 
 **Features:**
 
@@ -194,25 +197,20 @@ Advanced query queue with admission control and long polling.
 - **Long Polling**: Efficient result waiting
 - **Transparent Queuing**: Executes immediately when capacity available
 
-**Configuration:**
-
-```python
-QUERY_QUEUE_MAX_SIZE = 1000          # Max queries in queue
-QUERY_QUEUE_MAX_CONCURRENT = 50      # Max simultaneous executions
-ADMISSION_MEMORY_THRESHOLD = 85      # Memory usage limit (%)
-ADMISSION_CPU_THRESHOLD = 90         # CPU usage limit (%)
-```
-
 **Usage:**
 
 ```python
-queue = QueryQueue()
+from robosystems.middleware.graph.query_queue import get_query_queue
+
+queue = get_query_queue()
 query_id = await queue.submit_query(
     graph_id="kg1a2b3c",
     query="MATCH (n) RETURN n",
-    priority=5
+    priority=5,
 )
-result = await queue.get_result(query_id, timeout=30)
+# Poll status, then fetch the result:
+status = await queue.get_query_status(query_id)
+result = await queue.get_query_result(query_id)
 ```
 
 ### 6. Admission Control (`admission_control.py`)
@@ -233,44 +231,41 @@ Monitors system resources and controls admission.
 3. Apply probabilistic rejection based on load
 4. Track rejection metrics
 
-### 7. FastAPI Dependencies (`dependencies.py`)
+### 7. FastAPI Dependencies (`dependencies/`)
 
-Dependency injection for FastAPI routes.
+Dependency injection for FastAPI routes lives in the `dependencies/`
+package (`auth.py`, `repositories.py`, `helpers.py`), exported from
+`dependencies/__init__.py`.
 
-**Provided Dependencies:**
+**Provided Dependencies (selected):**
 
-- `get_graph_repository`: Returns repository for graph operations
-- `get_query_queue`: Returns query queue instance
-- `validate_graph_access`: Validates user access to graph
-- `track_credits`: Tracks credit consumption
-
-**Usage:**
+- `get_graph_database`: Resolves + auth-checks the graph for the request
+- `get_graph_repository_with_auth` / `get_universal_repository_with_auth`: Auth-checked repository
+- `get_user_graph_repository` / `get_shared_repository` / `get_main_repository`: Repository by graph kind
+- `get_graph_repository_dependency`: Generic repository dependency
+- `require_entity` / `require_user_graph` / `require_graph_category` (+ `optional_*` variants): Path-param helpers
 
 ```python
-@router.post("/query")
+from robosystems.middleware.graph.dependencies import get_graph_repository_with_auth
+
+@router.post("/v1/graphs/{graph_id}/query")
 async def execute_query(
-    repo: Repository = Depends(get_graph_repository),
-    credits: CreditTracker = Depends(track_credits)
+    repo = Depends(get_graph_repository_with_auth),
 ):
-    result = await repo.execute_query(query)
-    await credits.consume("query", len(result))
-    return result
+    return await repo.execute_query(query)
 ```
 
 ### 8. Type Definitions (`types.py`)
 
-Core type definitions and enums.
-
-**Key Types:**
-
-- `GraphType`: Enum for graph types (ENTITY, SHARED_REPOSITORY)
-- `GraphTier`: Enum for graph tiers (LBUG_STANDARD, LBUG_LARGE, LBUG_XLARGE)
-- `OperationType`: Enum for operations (READ, WRITE, ADMIN)
-- `QueryPriority`: Priority levels (1-10)
+Core type definitions and enums (see §2 for the enum list). `types.py`
+also exposes graph-id helpers (`is_subgraph_id`, `parse_graph_id`,
+`construct_subgraph_id`) and the `GraphIdentity` / `GraphTypeRegistry`
+models. `GraphTier` is imported from `config/graph_tier.py`.
 
 ### 9. Database Allocation (`allocation_manager.py`)
 
-DynamoDB-based allocation manager for graph databases across instances (LadybugDB-specific).
+`LadybugAllocationManager` — DynamoDB-based allocation of graph databases
+across instances.
 
 **Features:**
 
@@ -284,22 +279,25 @@ DynamoDB-based allocation manager for graph databases across instances (LadybugD
 **Usage:**
 
 ```python
-from robosystems.middleware.graph.allocation_manager import LadybugDBAllocationManager
+from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
 from robosystems.config.graph_tier import GraphTier
 
-manager = LadybugDBAllocationManager(environment="prod")
+manager = LadybugAllocationManager(environment="prod")
 location = await manager.allocate_database(
     entity_id="kg1a2b3c",
-    instance_tier=GraphTier.LBUG_STANDARD
+    instance_tier=GraphTier.LADYBUG_STANDARD,
 )
 print(f"Database allocated to {location.instance_id}")
 ```
 
-### 10. Multi-tenant Utilities (`multitenant_utils.py`)
+### 10. Multi-tenant Utilities (`utils/`)
 
-Core utilities for multi-tenant database operations and validation.
+`MultiTenantUtils` (in `middleware/graph/utils/__init__.py`) aggregates
+static methods from the `utils/` submodules (`validation.py`,
+`database.py`, `identity.py`, `subgraph.py`) for multi-tenant database
+operations and validation.
 
-**Features:**
+**Capabilities:**
 
 - **Database Name Resolution**: Maps graph IDs to database names
 - **Access Pattern Management**: Determines routing strategies
@@ -310,7 +308,7 @@ Core utilities for multi-tenant database operations and validation.
 **Usage:**
 
 ```python
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
 # Validate and get database name
 graph_id = MultiTenantUtils.validate_graph_id("kg1a2b3c")
@@ -351,10 +349,10 @@ subgraph_id = construct_subgraph_id("kg1234567890abcdef", "staging")
 
 **Allocation Manager Integration:**
 
-The `LadybugDBAllocationManager.find_database_location()` automatically resolves subgraphs to their parent's location:
+The `LadybugAllocationManager.find_database_location()` automatically resolves subgraphs to their parent's location:
 
 ```python
-manager = LadybugDBAllocationManager(environment="prod")
+manager = LadybugAllocationManager(environment="prod")
 
 # Requesting location for subgraph returns parent's instance location
 location = await manager.find_database_location("kg1234567890abcdef_dev")
@@ -418,7 +416,7 @@ MULTITENANT_MODE=true              # Enable multi-tenant database support
 from robosystems.middleware.graph import GraphRouter
 
 router = GraphRouter()
-repo = router.get_repository("kg1a2b3c")
+repo = await router.get_repository("kg1a2b3c")
 result = await repo.execute_query("MATCH (c:Entity) RETURN c")
 
 # Via core service (direct access when routing not needed)
@@ -435,21 +433,21 @@ response = await service.execute_query(QueryRequest(
 ### With Query Queue
 
 ```python
-from robosystems.middleware.graph import QueryQueue
+from robosystems.middleware.graph.query_queue import get_query_queue
 
-queue = QueryQueue()
+queue = get_query_queue()
 query_id = await queue.submit_query(
     graph_id="kg1a2b3c",
     query="MATCH (n) RETURN count(n)",
-    priority=8
+    priority=8,
 )
-result = await queue.wait_for_result(query_id)
+result = await queue.get_query_result(query_id)
 ```
 
 ### Transaction Execution
 
 ```python
-repo = router.get_repository("kg1a2b3c", operation_type="write")
+repo = await router.get_repository("kg1a2b3c", operation_type="write")
 success = await repo.execute_transaction([
     "CREATE (e:Entity {identifier: 'entity-123', name: 'New Corp'})",
     "CREATE (el:Element {uri: 'http://example.com/element/Cash', qname: 'Cash'})",
@@ -461,12 +459,15 @@ success = await repo.execute_transaction([
 
 ### 1. Credit System
 
-The middleware integrates with the credit system to track usage:
+Credit consumption is intentionally narrow:
 
-- **AI Operations**: Anthropic/OpenAI API calls consume credits (token-based billing)
-- **Database Operations**: All graph queries, imports, backups are FREE (included in subscription)
-- **Storage**: Optional billing mechanism (10 credits/GB/day)
-- Credit tracking happens at the middleware layer before queries reach core services
+- **AI Operations**: Anthropic/OpenAI API calls consume credits (token-based billing) — the only credit-consuming path
+- **Database Operations**: All graph queries, imports, backups are free (included in the subscription tier)
+- **Storage**: Currently limit-enforced, not metered into credits. A
+  `STORAGE_CREDITS_PER_GB_PER_DAY` constant exists in `config/constants.py`
+  but is unreferenced today (see `middleware/billing/README.md`); if
+  usage-based storage billing is added it would be a separate credit line,
+  independent of the AI compute path.
 
 ### 2. Authentication
 
@@ -544,7 +545,7 @@ Common issues and solutions:
 
 ### Configuration
 
-- **[Billing Plans](/robosystems/config/billing.py)** - Subscription tiers and features
+- **[Billing Plans](/robosystems/config/billing/core.py)** - Subscription tiers and features (the `config/billing/` package)
 - **[Rate Limiting](/robosystems/config/rate_limits.py)** - Burst-focused rate limiting
 - **[Graph Tier Configuration](/.github/configs/graph.yml)** - Infrastructure tier specifications
 

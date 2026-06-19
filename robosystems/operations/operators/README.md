@@ -81,6 +81,7 @@ operators/
         mapping/
             operator.py        # MappingOperator — taxonomy mapping operator
             prompt.py       # System prompt for mapping operations
+            constants.py    # Mapping operator constants
 ```
 
 ## Execution Paths

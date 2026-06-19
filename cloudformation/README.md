@@ -13,6 +13,7 @@ Infrastructure as Code for deploying RoboSystems to AWS. All templates are deplo
 | `s3.yaml` | Object storage | None | Variable |
 | `api.yaml` | ECS API service | VPC, others | ~$20-50 (Fargate Spot) |
 | `dagster.yaml` | Workflow orchestration | VPC, others | ~$15-30 (Fargate) |
+| `worker.yaml` | Background task worker | VPC, Dagster | ~$10-20 (Fargate) |
 | `bastion.yaml` | Secure SSH access | VPC | Free (SSM only) |
 | `graph-infra.yaml` | Graph DB registries | None | ~$3 (DynamoDB) |
 | `graph-volumes.yaml` | EBS management | VPC, graph-infra | ~$1 (Lambda) |
@@ -63,6 +64,7 @@ Templates have cross-stack dependencies that determine deployment order:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  api.yaml ◄─────────── ECS Fargate API (depends on VPC, uses SSM params)   │
 │  dagster.yaml ◄──────── Dagster orchestration (depends on VPC)             │
+│  worker.yaml ◄───────── Background task worker (depends on VPC, Dagster)   │
 │  bastion.yaml ◄──────── SSM bastion host (depends on VPC)                  │
 │  graph-ladybug.yaml ◄── LadybugDB writers (depends on VPC, S3, Valkey,     │
 │                         graph-infra, uses SSM params from graph-volumes)   │
@@ -160,11 +162,12 @@ Templates have cross-stack dependencies that determine deployment order:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `Environment` | `prod` | Environment name |
-| `DatabaseInstanceClass` | `db.t4g.micro` | RDS instance type |
-| `AllocatedStorage` | `20` | Storage in GB |
-| `MultiAZ` | `false` | Enable Multi-AZ |
-| `MasterUsername` | `postgres` | Master username |
-| `VpcStackName` | Required | VPC stack name |
+| `DBInstanceClass` | `db.t4g.micro` | RDS instance type |
+| `DBAllocatedStorage` | `20` | Initial storage in GB |
+| `DBMaxAllocatedStorage` | — | Max autoscale storage in GB |
+| `EnableMultiAZ` | `false` | Enable Multi-AZ |
+| `DBUsername` | `postgres` | Master username |
+| `VpcId` | Required | VPC ID |
 
 **Exports**:
 - `{StackName}-DatabaseEndpoint` - RDS endpoint
@@ -179,16 +182,18 @@ Templates have cross-stack dependencies that determine deployment order:
 **Dependencies**: VPC stack
 
 **Key Resources**:
-- `AWS::ElastiCache::ServerlessCache` - Valkey serverless cluster
+- `AWS::ElastiCache::ReplicationGroup` - Valkey cluster (`Engine: valkey`)
 - `AWS::EC2::SecurityGroup` - Cache access security group
 
 **Parameters**:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `Environment` | `prod` | Environment name |
-| `MaximumDataStorage` | `1` | Max storage in GB |
-| `MaximumECPU` | `1000` | Max ECPUs per second |
-| `VpcStackName` | Required | VPC stack name |
+| `NodeType` | `cache.t4g.micro` | ElastiCache node type |
+| `NumCacheNodes` | `1` | Number of cache nodes |
+| `ValkeyEngineVersion` | `8.1` | Valkey engine version |
+| `EnableEncryption` | `true` | Enable encryption in transit/at rest |
+| `VpcId` | Required | VPC ID |
 
 **Exports**:
 - `{StackName}-ValkeyEndpoint` - Valkey endpoint
@@ -270,11 +275,12 @@ Templates have cross-stack dependencies that determine deployment order:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `Environment` | `prod` | Environment name |
-| `ImageTag` | `latest` | Container image tag |
-| `DesiredCount` | `1` | Number of tasks |
-| `CPU` | `256` | Task CPU units |
-| `Memory` | `512` | Task memory (MB) |
-| `VpcStackName` | Required | VPC stack name |
+| `ECRImageTag` | `latest` | Container image tag |
+| `MinCapacity` | `1` | Minimum tasks |
+| `MaxCapacity` | `10` | Maximum tasks |
+| `Cpu` | `512` | Task CPU units |
+| `Memory` | `1024` | Task memory (MB) |
+| `VpcId` | Required | VPC ID |
 
 **Exports**:
 - `{StackName}-ClusterArn` - ECS cluster ARN
@@ -309,6 +315,30 @@ Templates have cross-stack dependencies that determine deployment order:
 - `{StackName}-ClusterArn` - ECS cluster ARN
 - `{StackName}-WebserverServiceArn` - Webserver service ARN
 - `{StackName}-DaemonServiceArn` - Daemon service ARN
+
+---
+
+#### `worker.yaml`
+**Purpose**: Background task worker service on ECS Fargate. Runs the queue consumer for asynchronous work, with optional queue-depth-based autoscaling.
+
+**Dependencies**: VPC, Dagster (reuses the Dagster ECS cluster and VPC-internal security group), PostgreSQL/Valkey (via SSM parameters)
+
+**Key Resources**:
+- `AWS::ECS::Service` - Fargate worker service (on the Dagster cluster)
+- `AWS::ECS::TaskDefinition` - Worker container definition
+- `AWS::ApplicationAutoScaling::ScalableTarget` - Queue-depth autoscaling target
+- `AWS::Logs::LogGroup` - CloudWatch logs
+
+**Parameters**:
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `Environment` | `prod` | Environment name |
+| `ImageTag` | `latest` | Container image tag |
+| `WorkerCpu` | `512` | Task CPU units |
+| `WorkerMemory` | `1024` | Task memory (MB) |
+| `WorkerDesiredCount` | `1` | Static desired count (when autoscaling disabled) |
+| `WorkerMinCount` | `1` | Minimum tasks (always-on baseline) |
+| `WorkerMaxCount` | `5` | Maximum tasks during burst |
 
 ---
 
@@ -423,21 +453,23 @@ The graph database system uses a modular architecture with separate templates fo
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `Environment` | `prod` | Environment name |
-| `InstanceType` | `r7g.medium` | EC2 instance type |
-| `MinCapacity` | `0` | Minimum instances |
-| `MaxCapacity` | `2` | Maximum instances |
-| `DesiredCapacity` | `1` | Desired instances |
+| `InstanceType` | Required (per-tier) | EC2 instance type (set per tier from `graph.yml`) |
+| `MinInstances` | `1` | Minimum instances |
+| `MaxInstances` | `10` | Maximum instances |
+| `DatabasesPerInstance` | `1` | Max databases per instance |
 | `VpcStackName` | Required | VPC stack name |
 | `S3StackName` | Required | S3 stack name |
 | `ValkeyStackName` | Required | Valkey stack name |
 | `GraphInfraStackName` | Required | Graph infra stack name |
 
+> DesiredCapacity is intentionally omitted from the ASG; it is managed by the application at runtime.
+
 **Instance Tiers** (configured in `.github/configs/graph.yml`):
 | Tier | Instance Type | Memory | Use Case |
 |------|---------------|--------|----------|
-| ladybug-standard | r7g.medium | 16 GB | Shared/free tier |
-| ladybug-large | r7g.large | 32 GB | Standard subscriptions |
-| ladybug-xlarge | r7g.xlarge | 64 GB | Large subscriptions |
+| ladybug-standard | m7g.large | 8 GB | Cost-efficient entry tier with subgraph support |
+| ladybug-large | r7g.large | 16 GB | Enhanced performance for growing teams |
+| ladybug-xlarge | r7g.xlarge | 32 GB | Maximum performance and scale |
 
 **Exports**:
 - `{StackName}-AutoScalingGroupArn` - ASG ARN
@@ -462,10 +494,10 @@ The graph database system uses a modular architecture with separate templates fo
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `Environment` | `prod` | Environment name |
-| `InstanceType` | `r7g.medium` | EC2 instance type |
-| `MinCapacity` | `0` | Minimum replicas |
-| `MaxCapacity` | `3` | Maximum replicas |
-| `DesiredCapacity` | `0` | Desired replicas |
+| `InstanceType` | `m7g.large` | EC2 instance type (smaller than writers) |
+| `MinInstances` | `2` | Minimum replicas (0 for cost-saving mode) |
+| `MaxInstances` | `10` | Maximum replicas |
+| `DesiredCapacity` | `2` | Desired replicas |
 | `VpcStackName` | Required | VPC stack name |
 
 **Exports**:
@@ -650,15 +682,14 @@ gh workflow run deploy-<stack>.yml -f environment=prod
 ### Local Validation
 
 ```bash
-# Validate a template
-just cf-validate cloudformation/api.yaml
+# Lint + validate a single template (pass the name, no path or extension)
+just cf-lint api
 
 # Lint all templates
-just cf-lint
-
-# Validate all templates
-just cf-validate-all
+just cf-lint-all
 ```
+
+`just cf-lint <name>` runs `cfn-lint` and `aws cloudformation validate-template` against `cloudformation/<name>.yaml`.
 
 ### Viewing Stack Status
 

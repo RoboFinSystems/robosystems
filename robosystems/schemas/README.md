@@ -6,7 +6,7 @@ The RoboSystems schema system implements a **base + extensions** architecture fo
 
 **Key Concepts:**
 
-- **Base Schema**: Core nodes shared by all graphs (Entity, Period, Unit, Element, Label, Reference, Taxonomy, Dimension, Structure, Association, Classification)
+- **Base Schema**: Core nodes shared by all graphs (Entity, Period, Unit, Element, Label, Reference, Taxonomy, Dimension, Structure, Association, Trait, Classification, Agent, Event)
 - **Extensions**: Domain schemas that extend the base schema with domain-specific node types and relationships
 - **Context-Aware Loading**: Different views of the same extension based on use case (e.g., SEC reporting vs full accounting)
 - **Product Extensions**: Extensions like RoboLedger and RoboInvestor that grow beyond the graph schema into full product verticals with dedicated databases, API surfaces, data pipelines, and frontend applications
@@ -45,7 +45,7 @@ Each extension defines the domain model for its application — the node types, 
 2. **OLTP Database Schema**: PostgreSQL tables that mirror the schema for transactional workloads
 3. **API Surface**: Endpoints that expose and operate on the domain model
 4. **Data Pipelines**: ETL/ELT jobs that transform external data into the schema
-5. **AI Agent Context**: MCP tools use the schema to understand what queries are valid
+5. **AI Operator Context**: MCP tools use the schema to understand what queries are valid
 6. **Frontend Applications**: UI components are built around the domain model
 
 Not every extension has all of these layers today. Some are schema-only (graph schema). Others — RoboLedger and RoboInvestor — have grown into full product extensions with dedicated infrastructure.
@@ -150,7 +150,7 @@ graph TD
     A[Base Schema] --> B[Core Nodes]
     A --> C[Core Relationships]
     B --> D[Entity]
-    B --> E[User]
+    B --> E[Agent/Event]
     B --> F[Period]
     B --> G[Unit]
     B --> H[Element/Taxonomy]
@@ -177,17 +177,20 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 | Node              | Purpose                                | Key Properties                                 |
 | ----------------- | -------------------------------------- | ---------------------------------------------- |
-| **GraphMetadata** | Database metadata and configuration    | identifier, graph_id, tier, schema_type        |
-| **User**          | System users with authentication       | identifier, email, is_active                   |
 | **Entity**        | Organizations, companies, subsidiaries | identifier, cik, ticker, name, entity_type     |
 | **Agent**         | REA counterparty (customer, vendor, …) | identifier, agent_type, name, source           |
 | **Event**         | REA business event with canonical action verb | identifier, event_type, event_action, status   |
-| **Period**        | Time periods for data                  | start_date, end_date, fiscal_year, period_type |
+| **Period**        | Time periods for data                  | start_date, end_date, period_type              |
 | **Unit**          | Measurement units                      | measure, value, numerator_uri                  |
 | **Element**       | XBRL taxonomy elements                 | qname, period_type, is_numeric                 |
 | **Label**         | Human-readable element labels          | value, type, language                          |
 | **Reference**     | Authoritative element references       | value, type                                    |
 | **Taxonomy**      | Global XBRL taxonomies                 | name, version, namespace                       |
+| **Dimension**     | XBRL dimensional axis/member tags      | axis, member, dimension_type                   |
+| **Structure**     | Named element collection (network)     | network_uri, definition, type                  |
+| **Association**   | Element relationships (calc, present.) | arcrole, order_value, association_type         |
+| **Trait**         | FASB us-gaap metamodel vocabulary (element axes/categories) | identifier, category, type, source |
+| **Classification**| Structural pattern classification for associations | identifier, category, type, source |
 
 `Agent` and `Event` are universal REA primitives — every planned RoboX extension needs them. `Event.event_action` carries the canonical 19-verb action vocabulary (`models/extensions/roboledger/event.py:EVENT_ACTIONS`) refining the coarser `event_category`. The vocabulary converges with Valueflows v1.0; canonical naming is RoboSystems-native. SEC-flavored repositories get the schema with empty tables (no rows loaded).
 
@@ -230,7 +233,7 @@ The RoboLedger extension models the full accounting domain: financial reporting 
 #### Context-Aware Loading
 
 ```python
-# SEC Repository — reporting only (hides transaction tables from AI agents)
+# SEC Repository — reporting only (hides transaction tables from AI Operators)
 loader = get_contextual_schema_loader("repository", "sec")
 
 # Entity Database — full accounting
@@ -279,7 +282,7 @@ The RoboInvestor extension models portfolio management, securities, and position
 ### Memory — AI Memory Schema
 
 - **Nodes**: Concept, Observation, Session
-- **Key Features**: AI knowledge graph for storing concepts and observations across agent sessions
+- **Key Features**: AI knowledge graph for storing concepts and observations across AI Operator sessions
 
 ## Schema Management
 
@@ -301,7 +304,7 @@ loader = get_contextual_schema_loader("repository", "sec")
 ### Building Schemas
 
 ```python
-from robosystems.schemas.runtime.builder import LadybugDBSchemaBuilder
+from robosystems.schemas.runtime.builder import LadybugSchemaBuilder
 
 config = {
     "name": "My Financial Graph",
@@ -309,7 +312,7 @@ config = {
     "extensions": ["roboledger", "roboinvestor"]
 }
 
-builder = LadybugDBSchemaBuilder(config)
+builder = LadybugSchemaBuilder(config)
 builder.load_schemas()
 cypher_ddl = builder.generate_cypher()
 ```
@@ -317,9 +320,9 @@ cypher_ddl = builder.generate_cypher()
 ### Schema Validation
 
 ```python
-from robosystems.schemas.runtime.validator import LadybugDBSchemaValidator
+from robosystems.schemas.runtime.validator import LadybugSchemaValidator
 
-validator = LadybugDBSchemaValidator()
+validator = LadybugSchemaValidator()
 
 # Validate node properties
 validator.validate_node("Entity", {
@@ -446,11 +449,11 @@ config_large = {
 
 ```python
 # SEC public data repository
-# Uses reporting-only view to prevent MCP agent confusion
+# Uses reporting-only view to prevent AI Operator confusion
 loader = get_contextual_schema_loader("repository", "sec")
 
 # This filters out transaction tables that don't exist in SEC data
-# Ensures AI agents only see relevant XBRL/reporting tables
+# Ensures AI Operators only see relevant XBRL/reporting tables
 ```
 
 ### Entity Database Configuration
@@ -488,7 +491,7 @@ ALTER TABLE Entity ADD COLUMN new_field STRING
 1. **Additive Changes**: New nodes/relationships can be added safely
 2. **Property Additions**: Use ALTER TABLE to add new properties
 3. **Breaking Changes**: Require coordinated migration scripts
-4. **Version Tracking**: Track schema versions in GraphMetadata
+4. **Version Tracking**: Track schema/tier metadata on the platform `Graph` model (`models/core/graph/graph.py`), not on a graph node
 
 ## Best Practices
 
@@ -518,7 +521,7 @@ ALTER TABLE Entity ADD COLUMN new_field STRING
 
 ### 5. Security Considerations
 
-- **Access Control**: Implement at USER_HAS_ACCESS relationship
+- **Access Control**: A platform-DB concern — graph access is enforced through the platform models (`models/core/user/`, e.g. `GraphUser`), not via a graph relationship. The base schema has no user/access node.
 - **Data Isolation**: Multi-tenant separation at database level
 - **Audit Trails**: Track all schema modifications
 
@@ -563,6 +566,6 @@ The schema system integrates with the RoboSystems API:
 
 ### MCP Integration
 
-- Context-aware schema exposure to AI agents
+- Context-aware schema exposure to AI Operators
 - Natural language to Cypher query generation
 - Schema-guided response formatting

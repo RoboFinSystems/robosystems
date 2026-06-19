@@ -10,7 +10,7 @@ POST /extensions/{graph_id}/graphql
 
 The endpoint is **graph-scoped at the URL level**. `graph_id` is a path parameter, not a query argument. Auth and per-graph access are validated by `get_context` before any resolver runs — resolvers read the graph id from `info.context["graph_id"]` via the `require_graph_id(info)` helper instead of taking it as a field argument. This avoids leaking a "wrong graph" failure mode where a client could pass a `graphId` argument that didn't match the URL.
 
-In dev, hitting the endpoint in a browser renders GraphiQL with introspection enabled. In staging/prod, introspection is still allowed (Strawberry default) but the CSP policy is tightened to block the playground UI.
+In dev, hitting the endpoint in a browser renders the GraphiQL playground with introspection enabled. In staging/prod the playground UI is not mounted (`graphql_ide=None` unless `env.is_development()`); introspection over the API itself is still allowed (Strawberry default).
 
 ## What lives here
 
@@ -22,11 +22,17 @@ robosystems/graphql/
 ├── resolvers/
 │   ├── _common.py         # Shared helpers (pagination guards, session opener)
 │   ├── information_block.py  # InformationBlockQuery — always-on (not feature-gated)
+│   ├── taxonomy_block.py  # TaxonomyBlockQuery — always-on (CoA / custom ontology / standards)
+│   ├── library.py         # LibraryQuery — always-on (taxonomy library browse)
 │   ├── ledger.py          # LedgerQuery — roboledger read fields (ROBOLEDGER_ENABLED)
 │   └── investor.py        # InvestorQuery — roboinvestor read fields (ROBOINVESTOR_ENABLED)
 └── types/
+    ├── _pydantic.py       # Shared pydantic→Strawberry derivation helpers
     ├── common.py          # PaginationInfo
     ├── information_block.py  # Strawberry types for InformationBlockEnvelope and its atoms
+    ├── taxonomy_block.py  # Strawberry types for the Taxonomy Block envelope
+    ├── library.py         # Strawberry types for the taxonomy library surface
+    ├── report_package.py  # Strawberry types for report package responses
     ├── ledger.py          # Strawberry types wrapping roboledger Pydantic response models
     └── investor.py        # Same for roboinvestor
 ```
@@ -78,7 +84,12 @@ Resolvers never contain business logic. The same `reads/*.py` modules are called
 ```python
 # graphql/schema.py
 def _build_query_type() -> type:
-    bases: tuple[type, ...] = (InformationBlockQuery, _BaseQuery)
+    bases: tuple[type, ...] = (
+        InformationBlockQuery,
+        TaxonomyBlockQuery,
+        LibraryQuery,
+        _BaseQuery,
+    )
     if env.ROBOLEDGER_ENABLED:
         bases = (LedgerQuery, *bases)
     if env.ROBOINVESTOR_ENABLED:
@@ -88,7 +99,7 @@ def _build_query_type() -> type:
 
 The `Query` root is built at class-construction time from whichever domain mixins are enabled. There are two composition patterns:
 
-**Always-on mixins** (`InformationBlockQuery`) are composed into `bases` unconditionally. They use `open_library_session` so they work on both the library sentinel (`graph_id='library'`) and any tenant graph — reads are driven by the session's `search_path`. The `informationBlock` / `informationBlocks` fields are always present in the schema regardless of which product flags are on.
+**Always-on mixins** (`InformationBlockQuery`, `TaxonomyBlockQuery`, `LibraryQuery`, plus the `_BaseQuery` probe) are composed into `bases` unconditionally. They work on both the library sentinel (`graph_id='library'`) and any tenant graph — reads are driven by the session's `search_path`. The `informationBlock` / `informationBlocks`, taxonomy-block, and library fields are always present in the schema regardless of which product flags are on.
 
 **Domain-gated mixins** (`LedgerQuery`, `InvestorQuery`) are guarded by feature flags. A ledger-only deployment:
 
@@ -98,7 +109,7 @@ The `Query` root is built at class-construction time from whichever domain mixin
 
 This is strictly better than the alternative ("expose everything, throw `INVESTOR_NOT_INITIALIZED` at runtime") because clients can branch on the actual schema shape rather than trial-and-error against runtime errors. The tradeoff is that introspection tooling sees a different schema per deployment. We don't publish a single SDL; the schema is composed dynamically per tenant feature-flag combination.
 
-Per-domain gating also short-circuits the router: if both flags are off, the FastAPI router that mounts `/extensions/{graph_id}/graphql` never mounts at all (see `main.py` line ~369).
+Per-domain gating also short-circuits the router: if both flags are off, the FastAPI router that mounts `/extensions/{graph_id}/graphql` never mounts at all. The mount is gated on `EXTENSIONS_GRAPHQL_ENABLED AND (ROBOLEDGER_ENABLED OR ROBOINVESTOR_ENABLED)` where the app wires up `GraphQLRouter` (the application factory in `main.py`); the flags themselves are defined in `config/env.py`.
 
 **Rule for new resolvers**: if the read is domain-specific (roboledger data, roboinvestor data), gate it behind the appropriate flag by adding the method to `LedgerQuery` or `InvestorQuery`. If the read is cross-domain or must be available regardless of which product domains are on, add it to `InformationBlockQuery` (or a new always-on mixin) and compose it into `bases` without a flag guard.
 

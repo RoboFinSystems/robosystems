@@ -165,13 +165,13 @@ just admin dev migrations current                          # Show version
 
 ## Common Workflows
 
-### Enable Invoice Billing for Enterprise Customer
+### Enable Invoice Billing for a Customer
 
 ```bash
 # Update org to enable invoice billing
 just admin dev orgs update ORG_ID \
   --invoice-billing \
-  --billing-email "ap@enterprise.com" \
+  --billing-email "ap@example.com" \
   --payment-terms "net_30"
 
 # Verify

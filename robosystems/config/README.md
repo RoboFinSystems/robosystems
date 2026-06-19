@@ -38,7 +38,7 @@ config/
 ├── query_queue.py           # Query queue configuration
 ├── shared_repositories.py   # Shared repository registry
 ├── validation.py            # Startup validation
-├── valkey_registry.py       # Redis database allocation
+├── valkey_registry.py       # Valkey database allocation
 └── storage/                 # S3 path configuration (see storage/README.md)
     ├── __init__.py          # Re-exports from shared and graph
     ├── shared.py            # Shared data sources (SEC, FRED, etc.)
@@ -112,7 +112,7 @@ Centralized environment variable management with validation.
 **Usage:**
 
 ```python
-from robosystems.config.env import env
+from robosystems.config import env
 
 # Access typed environment variables
 database_url = env.DATABASE_URL
@@ -148,8 +148,8 @@ SHARED_RAW_BUCKET    # S3 bucket for shared raw data (SEC, FRED, etc.)
 SHARED_PROCESSED_BUCKET  # S3 bucket for shared processed data
 
 # Feature Flags
-ENABLE_RATE_LIMITING # Rate limiting toggle
-ENABLE_CREDITS       # Credit system toggle
+RATE_LIMIT_ENABLED   # Rate limiting toggle
+BILLING_ENABLED      # Credit/billing system toggle
 ```
 
 ### 2. Billing Configuration (`billing/`)
@@ -165,7 +165,7 @@ Defines subscription plans, credit allocations, and AI token pricing.
 
 **Subscription Tiers** (per-graph):
 
-| Tier | Price | Monthly Credits | ~Agent Calls |
+| Tier | Price | Monthly Credits | ~Operator Calls |
 |------|-------|----------------|-------------|
 | ladybug-standard | $149/mo | 8,000 | ~200/mo |
 | ladybug-large | $299/mo | 32,000 | ~800/mo |
@@ -199,27 +199,49 @@ Burst-focused rate limiting for spike protection.
 
 ```python
 class EndpointCategory(str, Enum):
-    AUTH = "auth"                # Login, register
-    GRAPH_READ = "graph_read"    # GET operations
-    GRAPH_WRITE = "graph_write"  # POST/PUT/DELETE
-    GRAPH_QUERY = "graph_query"  # Cypher queries
-    ANALYTICS = "analytics"      # Heavy computations
-    AI = "ai"                    # AI/MCP operations
-    PUBLIC = "public"            # Health checks
+    # Non-graph scoped endpoints
+    AUTH = "auth"                          # Login, register
+    USER_MANAGEMENT = "user_management"
+    TASKS = "tasks"
+    STATUS = "status"                      # Health checks
+    SSE = "sse"                            # Server-Sent Events connections
+    BILLING = "billing"                    # Checkout and payment flows
+
+    # Graph-scoped endpoints
+    GRAPH_READ = "graph_read"              # GET operations
+    GRAPH_WRITE = "graph_write"            # POST/PUT/DELETE
+    GRAPH_ANALYTICS = "graph_analytics"    # Heavy computations
+    GRAPH_BACKUP = "graph_backup"
+    GRAPH_SYNC = "graph_sync"
+    GRAPH_MCP = "graph_mcp"                # MCP operations
+    GRAPH_OPERATOR = "graph_operator"      # AI Operator operations
+    GRAPH_SEARCH = "graph_search"          # OpenSearch full-text search
+
+    # High-cost operations
+    GRAPH_QUERY = "graph_query"            # Direct Cypher queries
+    GRAPH_IMPORT = "graph_import"          # Bulk data imports
+
+    # Extensions surface (OLTP on shared RDS)
+    EXTENSIONS_GRAPHQL = "extensions_graphql"  # Typed GraphQL reads
+    EXTENSIONS_WRITE = "extensions_write"      # Command writes + views
+
+    # Table operations (DuckDB staging tables)
+    TABLE_QUERY = "table_query"            # SQL queries on staging tables
+    TABLE_UPLOAD = "table_upload"          # File uploads to staging tables
+    TABLE_MANAGEMENT = "table_management"  # Table creation/deletion
 ```
 
-**Rate Limits:**
+**Rate Limits** (representative — see `rate_limits.py` for the authoritative table):
 
 ```python
-# Standard tier (1-minute windows)
-GRAPH_READ: 500/min   # 30k/hour possible
-GRAPH_WRITE: 100/min  # 6k/hour possible
-GRAPH_QUERY: 60/min   # 3.6k/hour possible
-AI: 10/min            # 600/hour possible
+# ladybug-standard tier (1-minute windows, base values)
+GRAPH_READ: 120/min
+GRAPH_WRITE: 30/min
+GRAPH_QUERY: 60/min
+GRAPH_OPERATOR: 15/min   # AI Operator operations
 
-# XLarge tier (5x multiplier)
-GRAPH_READ: 2500/min  # 150k/hour possible
-GRAPH_WRITE: 500/min  # 30k/hour possible
+# Larger tiers apply graph.yml api_rate_multiplier (e.g. 1.5x large, higher for xlarge)
+# on top of these base values.
 ```
 
 **Usage:**
@@ -251,7 +273,7 @@ Defines what consumes credits and token-based pricing for AI operations.
 
 **Credit Model:**
 
-- Only AI agent operations consume credits (token-based pricing)
+- Only AI Operator operations consume credits (token-based pricing)
 - All database operations are included with the subscription (no credits)
 - MCP tool access is unlimited (no credits)
 - Storage is included in each tier (no metering)
@@ -317,23 +339,25 @@ Centralized configuration for the AI Operator system.
 **Features:**
 
 - **Model Selection**: AWS Bedrock Claude model configuration
-- **Execution Profiles**: Time/token limits per agent mode
+- **Execution Profiles**: Time/token limits per operator mode
 - **Orchestrator Config**: Routing strategy and fallback settings
-- **Agent-Specific Overrides**: Per-agent model customization
+- **Operator-Specific Overrides**: Per-operator model customization
 
 **Available Models:**
+
+Each `BedrockModel` enum member's value is a short identifier (e.g. `SONNET_4_6.value == "claude-sonnet-4-6"`); it is mapped internally to a regional Bedrock inference profile id (`us.anthropic.*`) shown in the comments below.
 
 ```python
 from robosystems.config import BedrockModel
 
-# Sonnet 4.6 (default) - Regional inference profile
-BedrockModel.SONNET_4_6  # us.anthropic.claude-sonnet-4-6
+# Sonnet 4.6 (default) → us.anthropic.claude-sonnet-4-6
+BedrockModel.SONNET_4_6
 
-# Sonnet 4.5 (fallback) - Regional inference profile
-BedrockModel.SONNET_4_5  # us.anthropic.claude-sonnet-4-5-20250929-v1:0
+# Sonnet 4.5 (fallback) → us.anthropic.claude-sonnet-4-5-20250929-v1:0
+BedrockModel.SONNET_4_5
 
-# Sonnet 4 (last resort) - Regional inference profile
-BedrockModel.SONNET_4    # us.anthropic.claude-sonnet-4-20250514-v1:0
+# Sonnet 4 (last resort) → us.anthropic.claude-sonnet-4-20250514-v1:0
+BedrockModel.SONNET_4
 ```
 
 **Note:** All models use regional inference profiles (`us.*`) for on-demand access without marketplace subscriptions.
@@ -366,10 +390,10 @@ from robosystems.config import OperatorConfig, BedrockModel
 # Get default model ID
 model_id = OperatorConfig.get_bedrock_model_id()
 
-# Get model for specific agent with override
+# Get model for a specific operator with override
 model_id = OperatorConfig.get_bedrock_model_id(
     model=BedrockModel.SONNET_4_5,
-    agent_type="financial"
+    operator_type="financial"
 )
 
 # Get execution profile
@@ -393,9 +417,9 @@ if not validation["valid"]:
     print(f"Issues: {validation['issues']}")
 ```
 
-**Customizing Agent Models:**
+**Customizing Operator Models:**
 
-To use a different model for a specific agent, update `OPERATOR_MODEL_OVERRIDES`:
+To use a different model for a specific operator, update `OPERATOR_MODEL_OVERRIDES`:
 
 ```python
 # In robosystems/config/operators.py
@@ -487,7 +511,7 @@ All business configuration lives in code, not database:
 
 **Credit Costs** (Billing):
 
-- Only AI agent operations consume credits (token-based pricing)
+- Only AI Operator operations consume credits (token-based pricing)
 - All database operations are included (queries, imports, backups, etc.)
 - No multipliers applied to credit costs — same rate for all tiers
 - Credits are billed based on actual AI token usage (input + output tokens)
@@ -522,7 +546,7 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = "postgresql://test"
 
 # Test configuration access
-from robosystems.config.env import env
+from robosystems.config import env
 assert env.is_test()
 assert env.DATABASE_URL == "postgresql://test"
 

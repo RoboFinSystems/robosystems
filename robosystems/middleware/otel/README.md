@@ -44,13 +44,12 @@ Initializes OpenTelemetry providers and auto-instrumentation.
 **Usage:**
 
 ```python
-from robosystems.middleware.otel.setup import setup_opentelemetry
+from robosystems.middleware.otel.setup import setup_telemetry
 
-# Called during application startup
-setup_opentelemetry(
-    service_name="robosystems-api",
-    service_version="1.0.0"
-)
+# Called during application startup with the FastAPI app instance.
+# Service name comes from OTEL_SERVICE_NAME and the version is read
+# from the installed package metadata — neither is passed as an argument.
+setup_telemetry(app)
 ```
 
 ### 2. Metrics Collection (`metrics.py`)
@@ -262,7 +261,10 @@ ENVIRONMENT=prod                      # prod/staging enables OTEL
 
 # Auto-instrumentation
 OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true
-OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=/health,/metrics
+# setup.py instruments FastAPI with excluded_urls="status,health" to keep
+# high-frequency load-balancer health checks out of the metrics. The platform
+# health endpoint is GET /v1/status (there is no bare /health route).
+OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=status,health
 
 # AWS Integration (Production)
 AWS_PROMETHEUS_ENDPOINT=https://aps-workspaces.us-east-1.amazonaws.com/workspaces/ws-xxxx/

@@ -15,7 +15,7 @@ The MCP middleware:
 - Enables workspace management for isolated development environments
 - Provides data operation tools for staging, querying, and graph materialization
 
-**Operations kernel integration.** MCP tools are a **transport layer**, not a domain. Tools that touch extension OLTP data (ledger schedules, period close, fiscal calendar, CoA→GAAP mapping, reports) delegate directly to the same `operations/roboledger/{reads,commands}/*` functions that the GraphQL resolvers and the named command operation routers call. A schedule created via `create-schedule` MCP tool goes through the exact same `commands/schedules.py` function as one created via `POST /extensions/roboledger/{g}/operations/create-schedule`. This is the single-source-of-truth contract that makes agent-driven workflows byte-identical to UI-driven workflows. Never add business logic to an MCP tool file — wire it into `operations/` and have the tool delegate.
+**Operations kernel integration.** MCP tools are a **transport layer**, not a domain. Tools that touch extension OLTP data (period close, fiscal calendar, CoA→GAAP mapping, information blocks, events) delegate directly to the same `operations/roboledger/{reads,commands}/*` functions that the GraphQL resolvers and the named command operation routers call. An information block created via the `create-information-block` MCP tool goes through the exact same operations function as one created via `POST /extensions/roboledger/{g}/operations/create-information-block`. This is the single-source-of-truth contract that makes agent-driven workflows byte-identical to UI-driven workflows. Never add business logic to an MCP tool file — wire it into `operations/` and have the tool delegate.
 
 ## Architecture
 
@@ -29,9 +29,10 @@ mcp/
 ├── exceptions.py            # MCP-specific exception classes
 └── tools/                   # MCP tool implementations
     ├── base_tool.py         # Base tool interface
+    ├── _gate.py             # Tool gating helpers
     ├── manager.py           # GraphMCPTools — layered tool registry and dispatcher
     ├── registrar.py         # Registry-driven tool generation (infra)
-    ├── constants.py         # Tool name constants
+    ├── constants.py         # Shared tool guidance constants
     │
     │ # Layer 1: Core tools (always available)
     ├── cypher_tool.py       # read-graph-cypher
@@ -47,25 +48,26 @@ mcp/
     │ # Layer 2b: Roboledger OLTP tools (delegate to operations/roboledger/*)
     ├── fiscal_calendar_tools.py    # get-fiscal-calendar, close-period, reopen-period
     ├── schedule_tools.py           # get-period-close-status, list-period-drafts
-    │                               # (create-schedule + siblings are registrar-
-    │                               # generated; schedule envelopes now surface via
-    │                               # information_block_tools)
+    │                               # (schedule envelopes surface via the generic
+    │                               # information_block_tools; there are no
+    │                               # create/update/delete-schedule tools)
     ├── information_block_tools.py  # get-information-block, list-information-blocks
     ├── event_block_tools.py        # get/list/create-event-block (REA business events)
     ├── event_handler_tools.py      # get/list-event-handler (DSL rule rows)
     ├── agent_tools.py              # get-agent, list-agents, agent-activity (REA Agent reads)
     ├── taxonomy_tools.py           # get-unmapped-elements, suggest-mapping,
     │                               # create-mapping-association, get-mapping-summary
+    ├── playbook_tools.py           # get-close-playbook (close-workflow guidance)
     ├── graph_tools.py              # create-subgraph, delete-subgraph, list-subgraphs,
-    │                               # materialize, create-backup, set-write-policy
-    ├── materialization_tools.py    # get-graph-sync-status, materialize-graph
+    │                               # materialize, get-graph-sync-status, create-backup,
+    │                               # set-write-policy, switch-workspace (client-side)
     │
     │ # Layer 3: Document search + management (SEMANTIC_SEARCH_ENABLED)
     ├── search_tools.py      # search-documents, get-document-section
     ├── document_tools.py    # create-document, update-document, get-document, list-documents
     │
     │ # Layer 4: Infrastructure (feature-flag gated)
-    ├── workspace.py         # create/delete/list/switch-workspace (MCP_WORKSPACE_ENABLED)
+    │ # (switch-workspace lives in graph_tools.py; it is a client-side tool)
     └── memory_tools.py      # write-graph-cypher, add-node-table, add-relationship-table (MCP_MEMORY_ENABLED)
 ```
 
@@ -121,17 +123,15 @@ Require `roboledger` in `schema_extensions`, `ROBOLEDGER_ENABLED=true`, the grap
 
 **Schedules (depreciation, amortization, accruals):**
 
-Schedule reads (list, get facts) moved to the generic Information Block
-surface — use `list-information-blocks` with `block_type="schedule"`
-and `get-information-block` instead. Schedule-specific writes stay
-registered for wire compatibility and operate through the unified
-envelope machine under the hood.
+Schedules are an Information Block `block_type`, not a separate tool
+family. There are **no** `create-schedule` / `update-schedule` /
+`delete-schedule` tools (no such OperationSpec is registered).
+
+- **Reads**: use `list-information-blocks` with `block_type="schedule"` and `get-information-block`.
+- **Writes**: use `create-information-block` (and `update-information-block` / `delete-information-block`) with `block_type="schedule"`.
 
 | Tool | Description | Delegates to |
 |------|-------------|--------------|
-| `create-schedule` | Create a schedule structure with pre-generated facts | `commands/schedules.create_schedule` |
-| `update-schedule` | Rename or edit schedule mechanics | `commands/schedules.update_schedule` |
-| `delete-schedule` | Remove a schedule | `commands/schedules.delete_schedule` |
 | `list-period-drafts` | List pending draft entries for a period — surfaces the QB-outbox disposition (`will_publish_to_qb` per draft + `qb_publish_count` / `local_only_count` summary) so the user sees what close will write to QuickBooks | `reads/period_drafts.list_period_drafts` |
 
 Closing-entry drafting (schedule-derived + manual) and schedule
@@ -163,7 +163,7 @@ section. The Python handler registry routes them to `schedule_entry_due`,
 | Tool | Description |
 |------|-------------|
 | `get-graph-sync-status` | Check if the graph needs rebuild after OLTP writes |
-| `materialize-graph` | Trigger the `mark_graph_stale` sensor to rebuild |
+| `materialize` | Trigger an OLTP→OLAP rebuild (replaces the legacy `materialize-graph` name) |
 
 **Event blocks and REA agents (`event_block_tools.py`, `event_handler_tools.py`, `agent_tools.py`):**
 
@@ -205,14 +205,18 @@ Gated by `SEMANTIC_SEARCH_ENABLED`. Document management tools additionally skip 
 
 ### Layer 4: Infrastructure (feature-flag gated)
 
-**Workspaces** (`MCP_WORKSPACE_ENABLED`):
+**Workspaces:**
+
+Only `switch-workspace` is registered. It is a **client-side** tool
+(defined in `graph_tools.py`): the MCP client intercepts it to retarget
+the active graph context before sending; there is no server handler.
+There are no `list-workspaces` / `create-workspace` / `delete-workspace`
+tools — create a subgraph with `create-subgraph` and then point
+`switch-workspace` (or the `graph_id`) at it.
 
 | Tool | Description | Read-only OK |
 |------|-------------|--------------|
-| `list-workspaces` | List available workspaces | Yes |
-| `switch-workspace` | Switch active workspace context | Yes |
-| `create-workspace` | Create subgraph workspace | No |
-| `delete-workspace` | Delete workspace | No |
+| `switch-workspace` | Switch active workspace context (client-side) | Yes |
 
 **Memory / write Cypher** (`MCP_MEMORY_ENABLED`, writable graphs only):
 
@@ -233,7 +237,7 @@ Gated by `SEMANTIC_SEARCH_ENABLED`. Document management tools additionally skip 
 | Manifest `has_semantic_enrichment=True` | `resolve-element` |
 | `FACT_GRID_ENABLED=true` | `build-fact-grid` |
 | `SEMANTIC_SEARCH_ENABLED=true` | Layer 3 (search + document management) |
-| `MCP_WORKSPACE_ENABLED=true` | Layer 4 workspace tools |
+| `MCP_WORKSPACE_ENABLED=true` | Graph-lifecycle tools (`create-subgraph`, `delete-subgraph`, `create-backup`, `switch-workspace`) |
 | `MCP_MEMORY_ENABLED=true` | Layer 4 memory / write-cypher tools |
 
 A tool that would otherwise be unavailable due to any of these gates returns a structured error via `_tool_unavailable_reason` instead of silently no-oping — clients always see a typed reason when a tool isn't mounted in a given context.
@@ -293,12 +297,23 @@ max_lifetime: 3600 seconds (1 hour)
 **Usage:**
 
 ```python
-from robosystems.middleware.mcp import acquire_graph_mcp_client
+# acquire_graph_mcp_client (the pooled context manager) is exposed from
+# the factory module, not the package root. The package root exports
+# create_graph_mcp_client, GraphMCPClient, and GraphMCPTools.
+from robosystems.middleware.mcp.factory import acquire_graph_mcp_client
 
-# Acquire client from pool (recommended)
+# Acquire client from pool (preferred)
 async with acquire_graph_mcp_client(graph_id="kg1a2b3c") as client:
     result = await client.execute_query("MATCH (n) RETURN count(n)")
     # Client automatically returned to pool
+```
+
+For a one-off (non-pooled) client, use the package-level export:
+
+```python
+from robosystems.middleware.mcp import create_graph_mcp_client
+
+client = await create_graph_mcp_client(graph_id="kg1a2b3c")
 ```
 
 ### 3. MCP Tools (`tools/`)
@@ -342,7 +357,7 @@ Comprehensive exception hierarchy for MCP operations.
 - `GraphConnectionError` - Connection to Graph API failed
 - `GraphResourceNotFoundError` - Resource not found
 - `GraphRateLimitError` - Rate limit exceeded
-- `LadybugDBSchemaError` - Schema validation failed
+- `GraphSchemaError` - Schema validation failed
 
 ## Configuration
 
@@ -384,8 +399,8 @@ MCP_MEMORY_ENABLED=false               # Gates Layer 4 memory / write-cypher too
 ### With FastAPI Routes
 
 ```python
-from fastapi import APIRouter, Depends
-from robosystems.middleware.mcp import acquire_graph_mcp_client
+from fastapi import APIRouter
+from robosystems.middleware.mcp.factory import acquire_graph_mcp_client
 
 router = APIRouter()
 
@@ -399,10 +414,11 @@ async def execute_mcp_query(
         return {"results": result}
 ```
 
-### With Agent System
+### With an Operator
 
 ```python
-from robosystems.middleware.mcp import acquire_graph_mcp_client, GraphMCPTools
+from robosystems.middleware.mcp import GraphMCPTools, create_graph_mcp_client
+from robosystems.middleware.mcp.factory import acquire_graph_mcp_client
 
 # Acquire a pooled client for the target graph
 async with acquire_graph_mcp_client(graph_id="sec") as client:
@@ -415,32 +431,38 @@ async with acquire_graph_mcp_client(graph_id="sec") as client:
         read_only=False,
     )
 
-    # Agent uses tools for natural language queries
-    response = await agent.execute({
+    # The Operator uses tools for natural language queries
+    response = await operator.execute({
         "prompt": "What were Apple's total assets in 2023?",
         "tools": tools.get_tool_definitions(),
     })
 ```
 
-Agents that need both graph queries and OLTP writes (like `CloseAgent`, which calls `create-closing-entry` and `close-period`) initialize `GraphMCPTools` with a writable client and `schema_extensions=("roboledger",)` so both Layer 2a (analytical reads) and Layer 2b (OLTP commands) are available.
+An Operator that needs both graph queries and OLTP writes (e.g. a
+close-workflow Operator that calls `close-period` and drafts
+closing entries via `create-event-block`) initializes `GraphMCPTools`
+with a writable client and `schema_extensions=("roboledger",)` so both
+Layer 2a (analytical reads) and Layer 2b (OLTP commands) are available.
+There is no `create-closing-entry` tool — schedule-derived and manual
+drafts both come through `create-event-block`.
 
 ## Troubleshooting
 
 ### Common Issues
 
-**1. Query Timeouts**
+#### 1. Query Timeouts
 
 - Increase `GRAPH_QUERY_TIMEOUT` for complex queries
 - Optimize query patterns (use LIMIT clauses)
 - Check Graph API instance health
 
-**2. Connection Pool Exhausted**
+#### 2. Connection Pool Exhausted
 
 - Increase `MCP_POOL_MAX_CONNECTIONS`
 - Check for connection leaks (missing context manager exits)
 - Review pool lifetime settings
 
-**3. Validation Errors**
+#### 3. Validation Errors
 
 - Check query syntax (must be valid Cypher)
 - Verify query length is within limits

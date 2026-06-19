@@ -181,7 +181,7 @@ just setup-aws
 | ---------- | ------------------------------- | ------------------------------ |
 | Secret     | `robosystems/prod`              | Production credentials         |
 | Secret     | `robosystems/staging`           | Staging credentials (optional) |
-| SSM Params | `/robosystems/{env}/features/*` | Feature flags (26 params)      |
+| SSM Params | `/robosystems/{env}/features/*` | Feature flags (27 params)      |
 | SSM Params | `/robosystems/{env}/tuning/*`   | Tuning parameters (33 params)  |
 
 **Secrets Manager** (credentials only):
@@ -195,7 +195,6 @@ just setup-aws
   "GRAPH_BACKUP_ENCRYPTION_KEY": "[generated]",
   "INTUIT_CLIENT_ID": "...",
   "INTUIT_CLIENT_SECRET": "...",
-  "PLAID_CLIENT_ID": "...",
   "STRIPE_SECRET_KEY": "...",
   "SEC_GOV_USER_AGENT": "...",
   "TURNSTILE_SECRET_KEY": "..."
@@ -328,7 +327,7 @@ just setup-gha
 | `RDS_PROXY_MAX_CONNECTIONS_PERCENT_*`   | `100`          | Max % of DB max_connections proxy may use    |
 | `RDS_PROXY_CONNECTION_BORROW_TIMEOUT_*` | `120`          | Seconds client waits for a pooled connection |
 
-#### Valkey (Redis) Configuration
+#### Valkey Configuration
 
 | Variable                           | Prod Default              | Description        |
 | ---------------------------------- | ------------------------- | ------------------ |

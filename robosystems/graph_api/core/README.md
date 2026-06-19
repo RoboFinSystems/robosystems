@@ -19,22 +19,31 @@ core/
 │
 ├── ladybug/                       # LadybugDB embedded graph database
 │   ├── __init__.py               # LadybugDB exports
-│   ├── engine.py                 # Low-level database driver (18KB)
-│   ├── pool.py                   # Connection pooling (26KB)
-│   ├── manager.py                # Database lifecycle and schema (35KB)
-│   └── service.py                # Service orchestration (35KB)
+│   ├── engine.py                 # Low-level database driver
+│   ├── pool.py                   # Connection pooling
+│   ├── manager.py                # Database lifecycle and schema
+│   ├── service.py                # Service orchestration
+│   ├── config.py                 # LadybugDB configuration
+│   └── materialization_lock.py   # Single-writer materialization lock
 │
 ├── duckdb/                        # DuckDB data staging
 │   ├── __init__.py               # DuckDB exports
-│   ├── pool.py                   # DuckDB connection pooling (21KB)
-│   └── manager.py                # Staging table management (20KB)
+│   ├── pool.py                   # DuckDB connection pooling
+│   └── manager.py                # Staging table management
+│
+├── lance/                         # LanceDB vector storage
+│   ├── __init__.py               # LanceDB exports
+│   └── manager.py                # Vector table management
 │
 └── [shared services]              # Technology-agnostic services
-    ├── admission_control.py      # CPU/memory-based backpressure (6KB)
-    ├── metrics_collector.py      # Performance monitoring (13KB)
-    ├── task_manager.py           # Async task coordination (5KB)
-    ├── task_sse.py               # Server-Sent Events (7KB)
-    └── utils.py                  # Shared utilities (4KB)
+    ├── admission_control.py      # CPU/memory-based backpressure
+    ├── backup_service.py         # Backup/restore service
+    ├── memory_manager.py         # Memory budget management
+    ├── migration_service.py      # Graph schema migration service
+    ├── metrics_collector.py      # Performance monitoring
+    ├── task_manager.py           # Async task coordination
+    ├── task_sse.py               # Server-Sent Events
+    └── utils.py                  # Shared utilities
 ```
 
 ## Technology Stack
@@ -335,7 +344,7 @@ Async operation coordination with Server-Sent Events for real-time progress:
 **Key Features**:
 - **Task Tracking** - Manage long-running operations
 - **Progress Updates** - Real-time status via Server-Sent Events
-- **Redis-Backed** - Distributed task state storage
+- **Valkey-Backed** - Distributed task state storage
 - **Automatic Cleanup** - Task lifecycle management
 
 **Usage**:
@@ -516,7 +525,7 @@ MEMORY_CRITICAL_THRESHOLD=90
 
 ### Task Management
 ```bash
-# Redis configuration for task state
+# Valkey configuration for task state (redis:// URL scheme)
 VALKEY_URL=redis://localhost:6379
 TASK_MANAGER_DB=3
 TASK_TTL_SECONDS=3600
