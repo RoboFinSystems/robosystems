@@ -1,13 +1,52 @@
 ---
 id: https://robosystems.ai/report/rpt_01KTDR4JFECMQWRA5ZHNT81XB6
-type: databook
-vocab: https://w3id.org/databook/ns#
-serialization_version: "1.0"
+type: DataBook
+title: "Seattle Method (Test Case 1) — Lemonade Stand (Charlie Hoffman Test Case 1)"
+version: 1.0.0
+authors:
+  - name: "RoboSystems Report Engine"
+license: CC-BY-4.0
+description: >
+  Published financial report as a DataBook — the report as a
+  collection of Information Blocks (balance sheet, income
+  statement, cash flow, statement of changes in equity), each a
+  table plus an addressable RDF/Turtle slice, with SHACL + XBRL
+  2.1 validation evidence inlined.
+tags:
+  - financial
+  - reporting
+  - xbrl
+  - rs-gaap
+  - databook
+provenance:
+  source: "Lemonade Stand (Charlie Hoffman Test Case 1)"
+  method: "Materialized RoboSystems Report rpt_01KTDR4JFECMQWRA5ZHNT81XB6 (generation 1, draft)"
+manifest:
+  entrypoints:
+    - block: balance_sheet
+    - block: income_statement
+    - block: cash_flow_statement
+    - block: equity_statement
+  blocks:
+    balance_sheet:
+      type: turtle
+      description: "rs-gaap — Balance Sheet — Classified"
+    income_statement:
+      type: turtle
+      description: "rs-gaap — Income Statement — Multi-step"
+    cash_flow_statement:
+      type: turtle
+      description: "rs-gaap — Cash Flow Statement — Indirect"
+    equity_statement:
+      type: turtle
+      description: "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)"
 report:
   reporting_style: 025f5d48-12ce-5d65-b9eb-4f137a10ef06
-  entity: "Lemonade Stand (Charlie Hoffman Test Case 1)"
+  report_id: rpt_01KTDR4JFECMQWRA5ZHNT81XB6
+  generation_count: 1
+  filing_status: draft
   periods:
-    - { label: "2023-10-02 \u2192 2024-03-31", start: 2023-10-02, end: 2024-03-31 }
+    - { label: "2023-10-02 → 2024-03-31", start: 2023-10-02, end: 2024-03-31 }
   framework_pins:
     - { framework: fac-traits, version: v1 }
     - { framework: rs-gaap, version: v1 }
@@ -22,27 +61,16 @@ report:
     - { framework: rs-gaap-reporting-styles, version: v1 }
     - { framework: rs-gaap-rollup-rules, version: v1 }
     - { framework: rs-gaap-rules, version: v1 }
-process:
-  transformer: robosystems-report-engine
-  report_id: rpt_01KTDR4JFECMQWRA5ZHNT81XB6
-  generation_count: 1
-  filing_status: draft
-information_blocks:
-  - { id: b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d, block_type: balance_sheet, anchor: ib-balance_sheet }
-  - { id: 47cd6544-03d1-5bc1-8c28-31c0cfa450f9, block_type: income_statement, anchor: ib-income_statement }
-  - { id: 5473639a-2dac-56a6-b9e5-38480ea38bc1, block_type: cash_flow_statement, anchor: ib-cash_flow_statement }
-  - { id: 0b179e5c-5f02-506d-b8d5-860cb10c7694, block_type: equity_statement, anchor: ib-equity_statement }
-license: CC-BY-4.0
 ---
 
-# Seattle Method (Test Case 1) — Report DataBook
+# Seattle Method (Test Case 1) — Lemonade Stand (Charlie Hoffman Test Case 1)
 
-A report **is** a collection of Information Blocks. Each block below is shown twice: a markdown table (human view) and an addressable `turtle` block (machine view — the same facts as RDF). Frontmatter carries the report's provenance *process stamp*. Everything here is derived from `seattle-method-case-1.jsonld`; the bundle and this DataBook are two skins of one graph.
+A report **is** a collection of Information Blocks. Each block below is shown twice: a markdown table (human view) and an addressable `turtle` block (machine view — the same facts as RDF), keyed by the id declared in the frontmatter `manifest`. Everything is derived from `seattle-method-case-1.jsonld`; the bundle and this DataBook are two skins of one graph.
 
 
-## rs-gaap — Balance Sheet — Classified  {#ib-balance_sheet}
+## Balance Sheet
 
-- **Block type**: `balance_sheet`
+- **Structure**: rs-gaap — Balance Sheet — Classified
 - **Information Block**: `b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d`
 - **FactSet**: `fs_01KTDR4JG477A3VNMHZFPE28MP`
 
@@ -66,7 +94,7 @@ A report **is** a collection of Information Blocks. Each block below is shown tw
 | `rs-gaap:StockholdersEquity` |   **Stockholders Equity** | $12,050.00 |
 | `rs-gaap:LiabilitiesAndStockholdersEquity` | **Liabilities And Stockholders Equity** | $14,450.00 |
 
-```turtle {#ib-balance_sheet-rdf}
+```turtle {#balance_sheet}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
 @prefix rs: <https://robosystems.ai/vocab/> .
 @prefix rs-gaap: <https://robosystems.ai/taxonomy/rs-gaap/v1/> .
@@ -480,9 +508,9 @@ rs-gaap:RetainedEarningsAccumulatedDeficit a rs:Element ;
 ```
 
 
-## rs-gaap — Income Statement — Multi-step  {#ib-income_statement}
+## Income Statement
 
-- **Block type**: `income_statement`
+- **Structure**: rs-gaap — Income Statement — Multi-step
 - **Information Block**: `47cd6544-03d1-5bc1-8c28-31c0cfa450f9`
 - **FactSet**: `fs_01KTDR4JG477A3VNMHZFPE28MQ`
 
@@ -502,7 +530,7 @@ rs-gaap:RetainedEarningsAccumulatedDeficit a rs:Element ;
 | `rs-gaap:IncomeLossFromContinuingOperations` |   **Income Loss From Continuing Operations** | $2,050.00 |
 | `rs-gaap:NetIncomeLoss` |   **Net Income Loss** | $2,050.00 |
 
-```turtle {#ib-income_statement-rdf}
+```turtle {#income_statement}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
 @prefix rs: <https://robosystems.ai/vocab/> .
 @prefix rs-gaap: <https://robosystems.ai/taxonomy/rs-gaap/v1/> .
@@ -807,9 +835,9 @@ rs-gaap:Revenues a rs:Element ;
 ```
 
 
-## rs-gaap — Cash Flow Statement — Indirect  {#ib-cash_flow_statement}
+## Cash Flow Statement
 
-- **Block type**: `cash_flow_statement`
+- **Structure**: rs-gaap — Cash Flow Statement — Indirect
 - **Information Block**: `5473639a-2dac-56a6-b9e5-38480ea38bc1`
 - **FactSet**: `fs_01KTDR4JG477A3VNMHZFPE28MR`
 
@@ -829,7 +857,7 @@ rs-gaap:Revenues a rs:Element ;
 | `rs-gaap:NetCashProvidedByUsedInFinancingActivities` |   Net Cash Provided By Used In Financing Activities | $11,000.00 |
 | `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **Cash And Cash Equivalents Period Increase Decrease** | $10,850.00 |
 
-```turtle {#ib-cash_flow_statement-rdf}
+```turtle {#cash_flow_statement}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
 @prefix rs: <https://robosystems.ai/vocab/> .
 @prefix rs-gaap: <https://robosystems.ai/taxonomy/rs-gaap/v1/> .
@@ -1134,9 +1162,9 @@ rs-gaap:RepaymentsOfLongTermDebt a rs:Element ;
 ```
 
 
-## rs-gaap — Statement of Changes in Equity — Roll Forward (Total)  {#ib-equity_statement}
+## Statement of Changes in Equity
 
-- **Block type**: `equity_statement`
+- **Structure**: rs-gaap — Statement of Changes in Equity — Roll Forward (Total)
 - **Information Block**: `0b179e5c-5f02-506d-b8d5-860cb10c7694`
 - **FactSet**: `fs_01KTDR4JG477A3VNMHZFPE28MS`
 
@@ -1146,7 +1174,7 @@ rs-gaap:RepaymentsOfLongTermDebt a rs:Element ;
 | `rs-gaap:ProceedsFromIssuanceOfCommonStock` |   Proceeds From Issuance Of Common Stock | $10,000.00 |
 | `rs-gaap:StockholdersEquity` | **Stockholders Equity** | $12,050.00 |
 
-```turtle {#ib-equity_statement-rdf}
+```turtle {#equity_statement}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
 @prefix rs: <https://robosystems.ai/vocab/> .
 @prefix rs-gaap: <https://robosystems.ai/taxonomy/rs-gaap/v1/> .

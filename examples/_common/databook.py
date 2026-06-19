@@ -11,8 +11,9 @@ A RoboSystems Report maps onto the pattern almost 1:1: the report **is** a
 collection of Information Blocks, and each IB renders two ways —
 
 * a **markdown table** (the human view of the block's facts), and
-* an addressable ``turtle`` fenced block ``{#ib-...}`` (the machine view —
-  the same facts as RDF, which reads far better than the JSON-LD).
+* an addressable ``turtle`` fenced block ``{#<block_type>}`` keyed to the
+  frontmatter ``manifest`` (the machine view — the same facts as RDF, which
+  reads far better than the JSON-LD).
 
 Everything is derived from the on-disk ``.jsonld`` artifact (same design as
 ``validate.py``): no API, no database, no container. The DataBook therefore
@@ -71,12 +72,27 @@ _BLOCK_ORDER: dict[str, int] = {
   "equity_statement": 3,
 }
 
+# Friendly section headings keyed by block_type (the IB prefLabel — e.g.
+# "rs-gaap — Balance Sheet — Classified" — goes in the manifest description).
+_BLOCK_TITLES: dict[str, str] = {
+  "balance_sheet": "Balance Sheet",
+  "income_statement": "Income Statement",
+  "cash_flow_statement": "Cash Flow Statement",
+  "equity_statement": "Statement of Changes in Equity",
+}
+
 
 def _rel(p: Path) -> str:
   try:
     return str(p.resolve().relative_to(REPO_ROOT))
   except ValueError:
     return str(p)
+
+
+def _yaml_str(s: str) -> str:
+  """Double-quoted YAML scalar with real Unicode preserved (em-dash, arrows)
+  rather than ``\\uXXXX`` escapes — matches Charlie's hand-authored examples."""
+  return json.dumps(s, ensure_ascii=False)
 
 
 def _fmt_money(v: float | None) -> str:
@@ -296,10 +312,40 @@ def _render_ib_turtle(src: Graph, ib: URIRef) -> str:
 # ── Frontmatter ──────────────────────────────────────────────────────────────
 
 
-def _frontmatter(g: Graph, root: URIRef, ibs: list[URIRef], columns: list[dict]) -> str:
+def _frontmatter(
+  g: Graph, root: URIRef, ibs: list[URIRef], columns: list[dict], title: str
+) -> str:
+  """DataBook frontmatter in Charlie Hoffman's canonical envelope + key order
+  (id · type · title · version · created · modified · authors · license ·
+  description · tags · provenance · manifest), so the ``databook`` CLI parses
+  it; see seattlemethod/prototypes ``md-examples/``. RoboSystems-specific
+  metadata lives in a ``report`` extension block after the canonical keys."""
   meta = g.value(root, RS.reportMeta)
   entity = g.value(root, RS.entity)
   entity_name = str(g.value(entity, SKOS.prefLabel) or "") if entity else ""
+
+  def _meta(pred: URIRef) -> str | None:
+    val = g.value(meta, pred) if meta is not None else None
+    return str(val) if val is not None else None
+
+  # 1.0 → 1.0.0: the canonical `version` is semver.
+  version = str(g.value(root, RS.serializationVersion) or "1.0")
+  version += ".0" * max(0, 2 - version.count("."))
+  created = _meta(RS.filedAt) or _meta(RS.sharedAt)  # doc date, when known
+
+  report_id = _meta(RS.reportId)
+  generation = _meta(RS.generationCount)
+  filing_status = _meta(RS.filingStatus) or "draft"
+  src_graph = _meta(RS.sourceGraphId)
+
+  source = entity_name or "RoboSystems graph"
+  if src_graph:
+    source += f" (graph {src_graph})"
+  method = "Materialized RoboSystems Report"
+  if report_id:
+    method += f" {report_id}"
+  if generation:
+    method += f" (generation {generation}, {filing_status})"
 
   pins: list[tuple[str, str]] = []
   for pin in g.objects(root, RS.frameworkPins):
@@ -309,50 +355,58 @@ def _frontmatter(g: Graph, root: URIRef, ibs: list[URIRef], columns: list[dict])
       pins.append((fw, ver))
 
   lines: list[str] = ["---"]
+  # ── Canonical DataBook envelope (key order matters to the databook CLI) ──
   lines.append(f"id: {root}")
-  lines.append("type: databook")
-  lines.append("vocab: https://w3id.org/databook/ns#")
-  lines.append(
-    f'serialization_version: "{g.value(root, RS.serializationVersion) or ""}"'
-  )
+  lines.append("type: DataBook")
+  lines.append(f"title: {_yaml_str(title)}")
+  lines.append(f"version: {version}")
+  if created:
+    lines.append(f"created: {created}")
+    lines.append(f"modified: {created}")
+  lines.append("authors:")
+  lines.append('  - name: "RoboSystems Report Engine"')
+  lines.append("license: CC-BY-4.0")
+  lines.append("description: >")
+  lines.append("  Published financial report as a DataBook — the report as a")
+  lines.append("  collection of Information Blocks (balance sheet, income")
+  lines.append("  statement, cash flow, statement of changes in equity), each a")
+  lines.append("  table plus an addressable RDF/Turtle slice, with SHACL + XBRL")
+  lines.append("  2.1 validation evidence inlined.")
+  lines.append("tags:")
+  for tag in ("financial", "reporting", "xbrl", "rs-gaap", "databook"):
+    lines.append(f"  - {tag}")
+  lines.append("provenance:")
+  lines.append(f"  source: {_yaml_str(source)}")
+  lines.append(f"  method: {_yaml_str(method)}")
+  lines.append("manifest:")
+  lines.append("  entrypoints:")
+  for ib in ibs:
+    lines.append(f"    - block: {g.value(ib, RS.blockType)}")
+  lines.append("  blocks:")
+  for ib in ibs:
+    bt = str(g.value(ib, RS.blockType) or "block")
+    desc = str(g.value(ib, SKOS.prefLabel) or bt)
+    lines.append(f"    {bt}:")
+    lines.append("      type: turtle")
+    lines.append(f"      description: {_yaml_str(desc)}")
+  # ── RoboSystems extension (after the canonical keys) ──
   lines.append("report:")
   lines.append(f"  reporting_style: {g.value(root, RS.reportingStyle) or ''}")
-  if entity_name:
-    lines.append(f"  entity: {json.dumps(entity_name)}")
+  if report_id:
+    lines.append(f"  report_id: {report_id}")
+  if generation:
+    lines.append(f"  generation_count: {generation}")
+  lines.append(f"  filing_status: {filing_status}")
+  if src_graph:
+    lines.append(f"  source_graph_id: {src_graph}")
   lines.append("  periods:")
   for c in columns:
     lines.append(
-      f"    - {{ label: {json.dumps(c['label'])}, start: {c['start']}, end: {c['end']} }}"
+      f"    - {{ label: {_yaml_str(c['label'])}, start: {c['start']}, end: {c['end']} }}"
     )
   lines.append("  framework_pins:")
   for fw, ver in pins:
     lines.append(f"    - {{ framework: {fw}, version: {ver} }}")
-
-  # The process stamp — RoboSystems report-engine provenance, DataBook-shaped.
-  lines.append("process:")
-  lines.append("  transformer: robosystems-report-engine")
-  if meta is not None:
-    for key, pred in (
-      ("report_id", RS.reportId),
-      ("generation_count", RS.generationCount),
-      ("filing_status", RS.filingStatus),
-      ("filed_at", RS.filedAt),
-      ("supersedes_id", RS.supersedesId),
-      ("source_graph_id", RS.sourceGraphId),
-      ("source_report_id", RS.sourceReportId),
-      ("shared_at", RS.sharedAt),
-    ):
-      val = g.value(meta, pred)
-      if val is not None:
-        lines.append(f"  {key}: {val}")
-
-  lines.append("information_blocks:")
-  for ib in ibs:
-    bt = str(g.value(ib, RS.blockType) or "")
-    lines.append(
-      f"  - {{ id: {g.value(ib, RS.internalId)}, block_type: {bt}, anchor: ib-{bt} }}"
-    )
-  lines.append("license: CC-BY-4.0")
   lines.append("---")
   return "\n".join(lines)
 
@@ -413,28 +467,33 @@ def write_databook(
     ),
   )
 
-  parts: list[str] = [_frontmatter(g, root, ibs, columns)]  # type: ignore[arg-type]
+  entity = g.value(root, RS.entity)
+  entity_name = str(g.value(entity, SKOS.prefLabel) or "") if entity else ""
+  title = f"{label} — {entity_name}" if entity_name else label
+
+  parts: list[str] = [_frontmatter(g, root, ibs, columns, title)]  # type: ignore[arg-type]
   parts.append(
-    f"\n# {label} — Report DataBook\n\n"
+    f"\n# {title}\n\n"
     f"A report **is** a collection of Information Blocks. Each block below is "
     f"shown twice: a markdown table (human view) and an addressable `turtle` "
-    f"block (machine view — the same facts as RDF). Frontmatter carries the "
-    f"report's provenance *process stamp*. Everything here is derived from "
+    f"block (machine view — the same facts as RDF), keyed by the id declared in "
+    f"the frontmatter `manifest`. Everything is derived from "
     f"`{jsonld_path.name}`; the bundle and this DataBook are two skins of one "
     f"graph.\n"
   )
 
   for ib in ibs:
     bt = str(g.value(ib, RS.blockType) or "block")
-    name = str(g.value(ib, SKOS.prefLabel) or bt)
-    parts.append(f"\n## {name}  {{#ib-{bt}}}\n")
-    parts.append(f"- **Block type**: `{bt}`")
+    struct_label = str(g.value(ib, SKOS.prefLabel) or bt)
+    heading = _BLOCK_TITLES.get(bt, struct_label)
+    parts.append(f"\n## {heading}\n")
+    parts.append(f"- **Structure**: {struct_label}")
     parts.append(f"- **Information Block**: `{g.value(ib, RS.internalId)}`")
     parts.append(
       f"- **FactSet**: `{str(g.value(ib, RS.factSet)).rsplit('/', 1)[-1]}`\n"
     )
     parts.append(_render_ib_table(g, ib, columns))  # type: ignore[arg-type]
-    parts.append(f"\n```turtle {{#ib-{bt}-rdf}}")
+    parts.append(f"\n```turtle {{#{bt}}}")
     parts.append(_render_ib_turtle(g, ib))  # type: ignore[arg-type]
     parts.append("```\n")
 
