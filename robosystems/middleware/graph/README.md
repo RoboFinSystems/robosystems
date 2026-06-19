@@ -463,11 +463,9 @@ Credit consumption is intentionally narrow:
 
 - **AI Operations**: Anthropic/OpenAI API calls consume credits (token-based billing) — the only credit-consuming path
 - **Database Operations**: All graph queries, imports, backups are free (included in the subscription tier)
-- **Storage**: Currently limit-enforced, not metered into credits. A
-  `STORAGE_CREDITS_PER_GB_PER_DAY` constant exists in `config/constants.py`
-  but is unreferenced today (see `middleware/billing/README.md`); if
-  usage-based storage billing is added it would be a separate credit line,
-  independent of the AI compute path.
+- **Storage**: Currently limit-enforced, not metered into credits (see
+  `middleware/billing/README.md`); if usage-based storage billing is added it
+  would be a separate credit line, independent of the AI compute path.
 
 ### 2. Authentication
 

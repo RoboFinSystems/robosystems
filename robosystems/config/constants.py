@@ -14,9 +14,6 @@ Categories:
 # OPERATIONAL CONSTANTS
 # =============================================================================
 
-# Storage Pricing (fixed business rule)
-STORAGE_CREDITS_PER_GB_PER_DAY = 0.05
-
 # Port Configuration
 MIN_PORT = 1
 MAX_PORT = 65535

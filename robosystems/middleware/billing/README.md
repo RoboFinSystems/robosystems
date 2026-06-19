@@ -204,9 +204,8 @@ limit enforcement.
 - `CreditService.check_storage_limit()` reports current usage against the
   graph's `storage_limit_gb` (with an optional admin override). It returns
   status/recommendations; it does **not** consume credits or compute a charge.
-- A `STORAGE_CREDITS_PER_GB_PER_DAY` constant exists in `config/constants.py`
-  but is currently unreferenced (no code consumes it) — storage credit metering
-  is not implemented.
+- There is no storage pricing constant or metering code in the billing path —
+  storage credit metering is not implemented.
 - `consume_ai_tokens` is the only credit-consuming entry point; its inline note
   reads "Storage is included in each tier (no metering/overage)."
 
