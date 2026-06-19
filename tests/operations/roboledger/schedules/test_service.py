@@ -407,17 +407,27 @@ class TestCreateScheduleCreditDirection:
   contra-asset (credit-balance) accumulates; a directly-credited debit-balance
   asset like a prepaid draws down toward zero."""
 
-  def _credit_facts(self, session, *, credit_balance_type, asset_element_id=None):
+  def _credit_facts(
+    self,
+    session,
+    *,
+    credit_balance_type,
+    asset_element_id=None,
+    is_contra=False,
+    original_amount=120_000,
+  ):
     svc = ScheduleService()
     # execute order: (1) cm role lookup, (2) credit balance_type lookup,
-    # (3) SumEquals qname lookup.
+    # (3) credit contraAsset-trait lookup, (4) SumEquals qname lookup.
     cm_roles_row = MagicMock()
     cm_roles_row.scalars.return_value = []
     balance_row = MagicMock()
     balance_row.scalar.return_value = credit_balance_type
+    contra_row = MagicMock()
+    contra_row.scalar.return_value = "elem_cr" if is_contra else None
     qname_row = MagicMock()
     qname_row.scalar.return_value = "fac:Expense"
-    session.execute.side_effect = [cm_roles_row, balance_row, qname_row]
+    session.execute.side_effect = [cm_roles_row, balance_row, contra_row, qname_row]
 
     with patch.object(svc, "_get_entity_id", return_value="ent_01"):
       svc.create_schedule(
@@ -433,7 +443,7 @@ class TestCreateScheduleCreditDirection:
         ),
         schedule_metadata=ScheduleMetadata(
           method="straight_line",
-          original_amount=120_000,  # $1,200 total
+          original_amount=original_amount,  # 0 ⇒ derive from monthly x periods
           asset_element_id=asset_element_id,
         ),
         created_by="usr_test",
@@ -452,9 +462,28 @@ class TestCreateScheduleCreditDirection:
     facts = self._credit_facts(_mock_session(), credit_balance_type="credit")
     assert [f.value for f in facts] == [0.0, 400.0, 800.0, 1200.0]
 
+  def test_debit_balance_contra_accumulates(self):
+    # A QuickBooks Accumulated Depreciation account is asset/debit-normal but
+    # carries the contraAsset trait — balance_type would (wrongly) say "draws
+    # down", the trait makes it accumulate UP to cost like the contra it is.
+    facts = self._credit_facts(
+      _mock_session(), credit_balance_type="debit", is_contra=True
+    )
+    assert [f.value for f in facts] == [0.0, 400.0, 800.0, 1200.0]
+
   def test_directly_credited_asset_draws_down(self):
     # opening (1200 gross) + 3 drawing-down endings
     facts = self._credit_facts(_mock_session(), credit_balance_type="debit")
+    assert [f.value for f in facts] == [1200.0, 800.0, 400.0, 0.0]
+
+  def test_prepaid_without_original_derives_opening_and_draws_down(self):
+    # The Harbinger first-close bug: a prepaid schedule created without
+    # original_amount used to fall back to accumulating (balance climbing to
+    # cost). The opening cost is now derived from monthly x periods so the
+    # prepaid balance declines from cost to zero.
+    facts = self._credit_facts(
+      _mock_session(), credit_balance_type="debit", original_amount=0
+    )
     assert [f.value for f in facts] == [1200.0, 800.0, 400.0, 0.0]
 
   def test_asset_equals_credit_element_no_double_emit(self):
@@ -483,18 +512,26 @@ class TestCreateScheduleSumEqualsRule:
   def _run(self, session, *, original_amount: int | None = 120_000):
     svc = ScheduleService()
     # taxonomy_id is provided so _ensure_schedule_taxonomy is skipped.
-    # Three execute() calls now: (1) the cm:Debit/cm:Credit posting-role lookup
+    # Four execute() calls now: (1) the cm:Debit/cm:Credit posting-role lookup
     # for has-part arcs (no roles in the mock → arcs skipped), (2) the credit
     # element's balance_type lookup (a contra here → credit fact accumulates),
-    # then (3) the Element.qname lookup for the SumEquals rule.
+    # (3) the credit element's contraAsset-trait lookup, then (4) the
+    # Element.qname lookup for the SumEquals rule.
     cm_roles_row = MagicMock()
     cm_roles_row.scalars.return_value = []
     credit_balance_row = MagicMock()
     credit_balance_row.scalar.return_value = "credit"
+    contra_row = MagicMock()
+    contra_row.scalar.return_value = None
     debit_qname_row = MagicMock()
     debit_qname_row.scalar.return_value = "fac:DeprExpense"
 
-    session.execute.side_effect = [cm_roles_row, credit_balance_row, debit_qname_row]
+    session.execute.side_effect = [
+      cm_roles_row,
+      credit_balance_row,
+      contra_row,
+      debit_qname_row,
+    ]
 
     metadata = (
       ScheduleMetadata(
