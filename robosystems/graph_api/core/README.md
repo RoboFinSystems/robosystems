@@ -479,10 +479,10 @@ Core services are configured via environment variables:
 ### LadybugDB Configuration
 ```bash
 # Database directory
-LBUG_DATABASE_DIR=/data/lbug-dbs
+LBUG_DATABASE_PATH=/data/lbug-dbs
 
 # Instance limits
-LBUG_MAX_DATABASES_PER_NODE=100
+LBUG_DATABASES_PER_INSTANCE=10
 
 # Node configuration
 LBUG_NODE_TYPE=writer                    # writer, reader, shared_master

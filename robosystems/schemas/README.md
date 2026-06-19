@@ -214,7 +214,7 @@ Fiscal calendar / fiscal period stays OLTP-only — operational state (rolling c
 
 The RoboLedger extension models the full accounting domain: financial reporting (XBRL/SEC), general ledger (transactions, journal entries), and chart of accounts (via Element/Association patterns). It uses context-aware loading to present different views depending on the use case.
 
-**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), a GraphQL read surface under `/extensions/{graph_id}/graphql` (37 fields), named command operations under `/extensions/roboledger/{graph_id}/operations/*` (~20+ commands), graph-backed analytical view operations over the materialized data, a QuickBooks ELT pipeline, and a dedicated frontend app.
+**Full product extension** with OLTP tables in the `extensions` database (schema-per-tenant), a GraphQL read surface under `/extensions/{graph_id}/graphql` (38 fields), named command operations under `/extensions/roboledger/{graph_id}/operations/*` (~20+ commands), graph-backed analytical view operations over the materialized data, a QuickBooks ELT pipeline, and a dedicated frontend app.
 
 #### Reporting Section (SEC/XBRL)
 

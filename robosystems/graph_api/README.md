@@ -497,17 +497,15 @@ with get_graph_client_sync("kg1a2b3c4d5", operation_type="read") as client:
 # Node Configuration
 LBUG_NODE_TYPE=writer                    # writer|shared_master
 CLUSTER_TIER=ladybug-standard            # ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared
-LBUG_DATABASE_PATH=/data/lbug-dbs       # Storage location
-LBUG_PORT=8001                           # API port
+LBUG_DATABASE_PATH=/data/lbug-dbs        # Storage location
 
 # Performance Settings
-LBUG_MAX_DATABASES_PER_NODE=10          # Configuration-based limit
-LBUG_MAX_MEMORY_MB=14336                # Total memory allocation
-LBUG_MEMORY_PER_DB_MB=2048              # Per-database memory
-LBUG_CHUNK_SIZE=1000                    # Streaming chunk size
-LBUG_QUERY_TIMEOUT=30                   # Query timeout seconds
-LBUG_MAX_QUERY_LENGTH=10000             # Max query characters
-LBUG_CONNECTION_POOL_SIZE=10            # Connections per database
+LBUG_DATABASES_PER_INSTANCE=10           # Databases per instance
+LBUG_MAX_MEMORY_MB=14336                 # Total memory allocation
+LBUG_MAX_MEMORY_PER_DB_MB=2048           # Per-database memory
+LBUG_CHUNK_SIZE=1000                     # Streaming chunk size
+GRAPH_QUERY_TIMEOUT=30                   # Query timeout seconds
+LBUG_CONNECTION_POOL_SIZE=10             # Connections per database
 
 # Authentication
 GRAPH_API_KEY=                           # API key

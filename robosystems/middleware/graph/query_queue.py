@@ -134,7 +134,7 @@ class QueryQueueManager:
     parameters: dict[str, Any] | None,
     graph_id: str,
     user_id: str,
-    credits_required: float,
+    credits_required: float = 0,
     priority: int = 5,
   ) -> str:
     """
@@ -145,7 +145,7 @@ class QueryQueueManager:
         parameters: Query parameters
         graph_id: Target graph
         user_id: User submitting query
-        credits_required: Credits needed for query
+        credits_required: Credits to reserve (not enforced by the queue; default 0)
         priority: Query priority (1-10, higher = more important)
 
     Returns:

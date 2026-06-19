@@ -29,8 +29,7 @@ config/
 ├── openapi_tags.py          # OpenAPI tag metadata
 ├── billing/                 # Billing plans and pricing
 │   ├── core.py              # Subscription tiers and base pricing
-│   ├── ai.py                # AI/token-based pricing
-│   └── repositories.py      # Repository pricing
+│   └── ai.py                # AI/token-based pricing
 ├── rate_limits.py           # Burst-focused rate limiting
 ├── credits.py               # Credit costs and allocations
 ├── operators.py             # AI Operator configuration (Bedrock Claude models)

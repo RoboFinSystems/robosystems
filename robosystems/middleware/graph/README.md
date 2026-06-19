@@ -204,8 +204,10 @@ from robosystems.middleware.graph.query_queue import get_query_queue
 
 queue = get_query_queue()
 query_id = await queue.submit_query(
+    cypher="MATCH (n) RETURN n",
+    parameters=None,
     graph_id="kg1a2b3c",
-    query="MATCH (n) RETURN n",
+    user_id="user_123",
     priority=5,
 )
 # Poll status, then fetch the result:
@@ -378,10 +380,10 @@ Key environment variables:
 
 ```bash
 # LadybugDB Configuration (core/ladybug/)
-LBUG_DATABASE_DIR=/data/lbug-dbs       # Database directory
-LBUG_MAX_DATABASES_PER_NODE=100        # Instance capacity
-LBUG_MAX_CONNECTIONS_PER_DB=10         # Connection pool size
-LBUG_ACCESS_PATTERN=api_writer         # Access pattern for routing
+LBUG_DATABASE_PATH=/data/lbug-dbs        # Database directory
+LBUG_DATABASES_PER_INSTANCE=10           # Instance capacity
+LBUG_CONNECTION_POOL_SIZE=10             # Connection pool size
+LBUG_ACCESS_PATTERN=api_writer           # Access pattern for routing
 GRAPH_API_URL=                         # Graph API endpoint (dynamic in prod)
 
 # DuckDB Staging Configuration (core/duckdb/)
@@ -437,8 +439,10 @@ from robosystems.middleware.graph.query_queue import get_query_queue
 
 queue = get_query_queue()
 query_id = await queue.submit_query(
+    cypher="MATCH (n) RETURN count(n)",
+    parameters=None,
     graph_id="kg1a2b3c",
-    query="MATCH (n) RETURN count(n)",
+    user_id="user_123",
     priority=8,
 )
 result = await queue.get_query_result(query_id)
