@@ -1008,11 +1008,22 @@ class TestIsQbContraAssetSubType:
     ):
       assert _is_qb_contra_asset_sub_type(sub_type) is True
 
-  def test_accumulated_family_catch_all(self):
+  def test_accumulated_asset_family_catch_all(self):
     from robosystems.operations.extensions.loader import _is_qb_contra_asset_sub_type
 
-    # Forward-compat: an unlisted Accumulated* sub-type is still contra.
-    assert _is_qb_contra_asset_sub_type("AccumulatedSomethingNew") is True
+    # Forward-compat: unlisted depreciation/amortization/depletion variants
+    # are still contra-assets.
+    assert _is_qb_contra_asset_sub_type("AccumulatedDepreciationEquipment") is True
+    assert _is_qb_contra_asset_sub_type("AccumulatedAmortizationLeasehold") is True
+
+  def test_non_asset_accumulated_sub_types_are_not_contra(self):
+    from robosystems.operations.extensions.loader import _is_qb_contra_asset_sub_type
+
+    # AccumulatedOtherComprehensiveIncome / AccumulatedAdjustment are QB
+    # *equity* sub-types — the catch-all must NOT classify them as
+    # contra-assets.
+    assert _is_qb_contra_asset_sub_type("AccumulatedOtherComprehensiveIncome") is False
+    assert _is_qb_contra_asset_sub_type("AccumulatedAdjustment") is False
 
   def test_direct_assets_are_not_contra(self):
     from robosystems.operations.extensions.loader import _is_qb_contra_asset_sub_type
@@ -1088,6 +1099,35 @@ class TestApplySourceElementTraits:
 
     assert inserted == 3
     session.execute.assert_called_once()
+
+  def test_equity_accumulated_sub_type_is_not_marked_contra_asset(self):
+    """AccumulatedOtherComprehensiveIncome is a QB *equity* sub-type; the
+    contra override is asset-scoped, so it must keep its equity trait and
+    NOT be promoted to contraAsset. Only ``contraAsset`` is resolvable, so a
+    correct run inserts 0 rows (the AOCI element → equity, unresolvable); a
+    broken override would map it to contraAsset → 1 row."""
+    from robosystems.operations.extensions.loader import OLTPLoader
+
+    elem_aoci = MagicMock(
+      id="elem_1",
+      metadata_={
+        "account_type": "Equity",
+        "account_sub_type": "AccumulatedOtherComprehensiveIncome",
+      },
+    )
+    traits = [self._trait("contraAsset", "trt_contra")]
+    session = self._make_loader_session({"elem_1": elem_aoci}, traits)
+
+    loader = OLTPLoader()
+    inserted = loader._apply_source_element_traits(
+      session,
+      source="quickbooks",
+      connection_id="conn_1",
+      created_by="user_1",
+      now=datetime.now(UTC),
+    )
+
+    assert inserted == 0
 
   def test_contra_asset_sub_type_maps_to_contra_asset_trait(self):
     """A QB Accumulated Depreciation account is asset-typed (→ plain

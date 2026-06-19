@@ -418,7 +418,9 @@ class TestCreateScheduleCreditDirection:
   ):
     svc = ScheduleService()
     # execute order: (1) cm role lookup, (2) credit balance_type lookup,
-    # (3) credit contraAsset-trait lookup, (4) SumEquals qname lookup.
+    # (3) credit contraAsset-trait lookup — ONLY when balance_type=='debit'
+    # (the service short-circuits the trait query for credit-balance
+    # accounts), (4) SumEquals qname lookup.
     cm_roles_row = MagicMock()
     cm_roles_row.scalars.return_value = []
     balance_row = MagicMock()
@@ -427,7 +429,11 @@ class TestCreateScheduleCreditDirection:
     contra_row.scalar.return_value = "elem_cr" if is_contra else None
     qname_row = MagicMock()
     qname_row.scalar.return_value = "fac:Expense"
-    session.execute.side_effect = [cm_roles_row, balance_row, contra_row, qname_row]
+    seq = [cm_roles_row, balance_row]
+    if credit_balance_type == "debit":
+      seq.append(contra_row)
+    seq.append(qname_row)
+    session.execute.side_effect = seq
 
     with patch.object(svc, "_get_entity_id", return_value="ent_01"):
       svc.create_schedule(
@@ -512,24 +518,22 @@ class TestCreateScheduleSumEqualsRule:
   def _run(self, session, *, original_amount: int | None = 120_000):
     svc = ScheduleService()
     # taxonomy_id is provided so _ensure_schedule_taxonomy is skipped.
-    # Four execute() calls now: (1) the cm:Debit/cm:Credit posting-role lookup
+    # Three execute() calls: (1) the cm:Debit/cm:Credit posting-role lookup
     # for has-part arcs (no roles in the mock → arcs skipped), (2) the credit
-    # element's balance_type lookup (a contra here → credit fact accumulates),
-    # (3) the credit element's contraAsset-trait lookup, then (4) the
-    # Element.qname lookup for the SumEquals rule.
+    # element's balance_type lookup (a credit-balance contra here → credit
+    # fact accumulates), then (3) the Element.qname lookup for the SumEquals
+    # rule. The contraAsset-trait lookup is short-circuited because the
+    # credit account is credit-balance.
     cm_roles_row = MagicMock()
     cm_roles_row.scalars.return_value = []
     credit_balance_row = MagicMock()
     credit_balance_row.scalar.return_value = "credit"
-    contra_row = MagicMock()
-    contra_row.scalar.return_value = None
     debit_qname_row = MagicMock()
     debit_qname_row.scalar.return_value = "fac:DeprExpense"
 
     session.execute.side_effect = [
       cm_roles_row,
       credit_balance_row,
-      contra_row,
       debit_qname_row,
     ]
 
@@ -576,6 +580,48 @@ class TestCreateScheduleSumEqualsRule:
     added = self._run(session, original_amount=120_000)
     rules = [o for o in added if type(o).__name__ == "Rule"]
     assert rules[0].metadata_["expected_total"] == 1200.0  # cents → dollars
+
+  def test_sum_equals_rule_uses_derived_total_when_no_original_amount(self):
+    """A prepaid created without original_amount (the Harbinger case) still
+    emits a SumEquals rule anchored to the derived total (monthly x periods),
+    not skipped as it would be for a contra/accumulate schedule with no cost
+    basis."""
+    session = _mock_session()
+    svc = ScheduleService()
+    # debit-balance, non-contra credit element ⇒ draws down ⇒ original is
+    # derived ⇒ SumEquals fires. execute order: cm, balance(debit),
+    # contra-trait(None), qname.
+    cm_roles_row = MagicMock()
+    cm_roles_row.scalars.return_value = []
+    balance_row = MagicMock()
+    balance_row.scalar.return_value = "debit"
+    contra_row = MagicMock()
+    contra_row.scalar.return_value = None
+    qname_row = MagicMock()
+    qname_row.scalar.return_value = "fac:Expense"
+    session.execute.side_effect = [cm_roles_row, balance_row, contra_row, qname_row]
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Prepaid no-original",
+        taxonomy_id="tax_01",
+        element_ids=["elem_dr", "elem_cr"],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),  # 3 periods
+        monthly_amount=40_000,  # $400/mo → derived total $1,200
+        entry_template=EntryTemplate(
+          debit_element_id="elem_dr", credit_element_id="elem_cr"
+        ),
+        schedule_metadata=None,  # no original_amount
+        created_by="usr_test",
+      )
+
+    added = [c[0][0] for c in session.add.call_args_list]
+    rules = [o for o in added if type(o).__name__ == "Rule"]
+    assert len(rules) == 1
+    assert rules[0].rule_pattern == "SumEquals"
+    assert rules[0].metadata_["expected_total"] == 1200.0  # 400 x 3, derived
 
   def test_sum_equals_rule_targets_structure(self):
     session = _mock_session()

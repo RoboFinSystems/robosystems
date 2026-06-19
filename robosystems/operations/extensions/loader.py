@@ -143,16 +143,31 @@ _QB_CONTRA_ASSET_SUB_TYPES: frozenset[str] = frozenset(
 )
 
 
+# Accumulated-* sub-type families that are contra-ASSETS. Used as a
+# forward-compatible catch-all (QB periodically adds new variants, e.g.
+# AccumulatedDepreciationEquipment). Deliberately NOT a bare
+# ``startswith("Accumulated")`` — ``AccumulatedOtherComprehensiveIncome``
+# and ``AccumulatedAdjustment`` are QB *equity* sub-types, not contra-assets.
+_QB_CONTRA_ASSET_SUB_TYPE_PREFIXES: tuple[str, ...] = (
+  "AccumulatedDepreciation",
+  "AccumulatedAmortization",
+  "AccumulatedDepletion",
+)
+
+
 def _is_qb_contra_asset_sub_type(sub_type: str | None) -> bool:
   """True if a QuickBooks AccountSubType denotes a contra-asset.
 
-  Matches the known contra sub-types plus the ``Accumulated*`` family as
-  a forward-compatible catch-all (QB periodically adds new accumulated-*
-  fixed-asset sub-types).
+  Matches the known contra sub-types plus the accumulated
+  depreciation/amortization/depletion families as a forward-compatible
+  catch-all. Other ``Accumulated*`` sub-types (e.g. the equity
+  ``AccumulatedOtherComprehensiveIncome``) are intentionally excluded.
   """
   if not sub_type:
     return False
-  return sub_type in _QB_CONTRA_ASSET_SUB_TYPES or sub_type.startswith("Accumulated")
+  return sub_type in _QB_CONTRA_ASSET_SUB_TYPES or sub_type.startswith(
+    _QB_CONTRA_ASSET_SUB_TYPE_PREFIXES
+  )
 
 
 def _parse_metadata(raw) -> dict:
@@ -923,8 +938,13 @@ class OLTPLoader:
       # A contra-asset is asset-typed in QB but offsets the gross asset —
       # override the account_type's plain ``asset`` trait with
       # ``contraAsset`` so rollups subtract it and the schedule generator
-      # rolls it forward in the accumulate (not deplete) direction.
-      if _is_qb_contra_asset_sub_type(meta.get("account_sub_type")):
+      # rolls it forward in the accumulate (not deplete) direction. Guard on
+      # the asset classification so a non-asset Accumulated-* sub-type (e.g.
+      # the equity AccumulatedOtherComprehensiveIncome) can never be
+      # mislabeled as a contra-asset.
+      if efs_identifier == "asset" and _is_qb_contra_asset_sub_type(
+        meta.get("account_sub_type")
+      ):
         efs_identifier = "contraAsset"
       efs_trait_id = efs_id_by_identifier.get(efs_identifier)
       if efs_trait_id is not None:

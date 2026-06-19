@@ -355,7 +355,10 @@ class ScheduleService:
     credit_balance_type = session.execute(
       select(Element.balance_type).where(Element.id == entry_template.credit_element_id)
     ).scalar()
-    credit_is_contra = _element_is_contra_asset(
+    # Only debit-normal accounts can be contra-assets, so skip the trait
+    # lookup for credit-balance accounts (liabilities, deferred revenue) —
+    # the common case.
+    credit_is_contra = credit_balance_type == "debit" and _element_is_contra_asset(
       session, entry_template.credit_element_id
     )
     credit_draws_down = credit_balance_type == "debit" and not credit_is_contra
