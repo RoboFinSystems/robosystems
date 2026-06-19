@@ -356,7 +356,8 @@ def update_schedule(
 
   Period range and monthly amount are NOT editable — they define the
   fact grid. Fire an event block that terminates the schedule (e.g.,
-  `asset_disposed`) and create a fresh schedule via `create-schedule`.
+  `asset_disposed`) and create a fresh schedule via
+  `create-information-block` (`block_type='schedule'`).
 
   When the entry template changes, all remaining `pending`
   schedule_entry_due obligations are voided and replaced with a fresh

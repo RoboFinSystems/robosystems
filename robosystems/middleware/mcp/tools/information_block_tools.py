@@ -7,10 +7,9 @@ envelope for any registered block type. Two tools:
 2. ``list-information-blocks`` — list blocks, optionally filtered by
    block_type + category.
 
-These are the eventual unified replacement for the block-type-specific
-read tools in ``schedule_tools.py`` (``list-schedule-structures``,
-``get-schedule-facts``). Both surfaces ship in parallel during the
-migration so callers can switch over without a breaking change.
+These replaced the retired block-type-specific schedule reads
+(``list-schedule-structures``, ``get-schedule-facts``); schedule
+envelopes now surface here via ``block_type='schedule'``.
 
 The ``create-information-block`` **write** tool is NOT in this module —
 it's auto-generated from the OperationSpec via
@@ -67,9 +66,9 @@ A typed envelope with:
 - list-information-blocks — browse available blocks
 - create-information-block — build a new block
 
-Note: This is the generic reader. Block-type-specific tools like
-list-schedule-structures and get-schedule-facts still ship but will
-eventually be deprecated in favor of this pair.""",
+Note: This is the generic reader for every block type; the old
+schedule-specific readers (list-schedule-structures, get-schedule-facts)
+were retired in favor of this pair.""",
       "inputSchema": {
         "type": "object",
         "properties": {

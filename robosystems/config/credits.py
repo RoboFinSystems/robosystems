@@ -64,7 +64,7 @@ class CreditConfig:
     """
     Get the cost for an operation type.
 
-    Only AI operations (agent_call, ai_analysis) and storage consume credits.
+    Only AI operations (agent_call, ai_analysis) consume credits.
     All other operations including MCP calls are included in the subscription.
 
     Args:

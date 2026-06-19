@@ -244,9 +244,9 @@ class GraphMCPTools:
     self.get_fiscal_calendar_tool = None
     self.close_period_tool = None
     self.reopen_period_tool = None
-    # Information Block read tools — the eventual unified replacement for
-    # list-schedule-structures + get-schedule-facts. Both ship in parallel
-    # until agent workflows migrate.
+    # Information Block read tools (get/list-information-block) — these
+    # replaced the retired schedule-specific reads (list-schedule-structures,
+    # get-schedule-facts).
     self.get_information_block_tool = None
     self.list_information_blocks_tool = None
     if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED and not read_only:
@@ -261,9 +261,10 @@ class GraphMCPTools:
       )
 
       # Period-workflow read tools (span multiple blocks; not
-      # Information Block tools). Writes (create-schedule,
-      # update-schedule, delete-schedule) are registrar-generated from
-      # the roboledger OperationSpec declarations; closing-entry
+      # Information Block tools). Schedule writes have no dedicated ops —
+      # they go through create/update/delete-information-block
+      # (block_type='schedule'), registrar-generated from the roboledger
+      # OperationSpec declarations; closing-entry
       # drafting (schedule-derived and manual) goes through
       # create-event-block with event_type='schedule_entry_due'
       # (schedule-derived) or 'journal_entry_recorded' (manual).
