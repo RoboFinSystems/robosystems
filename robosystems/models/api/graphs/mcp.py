@@ -291,6 +291,14 @@ class MCPToolsResponse(BaseModel):
   tools: list[dict[str, object]] = Field(
     ..., description="List of available MCP tools with their schemas"
   )
+  instructions: str | None = Field(
+    None,
+    description=(
+      "Per-graph routing guidance for MCP clients, tailored to the graph's "
+      "category and live tool set. Clients should pass this to the MCP server's "
+      "`instructions` handshake field so it is always in the agent's context."
+    ),
+  )
 
 
 class MCPToolResult(BaseModel):

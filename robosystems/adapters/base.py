@@ -41,6 +41,12 @@ class SharedRepositoryManifest:
   has_semantic_enrichment: bool = False
   sibling_subgraphs: tuple[str, ...] = ()  # ("historical",) → graph_id_historical
 
+  # Agent-facing routing guidance handed to MCP clients via the server's
+  # `instructions` handshake field. Authored per-repo (shared repos have a
+  # fixed, curated tool set, so the text is stable). When None, the MCP layer
+  # falls back to generating instructions from the graph's live tool surface.
+  agent_instructions: str | None = None
+
   # Status
   status: str = "available"  # available, coming_soon
 

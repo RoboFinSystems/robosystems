@@ -198,6 +198,42 @@ class MCPHandler:
 
     return tools
 
+  def get_instructions(self, tools: list[dict[str, Any]]) -> str | None:
+    """Build per-graph routing guidance for the MCP client handshake.
+
+    Derived from the SAME signals that gate the tool list — the resolved
+    tool-name set, shared-repo status, and read-only — so the instructions can
+    never reference a tool this graph doesn't expose. Shared repositories use
+    their manifest's authored ``agent_instructions`` verbatim; entity and
+    generic graphs are generated from the live tool surface.
+    """
+    from robosystems.config.shared_repositories import (
+      get_manifest,
+      is_shared_repository_or_subgraph,
+      resolve_shared_repository_parent,
+    )
+    from robosystems.middleware.mcp.tools.instructions import build_instructions
+
+    is_shared_repo = is_shared_repository_or_subgraph(self.graph_id)
+
+    authored_override: str | None = None
+    if is_shared_repo:
+      try:
+        manifest = get_manifest(resolve_shared_repository_parent(self.graph_id))
+      except ValueError:
+        manifest = None
+      authored_override = getattr(manifest, "agent_instructions", None)
+
+    read_only = bool(getattr(self.mcp_tools, "read_only", is_shared_repo))
+
+    return build_instructions(
+      graph_id=self.graph_id,
+      tool_names={str(tool["name"]) for tool in tools},
+      is_shared_repo=is_shared_repo,
+      read_only=read_only,
+      authored_override=authored_override,
+    )
+
   async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Execute an MCP tool call using Graph API backend with comprehensive timeout protection."""
     self._ensure_not_closed()
