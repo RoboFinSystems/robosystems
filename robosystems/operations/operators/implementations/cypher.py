@@ -104,6 +104,33 @@ class CypherOperator(Operator):
     schema_text = self._format_schema_for_ai(schema)
     max_results = self._get_max_results(ctx.mode)
 
+    # The materialized ledger spine only exists in entity graphs with roboledger
+    # materialized — not SEC/generic graphs. Only inject status-filtering guidance
+    # when those nodes are present, or it's noise about nodes that don't exist.
+    # Key on Entry/Transaction/LineItem — NOT Event: the base REA Event table
+    # exists (empty) on the SEC shared repo, so it isn't a reliable signal.
+    node_labels = {item.get("label") for item in schema if item.get("type") == "node"}
+    has_ledger_spine = bool(node_labels & {"Entry", "Transaction", "LineItem"})
+
+    ledger_rule = (
+      """
+8. LEDGER STATUS: the graph keeps cancelled/replaced ledger rows. When counting or
+   aggregating Entry/Event/Transaction data, filter to live rows or voided/reversed
+   amounts inflate the result:
+   - Entry: match only `status = 'posted'` for balances and debit/credit sums.
+   - Event: exclude `voided` and `superseded` (`status <> 'voided' AND status <> 'superseded'`).
+   - Transaction has only a `pending` boolean (no full status) — aggregate realized
+     effect through its posted Entry/LineItem, not by summing Transaction.amount.
+   - Fact nodes have no status and are pre-filtered; this rule is ledger-spine only."""
+      if has_ledger_spine
+      else ""
+    )
+    ledger_pattern = (
+      "\n- Posted GL balances: MATCH (e:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem) WHERE e.status = 'posted'"
+      if has_ledger_spine
+      else ""
+    )
+
     system_prompt = f"""You are a Cypher query expert for RoboSystems graph databases.
 
 SCHEMA:
@@ -116,12 +143,12 @@ IMPORTANT RULES:
 4. Always include a LIMIT clause (max {max_results})
 5. Use parameterized queries when possible
 6. Handle NULL values appropriately
-7. Use CONTAINS for text search, not exact matches
+7. Use CONTAINS for text search, not exact matches{ledger_rule}
 
 SCHEMA PATTERNS:
 - Financial facts: MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
 - Time periods: MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
-- Entities: MATCH (e:Entity)-[:HAS_REPORT]->(r:Report)
+- Entities: MATCH (e:Entity)-[:HAS_REPORT]->(r:Report){ledger_pattern}
 
 Return ONLY the Cypher query, nothing else."""
 

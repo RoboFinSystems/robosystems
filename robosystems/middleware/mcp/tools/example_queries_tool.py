@@ -7,7 +7,11 @@ from typing import Any
 from robosystems.logger import logger
 
 from .base_tool import BaseTool
-from .constants import PERIOD_TYPE_GUIDANCE, QUERY_PATTERN_GUIDANCE
+from .constants import (
+  LEDGER_STATUS_GUIDANCE,
+  PERIOD_TYPE_GUIDANCE,
+  QUERY_PATTERN_GUIDANCE,
+)
 
 
 class ExampleQueriesTool(BaseTool):
@@ -185,6 +189,54 @@ WHERE r.form = '10-K' OR r.form = '10-Q'
 RETURN r.form, r.filing_date, r.identifier
 LIMIT 10""",
               "explanation": "Report nodes contain SEC filing metadata",
+            },
+          ]
+        )
+
+      # Ledger-spine queries (tenant roboledger graphs that materialize the
+      # OLTP general ledger). These nodes carry lifecycle status and the graph
+      # keeps voided/superseded rows, so every example MUST show the live filter.
+      # Key on Entry/Transaction/LineItem — NOT Event: the base REA Event table
+      # exists (empty) on the SEC shared repo, so including it would surface
+      # these tenant-only examples there.
+      has_ledger_spine = any(
+        n in node_types for n in ("Entry", "Transaction", "LineItem")
+      )
+      if has_ledger_spine and (not category or category == "ledger"):
+        examples.extend(
+          [
+            {
+              "category": "ledger",
+              "description": "⚠️ READ FIRST — ledger status filtering",
+              "info": LEDGER_STATUS_GUIDANCE,
+              "explanation": "The graph keeps voided/superseded/draft rows for audit; the examples below show the required live-row filters.",
+            },
+            {
+              "category": "ledger",
+              "description": "⭐ Account balances from POSTED entries only",
+              "query": """MATCH (e:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(el:Element)
+WHERE e.status = 'posted'
+RETURN el.qname, sum(li.debit_amount) AS debits, sum(li.credit_amount) AS credits
+ORDER BY debits DESC LIMIT 25""",
+              "explanation": "CRITICAL: filter `e.status = 'posted'`. The graph keeps draft/reversed entries (and entries of voided events stay as 'draft'); without this filter cancelled amounts inflate every balance.",
+            },
+            {
+              "category": "ledger",
+              "description": "Count / sum events excluding voided & superseded",
+              "query": """MATCH (ev:Event)
+WHERE ev.status <> 'voided' AND ev.status <> 'superseded'
+RETURN ev.event_type, count(ev) AS count, sum(ev.amount) AS total
+ORDER BY count DESC LIMIT 25""",
+              "explanation": "Event.status keeps voided (cancelled) and superseded (replaced) rows for audit. Exclude both from counts/sums. For open obligations instead, match the positive set (e.g. status IN ['committed','fulfilled','pending']).",
+            },
+            {
+              "category": "ledger",
+              "description": "Transaction amounts via posted entries (NOT Transaction.amount)",
+              "query": """MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(e:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)
+WHERE e.status = 'posted'
+RETURN t.number, t.date, sum(li.debit_amount) AS posted_debits
+ORDER BY t.date DESC LIMIT 25""",
+              "explanation": "The Transaction node exposes only a `pending` boolean, NOT the full status — a voided transaction looks identical to a live one. Aggregate realized effect through its posted Entry/LineItem instead of summing Transaction.amount directly.",
             },
           ]
         )

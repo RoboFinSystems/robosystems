@@ -23,3 +23,26 @@ Period nodes classify time context into three types:
 - `annual` - ~12 months duration
 - `other` - Non-standard durations
 Note: Element.period_type indicates the expected period type for that metric - different from Period.period_type!"""
+
+# Ledger lifecycle / status filtering — shared across tools that may touch the
+# tenant roboledger ledger spine (Event / Transaction / Entry / LineItem). The
+# graph mirrors the FULL ledger including cancelled/replaced rows; readers must
+# filter to live rows or voided/reversed amounts inflate counts and sums.
+LEDGER_STATUS_GUIDANCE = """**⚠️ LEDGER STATUS FILTERING (Event / Entry / Transaction):**
+The graph is a faithful mirror of the ledger and KEEPS cancelled and replaced rows —
+voided and superseded entries are NOT removed (they are real audit history). When you
+COUNT or AGGREGATE ledger-spine data you MUST filter to live rows, or voided/reversed
+amounts will inflate the result:
+- `Entry.status` ∈ {draft, posted, reversed}. For balances and debit/credit sums,
+  match ONLY `e.status = 'posted'`. `draft` = unposted (includes entries belonging to
+  voided events); `reversed` = superseded by a reversing entry.
+- `Event.status` ∈ {captured, classified, committed, pending, fulfilled, voided,
+  superseded}. EXCLUDE `voided` and `superseded` from counts/sums. For open
+  obligations use the positive set the question implies (e.g. committed/fulfilled/pending).
+- `Transaction` exposes only a `pending` boolean in the graph (NOT the full status),
+  so a voided transaction is indistinguishable at the Transaction node. To measure
+  realized economic effect, aggregate through `Entry`/`LineItem` filtered to
+  `Entry.status = 'posted'` — do NOT sum `Transaction.amount` directly.
+- `Fact` nodes (the XBRL hypercube / published statements) have NO status and are
+  already filtered at generation time — they are always safe to aggregate. This note
+  applies ONLY to the ledger spine, not to Fact queries."""
