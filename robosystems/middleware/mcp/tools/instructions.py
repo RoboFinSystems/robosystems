@@ -83,9 +83,12 @@ def build_instructions(
   if has("get-close-playbook"):
     close_lines = [
       "CLOSE / MONTH-END",
-      "- Before setting up or running a close, call `get-close-playbook` FIRST "
-      "— it lays out the exact tool sequence, the setup decisions, and the "
-      "gotchas. Don't improvise the close from individual tool schemas.",
+      (
+        "- Before setting up or running a close, call `get-close-playbook` "
+        "FIRST — it lays out the exact tool sequence, the setup decisions, "
+        "and the gotchas. Don't improvise the close from individual tool "
+        "schemas."
+      ),
     ]
     orient_tools = [
       t for t in ("get-fiscal-calendar", "get-period-close-status") if has(t)
