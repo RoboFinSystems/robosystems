@@ -437,7 +437,12 @@ class RoboLedgerContext:
         Dictionary mapping table name to entity type ("nodes" or "relationships")
         Order: base nodes, extension nodes, base relationships, extension relationships
     """
-    from ..base import BASE_NODES, BASE_RELATIONSHIPS
+    from ..base import (
+      BASE_NODES,
+      BASE_RELATIONSHIPS,
+      REPORTING_ONLY_EXCLUDED_NODES,
+      REPORTING_ONLY_EXCLUDED_RELATIONSHIPS,
+    )
 
     tables: dict[str, str] = {}
 
@@ -445,10 +450,20 @@ class RoboLedgerContext:
     ext_nodes = cls.get_nodes_for_context(context)
     ext_relationships = cls.get_relationships_for_context(context)
 
+    # Reporting-only contexts (SEC) skip the REA/trait base tables so this
+    # materialization list matches the schema the loader builds — neither
+    # creates nor materializes the empty Event/Agent/Trait tables.
+    reporting_only = context in (cls.SEC_REPOSITORY, cls.REPORTING_ONLY)
+    excluded_nodes = REPORTING_ONLY_EXCLUDED_NODES if reporting_only else frozenset()
+    excluded_rels = (
+      REPORTING_ONLY_EXCLUDED_RELATIONSHIPS if reporting_only else frozenset()
+    )
+
     # Add ALL nodes first (base nodes before extension nodes)
     if include_base:
       for node in BASE_NODES:
-        tables[node.name] = "nodes"
+        if node.name not in excluded_nodes:
+          tables[node.name] = "nodes"
 
     for node in ext_nodes:
       tables[node.name] = "nodes"
@@ -456,7 +471,8 @@ class RoboLedgerContext:
     # Then add ALL relationships (base before extension)
     if include_base:
       for rel in BASE_RELATIONSHIPS:
-        tables[rel.name] = "relationships"
+        if rel.name not in excluded_rels:
+          tables[rel.name] = "relationships"
 
     for rel in ext_relationships:
       tables[rel.name] = "relationships"

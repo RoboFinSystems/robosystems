@@ -591,3 +591,31 @@ BASE_RELATIONSHIPS = [
     properties=[],
   ),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Reporting-only exclusions
+# ---------------------------------------------------------------------------
+# The REA event/agent substrate (Event, Agent) and the advisory element Trait
+# node live in the base schema because accounting (roboledger) graphs populate
+# them. Reporting-only repositories — the SEC shared repo today — never create
+# economic events, counterparties, or element traits, so these tables stay
+# empty there. They are excluded from a reporting-only graph's schema so the
+# empty node/relationship tables are neither created nor materialized.
+#
+# Consumed by ContextAwareSchemaLoader (schema DDL) and
+# RoboLedgerContext.get_all_table_names_for_context (materialization list);
+# keep both call sites using these constants so the two paths stay in lockstep.
+REPORTING_ONLY_EXCLUDED_NODES: frozenset[str] = frozenset({"Event", "Agent", "Trait"})
+REPORTING_ONLY_EXCLUDED_RELATIONSHIPS: frozenset[str] = frozenset(
+  {
+    "ENTITY_HAS_EVENT",
+    "ENTITY_HAS_AGENT",
+    "ELEMENT_HAS_TRAIT",
+    "EVENT_INVOLVES_AGENT",
+    "EVENT_AFFECTS_RESOURCE",
+    "EVENT_DISCHARGES_EVENT",
+    "EVENT_OBLIGATED_BY_EVENT",
+    "EVENT_REPLACES_EVENT",
+  }
+)
