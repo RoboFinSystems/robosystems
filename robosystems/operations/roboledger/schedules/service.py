@@ -745,6 +745,24 @@ class ScheduleService:
     metadata = structure.metadata_ or {}
     schedule_created_event_id = metadata.get("schedule_created_event_id")
     if not schedule_created_event_id:
+      # Robust fallback: recover the originator from the obligations' own
+      # link — every schedule_entry_due carries metadata.schedule_id == this
+      # structure's id and obligated_by_event_id == the schedule_created
+      # originator. Structures missing the `schedule_created_event_id` stamp
+      # would otherwise no-op silently here and orphan their pending
+      # obligations on delete (the 2026-06-19 Harbinger defect: 280 phantom
+      # obligations that double-posted at close). See
+      # specs/schedule-delete-obligation-integrity.md.
+      schedule_created_event_id = session.execute(
+        select(Event.obligated_by_event_id)
+        .where(
+          Event.event_type == "schedule_entry_due",
+          Event.metadata_["schedule_id"].astext == structure.id,
+          Event.obligated_by_event_id.isnot(None),
+        )
+        .limit(1)
+      ).scalar()
+    if not schedule_created_event_id:
       return 0
 
     update_values: dict[str, object] = {"status": "voided"}

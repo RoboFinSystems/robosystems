@@ -6,6 +6,7 @@ from datetime import UTC, datetime, time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.promotion import (
   PromotionResult,
   promote_pending_obligations,
@@ -36,13 +37,39 @@ def _pending_event(
   )
 
 
-def _session_returning(events: list[SimpleNamespace]) -> MagicMock:
-  """MagicMock session whose .query(Event).filter(...).all() returns events."""
+def _session_returning(
+  events: list[SimpleNamespace],
+  *,
+  live_schedule_ids: set[str] | None = None,
+) -> MagicMock:
+  """MagicMock session that dispatches by query target.
+
+  - ``query(Event)`` → candidate load (``.all()`` → events) + bulk updates.
+  - ``query(Structure.id)`` → the orphan guard's existence check
+    (``.all()`` → ``[(sid,), ...]`` for the live schedule ids).
+
+  ``live_schedule_ids`` defaults to every schedule_id present on ``events``
+  (i.e. no orphans), so tests that don't exercise the guard behave as before.
+  The Event query mock is exposed as ``session.event_query`` for introspection.
+  """
+  if live_schedule_ids is None:
+    live_schedule_ids = {
+      e.metadata_.get("schedule_id")
+      for e in events
+      if e.metadata_ and e.metadata_.get("schedule_id")
+    }
+  event_query = MagicMock()
+  event_query.filter.return_value = event_query
+  event_query.all.return_value = events
+  struct_query = MagicMock()
+  struct_query.filter.return_value = struct_query
+  struct_query.all.return_value = [(sid,) for sid in live_schedule_ids]
   session = MagicMock()
-  query = MagicMock()
-  query.filter.return_value = query
-  query.all.return_value = events
-  session.query.return_value = query
+  session.query.side_effect = lambda target: (
+    event_query if target is Event else struct_query
+  )
+  session.event_query = event_query
+  session.struct_query = struct_query
   return session
 
 
@@ -76,9 +103,10 @@ class TestCoPilotMode:
 
     assert set(result.classified_event_ids) == {"evt_1", "evt_2"}
     assert result.dispatched_count == 0  # co-pilot — no dispatch
-    # Two .query() calls: one to load candidates, one to bulk-update by id
-    assert session.query.call_count == 2
-    bulk_update_call = session.query.return_value.filter.return_value.update
+    # Three .query() calls now: load candidates, the orphan-guard structure
+    # existence check, and the bulk classify-update by id.
+    assert session.query.call_count == 3
+    bulk_update_call = session.event_query.filter.return_value.update
     bulk_update_call.assert_called_once_with(
       {"status": "classified"}, synchronize_session="fetch"
     )
@@ -243,9 +271,70 @@ class TestQueryShape:
     # The first .filter() call is the candidate load:
     # session.query(Event).filter(event_type, status, occurred_at).all()
     # (The second .filter() is the bulk-update by id list — different shape.)
-    query = session.query.return_value
+    query = session.event_query
     candidate_filter_args = query.filter.call_args_list[0].args
     rendered = " | ".join(str(c) for c in candidate_filter_args)
     assert "events.event_type" in rendered
     assert "events.status" in rendered
     assert "events.occurred_at" in rendered
+
+
+class TestOrphanGuard:
+  """Layer 2: obligations whose schedule structure was deleted are voided in
+  place, never drafted — the catch-all that stops a deleted schedule from
+  double-posting at promotion. See specs/schedule-delete-obligation-integrity.md.
+  """
+
+  def test_orphan_voided_not_classified_copilot(self) -> None:
+    live = _pending_event("evt_live", schedule_id="struct_live")
+    orphan = _pending_event("evt_orphan", schedule_id="struct_deleted")
+    # Only struct_live still exists as a structure row.
+    session = _session_returning([live, orphan], live_schedule_ids={"struct_live"})
+
+    result = promote_pending_obligations(
+      session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
+    )
+
+    assert result.voided_orphan_event_ids == ["evt_orphan"]
+    assert result.voided_orphan_count == 1
+    # The live obligation still classifies; the orphan never does.
+    assert result.classified_event_ids == ["evt_live"]
+    assert "evt_orphan" not in result.classified_event_ids
+
+  def test_orphan_not_dispatched_autopilot(self) -> None:
+    live = _pending_event("evt_live", schedule_id="struct_live")
+    orphan = _pending_event("evt_orphan", schedule_id="struct_deleted")
+    session = _session_returning([live, orphan], live_schedule_ids={"struct_live"})
+
+    handler = MagicMock()
+    handler.metadata_schema.model_validate.return_value = MagicMock()
+    handler.dispatch.return_value = MagicMock()
+
+    with patch(
+      "robosystems.operations.event_block.promotion.get_python_handler",
+      return_value=handler,
+    ):
+      result = promote_pending_obligations(
+        session,
+        "kg_test",
+        as_of=datetime(2026, 2, 1, tzinfo=UTC),
+        dispatch_handlers=True,
+      )
+
+    # Only the live obligation is dispatched into a draft; the orphan is voided.
+    assert result.dispatched_event_ids == ["evt_live"]
+    assert result.voided_orphan_event_ids == ["evt_orphan"]
+    assert handler.dispatch.call_count == 1
+    assert orphan.status != "classified"
+
+  def test_no_orphans_when_all_schedules_live(self) -> None:
+    e1 = _pending_event("evt_1", schedule_id="struct_a")
+    e2 = _pending_event("evt_2", schedule_id="struct_b")
+    session = _session_returning([e1, e2], live_schedule_ids={"struct_a", "struct_b"})
+
+    result = promote_pending_obligations(
+      session, "kg_test", as_of=datetime(2026, 2, 1, tzinfo=UTC)
+    )
+
+    assert result.voided_orphan_count == 0
+    assert set(result.classified_event_ids) == {"evt_1", "evt_2"}
