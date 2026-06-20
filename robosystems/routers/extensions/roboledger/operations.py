@@ -156,6 +156,8 @@ from robosystems.models.api.extensions.reports import (
 from robosystems.models.api.extensions.schedules import (
   PromoteObligationsRequest,
   PromoteObligationsResponse,
+  RebuildScheduleRequest,
+  ScheduleCreatedResponse,
 )
 from robosystems.models.api.extensions.taxonomies import (
   AssociationResponse,
@@ -343,6 +345,9 @@ from robosystems.operations.roboledger.commands.schedules import (
 )
 from robosystems.operations.roboledger.commands.schedules import (
   promote_obligations as cmd_promote_obligations,
+)
+from robosystems.operations.roboledger.commands.schedules import (
+  rebuild_schedule as cmd_rebuild_schedule,
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   AssociationNotFoundError,
@@ -1414,6 +1419,43 @@ promote_obligations_op = _registrar.register(
     request_model=PromoteObligationsRequest,
     result_type=PromoteObligationsResponse,
     error_map={ValueError: 422},
+  )
+)
+
+
+# Re-run the schedule generator in place on an existing schedule. Atomic
+# alternative to delete-then-recreate (which orphans the obligation chain):
+# preserves the structure id + element associations + taxonomy, voids the
+# old pending obligation chain, deletes the old facts + rules, and
+# regenerates fresh forward facts + a fresh obligation chain from the
+# schedule's stored definition. Re-scopes historical-vs-in-scope from the
+# CURRENT fiscal calendar `closed_through`. This is the redo-after-a-
+# generator-fix path (e.g. the roll-forward direction fix).
+rebuild_schedule_op = _registrar.register(
+  OperationSpec(
+    name="rebuild-schedule",
+    summary="Rebuild Schedule In Place",
+    description=(
+      "Re-run the schedule generator in place on an existing schedule. "
+      "Atomic alternative to delete-then-recreate (which orphans pending "
+      "obligations): preserves the structure id + element associations + "
+      "taxonomy, voids the old pending obligation chain, deletes the old "
+      "facts and SumEquals rules, and regenerates fresh forward facts + a "
+      "fresh obligation chain from the schedule's stored definition "
+      "(entry_template / schedule_metadata / monthly_amount / period "
+      "bounds). The historical-vs-in-scope split is re-derived from the "
+      "CURRENT fiscal calendar closed_through. Use this to pick up a fixed "
+      "generator (e.g. the roll-forward direction fix) without orphaning "
+      "obligations."
+    ),
+    command=cmd_rebuild_schedule,
+    request_model=RebuildScheduleRequest,
+    result_type=ScheduleCreatedResponse,
+    error_map={
+      ScheduleNotFoundError: 404,
+      ValueError: 422,
+    },
+    mark_stale_reason="schedule_rebuilt",
   )
 )
 

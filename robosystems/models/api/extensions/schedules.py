@@ -327,6 +327,27 @@ class DeleteScheduleRequest(BaseModel):
   structure_id: str
 
 
+class RebuildScheduleRequest(BaseModel):
+  """Re-run the schedule generator in place on an existing schedule.
+
+  Atomic alternative to delete-then-recreate: the structure id and its
+  element associations are preserved, the old pending obligation chain
+  is voided, the old facts + rules are deleted, and a fresh set of
+  forward facts + a fresh obligation chain are regenerated from the
+  schedule's stored definition (entry_template / schedule_metadata /
+  monthly_amount / period bounds on the Structure's metadata).
+
+  The historical-vs-in-scope split is re-derived from the CURRENT fiscal
+  calendar `closed_through`, so a rebuild re-scopes the schedule to
+  today's close state. Use this to pick up a fixed generator (e.g. the
+  roll-forward direction fix) without orphaning obligations.
+  """
+
+  structure_id: str = Field(
+    ..., description="The schedule structure to regenerate in place."
+  )
+
+
 # Asset disposal is an event block:
 # `create-event-block(event_type='asset_disposed')`. See
 # operations/event_block/python_handlers/asset_disposed.py for the
