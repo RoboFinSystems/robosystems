@@ -211,6 +211,35 @@ class TestContextAwareSchemaLoader:
     loader = ContextAwareSchemaLoader(extension="roboledger", context="full_accounting")
     assert len(loader.nodes) > 0
 
+  def test_sec_materialization_list_excludes_rea_substrate(self):
+    """The materialization table list (get_all_table_names_for_context) must
+    agree with the loader-built DDL: SEC excludes the REA/trait base tables;
+    FULL_ACCOUNTING keeps them. Prevents empty Event/Agent/Trait tables from
+    being created or materialized on the SEC graph."""
+    from robosystems.schemas.extensions.roboledger import RoboLedgerContext
+
+    sec = RoboLedgerContext.get_all_table_names_for_context(
+      RoboLedgerContext.SEC_REPOSITORY
+    )
+    for name in ("Event", "Agent", "Trait", "ENTITY_HAS_EVENT", "ELEMENT_HAS_TRAIT"):
+      assert name not in sec, f"{name} should not be materialized on SEC"
+
+    full = RoboLedgerContext.get_all_table_names_for_context(
+      RoboLedgerContext.FULL_ACCOUNTING
+    )
+    for name in ("Event", "Agent", "Trait"):
+      assert name in full, f"{name} must remain for accounting graphs"
+
+    # The materialization list and the loader-built DDL must produce the same
+    # SEC node set, or a table would be materialized into a schema that lacks it.
+    ddl_nodes = set(
+      ContextAwareSchemaLoader(
+        extension="roboledger", context="sec_repository"
+      ).nodes.keys()
+    )
+    mat_nodes = {k for k, v in sec.items() if v == "nodes"}
+    assert ddl_nodes == mat_nodes
+
   def test_get_contextual_schema_loader_sec(self):
     loader = get_contextual_schema_loader("repository", "sec")
     assert isinstance(loader, ContextAwareSchemaLoader)
@@ -238,9 +267,10 @@ class TestREAPrimitives:
   """REA primitives: Agent + Event in base, EVENT_TRIGGERS_TRANSACTION
   bridge in roboledger TRANSACTION layer.
 
-  Validates that the placement holds in the loader: REA primitives reach
-  every consumer (including SEC) as base nodes, while the McCarthy bridge
-  edge is correctly scoped to roboledger TRANSACTION_RELATIONSHIPS and
+  Validates the placement in the loader: REA primitives reach accounting
+  consumers (default + roboledger application) as base nodes, but are
+  excluded from reporting-only repositories (SEC), which never populate
+  them. The McCarthy bridge edge is roboledger TRANSACTION-scoped and also
   absent from SEC.
   """
 
@@ -254,12 +284,31 @@ class TestREAPrimitives:
     assert "Agent" in loader.nodes
     assert "Event" in loader.nodes
 
-  def test_agent_and_event_in_sec_repository(self):
-    """Base nodes flow through to SEC. Tables stay empty (no rows
-    loaded), but the schema includes them."""
+  def test_rea_substrate_excluded_from_sec_repository(self):
+    """REA Event/Agent and element Traits live in base for accounting graphs,
+    but reporting-only repos (SEC) never populate them — so they're excluded
+    from the SEC schema entirely (neither created nor materialized as empty
+    tables)."""
     loader = ContextAwareSchemaLoader(extension="roboledger", context="sec_repository")
-    assert "Agent" in loader.nodes
-    assert "Event" in loader.nodes
+    assert "Agent" not in loader.nodes
+    assert "Event" not in loader.nodes
+    assert "Trait" not in loader.nodes
+    for edge in (
+      "ENTITY_HAS_AGENT",
+      "ENTITY_HAS_EVENT",
+      "ELEMENT_HAS_TRAIT",
+      "EVENT_INVOLVES_AGENT",
+      "EVENT_AFFECTS_RESOURCE",
+      "EVENT_OBLIGATED_BY_EVENT",
+      "EVENT_DISCHARGES_EVENT",
+      "EVENT_REPLACES_EVENT",
+    ):
+      assert edge not in loader.relationships, (
+        f"REA edge should be excluded from SEC: {edge}"
+      )
+    # Reporting substrate stays.
+    assert "Fact" in loader.nodes
+    assert "Report" in loader.nodes
 
   def test_rea_edges_in_default_loader(self):
     loader = get_schema_loader()

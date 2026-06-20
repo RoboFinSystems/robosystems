@@ -13,7 +13,12 @@ import pkgutil
 from typing import Any
 
 import robosystems.schemas.extensions as extensions_pkg
-from robosystems.schemas.base import BASE_NODES, BASE_RELATIONSHIPS
+from robosystems.schemas.base import (
+  BASE_NODES,
+  BASE_RELATIONSHIPS,
+  REPORTING_ONLY_EXCLUDED_NODES,
+  REPORTING_ONLY_EXCLUDED_RELATIONSHIPS,
+)
 from robosystems.schemas.models import Node, Relationship
 
 logger = logging.getLogger(__name__)
@@ -426,17 +431,14 @@ class ContextAwareSchemaLoader(LadybugSchemaLoader):
     """
     # For SEC repository, filter out base nodes and relationships that aren't populated
     if context == "sec_repository":
-      # NOTE: User, GraphMetadata, and Connection nodes have been removed from base.py
-      # They are now managed exclusively in PostgreSQL, not in LadybugDB graphs.
-      # These exclusions are kept for backward compatibility but are no longer needed.
-      excluded_base_nodes = (
-        set()
-      )  # No exclusions needed - platform nodes removed from base
+      # Reporting-only repos never populate the REA event/agent substrate or
+      # element traits, so those base tables are excluded (see base.py).
+      excluded_base_nodes = set(REPORTING_ONLY_EXCLUDED_NODES)
       all_nodes = [node for node in BASE_NODES if node.name not in excluded_base_nodes]
 
-      # These base relationships are not populated by SEC data
-      # NOTE: USER_HAS_ACCESS and ENTITY_HAS_CONNECTION removed from base.py
-      excluded_base_rels = {
+      # Base relationships not populated by SEC data: the REA/trait edges plus
+      # legacy lineage/hierarchy edges that carry no SEC rows.
+      excluded_base_rels = REPORTING_ONLY_EXCLUDED_RELATIONSHIPS | {
         "ENTITY_EVOLVED_FROM",
         "ENTITY_OWNS_ENTITY",
         "ELEMENT_IN_TAXONOMY",
