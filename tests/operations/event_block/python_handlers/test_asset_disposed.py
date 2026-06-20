@@ -330,13 +330,17 @@ class TestVoidPendingObligationsForSchedule:
     session.execute.assert_not_called()
 
   def test_returns_zero_when_structure_predates_stream_2a(self) -> None:
-    """Schedules created before the originator-id stamping land are no-op disposed."""
+    """Schedules created before the originator-id stamping land: with no stamp
+    AND no recoverable obligations, the robust fallback finds nothing, so
+    disposal is a clean no-op (returns 0)."""
     from robosystems.operations.event_block.python_handlers.asset_disposed import (
       _void_pending_obligations_for_schedule,
     )
 
     session = MagicMock()
     session.get.return_value = self._structure_with_event(None)
+    # No stamp on the structure AND the fallback recovery finds no obligations.
+    session.execute.return_value.scalar.return_value = None
 
     voided = _void_pending_obligations_for_schedule(
       session,
@@ -345,4 +349,5 @@ class TestVoidPendingObligationsForSchedule:
     )
 
     assert voided == 0
-    session.execute.assert_not_called()
+    # The fallback recovery select ran; no UPDATE followed.
+    assert session.execute.call_count == 1
