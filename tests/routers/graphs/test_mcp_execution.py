@@ -192,6 +192,8 @@ class TestMCPEndpoints:
           },
         ]
       )
+      # get_instructions is sync and returns the per-graph routing string
+      mock_handler.get_instructions = Mock(return_value="ROUTING GUIDANCE")
 
       MockHandler.return_value = mock_handler
 
@@ -206,6 +208,7 @@ class TestMCPEndpoints:
       data = response.json()
       assert "tools" in data
       assert len(data["tools"]) >= 2
+      assert data["instructions"] == "ROUTING GUIDANCE"
 
   @pytest.mark.asyncio
   async def test_mcp_unauthorized_access(self, test_user_graph, test_db):

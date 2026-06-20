@@ -19,6 +19,34 @@ SEC_MANIFEST = SharedRepositoryManifest(
   schema_extensions=("roboledger",),
   has_semantic_enrichment=True,
   sibling_subgraphs=("historical",),  # sec_historical subgraph
+  agent_instructions=(
+    "Connected to the SEC EDGAR knowledge graph (`sec`) — a curated, READ-ONLY "
+    "repository of public-company XBRL financial filings. There is no general "
+    "ledger here and no writes; this surface is for financial analysis and "
+    "exploration.\n"
+    "\n"
+    "START HERE\n"
+    "- `get-example-queries` — working Cypher patterns tailored to this graph's "
+    "schema. Run it before writing your first query.\n"
+    "- `get-graph-schema` — node types, relationships, and properties.\n"
+    "\n"
+    "COMMON TASKS\n"
+    "- A company's financial statements → `financial-statement-analysis` (look "
+    "up by ticker or CIK, with a reporting period).\n"
+    "- Multidimensional fact analysis across entities / periods / dimensions → "
+    "`build-fact-grid`.\n"
+    '- Map a concept like "revenue" to its XBRL element qname → '
+    "`resolve-element`.\n"
+    "- Full-text search across filings → `search-documents`.\n"
+    "- Typed GraphQL reads → `query-graphql`; raw graph traversal → "
+    "`read-graph-cypher`.\n"
+    "\n"
+    "NOTES\n"
+    "- Deeper historical filings live in the `sec_historical` subgraph — switch "
+    "to it with `switch-workspace` when you need older periods.\n"
+    "- This is shared public data: period close, chart-of-accounts mapping, and "
+    "all write operations are unavailable here."
+  ),
   rate_limits={
     "starter": {
       "queries_per_minute": 10,

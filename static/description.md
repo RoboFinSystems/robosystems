@@ -64,29 +64,27 @@ Domain extensions (RoboLedger, RoboInvestor) bring their own schema and OLTP tab
 - **Writes** → `POST /extensions/{domain}/{graph_id}/operations/{operation_name}` — named `OperationEnvelope` commands with `Idempotency-Key` and SSE progress
 - **Views** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — read-only analytics over the materialized graph
 
-Per-domain flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema.
+### RoboLedger
 
-### [RoboLedger](https://roboledger.ai)
-
-Accounting and financial reporting extension — a ledger-grade system of record that AI and analysts can both query and operate, broadly implementing the [Seattle Method](http://xbrlsite.com/seattlemethod/). Three block molecules are the authoring substrate:
+[RoboLedger](https://roboledger.ai) is an accounting and financial reporting extension — a ledger-grade system of record that AI and analysts can both query and operate, broadly implementing the [Seattle Method](http://xbrlsite.com/seattlemethod/). Three block molecules are the authoring substrate:
 
 - **Information Blocks** — reportable content (schedules, statements, metrics) bundled with period-versioned fact sets, typed mechanics, and rules; `evaluate-rules` runs arithmetic checks over materialized facts
 - **Event Blocks** — REA event capture: record what happened via an action-verb vocabulary, and a handler registry derives debits/credits across the three-level ledger (Transaction → Entry → LineItem)
-- **Taxonomy Blocks** — accounting frameworks as data: Elements, Associations (presentation / calculation / mapping), Structures, and structural rules in one write; ships `fac` and `rs-gaap` (~2,000 curated US-GAAP concepts)
+- **Taxonomy Blocks** — accounting frameworks as data: Elements, Associations (presentation / calculation / mapping), Structures, and structural rules in one write; Ships with `rs-gaap` (~2,000 curated US-GAAP concepts) as the initial base taxonomy
 
 Built on the blocks:
 
-- **Reads** (GraphQL) — chart of accounts and account trees, transactions, trial balances, taxonomies, mappings, reports, schedules, and fiscal calendar
+- **Reads** (GraphQL) — chart of accounts and account trees, events/transactions, trial balances, financial statements, taxonomies, mappings, reports, schedules, and fiscal calendar
 - **Close lifecycle** — fiscal calendar (`closed_through` / `close_target`) with period close/reopen gated on the balance equation and QuickBooks sync-staleness
 - **Mapping** — CoA→GAAP associations plus AI-assisted bulk mapping via the **MappingOperator** (auto-approve / review / skip)
 - **Reporting** — multi-period statements through a Reporting Style, with a draft → under_review → filed → archived lifecycle and publish lists
-- **Analytical views** — `live-financial-statement` from the OLTP ledger; `build-fact-grid` and `financial-statement-analysis` over the materialized XBRL hypercube
+- **Analytical views** — `live-financial-statement` from the OLTP ledger; `build-fact-grid` and `financial-statement-analysis` over the materialized XBRL graph hypercube
 - **Serialization** — reports to **JSON-LD** (SHACL-validatable) and **XBRL 2.1** (Arelle-validated)
-- **Pipelines** — QuickBooks ELT via dbt/Dagster with a configurable `write_policy`, plus SEC XBRL
+- **Pipelines** — QuickBooks ELT via dbt/Dagster with a configurable `write_policy`
 
-### [RoboInvestor](https://roboinvestor.ai)
+### RoboInvestor
 
-Portfolio management and investment tracking extension — tracks investor holdings and links them back to the companies behind them.
+[RoboInvestor](https://roboinvestor.ai) is a portfolio management and investment tracking extension — tracks investor holdings and links them back to the companies behind them.
 
 - **Portfolio Blocks** — a portfolio with its positions and securities written as one validated envelope (cost basis as integer cents); positions move through an active / disposed / archived lifecycle. Reads expose `portfolios`, `positions`, `holdings` (rolled up by issuer), and the assembled `portfolioBlock`
 - **Securities** — ownership instruments (common stock, warrants, convertible notes, …) with an extensible `terms` blob for instrument-specific detail

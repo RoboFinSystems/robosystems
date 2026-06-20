@@ -117,6 +117,17 @@ async def list_mcp_tools(
 
       enhanced_tools.append(tool)
 
+    # Per-graph routing guidance for the MCP client handshake (derived from the
+    # same tool set, so it can never reference an unavailable tool). Best-effort:
+    # a failure building instructions must never break tool discovery.
+    try:
+      instructions = handler.get_instructions(enhanced_tools)
+    except Exception as instructions_error:
+      logger.warning(
+        f"Failed to build MCP instructions for graph {graph_id}: {instructions_error}"
+      )
+      instructions = None
+
     # Record successful operation
     circuit_breaker.record_success(graph_id, "list_tools")
 
@@ -143,7 +154,7 @@ async def list_mcp_tools(
       },
     )
 
-    return MCPToolsResponse(tools=enhanced_tools)
+    return MCPToolsResponse(tools=enhanced_tools, instructions=instructions)
 
   except Exception as e:
     # Record failed operation
