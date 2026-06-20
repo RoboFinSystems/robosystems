@@ -374,28 +374,43 @@ def _rebuild_structure() -> MagicMock:
     "schedule_created_event_id": "evt_old_origin",
     "pending_event_count": 3,
   }
+  structure.artifact_mechanics = {
+    "source_transaction_id": "txn_origin",
+    "schedule_created_event_id": "evt_old_origin",
+  }
   return structure
 
 
-def _rebuild_session(structure: MagicMock) -> tuple[MagicMock, list[type]]:
+def _rebuild_session(
+  structure: MagicMock, *, posted_count: int = 0, old_event=None
+) -> tuple[MagicMock, list[type]]:
   """Wire a MagicMock session for the rebuild orchestration.
 
   execute call order:
     1. _load_schedule_or_404 → scalar_one_or_none → structure
-    2. select(Rule.id) for cascade delete → scalars().all()
-    3. count facts → fetchone
-    4. count distinct periods → fetchone
+    2. posted-entry guard → fetchone → MagicMock(c=posted_count)
+    3. select(Rule.id) for cascade delete → scalars().all()
+    4. DELETE line_items (draft sweep) → execute (result unused)
+    5. DELETE entries (draft sweep) → execute (result unused)
+    6. count facts → fetchone
+    7. count distinct periods → fetchone
   query().filter().delete() captures the deleted models in order.
   _calendar_closed_through_date uses session.query(FiscalCalendar).first().
+  session.get(Event, ...) returns ``old_event`` (the supersede path).
   """
   deleted_models: list[type] = []
   session = MagicMock()
   session.execute.side_effect = [
     _exec_result(row=structure),  # _load_schedule_or_404
+    _exec_result(fetchone_row=MagicMock(c=posted_count)),  # posted-entry guard
     _exec_result(scalars_all=["rule_old_1"]),  # select(Rule.id)
+    _exec_result(),  # DELETE line_items (draft sweep)
+    _exec_result(),  # DELETE entries (draft sweep)
     _exec_result(fetchone_row=MagicMock(cnt=6)),  # count facts
     _exec_result(fetchone_row=MagicMock(cnt=3)),  # count distinct periods
   ]
+
+  session.get.return_value = old_event
 
   # session.query(...) is used both by _calendar_closed_through_date
   # (FiscalCalendar.first() → None) and by the cascade deletes
@@ -537,3 +552,184 @@ def test_rebuild_schedule_raises_when_definition_unreconstructable() -> None:
     )
 
   session.commit.assert_not_called()
+
+
+def test_rebuild_schedule_guards_posted_entries() -> None:
+  """A schedule with posted closing entries refuses to rebuild."""
+  from unittest.mock import patch
+
+  import pytest
+
+  structure = _rebuild_structure()
+  # Posted-entry guard returns c=2; the rebuild must bail before any
+  # void/regeneration work.
+  session, _ = _rebuild_session(structure, posted_count=2)
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      return_value=0,
+    ) as void,
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.create_schedule",
+      return_value=structure,
+    ) as create,
+    pytest.raises(ValueError, match="posted"),
+  ):
+    rebuild_schedule(
+      session,
+      RebuildScheduleRequest(structure_id="struct_rebuild"),
+    )
+
+  # Guard fires before voiding/regeneration and the transaction never commits.
+  void.assert_not_called()
+  create.assert_not_called()
+  session.commit.assert_not_called()
+
+
+def test_rebuild_schedule_preserves_source_transaction_id() -> None:
+  """The source_transaction_id back-ref survives a rebuild — recovered
+  from artifact_mechanics and passed through to create_schedule."""
+  from unittest.mock import patch
+
+  structure = _rebuild_structure()
+  session, _ = _rebuild_session(structure)
+
+  rebuilt = structure
+  rebuilt.metadata_ = {
+    **structure.metadata_,
+    "schedule_created_event_id": "evt_new_origin",
+  }
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      return_value=0,
+    ),
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.create_schedule",
+      return_value=rebuilt,
+    ) as create,
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "evaluate_rules_for_structure",
+      return_value=[],
+    ),
+  ):
+    rebuild_schedule(
+      session,
+      RebuildScheduleRequest(structure_id="struct_rebuild"),
+    )
+
+  create.assert_called_once()
+  assert create.call_args.kwargs["source_transaction_id"] == "txn_origin"
+
+
+def test_rebuild_schedule_supersedes_old_originator() -> None:
+  """After a rebuild the old schedule_created event is voided and back-linked
+  to the new originator."""
+  from unittest.mock import patch
+
+  structure = _rebuild_structure()
+  old_evt = MagicMock()
+  old_evt.id = "evt_old_origin"
+  old_evt.status = "committed"
+  old_evt.replaced_by_event_id = None
+  session, _ = _rebuild_session(structure, old_event=old_evt)
+
+  # create_schedule re-stamps the originator on the in-place structure. Mutate
+  # metadata inside the mock so the OLD id is still readable when rebuild_schedule
+  # captures it (before the void), and the NEW id afterward.
+  def _restamp(*_args, **_kwargs):
+    structure.metadata_ = {
+      **structure.metadata_,
+      "schedule_created_event_id": "evt_new_origin",
+    }
+    return structure
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      return_value=0,
+    ),
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.create_schedule",
+      side_effect=_restamp,
+    ),
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "evaluate_rules_for_structure",
+      return_value=[],
+    ),
+  ):
+    rebuild_schedule(
+      session,
+      RebuildScheduleRequest(structure_id="struct_rebuild"),
+    )
+
+  # Old originator loaded by id, voided, and linked to its replacement.
+  from robosystems.models.extensions.roboledger.event import Event
+
+  session.get.assert_called_once_with(Event, "evt_old_origin")
+  assert old_evt.status == "voided"
+  assert old_evt.replaced_by_event_id == "evt_new_origin"
+
+
+def test_reconstruct_schedule_definition_legacy_fallback() -> None:
+  """A legacy schedule with no scalar inputs derives period bounds from the
+  FactSet and monthly_amount from the first duration debit fact."""
+  from datetime import date
+  from unittest.mock import patch
+
+  from robosystems.operations.roboledger.commands.schedules import (
+    _reconstruct_schedule_definition,
+  )
+
+  structure = MagicMock()
+  structure.id = "struct_legacy"
+  structure.artifact_mechanics = None
+  structure.metadata_ = {
+    "entry_template": {
+      "debit_element_id": "elem_dr",
+      "credit_element_id": "elem_cr",
+    },
+    # No monthly_amount / period_start / period_end → legacy fallbacks fire.
+  }
+
+  session = MagicMock()
+  # 1. FactSet bounds (fetchall) → min_start / max_end rows.
+  bounds_result = MagicMock()
+  bounds_result.fetchall.return_value = [
+    MagicMock(min_start=date(2026, 1, 1), max_end=date(2026, 2, 28)),
+    MagicMock(min_start=date(2026, 2, 1), max_end=date(2026, 3, 31)),
+  ]
+  # 2. first duration debit fact value (scalar) → 10_000.00 dollars.
+  debit_result = MagicMock()
+  debit_result.scalar.return_value = 10_000.0
+  session.execute.side_effect = [bounds_result, debit_result]
+
+  with patch(
+    "robosystems.operations.roboledger.commands.schedules.select",
+    return_value=MagicMock(),
+  ):
+    (
+      entry_template,
+      schedule_metadata,
+      monthly_amount,
+      period_start,
+      period_end,
+      source_transaction_id,
+    ) = _reconstruct_schedule_definition(session, structure)
+
+  assert entry_template.debit_element_id == "elem_dr"
+  assert schedule_metadata is None
+  assert period_start == date(2026, 1, 1)
+  assert period_end == date(2026, 3, 31)
+  assert monthly_amount == 1_000_000  # 10_000.00 * 100 cents
+  assert source_transaction_id is None

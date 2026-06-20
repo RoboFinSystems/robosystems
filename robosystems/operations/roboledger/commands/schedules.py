@@ -34,6 +34,7 @@ from robosystems.models.extensions import (
   VerificationResult,
 )
 from robosystems.models.extensions.roboledger import Fact
+from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
@@ -526,7 +527,7 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
 
 def _reconstruct_schedule_definition(
   session: Session, structure: Structure
-) -> tuple[EntryTemplate, ScheduleMetadata | None, int, date, date]:
+) -> tuple[EntryTemplate, ScheduleMetadata | None, int, date, date, str | None]:
   """Recover the generation inputs for a rebuild from a Structure row.
 
   Prefers the stored definition on ``metadata_`` (entry_template,
@@ -565,6 +566,13 @@ def _reconstruct_schedule_definition(
     if raw_meta
     else None
   )
+
+  # Audit back-ref to the source transaction — stored in artifact_mechanics
+  # at create time (legacy rows may carry it on metadata_ instead). Recovering
+  # it keeps the rebuilt schedule pointing at its originating transaction.
+  source_transaction_id = (structure.artifact_mechanics or {}).get(
+    "source_transaction_id"
+  ) or (structure.metadata_ or {}).get("source_transaction_id")
 
   # Reproducible scalar inputs — stored at create time on new rows.
   monthly_amount = metadata.get("monthly_amount")
@@ -625,6 +633,7 @@ def _reconstruct_schedule_definition(
     int(monthly_amount),
     period_start,
     period_end,
+    source_transaction_id,
   )
 
 
@@ -659,7 +668,30 @@ def rebuild_schedule(
     monthly_amount,
     period_start,
     period_end,
+    source_transaction_id,
   ) = _reconstruct_schedule_definition(session, structure)
+
+  # Refuse to rebuild underneath posted closing entries — a rebuild
+  # regenerates the facts those entries depend on, which would orphan the
+  # audit trail. Reopen the affected periods first (mirrors truncate_schedule).
+  posted_row = session.execute(
+    text(
+      "SELECT COUNT(*) AS c FROM entries "
+      "WHERE source_structure_id = :sid AND status = 'posted'"
+    ),
+    {"sid": structure.id},
+  ).fetchone()
+  if posted_row and posted_row.c:
+    raise ValueError(
+      f"Cannot rebuild schedule {structure.id!r}: {posted_row.c} posted "
+      "closing entries exist. Reopen those periods first."
+    )
+
+  # Capture the old originator event id so we can supersede it after the
+  # rebuild stamps a fresh one (avoids two unlinked committed originators).
+  old_schedule_created_event_id = (structure.metadata_ or {}).get(
+    "schedule_created_event_id"
+  )
 
   # Re-derive the close watermark from the CURRENT fiscal calendar — a
   # rebuild re-scopes the schedule to today's close state.
@@ -698,6 +730,22 @@ def rebuild_schedule(
   )
   if rule_ids:
     session.query(Rule).filter(Rule.id.in_(rule_ids)).delete(synchronize_session=False)
+
+  # Sweep stale DRAFT closing entries for this structure — the rebuilt
+  # obligation chain re-drafts them on the next promote. Line items first
+  # for the FK. Posted entries are guarded above, so this only hits drafts.
+  session.execute(
+    text(
+      "DELETE FROM line_items WHERE entry_id IN ("
+      "SELECT id FROM entries "
+      "WHERE source_structure_id = :sid AND status = 'draft')"
+    ),
+    {"sid": structure.id},
+  )
+  session.execute(
+    text("DELETE FROM entries WHERE source_structure_id = :sid AND status = 'draft'"),
+    {"sid": structure.id},
+  )
   session.flush()
 
   # Regenerate in place — preserves structure id + associations + arcs.
@@ -714,7 +762,25 @@ def rebuild_schedule(
     created_by=created_by,
     closed_through=closed_through,
     existing_structure=structure,
+    source_transaction_id=source_transaction_id,
   )
+
+  # Supersede the old originator event: the rebuild stamps a fresh
+  # `schedule_created` event, leaving the old one orphaned. Mark it voided
+  # and back-link it to its replacement so the audit chain stays connected.
+  new_schedule_created_event_id = (structure.metadata_ or {}).get(
+    "schedule_created_event_id"
+  )
+  if (
+    old_schedule_created_event_id
+    and new_schedule_created_event_id
+    and old_schedule_created_event_id != new_schedule_created_event_id
+  ):
+    old_evt = session.get(Event, old_schedule_created_event_id)
+    if old_evt is not None:
+      old_evt.status = "voided"
+      old_evt.replaced_by_event_id = new_schedule_created_event_id
+      session.flush()
 
   count_row = session.execute(
     text("SELECT COUNT(*) AS cnt FROM facts WHERE structure_id = :sid"),
