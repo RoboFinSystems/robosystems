@@ -125,6 +125,51 @@ class TestGetToolDefinitionHelpers:
     assert tools.financial_statement_analysis_tool is not None
     assert tools.live_financial_statement_tool is None
 
+  def test_oltp_read_tools_absent_on_shared_repo(self, mock_client):
+    """Roboledger OLTP read tools (information blocks, agents, event handlers,
+    event blocks, close playbook) read the extensions OLTP DB, which has no
+    schema for a shared repo. They must NOT be advertised on SEC — they error
+    with "Invalid graph_id for schema name: sec" if called."""
+    mock_client.graph_id = "sec"
+    with (
+      patch.object(GraphMCPTools, "_should_include_semantic_tools", return_value=False),
+      patch.object(GraphMCPTools, "_is_shared_repository", return_value=True),
+      patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
+    ):
+      mock_env.MCP_WORKSPACE_ENABLED = False
+      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.FACT_GRID_ENABLED = False
+      tools = GraphMCPTools(mock_client, schema_extensions=["roboledger"])
+
+    # OLTP-backed read tools are not constructed on shared repos.
+    assert tools.get_information_block_tool is None
+    assert tools.list_information_blocks_tool is None
+    assert tools.get_agent_tool is None
+    assert tools.list_agents_tool is None
+    assert tools.agent_activity_tool is None
+    assert tools.get_event_handler_tool is None
+    assert tools.list_event_handlers_tool is None
+    assert tools.get_event_block_tool is None
+    assert tools.list_event_blocks_tool is None
+    assert tools.get_close_playbook_tool is None
+
+    names = {d["name"] for d in tools._get_curated_tool_definitions()}
+    leaked = names & {
+      "list-information-blocks",
+      "get-information-block",
+      "list-agents",
+      "get-agent",
+      "agent-activity",
+      "list-event-handlers",
+      "get-event-handler",
+      "list-event-blocks",
+      "get-event-block",
+      "get-close-playbook",
+    }
+    assert not leaked, f"OLTP tenant tools leaked onto shared repo: {leaked}"
+    # Graph-backed analytical reads still belong on the shared repo.
+    assert "financial-statement-analysis" in names
+
 
 class TestCallToolErrors:
   @pytest.mark.asyncio
