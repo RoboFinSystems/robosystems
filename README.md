@@ -14,6 +14,7 @@ The platform provides the core infrastructure that all extensions build on:
 - **Dagster Orchestration**: Data pipeline orchestration for SEC filings, QuickBooks sync, backups, billing, and scheduled jobs
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
 - **Subgraphs (Workspaces)**: AI memory graphs and isolated environments for development and team collaboration
+- **Web Application**: Primary web interface — graph management, the AI query console (natural-language + Cypher over MCP), schema explorer, document search, shared-repository access, and billing — [`robosystems-app`](https://github.com/RoboFinSystems/robosystems-app)
 
 The **core platform API** lives at `/v1` — auth, orgs, billing, graph lifecycle (subgraphs, backups, materialize, tier changes), Cypher, and MCP — with reads as REST `GET`s. Every write — across both the core and extensions surfaces — is a named **`OperationEnvelope`** operation with `Idempotency-Key` support, audit logging, and SSE progress streaming via `/v1/operations/{id}/stream`.
 
@@ -45,7 +46,7 @@ Built on the blocks:
 - **Serialization** — reports serialize to web-native **JSON-LD** (stored, SHACL-validatable) and filing-grade **XBRL 2.1** (rebuilt on demand, Arelle-validated)
 - **Pipelines & data** — QuickBooks ELT via dbt/Dagster with a configurable `write_policy`, and SEC XBRL financial reporting
 
-Dedicated frontend app (`roboledger-app`).
+Dedicated frontend app: [`roboledger-app`](https://github.com/RoboFinSystems/roboledger-app).
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
@@ -55,7 +56,7 @@ Portfolio management and investment tracking extension — tracks investor holdi
 - **Securities** — register and maintain ownership instruments (common stock, warrants, convertible notes, …) with an extensible `terms` blob for instrument-specific detail (strike price, liquidation preference, vesting)
 - **Cross-graph research** — a security links to its issuer through a mutual handshake: the investor records the issuer's `source_graph_id`, and the issuer shares a report that materializes its entity in the investor's graph. This joins private holdings to SEC public-company data in the shared repository — the differentiated capability — with authorization enforced at the report-sharing boundary, not the OLTP layer.
 
-Dedicated frontend app (`roboinvestor-app`).
+Dedicated frontend app: [`roboinvestor-app`](https://github.com/RoboFinSystems/roboinvestor-app).
 
 ## SEC Shared Repository
 
