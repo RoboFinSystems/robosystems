@@ -5,7 +5,7 @@ High-performance REST API for LadybugDB graph database operations. Provides mult
 - **Multi-Tenant Architecture**: Isolated database instances per graph with API key authentication
 - **Cypher Query Execution**: Run graph queries with streaming results and batching support
 - **Data Ingestion**: DuckDB staging from S3 Parquet, PostgreSQL (postgres_scanner), and queries
-- **Backup & Restore**: Full database backups with encryption and point-in-time recovery
+- **Backup & Restore**: On-demand full database backups with optional encryption and compression
 - **Health & Monitoring**: Real-time health checks, metrics, and task tracking
 - **Vector Search**: LanceDB-powered semantic search across graph data
 
@@ -23,7 +23,7 @@ High-performance REST API for LadybugDB graph database operations. Provides mult
 - Execute Cypher queries with full OpenCypher support
 - Streaming results via NDJSON for large datasets
 - Configurable batch sizes and timeouts
-- Query plan analysis and optimization
+- Parameterized queries with admission-control backpressure
 
 ### Data Operations
 
@@ -34,16 +34,20 @@ High-performance REST API for LadybugDB graph database operations. Provides mult
 
 ### Backup & Recovery
 
-- On-demand full database backups
-- Automated backup scheduling
-- Point-in-time recovery
-- Backup encryption and compression
+- On-demand full database backups via multipart S3 upload
+- Multiple backup formats: encrypted ZIP, raw `.lbug` for the replica fleet, and zstd-compressed downloads to Cloudflare R2 for subscribers
+- DuckDB staging snapshots for analytics and local development
+- Restore from S3 backups with optional pre-restore safety backup
 
 ## Architecture
 
 ### Deployment Model
 
-**Writer Nodes**: Full read/write access for user databases and shared repositories (port 8001)
+**Writer Nodes**: Full read/write access for user (entity) databases (port 8001)
+
+**Shared Master**: Read/write node for shared-repository ingestion and publishing (SEC, etc.)
+
+**Shared Replicas**: Read-only fleet that downloads published `.lbug` / `.duckdb` databases from S3 on boot
 
 **Backend**: LadybugDB — embedded columnar graph database
 
