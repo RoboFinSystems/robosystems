@@ -2,12 +2,16 @@
 Cypher Tool - Executes read-only Cypher queries against the graph database.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from robosystems.logger import logger
 
 from ..exceptions import GraphAPIError
 from .base_tool import BaseTool
+from .constants import LEDGER_STATUS_GUIDANCE
+
+if TYPE_CHECKING:
+  from ..client import GraphMCPClient
 
 
 class CypherTool(BaseTool):
@@ -15,11 +19,38 @@ class CypherTool(BaseTool):
   Tool for executing read-only Cypher queries.
   """
 
+  def __init__(
+    self,
+    client: "GraphMCPClient",
+    schema_extensions: list[str] | tuple[str, ...] = (),
+  ):
+    super().__init__(client)
+    self.schema_extensions: tuple[str, ...] = tuple(schema_extensions)
+
+  def _has_ledger_spine(self) -> bool:
+    """True only for entity graphs that materialize the roboledger ledger spine.
+
+    The SEC shared repo carries the ``roboledger`` extension too — including the
+    base REA ``Event``/``Agent`` tables (present but empty) — yet not the
+    materialized three-level ledger (Transaction/Entry/LineItem). Because the
+    empty ``Event`` table makes node-presence an unreliable signal, we exclude
+    shared repositories and subgraphs explicitly here.
+    """
+    if "roboledger" not in self.schema_extensions:
+      return False
+    try:
+      from robosystems.config.shared_repositories import (
+        is_shared_repository_or_subgraph,
+      )
+
+      return not is_shared_repository_or_subgraph(self.client.graph_id)
+    except Exception as e:
+      logger.debug(f"Ledger-spine check failed for {self.client.graph_id}: {e}")
+      return False
+
   def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for Cypher queries."""
-    return {
-      "name": "read-graph-cypher",
-      "description": """Execute read-only Cypher queries against the graph database.
+    description = """Execute read-only Cypher queries against the graph database.
 
 **OVERVIEW:**
 Query the graph using Cypher syntax. Use `get-graph-schema` first to discover available node types and relationships.
@@ -52,7 +83,14 @@ MATCH (a)-[r]->(b)
 RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS to_type
 ```
 
-**TIP:** Use `get-graph-schema` to understand what's in the graph before writing complex queries.""",
+**TIP:** Use `get-graph-schema` to understand what's in the graph before writing complex queries."""
+
+    if self._has_ledger_spine():
+      description += "\n\n" + LEDGER_STATUS_GUIDANCE
+
+    return {
+      "name": "read-graph-cypher",
+      "description": description,
       "inputSchema": {
         "type": "object",
         "properties": {

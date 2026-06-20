@@ -127,7 +127,9 @@ class GraphMCPTools:
     self.validator = GraphQueryValidator()
 
     # Layer 1: Core tools (always available for any graph)
-    self.cypher_tool = CypherTool(graph_client)
+    self.cypher_tool = CypherTool(
+      graph_client, schema_extensions=self.schema_extensions
+    )
     self.schema_tool = SchemaTool(graph_client)
 
     # Layer 1: GraphQL escape-hatch tools (gated by EXTENSIONS_GRAPHQL_ENABLED)
