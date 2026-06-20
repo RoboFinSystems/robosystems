@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from robosystems.models.api.extensions.schedules import (
   DeleteScheduleRequest,
+  RebuildScheduleRequest,
   UpdateScheduleRequest,
 )
 from robosystems.models.extensions import (
@@ -19,6 +20,7 @@ from robosystems.models.extensions import (
 from robosystems.models.extensions.roboledger import Fact
 from robosystems.operations.roboledger.commands.schedules import (
   delete_schedule,
+  rebuild_schedule,
   update_schedule,
 )
 
@@ -337,3 +339,201 @@ def test_promote_obligations_maps_result_and_commits() -> None:
   assert resp.error_count == 1
   assert resp.classified_event_ids == ["evt_a", "evt_b"]
   assert resp.errors == [{"event_id": "evt_b", "error": "boom"}]
+
+
+# ─── rebuild_schedule ─────────────────────────────────────────────────────
+
+
+def _rebuild_structure() -> MagicMock:
+  """A schedule Structure whose stored metadata carries a full,
+  reproducible definition (the post-create-schedule shape)."""
+  structure = MagicMock()
+  structure.id = "struct_rebuild"
+  structure.name = "Depreciation Schedule"
+  structure.block_type = "schedule"
+  structure.taxonomy_id = "tax_1"
+  structure.metadata_ = {
+    "entry_template": {
+      "debit_element_id": "elem_dr",
+      "credit_element_id": "elem_cr",
+      "entry_type": "closing",
+      "memo_template": "Monthly depreciation",
+      "auto_reverse": False,
+    },
+    "schedule_metadata": {
+      "method": "straight_line",
+      "original_amount": 120_000,
+      "residual_value": 0,
+      "useful_life_months": 12,
+      "asset_element_id": "elem_asset",
+      "periodic_amounts": None,
+    },
+    "monthly_amount": 10_000,
+    "period_start": "2026-01-01",
+    "period_end": "2026-03-31",
+    "schedule_created_event_id": "evt_old_origin",
+    "pending_event_count": 3,
+  }
+  return structure
+
+
+def _rebuild_session(structure: MagicMock) -> tuple[MagicMock, list[type]]:
+  """Wire a MagicMock session for the rebuild orchestration.
+
+  execute call order:
+    1. _load_schedule_or_404 → scalar_one_or_none → structure
+    2. select(Rule.id) for cascade delete → scalars().all()
+    3. count facts → fetchone
+    4. count distinct periods → fetchone
+  query().filter().delete() captures the deleted models in order.
+  _calendar_closed_through_date uses session.query(FiscalCalendar).first().
+  """
+  deleted_models: list[type] = []
+  session = MagicMock()
+  session.execute.side_effect = [
+    _exec_result(row=structure),  # _load_schedule_or_404
+    _exec_result(scalars_all=["rule_old_1"]),  # select(Rule.id)
+    _exec_result(fetchone_row=MagicMock(cnt=6)),  # count facts
+    _exec_result(fetchone_row=MagicMock(cnt=3)),  # count distinct periods
+  ]
+
+  # session.query(...) is used both by _calendar_closed_through_date
+  # (FiscalCalendar.first() → None) and by the cascade deletes
+  # (.filter().delete()).
+  def _query(model):
+    if model.__name__ == "FiscalCalendar":
+      q = MagicMock()
+      q.first.return_value = None
+      return q
+    return _Query(model, deleted_models)
+
+  session.query.side_effect = _query
+  return session, deleted_models
+
+
+def test_rebuild_schedule_voids_old_obligations_and_regenerates() -> None:
+  from unittest.mock import patch
+
+  structure = _rebuild_structure()
+  session, deleted_models = _rebuild_session(structure)
+
+  # create_schedule returns the (in-place) structure; stamp the fresh chain.
+  rebuilt = structure
+  rebuilt.metadata_ = {
+    **structure.metadata_,
+    "schedule_created_event_id": "evt_new_origin",
+    "pending_event_count": 3,
+  }
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      return_value=3,
+    ) as void,
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.create_schedule",
+      return_value=rebuilt,
+    ) as create,
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "evaluate_rules_for_structure",
+      return_value=[],
+    ),
+  ):
+    resp = rebuild_schedule(
+      session,
+      RebuildScheduleRequest(structure_id="struct_rebuild"),
+      created_by="usr_admin",
+    )
+
+  # Old pending chain voided before regeneration, with the rebuild reason.
+  void.assert_called_once()
+  assert void.call_args.kwargs["structure"] is structure
+  assert void.call_args.kwargs["void_reason"] == "schedule_rebuilt"
+
+  # Regeneration runs in place on the SAME structure (id preserved).
+  create.assert_called_once()
+  ckwargs = create.call_args.kwargs
+  assert ckwargs["existing_structure"] is structure
+  assert ckwargs["taxonomy_id"] == "tax_1"
+  assert ckwargs["monthly_amount"] == 10_000
+  assert ckwargs["period_start"].isoformat() == "2026-01-01"
+  assert ckwargs["period_end"].isoformat() == "2026-03-31"
+  # Definition reconstructed from metadata.
+  assert ckwargs["entry_template"].debit_element_id == "elem_dr"
+  assert ckwargs["schedule_metadata"].original_amount == 120_000
+  assert ckwargs["created_by"] == "usr_admin"
+
+  # Old facts/factsets/rules deleted, but NOT associations or the structure.
+  assert VerificationResult in deleted_models
+  assert Fact in deleted_models
+  assert FactSet in deleted_models
+  assert Rule in deleted_models
+  assert Association not in deleted_models
+  session.delete.assert_not_called()
+
+  session.commit.assert_called_once()
+
+  # Response shape mirrors create_schedule.
+  assert resp.structure_id == "struct_rebuild"
+  assert resp.total_periods == 3
+  assert resp.total_facts == 6
+  assert resp.schedule_created_event_id == "evt_new_origin"
+
+
+def test_rebuild_schedule_preserves_structure_id_and_associations() -> None:
+  """The structure row + its associations survive a rebuild."""
+  from unittest.mock import patch
+
+  structure = _rebuild_structure()
+  session, deleted_models = _rebuild_session(structure)
+
+  with (
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.void_pending_obligations",
+      return_value=0,
+    ),
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "ScheduleService.create_schedule",
+      return_value=structure,
+    ),
+    patch(
+      "robosystems.operations.roboledger.commands.schedules."
+      "evaluate_rules_for_structure",
+      return_value=[],
+    ),
+  ):
+    resp = rebuild_schedule(
+      session,
+      RebuildScheduleRequest(structure_id="struct_rebuild"),
+    )
+
+  # Structure itself is never deleted; associations are preserved.
+  session.delete.assert_not_called()
+  assert Association not in deleted_models
+  assert resp.structure_id == "struct_rebuild"
+
+
+def test_rebuild_schedule_raises_when_definition_unreconstructable() -> None:
+  """A schedule with no stored definition and no facts can't be rebuilt."""
+  import pytest
+
+  structure = MagicMock()
+  structure.id = "struct_legacy"
+  structure.block_type = "schedule"
+  structure.metadata_ = {}  # no entry_template
+
+  session = MagicMock()
+  session.execute.side_effect = [_exec_result(row=structure)]
+
+  with pytest.raises(ValueError, match="entry_template"):
+    rebuild_schedule(
+      session,
+      RebuildScheduleRequest(structure_id="struct_legacy"),
+    )
+
+  session.commit.assert_not_called()

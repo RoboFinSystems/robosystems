@@ -7,7 +7,7 @@ translate request bodies to service calls and assemble responses.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
@@ -20,6 +20,7 @@ from robosystems.models.api.extensions.schedules import (
   DeleteScheduleRequest,
   PromoteObligationsRequest,
   PromoteObligationsResponse,
+  RebuildScheduleRequest,
   ScheduleCreatedResponse,
   UpdateScheduleRequest,
 )
@@ -521,3 +522,230 @@ def delete_schedule(session: Session, body: DeleteScheduleRequest) -> dict:
   session.commit()
 
   return {"deleted": True}
+
+
+def _reconstruct_schedule_definition(
+  session: Session, structure: Structure
+) -> tuple[EntryTemplate, ScheduleMetadata | None, int, date, date]:
+  """Recover the generation inputs for a rebuild from a Structure row.
+
+  Prefers the stored definition on ``metadata_`` (entry_template,
+  schedule_metadata, monthly_amount, period_start, period_end —
+  persisted at create time so the rebuild is unambiguous). For legacy
+  rows written before those scalar keys were stored, derives the period
+  bounds from the schedule's FactSet and ``monthly_amount`` from a
+  non-final duration debit Fact.
+
+  Raises ``ValueError`` when the definition can't be reconstructed.
+  """
+  metadata = structure.metadata_ or {}
+  raw_template = metadata.get("entry_template")
+  if not raw_template:
+    raise ValueError(
+      f"Schedule {structure.id!r} has no entry_template in metadata; cannot rebuild."
+    )
+  entry_template = EntryTemplate(
+    debit_element_id=raw_template["debit_element_id"],
+    credit_element_id=raw_template["credit_element_id"],
+    entry_type=raw_template.get("entry_type", "closing"),
+    memo_template=raw_template.get("memo_template", ""),
+    auto_reverse=raw_template.get("auto_reverse", False),
+  )
+
+  raw_meta = metadata.get("schedule_metadata")
+  schedule_metadata = (
+    ScheduleMetadata(
+      method=raw_meta.get("method", "straight_line"),
+      original_amount=raw_meta.get("original_amount", 0),
+      residual_value=raw_meta.get("residual_value", 0),
+      useful_life_months=raw_meta.get("useful_life_months", 0),
+      asset_element_id=raw_meta.get("asset_element_id"),
+      periodic_amounts=raw_meta.get("periodic_amounts"),
+    )
+    if raw_meta
+    else None
+  )
+
+  # Reproducible scalar inputs — stored at create time on new rows.
+  monthly_amount = metadata.get("monthly_amount")
+  period_start_iso = metadata.get("period_start")
+  period_end_iso = metadata.get("period_end")
+
+  period_start: date | None = (
+    date.fromisoformat(period_start_iso) if period_start_iso else None
+  )
+  period_end: date | None = (
+    date.fromisoformat(period_end_iso) if period_end_iso else None
+  )
+
+  # Legacy fallback: derive period bounds from the schedule's FactSet rows.
+  if period_start is None or period_end is None:
+    bounds = session.execute(
+      select(
+        FactSet.period_start.label("min_start"),
+        FactSet.period_end.label("max_end"),
+      ).where(
+        FactSet.structure_id == structure.id,
+        FactSet.factset_type == "schedule",
+      )
+    ).fetchall()
+    starts = [b.min_start for b in bounds if b.min_start is not None]
+    ends = [b.max_end for b in bounds if b.max_end is not None]
+    if not starts or not ends:
+      raise ValueError(
+        f"Schedule {structure.id!r} has no stored period bounds and no "
+        "schedule FactSet to derive them from; cannot rebuild."
+      )
+    period_start = period_start or min(starts)
+    period_end = period_end or max(ends)
+
+  # Legacy fallback: derive monthly_amount from a non-final duration debit
+  # fact (the per-period straight-line amount, in cents).
+  if monthly_amount is None:
+    debit_fact = session.execute(
+      select(Fact.value)
+      .where(
+        Fact.structure_id == structure.id,
+        Fact.element_id == entry_template.debit_element_id,
+        Fact.period_type == "duration",
+      )
+      .order_by(Fact.period_start.asc())
+      .limit(1)
+    ).scalar()
+    if debit_fact is None:
+      raise ValueError(
+        f"Schedule {structure.id!r} has no stored monthly_amount and no "
+        "duration debit fact to derive it from; cannot rebuild."
+      )
+    monthly_amount = round(float(debit_fact) * 100)
+
+  return (
+    entry_template,
+    schedule_metadata,
+    int(monthly_amount),
+    period_start,
+    period_end,
+  )
+
+
+def rebuild_schedule(
+  session: Session,
+  body: RebuildScheduleRequest,
+  created_by: str = "system",
+) -> ScheduleCreatedResponse:
+  """Re-run the schedule generator in place on an existing schedule.
+
+  Atomic alternative to delete-then-recreate (which orphans the
+  obligation chain). Preserves the structure id, its element
+  associations, and its taxonomy; voids the old pending obligation
+  chain; deletes the old facts, FactSets, and SumEquals rules; then
+  regenerates the forward facts + a fresh obligation chain from the
+  schedule's stored definition.
+
+  The historical-vs-in-scope split is re-derived from the CURRENT fiscal
+  calendar `closed_through`, re-scoping the schedule to today's close
+  state. This is the redo-after-a-generator-fix path (e.g. the
+  roll-forward direction fix).
+
+  Raises:
+      ScheduleNotFoundError: if the schedule does not exist.
+      ValueError: if the schedule's definition can't be reconstructed.
+  """
+  structure = _load_schedule_or_404(session, body.structure_id)
+
+  (
+    entry_template,
+    schedule_metadata,
+    monthly_amount,
+    period_start,
+    period_end,
+  ) = _reconstruct_schedule_definition(session, structure)
+
+  # Re-derive the close watermark from the CURRENT fiscal calendar — a
+  # rebuild re-scopes the schedule to today's close state.
+  closed_through = _calendar_closed_through_date(session)
+
+  service = ScheduleService()
+
+  # Void the old pending obligation chain so the regenerated chain doesn't
+  # double-count and the old pending events can't trip the close gate.
+  service.void_pending_obligations(
+    session,
+    structure=structure,
+    void_reason="schedule_rebuilt",
+  )
+
+  # Cascade-delete the old facts, FactSets, and SumEquals rule(s) — mirror
+  # delete_schedule's cascade, but NOT the Structure, Associations, or
+  # taxonomy (those are preserved). Verification results referencing the
+  # structure or its rules are cleared too so stale rows don't linger.
+  rule_ids = (
+    session.execute(select(Rule.id).where(Rule.target_structure_id == structure.id))
+    .scalars()
+    .all()
+  )
+  verification_filters = [VerificationResult.structure_id == structure.id]
+  if rule_ids:
+    verification_filters.append(VerificationResult.rule_id.in_(rule_ids))
+  session.query(VerificationResult).filter(or_(*verification_filters)).delete(
+    synchronize_session=False
+  )
+  session.query(Fact).filter(Fact.structure_id == structure.id).delete(
+    synchronize_session=False
+  )
+  session.query(FactSet).filter(FactSet.structure_id == structure.id).delete(
+    synchronize_session=False
+  )
+  if rule_ids:
+    session.query(Rule).filter(Rule.id.in_(rule_ids)).delete(synchronize_session=False)
+  session.flush()
+
+  # Regenerate in place — preserves structure id + associations + arcs.
+  structure = service.create_schedule(
+    session,
+    name=structure.name,
+    taxonomy_id=structure.taxonomy_id,
+    element_ids=[],
+    period_start=period_start,
+    period_end=period_end,
+    monthly_amount=monthly_amount,
+    entry_template=entry_template,
+    schedule_metadata=schedule_metadata,
+    created_by=created_by,
+    closed_through=closed_through,
+    existing_structure=structure,
+  )
+
+  count_row = session.execute(
+    text("SELECT COUNT(*) AS cnt FROM facts WHERE structure_id = :sid"),
+    {"sid": structure.id},
+  ).fetchone()
+  period_row = session.execute(
+    text(
+      "SELECT COUNT(DISTINCT (period_start, period_end)) AS cnt "
+      "FROM facts WHERE structure_id = :sid"
+    ),
+    {"sid": structure.id},
+  ).fetchone()
+
+  rule_results = evaluate_rules_for_structure(
+    session,
+    structure.id,
+    period_start=period_start,
+    period_end=period_end,
+    created_by=created_by,
+  )
+
+  session.commit()
+
+  metadata = structure.metadata_ or {}
+  return ScheduleCreatedResponse(
+    structure_id=structure.id,
+    name=structure.name,
+    taxonomy_id=structure.taxonomy_id,
+    total_periods=period_row.cnt if period_row else 0,
+    total_facts=count_row.cnt if count_row else 0,
+    rule_summary=_rule_summary(rule_results),
+    schedule_created_event_id=metadata.get("schedule_created_event_id"),
+    pending_event_count=metadata.get("pending_event_count", 0),
+  )

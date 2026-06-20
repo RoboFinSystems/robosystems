@@ -331,6 +331,165 @@ class TestCreateSchedule:
         assert round(obj.value, 2) == obj.value, f"Unrounded value: {obj.value}"
 
 
+class TestCreateScheduleExistingStructure:
+  """create_schedule(existing_structure=...) regenerates facts + the
+  obligation chain on an existing Structure WITHOUT re-creating the
+  structure row, its element associations, or its cm has-part arcs."""
+
+  def test_existing_structure_path_skips_structure_and_associations(self):
+    from robosystems.models.extensions.roboledger import Association, Structure
+
+    session = _mock_session()
+    svc = ScheduleService()
+
+    existing = Structure(
+      name="Rebuilt Schedule",
+      block_type="schedule",
+      taxonomy_id="tax_existing",
+      concept_arrangement="roll_forward",
+    )
+    existing.id = "struct_existing_01"
+    existing.metadata_ = {}
+    existing.artifact_mechanics = {}
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      result = svc.create_schedule(
+        session,
+        name="Rebuilt Schedule",
+        # element_ids is ignored in the existing_structure path
+        taxonomy_id=None,
+        element_ids=[],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+        existing_structure=existing,
+      )
+
+    # The returned structure is the SAME object — id preserved.
+    assert result is existing
+    assert result.id == "struct_existing_01"
+
+    added = [c[0][0] for c in session.add.call_args_list]
+    # No new Structure created — we reused the existing one.
+    assert not any(isinstance(o, Structure) for o in added)
+    # No presentation/has-part associations created (preserved on rebuild).
+    assert not any(isinstance(o, Association) for o in added)
+    # Facts WERE regenerated.
+    facts = [o for o in added if type(o).__name__ == "Fact"]
+    assert len(facts) > 0
+
+  def test_existing_structure_uses_its_own_taxonomy(self):
+    from robosystems.models.extensions.roboledger import Structure
+
+    session = _mock_session()
+    svc = ScheduleService()
+
+    existing = Structure(
+      name="Rebuilt",
+      block_type="schedule",
+      taxonomy_id="tax_keep_me",
+      concept_arrangement="roll_forward",
+    )
+    existing.id = "struct_existing_02"
+    existing.metadata_ = {}
+    existing.artifact_mechanics = {}
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Rebuilt",
+        # A different taxonomy_id arg must be ignored — the existing
+        # structure's taxonomy is authoritative on rebuild.
+        taxonomy_id="tax_should_be_ignored",
+        element_ids=[],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 1, 31),
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+        existing_structure=existing,
+      )
+
+    assert existing.taxonomy_id == "tax_keep_me"
+
+  def test_existing_structure_restamps_reproducible_definition(self):
+    from robosystems.models.extensions.roboledger import Structure
+
+    session = _mock_session()
+    svc = ScheduleService()
+
+    existing = Structure(
+      name="Rebuilt",
+      block_type="schedule",
+      taxonomy_id="tax_existing",
+      concept_arrangement="roll_forward",
+    )
+    existing.id = "struct_existing_03"
+    existing.metadata_ = {}
+    existing.artifact_mechanics = {}
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Rebuilt",
+        taxonomy_id="tax_existing",
+        element_ids=[],
+        period_start=date(2026, 2, 1),
+        period_end=date(2026, 4, 30),
+        monthly_amount=12_345,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+        existing_structure=existing,
+      )
+
+    # The reproducible scalar inputs are re-stamped so a subsequent
+    # rebuild stays unambiguous.
+    assert existing.metadata_["monthly_amount"] == 12_345
+    assert existing.metadata_["period_start"] == "2026-02-01"
+    assert existing.metadata_["period_end"] == "2026-04-30"
+    assert existing.artifact_mechanics["monthly_amount"] == 12_345
+    # The obligation chain was materialized in place.
+    assert existing.metadata_["schedule_created_event_id"] is not None
+
+  def test_existing_structure_emits_fresh_obligation_chain(self):
+    from robosystems.models.extensions.roboledger import Event, Structure
+
+    session = _mock_session()
+    svc = ScheduleService()
+
+    existing = Structure(
+      name="Rebuilt",
+      block_type="schedule",
+      taxonomy_id="tax_existing",
+      concept_arrangement="roll_forward",
+    )
+    existing.id = "struct_existing_04"
+    existing.metadata_ = {}
+    existing.artifact_mechanics = {}
+
+    with patch.object(svc, "_get_entity_id", return_value="ent_01"):
+      svc.create_schedule(
+        session,
+        name="Rebuilt",
+        taxonomy_id="tax_existing",
+        element_ids=[],
+        period_start=date(2026, 1, 1),
+        period_end=date(2026, 3, 31),  # 3 periods
+        monthly_amount=10_000,
+        entry_template=_make_entry_template(),
+        created_by="usr_test",
+        existing_structure=existing,
+      )
+
+    events = [c[0][0] for c in session.add.call_args_list if isinstance(c[0][0], Event)]
+    creators = [e for e in events if e.event_type == "schedule_created"]
+    pending = [e for e in events if e.event_type == "schedule_entry_due"]
+    assert len(creators) == 1
+    assert len(pending) == 3
+
+
 class TestCreateScheduleHasPartArcs:
   """create_schedule emits cm:Debit/cm:Credit has-part posting arcs so the
   debit/credit pairing is a first-class, queryable atom of the schedule IB."""

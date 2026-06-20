@@ -138,7 +138,7 @@ class ScheduleService:
   management.
   """
 
-  def create_schedule(
+  def _build_schedule_structure(
     self,
     session: Session,
     *,
@@ -149,78 +149,34 @@ class ScheduleService:
     period_end: date,
     monthly_amount: int,
     entry_template: EntryTemplate,
-    schedule_metadata: ScheduleMetadata | None = None,
+    schedule_metadata: ScheduleMetadata | None,
     created_by: str,
-    closed_through: date | None = None,
-    source_transaction_id: str | None = None,
-  ) -> Structure:
-    """Create a schedule with pre-generated facts.
+    source_transaction_id: str | None,
+  ) -> tuple[Structure, dict, dict, str]:
+    """Create the Structure row, its element associations, and the
+    cm:Debit/cm:Credit has-part posting arcs for a new schedule.
 
-    Creates a structure (type=schedule), associations to the referenced
-    elements, and facts for each monthly period between period_start and
-    period_end.
+    Factored out of :meth:`create_schedule` so the rebuild path
+    (``existing_structure``) can reuse the same fact-generation tail
+    without re-creating the structure, associations, or arcs (those are
+    preserved on rebuild).
 
-    Args:
-        session: Extensions DB session.
-        name: Schedule name (e.g., "Office Furniture Depreciation").
-        taxonomy_id: Taxonomy to attach to. If None, uses or creates
-            a default "Schedules" taxonomy.
-        element_ids: Element IDs to include in the schedule (e.g.,
-            [depreciation_expense_id, accumulated_depreciation_id]).
-        period_start: First period start date.
-        period_end: Last period end date.
-        monthly_amount: Monthly amount in cents (e.g., depreciation per month).
-        entry_template: Template for generating closing entries.
-        schedule_metadata: Informational metadata about the schedule.
-        created_by: User ID.
-        closed_through: If provided, facts with period_end ≤ this date are
-            tagged `fact_scope='historical'` (already reflected in opening
-            balances, ignored by the close workflow). Facts with period_end
-            > closed_through are tagged `in_scope`. None means all facts
-            are in_scope — backward compatible with callers that haven't
-            adopted the fiscal calendar yet.
-
-    Returns:
-        The created Structure.
+    Returns ``(structure, metadata, artifact_mechanics, taxonomy_id)``.
     """
     # Resolve or create taxonomy
     if not taxonomy_id:
       taxonomy_id = self._ensure_schedule_taxonomy(session, created_by)
 
     # Create structure with entry template metadata
-    metadata = {
-      "entry_template": {
-        "debit_element_id": entry_template.debit_element_id,
-        "credit_element_id": entry_template.credit_element_id,
-        "entry_type": entry_template.entry_type,
-        "memo_template": entry_template.memo_template or f"Monthly schedule - {name}",
-        "auto_reverse": entry_template.auto_reverse,
-      },
-    }
-    if schedule_metadata:
-      metadata["schedule_metadata"] = {
-        "method": schedule_metadata.method,
-        "original_amount": schedule_metadata.original_amount,
-        "residual_value": schedule_metadata.residual_value,
-        "useful_life_months": schedule_metadata.useful_life_months,
-        "asset_element_id": schedule_metadata.asset_element_id,
-        "periodic_amounts": schedule_metadata.periodic_amounts,
-      }
-
-    # Stamp the typed artifact_mechanics column alongside the legacy
-    # metadata_ blob so the envelope builder's typed-column read path
-    # works from creation. metadata_ stays populated during the
-    # transition window for backward compatibility with rows written
-    # before artifact_mechanics landed.
-    # periods_with_entries is a transient read-time value (queried from facts),
-    # not a stored property — intentionally excluded here rather than using
-    # ScheduleMechanics.model_dump(); it is injected by the envelope builder.
-    artifact_mechanics: dict[str, object] = {
-      "kind": "closing_entry_generator",
-      "entry_template": metadata["entry_template"],
-      "schedule_metadata": metadata.get("schedule_metadata"),
-      "source_transaction_id": source_transaction_id,
-    }
+    metadata, artifact_mechanics = self._build_schedule_definition_blobs(
+      name=name,
+      monthly_amount=monthly_amount,
+      period_start=period_start,
+      period_end=period_end,
+      entry_template=entry_template,
+      schedule_metadata=schedule_metadata,
+      source_transaction_id=source_transaction_id,
+    )
 
     structure = Structure(
       name=name,
@@ -282,6 +238,157 @@ class ScheduleService:
           association_type="has-part",
           arcrole=CM_HAS_PART_ARCROLE,
           created_by=created_by,
+        )
+      )
+
+    return structure, metadata, artifact_mechanics, taxonomy_id
+
+  @staticmethod
+  def _build_schedule_definition_blobs(
+    *,
+    name: str,
+    monthly_amount: int,
+    period_start: date,
+    period_end: date,
+    entry_template: EntryTemplate,
+    schedule_metadata: ScheduleMetadata | None,
+    source_transaction_id: str | None,
+  ) -> tuple[dict, dict]:
+    """Build the ``metadata_`` and ``artifact_mechanics`` JSONB blobs that
+    persist a schedule's reproducible definition.
+
+    ``monthly_amount`` + ``period_start`` + ``period_end`` are stored
+    alongside the entry template + schedule metadata so a later
+    ``rebuild_schedule`` can reconstruct the exact generation inputs
+    unambiguously (no derivation from facts required).
+    """
+    metadata: dict[str, object] = {
+      "entry_template": {
+        "debit_element_id": entry_template.debit_element_id,
+        "credit_element_id": entry_template.credit_element_id,
+        "entry_type": entry_template.entry_type,
+        "memo_template": entry_template.memo_template or f"Monthly schedule - {name}",
+        "auto_reverse": entry_template.auto_reverse,
+      },
+      # Reproducible generation inputs — let rebuild_schedule reconstruct
+      # the schedule from metadata alone without re-deriving from facts.
+      "monthly_amount": monthly_amount,
+      "period_start": period_start.isoformat(),
+      "period_end": period_end.isoformat(),
+    }
+    if schedule_metadata:
+      metadata["schedule_metadata"] = {
+        "method": schedule_metadata.method,
+        "original_amount": schedule_metadata.original_amount,
+        "residual_value": schedule_metadata.residual_value,
+        "useful_life_months": schedule_metadata.useful_life_months,
+        "asset_element_id": schedule_metadata.asset_element_id,
+        "periodic_amounts": schedule_metadata.periodic_amounts,
+      }
+
+    # Stamp the typed artifact_mechanics column alongside the legacy
+    # metadata_ blob so the envelope builder's typed-column read path
+    # works from creation. metadata_ stays populated during the
+    # transition window for backward compatibility with rows written
+    # before artifact_mechanics landed.
+    # periods_with_entries is a transient read-time value (queried from facts),
+    # not a stored property — intentionally excluded here rather than using
+    # ScheduleMechanics.model_dump(); it is injected by the envelope builder.
+    artifact_mechanics: dict[str, object] = {
+      "kind": "closing_entry_generator",
+      "entry_template": metadata["entry_template"],
+      "schedule_metadata": metadata.get("schedule_metadata"),
+      "source_transaction_id": source_transaction_id,
+      "monthly_amount": monthly_amount,
+      "period_start": period_start.isoformat(),
+      "period_end": period_end.isoformat(),
+    }
+    return metadata, artifact_mechanics
+
+  def create_schedule(
+    self,
+    session: Session,
+    *,
+    name: str,
+    taxonomy_id: str | None,
+    element_ids: list[str],
+    period_start: date,
+    period_end: date,
+    monthly_amount: int,
+    entry_template: EntryTemplate,
+    schedule_metadata: ScheduleMetadata | None = None,
+    created_by: str,
+    closed_through: date | None = None,
+    source_transaction_id: str | None = None,
+    existing_structure: Structure | None = None,
+  ) -> Structure:
+    """Create a schedule with pre-generated facts.
+
+    Creates a structure (type=schedule), associations to the referenced
+    elements, and facts for each monthly period between period_start and
+    period_end.
+
+    Args:
+        session: Extensions DB session.
+        name: Schedule name (e.g., "Office Furniture Depreciation").
+        taxonomy_id: Taxonomy to attach to. If None, uses or creates
+            a default "Schedules" taxonomy.
+        element_ids: Element IDs to include in the schedule (e.g.,
+            [depreciation_expense_id, accumulated_depreciation_id]).
+        period_start: First period start date.
+        period_end: Last period end date.
+        monthly_amount: Monthly amount in cents (e.g., depreciation per month).
+        entry_template: Template for generating closing entries.
+        schedule_metadata: Informational metadata about the schedule.
+        created_by: User ID.
+        closed_through: If provided, facts with period_end ≤ this date are
+            tagged `fact_scope='historical'` (already reflected in opening
+            balances, ignored by the close workflow). Facts with period_end
+            > closed_through are tagged `in_scope`. None means all facts
+            are in_scope — backward compatible with callers that haven't
+            adopted the fiscal calendar yet.
+        existing_structure: When provided, regenerate facts + the
+            obligation chain **in place** on this existing Structure row
+            instead of creating a new one. The structure, its element
+            associations, and its cm has-part arcs are preserved; only
+            the freshly-stamped definition blobs + facts + obligation
+            events are written. The caller (``rebuild_schedule``) is
+            responsible for voiding the old obligation chain and deleting
+            the old facts/rules before invoking this path. ``element_ids``
+            is ignored in this mode (associations are preserved).
+
+    Returns:
+        The created (or rebuilt) Structure.
+    """
+    if existing_structure is not None:
+      structure = existing_structure
+      taxonomy_id = str(structure.taxonomy_id)
+      metadata, artifact_mechanics = self._build_schedule_definition_blobs(
+        name=name,
+        monthly_amount=monthly_amount,
+        period_start=period_start,
+        period_end=period_end,
+        entry_template=entry_template,
+        schedule_metadata=schedule_metadata,
+        source_transaction_id=source_transaction_id,
+      )
+      structure.metadata_ = metadata
+      structure.artifact_mechanics = artifact_mechanics
+      session.flush()
+    else:
+      structure, metadata, artifact_mechanics, taxonomy_id = (
+        self._build_schedule_structure(
+          session,
+          name=name,
+          taxonomy_id=taxonomy_id,
+          element_ids=element_ids,
+          period_start=period_start,
+          period_end=period_end,
+          monthly_amount=monthly_amount,
+          entry_template=entry_template,
+          schedule_metadata=schedule_metadata,
+          created_by=created_by,
+          source_transaction_id=source_transaction_id,
         )
       )
 
@@ -604,6 +711,15 @@ class ScheduleService:
     artifact_mechanics["schedule_created_event_id"] = schedule_created_event_id
     artifact_mechanics["pending_event_count"] = pending_event_count
     structure.artifact_mechanics = artifact_mechanics
+
+    # On the rebuild path the Structure already lives in the DB, so the
+    # in-place JSONB reassignment above must be flagged for SQLAlchemy to
+    # emit the UPDATE (a fresh-create row is dirty regardless).
+    if existing_structure is not None:
+      from sqlalchemy.orm.attributes import flag_modified
+
+      flag_modified(structure, "metadata_")
+      flag_modified(structure, "artifact_mechanics")
 
     session.flush()
     return structure
