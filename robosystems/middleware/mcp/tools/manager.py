@@ -281,12 +281,17 @@ class GraphMCPTools:
       self.close_period_tool = ClosePeriodTool(graph_client)
       self.reopen_period_tool = ReopenPeriodTool(graph_client)
 
-    # Information Block reads are pure reads and must stay available on
-    # read-only graphs. Same gate pattern as document_tools below:
-    # extension + flag only, no read_only guard.
+    # Information Block reads stay available on read-only *tenant* graphs (no
+    # read_only guard) but are excluded on shared repos: they read the
+    # extensions OLTP DB, which has no per-graph schema for a shared repo like
+    # 'sec' (the call fails with "Invalid graph_id for schema name: sec").
     self.get_information_block_tool = None
     self.list_information_blocks_tool = None
-    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
       from .information_block_tools import (
         GetInformationBlockTool,
         ListInformationBlocksTool,
@@ -296,10 +301,16 @@ class GraphMCPTools:
       self.list_information_blocks_tool = ListInformationBlocksTool(graph_client)
 
     # Workflow playbook (guidance only — version-locked to this build).
-    # Pure read with no DB access, so it stays available on read-only graphs:
-    # an operator can learn the close workflow before they have write access.
+    # Pure read with no DB access, so it stays available on read-only tenant
+    # graphs: an operator can learn the close workflow before they have write
+    # access. Excluded on shared repos — the close workflow is a roboledger
+    # tenant concept with no meaning on a shared repository like 'sec'.
     self.get_close_playbook_tool = None
-    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
       from .playbook_tools import GetClosePlaybookTool
 
       self.get_close_playbook_tool = GetClosePlaybookTool(graph_client)
@@ -308,7 +319,11 @@ class GraphMCPTools:
     self.get_agent_tool = None
     self.list_agents_tool = None
     self.agent_activity_tool = None
-    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
       from .agent_tools import AgentActivityTool, GetAgentTool, ListAgentsTool
 
       self.get_agent_tool = GetAgentTool(graph_client)
@@ -318,17 +333,26 @@ class GraphMCPTools:
     # Event Handler reads (get-event-handler, list-event-handlers)
     self.get_event_handler_tool = None
     self.list_event_handlers_tool = None
-    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
       from .event_handler_tools import GetEventHandlerTool, ListEventHandlersTool
 
       self.get_event_handler_tool = GetEventHandlerTool(graph_client)
       self.list_event_handlers_tool = ListEventHandlersTool(graph_client)
 
     # Event Block reads (get-event-block, list-event-blocks) — same gate as
-    # information block reads: available on read-only graphs.
+    # information block reads: read-only tenant graphs yes, shared repos no
+    # (extensions OLTP DB has no schema for a shared repo).
     self.get_event_block_tool = None
     self.list_event_blocks_tool = None
-    if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED:
+    if (
+      self._has_extension("roboledger")
+      and env.ROBOLEDGER_ENABLED
+      and not self._is_shared_repository()
+    ):
       from .event_block_tools import GetEventBlockTool, ListEventBlocksTool
 
       self.get_event_block_tool = GetEventBlockTool(graph_client)
