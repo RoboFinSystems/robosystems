@@ -52,6 +52,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
+from robosystems.models.extensions.roboledger import Structure
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.operations.event_block.python_handlers import get_python_handler
 from robosystems.operations.event_block.python_handlers.types import (
@@ -66,6 +67,7 @@ class PromotionResult:
   graph_id: str
   classified_event_ids: list[str] = field(default_factory=list)
   dispatched_event_ids: list[str] = field(default_factory=list)
+  voided_orphan_event_ids: list[str] = field(default_factory=list)
   errors: list[tuple[str, str]] = field(default_factory=list)
 
   @property
@@ -75,6 +77,10 @@ class PromotionResult:
   @property
   def dispatched_count(self) -> int:
     return len(self.dispatched_event_ids)
+
+  @property
+  def voided_orphan_count(self) -> int:
+    return len(self.voided_orphan_event_ids)
 
   @property
   def error_count(self) -> int:
@@ -120,6 +126,51 @@ def promote_pending_obligations(
   )
 
   result = PromotionResult(graph_id=graph_id)
+
+  # Orphan guard (Layer 2): an obligation whose schedule structure no longer
+  # exists is orphaned — the schedule was deleted but its register wasn't
+  # voided (e.g. a pre-fix delete, or the void's silent no-op). Never draft an
+  # orphan into a closing entry: void it in place so it stops blocking close,
+  # and surface it. The catch-all that stops a deleted schedule from
+  # double-posting at promotion regardless of how the orphan arose. See
+  # specs/schedule-delete-obligation-integrity.md (Layer 2).
+  if candidates:
+    candidate_schedule_ids = {
+      evt.metadata_.get("schedule_id")
+      for evt in candidates
+      if evt.metadata_ and evt.metadata_.get("schedule_id")
+    }
+    live_schedule_ids: set[str] = set()
+    if candidate_schedule_ids:
+      live_schedule_ids = {
+        sid
+        for (sid,) in session.query(Structure.id)
+        .filter(Structure.id.in_(candidate_schedule_ids))
+        .all()
+      }
+    orphans = [
+      evt
+      for evt in candidates
+      if evt.metadata_
+      and evt.metadata_.get("schedule_id")
+      and evt.metadata_.get("schedule_id") not in live_schedule_ids
+    ]
+    if orphans:
+      orphan_ids = [evt.id for evt in orphans]
+      session.query(Event).filter(
+        Event.id.in_(orphan_ids), Event.status == "pending"
+      ).update({"status": "voided"}, synchronize_session="fetch")
+      result.voided_orphan_event_ids.extend(orphan_ids)
+      for evt in orphans:
+        logger.warning(
+          "promote_pending_obligations[%s]: voided orphan obligation %s — "
+          "schedule %s no longer exists (not drafted)",
+          graph_id,
+          evt.id,
+          evt.metadata_.get("schedule_id"),
+        )
+      orphan_id_set = set(orphan_ids)
+      candidates = [evt for evt in candidates if evt.id not in orphan_id_set]
 
   if not candidates:
     return result

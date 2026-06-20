@@ -1021,11 +1021,14 @@ class TestCreateScheduleMaterializesObligations:
     rendered = str(update_stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "replaced_by_event_id='evt_disposal_42'" in rendered.replace(" = ", "=")
 
-  def test_void_pending_obligations_no_op_when_no_originator(self):
-    """Legacy schedules with no schedule_created_event_id return 0 cleanly."""
+  def test_void_pending_obligations_no_op_when_unrecoverable(self):
+    """No stamp AND no recoverable obligations (the fallback finds nothing) → 0."""
     structure = MagicMock()
     structure.metadata_ = {}
+    structure.id = "struct_legacy"
     session = MagicMock()
+    # The fallback recovery select returns no originator id.
+    session.execute.return_value.scalar.return_value = None
 
     svc = ScheduleService()
     voided = svc.void_pending_obligations(
@@ -1033,7 +1036,41 @@ class TestCreateScheduleMaterializesObligations:
     )
 
     assert voided == 0
-    session.execute.assert_not_called()
+    # The fallback recovery select ran, but no UPDATE followed.
+    assert session.execute.call_count == 1
+    session.get.assert_not_called()
+
+  def test_void_pending_obligations_recovers_link_when_stamp_missing(self):
+    """Layer 1 fix: the structure lacks the schedule_created_event_id stamp, but
+    the obligations carry the link (obligated_by_event_id) — recover it and void
+    anyway, instead of silently returning 0.
+
+    This is the 2026-06-19 Harbinger orphan defect: without this fallback the
+    void no-op'd and the delete orphaned 280 pending obligations that then
+    double-posted at close. See specs/schedule-delete-obligation-integrity.md.
+    """
+    structure = MagicMock()
+    structure.metadata_ = {}  # the bug condition: stamp missing
+    structure.id = "struct_orphan"
+
+    originator = MagicMock()
+    originator.metadata_ = {"pending_event_count": 5}
+
+    session = MagicMock()
+    recovery = MagicMock()
+    recovery.scalar.return_value = "evt_origin_recovered"
+    update_result = MagicMock(rowcount=5)
+    session.execute.side_effect = [recovery, update_result]
+    session.get.return_value = originator
+
+    svc = ScheduleService()
+    voided = svc.void_pending_obligations(
+      session, structure=structure, void_reason="schedule_deleted"
+    )
+
+    assert voided == 5
+    assert originator.metadata_["pending_event_count"] == 0
+    assert session.execute.call_count == 2  # recovery select + UPDATE
 
   def test_void_pending_obligations_no_op_when_no_pending_rows(self):
     """When the UPDATE matches zero rows, originator metadata is untouched."""
