@@ -185,13 +185,24 @@ async def query_fact_grid(
   entity_list = entities if entities else ([entity] if entity else None)
   entity_pattern, entity_where = _build_entity_match(entity_list, parameters)
 
-  match_parts = [
-    f"(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}",
-    "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
-    "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
-  ]
+  # Anchor the traversal on the Entity when an entity filter is present so the
+  # planner seeds from the ~thousands of Entity nodes (single tickers are
+  # inline-anchored to one) and never full-scans the 100M+ Fact nodes that
+  # leading with (f:Fact) forces. Multi-entity / CIK / name comparisons lost
+  # the single-ticker inline anchor and degraded to a full Fact scan (25s+
+  # timeout) before this; leading with Entity keeps them sub-second.
   if entity_pattern:
-    match_parts.append(f"(f)-[:FACT_HAS_ENTITY]->{entity_pattern}")
+    match_parts = [
+      f"{entity_pattern}<-[:FACT_HAS_ENTITY]-(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}",
+      "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
+      "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
+    ]
+  else:
+    match_parts = [
+      f"(f:Fact)-[:FACT_HAS_ELEMENT]->{element_pattern}",
+      "(f)-[:FACT_HAS_PERIOD]->(p:Period)",
+      "(f)-[:FACT_HAS_UNIT]->(u:Unit)",
+    ]
 
   where_clauses = ["f.has_dimensions = false", *element_where, *entity_where]
 

@@ -26,14 +26,24 @@ async def query_financial_statement(
   period_type: str | None = None,
   limit: int = 50,
 ) -> list[dict[str, Any]]:
-  """Run the `Structure → FactSet → Fact` traversal for a statement.
+  """Run the `Fact → FactSet → Structure` traversal for a statement.
 
-  Either ``report_id`` or ``ticker`` must be provided:
+  Either ``report_id`` or ``ticker`` must be provided. **Both paths lead
+  with the selective, indexed anchor and reach the globally-scoped
+  ``Structure {canonical_type: ...}`` node LAST**, through facts that are
+  already constrained:
 
-  - ``report_id`` (fast path): starts from the Report node and
-    intersects with FactSet membership. Selective and planner-friendly.
-  - ``ticker`` (slower): Structure-first traversal anchored on the
-    matching Entity. Used when a caller doesn't know the report id.
+  - ``report_id`` path: anchors on the single ``Report`` node, expands to
+    its facts, then up to each fact's FactSet and that FactSet's Structure.
+  - ``ticker`` path: anchors on the single ``Entity`` node, same expansion.
+
+  This ordering matters. ``canonical_type`` is not indexed and ~53k
+  ``Structure`` nodes share ``income_statement`` on the SEC repo (one per
+  filing). Leading with ``(s:Structure {canonical_type})`` makes the
+  planner scan every such structure → every FactSet → millions of facts
+  before intersecting down to one report, which times out. Leading with
+  the indexed anchor (``Report.identifier`` / ``Entity.ticker``) keeps the
+  intermediate result set to a single filer's facts.
 
   ``period_type`` drives inline ``Period`` filters:
 
@@ -65,33 +75,39 @@ async def query_financial_statement(
 
   period_match = f"(f)-[:FACT_HAS_PERIOD]->(p:Period{period_props})"
 
+  # Reach the globally-scoped Structure node LAST, through already-constrained
+  # facts. The standalone Structure anchor is the FactSet→Structure tail —
+  # never the scan root. See the docstring for why ordering is load-bearing.
+  structure_match = (
+    "(s:Structure {canonical_type: $statement_type})"
+    + "-[:STRUCTURE_HAS_FACT_SET]->(fs)"
+  )
+  factset_match = "(fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f)"
+
   if report_id:
-    # Fast path: anchor on Report, intersect with FactSet.
+    # Anchor on the single indexed Report node.
     match_parts = [
-      (
-        "(s:Structure {canonical_type: $statement_type})"
-        + "-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
-      ),
       (
         "(r:Report {identifier: $report_id})"
         + "-[:REPORT_HAS_FACT]->(f:Fact {has_dimensions: false})"
         + "-[:FACT_HAS_ELEMENT]->(e:Element)"
       ),
-      "(fs)-[:FACT_SET_CONTAINS_FACT]->(f)",
       period_match,
+      factset_match,
+      structure_match,
     ]
     parameters["report_id"] = report_id
   else:
-    # Ticker path: Structure-first traversal, anchor on Entity.
+    # Anchor on the single indexed Entity node.
     match_parts = [
       (
-        "(s:Structure {canonical_type: $statement_type})"
-        + "-[:STRUCTURE_HAS_FACT_SET]->(fs:FactSet)"
-        + "-[:FACT_SET_CONTAINS_FACT]->(f:Fact {has_dimensions: false})"
+        "(ent:Entity {ticker: $ticker})"
+        + "<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})"
         + "-[:FACT_HAS_ELEMENT]->(e:Element)"
       ),
       period_match,
-      "(f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: $ticker})",
+      factset_match,
+      structure_match,
     ]
     parameters["ticker"] = ticker
 
