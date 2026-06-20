@@ -165,7 +165,7 @@ async def execute_cypher_query(
         "1. Create file upload: POST /v1/graphs/{graph_id}/tables/{table_name}/files\n"
         "2. Ingest to graph: POST /v1/graphs/{graph_id}/tables/ingest\n"
         "This ensures data integrity and enables pipeline benefits (audit, rollback, validation).\n"
-        "Note: Subgraphs support write operations for development and report creation.",
+        "Note: Subgraphs support write operations for scratch/workspace use (e.g. agent memory).",
       )
 
     # Log write operations on subgraphs for audit
