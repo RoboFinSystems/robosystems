@@ -7,7 +7,7 @@ RoboSystems is an open-source, AI-native financial intelligence platform for acc
 The platform provides the core infrastructure that all extensions build on:
 
 - **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
-- **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming. The API surface behind "AI agent" features in product copy.
+- **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming.
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
 - **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
@@ -15,11 +15,11 @@ The platform provides the core infrastructure that all extensions build on:
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
 - **Subgraphs (Workspaces)**: AI memory graphs and isolated environments for development and team collaboration
 
+The **core platform API** lives at `/v1` — auth, orgs, billing, graph lifecycle (subgraphs, backups, materialize, tier changes), Cypher, and MCP — with reads as REST `GET`s. Every write — across both the core and extensions surfaces — is a named **`OperationEnvelope`** operation with `Idempotency-Key` support, audit logging, and SSE progress streaming via `/v1/operations/{id}/stream`.
+
 ## Extensions
 
-Extensions are domain-specific subsystems that bring their own schema, OLTP tables, API routes, data pipelines, and dedicated frontend apps. They share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph for analytical queries.
-
-The **core platform API** lives at `/v1` — auth, orgs, billing, graph lifecycle (subgraphs, backups, materialize, tier changes), Cypher, and MCP — with reads as REST `GET`s. Every write, across both the core and extensions surfaces, is a named **`OperationEnvelope`** operation with `Idempotency-Key` support, audit logging, and SSE progress streaming via `/v1/operations/{id}/stream`.
+Extensions are domain-specific subsystems that bring their own schema, OLTP tables, API routes, data pipelines, and dedicated frontend apps. They share a single PostgreSQL database with schema-per-tenant isolation and materialize to the graph for analytical queries. Domain content is authored as **block molecules** — self-describing envelopes bundling atomic facts with their structure, rules, and verification — never bare rows.
 
 The extensions API surface is **graph-scoped at the URL level** — `graph_id` is always a path parameter, never a query argument — and splits reads from writes by transport:
 
@@ -30,11 +30,43 @@ Behind the API is a CQRS operations kernel (`reads/` + `commands/` per domain) t
 
 ### [RoboLedger](https://roboledger.ai)
 
-Accounting and financial reporting extension. OLTP general ledger in schema-per-tenant PostgreSQL (accounts, transactions, journal entries, line items, dimensions); 30+ GraphQL read fields covering entities, accounts, trial balance, fiscal calendar, schedules, taxonomies, mappings, reports, and publish lists; 30+ named command operations spanning close lifecycle, schedule and closing-entry authoring, CoA→GAAP mapping associations, multi-period report authoring, and publish lists; analytical view operations over the materialized graph; QuickBooks ELT pipeline via dbt/Dagster; SEC XBRL financial reporting; AI-powered CoA→GAAP mapping via the MappingOperator. Dedicated frontend app.
+Accounting and financial reporting extension — a ledger-grade system of record that AI and analysts can both query and operate. Writes land as self-describing **molecules**: atomic facts bundled with their structural wiring, rules, and verification in one typed envelope, never bare rows. Three block molecules are the authoring substrate:
+
+- **Information Blocks** — the envelope for reportable content: schedules, statements, and metrics bundled with their period-versioned fact sets, typed mechanics, and rules. `evaluate-rules` runs arithmetic checks (EqualTo, RollUp, RollForward, Exists, CoExists) over materialized facts; pinning a fact set separates a live closing book from a frozen report.
+- **Event Blocks** — REA event capture: callers record what happened in the world (a sale, a payment, an asset disposal) through a structured action-verb vocabulary, and a handler registry derives the debits and credits across the three-level ledger (Transaction → Entry → LineItem). Preview handler resolution, execute to post GL atomically, and promote matured obligations (AR/AP, schedule entries) on demand.
+- **Taxonomy Blocks** — accounting frameworks as data, not code: Elements, linkbase Associations (presentation / calculation / mapping), Structures, and auto-generated structural rules in one atomic write. Ships `fac` (fundamentals) and `rs-gaap` (~2,000 curated US-GAAP concepts) behind a two-tier public→tenant library, with CoA→GAAP mapping anchored to calc-DAG leaves.
+
+Built on the blocks:
+
+- **Close lifecycle** — fiscal calendar, close-target catch-up sequencing, and period close/reopen gated on the balance equation and QuickBooks sync-staleness
+- **Mapping** — CoA→GAAP mapping associations plus AI-assisted bulk mapping via the **MappingOperator** (confidence-tiered: auto-approve / review / skip)
+- **Reporting** — multi-period reports rendered from shared facts through a Reporting Style; a report lifecycle (draft → under_review → filed → archived) with publish lists for distribution
+- **Analytical operations** — `live-financial-statement` renders a statement straight from the OLTP ledger (no materialization required); `build-fact-grid` and `financial-statement-analysis` query the materialized XBRL hypercube in the graph
+- **Serialization** — reports serialize to web-native **JSON-LD** (stored, SHACL-validatable) and filing-grade **XBRL 2.1** (rebuilt on demand, Arelle-validated)
+- **Pipelines & data** — QuickBooks ELT via dbt/Dagster with a configurable `write_policy`, and SEC XBRL financial reporting
+
+Dedicated frontend app (`roboledger-app`).
 
 ### [RoboInvestor](https://roboinvestor.ai)
 
-Portfolio management and investment tracking extension. OLTP database with portfolios, securities, and positions in schema-per-tenant PostgreSQL; 7 GraphQL read fields (portfolios, securities, positions, holdings) and 6 named command operations for portfolio-block CRUD and security CRUD. Securities can link to entities for cross-graph research between investor portfolios and SEC public-company data via the shared repository. Dedicated frontend app.
+Portfolio management and investment tracking extension — tracks investor holdings and links them back to the companies behind them.
+
+- **Portfolio Blocks** — the same molecule discipline as RoboLedger: a portfolio plus its positions and securities are validated and written as one envelope, with cost basis and current value held as integer cents and dollar totals computed at the boundary. Positions move through an active / disposed / archived lifecycle; reads expose `portfolios`, `positions`, `holdings` (rolled up by issuer), and the assembled `portfolioBlock`.
+- **Securities** — register and maintain ownership instruments (common stock, warrants, convertible notes, …) with an extensible `terms` blob for instrument-specific detail (strike price, liquidation preference, vesting)
+- **Cross-graph research** — a security links to its issuer through a mutual handshake: the investor records the issuer's `source_graph_id`, and the issuer shares a report that materializes its entity in the investor's graph. This joins private holdings to SEC public-company data in the shared repository — the differentiated capability — with authorization enforced at the report-sharing boundary, not the OLTP layer.
+
+Dedicated frontend app (`roboinvestor-app`).
+
+## SEC Shared Repository
+
+A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
+
+- **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
+- **Graph**: 14 node types and 24 relationship types modeling the full XBRL reporting hierarchy
+- **Search**: Hybrid BM25 + KNN vector search across XBRL text blocks, narrative sections, and iXBRL disclosures
+- **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging via the [Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) taxonomy
+
+See [SEC Adapter](/robosystems/adapters/sec/README.md) for detailed documentation.
 
 ## AI
 
@@ -167,7 +199,7 @@ Built end-to-end on open-source engines — PostgreSQL, a columnar graph databas
 **Application Layer:**
 
 - FastAPI REST API with versioned endpoints
-- Extension GraphQL API for reads with command operations
+- Extension GraphQL read API plus named REST command operations (CQRS)
 - MCP Server for AI-powered graph database access with schema-aware tools
 - AI Operator System for autonomous financial operations with automatic credit tracking
 - Dagster for data pipeline orchestration and background jobs
@@ -194,22 +226,6 @@ Built end-to-end on open-source engines — PostgreSQL, a columnar graph databas
 - CloudFormation deployed via GitHub Actions with OIDC
 - ECS Fargate for API and Dagster
 - EC2 (ASG) for LadybugDB writer clusters; EC2 (ALB + ASG) for shared replica clusters
-
-## SEC Shared Repository
-
-A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
-
-- **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
-- **Graph**: 14 node types and 24 relationship types modeling the full XBRL reporting hierarchy
-- **Search**: Hybrid BM25 + KNN vector search across XBRL text blocks, narrative sections, and iXBRL disclosures
-- **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging via the [Seattle Method](http://xbrlsite.com/seattlemethod/SeattleMethod.pdf) taxonomy
-
-```bash
-just sec-load NVDA 2025  # Load NVIDIA filings for 2025
-just sec-health          # Check SEC database health
-```
-
-See [SEC Adapter](/robosystems/adapters/sec/README.md) and [SEC Pipeline](/robosystems/adapters/sec/pipeline/README.md) for detailed documentation.
 
 ## Client Libraries
 
