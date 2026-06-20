@@ -414,8 +414,12 @@ class GraphMCPClient:
           continue
 
         if table_type.upper() == "NODE":
-          # Use static common properties instead of querying each table
+          # Prefer the curated property map for well-known nodes (nice
+          # ordering); for everything else introspect the real columns from
+          # the catalog so the schema isn't reported as a misleading guess.
           sample_properties = self._get_common_properties(table_name)
+          if sample_properties is None:
+            sample_properties = await self._introspect_node_properties(table_name)
 
           schema_info.append(
             {
@@ -451,8 +455,15 @@ class GraphMCPClient:
       sanitized = self._sanitize_error_message(e, "schema retrieval")
       raise GraphAPIError(sanitized)
 
-  def _get_common_properties(self, node_name: str) -> list[str]:
-    """Get commonly used properties for node types."""
+  def _get_common_properties(self, node_name: str) -> list[str] | None:
+    """Curated query-hint properties for well-known node types.
+
+    Returns ``None`` for node types not in the map so the caller can
+    introspect real columns from the catalog instead of emitting a generic
+    guess (the old behavior reported every uncurated node — Structure,
+    Dimension, FactSet, Taxonomy, … — as ``identifier/name/value/...``,
+    which is wrong for most of them).
+    """
     common_props = {
       "Entity": [
         "name",
@@ -486,9 +497,36 @@ class GraphMCPClient:
       "Connection": ["provider", "status", "last_sync", "realm_id", "connection_id"],
       "Unit": ["measure", "numerator_uri", "denominator_uri"],
     }
-    return common_props.get(
-      node_name, ["identifier", "name", "value", "created_at", "updated_at"]
-    )
+    return common_props.get(node_name)
+
+  async def _introspect_node_properties(self, node_name: str) -> list[str]:
+    """Fetch real column names for a node table from the catalog.
+
+    Uses ``CALL TABLE_INFO`` — a catalog lookup, not a data scan, so it is
+    O(1) even on 100M+ node databases. Drops high-dimensional vector
+    columns (embeddings) since they are noise as query hints. Falls back to
+    the legacy generic list only if the catalog call fails.
+    """
+    try:
+      rows = await self.execute_query(
+        f"CALL TABLE_INFO('{node_name}') RETURN name, type"
+      )
+    except Exception as e:  # pragma: no cover - defensive catalog fallback
+      logger.warning(f"TABLE_INFO introspection failed for {node_name}: {e}")
+      return ["identifier", "name", "value", "created_at", "updated_at"]
+
+    properties: list[str] = []
+    for row in rows:
+      col_name = row.get("name", "")
+      col_type = (row.get("type", "") or "").upper()
+      if not col_name:
+        continue
+      # Skip fixed-size array columns (e.g. embedding FLOAT[384]) — not
+      # useful as a Cypher query hint and noisy in the schema output.
+      if "[" in col_type:
+        continue
+      properties.append(col_name)
+    return properties or ["identifier"]
 
   def _get_node_description(self, node_name: str) -> str:
     """Get description for common node types (base + roboledger extension only)."""

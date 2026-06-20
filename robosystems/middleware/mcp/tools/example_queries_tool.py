@@ -133,17 +133,29 @@ List of example queries with explanations, tailored to the actual schema present
             {
               "category": "financial",
               "description": "Get company information",
-              "query": "MATCH (e:Entity) RETURN e.name, e.cik, e.ticker, e.sic_description",
-              "explanation": "Entity nodes contain company master data",
+              "query": "MATCH (e:Entity) RETURN e.name, e.cik, e.ticker, e.sic_description LIMIT 25",
+              "explanation": "Entity nodes contain company master data. Filter by ticker (e.ticker = 'MRMD') or CIK for one company — this repo holds thousands of entities, so always LIMIT or filter.",
             },
             {
               "category": "financial",
-              "description": "⭐ CONSOLIDATED Revenue (use has_dimensions=false!)",
-              "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element {qname: 'us-gaap:Revenues'}), (f)-[:FACT_HAS_PERIOD]->(p:Period)
-WHERE f.numeric_value IS NOT NULL
-RETURN p.end_date, p.duration_type, f.numeric_value as revenue
+              "description": "⭐ CONSOLIDATED Revenue for one company (cross-filer robust)",
+              "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: 'MRMD'}), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
+WHERE e.canonical_concept = 'revenue' AND f.numeric_value IS NOT NULL
+RETURN ent.ticker, e.qname, p.end_date, f.numeric_value AS revenue
 ORDER BY p.end_date DESC LIMIT 10""",
-              "explanation": "⚠️ CRITICAL: has_dimensions=false filters out segment breakdowns. Use comma-separated patterns in single MATCH for performance.",
+              "explanation": "⚠️ has_dimensions=false drops segment breakdowns (consolidated totals only). Filter on e.canonical_concept ('revenue', 'net_income', ...) rather than a single qname — revenue is tagged us-gaap:Revenues by some filers and us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax by others, and canonical_concept normalizes across both. Use the resolve-element tool to discover concepts.",
+            },
+            {
+              "category": "financial",
+              "description": "Full income statement by ticker (fast Structure traversal)",
+              "query": """MATCH (ent:Entity {ticker: 'MRMD'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element),
+      (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'}),
+      (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
+      (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
+WHERE f.numeric_value IS NOT NULL
+RETURN DISTINCT e.qname, f.numeric_value AS value, p.end_date
+ORDER BY p.end_date DESC LIMIT 40""",
+              "explanation": "Pull a whole statement via Structure.canonical_type (income_statement | balance_sheet | cash_flow_statement | equity_statement). ⚠️ ANCHOR ON THE ENTITY (or a Report) FIRST and reach Structure LAST — ~53k filings share canonical_type='income_statement', so leading the MATCH with the Structure node scans them all and times out. For balance sheets, filter Period {period_type: 'instant'} instead of duration_type.",
             },
             {
               "category": "financial",
@@ -243,7 +255,7 @@ RETURN min(n.numeric_value) as min_val, max(n.numeric_value) as max_val""",
         {
           "category": "reference",
           "description": "Available node types in this graph",
-          "info": f"Node types: {', '.join(node_types[:10])}",
+          "info": f"Node types: {', '.join(node_types)}",
           "explanation": "Use these labels in your MATCH patterns",
         }
       )
@@ -252,7 +264,7 @@ RETURN min(n.numeric_value) as min_val, max(n.numeric_value) as max_val""",
           {
             "category": "reference",
             "description": "Available relationship types",
-            "info": f"Relationships: {', '.join(rel_types[:10])}",
+            "info": f"Relationships: {', '.join(rel_types)}",
             "explanation": "Use these in relationship patterns like -[:TYPE]->",
           }
         )

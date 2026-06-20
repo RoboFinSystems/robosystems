@@ -595,7 +595,7 @@ class TestGraphMCPConfigurableSchema:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_schema_all_tables_listed(self, mock_async_graph_client, monkeypatch):
-    """Test that all tables are listed in schema (no counts for performance)."""
+    """All tables are listed; uncurated nodes report real catalog columns."""
 
     # Mock table response - includes nodes and relationships
     tables_response = [
@@ -604,9 +604,18 @@ class TestGraphMCPConfigurableSchema:
       {"name": "OtherTable", "type": "NODE"},
       {"name": "HAS_CUSTOM", "type": "REL"},
     ]
-
+    # Uncurated node types are not in the static property map, so get_schema
+    # introspects each one's real columns via a TABLE_INFO catalog lookup
+    # (cheap — no data scan) instead of emitting a generic guess.
+    table_info_response = [
+      {"name": "identifier", "type": "STRING"},
+      {"name": "label", "type": "STRING"},
+    ]
     mock_async_graph_client.query.side_effect = [
-      {"data": tables_response, "execution_time_ms": 10},  # SHOW_TABLES only
+      {"data": tables_response, "execution_time_ms": 10},  # SHOW_TABLES
+      {"data": table_info_response, "execution_time_ms": 5},  # CustomTable1
+      {"data": table_info_response, "execution_time_ms": 5},  # CustomTable2
+      {"data": table_info_response, "execution_time_ms": 5},  # OtherTable
     ]
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
@@ -618,10 +627,12 @@ class TestGraphMCPConfigurableSchema:
       # Verify all tables are listed (3 nodes + 1 relationship)
       assert len(schema) == 4
 
-      # Check that all node tables are present (no counts)
+      # Check that all node tables are present (no counts) and that their
+      # properties came from catalog introspection, not the generic guess.
       custom1 = next(s for s in schema if s["label"] == "CustomTable1")
       assert custom1["type"] == "node"
       assert "count" not in custom1
+      assert custom1["sample_properties"] == ["identifier", "label"]
 
       custom2 = next(s for s in schema if s["label"] == "CustomTable2")
       assert custom2["type"] == "node"
@@ -635,9 +646,9 @@ class TestGraphMCPConfigurableSchema:
       assert "from_node" in has_custom
       assert "to_node" in has_custom
 
-      # Verify only 1 query (SHOW_TABLES)
+      # 1 SHOW_TABLES + 1 TABLE_INFO per uncurated node table (no data scans).
       query_calls = list(mock_async_graph_client.query.call_args_list)
-      assert len(query_calls) == 1
+      assert len(query_calls) == 4
 
 
 class TestGraphMCPFactory:

@@ -327,9 +327,30 @@ class TestSchemaInference:
 
   def test_get_common_properties_unknown_node(self):
     client = _create_client()
-    props = client._get_common_properties("UnknownNode")
+    # Unknown nodes return None so get_schema introspects real columns from
+    # the catalog instead of emitting a misleading generic guess.
+    assert client._get_common_properties("UnknownNode") is None
+
+  @pytest.mark.asyncio
+  async def test_introspect_node_properties_uses_catalog(self):
+    client = _create_client()
+    client.execute_query = AsyncMock(
+      return_value=[
+        {"name": "identifier", "type": "STRING"},
+        {"name": "canonical_type", "type": "STRING"},
+        {"name": "embedding", "type": "FLOAT[384]"},  # vector noise — dropped
+      ]
+    )
+    props = await client._introspect_node_properties("Structure")
+    assert props == ["identifier", "canonical_type"]
+    assert "embedding" not in props
+
+  @pytest.mark.asyncio
+  async def test_introspect_node_properties_falls_back_on_error(self):
+    client = _create_client()
+    client.execute_query = AsyncMock(side_effect=RuntimeError("catalog down"))
+    props = await client._introspect_node_properties("Structure")
     assert "identifier" in props
-    assert "name" in props
 
   def test_get_node_description_known(self):
     client = _create_client()
