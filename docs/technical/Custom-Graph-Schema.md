@@ -433,7 +433,7 @@ cat .local/config.json | grep -E "api_key|graph_id"
   "mcpServers": {
     "robosystems": {
       "command": "npx",
-      "args": ["-y", "@robosystems/mcp"],
+      "args": ["-y", "@robosystems/mcp@latest"],
       "env": {
         "ROBOSYSTEMS_API_URL": "http://localhost:8000",
         "ROBOSYSTEMS_API_KEY": "rfsabc123xyz...",
