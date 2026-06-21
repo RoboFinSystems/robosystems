@@ -102,14 +102,14 @@ Built on the blocks:
 
 Model Context Protocol client for AI agent integration - [@robosystems/mcp](https://www.npmjs.com/package/@robosystems/mcp)
 
-**Usage**: `npx -y @robosystems/mcp`
+**Usage**: `npx -y @robosystems/mcp@latest`
 
 ```
 {
   "mcpServers": {
     "robosystems": {
       "command": "npx",
-      "args": ["-y", "@robosystems/mcp"],
+      "args": ["-y", "@robosystems/mcp@latest"],
       "env": {
         "ROBOSYSTEMS_API_URL": "https://api.robosystems.ai",
         "ROBOSYSTEMS_API_KEY": "rfs*",

@@ -237,7 +237,7 @@ RoboSystems provides comprehensive client libraries for building applications:
 AI integration client for connecting Claude and other LLMs to RoboSystems.
 
 ```bash
-npx -y @robosystems/mcp
+npx -y @robosystems/mcp@latest
 ```
 
 - **Features**: Claude Desktop integration, natural language queries, graph traversal, financial analysis
