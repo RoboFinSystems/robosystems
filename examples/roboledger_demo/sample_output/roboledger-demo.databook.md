@@ -40,6 +40,29 @@ manifest:
     equity_statement:
       type: turtle
       description: "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)"
+graph:
+  facts: 41
+  href: roboledger-demo.holon.trig
+  graphs:
+    - id: scene
+      iri: https://robosystems.ai/report/rpt_01KVF94CFWZ98EPA84K7V2EY45#scene
+      description: "Instance facts — the values this report reports"
+      disposition: inline
+    - id: boundary
+      iri: https://robosystems.ai/report/rpt_01KVF94CFWZ98EPA84K7V2EY45#boundary
+      description: "Calculation network — the rollup rules the facts must obey"
+      disposition: reference
+      derived_from: rs-gaap-calculations@v1
+    - id: projection
+      iri: https://robosystems.ai/report/rpt_01KVF94CFWZ98EPA84K7V2EY45#projection
+      description: "Presentation network — order, indentation, subtotals"
+      disposition: reference
+      derived_from: rs-gaap-presentation@v1
+      reporting_style: 025f5d48-12ce-5d65-b9eb-4f137a10ef06
+    - id: lineage
+      description: "Event lineage — fact → event → entry → line item → CoA"
+      disposition: internal
+      note: "the books, not published — a report is an aggregation of the ledger, which is internal; substantiation available to authorized parties"
 report:
   reporting_style: 025f5d48-12ce-5d65-b9eb-4f137a10ef06
   report_id: rpt_01KVF94CFWZ98EPA84K7V2EY45
@@ -66,7 +89,7 @@ report:
 
 # RoboLedger Demo — Cascade Advisory Group LLC
 
-A report **is** a collection of Information Blocks. Each block below is shown twice: a markdown table (human view) and an addressable `turtle` block (machine view — the same facts as RDF), keyed by the id declared in the frontmatter `manifest`. Everything is derived from `roboledger-demo.jsonld`; the bundle and this DataBook are two skins of one graph.
+A report **is** a collection of Information Blocks, and this DataBook is a projection of one report holon (see the `graph:` map above). The **scene** graph — the facts — renders twice per block here: a markdown table (human view) and a foldable, addressable `turtle` slice (machine view, the same facts as RDF). The **boundary** (calculation) and **projection** (presentation) graphs live as real named graphs in the companion `roboledger-demo.holon.trig` and derive from their versioned framework — referenced here rather than inlined, since they're shared by every report on that framework. The **lineage** graph — the ledger behind the facts — is internal and not published: a report is an aggregation of the books, not the books. The `Validation evidence` section is the published substantiation that the referenced rules hold. Everything here derives from `roboledger-demo.jsonld`.
 
 
 ## Balance Sheet
@@ -92,6 +115,9 @@ A report **is** a collection of Information Blocks. Each block below is shown tw
 | `rs-gaap:RetainedEarningsAccumulatedDeficit` |     Retained Earnings (Accumulated Deficit) | $20,120.03 |
 | `rs-gaap:StockholdersEquity` |   **Stockholders' Equity Attributable to Parent** | $69,920.03 |
 | `rs-gaap:LiabilitiesAndStockholdersEquity` | **Liabilities and Equity** | $70,720.03 |
+
+<details>
+<summary>▸ Balance Sheet — scene RDF / Turtle (340 triples · 19.6 KB)</summary>
 
 ```turtle {#balance_sheet}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
@@ -479,6 +505,8 @@ rs-gaap:RetainedEarningsAccumulatedDeficit a rs:Element ;
     xbrli:measure iso4217:USD .
 ```
 
+</details>
+
 
 ## Income Statement
 
@@ -498,6 +526,9 @@ rs-gaap:RetainedEarningsAccumulatedDeficit a rs:Element ;
 | `rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest` |   **Income (Loss) from Continuing Operations before Income Taxes, Noncontrolling Interest** | $20,120.03 |
 | `rs-gaap:IncomeLossFromContinuingOperations` |   **Income (Loss) from Continuing Operations, Net of Tax, Attributable to Parent** | $20,120.03 |
 | `rs-gaap:NetIncomeLoss` |   **Net Income (Loss) Attributable to Parent** | $20,120.03 |
+
+<details>
+<summary>▸ Income Statement — scene RDF / Turtle (218 triples · 12.8 KB)</summary>
 
 ```turtle {#income_statement}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
@@ -750,6 +781,8 @@ rs-gaap:Revenues a rs:Element ;
     xbrli:measure iso4217:USD .
 ```
 
+</details>
+
 
 ## Cash Flow Statement
 
@@ -770,6 +803,9 @@ rs-gaap:Revenues a rs:Element ;
 | `rs-gaap:ProceedsFromIssuanceOfCommonStock` |     Proceeds from Issuance of Common Stock | $49,800.00 |
 | `rs-gaap:NetCashProvidedByUsedInFinancingActivities` |   Cash Provided by (Used in) Financing Activity, Including Discontinued Operation | $49,800.00 |
 | `rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease` | **Cash and Cash Equivalents, Period Increase (Decrease)** | $63,695.00 |
+
+<details>
+<summary>▸ Cash Flow Statement — scene RDF / Turtle (238 triples · 14.2 KB)</summary>
 
 ```turtle {#cash_flow_statement}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
@@ -1044,6 +1080,8 @@ rs-gaap:ProceedsFromIssuanceOfCommonStock a rs:Element ;
     xbrli:measure iso4217:USD .
 ```
 
+</details>
+
 
 ## Statement of Changes in Equity
 
@@ -1056,6 +1094,9 @@ rs-gaap:ProceedsFromIssuanceOfCommonStock a rs:Element ;
 | `rs-gaap:NetIncomeLoss` |   **Net Income (Loss) Attributable to Parent** | $20,120.03 |
 | `rs-gaap:ProceedsFromIssuanceOfCommonStock` |   Proceeds from Issuance of Common Stock | $49,800.00 |
 | `rs-gaap:StockholdersEquity` | **Stockholders' Equity Attributable to Parent** | $69,920.03 |
+
+<details>
+<summary>▸ Statement of Changes in Equity — scene RDF / Turtle (81 triples · 4.9 KB)</summary>
 
 ```turtle {#equity_statement}
 @prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
@@ -1157,6 +1198,8 @@ rs-gaap:StockholdersEquity a rs:Element ;
 <https://robosystems.ai/report/rpt_01KVF94CFWZ98EPA84K7V2EY45/unit/u_USD> a rs:Unit ;
     xbrli:measure iso4217:USD .
 ```
+
+</details>
 
 
 ## Validation evidence

@@ -35,7 +35,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import rdflib
-from rdflib import RDF, Graph, URIRef
+from rdflib import RDF, Dataset, Graph, URIRef
 from rdflib.namespace import Namespace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -312,8 +312,107 @@ def _render_ib_turtle(src: Graph, ib: URIRef) -> str:
 # ── Frontmatter ──────────────────────────────────────────────────────────────
 
 
+def _triple_count(turtle: str) -> int:
+  """Approximate triple count of a turtle slice for the fold summary — count
+  statement terminators (``;`` / ``.``), skipping ``@prefix`` lines and blanks."""
+  n = 0
+  for line in turtle.splitlines():
+    s = line.strip()
+    if not s or s.startswith("@prefix"):
+      continue
+    if s.endswith(";") or s.endswith("."):
+      n += 1
+  return n
+
+
+def _fold(block_type: str, title: str, turtle: str) -> str:
+  """Collapse a scene turtle slice into a ``<details>`` so the human view (the
+  table) stays clean while the RDF still travels in the same file. Folds
+  *pixels, not bytes* — the triples are all still here for any parser. The
+  blank lines around the fence are required for GitHub-flavored Markdown to
+  render the code block when expanded."""
+  n = _triple_count(turtle)
+  kb = len(turtle.encode("utf-8")) / 1024
+  summary = f"▸ {title} — scene RDF / Turtle ({n} triples · {kb:.1f} KB)"
+  return (
+    f"<details>\n<summary>{summary}</summary>\n\n"
+    f"```turtle {{#{block_type}}}\n{turtle}\n```\n\n"
+    f"</details>"
+  )
+
+
+def _graph_index(
+  root: URIRef,
+  fact_count: int,
+  pins: list[tuple[str, str]],
+  reporting_style: str,
+  holon_name: str,
+) -> list[str]:
+  """The holon map — the decomposition, made explicit, with **resolvable**
+  IRIs. The three published graphs are real named graphs in the companion
+  ``holon.trig`` (``href``): **scene** (facts, also inlined + folded here),
+  **boundary** (calculation arcs) and **projection** (presentation arcs +
+  structures) — boundary/projection also name the versioned framework they
+  derive from. The fourth graph, **lineage** (the ledger), carries no IRI
+  because it is intentionally unpublished: a report is an aggregation of the
+  books, not the books; the inline validation evidence is the published
+  substantiation that the referenced rules hold."""
+  rid = str(root)
+
+  def _pin(needle: str) -> str | None:
+    for fw, ver in pins:
+      if needle in fw:
+        return f"{fw}@{ver}"
+    return None
+
+  calc = _pin("calculation")
+  pres = _pin("presentation")
+  out = [
+    "graph:",
+    f"  facts: {fact_count}",
+    f"  href: {holon_name}",
+    "  graphs:",
+  ]
+  out += [
+    "    - id: scene",
+    f"      iri: {rid}#scene",
+    '      description: "Instance facts — the values this report reports"',
+    "      disposition: inline",
+  ]
+  out += [
+    "    - id: boundary",
+    f"      iri: {rid}#boundary",
+    '      description: "Calculation network — the rollup rules the facts must obey"',
+    "      disposition: reference",
+  ]
+  if calc:
+    out.append(f"      derived_from: {calc}")
+  out += [
+    "    - id: projection",
+    f"      iri: {rid}#projection",
+    '      description: "Presentation network — order, indentation, subtotals"',
+    "      disposition: reference",
+  ]
+  if pres:
+    out.append(f"      derived_from: {pres}")
+  if reporting_style:
+    out.append(f"      reporting_style: {reporting_style}")
+  out += [
+    "    - id: lineage",
+    '      description: "Event lineage — fact → event → entry → line item → CoA"',
+    "      disposition: internal",
+    '      note: "the books, not published — a report is an aggregation of the ledger, which is internal; substantiation available to authorized parties"',
+  ]
+  return out
+
+
 def _frontmatter(
-  g: Graph, root: URIRef, ibs: list[URIRef], columns: list[dict], title: str
+  g: Graph,
+  root: URIRef,
+  ibs: list[URIRef],
+  columns: list[dict],
+  title: str,
+  holon_name: str,
 ) -> str:
   """DataBook frontmatter in Charlie Hoffman's canonical envelope + key order
   (id · type · title · version · created · modified · authors · license ·
@@ -389,6 +488,11 @@ def _frontmatter(
     lines.append(f"    {bt}:")
     lines.append("      type: turtle")
     lines.append(f"      description: {_yaml_str(desc)}")
+  # ── Holon graph map: inline scene · referenced boundary/projection ·
+  #    internal lineage ──
+  fact_count = sum(1 for _ in g.subjects(RDF.type, RS.Fact))
+  reporting_style = str(g.value(root, RS.reportingStyle) or "")
+  lines += _graph_index(root, fact_count, pins, reporting_style, holon_name)
   # ── RoboSystems extension (after the canonical keys) ──
   lines.append("report:")
   lines.append(f"  reporting_style: {g.value(root, RS.reportingStyle) or ''}")
@@ -442,6 +546,79 @@ def _evidence_section(shacl_md: Path | None, xbrl_md: Path | None) -> str:
 # ── Top-level render ─────────────────────────────────────────────────────────
 
 
+def _partition_holon(g: Graph, root: URIRef) -> dict[str, Graph]:
+  """Split the flat report graph into the three *published* holon graphs —
+  ``scene`` (facts, the InformationBlock that groups them, and the
+  element/period/unit/entity/factSet they reference), ``boundary``
+  (calculation arcs) and ``projection`` (presentation arcs + structures). The
+  fourth graph, lineage/event, is intentionally absent: a report is an
+  aggregation of the books, not the books, and the ledger is internal.
+  Everything here already lives in the bundle, so this is a pure repartition —
+  no upstream/ledger access needed."""
+  scene, boundary, projection = Graph(), Graph(), Graph()
+
+  scene_subjects: set[URIRef] = set()
+  for fact in g.subjects(RDF.type, RS.Fact):
+    scene_subjects.add(fact)  # type: ignore[arg-type]
+    for ref in (RS.element, RS.period, RS.unit, RS.entity, RS.factSet):
+      v = g.value(fact, ref)
+      if isinstance(v, URIRef):
+        scene_subjects.add(v)
+  # the InformationBlock molecule groups its facts via the shared factSet
+  # (Fact --factSet--> FactSet <--factSet-- InformationBlock); include it so its
+  # blockType / prefLabel and that grouping link land in scene.
+  for ib in g.subjects(RDF.type, RS.InformationBlock):
+    scene_subjects.add(ib)  # type: ignore[arg-type]
+  for s in scene_subjects:
+    for p, o in g.predicate_objects(s):
+      if p == RS.envelopeJson:
+        continue
+      scene.add((s, p, o))
+
+  for assoc in g.subjects(RDF.type, RS.Association):
+    at = str(g.value(assoc, RS.associationType) or "")
+    target = (
+      boundary if at == "calculation" else projection if at == "presentation" else None
+    )
+    if target is None:
+      continue
+    for p, o in g.predicate_objects(assoc):
+      target.add((assoc, p, o))
+
+  for struct in g.subjects(RDF.type, RS.Structure):
+    for p, o in g.predicate_objects(struct):
+      if p == RS.envelopeJson:
+        continue
+      if p == RS.hasAssociation:
+        at = str(g.value(o, RS.associationType) or "")
+        (boundary if at == "calculation" else projection).add((struct, p, o))
+      else:
+        projection.add((struct, p, o))
+
+  return {"scene": scene, "boundary": boundary, "projection": projection}
+
+
+def write_holon_trig(jsonld_path: Path, out_trig: Path) -> Path:
+  """Serialize the report's published holon as a TriG file with three real
+  named graphs — ``<report>#scene`` / ``#boundary`` / ``#projection`` — derived
+  purely from the on-disk ``.jsonld`` (the machine skin the human DataBook
+  references). The named-graph IRIs are exactly the ones the DataBook's
+  ``graph:`` map declares, so those references resolve to actual content."""
+  g = rdflib.Graph().parse(str(jsonld_path), format="json-ld")
+  root = _root(g)
+
+  ds = Dataset()
+  for prefix, ns in _TURTLE_PREFIXES.items():
+    ds.bind(prefix, ns, replace=True)
+  for name, sub in _partition_holon(g, root).items():
+    ctx = ds.graph(URIRef(f"{root}#{name}"))
+    for triple in sub:
+      ctx.add(triple)
+
+  out_trig.write_text(ds.serialize(format="trig"))
+  return out_trig
+
+
 def write_databook(
   jsonld_path: Path,
   out_md: Path,
@@ -459,6 +636,9 @@ def write_databook(
   root = _root(g)
   columns = _period_columns(g, root)
 
+  out_trig = out_md.parent / (jsonld_path.stem + ".holon.trig")
+  write_holon_trig(jsonld_path, out_trig)
+
   ibs = sorted(
     g.subjects(RDF.type, RS.InformationBlock),
     key=lambda ib: (
@@ -471,15 +651,24 @@ def write_databook(
   entity_name = str(g.value(entity, SKOS.prefLabel) or "") if entity else ""
   title = f"{label} — {entity_name}" if entity_name else label
 
-  parts: list[str] = [_frontmatter(g, root, ibs, columns, title)]  # type: ignore[arg-type]
+  parts: list[str] = [
+    _frontmatter(g, root, ibs, columns, title, out_trig.name)  # type: ignore[arg-type]
+  ]
   parts.append(
     f"\n# {title}\n\n"
-    f"A report **is** a collection of Information Blocks. Each block below is "
-    f"shown twice: a markdown table (human view) and an addressable `turtle` "
-    f"block (machine view — the same facts as RDF), keyed by the id declared in "
-    f"the frontmatter `manifest`. Everything is derived from "
-    f"`{jsonld_path.name}`; the bundle and this DataBook are two skins of one "
-    f"graph.\n"
+    f"A report **is** a collection of Information Blocks, and this DataBook is a "
+    f"projection of one report holon (see the `graph:` map above). The **scene** "
+    f"graph — the facts — renders twice per block here: a markdown table (human "
+    f"view) and a foldable, addressable `turtle` slice (machine view, the same "
+    f"facts as RDF). The **boundary** (calculation) and **projection** "
+    f"(presentation) graphs live as real named graphs in the companion "
+    f"`{out_trig.name}` and derive from their versioned framework — referenced "
+    f"here rather than inlined, since they're shared by every report on that "
+    f"framework. The **lineage** graph — the ledger behind the facts — is "
+    f"internal and not published: a report is an aggregation of the books, not "
+    f"the books. The `Validation evidence` section is the published "
+    f"substantiation that the referenced rules hold. Everything here derives from "
+    f"`{jsonld_path.name}`.\n"
   )
 
   for ib in ibs:
@@ -493,9 +682,8 @@ def write_databook(
       f"- **FactSet**: `{str(g.value(ib, RS.factSet)).rsplit('/', 1)[-1]}`\n"
     )
     parts.append(_render_ib_table(g, ib, columns))  # type: ignore[arg-type]
-    parts.append(f"\n```turtle {{#{bt}}}")
-    parts.append(_render_ib_turtle(g, ib))  # type: ignore[arg-type]
-    parts.append("```\n")
+    turtle = _render_ib_turtle(g, ib)  # type: ignore[arg-type]
+    parts.append("\n" + _fold(bt, heading, turtle) + "\n")
 
   evidence = _evidence_section(shacl_md, xbrl_md)
   if evidence:
@@ -527,6 +715,9 @@ def main() -> None:
     jsonld, out, args.label, shacl_md=args.shacl_md, xbrl_md=args.xbrl_md
   )
   print(f"DataBook: {jsonld.name} → {_rel(written)} ({written.stat().st_size:,} bytes)")
+  holon = written.parent / (jsonld.stem + ".holon.trig")
+  if holon.exists():
+    print(f"  + holon:  {_rel(holon)} ({holon.stat().st_size:,} bytes)")
 
 
 if __name__ == "__main__":
