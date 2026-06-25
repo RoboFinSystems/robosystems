@@ -6,12 +6,10 @@ RoboSystems is an open-source, AI-native financial intelligence platform for acc
 
 The platform provides the core infrastructure that all extensions build on:
 
-- **Dedicated Infrastructure**: Tiered graph infrastructure with dedicated instances and configurable memory allocation
+- **Dedicated Infrastructure**: Tiered LadybugDB graph infrastructure with dedicated instances and configurable memory allocation
 - **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming.
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining and benchmarking
 - **Document Management**: Upload, index, and search documents with full-text and semantic search via OpenSearch
-- **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
-- **Dagster Orchestration**: Data pipeline orchestration for SEC filings, QuickBooks sync, backups, billing, and scheduled jobs
 - **Credit-Based Billing**: Flexible credits for AI operations based on token usage
 - **Subgraphs (Workspaces)**: AI memory graphs and isolated environments for development and team collaboration
 - **Web Application**: Primary web interface — graph management, the AI query console (natural-language + Cypher over MCP), schema explorer, document search, shared-repository access, and billing — [`robosystems-app`](https://github.com/RoboFinSystems/robosystems-app)
@@ -57,39 +55,6 @@ Portfolio management and investment tracking extension — tracks investor holdi
 - **Cross-graph research** — a security links to its issuer through a mutual handshake: the investor records the issuer's `source_graph_id`, and the issuer shares a report that materializes its entity in the investor's graph. This joins private holdings to SEC public-company data in the shared repository — the differentiated capability — with authorization enforced at the report-sharing boundary, not the OLTP layer.
 
 Dedicated frontend app: [`roboinvestor-app`](https://github.com/RoboFinSystems/roboinvestor-app).
-
-## SEC Shared Repository
-
-A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
-
-- **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
-- **Graph**: 14 node types and 24 relationship types modeling the full XBRL reporting hierarchy
-- **Search**: Hybrid BM25 + KNN vector search across XBRL text blocks, narrative sections, and iXBRL disclosures
-- **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging — applying aspects of the Seattle Method to the shared repository's disclosures (the methodology RoboLedger implements more broadly)
-
-See [SEC Adapter](/robosystems/adapters/sec/README.md) for detailed documentation.
-
-## AI
-
-### Model Context Protocol (MCP)
-
-- **Financial Analysis**: Natural language queries across enterprise data and public benchmark data
-- **Cross-Database Queries**: Compare user graph data against SEC shared repository data
-- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, financial analysis, document search, and AI memory operations
-- **Handler Pool**: Managed MCP handler instances with resource limits
-
-### AI Operator System
-
-- Unified architecture: stateless Operators (Claude/MCP executors) with protocol-based service injection
-- Dual execution: API (sync/SSE) and background worker (Valkey queue + SSE progress)
-- Automatic credit tracking per AI call — Operators cannot forget billing
-- Extensible: add new Operators for new AI workflows; they inherit execution, credit tracking, and progress streaming automatically
-
-### Credit System
-
-- **AI Operations Only**: Credits are consumed exclusively by AI Operator calls (Anthropic Claude via AWS Bedrock)
-- **Token-Based Billing**: Credits based on actual token usage and model cost
-- **MCP Tool Access**: No credits consumed for MCP calls or database operations
 
 ## Quick Start
 
@@ -227,6 +192,39 @@ Built end-to-end on open-source engines — PostgreSQL, LadybugDB, DuckDB, Lance
 - CloudFormation deployed via GitHub Actions with OIDC
 - ECS Fargate for API and Dagster
 - EC2 (ASG) for LadybugDB writer clusters; EC2 (ALB + ASG) for shared replica clusters
+
+## AI
+
+### Model Context Protocol (MCP)
+
+- **Financial Analysis**: Natural language queries across enterprise data and public benchmark data
+- **Cross-Database Queries**: Compare user graph data against SEC shared repository data
+- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, financial analysis, document search, and AI memory operations
+- **Handler Pool**: Managed MCP handler instances with resource limits
+
+### AI Operator System
+
+- Unified architecture: stateless Operators (Claude/MCP executors) with protocol-based service injection
+- Dual execution: API (sync/SSE) and background worker (Valkey queue + SSE progress)
+- Automatic credit tracking per AI call — Operators cannot forget billing
+- Extensible: add new Operators for new AI workflows; they inherit execution, credit tracking, and progress streaming automatically
+
+### Credit System
+
+- **AI Operations Only**: Credits are consumed exclusively by AI Operator calls (Anthropic Claude via AWS Bedrock)
+- **Token-Based Billing**: Credits based on actual token usage and model cost
+- **MCP Tool Access**: No credits consumed for MCP calls or database operations
+
+## SEC Shared Repository
+
+A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
+
+- **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
+- **Graph**: 14 node types and 24 relationship types modeling the full XBRL reporting hierarchy
+- **Search**: Hybrid BM25 + KNN vector search across XBRL text blocks, narrative sections, and iXBRL disclosures
+- **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging — applying aspects of the Seattle Method to the shared repository's disclosures (the methodology RoboLedger implements more broadly)
+
+See [SEC Adapter](/robosystems/adapters/sec/README.md) for detailed documentation.
 
 ## Client Libraries
 
