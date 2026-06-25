@@ -1,0 +1,2601 @@
+@prefix iso4217: <http://www.xbrl.org/2003/iso4217#> .
+@prefix link: <http://www.xbrl.org/2003/linkbase#> .
+@prefix rs: <https://robosystems.ai/vocab/> .
+@prefix rs-gaap: <https://robosystems.ai/taxonomy/rs-gaap/v1/> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xbrli: <http://www.xbrl.org/2003/instance#> .
+@prefix xlink: <http://www.w3.org/1999/xlink#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC#boundary> {
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> rs:hasAssociation <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/0>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/1>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/10>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/11>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/12>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/13>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/14>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/15>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/16>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/17>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/18>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/19>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/2>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/20>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/21>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/22>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/23>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/24>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/25>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/3>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/4>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/5>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/6>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/7>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/8>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/9> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> rs:hasAssociation <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/calculation/0>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/calculation/1>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/calculation/2>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/calculation/3> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> rs:hasAssociation <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/0>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/1>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/10>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/11>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/12>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/13>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/14>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/15>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/16>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/17>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/18>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/19>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/2>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/20>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/21>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/22>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/23>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/24>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/25>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/26>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/27>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/28>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/29>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/3>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/30>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/31>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/32>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/33>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/34>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/35>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/36>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/37>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/4>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/5>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/6>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/7>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/8>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/9> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/0> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:CostOfRevenue ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:CostOfGoodsAndServicesSold ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/1> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:GrossProfit ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:Revenues ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/10> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:CostOfRevenue ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OtherCostOfOperatingRevenue ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/11> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:GrossProfit ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:CostOfRevenue ;
+        link:order 200.0 ;
+        link:weight -1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/12> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:IncomeLossFromContinuingOperations ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:IncomeTaxExpenseBenefit ;
+        link:order 200.0 ;
+        link:weight -1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/13> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:NonoperatingIncomeExpense ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/14> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:NetIncomeLoss ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/15> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:InterestExpense ;
+        link:order 200.0 ;
+        link:weight -1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/16> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:ResearchAndDevelopmentExpense ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/17> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingIncomeLoss ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OperatingExpenses ;
+        link:order 200.0 ;
+        link:weight -1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/18> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:GainLossOnDispositionOfAssets ;
+        link:order 300.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/19> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:DepreciationDepletionAndAmortization ;
+        link:order 300.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/2> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:IncomeLossFromContinuingOperations ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/20> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OtherNonoperatingIncomeExpense ;
+        link:order 400.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/21> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OtherCostAndExpenseOperating ;
+        link:order 400.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/22> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:ForeignCurrencyTransactionGainLossBeforeTax ;
+        link:order 403.3333 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/23> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:RestructuringCharges ;
+        link:order 403.3333 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/24> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:GainsLossesOnExtinguishmentOfDebt ;
+        link:order 406.6667 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/25> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:AssetImpairmentCharges ;
+        link:order 406.6667 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/3> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OperatingIncomeLoss ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/4> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:NetIncomeLoss ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:IncomeLossFromContinuingOperations ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/5> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:InvestmentIncomeInterest ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/6> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:GeneralAndAdministrativeExpense ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/7> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingIncomeLoss ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:GrossProfit ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/8> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:Revenues ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/calculation/9> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:SellingAndMarketingExpense ;
+        link:order 150.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/calculation/0> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/calculation/1> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/calculation/2> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:NetCashProvidedByUsedInFinancingActivities ;
+        link:order 300.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/calculation/3> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:EffectOfExchangeRateOnCash ;
+        link:order 400.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/0> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:Assets ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AssetsCurrent ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/1> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:CashAndCashEquivalentsAtCarryingValue ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/10> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:Assets ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AssetsNoncurrent ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/11> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:ReceivablesNetCurrent ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/12> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:Goodwill ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/13> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:Liabilities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LiabilitiesNoncurrent ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/14> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesAndStockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:StockholdersEquity ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/15> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:DebtCurrent ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/16> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:DeferredIncomeTaxLiabilitiesNet ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/17> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:PreferredStockValue ;
+        link:order 200.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/18> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:IntangibleAssetsNetExcludingGoodwill ;
+        link:order 250.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/19> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LongTermDebtCurrent ;
+        link:order 250.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/2> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:PropertyPlantAndEquipmentNet ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/20> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings ;
+        link:order 300.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/21> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LongTermInvestmentsAndReceivablesNet ;
+        link:order 300.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/22> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:DeferredRevenueCurrent ;
+        link:order 300.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/23> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:DeferredRevenueNoncurrent ;
+        link:order 300.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/24> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AdditionalPaidInCapital ;
+        link:order 300.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/25> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:PrepaidExpenseCurrent ;
+        link:order 400.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/26> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OperatingLeaseRightOfUseAsset ;
+        link:order 400.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/27> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:FinanceLeaseLiabilityCurrent ;
+        link:order 400.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/28> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OperatingLeaseLiabilityNoncurrent ;
+        link:order 400.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/29> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:RetainedEarningsAccumulatedDeficit ;
+        link:order 400.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/3> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:Liabilities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LiabilitiesCurrent ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/30> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:RestrictedCashAndInvestmentsCurrent ;
+        link:order 500.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/31> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:FinanceLeaseRightOfUseAsset ;
+        link:order 500.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/32> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OtherLiabilitiesCurrent ;
+        link:order 500.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/33> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OtherLiabilitiesNoncurrent ;
+        link:order 500.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/34> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax ;
+        link:order 500.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/35> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OtherAssetsCurrent ;
+        link:order 600.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/36> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OtherAssetsNoncurrent ;
+        link:order 600.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/37> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:TreasuryStockValue ;
+        link:order 600.0 ;
+        link:weight -1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/4> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesAndStockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:Liabilities ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/5> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AccountsPayableCurrent ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/6> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LongTermDebtAndCapitalLeaseObligations ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/7> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:CommonStockValue ;
+        link:order 100.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/8> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:ShortTermInvestments ;
+        link:order 150.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/calculation/9> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/summation-item> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AccruedLiabilitiesCurrent ;
+        link:order 150.0 ;
+        link:weight 1.0 ;
+        rs:associationType "calculation" .
+}
+
+<https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC#projection> {
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> a rs:Structure ;
+        rs:blockType "equity_statement" ;
+        rs:hasAssociation <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/0>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/1>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/2>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/3>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/4>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/5> ;
+        rs:internalId "0b179e5c-5f02-506d-b8d5-860cb10c7694" ;
+        rs:roleUri "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward" ;
+        rs:structureName "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/0> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward> ;
+        xlink:to rs-gaap:NetIncomeLoss ;
+        link:order 40100.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/1> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward> ;
+        xlink:to rs-gaap:OtherComprehensiveIncomeLossNetOfTax ;
+        link:order 40200.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/2> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward> ;
+        xlink:to rs-gaap:ProceedsFromIssuanceOfCommonStock ;
+        link:order 40300.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/3> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward> ;
+        xlink:to rs-gaap:PaymentsForRepurchaseOfCommonStock ;
+        link:order 40400.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/4> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward> ;
+        xlink:to rs-gaap:ShareBasedCompensation ;
+        link:order 40500.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/0b179e5c-5f02-506d-b8d5-860cb10c7694/presentation/5> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/Equity-rollforward> ;
+        xlink:to rs-gaap:PaymentsOfDividends ;
+        link:order 40600.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/0> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:Revenues ;
+        link:order 10100.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/1> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:Revenues ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax ;
+        link:order 10120.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/10> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:DepreciationDepletionAndAmortization ;
+        link:order 10430.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/11> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OtherCostAndExpenseOperating ;
+        link:order 10440.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/12> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:RestructuringCharges ;
+        link:order 10443.3333 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/13> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:AssetImpairmentCharges ;
+        link:order 10446.6667 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/14> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OperatingIncomeLoss ;
+        link:order 10500.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/15> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:NonoperatingIncomeExpense ;
+        link:order 10600.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/16> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:InvestmentIncomeInterest ;
+        link:order 10610.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/17> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:InterestExpense ;
+        link:order 10620.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/18> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:GainLossOnDispositionOfAssets ;
+        link:order 10630.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/19> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OtherNonoperatingIncomeExpense ;
+        link:order 10640.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/2> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:CostOfRevenue ;
+        link:order 10200.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/20> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:ForeignCurrencyTransactionGainLossBeforeTax ;
+        link:order 10643.3333 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/21> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NonoperatingIncomeExpense ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:GainsLossesOnExtinguishmentOfDebt ;
+        link:order 10646.6667 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/22> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
+        link:order 10800.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/23> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:IncomeTaxExpenseBenefit ;
+        link:order 10900.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/24> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:IncomeLossFromContinuingOperations ;
+        link:order 11000.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/25> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:IncomeLossFromDiscontinuedOperationsNetOfTax ;
+        link:order 11100.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/26> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:NetIncomeLoss ;
+        link:order 11200.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/3> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:CostOfRevenue ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:CostOfGoodsAndServicesSold ;
+        link:order 10210.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/4> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:CostOfRevenue ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OtherCostOfOperatingRevenue ;
+        link:order 10230.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/5> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:GrossProfit ;
+        link:order 10300.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/6> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:IncomeStatementAbstract ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:OperatingExpenses ;
+        link:order 10400.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/7> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:GeneralAndAdministrativeExpense ;
+        link:order 10410.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/8> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:SellingAndMarketingExpense ;
+        link:order 10415.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/9> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:OperatingExpenses ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep> ;
+        xlink:to rs-gaap:ResearchAndDevelopmentExpense ;
+        link:order 10420.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/0> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        link:order 30100.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/1> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:NetIncomeLoss ;
+        link:order 30110.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/10> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        link:order 30200.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/11> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment ;
+        link:order 30210.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/12> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:ProceedsFromSaleOfPropertyPlantAndEquipment ;
+        link:order 30220.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/13> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:PaymentsToAcquireInvestments ;
+        link:order 30230.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/14> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments ;
+        link:order 30240.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/15> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:PaymentsToAcquireIntangibleAssets ;
+        link:order 30250.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/16> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:ProceedsFromSaleOfIntangibleAssets ;
+        link:order 30260.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/17> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:NetCashProvidedByUsedInFinancingActivities ;
+        link:order 30300.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/18> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInFinancingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:ProceedsFromIssuanceOfCommonStock ;
+        link:order 30310.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/19> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInFinancingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:ProceedsFromIssuanceOfLongTermDebt ;
+        link:order 30320.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/2> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:DepreciationDepletionAndAmortization ;
+        link:order 30120.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/20> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInFinancingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:RepaymentsOfLongTermDebt ;
+        link:order 30330.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/21> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInFinancingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:PaymentsForRepurchaseOfCommonStock ;
+        link:order 30340.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/22> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:EffectOfExchangeRateOnCash ;
+        link:order 30400.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/3> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:IncreaseDecreaseInAccountsReceivable ;
+        link:order 30130.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/4> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:IncreaseDecreaseInInventories ;
+        link:order 30140.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/5> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:IncreaseDecreaseInPrepaidExpense ;
+        link:order 30150.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/6> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities ;
+        link:order 30160.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/7> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet ;
+        link:order 30170.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/8> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:IncreaseDecreaseInAccruedLiabilities ;
+        link:order 30180.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/9> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect> ;
+        xlink:to rs-gaap:IncreaseDecreaseInAccruedIncomeTaxesPayable ;
+        link:order 30190.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/0> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:Assets ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AssetsCurrent ;
+        link:order 20100.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/1> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:CashAndCashEquivalentsAtCarryingValue ;
+        link:order 20110.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/10> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:Goodwill ;
+        link:order 20220.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/11> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:IntangibleAssetsNetExcludingGoodwill ;
+        link:order 20225.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/12> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LongTermInvestmentsAndReceivablesNet ;
+        link:order 20230.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/13> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OperatingLeaseRightOfUseAsset ;
+        link:order 20240.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/14> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:FinanceLeaseRightOfUseAsset ;
+        link:order 20250.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/15> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OtherAssetsNoncurrent ;
+        link:order 20260.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/16> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesAndStockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:Liabilities ;
+        link:order 20300.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/17> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:Liabilities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LiabilitiesCurrent ;
+        link:order 20310.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/18> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AccountsPayableCurrent ;
+        link:order 20311.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/19> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AccruedLiabilitiesCurrent ;
+        link:order 20311.5 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/2> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:ShortTermInvestments ;
+        link:order 20115.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/20> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:DebtCurrent ;
+        link:order 20312.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/21> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LongTermDebtCurrent ;
+        link:order 20312.5 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/22> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:DeferredRevenueCurrent ;
+        link:order 20313.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/23> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:FinanceLeaseLiabilityCurrent ;
+        link:order 20314.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/24> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OtherLiabilitiesCurrent ;
+        link:order 20315.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/25> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:Liabilities ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LiabilitiesNoncurrent ;
+        link:order 20320.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/26> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:LongTermDebtAndCapitalLeaseObligations ;
+        link:order 20321.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/27> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:DeferredIncomeTaxLiabilitiesNet ;
+        link:order 20322.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/28> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:DeferredRevenueNoncurrent ;
+        link:order 20323.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/29> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OperatingLeaseLiabilityNoncurrent ;
+        link:order 20324.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/3> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:ReceivablesNetCurrent ;
+        link:order 20120.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/30> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OtherLiabilitiesNoncurrent ;
+        link:order 20325.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/31> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:LiabilitiesAndStockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:StockholdersEquity ;
+        link:order 20400.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/32> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:CommonStockValue ;
+        link:order 20410.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/33> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:PreferredStockValue ;
+        link:order 20420.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/34> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AdditionalPaidInCapital ;
+        link:order 20430.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/35> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:RetainedEarningsAccumulatedDeficit ;
+        link:order 20440.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/36> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax ;
+        link:order 20450.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/37> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:StockholdersEquity ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:TreasuryStockValue ;
+        link:order 20460.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/4> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings ;
+        link:order 20130.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/5> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:PrepaidExpenseCurrent ;
+        link:order 20140.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/6> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:RestrictedCashAndInvestmentsCurrent ;
+        link:order 20150.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/7> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsCurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:OtherAssetsCurrent ;
+        link:order 20160.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/8> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:Assets ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:AssetsNoncurrent ;
+        link:order 20200.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/9> a rs:Association ;
+        xlink:arcrole <http://www.xbrl.org/2003/arcrole/parent-child> ;
+        xlink:from rs-gaap:AssetsNoncurrent ;
+        xlink:role <https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified> ;
+        xlink:to rs-gaap:PropertyPlantAndEquipmentNet ;
+        link:order 20210.0 ;
+        rs:associationType "presentation" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> a rs:Structure ;
+        rs:blockType "income_statement" ;
+        rs:hasAssociation <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/0>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/1>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/10>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/11>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/12>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/13>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/14>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/15>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/16>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/17>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/18>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/19>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/2>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/20>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/21>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/22>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/23>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/24>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/25>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/26>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/3>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/4>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/5>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/6>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/7>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/8>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/47cd6544-03d1-5bc1-8c28-31c0cfa450f9/presentation/9> ;
+        rs:internalId "47cd6544-03d1-5bc1-8c28-31c0cfa450f9" ;
+        rs:roleUri "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/IS-multistep" ;
+        rs:structureName "rs-gaap — Income Statement — Multi-step" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> a rs:Structure ;
+        rs:blockType "cash_flow_statement" ;
+        rs:hasAssociation <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/0>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/1>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/10>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/11>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/12>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/13>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/14>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/15>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/16>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/17>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/18>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/19>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/2>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/20>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/21>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/22>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/3>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/4>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/5>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/6>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/7>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/8>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/5473639a-2dac-56a6-b9e5-38480ea38bc1/presentation/9> ;
+        rs:internalId "5473639a-2dac-56a6-b9e5-38480ea38bc1" ;
+        rs:roleUri "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/CashFlow-indirect" ;
+        rs:structureName "rs-gaap — Cash Flow Statement — Indirect" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> a rs:Structure ;
+        rs:blockType "balance_sheet" ;
+        rs:hasAssociation <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/0>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/1>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/10>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/11>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/12>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/13>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/14>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/15>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/16>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/17>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/18>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/19>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/2>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/20>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/21>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/22>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/23>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/24>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/25>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/26>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/27>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/28>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/29>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/3>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/30>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/31>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/32>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/33>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/34>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/35>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/36>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/37>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/4>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/5>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/6>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/7>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/8>,
+            <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/association/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d/presentation/9> ;
+        rs:internalId "b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d" ;
+        rs:roleUri "https://robosystems.ai/seattle/cm-roles/roles/rs-gaap-presentation/BS-classified" ;
+        rs:structureName "rs-gaap — Balance Sheet — Classified" .
+}
+
+<https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC#scene> {
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G1V> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:AccountsPayableCurrent ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G1V" ;
+        rs:numericValue 1000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G1W> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:AccruedLiabilitiesCurrent ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G1W" ;
+        rs:numericValue 400.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G1X> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:AdditionalPaidInCapital ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G1X" ;
+        rs:numericValue 10000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G1Y> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:CashAndCashEquivalentsAtCarryingValue ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G1Y" ;
+        rs:numericValue 10850.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G1Z> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:CostOfGoodsAndServicesSold ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G1Z" ;
+        rs:numericValue 5300.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G20> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:DepreciationDepletionAndAmortization ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G20" ;
+        rs:numericValue 100.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G21> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:DepreciationDepletionAndAmortization ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G21" ;
+        rs:numericValue 100.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G22> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:IncomeTaxExpenseBenefit ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G22" ;
+        rs:numericValue 400.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G23> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:InterestExpense ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G23" ;
+        rs:numericValue 150.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G24> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G24" ;
+        rs:numericValue 2700.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G25> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:LongTermDebtAndCapitalLeaseObligations ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G25" ;
+        rs:numericValue 1000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G26> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:PropertyPlantAndEquipmentNet ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G26" ;
+        rs:numericValue 900.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G27> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:ReceivablesNetCurrent ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G27" ;
+        rs:numericValue 0.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G28> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:Revenues ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G28" ;
+        rs:numericValue 8000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G29> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:RetainedEarningsAccumulatedDeficit ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G29" ;
+        rs:numericValue 2050.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2A> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:AdditionalPaidInCapital ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2A" ;
+        rs:numericValue 0.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_3> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2B> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:RetainedEarningsAccumulatedDeficit ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2B" ;
+        rs:numericValue 0.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_3> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2C> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:NetIncomeLoss ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2C" ;
+        rs:numericValue 2050.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2D> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:NetIncomeLoss ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2D" ;
+        rs:numericValue 2050.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2E> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:NetIncomeLoss ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BE> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2E" ;
+        rs:numericValue 2050.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2F> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:ProceedsFromIssuanceOfLongTermDebt ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2F" ;
+        rs:numericValue 2000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2G> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:ProceedsFromIssuanceOfCommonStock ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2G" ;
+        rs:numericValue 10000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2H> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:ProceedsFromIssuanceOfCommonStock ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BE> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2H" ;
+        rs:numericValue 10000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2J> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:RepaymentsOfLongTermDebt ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2J" ;
+        rs:numericValue -1000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2K> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2K" ;
+        rs:numericValue -1000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2M> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:IncreaseDecreaseInInventories ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2M" ;
+        rs:numericValue -2700.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2N> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:IncreaseDecreaseInAccruedLiabilities ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2N" ;
+        rs:numericValue 400.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2P> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2P" ;
+        rs:numericValue 1000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2Q> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:LiabilitiesCurrent ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2Q" ;
+        rs:numericValue 1400.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2R> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:Assets ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2R" ;
+        rs:numericValue 14450.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2S> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2S" ;
+        rs:numericValue 10850.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2T> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:LiabilitiesNoncurrent ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2T" ;
+        rs:numericValue 1000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2V> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:AssetsCurrent ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2V" ;
+        rs:numericValue 13550.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2W> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:NetCashProvidedByUsedInOperatingActivities ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2W" ;
+        rs:numericValue 850.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2X> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:Liabilities ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2X" ;
+        rs:numericValue 2400.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2Y> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:NonoperatingIncomeExpense ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2Y" ;
+        rs:numericValue -150.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G2Z> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G2Z" ;
+        rs:numericValue 2450.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G30> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:LiabilitiesAndStockholdersEquity ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G30" ;
+        rs:numericValue 14450.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G31> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:StockholdersEquity ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BE> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G31" ;
+        rs:numericValue 12050.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/0b179e5c-5f02-506d-b8d5-860cb10c7694> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G32> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:StockholdersEquity ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G32" ;
+        rs:numericValue 12050.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G33> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:AssetsNoncurrent ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G33" ;
+        rs:numericValue 900.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G34> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:OperatingExpenses ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G34" ;
+        rs:numericValue 100.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G35> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:OperatingIncomeLoss ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G35" ;
+        rs:numericValue 2600.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G36> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:CostOfRevenue ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G36" ;
+        rs:numericValue 5300.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G37> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:GrossProfit ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G37" ;
+        rs:numericValue 2700.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G38> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:NetCashProvidedByUsedInFinancingActivities ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G38" ;
+        rs:numericValue 11000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G39> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:NetCashProvidedByUsedInInvestingActivities ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G39" ;
+        rs:numericValue -1000.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/5473639a-2dac-56a6-b9e5-38480ea38bc1> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/fact/fact_01KVF99WQY5TRD74A1N9N56G3A> a rs:Fact ;
+        rs:decimals "INF" ;
+        rs:element rs-gaap:IncomeLossFromContinuingOperations ;
+        rs:entity <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "fact_01KVF99WQY5TRD74A1N9N56G3A" ;
+        rs:numericValue 2050.0 ;
+        rs:period <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> ;
+        rs:structure <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/structure/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> ;
+        rs:unit <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/ib/0b179e5c-5f02-506d-b8d5-860cb10c7694> a rs:InformationBlock ;
+        skos:prefLabel "rs-gaap — Statement of Changes in Equity — Roll Forward (Total)" ;
+        rs:blockType "equity_statement" ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BE> ;
+        rs:internalId "0b179e5c-5f02-506d-b8d5-860cb10c7694" ;
+        rs:taxonomyId "cf7178a0-e2d4-58df-995a-2f0233d15466" ;
+        rs:taxonomyName "rs-gaap-presentation v1" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/ib/47cd6544-03d1-5bc1-8c28-31c0cfa450f9> a rs:InformationBlock ;
+        skos:prefLabel "rs-gaap — Income Statement — Multi-step" ;
+        rs:blockType "income_statement" ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BC> ;
+        rs:internalId "47cd6544-03d1-5bc1-8c28-31c0cfa450f9" ;
+        rs:taxonomyId "cf7178a0-e2d4-58df-995a-2f0233d15466" ;
+        rs:taxonomyName "rs-gaap-presentation v1" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/ib/5473639a-2dac-56a6-b9e5-38480ea38bc1> a rs:InformationBlock ;
+        skos:prefLabel "rs-gaap — Cash Flow Statement — Indirect" ;
+        rs:blockType "cash_flow_statement" ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BD> ;
+        rs:internalId "5473639a-2dac-56a6-b9e5-38480ea38bc1" ;
+        rs:taxonomyId "cf7178a0-e2d4-58df-995a-2f0233d15466" ;
+        rs:taxonomyName "rs-gaap-presentation v1" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/ib/b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d> a rs:InformationBlock ;
+        skos:prefLabel "rs-gaap — Balance Sheet — Classified" ;
+        rs:blockType "balance_sheet" ;
+        rs:factSet <https://robosystems.ai/factset/fs_01KVF99WQS6G93C6DZDCV964BB> ;
+        rs:internalId "b6dfb8d2-8ee9-5597-9a3b-8aeee625ff0d" ;
+        rs:taxonomyId "cf7178a0-e2d4-58df-995a-2f0233d15466" ;
+        rs:taxonomyName "rs-gaap-presentation v1" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_3> a rs:Period ;
+        xbrli:instant "2023-12-31"^^xsd:date ;
+        xbrli:periodType "instant" .
+
+    rs-gaap:IncreaseDecreaseInAccruedLiabilities a rs:Element ;
+        skos:prefLabel "Increase (Decrease) in Accrued Liabilities" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "e92e6488-dcc7-5877-ad4b-f2498bdf7bae" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:IncreaseDecreaseInInventories a rs:Element ;
+        skos:prefLabel "Increase (Decrease) in Inventories" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "c8b0722b-7993-592f-8ef1-5b0964ac8a10" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet a rs:Element ;
+        skos:prefLabel "Increase (Decrease) in Other Operating Assets and Liabilities, Net" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "a3227fb2-202b-51db-9574-4e60db03c04f" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:PaymentsToAcquirePropertyPlantAndEquipment a rs:Element ;
+        skos:prefLabel "Payments to Acquire Property, Plant, and Equipment" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "ff101489-15f4-573d-967b-24f75e0fc0f6" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:ProceedsFromIssuanceOfLongTermDebt a rs:Element ;
+        skos:prefLabel "Proceeds from Issuance of Long-Term Debt" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "1802f6ae-7d95-5029-af7a-b36015b2c525" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:RepaymentsOfLongTermDebt a rs:Element ;
+        skos:prefLabel "Repayments of Long-Term Debt" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "85890c87-aac7-5702-8f69-b1a14139dc41" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:AccountsPayableCurrent a rs:Element ;
+        skos:prefLabel "Accounts Payable, Current" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "9ddbc9d7-c769-5800-8f65-1089d476e5c9" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:AccruedLiabilitiesCurrent a rs:Element ;
+        skos:prefLabel "Accrued Liabilities, Current" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "4decfae2-2ca3-5dd3-8c06-88557583c13d" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:CashAndCashEquivalentsAtCarryingValue a rs:Element ;
+        skos:prefLabel "Cash and Cash Equivalents, at Carrying Value" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "20a6586b-880a-5745-94db-e23d397eb5e1" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:CostOfGoodsAndServicesSold a rs:Element ;
+        skos:prefLabel "Cost of Product and Service Sold" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "5ca0e51f-dff1-5c2b-94f5-26620852a5f9" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:IncomeTaxExpenseBenefit a rs:Element ;
+        skos:prefLabel "Income Tax Expense (Benefit)" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "d629316b-5674-58d9-afcd-b7e7fd34232d" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:InterestExpense a rs:Element ;
+        skos:prefLabel "Interest Expense, Operating and Nonoperating" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "890e4f8c-8fed-57e2-96fd-e70455201b11" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings a rs:Element ;
+        skos:prefLabel "Inventory, Net of Allowances, Customer Advances and Progress Billings" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "4afa5950-85ac-5a85-a9cb-01c387c6ab08" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:LongTermDebtAndCapitalLeaseObligations a rs:Element ;
+        skos:prefLabel "Long-Term Debt and Lease Obligation" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "091373d9-8a82-51bd-adf8-d09b73beb32e" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:PropertyPlantAndEquipmentNet a rs:Element ;
+        skos:prefLabel "Property, Plant and Equipment, Net" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "288099af-5cbb-5f78-8f8a-1a85675fb661" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:ReceivablesNetCurrent a rs:Element ;
+        skos:prefLabel "Receivables, Net, Current" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "44686df3-3871-5c1f-8a08-fc542d69dfa0" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:AdditionalPaidInCapital a rs:Element ;
+        skos:prefLabel "Additional Paid in Capital" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "6146605c-0d63-51e1-a523-3450d6abaca3" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:ProceedsFromIssuanceOfCommonStock a rs:Element ;
+        skos:prefLabel "Proceeds from Issuance of Common Stock" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "2eb72b5f-d7e3-5bd5-bf93-be38b6d21820" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:RetainedEarningsAccumulatedDeficit a rs:Element ;
+        skos:prefLabel "Retained Earnings (Accumulated Deficit)" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "a9c87d60-a1e5-506b-a27e-cbf9e14e5113" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:Assets a rs:Element ;
+        skos:prefLabel "Assets" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "a1f04756-41d8-5d35-b821-23aa2f3b2fae" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:DepreciationDepletionAndAmortization a rs:Element ;
+        skos:prefLabel "Depreciation, Depletion and Amortization" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "189a099a-7512-5144-9215-65d837c2c3b5" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:GrossProfit a rs:Element ;
+        skos:prefLabel "Gross Profit" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "a92b3181-9fe7-543c-81d9-13ebd12bbefa" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:IncomeLossFromContinuingOperations a rs:Element ;
+        skos:prefLabel "Income (Loss) from Continuing Operations, Net of Tax, Attributable to Parent" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "d60cabda-7060-5aff-ac98-96371606a738" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest a rs:Element ;
+        skos:prefLabel "Income (Loss) from Continuing Operations before Income Taxes, Noncontrolling Interest" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "6b0b414f-0c76-54f0-8e51-cf53db59ca24" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:LiabilitiesAndStockholdersEquity a rs:Element ;
+        skos:prefLabel "Liabilities and Equity" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "30b2801e-e682-5298-82e6-3670e1d508f1" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:OperatingIncomeLoss a rs:Element ;
+        skos:prefLabel "Operating Income (Loss)" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "16780828-0201-5609-b572-fbe3ebfcb177" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:Revenues a rs:Element ;
+        skos:prefLabel "Revenues" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "b26a6cd4-072f-5bf2-b5d3-ebf928150d6c" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:CostOfRevenue a rs:Element ;
+        skos:prefLabel "Cost of Revenue" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "12ab7417-5324-55d6-946e-2456adba47c5" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:Liabilities a rs:Element ;
+        skos:prefLabel "Liabilities" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "7af273ac-1cba-5fb3-a1c9-5c5d8fdb9bdf" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:NetCashProvidedByUsedInFinancingActivities a rs:Element ;
+        skos:prefLabel "Cash Provided by (Used in) Financing Activity, Including Discontinued Operation" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "811f1cf5-836c-575f-9f3f-cd7fa477e4e5" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:NetIncomeLoss a rs:Element ;
+        skos:prefLabel "Net Income (Loss) Attributable to Parent" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "27a05717-2370-51c2-a924-db5cbcb48219" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease a rs:Element ;
+        skos:prefLabel "Cash and Cash Equivalents, Period Increase (Decrease)" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "353f790f-1ed1-5b91-880d-8029b4b687cf" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:NetCashProvidedByUsedInInvestingActivities a rs:Element ;
+        skos:prefLabel "Cash Provided by (Used in) Investing Activity, Including Discontinued Operation" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "69b82be1-1145-5686-8613-31da9eb04a72" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:NetCashProvidedByUsedInOperatingActivities a rs:Element ;
+        skos:prefLabel "Cash Provided by (Used in) Operating Activity, Including Discontinued Operation" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "57ccbf45-c970-5bcd-a381-44d96b6b6d94" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:LiabilitiesNoncurrent a rs:Element ;
+        skos:prefLabel "Liabilities, Noncurrent" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "f41fe34d-88ea-5e20-a781-2d3e256a6abf" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:NonoperatingIncomeExpense a rs:Element ;
+        skos:prefLabel "Nonoperating Income (Expense)" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "45aae2c2-fa56-50c9-b381-df8079e7d33a" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:AssetsCurrent a rs:Element ;
+        skos:prefLabel "Assets, Current" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "0fc9ab7e-c5ce-5277-9530-344cc127fe26" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:AssetsNoncurrent a rs:Element ;
+        skos:prefLabel "Assets, Noncurrent" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "841cedeb-4cb0-532a-b0bd-c34846a13a8c" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:LiabilitiesCurrent a rs:Element ;
+        skos:prefLabel "Liabilities, Current" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "efb036ff-3f30-5deb-bee9-1af4cd4b9800" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    rs-gaap:OperatingExpenses a rs:Element ;
+        skos:prefLabel "Operating Expenses" ;
+        xbrli:balance "debit" ;
+        xbrli:periodType "duration" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "71fcdebb-7145-5f76-b5e0-b4ccbf2c29d2" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_1> a rs:Period ;
+        xbrli:instant "2024-03-31"^^xsd:date ;
+        xbrli:periodType "instant" .
+
+    rs-gaap:StockholdersEquity a rs:Element ;
+        skos:prefLabel "Stockholders' Equity Attributable to Parent" ;
+        xbrli:balance "credit" ;
+        xbrli:periodType "instant" ;
+        rs:abstract false ;
+        rs:elementType "concept" ;
+        rs:internalId "e3796201-9899-5b7b-9477-659550ba8e68" ;
+        rs:monetary true ;
+        rs:source "rs-gaap" ;
+        rs:substitutionGroup xbrli:item .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/period/p_2> a rs:Period ;
+        xbrli:endDate "2024-03-31"^^xsd:date ;
+        xbrli:periodType "duration" ;
+        xbrli:startDate "2024-01-01"^^xsd:date .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/entity/entity_kg19ede94dda6b99013d06> a rs:Entity ;
+        skos:prefLabel "Lemonade Stand (Charlie Hoffman Test Case 1)" ;
+        rs:country "US" ;
+        rs:internalId "entity_kg19ede94dda6b99013d06" ;
+        rs:legalName "Lemonade Stand (Charlie Hoffman Test Case 1)" .
+
+    <https://robosystems.ai/report/rpt_01KVF99WPYN17GS13R5DJY87HC/unit/u_USD> a rs:Unit ;
+        xbrli:measure iso4217:USD .
+}
+
