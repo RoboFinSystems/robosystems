@@ -605,22 +605,40 @@ setup_ecr_repository() {
     fi
 
     # Choose the lifecycle policy. Honors a non-interactive override:
-    #   ECR_LIFECYCLE_POLICY=robust|basic
-    # The policy is always (re)applied so re-running bootstrap reconciles it
-    # after edits to ecr-lifecycle-policy.json.
+    #   ECR_LIFECYCLE_POLICY=robust|basic|skip
+    # Robust/basic are (re)applied so re-running bootstrap reconciles them after
+    # edits to ecr-lifecycle-policy.json; skip leaves the existing policy alone.
     local policy_choice="${ECR_LIFECYCLE_POLICY:-}"
     if [ -z "$policy_choice" ]; then
         echo ""
         echo "Which ECR image lifecycle policy do you want to apply?"
         echo "  1) Robust - full operational policy, count-based dev-image retention (recommended)"
         echo "  2) Basic  - minimal, keep last 20 untagged images only"
+        echo "  3) Skip   - leave the existing lifecycle policy unchanged"
         echo ""
         read -p "Select [1]: " lc_choice
         lc_choice=${lc_choice:-1}
         case "$lc_choice" in
+            1) policy_choice="robust" ;;
             2) policy_choice="basic" ;;
-            *) policy_choice="robust" ;;
+            3) policy_choice="skip" ;;
+            *)
+                print_warning "Unrecognized choice '${lc_choice}' — leaving the lifecycle policy unchanged"
+                policy_choice="skip"
+                ;;
         esac
+    fi
+
+    # 'none' is an accepted alias for 'skip' (e.g. ECR_LIFECYCLE_POLICY=none)
+    if [ "$policy_choice" = "none" ]; then
+        policy_choice="skip"
+    fi
+
+    # Skip path: never touches an existing repo's lifecycle policy.
+    if [ "$policy_choice" = "skip" ]; then
+        print_info "Leaving the existing ECR lifecycle policy unchanged"
+        print_success "ECR repository ready (lifecycle policy unchanged)"
+        return 0
     fi
 
     if [ "$policy_choice" = "basic" ]; then
