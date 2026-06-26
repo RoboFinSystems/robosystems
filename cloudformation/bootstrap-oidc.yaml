@@ -444,6 +444,10 @@ Resources:
                   - !Sub repo:${GitHubOrg}/roboinvestor-app:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}/roboinvestor-app:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}/roboinvestor-app:ref:refs/tags/v*
+                  # robosystems-holon-viewer (static SPA → S3 + CloudFront)
+                  - !Sub repo:${GitHubOrg}/robosystems-holon-viewer:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/robosystems-holon-viewer:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}/robosystems-holon-viewer:ref:refs/tags/v*
       Policies:
         - PolicyName: !Sub ${ServiceTag}FrontendDeploymentPolicy
           PolicyDocument:
@@ -539,6 +543,8 @@ Resources:
                   - arn:aws:s3:::roboledger-app-*/*
                   - arn:aws:s3:::roboinvestor-app-*
                   - arn:aws:s3:::roboinvestor-app-*/*
+                  - arn:aws:s3:::holon-viewer-*
+                  - arn:aws:s3:::holon-viewer-*/*
               - Sid: S3Global
                 Effect: Allow
                 Action:
