@@ -543,8 +543,8 @@ Resources:
                   - arn:aws:s3:::roboledger-app-*/*
                   - arn:aws:s3:::roboinvestor-app-*
                   - arn:aws:s3:::roboinvestor-app-*/*
-                  - arn:aws:s3:::holon-viewer-*
-                  - arn:aws:s3:::holon-viewer-*/*
+                  - arn:aws:s3:::robosystems-holon-viewer-*
+                  - arn:aws:s3:::robosystems-holon-viewer-*/*
               - Sid: S3Global
                 Effect: Allow
                 Action:
