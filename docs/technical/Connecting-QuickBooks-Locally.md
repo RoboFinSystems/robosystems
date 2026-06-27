@@ -9,7 +9,7 @@ There are two ways to develop against QuickBooks data locally. Pick the path tha
 | Path | Companies | Setup | When to use |
 | --- | --- | --- | --- |
 | **A. Sandbox + localhost** | Intuit Sample Company (pre-populated canned data) | Minutes — no tunnel, no production keys | Validating the OAuth handshake, exploring the sync flow, demoing the close/report UX without your own books |
-| **B. Production + public tunnel** | Your own real QB Online companies | ~15 minutes — tunnel install + Intuit production setup | Real-data smoke tests, customer-facing demos against your own QB, debugging adapter edge cases that only surface in messy real data |
+| **B. Production + public tunnel** | Your own real QB Online companies | ~15 min mechanical setup **+ a one-time Intuit production-access approval** (app assessment questionnaire — see [Prerequisites](#prerequisites)) | Real-data smoke tests, customer-facing demos against your own QB, debugging adapter edge cases that only surface in messy real data |
 | _Neither_ — synthetic data only | N/A | One command | When you don't need Intuit at all — see the synthetic demo walkthrough (separate guide) for the `just demo-roboledger` workflow which generates fake books for testing close-period, reports, and rules without OAuth |
 
 Both QB paths use the same RoboSystems stack, the same sync pipeline, and the same reporting surface. The only differences are which Intuit OAuth credentials you use and whether the redirect URI points at localhost or a public tunnel.
@@ -55,22 +55,53 @@ By the end of this guide you'll have all four working against either a QB sandbo
 
 ## Prerequisites
 
-Both paths require an Intuit Developer account with a registered app:
+### Before you start (both paths)
+
+1. **Clone both repos as siblings** in the same parent folder — this guide `cd`s between them:
+
+   ```bash
+   git clone https://github.com/RoboFinSystems/robosystems.git
+   git clone https://github.com/RoboFinSystems/roboledger-app.git
+   ```
+
+2. **Complete the base local setup first** so `just start` works — see [Quick Start](Quick-Start) / [Bootstrap Guide](Bootstrap-Guide) (Docker, `uv`, `just`, the generated `.env`, migrations).
+3. **Install the frontend deps**: `cd roboledger-app && npm install` (Node 22+; `.nvmrc` pins the exact version). Run the frontend with `npm run dev` on the host for the OAuth step (see the Private-Network-Access note in [Troubleshooting](#troubleshooting)).
+
+### Intuit Developer account (both paths)
 
 1. Sign up at [developer.intuit.com](https://developer.intuit.com/)
 2. Create an app under **My Apps → Create an app**
-3. Note the two relevant pages for your app:
-   - **App Settings → Redirect URIs** — where you register callback URLs
-   - **Keys & OAuth → Production Keys** / **Development Keys** — where you grab Client ID + Secret
+3. Two pages matter for your app:
+   - **App Settings → Redirect URIs** — register callback URLs (separate lists for Development and Production)
+   - **Keys & OAuth** — grab Client ID + Secret (separate **Development** and **Production** keys)
 
-Intuit treats Development and Production as separate environments with their own keys, their own redirect URI lists, and their own consent flows. Sandbox companies authenticate against Development keys; real companies authenticate against Production keys.
+Intuit treats **Development** and **Production** as separate environments with their own keys, redirect-URI lists, and consent flows. Sandbox companies authenticate against **Development** keys; real companies authenticate against **Production** keys.
 
-**Path-specific prerequisites:**
+### Path A — Sandbox (frictionless)
 
-| Path | Additional requirements |
-| --- | --- |
-| **A. Sandbox** | A QB sandbox company (Intuit auto-creates a "Sample Company" for new developer accounts; additional sandboxes via [developer.intuit.com/app/developer/sandbox](https://developer.intuit.com/app/developer/sandbox)) |
-| **B. Production** | A public tunnel — either an [ngrok](https://dashboard.ngrok.com/signup) account + reserved static domain, OR a Cloudflare-managed domain + `cloudflared` — and a real QB Online company you own |
+A QB sandbox company. Intuit auto-creates a "Sample Company" for new developer accounts; add more (up to 5, free) via [developer.intuit.com/app/developer/sandbox](https://developer.intuit.com/app/developer/sandbox). **No approval needed — Development keys work immediately.**
+
+### Path B — Production access (plan ahead: Intuit approval required)
+
+This is the friction Path A doesn't have, and it's the most common reason a first Path-B run stalls. **Development/sandbox keys work instantly; production keys do not** — Intuit gates them behind a one-time **app assessment questionnaire**. Start it *before* you schedule the rest of Path B.
+
+**Where:** in the Developer portal, open your app → switch the environment to **Production** → fill in **App details** → open the **Compliance / App assessment questionnaire** section (also reachable as *Production Settings → App assessment questionnaire*) and **Start questionnaire**. Intuit reviews your answers before releasing production keys.
+
+**Have these ready** (missing any one stalls the questionnaire):
+
+- A public **EULA URL** and **Privacy Policy URL**
+- **Host domain**, **launch / sign-in URL**, and **disconnect URL**
+- App details (name, description, website, redirect URIs) + app category
+- Hosting-location and security/compliance answers; regulated-industry disclosures (only the sections relevant to your app appear)
+- Acceptance of the **Intuit Developer Terms / App Partner Program** + a valid payment method on file
+
+**Time:** Intuit estimates **~20–30 minutes** to complete the questionnaire. Production keys are **not granted instantly** — budget for Intuit's review and possible follow-up questions.
+
+**Not the same as publishing to the QuickBooks App Store.** Connecting *your own* companies only needs **production keys** (the questionnaire above). Listing on the public App Store is a separate path with a **technical review that averages ~20 days** — you do **not** need that to self-host and connect your own books.
+
+> **Self-host reality:** the questionnaire expects production-app artifacts — a public EULA, a privacy policy, and hosted URLs — which a pure localhost/tunnel dev setup doesn't naturally have. You'll need at least minimal hosted EULA/privacy pages and a real host or tunnel domain to supply. This is why Path B is "attainable, but not fifteen minutes."
+
+You'll also need a **public tunnel** for the OAuth handshake itself — either an [ngrok](https://dashboard.ngrok.com/signup) account + reserved static domain, OR a Cloudflare-managed domain + `cloudflared` — and a real QB Online company you own.
 
 ## Quick Start
 
@@ -102,10 +133,11 @@ cd ../roboledger-app && npm run dev                # frontend (terminal 2)
 
 The sandbox company comes pre-populated with synthetic QB data. After connect, trigger a sync and you'll have ~100 transactions to explore.
 
-### Path B — Real QB in fifteen minutes
+### Path B — Real QB (~15 min setup, after one-time Intuit production approval)
 
 ```bash
-# 1. Get production credentials
+# 1. Get production credentials — REQUIRES one-time Intuit production access:
+#    complete the app assessment questionnaire first (see Prerequisites → Path B).
 #    Intuit Developer Portal → your app → Keys & OAuth → Production Keys
 
 # 2. Set up a public tunnel (pick one):
@@ -184,6 +216,8 @@ For additional sandboxes (e.g. to test on a clean book), use [developer.intuit.c
 ## Path B — Production + public tunnel
 
 Required for connecting your own real QuickBooks Online companies. Intuit's Production OAuth flow rejects `localhost` callbacks, so we need a public HTTPS hostname that proxies to your local frontend.
+
+> **Before the tunnel:** confirm your Intuit app already has **production access** — that one-time approval (the app assessment questionnaire), not the tunnel, is the long pole on Path B. See [Prerequisites → Path B — Production access](#prerequisites).
 
 > **The tunnel is only needed for the OAuth handshake itself.** Once the connection is established and tokens are stored, all subsequent work — syncing, mapping, reports, close-period — runs against `localhost:3001` directly. You can shut down the tunnel after each successful connect; only spin it up again when adding another QB company or re-authenticating.
 
@@ -742,6 +776,7 @@ Both halves of the OAuth handshake have to come from the same environment tab.
 | Component | Cost |
 | --- | --- |
 | Intuit Developer account | Free |
+| Intuit production access | Free — but requires the one-time app assessment questionnaire (~20–30 min + Intuit review) |
 | Intuit sandbox companies | Free (up to 5) |
 | ngrok free tier | $0/month, 1 static domain, occasional browser interstitial |
 | ngrok paid plans | ~$10/month, removes interstitial, more domains |
