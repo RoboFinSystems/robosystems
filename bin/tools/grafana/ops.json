@@ -43,7 +43,7 @@
         "content": "# API Observability",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": " ",
       "transparent": true,
       "type": "text"
@@ -199,7 +199,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "datasource": {
@@ -209,7 +209,7 @@
           "disableTextWrap": false,
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "sum(rate(robosystems_api_requests_total{endpoint=~\"$endpoints\"}[5m])) * 5",
+          "expr": "sum(rate(robosystems_api_requests_total{endpoint=~\"$endpoints\"}[5m])) * 60",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -340,7 +340,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "datasource": {
@@ -451,7 +451,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "topk(15, sum by(endpoint) (rate(robosystems_api_requests_total{endpoint=~\"$endpoints\"}[5m]))) * 5",
+          "expr": "topk(15, sum by(endpoint) (rate(robosystems_api_requests_total{endpoint=~\"$endpoints\"}[5m]))) * 60",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -514,7 +514,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "targets": [
         {
           "datasource": {
@@ -624,7 +624,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg by(event_type) (topk(15, rate(robosystems_business_events_total{endpoint=~\"$endpoints\"}[5m]))) * 5",
+          "expr": "avg by(event_type) (topk(15, rate(robosystems_business_events_total{endpoint=~\"$endpoints\"}[5m]))) * 60",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -1871,7 +1871,7 @@
         "content": "# Container Services",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": " ",
       "transparent": true,
       "type": "text"
@@ -2535,6 +2535,58 @@
           "region": "default",
           "sqlExpression": "",
           "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClusterName": "$dagster_cluster",
+            "TaskDefinitionFamily": "$dagster_worker_task"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "",
+          "logGroups": [],
+          "matchExact": false,
+          "metricEditorMode": 0,
+          "metricName": "CpuUtilized",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "E",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClusterName": "$dagster_cluster",
+            "TaskDefinitionFamily": "$dagster_worker_task"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "",
+          "logGroups": [],
+          "matchExact": false,
+          "metricEditorMode": 0,
+          "metricName": "CpuReserved",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "F",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
         }
       ],
       "title": "Dagster CPU Utilization",
@@ -2544,9 +2596,9 @@
           "options": {
             "alias": "Run CPU Utilization",
             "binary": {
-              "left": "CpuUtilized",
+              "left": "robosystems-dagster-run-prod CpuUtilized",
               "operator": "/",
-              "right": "CpuReserved"
+              "right": "robosystems-dagster-run-prod CpuReserved"
             },
             "mode": "binary",
             "reduce": {
@@ -2560,6 +2612,37 @@
             "alias": "Run",
             "binary": {
               "left": "Run CPU Utilization",
+              "operator": "*",
+              "right": "100"
+            },
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            }
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "Worker CPU Utilized",
+            "binary": {
+              "left": "robosystems-worker-prod CpuUtilized",
+              "operator": "/",
+              "right": "robosystems-worker-prod CpuReserved"
+            },
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            },
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "Worker",
+            "binary": {
+              "left": "Worker CPU Utilized",
               "operator": "*",
               "right": "100"
             },
@@ -2585,10 +2668,27 @@
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuUtilized": true,
               "Run CPU Utilization": true,
-              "Run Utilization": true
+              "Run Utilization": true,
+              "Worker CPU Utilized": true,
+              "robosystems-dagster-run-prod CpuReserved": true,
+              "robosystems-dagster-run-prod CpuUtilized": true,
+              "robosystems-worker-prod CpuReserved": true,
+              "robosystems-worker-prod CpuUtilized": true
             },
             "includeByName": {},
-            "indexByName": {},
+            "indexByName": {
+              "Daemon": 1,
+              "Run": 3,
+              "Run CPU Utilization": 9,
+              "Time": 0,
+              "Webserver": 2,
+              "Worker": 4,
+              "Worker CPU Utilized": 10,
+              "robosystems-dagster-run-prod CpuReserved": 6,
+              "robosystems-dagster-run-prod CpuUtilized": 5,
+              "robosystems-worker-prod CpuReserved": 8,
+              "robosystems-worker-prod CpuUtilized": 7
+            },
             "renameByName": {
               "AWS/ECS robosystems-dagster-daemon-${env} CPUUtilization": "Daemon",
               "AWS/ECS robosystems-dagster-webserver-${env} CPUUtilization": "Webserver",
@@ -2784,6 +2884,58 @@
           "region": "default",
           "sqlExpression": "",
           "statistic": "Maximum"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClusterName": "$dagster_cluster",
+            "TaskDefinitionFamily": "$dagster_worker_task"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Worker Memory Utilized",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "MemoryUtilized",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "E",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Maximum"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClusterName": "$dagster_cluster",
+            "TaskDefinitionFamily": "$dagster_worker_task"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Worker Memory Reserved",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "MemoryReserved",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "F",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Maximum"
         }
       ],
       "title": "Dagster Memory Utilization",
@@ -2819,6 +2971,36 @@
           }
         },
         {
+          "id": "calculateField",
+          "options": {
+            "alias": "Worker Memory Utilization",
+            "binary": {
+              "left": "Worker Memory Utilized",
+              "operator": "/",
+              "right": "Worker Memory Reserved"
+            },
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            }
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "Worker",
+            "binary": {
+              "left": "Worker Memory Utilization",
+              "operator": "*",
+              "right": "100"
+            },
+            "mode": "binary",
+            "reduce": {
+              "reducer": "sum"
+            }
+          }
+        },
+        {
           "id": "organize",
           "options": {
             "excludeByName": {
@@ -2830,7 +3012,10 @@
               "ECS/ContainerInsights robosystems-dagster-run-${env} MemoryUtilized / ECS/ContainerInsights robosystems-dagster-run-${env} MemoryReserved": true,
               "Run Memory Reserved": true,
               "Run Memory Utilization": true,
-              "Run Memory Utilized": true
+              "Run Memory Utilized": true,
+              "Worker Memory Reserved": true,
+              "Worker Memory Utilization": true,
+              "Worker Memory Utilized": true
             },
             "includeByName": {},
             "indexByName": {},
@@ -2910,7 +3095,7 @@
       },
       "gridPos": {
         "h": 10,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 99
       },
@@ -2939,9 +3124,9 @@
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Task Count",
           "logGroups": [],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "TaskCount",
           "metricQueryType": 0,
@@ -2949,6 +3134,58 @@
           "period": "",
           "queryMode": "Metrics",
           "refId": "C",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClusterName": "$dagster_cluster",
+            "ServiceName": "robosystems-worker-prod"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Worker Desired",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "DesiredTaskCount",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "A",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClusterName": "$dagster_cluster",
+            "ServiceName": "robosystems-worker-prod"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Worker Running",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "RunningTaskCount",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "B",
           "region": "default",
           "sqlExpression": "",
           "statistic": "Average"
@@ -3014,14 +3251,145 @@
               }
             ]
           },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 99
+      },
+      "id": 113,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {},
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Queue",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "QueueDepth",
+          "metricQueryType": 0,
+          "namespace": "$worker_queue_cloudwatch",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "C",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {},
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "DLQ",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "DLQDepth",
+          "metricQueryType": 0,
+          "namespace": "$worker_queue_cloudwatch",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "A",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        }
+      ],
+      "title": "Worker Queue Depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "${cloudwatch}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
           "unit": "decbytes"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 10,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 16,
         "y": 99
       },
       "id": 63,
@@ -3123,6 +3491,32 @@
           },
           "dimensions": {
             "ClusterName": "$dagster_cluster",
+            "TaskDefinitionFamily": "$dagster_worker_task"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Worker Bytes In",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "NetworkRxBytes",
+          "metricQueryType": 0,
+          "namespace": "ECS/ContainerInsights",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "G",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClusterName": "$dagster_cluster",
             "TaskDefinitionFamily": "$dagster_daemon_service"
           },
           "expression": "",
@@ -3175,12 +3569,12 @@
           },
           "dimensions": {
             "ClusterName": "$dagster_cluster",
-            "TaskDefinitionFamily": "$dagster_run_task"
+            "TaskDefinitionFamily": "$dagster_worker_task"
           },
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "Run Bytes Out",
+          "label": "Worker Bytes Out",
           "logGroups": [],
           "matchExact": true,
           "metricEditorMode": 0,
@@ -3220,7 +3614,7 @@
         "content": "# Graph Instances",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": " ",
       "transparent": true,
       "type": "text"
@@ -3247,7 +3641,7 @@
         "content": "",
         "mode": "html"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": " Shared Replicas",
       "transparent": true,
       "type": "text"
@@ -3657,7 +4051,7 @@
         "content": "",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": " Shared Master",
       "transparent": true,
       "type": "text"
@@ -4538,7 +4932,7 @@
         "content": "",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": "User Writers",
       "transparent": true,
       "type": "text"
@@ -5417,7 +5811,7 @@
         "content": "",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": "Graph Tier Metrics",
       "transparent": true,
       "type": "text"
@@ -6483,7 +6877,7 @@
         "content": "# RDS Postgres",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": " ",
       "transparent": true,
       "type": "text"
@@ -7588,7 +7982,7 @@
         "content": "# OpenSearch",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": " ",
       "transparent": true,
       "type": "text"
@@ -7722,12 +8116,11 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false,
               "viz": false
             },
             "insertNulls": false,
@@ -7737,7 +8130,7 @@
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "never",
+            "showPoints": "auto",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -7761,8 +8154,7 @@
                 "value": 80
               }
             ]
-          },
-          "unit": "percent"
+          }
         },
         "overrides": []
       },
@@ -7785,6 +8177,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "10.4.1",
       "targets": [
         {
           "datasource": {
@@ -7796,8 +8189,9 @@
             "DomainName": "$opensearch_domain"
           },
           "expression": "",
+          "hide": false,
           "id": "",
-          "label": "",
+          "label": "Avg",
           "logGroups": [],
           "matchExact": true,
           "metricEditorMode": 0,
@@ -7806,7 +8200,7 @@
           "namespace": "AWS/ES",
           "period": "300",
           "queryMode": "Metrics",
-          "refId": "A",
+          "refId": "B",
           "region": "${aws_region}",
           "sqlExpression": "",
           "statistic": "Average"
@@ -8528,7 +8922,7 @@
               }
             ]
           },
-          "unit": "iops"
+          "unit": "none"
         },
         "overrides": []
       },
@@ -8537,6 +8931,116 @@
         "w": 8,
         "x": 16,
         "y": 263
+      },
+      "id": 112,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClientId": "$aws_account_id",
+            "DomainName": "$opensearch_domain"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "KNNHitCount",
+          "metricQueryType": 0,
+          "namespace": "AWS/ES",
+          "period": "300",
+          "queryMode": "Metrics",
+          "refId": "B",
+          "region": "${aws_region}",
+          "sqlExpression": "",
+          "statistic": "Average"
+        }
+      ],
+      "title": "KNN Hits",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "${cloudwatch}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "iops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 272
       },
       "id": 88,
       "options": {
@@ -8605,215 +9109,6 @@
         }
       ],
       "title": "Read / Write IOPS",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${cloudwatch}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "continuous-RdYlGr",
-            "seriesBy": "last"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ClusterStatus.yellow"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "yellow",
-                  "mode": "fixed",
-                  "seriesBy": "last"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ClusterStatus.green"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "green",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ClusterStatus.red"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "red",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 0,
-        "y": 272
-      },
-      "id": 111,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {
-            "ClientId": "$aws_account_id",
-            "DomainName": "$opensearch_domain"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "ClusterStatus.green",
-          "metricQueryType": 0,
-          "namespace": "AWS/ES",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "C",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {
-            "ClientId": "$aws_account_id",
-            "DomainName": "$opensearch_domain"
-          },
-          "expression": "",
-          "id": "",
-          "label": "",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "ClusterStatus.yellow",
-          "metricQueryType": 0,
-          "namespace": "AWS/ES",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "A",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {
-            "ClientId": "$aws_account_id",
-            "DomainName": "$opensearch_domain"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "ClusterStatus.red",
-          "metricQueryType": 0,
-          "namespace": "AWS/ES",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "B",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        }
-      ],
-      "title": "Cluster Status",
       "type": "timeseries"
     },
     {
@@ -9011,7 +9306,8 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "continuous-RdYlGr",
+            "seriesBy": "last"
           },
           "custom": {
             "axisBorderShow": false,
@@ -9061,7 +9357,54 @@
           },
           "unit": "none"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ClusterStatus.yellow"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed",
+                  "seriesBy": "last"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ClusterStatus.green"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ClusterStatus.red"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 9,
@@ -9069,7 +9412,7 @@
         "x": 16,
         "y": 272
       },
-      "id": 110,
+      "id": 111,
       "options": {
         "legend": {
           "calcs": [],
@@ -9099,7 +9442,58 @@
           "logGroups": [],
           "matchExact": true,
           "metricEditorMode": 0,
-          "metricName": "ThreadpoolBulkRejected",
+          "metricName": "ClusterStatus.green",
+          "metricQueryType": 0,
+          "namespace": "AWS/ES",
+          "period": "300",
+          "queryMode": "Metrics",
+          "refId": "C",
+          "region": "${aws_region}",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClientId": "$aws_account_id",
+            "DomainName": "$opensearch_domain"
+          },
+          "expression": "",
+          "id": "",
+          "label": "",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "ClusterStatus.yellow",
+          "metricQueryType": 0,
+          "namespace": "AWS/ES",
+          "period": "300",
+          "queryMode": "Metrics",
+          "refId": "A",
+          "region": "${aws_region}",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cloudwatch}"
+          },
+          "dimensions": {
+            "ClientId": "$aws_account_id",
+            "DomainName": "$opensearch_domain"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "ClusterStatus.red",
           "metricQueryType": 0,
           "namespace": "AWS/ES",
           "period": "300",
@@ -9110,7 +9504,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "Threadpool Bulk Rejected",
+      "title": "Cluster Status",
       "type": "timeseries"
     },
     {
@@ -9134,7 +9528,7 @@
         "content": "# ElastiCache Valkey",
         "mode": "markdown"
       },
-      "pluginVersion": "10.4.1",
+      "pluginVersion": "10.4.7",
       "title": " ",
       "transparent": true,
       "type": "text"
@@ -10195,726 +10589,6 @@
       ],
       "title": "Network Throughput",
       "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "text",
-        "uid": "-- Mixed --"
-      },
-      "description": "",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 311
-      },
-      "id": 112,
-      "options": {
-        "code": {
-          "language": "plaintext",
-          "showLineNumbers": false,
-          "showMiniMap": false
-        },
-        "content": "",
-        "mode": "markdown"
-      },
-      "pluginVersion": "10.4.1",
-      "title": "Worker",
-      "transparent": true,
-      "type": "text"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${cloudwatch}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 312
-      },
-      "id": 113,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {},
-          "expression": "",
-          "id": "",
-          "label": "",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "QueueDepth",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Worker/${env}",
-          "period": "60",
-          "queryMode": "Metrics",
-          "refId": "A",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Maximum"
-        }
-      ],
-      "title": "Worker Queue Depth",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${cloudwatch}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 312
-      },
-      "id": 114,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {},
-          "expression": "",
-          "id": "",
-          "label": "",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "DLQDepth",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Worker/${env}",
-          "period": "60",
-          "queryMode": "Metrics",
-          "refId": "A",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Maximum"
-        }
-      ],
-      "title": "Worker DLQ Depth",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${cloudwatch}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 320
-      },
-      "id": 115,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {
-            "ClusterName": "$dagster_cluster",
-            "ServiceName": "robosystems-worker-${env}"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Running",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "RunningTaskCount",
-          "metricQueryType": 0,
-          "namespace": "ECS/ContainerInsights",
-          "period": "",
-          "queryMode": "Metrics",
-          "refId": "A",
-          "region": "default",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {
-            "ClusterName": "$dagster_cluster",
-            "ServiceName": "robosystems-worker-${env}"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Desired",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "DesiredTaskCount",
-          "metricQueryType": 0,
-          "namespace": "ECS/ContainerInsights",
-          "period": "",
-          "queryMode": "Metrics",
-          "refId": "B",
-          "region": "default",
-          "sqlExpression": "",
-          "statistic": "Average"
-        }
-      ],
-      "title": "Worker Running vs Desired Tasks",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${cloudwatch}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": 3600000,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 320
-      },
-      "id": 116,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {
-            "ClusterName": "$dagster_cluster",
-            "ServiceName": "robosystems-worker-${env}"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Worker",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "CPUUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "",
-          "queryMode": "Metrics",
-          "refId": "A",
-          "region": "default",
-          "sqlExpression": "",
-          "statistic": "Average"
-        }
-      ],
-      "title": "Worker CPU Utilization",
-      "transformations": [
-        {
-          "id": "calculateField",
-          "options": {
-            "alias": "Run CPU Utilization",
-            "binary": {
-              "left": "CpuUtilized",
-              "operator": "/",
-              "right": "CpuReserved"
-            },
-            "mode": "binary",
-            "reduce": {
-              "reducer": "sum"
-            }
-          }
-        },
-        {
-          "id": "calculateField",
-          "options": {
-            "alias": "Run",
-            "binary": {
-              "left": "Run CPU Utilization",
-              "operator": "*",
-              "right": "100"
-            },
-            "mode": "binary",
-            "reduce": {
-              "reducer": "sum"
-            }
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "1 -": true,
-              "AWS/ECS robosystems-dagster-daemon-prod CPUUtilization": false,
-              "AWS/ECS robosystems-dagster-webserver-prod CPUUtilization": false,
-              "CpuReserved": true,
-              "CpuUtilized": true,
-              "Dagster Run CPU Utilization": false,
-              "ECS/ContainerInsights robosystems-dagster-run-${env} CpuReserved": true,
-              "ECS/ContainerInsights robosystems-dagster-run-${env} CpuUtilized": true,
-              "ECS/ContainerInsights robosystems-dagster-run-${env} CpuUtilized / ECS/ContainerInsights robosystems-dagster-run-${env} CpuReserved": true,
-              "ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved": true,
-              "ECS/ContainerInsights robosystems-dagster-run-prod CpuUtilized": true,
-              "Run CPU Utilization": true,
-              "Run Utilization": true
-            },
-            "includeByName": {},
-            "indexByName": {},
-            "renameByName": {
-              "AWS/ECS robosystems-dagster-daemon-${env} CPUUtilization": "Daemon",
-              "AWS/ECS robosystems-dagster-webserver-${env} CPUUtilization": "Webserver",
-              "Dagster Run CPU Utilization": "Run"
-            }
-          }
-        }
-      ],
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${cloudwatch}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": 3600000,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 328
-      },
-      "id": 117,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cloudwatch}"
-          },
-          "dimensions": {
-            "ClusterName": "$dagster_cluster",
-            "ServiceName": "robosystems-worker-${env}"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Worker",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "MemoryUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "",
-          "queryMode": "Metrics",
-          "refId": "A",
-          "region": "default",
-          "sqlExpression": "",
-          "statistic": "Maximum"
-        }
-      ],
-      "title": "Worker Memory Utilization",
-      "transformations": [
-        {
-          "id": "calculateField",
-          "options": {
-            "alias": "Run CPU Utilization",
-            "binary": {
-              "left": "CpuUtilized",
-              "operator": "/",
-              "right": "CpuReserved"
-            },
-            "mode": "binary",
-            "reduce": {
-              "reducer": "sum"
-            }
-          }
-        },
-        {
-          "id": "calculateField",
-          "options": {
-            "alias": "Run",
-            "binary": {
-              "left": "Run CPU Utilization",
-              "operator": "*",
-              "right": "100"
-            },
-            "mode": "binary",
-            "reduce": {
-              "reducer": "sum"
-            }
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "1 -": true,
-              "AWS/ECS robosystems-dagster-daemon-prod CPUUtilization": false,
-              "AWS/ECS robosystems-dagster-webserver-prod CPUUtilization": false,
-              "CpuReserved": true,
-              "CpuUtilized": true,
-              "Dagster Run CPU Utilization": false,
-              "ECS/ContainerInsights robosystems-dagster-run-${env} CpuReserved": true,
-              "ECS/ContainerInsights robosystems-dagster-run-${env} CpuUtilized": true,
-              "ECS/ContainerInsights robosystems-dagster-run-${env} CpuUtilized / ECS/ContainerInsights robosystems-dagster-run-${env} CpuReserved": true,
-              "ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved": true,
-              "ECS/ContainerInsights robosystems-dagster-run-prod CpuUtilized": true,
-              "Run CPU Utilization": true,
-              "Run Utilization": true
-            },
-            "includeByName": {},
-            "indexByName": {},
-            "renameByName": {
-              "AWS/ECS robosystems-dagster-daemon-${env} CPUUtilization": "Daemon",
-              "AWS/ECS robosystems-dagster-webserver-${env} CPUUtilization": "Webserver",
-              "Dagster Run CPU Utilization": "Run"
-            }
-          }
-        }
-      ],
-      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -11355,6 +11029,59 @@
         "skipUrlSync": false,
         "sort": 0,
         "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "robosystems-worker-prod",
+          "value": "robosystems-worker-prod"
+        },
+        "datasource": {
+          "type": "cloudwatch",
+          "uid": "${cloudwatch}"
+        },
+        "definition": "",
+        "hide": 2,
+        "includeAll": false,
+        "label": "",
+        "multi": false,
+        "name": "dagster_worker_task",
+        "options": [],
+        "query": {
+          "dimensionKey": "TaskDefinitionFamily",
+          "metricName": "CpuUtilized",
+          "namespace": "ECS/ContainerInsights",
+          "queryType": "dimensionValues",
+          "refId": "CloudWatchVariableQueryEditor-VariableQuery",
+          "region": "default"
+        },
+        "refresh": 1,
+        "regex": "robosystems-worker-${env}",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "RoboSystems/Worker/prod",
+          "value": "RoboSystems/Worker/prod"
+        },
+        "hide": 2,
+        "includeAll": false,
+        "label": "",
+        "multi": false,
+        "name": "worker_queue_cloudwatch",
+        "options": [
+          {
+            "selected": true,
+            "text": "RoboSystems/Worker/prod",
+            "value": "RoboSystems/Worker/prod"
+          }
+        ],
+        "query": "RoboSystems/Worker/${env}",
+        "skipUrlSync": false,
+        "type": "custom"
       },
       {
         "current": {
