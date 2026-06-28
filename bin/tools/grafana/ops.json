@@ -2496,7 +2496,7 @@
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Run CPU Utilized",
           "logGroups": [],
           "matchExact": false,
           "metricEditorMode": 0,
@@ -2522,7 +2522,7 @@
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Run CPU Reserved",
           "logGroups": [],
           "matchExact": false,
           "metricEditorMode": 0,
@@ -2548,7 +2548,7 @@
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Worker CPU Utilized",
           "logGroups": [],
           "matchExact": false,
           "metricEditorMode": 0,
@@ -2574,7 +2574,7 @@
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Worker CPU Reserved",
           "logGroups": [],
           "matchExact": false,
           "metricEditorMode": 0,
@@ -2596,9 +2596,9 @@
           "options": {
             "alias": "Run CPU Utilization",
             "binary": {
-              "left": "robosystems-dagster-run-prod CpuUtilized",
+              "left": "Run CPU Utilized robosystems-dagster-run-prod CpuUtilized",
               "operator": "/",
-              "right": "robosystems-dagster-run-prod CpuReserved"
+              "right": "Run CPU Reserved robosystems-dagster-run-prod CpuReserved"
             },
             "mode": "binary",
             "reduce": {
@@ -2626,9 +2626,9 @@
           "options": {
             "alias": "Worker CPU Utilized",
             "binary": {
-              "left": "robosystems-worker-prod CpuUtilized",
+              "left": "Worker CPU Utilized robosystems-worker-prod CpuUtilized",
               "operator": "/",
-              "right": "robosystems-worker-prod CpuReserved"
+              "right": "Worker CPU Reserved robosystems-worker-prod CpuReserved"
             },
             "mode": "binary",
             "reduce": {
@@ -2667,9 +2667,13 @@
               "ECS/ContainerInsights robosystems-dagster-run-${env} CpuUtilized / ECS/ContainerInsights robosystems-dagster-run-${env} CpuReserved": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuReserved": true,
               "ECS/ContainerInsights robosystems-dagster-run-prod CpuUtilized": true,
+              "Run CPU Reserved robosystems-dagster-run-prod CpuReserved": true,
               "Run CPU Utilization": true,
+              "Run CPU Utilized robosystems-dagster-run-prod CpuUtilized": true,
               "Run Utilization": true,
+              "Worker CPU Reserved robosystems-worker-prod CpuReserved": true,
               "Worker CPU Utilized": true,
+              "Worker CPU Utilized robosystems-worker-prod CpuUtilized": true,
               "robosystems-dagster-run-prod CpuReserved": true,
               "robosystems-dagster-run-prod CpuUtilized": true,
               "robosystems-worker-prod CpuReserved": true,
