@@ -143,6 +143,11 @@ on:
         required: false
         type: string
         default: "false"
+      aws_sns_alert_email:
+        description: "Email for worker alerts (e.g. DLQ depth); empty disables alarm notifications"
+        required: false
+        type: string
+        default: ""
 
       # Cache Configuration
       valkey_url:
@@ -447,6 +452,7 @@ jobs:
                 ParameterKey=WorkerMinCount,ParameterValue=${{ inputs.worker_min_count }} \
                 ParameterKey=WorkerMaxCount,ParameterValue=${{ inputs.worker_max_count }} \
                 ParameterKey=WorkerAutoscalingEnabled,ParameterValue=${{ inputs.worker_autoscaling_enabled }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=\"${{ inputs.aws_sns_alert_email }}\" \
                 ParameterKey=DatabaseEndpoint,ParameterValue=${{ inputs.database_endpoint }} \
                 ParameterKey=DatabasePort,ParameterValue=${{ inputs.database_port }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \
