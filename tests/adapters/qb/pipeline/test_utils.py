@@ -442,6 +442,10 @@ class TestParseJournalReport:
         ],
       }
 
+    # Two transaction groups, each closed by its own typed Section/Summary
+    # row — so the test proves group ISOLATION (no bleed), not just that a
+    # single transaction parses.
+    section_row = {"type": "Section", "Summary": {"ColData": [{"value": "Total"}]}}
     report = {
       # v2 #10 — Header always present; parser ignores it, must not choke
       "Header": {
@@ -453,6 +457,7 @@ class TestParseJournalReport:
       "Columns": {"Column": [{"ColTitle": "Date"}, {"ColTitle": "Transaction Type"}]},
       "Rows": {
         "Row": [
+          # Group 1 — Invoice 101: DR AR 500 / CR Revenue 500
           _v2_data_row(
             "2024-03-15",
             "Invoice",
@@ -475,29 +480,59 @@ class TestParseJournalReport:
             "",
             "500.00",
           ),
-          # v2 #8 — group/summary row is now typed "Section" but still
-          # carries the Summary payload the parser keys group breaks off.
-          {"type": "Section", "Summary": {"ColData": [{"value": "Total"}]}},
+          section_row,
+          # Group 2 — JournalEntry 202: DR Cash 300 / CR Revenue 300
+          _v2_data_row(
+            "2024-03-20",
+            "Journal Entry",
+            "202",
+            "JE-9",
+            "Cash sale",
+            "Cash",
+            "3",
+            "300.00",
+            "",
+          ),
+          _v2_data_row(
+            "",
+            "",
+            "",
+            "",
+            "Cash sale",
+            "Revenue",
+            "2",
+            "",
+            "300.00",
+          ),
+          section_row,
         ]
       },
     }
 
     entries, lines = parse_journal_report(report)
 
-    assert len(entries) == 1
-    assert entries[0]["Id"] == "Invoice_101"
+    # Group isolation: two distinct entries, lines attributed to the right one.
+    assert [e["Id"] for e in entries] == ["Invoice_101", "JournalEntry_202"]
     assert entries[0]["TxnDate"] == "2024-03-15"
     assert entries[0]["DocNumber"] == "INV-001"
     assert entries[0]["TotalAmt"] == 500.0
+    assert entries[1]["TxnDate"] == "2024-03-20"
+    assert entries[1]["TotalAmt"] == 300.0
 
-    assert len(lines) == 2
+    assert len(lines) == 4
+    # Group 1 lines belong to the Invoice...
+    assert {line_["journal_entry_id"] for line_ in lines[:2]} == {"Invoice_101"}
     assert lines[0]["PostingType"] == "Debit"
-    assert lines[0]["Amount"] == 500.0
     assert lines[0]["AccountRef_value"] == "1"
     assert lines[1]["PostingType"] == "Credit"
-    assert lines[1]["Amount"] == 500.0
     assert lines[1]["AccountRef_value"] == "2"
-    # Double-entry still balances after v2 reshaping.
+    # ...and group 2 lines belong to the JournalEntry — the second group did
+    # NOT bleed into the first.
+    assert {line_["journal_entry_id"] for line_ in lines[2:]} == {"JournalEntry_202"}
+    assert lines[2]["AccountRef_value"] == "3"
+    assert lines[2]["Amount"] == 300.0
+
+    # Double-entry still balances overall after v2 reshaping.
     assert sum(
       line_["Amount"] for line_ in lines if line_["PostingType"] == "Debit"
     ) == (sum(line_["Amount"] for line_ in lines if line_["PostingType"] == "Credit"))

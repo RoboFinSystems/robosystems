@@ -150,6 +150,8 @@ def qb_extract(
     )
     context.log.info(f"Incremental: fetching transactions from {start_date}")
 
+  # testing_migration defaults to the INTUIT_REPORTS_TESTING_MIGRATION flag,
+  # so this routes through Intuit's v2 reporting service unless SSM-disabled.
   report = client.get_transactions(start_date=start_date, end_date=end_date)
   journal_entries, journal_lines = parse_journal_report(report)
 

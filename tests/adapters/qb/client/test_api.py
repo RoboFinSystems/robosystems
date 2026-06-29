@@ -467,6 +467,21 @@ class TestQBClient:
       },
     )
 
+  @patch("robosystems.adapters.quickbooks.client.api.env")
+  def test_get_transactions_v1_fallback_when_flag_false(self, mock_env, mock_qb_client):
+    """The SSM kill switch: with the flag off and no explicit arg, the
+    `testing_migration` param is omitted and we stay on v1."""
+    mock_env.INTUIT_REPORTS_TESTING_MIGRATION = False
+    client = QBClient.__new__(QBClient)
+    client.client = mock_qb_client
+    mock_qb_client.get_report.return_value = {"transactions": []}
+
+    client.get_transactions("2023-01-01", "2023-12-31")
+
+    mock_qb_client.get_report.assert_called_once_with(
+      "JournalReport", {"start_date": "2023-01-01", "end_date": "2023-12-31"}
+    )
+
   # ---- CDC endpoint -----------------------------------------------------
 
   def _make_cdc_client(self, realm_id="1234567890123456789"):
