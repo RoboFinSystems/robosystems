@@ -125,6 +125,11 @@ Parameters:
     MaxValue: 365
     Description: CloudWatch log retention in days
 
+  SNSAlertEmail:
+    Type: String
+    Default: ""
+    Description: Email for worker alerts (e.g. DLQ depth); empty disables alarm notifications
+
   # Tagging Configuration
   ServiceTag:
     Type: String
@@ -144,6 +149,7 @@ Parameters:
 Conditions:
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
   AutoscalingEnabled: !Equals [!Ref WorkerAutoscalingEnabled, "true"]
+  HasAlertEmail: !Not [!Equals [!Ref SNSAlertEmail, ""]]
 
 Resources:
   # ========================================
@@ -580,6 +586,53 @@ Resources:
       AlarmActions:
         - !Ref WorkerScaleInPolicy
 
+  # ========================================
+  # ALERTING
+  # ========================================
+  WorkerNotificationTopic:
+    Condition: HasAlertEmail
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TopicName: !Sub robosystems-worker-${Environment}-alerts
+      DisplayName: !Sub RoboSystems Worker ${Environment} Alerts
+      Subscription:
+        - Endpoint: !Ref SNSAlertEmail
+          Protocol: email
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-worker-notifications-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  WorkerDLQDepthAlarm:
+    Condition: HasAlertEmail
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-worker-dlq-depth-${Environment}
+      AlarmDescription: >-
+        Worker dead-letter queue has one or more messages - a job failed
+        permanently and needs investigation.
+      Namespace: !Sub RoboSystems/Worker/${Environment}
+      MetricName: DLQDepth
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      # Only an actual DLQ message pages; a gap in published depth is not an
+      # alertable condition (worker liveness is covered elsewhere).
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref WorkerNotificationTopic
+
 Outputs:
   WorkerServiceArn:
     Description: ARN of the worker ECS service
@@ -592,3 +645,8 @@ Outputs:
     Value: !GetAtt WorkerTaskDefinition.TaskDefinitionArn
     Export:
       Name: !Sub ${AWS::StackName}-WorkerTaskDefinitionArn
+
+  WorkerNotificationTopicArn:
+    Condition: HasAlertEmail
+    Description: ARN of the worker alerts SNS topic
+    Value: !Ref WorkerNotificationTopic

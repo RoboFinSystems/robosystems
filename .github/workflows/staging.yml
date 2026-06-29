@@ -644,6 +644,7 @@ jobs:
       worker_min_count: ${{ vars.WORKER_MIN_COUNT_STAGING || '1' }}
       worker_max_count: ${{ vars.WORKER_MAX_COUNT_STAGING || '5' }}
       worker_autoscaling_enabled: ${{ vars.WORKER_AUTOSCALING_ENABLED_STAGING || 'false' }}
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
       # Capacity Provider Configuration (Spot vs On-Demand)
       daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_STAGING || '80' }}
       webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_STAGING || '80' }}

@@ -627,6 +627,7 @@ jobs:
       worker_min_count: ${{ vars.WORKER_MIN_COUNT_PROD || '1' }}
       worker_max_count: ${{ vars.WORKER_MAX_COUNT_PROD || '5' }}
       worker_autoscaling_enabled: ${{ vars.WORKER_AUTOSCALING_ENABLED_PROD || 'false' }}
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
       # Capacity Provider Configuration (Spot vs On-Demand)
       daemon_fargate_spot_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_SPOT_WEIGHT_PROD || '0' }}
       webserver_fargate_spot_weight: ${{ vars.DAGSTER_WEBSERVER_FARGATE_SPOT_WEIGHT_PROD || '0' }}

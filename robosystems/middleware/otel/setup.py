@@ -14,6 +14,7 @@ Features:
 """
 
 import logging
+import socket
 from importlib.metadata import version as pkg_version
 
 from fastapi import FastAPI
@@ -63,9 +64,17 @@ def _create_resource() -> Resource:
     "service.name": service_name,
     "service.version": service_version,
     "deployment.environment": env.ENVIRONMENT,
+    # Unique per-process identity so each task/replica maps to its own
+    # Prometheus series (via the `instance` label). Without it, every ECS
+    # task exports its cumulative OTel counters into one shared series;
+    # rate() then misreads the interleaved per-task samples as constant
+    # counter resets and inflates request/event volume metrics massively.
+    # On ECS Fargate the hostname is the unique container ID.
+    "service.instance.id": socket.gethostname(),
   }
 
   # Parse additional resource attributes from environment
+  # (an explicit service.instance.id here still wins, since it overrides above)
   if resource_attributes:
     try:
       for attr in resource_attributes.split(","):
