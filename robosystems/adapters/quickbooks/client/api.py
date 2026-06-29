@@ -507,17 +507,27 @@ class QBClient:
     return self._paginate(JournalEntry)
 
   @_QB_RETRY
-  def get_transactions(self, start_date=None, end_date=None):
-    """Fetch JournalReport — no longer the transactional source.
+  def get_transactions(self, start_date=None, end_date=None, testing_migration=None):
+    """Fetch JournalReport — still the live GL posting source (extract.py).
 
-    Kept for backward compat with any external callers; the QB pipeline now
-    pulls Invoice / Bill / Payment / JournalEntry per-entity instead.
+    When ``testing_migration`` is True — or, when left None, the
+    ``INTUIT_REPORTS_TESTING_MIGRATION`` config flag is set — the request is
+    routed through Intuit's modernized "v2" reporting service via the
+    ``testing_migration`` query param. This is a temporary Intuit-side
+    migration switch: after the 2026-08-31 cutover the v2 service serves all
+    Reports API responses unconditionally and the param becomes a no-op.
+    See https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce
     """
     params = {}
     if start_date:
       params["start_date"] = start_date
     if end_date:
       params["end_date"] = end_date
+    if testing_migration is None:
+      testing_migration = env.INTUIT_REPORTS_TESTING_MIGRATION
+    if testing_migration:
+      # Presence of the key is what routes to v2; value is ignored by Intuit.
+      params["testing_migration"] = "true"
     transactions = self.client.get_report("JournalReport", params)
     return transactions
 

@@ -383,8 +383,11 @@ class TestQBClient:
     mock_transactions = {"transactions": [{"id": "1", "amount": 150.00}]}
     mock_qb_client.get_report.return_value = mock_transactions
 
-    # Execute
-    result = client.get_transactions("2023-01-01", "2023-12-31")
+    # Execute — testing_migration=False isolates date handling from the
+    # now-default-on v2 flag (covered separately below).
+    result = client.get_transactions(
+      "2023-01-01", "2023-12-31", testing_migration=False
+    )
 
     # Verify
     assert result == mock_transactions
@@ -401,8 +404,8 @@ class TestQBClient:
     mock_transactions = {"transactions": []}
     mock_qb_client.get_report.return_value = mock_transactions
 
-    # Execute
-    result = client.get_transactions()
+    # Execute (testing_migration=False to isolate from the default-on v2 flag)
+    result = client.get_transactions(testing_migration=False)
 
     # Verify
     assert result == mock_transactions
@@ -417,13 +420,51 @@ class TestQBClient:
     mock_transactions = {"transactions": [{"id": "1"}]}
     mock_qb_client.get_report.return_value = mock_transactions
 
-    # Execute
-    result = client.get_transactions("2023-01-01")
+    # Execute (testing_migration=False to isolate from the default-on v2 flag)
+    result = client.get_transactions("2023-01-01", testing_migration=False)
 
     # Verify
     assert result == mock_transactions
     mock_qb_client.get_report.assert_called_once_with(
       "JournalReport", {"start_date": "2023-01-01"}
+    )
+
+  def test_get_transactions_testing_migration_explicit(self, mock_qb_client):
+    """Explicit testing_migration=True routes the request through Intuit's v2
+    reporting service via the `testing_migration` query param."""
+    client = QBClient.__new__(QBClient)
+    client.client = mock_qb_client
+    mock_qb_client.get_report.return_value = {"transactions": []}
+
+    client.get_transactions("2023-01-01", "2023-12-31", testing_migration=True)
+
+    mock_qb_client.get_report.assert_called_once_with(
+      "JournalReport",
+      {
+        "start_date": "2023-01-01",
+        "end_date": "2023-12-31",
+        "testing_migration": "true",
+      },
+    )
+
+  @patch("robosystems.adapters.quickbooks.client.api.env")
+  def test_get_transactions_testing_migration_from_flag(self, mock_env, mock_qb_client):
+    """With no explicit arg, the INTUIT_REPORTS_TESTING_MIGRATION config flag
+    decides whether the v2 param is sent."""
+    mock_env.INTUIT_REPORTS_TESTING_MIGRATION = True
+    client = QBClient.__new__(QBClient)
+    client.client = mock_qb_client
+    mock_qb_client.get_report.return_value = {"transactions": []}
+
+    client.get_transactions("2023-01-01", "2023-12-31")
+
+    mock_qb_client.get_report.assert_called_once_with(
+      "JournalReport",
+      {
+        "start_date": "2023-01-01",
+        "end_date": "2023-12-31",
+        "testing_migration": "true",
+      },
     )
 
   # ---- CDC endpoint -----------------------------------------------------
