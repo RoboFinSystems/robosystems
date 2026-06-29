@@ -629,6 +629,20 @@ class EnvConfig:
     get_parameter_value("CONNECTION_QUICKBOOKS_ENABLED", "true").lower() == "true",
   )
 
+  # Routes QB Reports API calls (JournalReport — our live GL posting source)
+  # through Intuit's modernized "v2" reporting service via the
+  # `testing_migration` query param. Defaults TRUE: we cut over to v2 ahead of
+  # Intuit's 2026-08-31 hard cutover (validated to parse identically to v1).
+  # Set FALSE via SSM (features/INTUIT_REPORTS_TESTING_MIGRATION) to fall back
+  # to v1 at runtime with no redeploy — but ONLY until 2026-08-31, after which
+  # Intuit serves v2 unconditionally and the param becomes a no-op. Retire this
+  # flag (and the get_transactions param) once that cutover lands.
+  # https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce
+  INTUIT_REPORTS_TESTING_MIGRATION = get_bool_env(
+    "INTUIT_REPORTS_TESTING_MIGRATION",
+    get_parameter_value("INTUIT_REPORTS_TESTING_MIGRATION", "true").lower() == "true",
+  )
+
   # ==========================================================================
   # EXTENSIONS — RoboLedger & RoboInvestor product surfaces
   # ==========================================================================

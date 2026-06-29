@@ -409,6 +409,134 @@ class TestParseJournalReport:
     assert lines[1]["PostingType"] == "Credit"
     assert lines[1]["AccountRef_value"] == "2"
 
+  def test_v2_modernized_report_shape(self):
+    """Parser survives Intuit's modernized (v2) Reports API response shape.
+
+    Covers the documented v2 differences that can surface in a JournalReport
+    (https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce):
+      #1  null amounts always come back as "" (already handled — asserted here)
+      #8  rows carry a `type` field: "Section" for group/summary rows,
+          "Data" for leaf rows (v1 omitted it / mislabeled empty sections)
+      #10 Header block with StartPeriod/EndPeriod always present
+      — extra trailing ColData columns appended by v2 must be ignored
+
+    The load-bearing invariant: group boundaries are still keyed off the
+    `Summary` payload, so transactions don't bleed together when v2 also
+    stamps `type: "Section"` on that row.
+    """
+    from robosystems.adapters.quickbooks.pipeline.utils import parse_journal_report
+
+    def _v2_data_row(date, tx_type, tx_id, num, memo, account, account_id, dr, cr):
+      return {
+        "type": "Data",  # v2 #8 — leaf rows are now typed
+        "ColData": [
+          {"value": date},
+          {"value": tx_type, "id": tx_id},
+          {"value": num},
+          {"value": ""},  # Name
+          {"value": memo},
+          {"value": account, "id": account_id},
+          {"value": dr},  # v2 #1 — "" when no value (never 0 / absent)
+          {"value": cr},
+          {"value": "USD"},  # v2 may append columns — must be ignored
+        ],
+      }
+
+    # Two transaction groups, each closed by its own typed Section/Summary
+    # row — so the test proves group ISOLATION (no bleed), not just that a
+    # single transaction parses.
+    section_row = {"type": "Section", "Summary": {"ColData": [{"value": "Total"}]}}
+    report = {
+      # v2 #10 — Header always present; parser ignores it, must not choke
+      "Header": {
+        "ReportName": "JournalReport",
+        "StartPeriod": "2024-03-01",
+        "EndPeriod": "2024-03-31",
+        "Currency": "USD",
+      },
+      "Columns": {"Column": [{"ColTitle": "Date"}, {"ColTitle": "Transaction Type"}]},
+      "Rows": {
+        "Row": [
+          # Group 1 — Invoice 101: DR AR 500 / CR Revenue 500
+          _v2_data_row(
+            "2024-03-15",
+            "Invoice",
+            "101",
+            "INV-001",
+            "Service revenue",
+            "Accounts Receivable",
+            "1",
+            "500.00",
+            "",
+          ),
+          _v2_data_row(
+            "",
+            "",
+            "",
+            "",
+            "Service revenue",
+            "Revenue",
+            "2",
+            "",
+            "500.00",
+          ),
+          section_row,
+          # Group 2 — JournalEntry 202: DR Cash 300 / CR Revenue 300
+          _v2_data_row(
+            "2024-03-20",
+            "Journal Entry",
+            "202",
+            "JE-9",
+            "Cash sale",
+            "Cash",
+            "3",
+            "300.00",
+            "",
+          ),
+          _v2_data_row(
+            "",
+            "",
+            "",
+            "",
+            "Cash sale",
+            "Revenue",
+            "2",
+            "",
+            "300.00",
+          ),
+          section_row,
+        ]
+      },
+    }
+
+    entries, lines = parse_journal_report(report)
+
+    # Group isolation: two distinct entries, lines attributed to the right one.
+    assert [e["Id"] for e in entries] == ["Invoice_101", "JournalEntry_202"]
+    assert entries[0]["TxnDate"] == "2024-03-15"
+    assert entries[0]["DocNumber"] == "INV-001"
+    assert entries[0]["TotalAmt"] == 500.0
+    assert entries[1]["TxnDate"] == "2024-03-20"
+    assert entries[1]["TotalAmt"] == 300.0
+
+    assert len(lines) == 4
+    # Group 1 lines belong to the Invoice...
+    assert {line_["journal_entry_id"] for line_ in lines[:2]} == {"Invoice_101"}
+    assert lines[0]["PostingType"] == "Debit"
+    assert lines[0]["AccountRef_value"] == "1"
+    assert lines[1]["PostingType"] == "Credit"
+    assert lines[1]["AccountRef_value"] == "2"
+    # ...and group 2 lines belong to the JournalEntry — the second group did
+    # NOT bleed into the first.
+    assert {line_["journal_entry_id"] for line_ in lines[2:]} == {"JournalEntry_202"}
+    assert lines[2]["AccountRef_value"] == "3"
+    assert lines[2]["Amount"] == 300.0
+
+    # Double-entry still balances overall after v2 reshaping.
+    assert sum(
+      line_["Amount"] for line_ in lines if line_["PostingType"] == "Debit"
+    ) == (sum(line_["Amount"] for line_ in lines if line_["PostingType"] == "Credit"))
+
   def test_empty_report(self):
     from robosystems.adapters.quickbooks.pipeline.utils import parse_journal_report
 
