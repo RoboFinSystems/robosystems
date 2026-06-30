@@ -404,11 +404,14 @@ def create_business_events(
   """
   client = _get_ledger_client()
 
-  # Index of invoice events keyed by (customer_name, amount) so the
-  # subsequent payment can populate `discharges_event_id`. LIFO match
-  # via dict deletion handles the case where a single customer has
-  # multiple identical-amount invoices in flight.
-  invoice_index: dict[tuple[str, int], str] = {}
+  # Index of open invoice events keyed by (customer_name, amount) so the
+  # subsequent payment can populate `discharges_event_id`. A *stack* per key
+  # (not a single id) is essential: a customer can have several identical-amount
+  # invoices outstanding at once (e.g. a wholesale account billed the same
+  # amount for several months while its payments lag), and each payment must
+  # discharge a distinct one. A plain dict would overwrite, leaving the earlier
+  # same-amount invoices forever un-discharged even after they're paid.
+  invoice_index: dict[tuple[str, int], list[str]] = {}
 
   counts: dict[str, int] = {
     "invoice_issued": 0,
@@ -461,12 +464,13 @@ def create_business_events(
           "metadata": base_metadata,
         }
         resp = client.create_event_block(graph_id, body)
-        invoice_index[(agent_name or "", total_amount)] = resp.id
+        invoice_index.setdefault((agent_name or "", total_amount), []).append(resp.id)
         counts["invoice_issued"] += 1
         line_item_count += len(li_list)
 
       elif txn_type == "payment":
-        invoice_evt_id = invoice_index.pop((agent_name or "", total_amount), None)
+        _open = invoice_index.get((agent_name or "", total_amount))
+        invoice_evt_id = _open.pop() if _open else None
         body = {
           **base_body,
           "event_type": "payment_received",
