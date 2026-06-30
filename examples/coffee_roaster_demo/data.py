@@ -36,6 +36,7 @@ from examples._scenario.engine import (
   ramp,
   staggered_prepaid,
   step,
+  trailing_year,
   validate,
   window,
 )
@@ -329,7 +330,9 @@ def build_scenario(start: date) -> Scenario:
     capex=CAPEX,
     prepaids=PREPAIDS,
     months=MONTHS,
-    report_period=(date(2025, 1, 1), date(2025, 12, 31)),
+    # Trailing 12 months ending at the close target — captures the squeeze,
+    # which lands in the most recent months of the rolling window.
+    report_period=trailing_year(start, MONTHS),
   )
 
 

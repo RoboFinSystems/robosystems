@@ -59,6 +59,20 @@ def get_demo_start_date(months: int, today: date | None = None) -> date:
   return add_months(date(today.year, today.month, 1), -(months - 1))
 
 
+def trailing_year(start: date, months: int) -> tuple[date, date]:
+  """The 12-month ('annual') reporting window ending at the **close target** —
+  the last completed month (offset ``months - 2``; offset ``months - 1`` is the
+  still-open current month).
+
+  Use this for the filed report's period so it captures the arc's climax, which
+  lands in the most recent months of the rolling window. A fixed calendar year
+  would end before the reveal and render the off-camera 'before' state.
+  """
+  close_offset = months - 2
+  first_offset = max(close_offset - 11, 0)
+  return month_date(start, first_offset, 1), month_date(start, close_offset, 31)
+
+
 # ---------------------------------------------------------------------------
 # Curve builders — author driver curves as intent, not 16 literals
 # ---------------------------------------------------------------------------

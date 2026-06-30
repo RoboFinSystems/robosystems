@@ -961,7 +961,7 @@ def generate_annual_report(
 
   report = client.create_report(
     graph_id,
-    name=f"FY {period_start.year} Annual Report",
+    name=f"FY {period_end.year} Annual Report",
     mapping_id=mapping_id,
     taxonomy_id=taxonomy_id,
     period_start=period_start,

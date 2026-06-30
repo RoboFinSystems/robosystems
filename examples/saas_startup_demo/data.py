@@ -34,6 +34,7 @@ from examples._scenario.engine import (
   get_demo_start_date,
   ramp,
   staggered_prepaid,
+  trailing_year,
   validate,
 )
 
@@ -255,7 +256,9 @@ def build_scenario(start: date) -> Scenario:
     capex=CAPEX,
     prepaids=PREPAIDS,
     months=MONTHS,
-    report_period=(date(2025, 1, 1), date(2025, 12, 31)),
+    # Trailing 12 months ending at the close target — captures the burn /
+    # deferred-revenue build in the most recent months of the rolling window.
+    report_period=trailing_year(start, MONTHS),
   )
 
 
