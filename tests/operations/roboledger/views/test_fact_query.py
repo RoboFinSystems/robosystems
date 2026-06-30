@@ -83,6 +83,17 @@ class TestIsTicker:
 class TestQueryFactGrid:
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_routes_to_read_endpoint(self, mock_repository):
+    """Read-only analytical query: must acquire the repository with
+    operation_type="read" so shared repos (SEC) route to the replica ALB.
+    The default "write" path resolves the shared master (DynamoDB discovery +
+    retry) and times out the MCP tool. Regression guard for that bug."""
+    with patch(PATCH_REPO, return_value=mock_repository) as mock_get_repo:
+      await query_fact_grid(MOCK_GRAPH_ID, elements=["us-gaap:Assets"])
+    assert mock_get_repo.call_args.kwargs.get("operation_type") == "read"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_single_element_uses_inline_anchor(self, mock_repository):
     """Single qname → inline `(el:Element {qname: 'x'})` for fast lookup."""
     with patch(PATCH_REPO, return_value=mock_repository):

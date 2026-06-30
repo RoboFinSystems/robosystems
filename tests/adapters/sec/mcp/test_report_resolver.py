@@ -66,6 +66,19 @@ class TestResolveSecReport:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_routes_to_read_endpoint(self, mock_repository):
+    """Read-only resolution must route to the read endpoint (replica ALB on the
+    shared SEC repo). The default "write" path resolves the shared master
+    (DynamoDB discovery + retry) and times out the MCP tool. Regression guard."""
+    with patch(
+      "robosystems.adapters.sec.mcp.report_resolver.get_graph_repository",
+      return_value=mock_repository,
+    ) as mock_get_repo:
+      await resolve_sec_report(MOCK_GRAPH, ticker="NVDA")
+    assert mock_get_repo.call_args.kwargs.get("operation_type") == "read"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_fiscal_year_filter_threaded(self, mock_repository):
     with patch(
       "robosystems.adapters.sec.mcp.report_resolver.get_graph_repository",
