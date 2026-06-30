@@ -314,6 +314,7 @@ def _opening(start: date) -> list:
 def build_scenario(start: date) -> Scenario:
   """Assemble the Driftline scenario for a given evergreen start date."""
   return Scenario(
+    slug="coffee_roaster",
     company_name="Driftline Coffee Roasters",
     entity_type="corporation",
     ticker="DRIFT",

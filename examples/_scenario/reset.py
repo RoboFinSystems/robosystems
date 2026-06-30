@@ -1,4 +1,4 @@
-"""Demo-only reset logic for coffee_roaster_demo.
+"""Demo-only reset logic for the showcase scenario demos.
 
 This is NOT a production operation. It selectively wipes demo-generated
 state while preserving graph infrastructure (entity, library-seeded

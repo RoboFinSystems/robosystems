@@ -132,10 +132,12 @@ def staggered_prepaid(
   deferred-revenue liability — the realistic shape of a monthly+prepaid
   subscription book. Returns a list to splice into ``Scenario.revenue``.
   """
+  # Rotate the customer roster so each cohort bills a different account —
+  # spreading prepaid revenue across the named logos rather than one agent.
   return [
     RevenueStream(
       name=f"{name} (cohort {k + 1}/{cohorts})",
-      customers=customers,
+      customers=[customers[k % len(customers)]] if customers else [],
       revenue_account=revenue_account,
       monthly_recognized=scale(monthly_recognized, 1, cohorts),
       collection=CollectionPolicy(kind="prepaid", bill_every=cohorts, bill_phase=k),

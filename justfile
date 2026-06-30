@@ -206,6 +206,10 @@ demo-roboledger *args="":
 demo-coffee-roaster *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.coffee_roaster_demo.main {{args}}
 
+# Run SaaS Startup showcase demo — Cadence Labs (burning cash, deferred-revenue runway). Flags: --ai (MappingOperator; needs Bedrock), --dry-run, [graph_id]
+demo-saas-startup *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m examples.saas_startup_demo.main {{args}}
+
 # Run custom graph demo end-to-end (pass any flags: --new-user, --new-graph, --skip-queries)
 demo-custom-graph *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m examples.custom_graph_demo.main {{args}}

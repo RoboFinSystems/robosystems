@@ -163,6 +163,7 @@ class PrepaidItem:
 class Scenario:
   """A complete synthetic company: identity + chart of accounts + flows."""
 
+  slug: str  # episode id — drives demo slot, credential prefixes, tags, bundle names
   company_name: str
   entity_type: str
   ticker: str
