@@ -63,7 +63,10 @@ async def resolve_sec_report(
   )
 
   try:
-    repository = await get_graph_repository(graph_id)
+    # Read-only resolution against the shared SEC repo — route to the replica
+    # ALB via operation_type="read"; the default "write" path resolves the
+    # shared master (DynamoDB discovery + retry) and times out the MCP tool.
+    repository = await get_graph_repository(graph_id, operation_type="read")
     rows = await repository.execute_query(query, parameters)
     if rows:
       return rows[0]

@@ -59,6 +59,25 @@ class TestQueryFinancialStatement:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
+  async def test_routes_to_read_endpoint(self, mock_repository):
+    """This is a read-only analytical query: it must acquire the repository
+    with operation_type="read". On shared repos that routes to the replica ALB;
+    the default "write" path resolves the shared master (DynamoDB discovery +
+    retry) and times out the MCP tool. Regression guard for that bug."""
+    with patch(
+      "robosystems.operations.roboledger.views.financial_statement_query.get_graph_repository",
+      return_value=mock_repository,
+    ) as mock_get_repo:
+      await query_financial_statement(
+        MOCK_GRAPH,
+        statement_type="income_statement",
+        report_id="rpt_abc",
+      )
+
+    assert mock_get_repo.call_args.kwargs.get("operation_type") == "read"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
   async def test_ticker_path(self, mock_repository):
     with patch(
       "robosystems.operations.roboledger.views.financial_statement_query.get_graph_repository",

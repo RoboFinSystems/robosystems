@@ -256,7 +256,10 @@ async def query_fact_grid(
   query += "\nWHERE " + "\n  AND ".join(where_clauses)
   query += return_clause
 
-  repository = await get_graph_repository(graph_id)
+  # Read-only analytical query — route to read endpoint. On shared repos (SEC)
+  # this hits the replica ALB rather than the shared master's slow discovery
+  # path; on tenant graphs operation_type is ignored (single instance).
+  repository = await get_graph_repository(graph_id, operation_type="read")
   results = await repository.execute_query(query, parameters)
 
   base_columns = ["element_id", "element_name", "period_end", "value", "unit"]

@@ -128,7 +128,12 @@ async def query_financial_statement(
     "LIMIT $limit"
   )
 
-  repository = await get_graph_repository(graph_id)
+  # Read-only analytical query. ``operation_type="read"`` is load-bearing for
+  # shared repositories (SEC): it routes to the replica ALB instead of the
+  # shared master, whose discovery path (DynamoDB lookup + retry/backoff) blows
+  # past the MCP tool timeout. For tenant entity graphs the user-graph router
+  # ignores operation_type (single instance per graph), so this is a no-op there.
+  repository = await get_graph_repository(graph_id, operation_type="read")
   return await repository.execute_query(query, parameters)
 
 
