@@ -21,7 +21,7 @@ jobs:
       runner_config: ${{ steps.select.outputs.runner_config }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
