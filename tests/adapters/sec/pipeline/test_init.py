@@ -46,17 +46,17 @@ class TestGetDagsterComponents:
     # 2 lbug s3 publish, 2 duckdb s3 publish,
     # 1 vector s3 publish, 1 lbug r2 publish, knowledge artifact,
     # 2 text index (narratives + ixbrl disclosures)
-    assert len(components["assets"]) == 16
+    assert len(components["assets"]) == 18
 
   def test_expected_number_of_jobs(self):
     """Test that the expected number of jobs are registered."""
     components = get_dagster_components()
-    assert len(components["jobs"]) == 18
+    assert len(components["jobs"]) == 20
 
   def test_expected_number_of_sensors(self):
     """Test that the expected number of sensors are registered."""
     components = get_dagster_components()
-    assert len(components["sensors"]) == 6
+    assert len(components["sensors"]) == 8
 
   def test_expected_number_of_schedules(self):
     """Test that the expected number of schedules are registered."""
