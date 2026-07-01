@@ -311,9 +311,9 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
   via the S3 filing cache. This sensor re-triggers process runs until the
   queue is drained across all partitions, then hands off to staging.
 
-  At quarter boundaries, the download schedule scans two quarters (current +
-  previous). This sensor waits for both partitions to fully drain before
-  triggering staging, ensuring DuckDB receives a complete batch.
+  The download schedule scans exactly one quarter per run (hard cut-over, keyed
+  off Eastern time), so there is normally a single partition to drain before
+  staging.
 
   The stage_to_materialize_sensor handles the next step (stage → materialize).
   """
