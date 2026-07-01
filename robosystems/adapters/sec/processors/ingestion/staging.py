@@ -268,26 +268,18 @@ class DuckDBStager:
     Returns:
         StagingResult with tables staged and row counts (net new rows)
     """
-    from robosystems.adapters.sec import (
-      get_current_quarter,
-      get_previous_quarter,
-      is_in_quarter_overlap_window,
-    )
+    from robosystems.adapters.sec import get_current_quarter
 
     start_time = time.time()
     log_progress = make_progress_logger(progress_callback)
 
-    # Default to current year/quarter
-    now = datetime.now(UTC)
+    # Default to the current Eastern-time quarter (SEC filing calendar). Hard
+    # cut-over: stage exactly the target quarter, with no previous-quarter
+    # overlap.
     if year is None or quarter is None:
-      year, quarter = get_current_quarter(now)
+      year, quarter = get_current_quarter()
 
-    # Build list of quarters to scan (current + previous during overlap period)
     quarters_to_scan: list[tuple[int, int]] = [(year, quarter)]
-
-    if is_in_quarter_overlap_window(now):
-      prev_year, prev_quarter = get_previous_quarter(year, quarter)
-      quarters_to_scan.append((prev_year, prev_quarter))
 
     quarters_str = ", ".join(f"{y}-Q{q}" for y, q in quarters_to_scan)
     logger.info(

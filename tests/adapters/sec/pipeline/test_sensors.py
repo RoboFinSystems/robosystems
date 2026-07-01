@@ -9,6 +9,7 @@ This file covers the incremental pipeline chain sensors:
 
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from dagster import (
@@ -582,19 +583,20 @@ class TestSecIncrementalDownloadSchedule:
     assert result[0].tags["mode"] == "incremental"
 
   @patch("robosystems.adapters.sec.pipeline.sensors._get_quarters_to_scan")
-  def test_yields_multiple_quarters_at_boundary(self, mock_quarters):
-    """Test schedule yields two RunRequests at quarter boundary."""
-    mock_quarters.return_value = ["2025-Q1", "2024-Q4"]
+  def test_yields_single_quarter_keyed_off_et_tick(self, mock_quarters):
+    """Hard cut-over: one RunRequest, quarter derived from the ET tick time."""
+    mock_quarters.return_value = ["2026-Q2"]
 
-    context = build_schedule_context(
-      scheduled_execution_time=datetime(2025, 1, 2, 21, 0, tzinfo=UTC)
-    )
+    # 2026-06-30 21:00 ET is already 2026-07-01 in UTC; the schedule must key
+    # the quarter off the ET scheduled time, not the container UTC clock.
+    sched = datetime(2026, 6, 30, 21, 0, tzinfo=ZoneInfo("America/New_York"))
+    context = build_schedule_context(scheduled_execution_time=sched)
 
     result = list(sec_incremental_download_schedule(context))
 
-    assert len(result) == 2
-    partition_keys = {r.partition_key for r in result}
-    assert partition_keys == {"2025-Q1", "2024-Q4"}
+    assert len(result) == 1
+    assert result[0].partition_key == "2026-Q2"
+    mock_quarters.assert_called_once_with(sched)
 
   @patch("robosystems.adapters.sec.pipeline.sensors._get_quarters_to_scan")
   def test_run_keys_include_batch_id(self, mock_quarters):
@@ -642,17 +644,48 @@ class TestGetQuartersToScan:
     mock_get_quarters.assert_called_once()
 
   @patch("robosystems.adapters.sec.get_quarters_to_scan")
-  def test_returns_list_of_partition_keys(self, mock_get_quarters):
-    """Test returns properly formatted partition keys."""
-    mock_get_quarters.return_value = ["2025-Q1", "2024-Q4"]
+  def test_returns_single_partition_key(self, mock_get_quarters):
+    """Hard cut-over: exactly one properly formatted partition key."""
+    mock_get_quarters.return_value = ["2026-Q2"]
 
     result = _get_quarters_to_scan()
 
     assert isinstance(result, list)
-    assert len(result) == 2
-    for key in result:
-      parts = key.split("-Q")
-      assert len(parts) == 2
+    assert len(result) == 1
+    parts = result[0].split("-Q")
+    assert len(parts) == 2
+
+
+@pytest.mark.unit
+class TestQuarterSelectionEasternHardCutover:
+  """Regression tests for the ET-keyed, single-quarter hard cut-over.
+
+  The bug: quarter was computed from the container's UTC clock, so the 21:00 ET
+  run on a quarter's last day (already next-day in UTC) rolled to the next
+  quarter and also fired a spurious previous-quarter overlap run.
+  """
+
+  def test_last_evening_of_q2_stays_q2(self):
+    from robosystems.adapters.sec import get_current_quarter, get_quarters_to_scan
+
+    # 2026-06-30 21:00 ET == 2026-07-01 01:00 UTC — must resolve to Q2, not Q3.
+    now = datetime(2026, 6, 30, 21, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert get_current_quarter(now) == (2026, 2)
+    assert get_quarters_to_scan(now) == ["2026-Q2"]
+
+  def test_first_evening_of_q3_is_q3_only(self):
+    from robosystems.adapters.sec import get_quarters_to_scan
+
+    # First day of Q3 — no previous-quarter (Q2) overlap under hard cut-over.
+    now = datetime(2026, 7, 1, 21, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert get_quarters_to_scan(now) == ["2026-Q3"]
+
+  def test_always_single_quarter(self):
+    from robosystems.adapters.sec import get_quarters_to_scan
+
+    # A few days into a new quarter — still exactly one quarter (no overlap).
+    now = datetime(2026, 7, 3, 21, 0, tzinfo=ZoneInfo("America/New_York"))
+    assert get_quarters_to_scan(now) == ["2026-Q3"]
 
 
 @pytest.mark.unit
