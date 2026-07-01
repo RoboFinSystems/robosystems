@@ -1,12 +1,12 @@
 """SEC EDGAR adapter for XBRL financial data extraction."""
 
-from datetime import UTC, datetime
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-# Quarter overlap window for incremental updates.
-# SEC filings submitted near quarter-end may not appear in EFTS for 1-2 days
-# due to SEC indexing delays and UTC/EST timing differences. We scan the
-# previous quarter during the first N days of a new quarter to catch these.
-QUARTER_OVERLAP_DAYS = 5
+# SEC filings follow the US-market (Eastern) calendar. The nightly pipeline runs
+# at 21:00 ET; on a quarter's last day that is already the next day in UTC, so
+# quarter selection must key off Eastern time, not the container's UTC clock.
+EASTERN = ZoneInfo("America/New_York")
 
 _LAZY_IMPORTS = {
   "SEC_BASE_URL": "robosystems.adapters.sec.client",
@@ -43,70 +43,32 @@ def get_current_quarter(now: datetime | None = None) -> tuple[int, int]:
   """Get the current year and quarter.
 
   Args:
-      now: Optional datetime to use (defaults to UTC now).
+      now: Optional datetime to use (defaults to Eastern-time now, matching the
+          SEC filing calendar).
 
   Returns:
       Tuple of (year, quarter) where quarter is 1-4.
   """
   if now is None:
-    now = datetime.now(UTC)
+    now = datetime.now(EASTERN)
   quarter = (now.month - 1) // 3 + 1
   return now.year, quarter
 
 
-def get_previous_quarter(year: int, quarter: int) -> tuple[int, int]:
-  """Get the previous quarter given a year and quarter.
-
-  Args:
-      year: The year.
-      quarter: The quarter (1-4).
-
-  Returns:
-      Tuple of (year, quarter) for the previous quarter.
-  """
-  if quarter == 1:
-    return year - 1, 4
-  return year, quarter - 1
-
-
-def is_in_quarter_overlap_window(now: datetime | None = None) -> bool:
-  """Check if we're in the quarter overlap window (first N days of a new quarter).
-
-  During this window, we should also scan the previous quarter to catch
-  late-indexed filings from the prior quarter.
-
-  Args:
-      now: Optional datetime to use (defaults to UTC now).
-
-  Returns:
-      True if we're in the overlap window.
-  """
-  if now is None:
-    now = datetime.now(UTC)
-  _, quarter = get_current_quarter(now)
-  quarter_start_month = (quarter - 1) * 3 + 1
-  return now.month == quarter_start_month and now.day <= QUARTER_OVERLAP_DAYS
-
-
 def get_quarters_to_scan(now: datetime | None = None) -> list[str]:
-  """Get list of partition keys (quarters) to scan for incremental updates.
+  """Get the partition key(s) to scan for the incremental nightly download.
 
-  Always scans current quarter. Also scans previous quarter during the
-  overlap window (first N days of a new quarter).
+  Hard cut-over: exactly one quarter per run — the current (Eastern-time)
+  quarter. There is no previous-quarter overlap; the final batch of a quarter is
+  trusted to capture that quarter's filings. Quarter selection keys off Eastern
+  time so the last-day-of-quarter run (21:00 ET, already next-day in UTC) stays
+  on the correct quarter.
 
   Args:
-      now: Optional datetime to use (defaults to UTC now).
+      now: Optional datetime to use (defaults to Eastern-time now).
 
   Returns:
-      List of partition keys like ["2025-Q1"] or ["2025-Q1", "2024-Q4"].
+      Single-element list of partition keys, e.g. ["2026-Q2"].
   """
-  if now is None:
-    now = datetime.now(UTC)
   year, quarter = get_current_quarter(now)
-  quarters = [f"{year}-Q{quarter}"]
-
-  if is_in_quarter_overlap_window(now):
-    prev_year, prev_quarter = get_previous_quarter(year, quarter)
-    quarters.append(f"{prev_year}-Q{prev_quarter}")
-
-  return quarters
+  return [f"{year}-Q{quarter}"]

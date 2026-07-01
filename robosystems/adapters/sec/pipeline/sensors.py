@@ -222,20 +222,20 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 # ============================================================================
 
 
-def _get_quarters_to_scan() -> list[str]:
-  """Get quarters to scan for incremental download.
+def _get_quarters_to_scan(now: datetime | None = None) -> list[str]:
+  """Get the single quarter to scan for the incremental nightly download.
 
-  Always scans current quarter. Also scans previous quarter during the first
-  several days of a new quarter to catch late-indexed filings (filings submitted
-  near quarter-end may not appear in EFTS for 1-2 days due to SEC indexing delays
-  and UTC/EST timing differences).
+  Hard cut-over: one quarter per run, keyed off Eastern time. Pass the
+  schedule's ``scheduled_execution_time`` so the last-day-of-quarter run
+  (21:00 ET, already next-day in UTC) stays on the correct quarter instead of
+  rolling to the next quarter by the container's UTC clock.
 
   Returns:
-      List of partition keys like ["2025-Q1"] or ["2025-Q1", "2024-Q4"]
+      Single-element list of partition keys like ["2026-Q2"]
   """
   from robosystems.adapters.sec import get_quarters_to_scan
 
-  return get_quarters_to_scan()
+  return get_quarters_to_scan(now)
 
 
 @schedule(
@@ -245,10 +245,12 @@ def _get_quarters_to_scan() -> list[str]:
   execution_timezone="America/New_York",
 )
 def sec_incremental_download_schedule(context):
-  """Incremental SEC download at 9pm EST on weekdays.
+  """Incremental SEC download at 9pm ET on weekdays.
 
-  Part of the automated incremental pipeline. Downloads new filings for
-  current quarter (and previous quarter at quarter boundaries).
+  Part of the automated incremental pipeline. Downloads new filings for the
+  current quarter only (hard cut-over). The quarter is keyed off the schedule's
+  Eastern execution time, so the last-day-of-quarter run stays on the correct
+  quarter instead of rolling forward by the container's UTC clock.
 
   Chain: download → process → stage → materialize → S3 sync
 
@@ -256,8 +258,8 @@ def sec_incremental_download_schedule(context):
   """
   from robosystems.adapters.sec.pipeline.configs import SECDownloadConfig
 
-  quarters = _get_quarters_to_scan()
-  context.log.info(f"Incremental download for quarters: {quarters}")
+  quarters = _get_quarters_to_scan(context.scheduled_execution_time)
+  context.log.info(f"Incremental download for quarter: {quarters[0]}")
 
   # Generate batch_id to track all jobs from this schedule tick
   # Used by downstream sensors to wait for all quarters to complete
