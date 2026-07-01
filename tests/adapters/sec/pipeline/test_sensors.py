@@ -22,9 +22,11 @@ from robosystems.adapters.sec.pipeline.sensors import (
   _get_quarters_to_scan,
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
+  sec_master_sleep_on_failure_sensor,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
   sec_stage_to_materialize_sensor,
+  sec_wake_to_stage_sensor,
 )
 
 
@@ -215,10 +217,14 @@ class TestSecIncrementalPipelineSensor:
 
   @patch("robosystems.database.session")
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_process_triggers_stage_when_queue_drained(
+  def test_process_triggers_master_wake_when_queue_drained(
     self, mock_env, mock_session_factory
   ):
-    """Test process success triggers staging when no pending files remain."""
+    """Test process success wakes the shared master when no pending files remain.
+
+    Parking design: the drained-queue branch triggers the master wake
+    (sec_master_wake); staging is then chained by sec_wake_to_stage_sensor.
+    """
     mock_env.ENVIRONMENT = "prod"
 
     # Mock SourceFile query returning no pending files
@@ -250,8 +256,8 @@ class TestSecIncrementalPipelineSensor:
 
     assert len(result) == 1
     assert isinstance(result[0], RunRequest)
-    assert result[0].job_name == "sec_incremental_stage"
-    assert result[0].tags["phase"] == "incremental_stage"
+    assert result[0].job_name == "sec_master_wake"
+    assert result[0].tags["phase"] == "master_wake"
     assert result[0].tags["mode"] == "incremental"
 
   @patch("robosystems.database.session")
@@ -842,3 +848,100 @@ class TestSecPostStageIndexSensor:
 
     result = list(sec_post_stage_index_sensor(context))
     assert len(result) == 0
+
+
+@pytest.mark.unit
+class TestSecWakeToStageSensor:
+  """Tests for sec_wake_to_stage_sensor (master wake success -> DuckDB staging)."""
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_triggers_stage_on_wake_success(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_wake_to_stage_sensor",
+      job_name="sec_master_wake",
+      tags={"mode": "incremental", "batch_id": "20260701-21"},
+    )
+    result = list(sec_wake_to_stage_sensor(context))
+    assert len(result) == 1
+    config = result[0].run_config["ops"]["sec_duckdb_incremental_staged"]["config"]
+    assert config["graph_id"] == "sec"
+    assert result[0].tags["mode"] == "incremental"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_non_incremental(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_wake_to_stage_sensor",
+      job_name="sec_master_wake",
+      tags={"mode": "backfill"},
+    )
+    assert list(sec_wake_to_stage_sensor(context)) == []
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_when_stage_already_running(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_wake_to_stage_sensor",
+      job_name="sec_master_wake",
+      tags={"mode": "incremental"},
+      get_runs_return=[MagicMock()],
+    )
+    assert list(sec_wake_to_stage_sensor(context)) == []
+
+
+@pytest.mark.unit
+class TestSecMasterSleepOnFailureSensor:
+  """Tests for sec_master_sleep_on_failure_sensor (never strand master awake)."""
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_sleeps_on_incremental_failure(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_master_sleep_on_failure_sensor",
+      job_name="sec_materialize",
+      tags={"mode": "incremental"},
+    )
+    result = list(sec_master_sleep_on_failure_sensor(context))
+    assert len(result) == 1
+    assert result[0].tags["phase"] == "master_sleep"
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_non_incremental(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_master_sleep_on_failure_sensor",
+      job_name="sec_materialize",
+      tags={"mode": "backfill"},
+    )
+    assert list(sec_master_sleep_on_failure_sensor(context)) == []
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_skips_when_sleep_already_running(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_master_sleep_on_failure_sensor",
+      job_name="sec_materialize",
+      tags={"mode": "incremental"},
+      get_runs_return=[MagicMock()],
+    )
+    assert list(sec_master_sleep_on_failure_sensor(context)) == []
+
+
+@pytest.mark.unit
+class TestPublishSensorSleepsMaster:
+  """The publish sensor sleeps the master alongside the replica refresh."""
+
+  @patch("robosystems.adapters.sec.pipeline.sensors.env")
+  def test_vector_publish_triggers_refresh_and_sleep(self, mock_env):
+    mock_env.ENVIRONMENT = "prod"
+    context = _build_run_status_context(
+      sensor_name="sec_post_materialize_publish_sensor",
+      job_name="sec_vector_s3_publish",
+      tags={"mode": "incremental"},
+    )
+    result = list(sec_post_materialize_publish_sensor(context))
+    assert {r.job_name for r in result} == {
+      "shared_replicas_refresh",
+      "sec_master_sleep",
+    }

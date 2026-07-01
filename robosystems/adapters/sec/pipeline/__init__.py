@@ -90,6 +90,8 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_ixbrl_index_job,
   sec_lbug_r2_publish_job,
   sec_lbug_s3_publish_job,
+  sec_master_sleep_job,
+  sec_master_wake_job,
   sec_materialize_job,
   sec_narratives_index_job,
   sec_process_job,
@@ -97,6 +99,8 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_staged_materialize_job,
   sec_vector_s3_publish_job,
 )
+from robosystems.adapters.sec.pipeline.master_sleep import sec_master_asleep
+from robosystems.adapters.sec.pipeline.master_wake import sec_master_awake
 from robosystems.adapters.sec.pipeline.materialize import (
   sec_graph_materialized,
   sec_historical_materialized,
@@ -111,10 +115,12 @@ from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_download_schedule,
   sec_incremental_pipeline_sensor,
   sec_index_retry_sensor,
+  sec_master_sleep_on_failure_sensor,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
   sec_processing_sensor,
   sec_stage_to_materialize_sensor,
+  sec_wake_to_stage_sensor,
 )
 from robosystems.adapters.sec.pipeline.stage import (
   sec_duckdb_incremental_staged,
@@ -156,6 +162,8 @@ def get_dagster_components():
       sec_knowledge_artifacts,
       sec_narratives_indexed,
       sec_ixbrl_disclosures_indexed,
+      sec_master_awake,
+      sec_master_asleep,
     ],
     "jobs": [
       sec_download_job,
@@ -176,6 +184,8 @@ def get_dagster_components():
       sec_historical_lbug_s3_publish_job,
       sec_narratives_index_job,
       sec_ixbrl_index_job,
+      sec_master_wake_job,
+      sec_master_sleep_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -184,6 +194,8 @@ def get_dagster_components():
       sec_post_materialize_publish_sensor,
       sec_post_stage_index_sensor,
       sec_index_retry_sensor,
+      sec_wake_to_stage_sensor,
+      sec_master_sleep_on_failure_sensor,
     ],
     "schedules": [
       sec_incremental_download_schedule,
@@ -233,6 +245,11 @@ __all__ = [
   "sec_lbug_r2_published",
   "sec_lbug_s3_publish_job",
   "sec_lbug_s3_published",
+  "sec_master_asleep",
+  "sec_master_awake",
+  "sec_master_sleep_job",
+  "sec_master_sleep_on_failure_sensor",
+  "sec_master_wake_job",
   "sec_materialize_job",
   "sec_narratives_index_job",
   "sec_narratives_indexed",
@@ -248,4 +265,5 @@ __all__ = [
   "sec_staged_materialize_job",
   "sec_vector_s3_publish_job",
   "sec_vector_s3_published",
+  "sec_wake_to_stage_sensor",
 ]
