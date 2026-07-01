@@ -246,7 +246,7 @@ sec_incremental_stage_job = define_asset_job(
 
 _MASTER_PARKING_TAGS = {
   "pipeline": "sec",
-  "phase": "master_parking",
+  # phase is set per-run by the triggering sensor (master_wake / master_sleep)
   "ecs/cpu": "512",
   "ecs/memory": "2048",
   "ecs/ephemeral_storage": "21",

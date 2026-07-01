@@ -161,6 +161,29 @@ class TestSleepMaster:
 
 
 @pytest.mark.unit
+class TestVolumeGate:
+  @patch.object(master_parking, "_dynamodb_resource")
+  def test_ignores_stale_sec_row_and_matches_real_one(self, m_ddb):
+    from robosystems.adapters.sec.pipeline.master_parking import (
+      _sec_volume_attached_to,
+    )
+
+    volume_table = MagicMock()
+    # Stale row for a "sec" volume appears FIRST; the real attached match is later.
+    volume_table.scan.return_value = {
+      "Items": [
+        {"databases": ["sec"], "status": "available", "instance_id": "i-old"},
+        {"databases": ["sec"], "status": "attached", "instance_id": "i-123"},
+      ]
+    }
+    resource = MagicMock()
+    resource.Table.return_value = volume_table
+    m_ddb.return_value = resource
+
+    assert _sec_volume_attached_to("i-123") is True
+
+
+@pytest.mark.unit
 def test_asg_name_from_config():
   from robosystems.config import env
 

@@ -93,12 +93,20 @@ def _instance_is_running(instance_id: str) -> bool:
 
 
 def _sec_volume_attached_to(instance_id: str) -> bool:
-  """True if the SEC data volume is ``attached`` to ``instance_id`` per registry."""
+  """True if the SEC data volume is ``attached`` to ``instance_id`` per registry.
+
+  Scans all ``sec``-tagged rows and matches only an actually-attached one — a
+  transient stale row (e.g. an old row mid-reattach) must not shadow the real
+  match, since that reattach race is exactly what this gate guards against.
+  """
   table = _dynamodb_resource().Table(env.VOLUME_REGISTRY_TABLE)
-  resp = table.scan()
-  for item in resp.get("Items", []):
-    if SEC_DATABASE in (item.get("databases") or []):
-      return item.get("status") == "attached" and item.get("instance_id") == instance_id
+  for item in table.scan().get("Items", []):
+    if (
+      SEC_DATABASE in (item.get("databases") or [])
+      and item.get("status") == "attached"
+      and item.get("instance_id") == instance_id
+    ):
+      return True
   return False
 
 
