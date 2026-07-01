@@ -491,6 +491,9 @@ Resources:
                 Action:
                   - autoscaling:UpdateAutoScalingGroup
                   - autoscaling:StartInstanceRefresh
+                  # SEC shared-master parking (scale to 0/1 + clear scale-in protection)
+                  - autoscaling:SetDesiredCapacity
+                  - autoscaling:SetInstanceProtection
                 Resource:
                   - !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/robosystems-*-${Environment}-asg"
               # CloudFormation for shared replica ALB discovery

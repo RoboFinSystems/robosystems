@@ -49,6 +49,8 @@ from .jobs import (
   sec_incremental_stage_job,
   sec_ixbrl_index_job,
   sec_lbug_s3_publish_job,
+  sec_master_sleep_job,
+  sec_master_wake_job,
   sec_materialize_job,
   sec_narratives_index_job,
   sec_process_job,
@@ -386,40 +388,32 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       )
       return
     else:
-      # All partitions drained — trigger incremental DuckDB staging
+      # All partitions drained — wake the shared master; staging is triggered
+      # once it is healthy (sec_wake_to_stage_sensor).
       context.log.info(
-        "All pending files processed across all partitions, triggering DuckDB staging"
+        "All pending files processed across all partitions, waking shared master"
       )
 
-      # Check if stage job is already running
-      active_stage_runs = context.instance.get_runs(
+      # Check if a wake is already running (avoids double-wake on races)
+      active_wake_runs = context.instance.get_runs(
         filters=RunsFilter(
-          job_name="sec_incremental_stage",
+          job_name="sec_master_wake",
           statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
         ),
         limit=1,
       )
-      if active_stage_runs:
+      if active_wake_runs:
         context.log.info(
-          f"Incremental stage already running (run_id={active_stage_runs[0].run_id}), skipping"
+          f"Master wake already running (run_id={active_wake_runs[0].run_id}), skipping"
         )
         return
 
       yield RunRequest(
-        run_key=f"sec-stage-chain-{batch_id or partition_key}-{dagster_run.run_id[:8]}",
-        job_name="sec_incremental_stage",
-        run_config={
-          "ops": {
-            "sec_duckdb_incremental_staged": {
-              "config": {
-                "graph_id": "sec",
-              }
-            },
-          }
-        },
+        run_key=f"sec-wake-chain-{batch_id or partition_key}-{dagster_run.run_id[:8]}",
+        job_name="sec_master_wake",
         tags={
           "pipeline": "sec",
-          "phase": "incremental_stage",
+          "phase": "master_wake",
           "mode": "incremental",
           "batch_id": batch_id or "",
         },
@@ -450,6 +444,71 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       "phase": "process",
       "mode": "incremental",
       "quarter": partition_key,
+      "batch_id": batch_id or "",
+    },
+  )
+
+
+# ============================================================================
+# SEC Wake to Stage Sensor (Chains Master Wake → DuckDB Staging)
+# ============================================================================
+# The master is awake and healthy; trigger the first master-dependent step.
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[sec_master_wake_job],
+  request_job=sec_incremental_stage_job,
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  minimum_interval_seconds=60,
+  description="Trigger incremental DuckDB staging after the shared master is awake",
+)
+def sec_wake_to_stage_sensor(context: RunStatusSensorContext):
+  """Trigger incremental DuckDB staging once the shared master is awake+healthy."""
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping chain sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+  run_tags = dagster_run.tags or {}
+  if run_tags.get("mode") != "incremental":
+    context.log.info("Run is not incremental mode, skipping chain")
+    return
+
+  batch_id = run_tags.get("batch_id")
+
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="sec_incremental_stage",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Incremental stage already running (run_id={active_runs[0].run_id}), skipping"
+    )
+    return
+
+  context.log.info(
+    f"Shared master awake (run_id={dagster_run.run_id}), triggering DuckDB staging"
+  )
+
+  yield RunRequest(
+    run_key=f"sec-stage-chain-{batch_id or dagster_run.run_id[:8]}",
+    run_config={
+      "ops": {
+        "sec_duckdb_incremental_staged": {
+          "config": {
+            "graph_id": "sec",
+          }
+        },
+      }
+    },
+    tags={
+      "pipeline": "sec",
+      "phase": "incremental_stage",
+      "mode": "incremental",
       "batch_id": batch_id or "",
     },
   )
@@ -560,6 +619,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     sec_duckdb_s3_publish_job,
     sec_vector_s3_publish_job,
     shared_replicas_refresh_job,
+    sec_master_sleep_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
@@ -608,9 +668,34 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     context.log.info("DuckDB S3 publish complete, triggering vector index S3 publish")
 
   elif dagster_run.job_name == "sec_vector_s3_publish":
-    next_job_name = "shared_replicas_refresh"
-    next_phase = "replica_refresh"
-    context.log.info("Vector S3 publish complete, triggering replica refresh")
+    # Final publish done — the master is now dead weight (replicas refresh from
+    # S3, never from the master). Trigger the replica refresh AND sleep the
+    # master, in parallel; sleep does not depend on the refresh outcome.
+    context.log.info(
+      "Vector S3 publish complete, triggering replica refresh and master sleep"
+    )
+    for job_name, phase in (
+      ("shared_replicas_refresh", "replica_refresh"),
+      ("sec_master_sleep", "master_sleep"),
+    ):
+      active = context.instance.get_runs(
+        filters=RunsFilter(
+          job_name=job_name,
+          statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+        ),
+        limit=1,
+      )
+      if active:
+        context.log.info(
+          f"{job_name} already running (run_id={active[0].run_id}), skipping"
+        )
+        continue
+      yield RunRequest(
+        run_key=f"sec-{phase}-chain-{dagster_run.run_id[:8]}",
+        job_name=job_name,
+        tags={"pipeline": "sec", "phase": phase, "mode": "incremental"},
+      )
+    return
 
   else:
     return
@@ -635,6 +720,69 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     tags={
       "pipeline": "sec",
       "phase": next_phase,
+      "mode": "incremental",
+    },
+  )
+
+
+# ============================================================================
+# SEC Master Sleep-on-Failure Sensor (never strand the master awake)
+# ============================================================================
+# If any incremental master-dependent job fails, the terminal sleep never runs,
+# so scale the master back to 0 here. Sleep is idempotent.
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.FAILURE,
+  monitored_jobs=[
+    sec_master_wake_job,
+    sec_incremental_stage_job,
+    sec_materialize_job,
+    sec_lbug_s3_publish_job,
+    sec_duckdb_s3_publish_job,
+    sec_vector_s3_publish_job,
+  ],
+  request_job=sec_master_sleep_job,
+  default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
+  minimum_interval_seconds=60,
+  description="Sleep the shared master if any incremental master-dependent job fails",
+)
+def sec_master_sleep_on_failure_sensor(context: RunStatusSensorContext):
+  """Never strand the master awake: on any incremental master-dependent job
+  failure, scale it back to 0."""
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping failure sleep sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+  run_tags = dagster_run.tags or {}
+  if run_tags.get("mode") != "incremental":
+    context.log.info("Run is not incremental mode, skipping sleep")
+    return
+
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="sec_master_sleep",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Master sleep already running (run_id={active_runs[0].run_id}), skipping"
+    )
+    return
+
+  context.log.warning(
+    f"Incremental job {dagster_run.job_name} failed (run_id={dagster_run.run_id}), "
+    "sleeping shared master to avoid stranding it awake"
+  )
+
+  yield RunRequest(
+    run_key=f"sec-master-sleep-failure-{dagster_run.run_id[:8]}",
+    tags={
+      "pipeline": "sec",
+      "phase": "master_sleep",
       "mode": "incremental",
     },
   )
