@@ -72,6 +72,13 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
       user.email = user_data.get("email")
       user.is_active = user_data.get("is_active", True)
 
+      # Reject keys owned by a deactivated user, even when the key row and its
+      # cache entry are still marked active. Deactivation invalidates the cache
+      # entry, but this guard closes the window until that propagates.
+      if not user.is_active:
+        logger.debug(f"API key rejected: owning user inactive: {cache_key[:8]}...")
+        return None
+
       return user
 
   # Cache miss - fall back to database with secure bcrypt verification.
@@ -101,6 +108,13 @@ def validate_api_key(api_key: str, db_session: Session | None = None) -> User | 
 
     # Grab user reference while session is active (triggers lazy load once)
     user = key_record.user
+
+    # Reject keys whose owning user is deactivated. UserAPIKey.get_by_key only
+    # filters on the key's own is_active flag, not the user's — without this a
+    # deactivated user retains full API access via any existing key.
+    if not user.is_active:
+      logger.debug(f"API key rejected: owning user inactive: {cache_key[:8]}...")
+      return None
 
     # Cache positive result with encrypted storage
     try:
@@ -187,6 +201,11 @@ def validate_api_key_with_graph(
       user.email = user_data.get("email")
       user.is_active = user_data.get("is_active", True)
 
+      # Reject keys owned by a deactivated user (see validate_api_key).
+      if not user.is_active:
+        logger.debug(f"API key rejected: owning user inactive: {api_key_hash[:8]}...")
+        return None
+
       # last_used_at is updated on cache miss (below).
       # Skipping it on cache hits avoids DB pool contention under load —
       # the cache TTL ensures it refreshes every few minutes anyway.
@@ -220,6 +239,11 @@ def validate_api_key_with_graph(
 
     # Grab user reference while session is active (triggers lazy load once)
     user = key_record.user
+
+    # Reject keys whose owning user is deactivated (see validate_api_key).
+    if not user.is_active:
+      logger.debug(f"API key rejected: owning user inactive: {api_key_hash[:8]}...")
+      return None
 
     # Check if the user has access to the specified graph
     from ..graph.utils import MultiTenantUtils

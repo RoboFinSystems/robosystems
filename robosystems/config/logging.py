@@ -83,6 +83,19 @@ class StructuredFormatter(logging.Formatter):
     if hasattr(record, "request_id"):
       log_entry["request_id"] = record.request_id
 
+    # Structured operation-audit payload (who / what / which-tenant / result).
+    # Emitted via extra={"audit": {...}} by middleware.operations.log_operation_audit;
+    # without this the entire audit payload was silently dropped.
+    if hasattr(record, "audit"):
+      log_entry["audit"] = record.audit
+
+    # Security / auth event fields emitted by the security-logging middleware.
+    # Source IP and success flag are required for auth-anomaly detection.
+    if hasattr(record, "ip_address"):
+      log_entry["ip_address"] = record.ip_address
+    if hasattr(record, "success"):
+      log_entry["success"] = record.success
+
     return json.dumps(log_entry, default=str, separators=(",", ":"))
 
 

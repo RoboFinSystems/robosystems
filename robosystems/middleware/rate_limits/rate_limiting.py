@@ -194,7 +194,11 @@ def auth_rate_limit_dependency(request: Request):
     limit = get_int_env("RATE_LIMIT_AUTH", "10")  # 10 attempts
     window = get_int_env("RATE_LIMIT_AUTH_WINDOW", "300")  # 5 minutes
 
-  allowed, remaining = rate_limit_cache.check_rate_limit(identifier, limit, window)
+  # Auth endpoints fail CLOSED: if the limiter backend is down, deny rather
+  # than silently disable brute-force protection on login/register.
+  allowed, remaining = rate_limit_cache.check_rate_limit(
+    identifier, limit, window, fail_closed=True
+  )
 
   if not allowed:
     # Log authentication rate limit violation - this is high risk

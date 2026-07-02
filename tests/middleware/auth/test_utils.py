@@ -104,6 +104,60 @@ class TestValidateAPIKey:
     assert validate_api_key("") is None
     assert validate_api_key(None) is None
 
+  @patch("robosystems.middleware.auth.utils.api_key_cache")
+  @patch("robosystems.middleware.auth.utils.UserAPIKey")
+  def test_validate_api_key_cache_hit_inactive_user_rejected(
+    self, mock_api_key_class, mock_cache
+  ):
+    """Cache hit for an active key whose owning user is deactivated is rejected."""
+    api_key = _VALID_TEST_KEY
+    mock_cache.get_cached_api_key_validation.return_value = {
+      "is_active": True,  # the key itself is active
+      "user_data": {
+        "id": "user123",
+        "name": "Test User",
+        "email": "test@example.com",
+        "is_active": False,  # but the owning user is deactivated
+      },
+    }
+
+    result = validate_api_key(api_key)
+
+    assert result is None
+    # Must not fall through to the database either
+    mock_api_key_class.get_by_key.assert_not_called()
+
+  @patch("robosystems.database.SessionFactory")
+  @patch("robosystems.middleware.auth.utils.api_key_cache")
+  @patch("robosystems.middleware.auth.utils.UserAPIKey")
+  @patch("robosystems.middleware.auth.utils.SecurityAuditLogger")
+  def test_validate_api_key_db_inactive_user_rejected(
+    self, mock_audit, mock_api_key_class, mock_cache, mock_session_factory
+  ):
+    """DB path rejects an active key whose owning user is deactivated."""
+    api_key = _VALID_TEST_KEY
+    mock_cache.get_cached_api_key_validation.return_value = None
+
+    mock_sess = Mock()
+    mock_session_factory.return_value = mock_sess
+
+    mock_user = Mock(spec=User)
+    mock_user.id = "user123"
+    mock_user.name = "Test User"
+    mock_user.email = "test@example.com"
+    mock_user.is_active = False  # deactivated user
+
+    mock_key_record = Mock(spec=UserAPIKey)
+    mock_key_record.user = mock_user
+    mock_key_record.is_active = True  # key row still active
+    mock_api_key_class.get_by_key.return_value = mock_key_record
+
+    result = validate_api_key(api_key)
+
+    assert result is None
+    mock_audit.log_auth_success.assert_not_called()
+    mock_sess.close.assert_called_once()
+
 
 class TestValidateAPIKeyWithGraph:
   """Test API key validation with graph access."""
@@ -163,6 +217,53 @@ class TestValidateAPIKeyWithGraph:
     mock_user_graph.user_has_access.assert_called_once()
     mock_key_record.update_last_used.assert_called_once()
     mock_sess.close.assert_called_once()
+
+  @patch("robosystems.database.SessionFactory")
+  @patch("robosystems.middleware.auth.utils.api_key_cache")
+  @patch("robosystems.middleware.auth.utils.UserAPIKey")
+  @patch("robosystems.middleware.auth.utils.GraphUser")
+  @patch(
+    "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+    return_value=False,
+  )
+  @patch("robosystems.middleware.auth.utils.SecurityAuditLogger")
+  def test_validate_api_key_with_graph_db_inactive_user_rejected(
+    self,
+    mock_audit,
+    mock_is_shared,
+    mock_user_graph,
+    mock_api_key_class,
+    mock_cache,
+    mock_session_factory,
+  ):
+    """A deactivated user's key is rejected before the graph-access check runs."""
+    api_key = _VALID_TEST_KEY
+    graph_id = "kg1234567890"
+
+    mock_sess = Mock()
+    mock_session_factory.return_value = mock_sess
+
+    mock_cache.get_cached_api_key_validation.return_value = None
+    mock_cache.get_cached_graph_access.return_value = None
+
+    mock_user = Mock(spec=User)
+    mock_user.id = "user123"
+    mock_user.name = "Test User"
+    mock_user.email = "test@example.com"
+    mock_user.is_active = False  # deactivated
+
+    mock_key_record = Mock(spec=UserAPIKey)
+    mock_key_record.user = mock_user
+    mock_key_record.user_id = "user123"
+    mock_key_record.is_active = True  # key row still active
+    mock_api_key_class.get_by_key.return_value = mock_key_record
+
+    result = validate_api_key_with_graph(api_key, graph_id)
+
+    assert result is None
+    # Rejected before the graph-access check ever runs
+    mock_user_graph.user_has_access.assert_not_called()
+    mock_audit.log_auth_success.assert_not_called()
 
   @patch("robosystems.database.SessionFactory")
   @patch("robosystems.middleware.auth.utils.api_key_cache")
