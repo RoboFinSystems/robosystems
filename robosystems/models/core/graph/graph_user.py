@@ -166,6 +166,29 @@ class GraphUser(Model):
     )
 
   @classmethod
+  def user_has_write_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
+    """
+    Check if a user has write access to a specific graph.
+
+    Write access requires the 'admin' or 'member' role; 'viewer' is read-only.
+    For subgraphs (e.g., 'kg123_dev'), this method checks write access to the
+    parent graph ('kg123') since subgraphs inherit permissions from their parent.
+    """
+    from robosystems.middleware.graph.types import parse_graph_id
+
+    # Resolve subgraph to parent graph for permission check
+    # Subgraphs inherit parent's permissions
+    parent_id, _ = parse_graph_id(graph_id)
+
+    graph_user = (
+      session.query(cls)
+      .filter(cls.user_id == user_id, cls.graph_id == parent_id)
+      .first()
+    )
+
+    return graph_user is not None and graph_user.role in ("admin", "member")
+
+  @classmethod
   def user_has_admin_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
     """
     Check if a user has admin access to a specific graph.

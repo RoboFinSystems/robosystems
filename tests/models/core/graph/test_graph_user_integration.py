@@ -399,3 +399,19 @@ class TestGraphUserIntegration:
     assert GraphUser.user_has_access(admin_user.id, graph.graph_id, test_db) is True
     assert GraphUser.user_has_access(member_user.id, graph.graph_id, test_db) is True
     assert GraphUser.user_has_access(viewer_user.id, graph.graph_id, test_db) is True
+
+    # Write access requires admin or member role; viewer is read-only
+    assert (
+      GraphUser.user_has_write_access(admin_user.id, graph.graph_id, test_db) is True
+    )
+    assert (
+      GraphUser.user_has_write_access(member_user.id, graph.graph_id, test_db) is True
+    )
+    assert (
+      GraphUser.user_has_write_access(viewer_user.id, graph.graph_id, test_db) is False
+    )
+    # A user with no relationship to the graph has no write access
+    assert (
+      GraphUser.user_has_write_access("nonexistent-user", graph.graph_id, test_db)
+      is False
+    )
