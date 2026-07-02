@@ -132,7 +132,7 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ github.token }}
 
@@ -252,7 +252,7 @@ jobs:
       space_freed: ${{ steps.cleanup.outputs.space_freed }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6

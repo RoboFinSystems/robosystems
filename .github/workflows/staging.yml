@@ -57,7 +57,7 @@ jobs:
       runner_config: ${{ steps.select.outputs.runner_config }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
@@ -104,7 +104,7 @@ jobs:
       graph_ami_id: ${{ steps.ami.outputs.ami_id }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
@@ -241,7 +241,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
@@ -748,7 +748,7 @@ jobs:
       deployment_id: ${{ needs.create-deployment.outputs.deployment_id }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
@@ -865,7 +865,7 @@ jobs:
     runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
