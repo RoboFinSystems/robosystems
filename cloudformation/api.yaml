@@ -1047,6 +1047,9 @@ Resources:
       LoadBalancerArn: !Ref ApiALB
       Port: 443
       Protocol: HTTPS
+      # Modern TLS only (TLS 1.2 + 1.3). Without an explicit SslPolicy the ALB
+      # default (ELBSecurityPolicy-2016-08) still negotiates TLS 1.0/1.1.
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
       Certificates:
         - CertificateArn: !Ref ApiCertificate
 

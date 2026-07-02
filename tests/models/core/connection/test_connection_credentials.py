@@ -93,6 +93,39 @@ class TestConnectionCredentialsModel:
     mock_logger.error.assert_called()
 
   @patch("robosystems.models.core.connection.connection_credentials.env")
+  def test_get_encryption_key_prod_refuses_jwt_fallback(self, mock_env):
+    """Prod refuses the weak JWT-derived fallback and raises when the key is unset."""
+    mock_env.CONNECTION_CREDENTIALS_KEY = None
+    mock_env.JWT_SECRET_KEY = "some_jwt_secret_value_long_enough_for_validation"
+    mock_env.ENVIRONMENT = "prod"
+
+    with pytest.raises(ValueError, match="CONNECTION_CREDENTIALS_KEY must be set"):
+      ConnectionCredentials._get_encryption_key()
+
+  @patch("robosystems.models.core.connection.connection_credentials.env")
+  def test_get_encryption_key_staging_refuses_jwt_fallback(self, mock_env):
+    """Staging refuses the weak JWT-derived fallback and raises when the key is unset."""
+    mock_env.CONNECTION_CREDENTIALS_KEY = None
+    mock_env.JWT_SECRET_KEY = "some_jwt_secret_value_long_enough_for_validation"
+    mock_env.ENVIRONMENT = "staging"
+
+    with pytest.raises(ValueError, match="CONNECTION_CREDENTIALS_KEY must be set"):
+      ConnectionCredentials._get_encryption_key()
+
+  @patch("robosystems.models.core.connection.connection_credentials.env")
+  @patch("robosystems.models.core.connection.connection_credentials.logger")
+  def test_get_encryption_key_dev_allows_jwt_fallback(self, mock_logger, mock_env):
+    """Dev/local may still derive a key from JWT_SECRET_KEY (convenience only)."""
+    mock_env.CONNECTION_CREDENTIALS_KEY = None
+    mock_env.JWT_SECRET_KEY = "test_jwt_secret_key_123"
+    mock_env.ENVIRONMENT = "dev"
+
+    key = ConnectionCredentials._get_encryption_key()
+
+    assert key is not None
+    mock_logger.warning.assert_called_once()
+
+  @patch("robosystems.models.core.connection.connection_credentials.env")
   @patch("robosystems.models.core.connection.connection_credentials.logger")
   def test_get_encryption_key_invalid_format(self, mock_logger, mock_env):
     """Test error when encryption key has invalid format."""

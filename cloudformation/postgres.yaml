@@ -99,6 +99,16 @@ Parameters:
       - "false"
     ConstraintDescription: Must be true or false
 
+  # Accidental-deletion protection (independent of Multi-AZ; no additional cost)
+  EnableDeletionProtection:
+    Type: String
+    Description: Block accidental deletion of the RDS instance (recommended for prod/staging)
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    ConstraintDescription: Must be true or false
+
   # RDS Proxy Configuration (off by default - billed at ~$0.015/vCPU/hour when enabled)
   # Requires DBPasswordSecret to contain "username" and "password" keys, which the
   # rotation lambda adds on first rotation after this template is deployed. A freshly
@@ -151,6 +161,7 @@ Parameters:
 
 Conditions:
   EnableMultiAZCondition: !Equals [!Ref EnableMultiAZ, "true"]
+  DeletionProtectionCondition: !Equals [!Ref EnableDeletionProtection, "true"]
   RDSProxyEnabledCondition: !Equals [!Ref EnableRDSProxy, "true"]
 
 Resources:
@@ -480,7 +491,8 @@ Resources:
         - !GetAtt RDSSecurityGroup.GroupId
       PubliclyAccessible: false
       MultiAZ: !If [EnableMultiAZCondition, true, false]
-      BackupRetentionPeriod: 7
+      DeletionProtection: !If [DeletionProtectionCondition, true, false]
+      BackupRetentionPeriod: 30
       PreferredBackupWindow: 03:00-04:00
       PreferredMaintenanceWindow: sun:04:30-sun:05:30
       AutoMinorVersionUpgrade: false
