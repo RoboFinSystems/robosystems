@@ -185,9 +185,35 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
         query: Cypher query to validate
 
     Raises:
-        ValueError: If query contains write operations
+        ValueError: If query contains write, bulk, admin, or schema-DDL operations
     """
     import re
+
+    # Delegate the dangerous categories to the central security analyzer — the
+    # same one the REST /query endpoint uses — so this read path can't diverge
+    # from it. The hand-rolled keyword list below previously missed LOAD / COPY /
+    # ATTACH / INSTALL / EXPORT, letting a "read-only" tool read local files,
+    # reach instance metadata (SSRF), and ATTACH other tenants' databases.
+    from robosystems.security.cypher_analyzer import (
+      is_admin_operation,
+      is_bulk_operation,
+      is_schema_ddl,
+    )
+
+    if is_bulk_operation(query):
+      logger.warning("Blocked bulk operation (COPY/LOAD/IMPORT) in read-graph-cypher")
+      raise ValueError("Only read-only queries are allowed")
+
+    if is_admin_operation(query):
+      logger.warning(
+        "Blocked administrative operation (EXPORT/INSTALL/ATTACH/USE) in "
+        "read-graph-cypher"
+      )
+      raise ValueError("Only read-only queries are allowed")
+
+    if is_schema_ddl(query):
+      logger.warning("Blocked schema DDL in read-graph-cypher")
+      raise ValueError("Only read-only queries are allowed")
 
     # Remove string literals to avoid false positives
     # Replace single-quoted strings with empty placeholder
