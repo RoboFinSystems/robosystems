@@ -769,6 +769,12 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-MultiAZEnabled
 
+  DeletionProtectionEnabled:
+    Description: Whether accidental-deletion protection is enabled on the RDS instance
+    Value: !If [DeletionProtectionCondition, "true", "false"]
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DeletionProtectionEnabled
+
   PostgresEngineVersionConfigured:
     Description: PostgreSQL engine version configured for this deployment
     Value: !Ref PostgresEngineVersion
