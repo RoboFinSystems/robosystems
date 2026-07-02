@@ -48,6 +48,7 @@ class TrackedAIClient:
     model: str | None = None,
     operator_type: str | None = None,
     operation_description: str = "Operator AI call",
+    tools: list[dict[str, Any]] | None = None,
   ) -> AIResponse:
     """Call AI and automatically consume credits.
 
@@ -59,6 +60,9 @@ class TrackedAIClient:
         model: Optional model override.
         operator_type: Optional operator type for model override lookup.
         operation_description: Description for credit audit trail.
+        tools: Optional Anthropic tool definitions. Each call in a tool-use
+            loop flows through here, so tokens and credits accumulate across
+            iterations automatically.
 
     Returns:
         AIResponse with content and token counts.
@@ -70,6 +74,7 @@ class TrackedAIClient:
       temperature=temperature,
       model=model,
       operator_type=operator_type,
+      tools=tools,
     )
 
     # Track tokens

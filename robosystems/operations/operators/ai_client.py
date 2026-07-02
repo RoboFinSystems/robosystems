@@ -8,7 +8,8 @@ Production-grade AI client using AWS Bedrock exclusively for:
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from robosystems.config import BedrockModel, OperatorConfig, env
 from robosystems.logger import logger
@@ -17,7 +18,10 @@ from robosystems.logger import logger
 @dataclass
 class AIMessage:
   role: str
-  content: str
+  # A turn is either plain text or a list of Anthropic content blocks
+  # (tool_use / tool_result). Tool-use loops append block lists; simple
+  # single-shot callers still pass a string.
+  content: str | list[dict[str, Any]]
 
 
 @dataclass
@@ -27,6 +31,9 @@ class AIResponse:
   input_tokens: int
   output_tokens: int
   stop_reason: str | None = None
+  # Full response content blocks (text + tool_use). Populated for tool-use
+  # loops; `content` above is the concatenated text for simple callers.
+  content_blocks: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AIClient:
@@ -121,6 +128,7 @@ class AIClient:
     temperature: float = 0.7,
     model: str | None = None,
     operator_type: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
   ) -> AIResponse:
     """
     Create a message using AWS Bedrock.
@@ -132,13 +140,16 @@ class AIClient:
         temperature: Sampling temperature (0-1)
         model: Optional model name override
         operator_type: Optional operator type for model override lookup
+        tools: Optional Anthropic tool definitions (name/description/
+            input_schema). When provided the model may return tool_use
+            blocks and stop_reason "tool_use" — see AIResponse.content_blocks.
 
     Returns:
         AIResponse with content and token usage
     """
     model_id = self._get_model_id(model, operator_type)
     return await self._bedrock_create_message(
-      messages, system, max_tokens, temperature, model_id
+      messages, system, max_tokens, temperature, model_id, tools
     )
 
   async def _bedrock_create_message(
@@ -148,11 +159,12 @@ class AIClient:
     max_tokens: int,
     temperature: float,
     model: str,
+    tools: list[dict[str, Any]] | None = None,
   ) -> AIResponse:
     """Create message using AWS Bedrock."""
     message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
 
-    request_body = {
+    request_body: dict[str, Any] = {
       "anthropic_version": "bedrock-2023-05-31",
       "max_tokens": max_tokens,
       "temperature": temperature,
@@ -161,6 +173,8 @@ class AIClient:
 
     if system:
       request_body["system"] = system
+    if tools:
+      request_body["tools"] = tools
 
     response = self.client.invoke_model(
       modelId=model,
@@ -169,10 +183,20 @@ class AIClient:
 
     response_body = json.loads(response["body"].read())
 
+    # A response may interleave text and tool_use blocks; the first block
+    # is not guaranteed to be text (a pure tool_use turn has none). Join every
+    # text-bearing block for the back-compat `content` string (tool_use blocks
+    # carry no "text" key), and hand back the full block list for tool loops.
+    blocks = response_body.get("content", [])
+    text = "".join(
+      b.get("text", "") for b in blocks if isinstance(b, dict) and "text" in b
+    )
+
     return AIResponse(
-      content=response_body["content"][0]["text"],
+      content=text,
       model=model,
       input_tokens=response_body["usage"]["input_tokens"],
       output_tokens=response_body["usage"]["output_tokens"],
       stop_reason=response_body.get("stop_reason"),
+      content_blocks=blocks,
     )

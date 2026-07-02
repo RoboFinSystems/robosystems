@@ -1,17 +1,22 @@
-"""CypherOperator — natural language to Cypher query conversion and execution.
+"""CypherOperator — agentic natural-language querying of the graph.
 
-Converts natural language questions into Cypher queries, executes them
-via MCP tools, and returns formatted results. Primary operator for the
-console interface.
+Drives a bounded tool-use loop (``run_tool_loop``): the model discovers the
+schema, writes read-only Cypher, sees query errors and retries, then answers
+in natural language. Returns the last result set as structured ``rows`` so the
+console can render a real table rather than scraping the prose. Primary
+operator for the console interface.
+
+This replaced an earlier single-shot pipeline (fetch truncated schema →
+generate one query → execute once → format) that never showed the model its
+query errors and so failed on basic questions. The loop is the harness that
+makes Claude-via-MCP robust, run in-process on Bedrock.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from robosystems.logger import logger
-from robosystems.operations.operators.ai_client import AIMessage
+from robosystems.config import OperatorConfig
 from robosystems.operations.operators.base import (
   ExecutionProfile,
   Operator,
@@ -22,31 +27,46 @@ from robosystems.operations.operators.base import (
 )
 from robosystems.operations.operators.operator_context import OperatorContext
 from robosystems.operations.operators.operator_registry import register_operator
+from robosystems.operations.operators.tool_loop import ToolLoopResult, run_tool_loop
 
 
 @register_operator("cypher")
 class CypherOperator(Operator):
-  """Converts natural language to Cypher queries and executes them."""
+  """Converts natural language to Cypher and answers via a tool-use loop."""
+
+  # Read-only tool allowlist. The loop intersects this with the tools the
+  # graph actually exposes (generic graphs get only schema + cypher; SEC and
+  # roboledger graphs also get example queries, element resolution, GraphQL,
+  # and document search). Write tools are never included.
+  READ_ONLY_TOOLS = [
+    "get-graph-schema",
+    "read-graph-cypher",
+    "get-example-queries",
+    "get-graphql-schema",
+    "query-graphql",
+    "resolve-element",
+    "search-documents",
+  ]
 
   spec = OperatorSpec(
     name="Cypher Operator",
-    description="Converts natural language to Cypher queries and executes them",
+    description="Answers natural-language questions by querying the graph with Cypher",
     capabilities=[
       OperatorCapability.RAG_SEARCH,
       OperatorCapability.ENTITY_ANALYSIS,
       OperatorCapability.CUSTOM,
     ],
-    version="1.0.0",
+    version="2.0.0",
     requires_credits=True,
     execution_profile={
       OperatorMode.QUICK: ExecutionProfile(
-        min_time=2, max_time=5, avg_time=3, tool_calls=2
+        min_time=3, max_time=12, avg_time=6, tool_calls=3
       ),
       OperatorMode.STANDARD: ExecutionProfile(
-        min_time=5, max_time=15, avg_time=10, tool_calls=3
+        min_time=6, max_time=25, avg_time=12, tool_calls=6
       ),
       OperatorMode.EXTENDED: ExecutionProfile(
-        min_time=15, max_time=60, avg_time=30, tool_calls=5
+        min_time=15, max_time=90, avg_time=40, tool_calls=13
       ),
     },
   )
@@ -72,197 +92,76 @@ class CypherOperator(Operator):
     return 0.7
 
   async def run(self, ctx: OperatorContext) -> OperatorResult:
-    await ctx.progress.report("Getting graph schema...", percent=10)
-    schema = await ctx.tools.call_tool("get-graph-schema", {}, return_raw=True)
-
-    await ctx.progress.report("Generating Cypher query...", percent=30)
-    cypher_query = await self._generate_cypher(ctx, schema)
-
-    await ctx.progress.report("Executing query...", percent=60)
-    results = await ctx.tools.call_tool(
-      "read-graph-cypher",
-      {"query": cypher_query, "parameters": {}},
-      return_raw=True,
-    )
-
-    await ctx.progress.report("Formatting results...", percent=90)
-    formatted = await self._format_results(ctx, cypher_query, results)
-
-    return OperatorResult(
-      content=formatted,
-      metadata={
-        "cypher_query": cypher_query,
-        "result_count": len(results) if results else 0,
-      },
-      tools_called=["get-graph-schema", "read-graph-cypher"],
-      confidence_score=self._calculate_confidence(cypher_query, results),
-    )
-
-  async def _generate_cypher(
-    self, ctx: OperatorContext, schema: list[dict[str, Any]]
-  ) -> str:
-    schema_text = self._format_schema_for_ai(schema)
+    limits = OperatorConfig.get_mode_limits(ctx.mode.value)
     max_results = self._get_max_results(ctx.mode)
+    # One iteration per allowed tool call, plus a final answer turn.
+    max_iterations = int(limits.get("max_tools", 5)) + 1
+    max_tokens = int(limits.get("max_output_tokens", 4000))
+    output_mode = "answer" if ctx.extra.get("output_mode") == "answer" else "narrative"
 
-    # The materialized ledger spine only exists in entity graphs with roboledger
-    # materialized — not SEC/generic graphs. Only inject status-filtering guidance
-    # when those nodes are present, or it's noise about nodes that don't exist.
-    # Key on Entry/Transaction/LineItem — NOT Event: the base REA Event table
-    # exists (empty) on the SEC shared repo, so it isn't a reliable signal.
-    node_labels = {item.get("label") for item in schema if item.get("type") == "node"}
-    has_ledger_spine = bool(node_labels & {"Entry", "Transaction", "LineItem"})
+    system = self._build_system_prompt(max_results, output_mode)
 
-    ledger_rule = (
-      """
-8. LEDGER STATUS: the graph keeps cancelled/replaced ledger rows. When counting or
-   aggregating Entry/Event/Transaction data, filter to live rows or voided/reversed
-   amounts inflate the result:
-   - Entry: match only `status = 'posted'` for balances and debit/credit sums.
-   - Event: exclude `voided` and `superseded` (`status <> 'voided' AND status <> 'superseded'`).
-   - Transaction has only a `pending` boolean (no full status) — aggregate realized
-     effect through its posted Entry/LineItem, not by summing Transaction.amount.
-   - Fact nodes have no status and are pre-filtered; this rule is ledger-spine only."""
-      if has_ledger_spine
-      else ""
-    )
-    ledger_pattern = (
-      "\n- Posted GL balances: MATCH (e:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem) WHERE e.status = 'posted'"
-      if has_ledger_spine
-      else ""
-    )
-
-    system_prompt = f"""You are a Cypher query expert for RoboSystems graph databases.
-
-SCHEMA:
-{schema_text}
-
-IMPORTANT RULES:
-1. Generate ONLY the Cypher query - no explanations, no markdown formatting
-2. Queries must be read-only (MATCH, RETURN, WHERE, WITH, ORDER BY, LIMIT)
-3. No write operations (CREATE, SET, DELETE, MERGE, DROP)
-4. Always include a LIMIT clause (max {max_results})
-5. Use parameterized queries when possible
-6. Handle NULL values appropriately
-7. Use CONTAINS for text search, not exact matches{ledger_rule}
-
-SCHEMA PATTERNS:
-- Financial facts: MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-- Time periods: MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
-- Entities: MATCH (e:Entity)-[:HAS_REPORT]->(r:Report){ledger_pattern}
-
-Return ONLY the Cypher query, nothing else."""
-
-    messages = []
-    if ctx.history:
-      for msg in ctx.history[-5:]:
-        role = (
-          msg.get("role", "user")
-          if isinstance(msg, dict)
-          else getattr(msg, "role", "user")
-        )
-        content = (
-          msg.get("content", "")
-          if isinstance(msg, dict)
-          else getattr(msg, "content", "")
-        )
-        messages.append(AIMessage(role=role, content=content))
-
-    messages.append(
-      AIMessage(
-        role="user",
-        content=f"Convert this natural language query to Cypher:\n\n{ctx.query}",
-      )
-    )
-
-    response = await ctx.ai.create_message(
-      messages=messages,
-      system=system_prompt,
-      max_tokens=2000,
+    result = await run_tool_loop(
+      ctx,
+      system=system,
+      tool_names=self.READ_ONLY_TOOLS,
+      max_iterations=max_iterations,
+      max_tokens=max_tokens,
       temperature=0.3,
-      operation_description="Cypher query generation",
+      operator_type="cypher",
+      operation_description="Cypher query loop",
     )
 
-    cypher_query = response.content.strip()
-    cypher_query = cypher_query.replace("```cypher", "").replace("```", "").strip()
+    await ctx.progress.report("Done", percent=100)
 
-    logger.info(f"Generated Cypher: {cypher_query}")
-    return cypher_query
+    rows = result.rows or []
+    return OperatorResult(
+      content=result.text,
+      metadata={
+        # Structured outputs the console renders directly — no prose scraping.
+        "cypher": result.cypher,
+        "rows": rows,
+        "result_count": len(rows),
+        "hit_step_limit": result.hit_cap,
+        "loop_iterations": result.iterations,
+      },
+      # De-dupe preserving order (a tool may be called several times).
+      tools_called=list(dict.fromkeys(result.tools_called)),
+      confidence_score=self._calculate_confidence(result),
+    )
 
-  async def _format_results(
-    self,
-    ctx: OperatorContext,
-    cypher_query: str,
-    results: list[dict[str, Any]],
-  ) -> str:
-    if not results:
-      return f"No results found for your query.\n\nGenerated Cypher:\n{cypher_query}"
+  def _build_system_prompt(self, max_results: int, output_mode: str) -> str:
+    prompt = f"""You are a graph database analyst for RoboSystems. You answer the user's question by querying a LadybugDB graph with read-only Cypher.
 
-    if ctx.mode == OperatorMode.QUICK:
-      return self._simple_format(cypher_query, results)
+WORKFLOW:
+1. Call `get-graph-schema` first to discover node labels, relationships, and properties — never guess the schema.
+2. If `get-example-queries` is available, use it for working query patterns tuned to this graph.
+3. Write a read-only Cypher query and run it with `read-graph-cypher`.
+4. If a query errors or returns nothing useful, read the error, fix the query, and try again. You have a limited number of steps, so be efficient — don't repeat a failing query unchanged.
+5. When you have the answer, respond in natural language.
 
-    results_sample = results[:10]
-    results_json = json.dumps(results_sample, indent=2, default=str)
+CYPHER RULES:
+- Read-only only: MATCH, WHERE, WITH, RETURN, ORDER BY, LIMIT. Never CREATE, SET, DELETE, MERGE, or DROP.
+- Always include a LIMIT (max {max_results}).
+- Use CONTAINS for text search; guard against NULLs with IS NOT NULL.
+- Anchor every query on a selective, indexed starting point (an Entity by ticker, a Report by identifier, an Element by qname) and expand from there. Never start a MATCH from an unfiltered global pattern like `(f:Fact)` or `(n)` on a large graph — it will time out.
 
-    system_prompt = """You are a helpful assistant that explains graph query results.
-
-Format the results in a clear, concise way that directly answers the user's question.
-If there are patterns or insights in the data, mention them briefly.
-Keep your response focused and actionable."""
-
-    messages = [
-      AIMessage(
-        role="user",
-        content=f"""User asked: "{ctx.query}"
-
-I executed this Cypher query:
-{cypher_query}
-
-Results ({len(results)} total, showing first 10):
-{results_json}
-
-Please explain these results in a clear, natural way.""",
+LEDGER DATA (only when the schema has Entry / Transaction / LineItem nodes):
+- The graph keeps cancelled/replaced rows. When counting or summing ledger data, filter to live rows: match Entry `status = 'posted'` for balances and debit/credit sums; exclude Event rows where `status = 'voided' OR status = 'superseded'`. Aggregate realized amounts through posted Entry/LineItem, not by summing Transaction.amount.
+"""
+    if output_mode == "answer":
+      prompt += (
+        "\nFINAL ANSWER: Give a direct, concise answer — no preamble. The raw "
+        "rows are shown to the user as a table, so don't re-list them."
       )
-    ]
-
-    response = await ctx.ai.create_message(
-      messages=messages,
-      system=system_prompt,
-      max_tokens=1500,
-      temperature=0.5,
-      operation_description="Result formatting",
-    )
-
-    formatted = (
-      f"{response.content}\n\n**Generated Cypher:**\n```cypher\n{cypher_query}\n```"
-    )
-    if len(results) > 10:
-      formatted += f"\n\n*Showing 10 of {len(results)} results*"
-
-    return formatted
-
-  def _simple_format(self, cypher_query: str, results: list[dict[str, Any]]) -> str:
-    formatted = f"**Generated Cypher:**\n```cypher\n{cypher_query}\n```\n\n"
-    formatted += f"**Results:** {len(results)} rows\n\n"
-    if results:
-      sample = results[:5]
-      formatted += "```json\n" + json.dumps(sample, indent=2, default=str) + "\n```"
-      if len(results) > 5:
-        formatted += f"\n\n*Showing 5 of {len(results)} results*"
-    return formatted
-
-  def _format_schema_for_ai(self, schema: list[dict[str, Any]]) -> str:
-    formatted = []
-    for item in schema[:20]:
-      if item.get("type") == "node":
-        props = ", ".join(
-          [f"{p['name']}: {p['type']}" for p in item.get("properties", [])[:5]]
-        )
-        formatted.append(f"Node {item['label']}: {props}")
-      elif item.get("type") == "relationship":
-        formatted.append(
-          f"Relationship {item['label']}: {item.get('from', '?')} -> {item.get('to', '?')}"
-        )
-    return "\n".join(formatted) if formatted else "Schema information not available"
+    else:
+      prompt += (
+        "\nFINAL ANSWER: Briefly explain what you found in clear prose, calling "
+        "out the key figures or patterns. The application shows the raw rows to "
+        "the user as a table, so do NOT draw your own table or re-list every "
+        "row — summarize and interpret."
+      )
+    return prompt
 
   def _get_max_results(self, mode: OperatorMode) -> int:
     return {
@@ -271,13 +170,9 @@ Please explain these results in a clear, natural way.""",
       OperatorMode.EXTENDED: 500,
     }.get(mode, 100)
 
-  def _calculate_confidence(self, cypher_query: str, results: list | None) -> float:
-    if not cypher_query or "ERROR" in cypher_query.upper():
-      return 0.3
-    if results is None:
+  def _calculate_confidence(self, result: ToolLoopResult) -> float:
+    if result.hit_cap:
       return 0.5
-    if len(results) == 0:
-      return 0.6
-    if len(results) > 0:
+    if result.rows:
       return 0.9
-    return 0.7
+    return 0.6
