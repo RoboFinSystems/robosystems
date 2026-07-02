@@ -8,6 +8,8 @@ from robosystems.config.env import (
   get_int_env,
   get_list_env,
   get_str_env,
+  get_tuning_float,
+  get_tuning_int,
 )
 
 
@@ -290,3 +292,51 @@ def test_get_valkey_url_with_integer(monkeypatch):
 
   result = EnvConfig.get_valkey_url(5)
   assert result == "redis://base/5"
+
+
+class TestTuningEnvConvention:
+  """get_tuning_int/float honor the documented TUNING_{CATEGORY}_{KEY} env var
+  (derived from the ssm_path) as well as the raw env_key (backward compat)."""
+
+  def test_env_key_derivation(self):
+    from robosystems.config.env import _tuning_env_key
+
+    assert _tuning_env_key("graphql/MAX_DEPTH") == "TUNING_GRAPHQL_MAX_DEPTH"
+    assert (
+      _tuning_env_key("lbug_admission/MEMORY_THRESHOLD")
+      == "TUNING_LBUG_ADMISSION_MEMORY_THRESHOLD"
+    )
+
+  def test_int_honors_tuning_prefix(self, monkeypatch):
+    monkeypatch.delenv("EXTENSIONS_GRAPHQL_MAX_DEPTH", raising=False)
+    monkeypatch.setenv("TUNING_GRAPHQL_MAX_DEPTH", "7")
+
+    assert get_tuning_int("EXTENSIONS_GRAPHQL_MAX_DEPTH", "graphql/MAX_DEPTH", 15) == 7
+
+  def test_int_honors_raw_env_key(self, monkeypatch):
+    monkeypatch.delenv("TUNING_GRAPHQL_MAX_DEPTH", raising=False)
+    monkeypatch.setenv("EXTENSIONS_GRAPHQL_MAX_DEPTH", "9")
+
+    assert get_tuning_int("EXTENSIONS_GRAPHQL_MAX_DEPTH", "graphql/MAX_DEPTH", 15) == 9
+
+  def test_int_raw_env_key_wins_when_both_set(self, monkeypatch):
+    monkeypatch.setenv("EXTENSIONS_GRAPHQL_MAX_DEPTH", "9")
+    monkeypatch.setenv("TUNING_GRAPHQL_MAX_DEPTH", "7")
+
+    assert get_tuning_int("EXTENSIONS_GRAPHQL_MAX_DEPTH", "graphql/MAX_DEPTH", 15) == 9
+
+  def test_int_falls_back_to_default(self, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "dev")
+    monkeypatch.delenv("EXTENSIONS_GRAPHQL_MAX_DEPTH", raising=False)
+    monkeypatch.delenv("TUNING_GRAPHQL_MAX_DEPTH", raising=False)
+
+    assert get_tuning_int("EXTENSIONS_GRAPHQL_MAX_DEPTH", "graphql/MAX_DEPTH", 15) == 15
+
+  def test_float_honors_tuning_prefix(self, monkeypatch):
+    monkeypatch.delenv("LBUG_ADMISSION_MEMORY_THRESHOLD", raising=False)
+    monkeypatch.setenv("TUNING_LBUG_ADMISSION_MEMORY_THRESHOLD", "42.5")
+
+    result = get_tuning_float(
+      "LBUG_ADMISSION_MEMORY_THRESHOLD", "lbug_admission/MEMORY_THRESHOLD", 85.0
+    )
+    assert result == pytest.approx(42.5)
