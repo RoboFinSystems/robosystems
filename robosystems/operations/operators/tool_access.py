@@ -58,6 +58,28 @@ class HttpToolAccess:
       await self.initialize()
     return await self._tools.call_tool(tool_name, arguments, return_raw=return_raw)
 
+  async def get_tool_schemas(self, names: list[str]) -> list[dict[str, Any]]:
+    """Return Anthropic-shaped tool definitions for the requested names.
+
+    The requested `names` are intersected with the tools actually available
+    on this graph (GraphMCPTools gates by schema extension + feature flag),
+    so an operator can ask for a broad read-only allowlist and safely get
+    back only what exists. Remaps the MCP `inputSchema` key to Anthropic's
+    `input_schema`.
+    """
+    if self._tools is None:
+      await self.initialize()
+    wanted = set(names)
+    return [
+      {
+        "name": defn["name"],
+        "description": defn["description"],
+        "input_schema": defn["inputSchema"],
+      }
+      for defn in self._tools.get_tool_definitions_as_dict()
+      if defn["name"] in wanted
+    ]
+
   async def close(self) -> None:
     """Clean up HTTP client connection."""
     if self._client:
@@ -116,6 +138,28 @@ class DirectToolAccess:
       f"Tool '{tool_name}' not registered in DirectToolAccess. "
       f"Use get_tool_instance() to register tool classes first."
     )
+
+  async def get_tool_schemas(self, names: list[str]) -> list[dict[str, Any]]:
+    """Return Anthropic-shaped definitions for registered tool instances.
+
+    DirectToolAccess is used by operators that drive tools imperatively
+    (e.g. MappingOperator), not by the model-driven tool loop. It only
+    knows about tool classes explicitly registered via get_tool_instance,
+    so it reports those; the loop-based operators use HttpToolAccess.
+    """
+    wanted = set(names)
+    schemas: list[dict[str, Any]] = []
+    for tool in self._tool_instances.values():
+      defn = tool.get_tool_definition()
+      if defn.get("name") in wanted:
+        schemas.append(
+          {
+            "name": defn["name"],
+            "description": defn["description"],
+            "input_schema": defn["inputSchema"],
+          }
+        )
+    return schemas
 
   async def close(self) -> None:
     """No-op — no connections to clean up."""

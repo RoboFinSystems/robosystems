@@ -394,6 +394,70 @@ class TestAIClientCreateMessage:
     assert "system" not in request_body
 
   @pytest.mark.unit
+  async def test_create_message_with_tools_and_tool_use_response(self):
+    """Tools are sent in the request body; a tool_use response exposes
+    content_blocks and stop_reason so the tool loop can drive it."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [
+        {"type": "text", "text": "Let me check."},
+        {
+          "type": "tool_use",
+          "id": "toolu_1",
+          "name": "read-graph-cypher",
+          "input": {"query": "MATCH (n) RETURN n"},
+        },
+      ],
+      "usage": {"input_tokens": 120, "output_tokens": 30},
+      "stop_reason": "tool_use",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    tools = [
+      {
+        "name": "read-graph-cypher",
+        "description": "run cypher",
+        "input_schema": {"type": "object"},
+      }
+    ]
+    result = await client.create_message(
+      messages=[AIMessage(role="user", content="how many nodes?")],
+      tools=tools,
+    )
+
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert request_body["tools"] == tools
+
+    assert result.stop_reason == "tool_use"
+    # `content` is the joined text blocks; tool_use carries no text.
+    assert result.content == "Let me check."
+    assert len(result.content_blocks) == 2
+    assert result.content_blocks[1]["name"] == "read-graph-cypher"
+
+  @pytest.mark.unit
+  async def test_create_message_without_tools_omits_tools_key(self):
+    """No tools param → no `tools` key in the Bedrock request body."""
+    client, mock_bedrock = _make_ai_client()
+    from robosystems.operations.operators.ai_client import AIMessage
+
+    response_body = {
+      "content": [{"type": "text", "text": "hi"}],
+      "usage": {"input_tokens": 10, "output_tokens": 5},
+      "stop_reason": "end_turn",
+    }
+    mock_body = MagicMock()
+    mock_body.read.return_value = json.dumps(response_body).encode()
+    mock_bedrock.invoke_model.return_value = {"body": mock_body}
+
+    await client.create_message(messages=[AIMessage(role="user", content="hi")])
+    request_body = json.loads(mock_bedrock.invoke_model.call_args[1]["body"])
+    assert "tools" not in request_body
+
+  @pytest.mark.unit
   async def test_create_message_formats_messages_correctly(self):
     """Test that messages are formatted into the correct dict structure."""
     client, mock_bedrock = _make_ai_client()
