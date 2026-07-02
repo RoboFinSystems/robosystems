@@ -143,7 +143,6 @@ Resources:
                   - iam:AddRoleToInstanceProfile
                   - iam:RemoveRoleFromInstanceProfile
                   - iam:ListInstanceProfilesForRole
-                  - iam:PassRole
                   - iam:CreateServiceLinkedRole
                   - iam:DeleteServiceLinkedRole
                   - iam:GetServiceLinkedRoleDeletionStatus
@@ -158,6 +157,30 @@ Resources:
                   - iam:TagPolicy
                   - iam:UntagPolicy
                 Resource: "*"
+
+              # IAM PassRole — restricted to the AWS services this deployment
+              # actually creates roles for, so the deploy role cannot pass an
+              # arbitrary role to an arbitrary principal. This closes the main
+              # privilege-escalation path that unconditional iam:PassRole opened.
+              # The service list is derived from every Service principal the
+              # cloudformation/ templates create roles for.
+              - Sid: IAMPassRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "iam:PassedToService":
+                      - ecs-tasks.amazonaws.com
+                      - lambda.amazonaws.com
+                      - ec2.amazonaws.com
+                      - rds.amazonaws.com
+                      - autoscaling.amazonaws.com
+                      - cloudtrail.amazonaws.com
+                      - delivery.logs.amazonaws.com
+                      - grafana.amazonaws.com
+                      - cloudfront.amazonaws.com
 
               # EC2
               - Sid: EC2
