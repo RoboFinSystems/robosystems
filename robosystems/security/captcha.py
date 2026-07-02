@@ -63,6 +63,19 @@ class CaptchaService:
       )
 
     if not self.secret_key:
+      # A missing secret means we cannot verify the token. Fail CLOSED in
+      # deployed environments — an enabled CAPTCHA gate with no secret must
+      # reject, not silently admit every request (bot-registration exposure).
+      # Dev/test fall open for convenience (and normally short-circuit earlier
+      # via CAPTCHA_ENABLED in verify_captcha_or_skip).
+      if env.is_production() or env.is_staging():
+        logger.error(
+          "TURNSTILE_SECRET_KEY not configured while CAPTCHA is enabled - "
+          "failing closed"
+        )
+        return CaptchaVerificationResult(
+          success=False, error_codes=["missing-secret-key"]
+        )
       logger.warning(
         "TURNSTILE_SECRET_KEY not configured - CAPTCHA verification disabled"
       )

@@ -318,9 +318,15 @@ def get_secret_value(key: str, default: str = "") -> str:
     return secrets.get(key, default)
 
   except Exception as e:
-    # Log the error but don't fail - return default
-    logger.warning(f"Failed to retrieve secret '{key}' from Secrets Manager: {e}")
-    return default
+    # We only reach here in prod/staging (dev/test returned the default above).
+    # The inner get_secret() already fails closed for access/other errors by
+    # re-raising; swallowing here would silently substitute a possibly-insecure
+    # default (e.g. an empty encryption/signing key), so surface the failure.
+    # Missing-but-optional secrets do NOT reach this branch — get_secret()
+    # returns {} for ResourceNotFound, and {}.get(key, default) yields the
+    # default without raising.
+    logger.error(f"Failed to retrieve secret '{key}' from Secrets Manager: {e}")
+    raise
 
 
 def get_secret_list_value(
