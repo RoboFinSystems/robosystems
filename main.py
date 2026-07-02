@@ -103,8 +103,9 @@ async def lifespan(app: FastAPI):
     logger.info(f"Configuration validated successfully: {config_summary}")
   except Exception as e:
     logger.error(f"Configuration validation failed: {e}")
-    if env.ENVIRONMENT == "prod":
-      # Fail fast in prod; continue in dev so local iteration isn't blocked.
+    if env.ENVIRONMENT in ("prod", "staging"):
+      # Fail fast in prod and staging; continue in dev/test so local iteration
+      # isn't blocked.
       raise
     logger.warning("Continuing with invalid configuration (development mode)")
 

@@ -43,8 +43,8 @@ class EnvValidator:
         f"Only 'ladybug' is supported."
       )
 
-    # Critical variables that must be set in production
-    if env_config.ENVIRONMENT == "prod":
+    # Critical variables that must be set in production and staging
+    if env_config.ENVIRONMENT in ("prod", "staging"):
       required_prod_vars = {
         "DATABASE_URL": "PostgreSQL connection string",
         "JWT_SECRET_KEY": "JWT signing key (must not be default)",
@@ -74,10 +74,15 @@ class EnvValidator:
       for var_name, description in required_prod_vars.items():
         value = getattr(env_config, var_name, None)
         if not value:
-          errors.append(f"{var_name}: {description} is required in production")
+          errors.append(
+            f"{var_name}: {description} is required in {env_config.ENVIRONMENT}"
+          )
         elif var_name == "JWT_SECRET_KEY":
           if "development" in str(value).lower() or "dev-jwt" in str(value).lower():
-            errors.append(f"{var_name}: Must not use development default in production")
+            errors.append(
+              f"{var_name}: Must not use the development default in "
+              f"{env_config.ENVIRONMENT}"
+            )
           elif len(str(value)) < 32:
             errors.append(f"{var_name}: Must be at least 32 characters for security")
 

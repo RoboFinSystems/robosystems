@@ -64,6 +64,13 @@ on:
         type: string
         default: "false"
 
+      # Accidental-deletion protection (recommended on for prod/staging; no added cost)
+      deletion_protection_enabled:
+        description: "Block accidental deletion of the RDS instance (set false only for an intentional teardown)"
+        required: false
+        type: string
+        default: "true"
+
       # RDS Proxy Configuration (off by default)
       rds_proxy_enabled:
         description: "Enable RDS Proxy for connection pooling (costs ~$0.015/vCPU/hour when enabled)"
@@ -156,6 +163,7 @@ jobs:
                 ParameterKey=DBAllocatedStorage,ParameterValue=${{ inputs.allocated_storage }} \
                 ParameterKey=DBMaxAllocatedStorage,ParameterValue=${{ inputs.allocated_max_storage }} \
                 ParameterKey=EnableMultiAZ,ParameterValue=${{ inputs.multi_az_enabled }} \
+                ParameterKey=EnableDeletionProtection,ParameterValue=${{ inputs.deletion_protection_enabled }} \
                 ParameterKey=EnableRDSProxy,ParameterValue=${{ inputs.rds_proxy_enabled }} \
                 ParameterKey=RDSProxyMaxConnectionsPercent,ParameterValue=${{ inputs.rds_proxy_max_connections_percent }} \
                 ParameterKey=RDSProxyConnectionBorrowTimeout,ParameterValue=${{ inputs.rds_proxy_connection_borrow_timeout }} \

@@ -55,13 +55,27 @@ class ConnectionCredentials(Model):
 
   @staticmethod
   def _get_encryption_key() -> bytes:
-    """Get or generate encryption key from environment."""
+    """Get or generate the credential-encryption key.
+
+    In prod/staging ``CONNECTION_CREDENTIALS_KEY`` MUST be set explicitly. Only
+    dev/test/local may fall back to a key derived from ``JWT_SECRET_KEY`` — a
+    fast, unsalted derivation that must never protect real customer credentials
+    and must never share key material with the token-signing secret in a
+    deployed environment.
+    """
     key = env.CONNECTION_CREDENTIALS_KEY
     if not key:
-      # In production, this MUST be set in environment
-      # For development, derive from JWT_SECRET_KEY for consistency
+      # Never allow the weak JWT-derived fallback in prod/staging. Startup
+      # validation also requires the key there; this is defense-in-depth.
+      if env.ENVIRONMENT in ("prod", "staging"):
+        raise ValueError(
+          f"CONNECTION_CREDENTIALS_KEY must be set in {env.ENVIRONMENT}; "
+          "refusing to derive a credential key from JWT_SECRET_KEY."
+        )
+      # Dev/test/local only: derive a deterministic key from JWT_SECRET_KEY.
       logger.warning(
-        "CONNECTION_CREDENTIALS_KEY is not set. Falling back to JWT_SECRET_KEY for development."
+        "CONNECTION_CREDENTIALS_KEY is not set; deriving a dev-only key from "
+        "JWT_SECRET_KEY. Do not rely on this outside local development."
       )
       jwt_secret = env.JWT_SECRET_KEY
       if jwt_secret:

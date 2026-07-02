@@ -153,6 +153,31 @@ class TestEnvValidator:
       warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
       assert any("GRAPH_API_KEY" in msg for msg in warning_calls)
 
+  def test_validate_required_vars_staging_environment_success(self):
+    """Staging enforces the same critical vars as prod and passes when all set."""
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "staging"
+    env_config.GRAPH_API_KEY = "test-api-key"
+
+    with patch("os.getenv", return_value=None):
+      with patch("robosystems.config.validation.logger") as mock_logger:
+        EnvValidator.validate_required_vars(env_config)
+        mock_logger.info.assert_called_with("Configuration validation passed")
+
+  def test_validate_required_vars_staging_missing_credentials_key(self):
+    """Staging now fails when CONNECTION_CREDENTIALS_KEY is missing (was prod-only)."""
+    env_config = MockEnvConfig()
+    env_config.ENVIRONMENT = "staging"
+    env_config.GRAPH_API_KEY = "test-api-key"
+    env_config.CONNECTION_CREDENTIALS_KEY = None
+
+    with patch("os.getenv", return_value=None):
+      with pytest.raises(ConfigValidationError) as exc_info:
+        EnvValidator.validate_required_vars(env_config)
+
+    error_msg = str(exc_info.value)
+    assert "CONNECTION_CREDENTIALS_KEY" in error_msg or "errors" in error_msg
+
   def test_validate_urls_valid(self):
     """Test validation passes for valid URLs."""
     env_config = MockEnvConfig()
