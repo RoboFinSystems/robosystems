@@ -42,7 +42,7 @@ class RateLimitCache:
     return f"{self.RATE_LIMIT_PREFIX}{identifier}"
 
   def check_rate_limit(
-    self, identifier: str, limit: int, window: int
+    self, identifier: str, limit: int, window: int, fail_closed: bool = False
   ) -> tuple[bool, int]:
     """
     Check if request is within rate limit using sliding window.
@@ -51,6 +51,11 @@ class RateLimitCache:
         identifier: Unique identifier (e.g., user:123, ip:1.2.3.4)
         limit: Maximum requests allowed
         window: Time window in seconds
+        fail_closed: When the limiter backend errors, deny (True) instead of
+            allowing (False). Use for high-value categories such as auth /
+            brute-force where a broken limiter must not silently disable
+            protection. Defaults to False so a limiter outage doesn't take
+            down general traffic.
 
     Returns:
         tuple[bool, int]: (allowed, remaining_requests)
@@ -110,7 +115,16 @@ class RateLimitCache:
 
     except Exception as e:
       logger.error(f"Rate limiting check failed for {identifier}: {e}")
-      # Fail open - allow request if rate limiting is broken
+      if fail_closed:
+        # High-value category (auth/brute-force): a broken limiter must NOT
+        # silently disable protection. Deny, and log distinctly so alerting can
+        # treat this as a limiter-backend incident rather than an attack.
+        logger.error(
+          f"Rate limiter failing CLOSED for {identifier}: denying because the "
+          f"limiter backend is unavailable"
+        )
+        return False, 0
+      # Default: fail open - a limiter outage shouldn't take down general traffic.
       return True, limit
 
   def get_rate_limit_stats(self) -> dict[str, Any]:

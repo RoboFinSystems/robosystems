@@ -67,6 +67,43 @@ def test_structured_formatter_includes_optional_fields():
   assert payload["timestamp"].endswith("Z")
 
 
+def test_structured_formatter_includes_audit_and_security_fields():
+  """Operation-audit payload and auth event fields must survive serialization.
+
+  Regression guard: the formatter previously dropped extra={"audit": ...},
+  ip_address, and success, making the operation-audit trail content-free.
+  """
+  formatter = StructuredFormatter()
+  record = logging.LogRecord(
+    name="robosystems.test",
+    level=logging.INFO,
+    pathname=__file__,
+    lineno=10,
+    msg="extensions.operation",
+    args=(),
+    exc_info=None,
+  )
+  record.audit = {
+    "operation": "create-backup",
+    "user_id": "u1",
+    "graph_id": "kg1",
+    "status": "success",
+  }
+  record.ip_address = "203.0.113.7"
+  record.success = False
+
+  payload = json.loads(formatter.format(record))
+
+  assert payload["audit"] == {
+    "operation": "create-backup",
+    "user_id": "u1",
+    "graph_id": "kg1",
+    "status": "success",
+  }
+  assert payload["ip_address"] == "203.0.113.7"
+  assert payload["success"] is False
+
+
 def test_structured_formatter_includes_error_details():
   formatter = StructuredFormatter()
 

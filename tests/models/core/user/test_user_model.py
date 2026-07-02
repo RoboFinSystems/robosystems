@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.models.core import User
+from robosystems.models.core import User, UserAPIKey
 
 
 class TestUserModel:
@@ -425,6 +425,33 @@ class TestUserModel:
     # Verify in database
     db_user = db_session.query(User).filter_by(id=user.id).first()
     assert db_user.is_active is False
+
+  def test_deactivate_revokes_api_keys(self, db_session):
+    """Deactivating a user revokes all their API keys.
+
+    Regression guard for broken de-provisioning: keys don't carry
+    session_version, so without cascade revocation a deactivated user keeps
+    full programmatic access.
+    """
+    user = User.create(
+      email="revoke-keys@example.com",
+      name="Key User",
+      password_hash="hashed_password",
+      session=db_session,
+    )
+    key1, _ = UserAPIKey.create(user_id=user.id, name="k1", session=db_session)
+    key2, _ = UserAPIKey.create(user_id=user.id, name="k2", session=db_session)
+    assert key1.is_active is True
+    assert key2.is_active is True
+
+    user.deactivate(db_session)
+
+    # No active keys remain for the user
+    assert UserAPIKey.get_active_by_user_id(user.id, db_session) == []
+    db_session.refresh(key1)
+    db_session.refresh(key2)
+    assert key1.is_active is False
+    assert key2.is_active is False
 
   def test_activate_user(self, db_session):
     """Test activating a user."""

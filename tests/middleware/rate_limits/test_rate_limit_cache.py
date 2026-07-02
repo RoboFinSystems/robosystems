@@ -56,6 +56,22 @@ class TestCheckRateLimit:
     assert allowed is True
     assert remaining == 100
 
+  def test_redis_failure_fail_closed_denies(self, cache):
+    """High-value (auth) categories deny when the limiter backend is down."""
+    cache._redis.eval.side_effect = Exception("Redis down")
+    allowed, remaining = cache.check_rate_limit(
+      "auth_ip:1.2.3.4", 10, 300, fail_closed=True
+    )
+    assert allowed is False
+    assert remaining == 0
+
+  def test_redis_failure_default_still_fails_open(self, cache):
+    """Default (fail_closed=False) preserves fail-open for general traffic."""
+    cache._redis.eval.side_effect = Exception("Redis down")
+    allowed, remaining = cache.check_rate_limit("user:1", 100, 60, fail_closed=False)
+    assert allowed is True
+    assert remaining == 100
+
 
 class TestGetRateLimitStats:
   def test_disabled(self):
