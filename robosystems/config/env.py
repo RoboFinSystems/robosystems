@@ -210,7 +210,7 @@ def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
       try:
         return float(env_value)
       except (ValueError, TypeError):
-        print(f"Warning: Invalid {candidate} value, using default: {default}")
+        print(f"Warning: Invalid {env_key} value, using default: {default}")
         return default
 
   # Priority 2: SSM Parameter Store (prod/staging only)
@@ -254,7 +254,7 @@ def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
       try:
         return int(env_value)
       except (ValueError, TypeError):
-        print(f"Warning: Invalid {candidate} value, using default: {default}")
+        print(f"Warning: Invalid {env_key} value, using default: {default}")
         return default
 
   # Priority 2: SSM Parameter Store (prod/staging only)
