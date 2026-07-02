@@ -151,6 +151,35 @@ async def test_tool_error_is_fed_back_and_model_retries():
   assert any("Invalid Cypher" in b.get("content", "") for b in blocks)
 
 
+async def test_empty_followup_does_not_clobber_captured_rows():
+  """A later zero-row read-graph-cypher must not wipe the rows from an earlier
+  successful query (finding #2 — last-non-empty wins)."""
+  ai = MagicMock()
+  ai.create_message = AsyncMock(
+    side_effect=[
+      _tool_use("t1", "read-graph-cypher", query="MATCH (e:Entity) RETURN e LIMIT 5"),
+      _tool_use(
+        "t2", "read-graph-cypher", query="MATCH (e:Entity) WHERE e.name='nope' RETURN e"
+      ),
+      _final("Here are the entities."),
+    ]
+  )
+  good_rows = [{"e": 1}, {"e": 2}, {"e": 3}]
+  tools = _tools_mock(call_results=[good_rows, []])  # second query returns []
+  ctx = _ctx(ai, tools)
+
+  result = await run_tool_loop(
+    ctx,
+    system="s",
+    tool_names=["read-graph-cypher"],
+    max_iterations=5,
+    max_tokens=100,
+  )
+
+  assert result.rows == good_rows  # not clobbered by the empty follow-up
+  assert result.cypher == "MATCH (e:Entity) RETURN e LIMIT 5"
+
+
 async def test_error_dict_result_is_flagged_and_not_captured_as_rows():
   """Registrar/domain tools report failure as {"error": ...} rather than
   raising — that path must also be fed back as is_error and not mistaken for

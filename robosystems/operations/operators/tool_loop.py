@@ -163,7 +163,11 @@ async def run_tool_loop(
         # raising; treat both paths as errors so the model gets the feedback.
         if isinstance(result, dict) and "error" in result:
           is_error = True
-        elif name == "read-graph-cypher" and isinstance(result, list):
+        elif name == "read-graph-cypher" and isinstance(result, list) and result:
+          # Capture the last NON-EMPTY result set so a later exploratory or
+          # zero-row query doesn't wipe the rows that back the answer. If every
+          # query returns empty, last_rows stays None and the console shows no
+          # table — correct for a genuinely empty answer.
           last_rows = result
           last_cypher = args.get("query")
       except Exception as e:  # cypher_tool raises ValueError on bad queries
