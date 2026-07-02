@@ -703,6 +703,24 @@ class EnvConfig:
     get_parameter_value("EXTENSIONS_GRAPHQL_ENABLED", "true").lower() == "true",
   )
 
+  # Query-bounding limits for the extensions GraphQL endpoint. The OLTP pool
+  # is small and each resolved field can open a session, so an unbounded
+  # nested / alias-heavy / oversized document is a DoS vector. Defaults are
+  # generous for legitimate nested reads; introspection is unaffected (the
+  # depth limiter does not count introspection fields). SSM-tunable at runtime
+  # (like the other query/pool limits) so a limit can be tightened on abuse or
+  # loosened for a false-positive block without a redeploy —
+  # `just ssm-set <env> tuning/graphql/MAX_DEPTH <n>`.
+  EXTENSIONS_GRAPHQL_MAX_DEPTH = get_tuning_int(
+    "EXTENSIONS_GRAPHQL_MAX_DEPTH", "graphql/MAX_DEPTH", 15
+  )
+  EXTENSIONS_GRAPHQL_MAX_ALIASES = get_tuning_int(
+    "EXTENSIONS_GRAPHQL_MAX_ALIASES", "graphql/MAX_ALIASES", 30
+  )
+  EXTENSIONS_GRAPHQL_MAX_TOKENS = get_tuning_int(
+    "EXTENSIONS_GRAPHQL_MAX_TOKENS", "graphql/MAX_TOKENS", 2000
+  )
+
   # --- Derived: EXTENSIONS_ENABLED ---
   # Whether the extensions PostgreSQL database should open at all.
   # Computed at class-body evaluation time from the per-domain flags
