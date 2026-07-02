@@ -222,9 +222,14 @@ class TestSecretValueFunction:
       result = get_secret_value("SHARED_RAW_BUCKET", "default")
       assert result == "robosystems-shared-raw-staging"
 
-  def test_get_secret_value_handles_exceptions(self):
-    """Test that exceptions are caught and defaults returned."""
-    with patch("os.getenv") as mock_getenv, patch("boto3.client") as mock_boto:
+  def test_get_secret_value_fails_closed_in_deployed_env(self):
+    """In prod/staging a failed secret fetch must surface (fail closed), not
+    silently return a default that could be an insecure empty key."""
+    with (
+      patch("os.getenv") as mock_getenv,
+      patch("robosystems.config.secrets_manager.boto3.client") as mock_boto,
+      patch("robosystems.config.secrets_manager._secrets_manager", None),
+    ):
       mock_getenv.side_effect = lambda key, default=None: {
         "ENVIRONMENT": "staging"
       }.get(key, default)
@@ -235,9 +240,9 @@ class TestSecretValueFunction:
       # Setup mock to raise exception
       mock_client.get_secret_value.side_effect = Exception("Network error")
 
-      # Should return default, not raise
-      result = get_secret_value("JWT_SECRET_KEY", "fallback_value")
-      assert result == "fallback_value"
+      # Should propagate, not swallow-and-default
+      with pytest.raises(Exception, match="Network error"):
+        get_secret_value("JWT_SECRET_KEY", "fallback_value")
 
   def test_get_secret_value_default_for_non_prod(self):
     """Non prod/staging environments should return default when not set."""

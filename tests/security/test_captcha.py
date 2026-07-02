@@ -107,14 +107,32 @@ class TestCaptchaService:
 
   @pytest.mark.asyncio
   @patch("robosystems.security.captcha.env")
-  async def test_verify_turnstile_token_missing_secret(self, mock_env):
-    """Test verification with missing secret key."""
+  async def test_verify_turnstile_token_missing_secret_dev_fails_open(self, mock_env):
+    """Dev/test with no secret falls open (convenience)."""
     mock_env.TURNSTILE_SECRET_KEY = None
+    mock_env.is_production.return_value = False
+    mock_env.is_staging.return_value = False
 
     service = CaptchaService()
     result = await service.verify_turnstile_token("valid_token")
 
     assert result.success is True  # Allows through with warning
+    assert "missing-secret-key" in result.error_codes
+
+  @pytest.mark.asyncio
+  @patch("robosystems.security.captcha.env")
+  async def test_verify_turnstile_token_missing_secret_prod_fails_closed(
+    self, mock_env
+  ):
+    """Prod/staging with an enabled gate but no secret fails closed (rejects)."""
+    mock_env.TURNSTILE_SECRET_KEY = None
+    mock_env.is_production.return_value = True
+    mock_env.is_staging.return_value = False
+
+    service = CaptchaService()
+    result = await service.verify_turnstile_token("valid_token")
+
+    assert result.success is False  # Missing secret must not admit the request
     assert "missing-secret-key" in result.error_codes
 
   @pytest.mark.asyncio
