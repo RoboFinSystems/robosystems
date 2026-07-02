@@ -315,6 +315,15 @@ async def call_mcp_tool(
           detail=f"Write operations not allowed on shared repository '{graph_id}'",
         )
 
+    # Schema-mutating / write tools aren't query-analyzed above; flag them as
+    # writes so write-role authorization applies below (viewer is read-only).
+    if tool_call.name in (
+      "write-graph-cypher",
+      "add-node-table",
+      "add-relationship-table",
+    ):
+      is_write_query = True
+
     # Validate access using a short-lived session.  The MCP endpoint's
     # tool execution can take minutes; using a scoped session or FastAPI
     # db dependency would hold a pool connection for the entire duration.

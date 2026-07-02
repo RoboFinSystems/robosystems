@@ -101,6 +101,43 @@ class TestValidateMcpAccess:
       assert exc_info.value.status_code == 403
 
   @pytest.mark.asyncio
+  async def test_user_graph_write_requires_write_role(self):
+    """Write operations on a user graph require the write role, not bare membership."""
+    with (
+      patch(
+        "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access",
+        return_value=True,
+      ) as mock_write,
+    ):
+      await validate_mcp_access(
+        "kg01234567890abcdef", _make_mock_user(), Mock(), "write"
+      )
+      mock_write.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_user_graph_write_denied_for_readonly_role(self):
+    """A read-only (viewer) member is denied write access despite membership."""
+    with (
+      patch(
+        "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access",
+        return_value=False,
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await validate_mcp_access(
+          "kg01234567890abcdef", _make_mock_user(), Mock(), "write"
+        )
+      assert exc_info.value.status_code == 403
+
+  @pytest.mark.asyncio
   async def test_shared_repo_subgraph_access(self):
     """Test access validation for shared repository subgraph."""
     with (

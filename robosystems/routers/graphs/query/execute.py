@@ -216,6 +216,21 @@ async def execute_cypher_query(
         detail=f"Write operations not allowed on shared repository '{graph_id}'",
       )
 
+    # Enforce role-based write access on user subgraphs (viewer is read-only).
+    # At this point a write is confirmed to target a non-shared subgraph.
+    if is_write:
+      from robosystems.models.core.graph.graph_user import GraphUser
+
+      if not GraphUser.user_has_write_access(current_user.id, graph_id, session):
+        logger.warning(
+          f"User {current_user.id} with read-only role attempted write on {graph_id}"
+        )
+        raise HTTPException(
+          status_code=http_status.HTTP_403_FORBIDDEN,
+          detail="Write operations require the 'member' or 'admin' role for this "
+          "graph. Your access is read-only (viewer).",
+        )
+
     # Apply dual-layer rate limiting for shared repositories
     await _check_shared_repository_limits(
       graph_id=graph_id, user=current_user, session=session, endpoint="query"
