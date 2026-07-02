@@ -3652,7 +3652,7 @@ requires-dist = [
     { name = "intuit-oauth", specifier = ">=1.2.0,<2.0" },
     { name = "lancedb", specifier = ">=0.30.0,<0.31" },
     { name = "lxml", specifier = ">=6.1.0,<7.0" },
-    { name = "moto", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=5.1.6,<6.0" },
+    { name = "moto", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=5.2.2,<6.0" },
     { name = "numpy", specifier = ">=2.4.0,<3.0" },
     { name = "opensearch-py", specifier = ">=3.0.0,<4.0" },
     { name = "opentelemetry-api", specifier = ">=1.41.0,<2.0" },
