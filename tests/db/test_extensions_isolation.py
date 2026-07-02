@@ -13,8 +13,13 @@ The whole isolation story has two halves:
    `extensions_session(B)` re-scopes it to B before any query runs. **This is
    the load-bearing primitive these tests pin** — it had no direct coverage
    (every other test mocks `extensions_session` rather than exercising it).
+3. **On return** — each session also clears search_path back to `public` in its
+   `finally`, before the connection returns to the pool. A plain (non-LOCAL)
+   `SET` survives the pool's rollback-on-return, so without this the tenant
+   scope would linger on the pooled connection; this is defense-in-depth for any
+   future code path that reuses a connection without going through this manager.
 
-The failure mode both halves guard against is real: a prior Celery incident
+The failure mode these layers guard against is real: a prior Celery incident
 leaked a search_path across tenants and caused cross-tenant writes (see
 `worker/cleanup.py` and the `feedback_session_isolation` note). For the
 multi-company-accountant launch — N client-company graphs under one org — this
@@ -83,6 +88,33 @@ def test_sequential_reuse_rescopes_to_new_graph():
   # The second use re-issues SET for B — B never inherits A's schema.
   assert executed_b[0] == f"SET search_path TO {GRAPH_B}, public"
   assert GRAPH_A not in executed_b[0]
+
+
+def test_resets_search_path_to_public_on_return():
+  """Defense-in-depth: a tenant session's LAST act is to clear search_path back
+  to `public`, so the connection returns to the pool unbound. A plain SET
+  survives the pool's rollback-on-return, so without this a later bypass could
+  inherit the tenant scope."""
+  session, executed = _drive(GRAPH_A)
+  assert executed[0] == f"SET search_path TO {GRAPH_A}, public"
+  assert executed[-1] == "SET search_path TO public"
+  session.close.assert_called_once()
+
+
+def test_resets_search_path_even_on_error():
+  """The reset runs in `finally`, so even a failed tenant op leaves the pooled
+  connection unbound rather than scoped to the failed tenant."""
+  session = MagicMock(name="session")
+  executed: list[str] = []
+  session.execute.side_effect = lambda clause, *a, **k: executed.append(str(clause))
+  factory = MagicMock(return_value=session)
+  with patch.object(ext, "_get_session_factory", return_value=factory):
+    with pytest.raises(RuntimeError, match="boom"):
+      with extensions_session(GRAPH_A):
+        raise RuntimeError("boom")
+  assert executed[-1] == "SET search_path TO public"
+  session.rollback.assert_called_once()
+  session.close.assert_called_once()
 
 
 def test_library_sentinel_binds_public_only():

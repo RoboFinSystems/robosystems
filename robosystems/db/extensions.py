@@ -156,6 +156,17 @@ def extensions_session(graph_id: str):
     session.rollback()
     raise
   finally:
+    # Defense-in-depth: clear the tenant search_path before the connection
+    # returns to the pool. Correctness does not depend on this — every
+    # extensions_session re-stamps search_path at the top before any query —
+    # but it removes the footgun where a code path that reuses a pooled
+    # connection without going through this context manager could inherit a
+    # stale tenant binding. A plain (non-LOCAL) SET survives the pool's
+    # rollback-on-return, which is exactly why the stale binding would persist.
+    try:
+      session.execute(text("SET search_path TO public"))
+    except Exception:
+      pass
     session.close()
 
 
