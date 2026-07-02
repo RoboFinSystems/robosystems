@@ -25,6 +25,11 @@ TypeScript and Python SDK facades expect without manual reshape.
 from __future__ import annotations
 
 import strawberry
+from strawberry.extensions import (
+  MaxAliasesLimiter,
+  MaxTokensLimiter,
+  QueryDepthLimiter,
+)
 from strawberry.extensions.tracing.opentelemetry import OpenTelemetryExtensionSync
 from strawberry.types import Info
 
@@ -129,7 +134,18 @@ Query = _build_query_type()
 # resolvers. The async variant would force every test and every sync
 # introspection call to fail with "GraphQL execution failed to complete
 # synchronously."
+# Query-bounding limiters guard the small extensions OLTP pool against
+# pathological documents (deep nesting, alias fan-out, oversized queries) —
+# each resolved field can open a session. Passed as factory callables (not
+# instances) per Strawberry's per-request construction contract. Introspection
+# is unaffected (the depth limiter does not count introspection fields), so SDK
+# codegen still works.
 schema = strawberry.Schema(
   query=Query,
-  extensions=[OpenTelemetryExtensionSync],
+  extensions=[
+    lambda: QueryDepthLimiter(max_depth=env.EXTENSIONS_GRAPHQL_MAX_DEPTH),
+    lambda: MaxAliasesLimiter(max_alias_count=env.EXTENSIONS_GRAPHQL_MAX_ALIASES),
+    lambda: MaxTokensLimiter(max_token_count=env.EXTENSIONS_GRAPHQL_MAX_TOKENS),
+    OpenTelemetryExtensionSync,
+  ],
 )
