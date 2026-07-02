@@ -174,6 +174,17 @@ def get_str_env(key: str, default: str = "") -> str:
   return os.getenv(key, default)
 
 
+def _tuning_env_key(ssm_path: str) -> str:
+  """Env-var name for a tuning param following the documented convention.
+
+  ``TUNING_{CATEGORY}_{KEY}`` derived from the SSM path — e.g.
+  ``"graphql/MAX_DEPTH"`` -> ``"TUNING_GRAPHQL_MAX_DEPTH"``. Mirrors the naming
+  in ``config/tuning.py`` and ``.env.example`` so the documented override
+  convention is actually honored (the raw ``env_key`` still works too).
+  """
+  return "TUNING_" + ssm_path.upper().replace("/", "_")
+
+
 def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
   """
   Get a float tuning parameter with layered fallback.
@@ -191,14 +202,16 @@ def get_tuning_float(env_key: str, ssm_path: str, default: float) -> float:
   Returns:
       Float value from the highest-priority source
   """
-  # Priority 1: Environment variable
-  env_value = os.getenv(env_key)
-  if env_value is not None:
-    try:
-      return float(env_value)
-    except (ValueError, TypeError):
-      print(f"Warning: Invalid {env_key} value, using default: {default}")
-      return default
+  # Priority 1: Environment variable — accept both the raw env_key (backward
+  # compat) and the documented TUNING_{CATEGORY}_{KEY} convention.
+  for candidate in (env_key, _tuning_env_key(ssm_path)):
+    env_value = os.getenv(candidate)
+    if env_value is not None:
+      try:
+        return float(env_value)
+      except (ValueError, TypeError):
+        print(f"Warning: Invalid {candidate} value, using default: {default}")
+        return default
 
   # Priority 2: SSM Parameter Store (prod/staging only)
   environment = os.getenv("ENVIRONMENT", "dev")
@@ -233,14 +246,16 @@ def get_tuning_int(env_key: str, ssm_path: str, default: int) -> int:
   Returns:
       Integer value from the highest-priority source
   """
-  # Priority 1: Environment variable
-  env_value = os.getenv(env_key)
-  if env_value is not None:
-    try:
-      return int(env_value)
-    except (ValueError, TypeError):
-      print(f"Warning: Invalid {env_key} value, using default: {default}")
-      return default
+  # Priority 1: Environment variable — accept both the raw env_key (backward
+  # compat) and the documented TUNING_{CATEGORY}_{KEY} convention.
+  for candidate in (env_key, _tuning_env_key(ssm_path)):
+    env_value = os.getenv(candidate)
+    if env_value is not None:
+      try:
+        return int(env_value)
+      except (ValueError, TypeError):
+        print(f"Warning: Invalid {candidate} value, using default: {default}")
+        return default
 
   # Priority 2: SSM Parameter Store (prod/staging only)
   environment = os.getenv("ENVIRONMENT", "dev")
