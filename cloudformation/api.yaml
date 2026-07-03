@@ -8,47 +8,36 @@ Parameters:
     AllowedValues:
       - prod
       - staging
-    Description: Environment name (prod or staging)
-    ConstraintDescription: Must be prod or staging
 
   # Infrastructure & Networking
   VpcId:
     Type: AWS::EC2::VPC::Id
-    Description: VPC ID for ECS tasks
   VpcCidr:
     Type: String
     Default: 10.0.0.0/16
-    Description: CIDR block for the VPC
     AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
-    ConstraintDescription: Must be a valid CIDR block
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Private subnet IDs for ECS tasks (comma-separated)
   PublicSubnetIds:
     Type: CommaDelimitedList
-    Description: Public subnet IDs for ALB (comma-separated). Required when DomainName is provided.
     Default: ""
 
   # Container & Application Configuration
   ECRRepositoryUrl:
     Type: String
-    Description: Full ECR repository URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com/robosystems)
   ECRImageTag:
     Type: String
-    Description: Docker image tag
     Default: latest
   ContainerPort:
     Type: Number
     Default: 8000
     MinValue: 1
     MaxValue: 65535
-    Description: Port the container listens on
 
   # ECS & Compute Configuration
   Cpu:
     Type: String
     Default: "512"
-    Description: CPU units for ECS task (512 = 0.5 vCPU)
     AllowedValues:
       - "256"
       - "512"
@@ -57,7 +46,6 @@ Parameters:
   Memory:
     Type: String
     Default: "1024"
-    Description: Memory in MiB for ECS task
     AllowedValues:
       - "512"
       - "1024"
@@ -70,43 +58,36 @@ Parameters:
     Default: 1
     MinValue: 1
     MaxValue: 100
-    Description: Minimum number of tasks for auto scaling
   MaxCapacity:
     Type: Number
     Default: 10
     MinValue: 1
     MaxValue: 100
-    Description: Maximum number of tasks for auto scaling
   CPUTargetValue:
     Type: Number
     Default: 70
     MinValue: 1
     MaxValue: 100
-    Description: Target CPU utilization percentage for auto scaling
   MemoryTargetValue:
     Type: Number
     Default: 60
     MinValue: 1
     MaxValue: 100
-    Description: Target Memory utilization percentage for auto scaling
   FargateWeight:
     Type: Number
     Default: 10
     MinValue: 0
     MaxValue: 100
-    Description: Weight for FARGATE capacity provider (On-Demand instances)
   FargateSpotWeight:
     Type: Number
     Default: 90
     MinValue: 0
     MaxValue: 100
-    Description: Weight for FARGATE_SPOT capacity provider (Spot instances)
   FargateBase:
     Type: Number
     Default: 0
     MinValue: 0
     MaxValue: 10
-    Description: Minimum number of tasks guaranteed to run on FARGATE (On-Demand). Set to 1+ for guaranteed availability during Spot shortages.
 
   # Access Mode Configuration
   ApiAccessMode:
@@ -123,15 +104,12 @@ Parameters:
   # Domain & DNS Configuration (Required only when ApiAccessMode=public)
   DomainName:
     Type: String
-    Description: Full domain name for the API (e.g., api.robosystems.ai). Required when ApiAccessMode=public.
     Default: ""
   RootDomainName:
     Type: String
-    Description: Root domain name (e.g., robosystems.ai). Required when ApiAccessMode=public.
     Default: ""
   HostedZoneId:
     Type: String
-    Description: Route53 Hosted Zone ID for the domain. Required when ApiAccessMode=public.
     Default: ""
 
   # Observability & Monitoring
@@ -140,112 +118,86 @@ Parameters:
     Default: 30
     MinValue: 1
     MaxValue: 365
-    Description: CloudWatch log retention in days
   LogRetentionStrategy:
     Type: String
     Default: "standard"
     AllowedValues: ["minimal", "standard", "extended"]
-    Description: "Log retention strategy for cost optimization"
   ContainerInsightsEnabled:
     Type: String
     Default: disabled
     AllowedValues:
       - enabled
       - disabled
-    Description: Enable/disable ECS Container Insights (adds ~$30-40/month in CloudWatch costs per cluster)
   PrometheusStackName:
     Type: String
-    Description: Name of the Prometheus CloudFormation stack for this environment
     Default: ""
 
   # Email Configuration
   EmailFromAddress:
     Type: String
-    Description: Verified email address for sending transactional emails via SES
     Default: "noreply@robosystems.ai"
     AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
-    ConstraintDescription: Must be a valid email address
 
   # Security Alerting
   SNSAlertEmail:
     Type: String
     Default: ""
-    Description: Email address for security alert notifications (empty disables the security alert topic and alarm actions)
 
   # Frontend URLs (for transactional email links, billing redirects, CORS)
   RoboSystemsAppUrl:
     Type: String
-    Description: RoboSystems frontend URL
     Default: "https://robosystems.ai"
   RoboLedgerAppUrl:
     Type: String
-    Description: RoboLedger frontend URL
     Default: "https://roboledger.ai"
   RoboInvestorAppUrl:
     Type: String
-    Description: RoboInvestor frontend URL
     Default: "https://roboinvestor.ai"
 
   # Cache Configuration
   ValkeyUrl:
     Type: String
-    Description: Valkey ElastiCache endpoint URL from Valkey stack
     AllowedPattern: ^rediss?://.*:[0-9]+$
-    ConstraintDescription: Must be a valid Redis URL (redis://host:port or rediss://host:port)
   ValkeyClientSecurityGroupId:
     Type: String
-    Description: Security group ID for applications connecting to Valkey
     AllowedPattern: ^sg-[0-9a-f]+$
-    ConstraintDescription: Must be a valid security group ID
   OpenSearchEndpoint:
     Type: String
-    Description: OpenSearch domain endpoint URL (empty if not deployed)
     Default: ""
   OpenSearchClientSecurityGroupId:
     Type: String
-    Description: Security group ID for applications connecting to OpenSearch (empty if not deployed)
     Default: ""
   BastionSecurityGroupId:
     Type: String
-    Description: Security group ID for bastion host (for SSM tunnel access to admin API)
     AllowedPattern: ^sg-[0-9a-f]+$
-    ConstraintDescription: Must be a valid security group ID
 
   # Tagging Configuration
   ServiceTag:
     Type: String
     Default: RoboSystems
-    Description: Service tag for resource identification and billing
   ComponentTag:
     Type: String
     Default: API
-    Description: Component tag for resource identification and billing
 
   # PostgreSQL Configuration (from Postgres stack outputs)
   DatabaseEndpoint:
     Type: String
-    Description: "PostgreSQL database endpoint hostname"
   DatabasePort:
     Type: String
-    Description: "PostgreSQL database port"
     Default: "5432"
 
   # Lambda Configuration (container-based)
   LambdaImageUri:
     Type: String
-    Description: ECR image URI for Lambda functions (container-based deployment)
     Default: ""
 
   # S3 Bucket Configuration (from S3 stack outputs)
   SharedProcessedBucketArn:
     Type: String
-    Description: ARN of shared processed data bucket (from S3 stack output)
   DeploymentBucketArn:
     Type: String
-    Description: ARN of deployment bucket (from S3 stack output)
   UserDataBucketArn:
     Type: String
-    Description: ARN of user data bucket (from S3 stack output)
 
 Conditions:
   HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
@@ -1167,10 +1119,9 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  # CloudWatch alarm for failed admin authentications
-  # Security alert topic — email subscription for the detective-control alarms
-  # below. Only created when an alert email is supplied (HasAlertEmail); the
-  # alarms still exist without it, just with no action.
+  # Security alert topic + detective-control alarms. Topic created only when an
+  # alert email is supplied (HasAlertEmail); alarms always exist, actions wired
+  # only when the topic is present. Metrics come from SecurityAuditLogger.
   SecurityAlertTopic:
     Type: AWS::SNS::Topic
     Condition: HasAlertEmail
@@ -1180,21 +1131,12 @@ Resources:
       Subscription:
         - Endpoint: !Ref SNSAlertEmail
           Protocol: email
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
 
   FailedAdminAuthAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-${Environment}-api-failed-admin-auth
-      AlarmDescription: Alert on multiple failed admin authentication attempts
+      AlarmDescription: Multiple failed admin authentication attempts
       MetricName: FailedAdminAuth
       Namespace: !Sub "RoboSystems/Security/${Environment}"
       Statistic: Sum
@@ -1206,12 +1148,11 @@ Resources:
       AlarmActions:
         !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
 
-  # Spike in authentication failures — possible credential-stuffing / brute force.
   AuthFailureSpikeAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-${Environment}-api-auth-failure-spike
-      AlarmDescription: Alert on a spike in authentication failures across the API
+      AlarmDescription: Spike in auth failures (possible credential stuffing)
       MetricName: AuthFailure
       Namespace: !Sub "RoboSystems/Security/${Environment}"
       Statistic: Sum
@@ -1223,12 +1164,11 @@ Resources:
       AlarmActions:
         !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
 
-  # Any detected injection / path-traversal attempt is worth a page.
   InjectionAttemptAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-${Environment}-api-injection-attempt
-      AlarmDescription: Alert on any detected injection or path-traversal attempt
+      AlarmDescription: Detected injection or path-traversal attempt
       MetricName: InjectionAttempt
       Namespace: !Sub "RoboSystems/Security/${Environment}"
       Statistic: Sum
@@ -1240,12 +1180,11 @@ Resources:
       AlarmActions:
         !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
 
-  # Any detected privilege-escalation attempt is worth a page.
   PrivilegeEscalationAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-${Environment}-api-privilege-escalation
-      AlarmDescription: Alert on any detected privilege-escalation attempt
+      AlarmDescription: Detected privilege-escalation attempt
       MetricName: PrivilegeEscalationAttempt
       Namespace: !Sub "RoboSystems/Security/${Environment}"
       Statistic: Sum
@@ -1429,73 +1368,59 @@ Resources:
 
 Outputs:
   ApiAccessMode:
-    Description: API access mode (public or internal)
     Value: !Ref ApiAccessMode
   ApiUrl:
-    Description: URL of the API endpoint
     Value: !If
       - IsPublicWithDomain
       - !Sub https://${DomainName}
       - !Sub http://${ApiALB.DNSName}
   LoadBalancerDNS:
-    Description: DNS of the Load Balancer
     Value: !GetAtt ApiALB.DNSName
     Export:
       Name: !Sub ${AWS::StackName}-LoadBalancerDNS
   LoadBalancerScheme:
-    Description: ALB scheme (internet-facing or internal)
     Value: !If [IsPublicWithDomain, internet-facing, internal]
   ClusterName:
-    Description: Name of the ECS Cluster
     Value: !Ref ApiCluster
   ECRRepositoryUsed:
-    Description: ECR Repository used for Docker images
     Value: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-ECRRepositoryUsed
   ApiScalingTarget:
-    Description: Auto Scaling Target Resource ID
     Value: !Sub service/robosystems-api-${Environment}-cluster/robosystems-api-${Environment}-service
   CertificateArn:
     Condition: IsPublicWithDomain
-    Description: ACM Certificate ARN
     Value: !Ref ApiCertificate
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-CertificateArn
   ApiALBArn:
-    Description: ARN of the API Application Load Balancer
     Value: !Ref ApiALB
     Export:
       Name: !Sub ${AWS::StackName}-ApiALBArn
 
   ApiSecurityGroupId:
-    Description: Security group ID for API ECS tasks (for Dagster access)
     Value: !Ref ApiSecurityGroup
     Export:
       Name: !Sub ${AWS::StackName}-ApiSecurityGroupId
 
   # Admin Key Outputs
   AdminKeySecretArn:
-    Description: ARN of the admin key secret
     Value: !Ref AdminKeySecret
     Export:
       Name: !Sub ${AWS::StackName}-AdminKeySecretArn
 
   # Service Discovery Outputs
   ApiServiceDiscoveryEndpoint:
-    Description: Internal DNS endpoint for direct API access (bypasses ALB)
     Value: !Sub api.${Environment}.robosystems.local
     Export:
       Name: !Sub ${AWS::StackName}-ServiceDiscoveryEndpoint
 
   ApiServiceDiscoveryNamespaceId:
-    Description: Service Discovery namespace ID (can be shared with other services)
     Value: !Ref ApiNamespace
     Export:
       Name: !Sub ${AWS::StackName}-ServiceDiscoveryNamespaceId
 
   ApiServiceDiscoveryNamespaceArn:
-    Description: Service Discovery namespace ARN
     Value: !GetAtt ApiNamespace.Arn
     Export:
       Name: !Sub ${AWS::StackName}-ServiceDiscoveryNamespaceArn

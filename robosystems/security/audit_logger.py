@@ -6,6 +6,8 @@ authorization violations, and suspicious activities.
 """
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -81,31 +83,49 @@ _ADMIN_FLAGGABLE_EVENTS = frozenset(
   }
 )
 
+# Metric publishing runs OFF the request path. log_security_event is called
+# synchronously from async auth handlers (get_current_user, AdminAuthMiddleware),
+# so a blocking put_metric_data would stall the whole event loop — worst during
+# an auth-failure spike, which is exactly when these alarms matter. Publish on a
+# small bounded thread pool instead, with short client timeouts, and shed load
+# past _METRIC_MAX_INFLIGHT rather than let work queue without bound under a flood.
+_METRIC_MAX_INFLIGHT = 256
+
 _cloudwatch_client: Any = None
+_metric_executor: ThreadPoolExecutor | None = None
+_metric_inflight = 0
+_metric_lock = threading.Lock()
 
 
 def _get_cloudwatch_client() -> Any:
   global _cloudwatch_client
   if _cloudwatch_client is None:
     import boto3
+    from botocore.config import Config
 
-    _cloudwatch_client = boto3.client("cloudwatch", region_name=env.AWS_REGION)
+    # Short timeouts + no retries: a stalled CloudWatch endpoint must fail fast,
+    # never hold a pool thread (or, historically, the event loop) for ~60s.
+    _cloudwatch_client = boto3.client(
+      "cloudwatch",
+      region_name=env.AWS_REGION,
+      config=Config(connect_timeout=2, read_timeout=3, retries={"max_attempts": 1}),
+    )
   return _cloudwatch_client
 
 
-def _publish_security_metrics(metric_names: list[str]) -> None:
-  """Publish security alerting metrics to CloudWatch.
+def _get_metric_executor() -> ThreadPoolExecutor:
+  global _metric_executor
+  if _metric_executor is None:
+    _metric_executor = ThreadPoolExecutor(
+      max_workers=2, thread_name_prefix="security-metrics"
+    )
+  return _metric_executor
 
-  Best-effort and prod/staging-only: skipped where there is no CloudWatch or
-  credentials (dev/test), and never allowed to raise into the caller — a
-  metrics failure must never break an auth or authorization path.
-  """
-  if not metric_names:
-    return
-  if not (env.is_production() or env.is_staging()):
-    return
+
+def _put_metric_data(namespace: str, metric_names: list[str]) -> None:
+  """Blocking CloudWatch publish — runs on the metric pool, never the caller."""
+  global _metric_inflight
   try:
-    namespace = f"RoboSystems/Security/{env.ENVIRONMENT}"
     _get_cloudwatch_client().put_metric_data(
       Namespace=namespace,
       MetricData=[
@@ -113,8 +133,39 @@ def _publish_security_metrics(metric_names: list[str]) -> None:
       ],
     )
   except Exception as e:
-    # Metrics are best-effort; a publish failure must not affect the request.
+    # Metrics are best-effort; a publish failure must not surface anywhere.
     logger.debug(f"Failed to publish security metric(s) {metric_names}: {e}")
+  finally:
+    with _metric_lock:
+      _metric_inflight -= 1
+
+
+def _publish_security_metrics(metric_names: list[str]) -> None:
+  """Queue security alerting metrics for CloudWatch, off the request path.
+
+  Best-effort and prod/staging-only: skipped where there is no CloudWatch or
+  credentials (dev/test). The actual publish runs on a bounded thread pool so it
+  never blocks the (often async) auth path, and load is shed past
+  ``_METRIC_MAX_INFLIGHT`` so a flood can't grow the queue without bound. Never
+  raises into the caller.
+  """
+  global _metric_inflight
+  if not metric_names:
+    return
+  if not (env.is_production() or env.is_staging()):
+    return
+  with _metric_lock:
+    if _metric_inflight >= _METRIC_MAX_INFLIGHT:
+      return
+    _metric_inflight += 1
+  namespace = f"RoboSystems/Security/{env.ENVIRONMENT}"
+  try:
+    _get_metric_executor().submit(_put_metric_data, namespace, list(metric_names))
+  except Exception as e:
+    # Executor rejected the task (e.g. interpreter shutdown) — release the slot.
+    with _metric_lock:
+      _metric_inflight -= 1
+    logger.debug(f"Failed to queue security metric(s) {metric_names}: {e}")
 
 
 class SecurityAuditLogger:

@@ -122,7 +122,7 @@ class AdminAuthMiddleware:
       extra={
         "admin_key_id": key_metadata["key_id"],
         "admin_name": key_metadata["name"],
-        "ip_address": request.client.host,
+        "ip_address": request.client.host if request.client else None,
       },
     )
 

@@ -10,11 +10,20 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi import HTTPException
 
+import robosystems.security.audit_logger as audit_mod
 from robosystems.security.audit_logger import (
   SecurityAuditLogger,
   SecurityEventType,
   _publish_security_metrics,
 )
+
+
+class _InlineExecutor:
+  """Runs submitted callables synchronously so tests can assert on the effect."""
+
+  def submit(self, fn, *args, **kwargs):
+    fn(*args, **kwargs)
+    return None
 
 
 class TestSecurityMetricMapping:
@@ -101,33 +110,55 @@ class TestSecurityMetricMapping:
 
 
 class TestPublishSecurityMetrics:
-  """``_publish_security_metrics`` is prod/staging-only and best-effort."""
+  """``_publish_security_metrics`` is prod/staging-only, off-thread, best-effort."""
+
+  @pytest.fixture(autouse=True)
+  def _reset_inflight(self):
+    audit_mod._metric_inflight = 0
+    yield
+    audit_mod._metric_inflight = 0
 
   @patch("robosystems.security.audit_logger.env")
   def test_skipped_when_not_prod_or_staging(self, mock_env):
     mock_env.is_production.return_value = False
     mock_env.is_staging.return_value = False
-    with patch(
-      "robosystems.security.audit_logger._get_cloudwatch_client"
-    ) as mock_client:
+    with patch("robosystems.security.audit_logger._get_metric_executor") as mock_exec:
       _publish_security_metrics(["AuthFailure"])
-      mock_client.assert_not_called()
+      mock_exec.assert_not_called()
 
   @patch("robosystems.security.audit_logger.env")
   def test_empty_metric_list_is_noop(self, mock_env):
     mock_env.is_production.return_value = True
     mock_env.is_staging.return_value = False
-    with patch(
-      "robosystems.security.audit_logger._get_cloudwatch_client"
-    ) as mock_client:
+    with patch("robosystems.security.audit_logger._get_metric_executor") as mock_exec:
       _publish_security_metrics([])
-      mock_client.assert_not_called()
+      mock_exec.assert_not_called()
 
+  @patch("robosystems.security.audit_logger._get_metric_executor")
   @patch("robosystems.security.audit_logger.env")
-  def test_publishes_to_security_namespace_in_production(self, mock_env):
+  def test_offloads_to_executor_not_inline(self, mock_env, mock_exec):
+    # The publish must be handed to the thread pool, never run on the caller.
     mock_env.is_production.return_value = True
     mock_env.is_staging.return_value = False
     mock_env.ENVIRONMENT = "prod"
+    executor = Mock()
+    mock_exec.return_value = executor
+    with patch(
+      "robosystems.security.audit_logger._get_cloudwatch_client"
+    ) as mock_client:
+      _publish_security_metrics(["AuthFailure"])
+      # Submitted to the pool; the blocking CloudWatch call did NOT run inline.
+      executor.submit.assert_called_once()
+      assert executor.submit.call_args.args[0] is audit_mod._put_metric_data
+      mock_client.assert_not_called()
+
+  @patch("robosystems.security.audit_logger._get_metric_executor")
+  @patch("robosystems.security.audit_logger.env")
+  def test_publishes_to_security_namespace_in_production(self, mock_env, mock_exec):
+    mock_env.is_production.return_value = True
+    mock_env.is_staging.return_value = False
+    mock_env.ENVIRONMENT = "prod"
+    mock_exec.return_value = _InlineExecutor()
     cw = Mock()
     with patch(
       "robosystems.security.audit_logger._get_cloudwatch_client", return_value=cw
@@ -140,11 +171,13 @@ class TestPublishSecurityMetrics:
     assert names == {"AuthFailure", "FailedAdminAuth"}
     assert all(m["Value"] == 1 and m["Unit"] == "Count" for m in kwargs["MetricData"])
 
+  @patch("robosystems.security.audit_logger._get_metric_executor")
   @patch("robosystems.security.audit_logger.env")
-  def test_publishes_in_staging(self, mock_env):
+  def test_publishes_in_staging(self, mock_env, mock_exec):
     mock_env.is_production.return_value = False
     mock_env.is_staging.return_value = True
     mock_env.ENVIRONMENT = "staging"
+    mock_exec.return_value = _InlineExecutor()
     cw = Mock()
     with patch(
       "robosystems.security.audit_logger._get_cloudwatch_client", return_value=cw
@@ -154,11 +187,13 @@ class TestPublishSecurityMetrics:
       "RoboSystems/Security/staging"
     )
 
+  @patch("robosystems.security.audit_logger._get_metric_executor")
   @patch("robosystems.security.audit_logger.env")
-  def test_publish_failure_is_swallowed(self, mock_env):
+  def test_publish_failure_is_swallowed(self, mock_env, mock_exec):
     mock_env.is_production.return_value = True
     mock_env.is_staging.return_value = False
     mock_env.ENVIRONMENT = "prod"
+    mock_exec.return_value = _InlineExecutor()
     cw = Mock()
     cw.put_metric_data.side_effect = RuntimeError("cloudwatch unavailable")
     with patch(
@@ -166,6 +201,18 @@ class TestPublishSecurityMetrics:
     ):
       # Must not raise — metrics are best-effort and never break the caller.
       _publish_security_metrics(["AuthFailure"])
+    # In-flight slot is released even when the publish raises.
+    assert audit_mod._metric_inflight == 0
+
+  @patch("robosystems.security.audit_logger._get_metric_executor")
+  @patch("robosystems.security.audit_logger.env")
+  def test_sheds_load_past_inflight_cap(self, mock_env, mock_exec):
+    mock_env.is_production.return_value = True
+    mock_env.is_staging.return_value = False
+    mock_env.ENVIRONMENT = "prod"
+    with patch.object(audit_mod, "_METRIC_MAX_INFLIGHT", 0):
+      _publish_security_metrics(["AuthFailure"])
+      mock_exec.assert_not_called()
 
 
 class TestAdminAuthFailurePath:
