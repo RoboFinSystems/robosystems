@@ -12,6 +12,16 @@ Description: RoboSystems Security Baseline - Account-Global Detective Controls (
 # IAM Access Analyzer. Amazon Inspector v2 has no native single-account
 # CloudFormation resource (enablement is the inspector2:Enable API), so it is
 # turned on by a small idempotent CLI step in the deploy job, not here.
+#
+# Workflow scope: the deploy job wires only Environment + EnableConfig
+# (SECURITY_CONFIG_ENABLED). GuardDuty / Security Hub / Access Analyzer use their
+# template defaults (on) — SECURITY_ENABLED is intentionally all-or-nothing for
+# those three; granular per-service toggling would need additional GH variables.
+#
+# Precondition: these are account-global singletons. If GuardDuty, Security Hub,
+# or Access Analyzer is already enabled out-of-band in the target account, first
+# stack creation fails with an "already exists" error — an account-state
+# precondition, not a permissions gap, so there is no CFN-level guard for it.
 
 Parameters:
   Environment:
@@ -111,6 +121,12 @@ Resources:
     Properties:
       ControlFindingGenerator: SECURITY_CONTROL
       AutoEnableControls: true
+      # Hub Tags is a JSON map (not the Key/Value list the other resources use).
+      Tags:
+        Environment: !Ref Environment
+        Service: !Ref ServiceTag
+        Component: !Ref ComponentTag
+        Purpose: SOC2-Compliance
 
   # AWS Foundational Security Best Practices — the AWS-recommended baseline.
   SecurityHubFSBP:
