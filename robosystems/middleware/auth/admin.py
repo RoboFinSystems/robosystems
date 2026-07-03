@@ -9,6 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ...config.secrets_manager import get_secrets_manager
 from ...logger import get_logger
+from ...security.audit_logger import SecurityAuditLogger
 
 logger = get_logger(__name__)
 
@@ -98,7 +99,14 @@ class AdminAuthMiddleware:
     key_metadata = self.verify_admin_key(api_key)
 
     if not key_metadata:
-      logger.warning(f"Invalid admin key attempted from IP: {request.client.host}")
+      client_ip = request.client.host if request.client else None
+      logger.warning(f"Invalid admin key attempted from IP: {client_ip}")
+      SecurityAuditLogger.log_admin_auth_failure(
+        reason="invalid_admin_key",
+        ip_address=client_ip,
+        endpoint=str(request.url.path),
+        user_agent=request.headers.get("User-Agent"),
+      )
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid admin API key",

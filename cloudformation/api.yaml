@@ -166,6 +166,12 @@ Parameters:
     AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
     ConstraintDescription: Must be a valid email address
 
+  # Security Alerting
+  SNSAlertEmail:
+    Type: String
+    Default: ""
+    Description: Email address for security alert notifications (empty disables the security alert topic and alarm actions)
+
   # Frontend URLs (for transactional email links, billing redirects, CORS)
   RoboSystemsAppUrl:
     Type: String
@@ -250,6 +256,7 @@ Conditions:
   IsPublicWithDomain: !Equals [!Ref ApiAccessMode, "public"]
   IsInternal: !Equals [!Ref ApiAccessMode, "internal"]
   HasOpenSearch: !Not [!Equals [!Ref OpenSearchEndpoint, ""]]
+  HasAlertEmail: !Not [!Equals [!Ref SNSAlertEmail, ""]]
 
 Mappings:
   LogRetentionPolicies:
@@ -332,14 +339,16 @@ Resources:
                 Action:
                   - cloudformation:DescribeStacks
                 Resource: "*"
-              # CloudWatch metrics for allocation monitoring
+              # CloudWatch metrics for allocation monitoring + security alerting
               - Effect: Allow
                 Action:
                   - cloudwatch:PutMetricData
                 Resource: "*"
                 Condition:
                   StringEquals:
-                    "cloudwatch:namespace": !Sub "RoboSystems/Graph/${Environment}"
+                    "cloudwatch:namespace":
+                      - !Sub "RoboSystems/Graph/${Environment}"
+                      - !Sub "RoboSystems/Security/${Environment}"
               # Auto Scaling permissions for capacity checks and scale-up triggers
               - Effect: Allow
                 Action:
@@ -1159,19 +1168,94 @@ Resources:
           Value: CloudFormation
 
   # CloudWatch alarm for failed admin authentications
+  # Security alert topic — email subscription for the detective-control alarms
+  # below. Only created when an alert email is supplied (HasAlertEmail); the
+  # alarms still exist without it, just with no action.
+  SecurityAlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlertEmail
+    Properties:
+      TopicName: !Sub robosystems-${Environment}-security-alerts
+      DisplayName: !Sub RoboSystems ${Environment} Security Alerts
+      Subscription:
+        - Endpoint: !Ref SNSAlertEmail
+          Protocol: email
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
   FailedAdminAuthAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub robosystems-${Environment}-api-failed-admin-auth
       AlarmDescription: Alert on multiple failed admin authentication attempts
       MetricName: FailedAdminAuth
-      Namespace: RoboSystems/Admin
+      Namespace: !Sub "RoboSystems/Security/${Environment}"
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
       Threshold: 5
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
+
+  # Spike in authentication failures — possible credential-stuffing / brute force.
+  AuthFailureSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-${Environment}-api-auth-failure-spike
+      AlarmDescription: Alert on a spike in authentication failures across the API
+      MetricName: AuthFailure
+      Namespace: !Sub "RoboSystems/Security/${Environment}"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
+
+  # Any detected injection / path-traversal attempt is worth a page.
+  InjectionAttemptAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-${Environment}-api-injection-attempt
+      AlarmDescription: Alert on any detected injection or path-traversal attempt
+      MetricName: InjectionAttempt
+      Namespace: !Sub "RoboSystems/Security/${Environment}"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
+
+  # Any detected privilege-escalation attempt is worth a page.
+  PrivilegeEscalationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-${Environment}-api-privilege-escalation
+      AlarmDescription: Alert on any detected privilege-escalation attempt
+      MetricName: PrivilegeEscalationAttempt
+      Namespace: !Sub "RoboSystems/Security/${Environment}"
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        !If [HasAlertEmail, [!Ref SecurityAlertTopic], !Ref "AWS::NoValue"]
 
   # ===========================================
   # API Key Rotation Lambda

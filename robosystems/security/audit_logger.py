@@ -51,6 +51,72 @@ class SecurityEventType(Enum):
   GRAPH_DELETED = "graph_deleted"
 
 
+# CloudWatch metrics: the compliance/alerting-relevant subset of security
+# events is published to RoboSystems/Security/{env} so the detective-control
+# alarms in cloudformation/api.yaml can actually fire. Operational events
+# (email_sent, auth_success, operation_timeout, …) are deliberately excluded
+# to keep the metric stream low-volume and the alarms meaningful.
+_METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
+  SecurityEventType.AUTH_FAILURE: "AuthFailure",
+  SecurityEventType.AUTH_TOKEN_EXPIRED: "AuthFailure",
+  SecurityEventType.AUTH_TOKEN_INVALID: "AuthFailure",
+  SecurityEventType.API_KEY_INVALID: "AuthFailure",
+  SecurityEventType.API_KEY_EXPIRED: "AuthFailure",
+  SecurityEventType.AUTHORIZATION_DENIED: "AuthorizationDenied",
+  SecurityEventType.INJECTION_ATTEMPT: "InjectionAttempt",
+  SecurityEventType.PATH_TRAVERSAL_ATTEMPT: "InjectionAttempt",
+  SecurityEventType.PRIVILEGE_ESCALATION_ATTEMPT: "PrivilegeEscalationAttempt",
+}
+
+# Emitted in addition to AuthFailure when the failure is on the admin surface,
+# so FailedAdminAuthAlarm has a dedicated, low-noise trigger.
+_ADMIN_AUTH_FAILURE_METRIC = "FailedAdminAuth"
+
+# Auth-failure event types that count as an admin failure when details.admin is set.
+_ADMIN_FLAGGABLE_EVENTS = frozenset(
+  {
+    SecurityEventType.AUTH_FAILURE,
+    SecurityEventType.API_KEY_INVALID,
+    SecurityEventType.AUTH_TOKEN_INVALID,
+  }
+)
+
+_cloudwatch_client: Any = None
+
+
+def _get_cloudwatch_client() -> Any:
+  global _cloudwatch_client
+  if _cloudwatch_client is None:
+    import boto3
+
+    _cloudwatch_client = boto3.client("cloudwatch", region_name=env.AWS_REGION)
+  return _cloudwatch_client
+
+
+def _publish_security_metrics(metric_names: list[str]) -> None:
+  """Publish security alerting metrics to CloudWatch.
+
+  Best-effort and prod/staging-only: skipped where there is no CloudWatch or
+  credentials (dev/test), and never allowed to raise into the caller — a
+  metrics failure must never break an auth or authorization path.
+  """
+  if not metric_names:
+    return
+  if not (env.is_production() or env.is_staging()):
+    return
+  try:
+    namespace = f"RoboSystems/Security/{env.ENVIRONMENT}"
+    _get_cloudwatch_client().put_metric_data(
+      Namespace=namespace,
+      MetricData=[
+        {"MetricName": name, "Value": 1, "Unit": "Count"} for name in metric_names
+      ],
+    )
+  except Exception as e:
+    # Metrics are best-effort; a publish failure must not affect the request.
+    logger.debug(f"Failed to publish security metric(s) {metric_names}: {e}")
+
+
 class SecurityAuditLogger:
   """Centralized security audit logging."""
 
@@ -96,6 +162,38 @@ class SecurityAuditLogger:
 
     # Log as structured JSON for security monitoring
     logger.warning(f"SECURITY_AUDIT: {json.dumps(audit_data)}")
+
+    # Publish the alerting metric for the compliance-relevant subset so the
+    # CloudWatch detective-control alarms can fire (no-op outside prod/staging).
+    metric_names: list[str] = []
+    metric = _METRIC_FOR_EVENT.get(event_type)
+    if metric:
+      metric_names.append(metric)
+    if (details or {}).get("admin") and event_type in _ADMIN_FLAGGABLE_EVENTS:
+      metric_names.append(_ADMIN_AUTH_FAILURE_METRIC)
+    _publish_security_metrics(metric_names)
+
+  @staticmethod
+  def log_admin_auth_failure(
+    reason: str,
+    ip_address: str | None = None,
+    endpoint: str | None = None,
+    user_agent: str | None = None,
+  ):
+    """Log an admin-surface authentication failure.
+
+    Flags the event as admin so a dedicated ``FailedAdminAuth`` CloudWatch
+    metric is emitted alongside the generic ``AuthFailure`` signal, giving
+    ``FailedAdminAuthAlarm`` a low-noise trigger.
+    """
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.AUTH_FAILURE,
+      ip_address=ip_address,
+      user_agent=user_agent,
+      endpoint=endpoint,
+      details={"admin": True, "failure_reason": reason},
+      risk_level="high",
+    )
 
   @staticmethod
   def log_auth_failure(
