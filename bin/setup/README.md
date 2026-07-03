@@ -392,6 +392,8 @@ just setup-gha
 | `CLOUDTRAIL_LOG_RETENTION_DAYS`  | `90`     | CloudTrail retention |
 | `CLOUDTRAIL_DATA_EVENTS_ENABLED` | `false`  | Log S3 data events   |
 | `SECRETS_ROTATION_ENABLED_*`     | `false`  | Monthly key rotation |
+| `AUDIT_ENABLED_*`                | `false`  | Retain audit logs to S3 |
+| `AUDIT_RETENTION_DAYS`           | `400`    | Audit S3 retention (days) |
 
 #### WAF Configuration
 

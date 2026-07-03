@@ -221,6 +221,23 @@ on:
         type: string
         default: "true"
 
+      # Audit Trail Retention (optional)
+      audit_enabled:
+        description: "Enable long-retention forwarding of audit logs to S3"
+        required: false
+        type: string
+        default: "false"
+      audit_stack_name:
+        description: "CloudFormation stack name for the audit stack"
+        required: false
+        type: string
+        default: ""
+      audit_retention_days:
+        description: "Days to retain audit records in S3 (~13 months = 400)"
+        required: false
+        type: string
+        default: "400"
+
       # Notification Configuration
       aws_sns_alert_email:
         description: "Email address for SNS alerts and notifications"
@@ -527,3 +544,97 @@ jobs:
           echo "Geo Blocking: ${{ inputs.waf_enable_geo_blocking }}"
           echo "AWS Managed Rules: ${{ inputs.waf_enable_aws_managed_rules }}"
           echo "Estimated monthly cost: $ESTIMATED_COST"
+
+  # Audit-log retention as separate job (only runs when enabled).
+  # Needs the API stack so the /robosystems/{env}/api log group exists before
+  # the subscription filter attaches to it.
+  audit:
+    needs: deploy
+    if: inputs.audit_enabled == 'true' && inputs.audit_stack_name != ''
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ github.token }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy Audit Stack
+        run: |
+          echo "Deploying audit-log retention forwarding"
+
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.audit_stack_name }} 2>&1 | grep -q 'Stack with id .* does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new audit stack: ${{ inputs.audit_stack_name }}"
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing audit stack: ${{ inputs.audit_stack_name }}"
+          fi
+
+          AUDIT_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }}"
+          AUDIT_PARAMS="$AUDIT_PARAMS ParameterKey=RetentionDays,ParameterValue=${{ inputs.audit_retention_days }}"
+
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.audit_stack_name }} \
+              --template-body file://cloudformation/audit.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $AUDIT_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Audit \
+                Key=ManagedBy,Value="GitHub Actions"
+
+            echo "Waiting for audit stack creation..."
+            aws cloudformation wait stack-create-complete \
+              --stack-name ${{ inputs.audit_stack_name }} || {
+              echo "Audit stack creation failed"
+              aws cloudformation describe-stack-events \
+                --stack-name ${{ inputs.audit_stack_name }} \
+                --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId, ResourceStatusReason]' \
+                --output table
+              exit 1
+            }
+          else
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.audit_stack_name }} \
+              --template-body file://cloudformation/audit.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $AUDIT_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Audit \
+                Key=ManagedBy,Value="GitHub Actions" \
+              2>&1 || true)
+
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "No changes detected in audit stack"
+            else
+              echo "Waiting for audit stack update..."
+              aws cloudformation wait stack-update-complete \
+                --stack-name ${{ inputs.audit_stack_name }} || {
+                echo "Audit stack update failed"
+                aws cloudformation describe-stack-events \
+                  --stack-name ${{ inputs.audit_stack_name }} \
+                  --query 'StackEvents[?ResourceStatus==`UPDATE_FAILED`].[LogicalResourceId, ResourceStatusReason]' \
+                  --output table
+                exit 1
+              }
+            fi
+          fi
+
+          echo "Audit stack deployed successfully"

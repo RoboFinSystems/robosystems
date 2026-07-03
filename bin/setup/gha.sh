@@ -506,6 +506,14 @@ function setup_full_config() {
         gh variable set WAF_ENABLED_STAGING --body "false"
     fi
 
+    # Audit Trail Retention (environment-specific) - disabled by default
+    # Forwards security-audit logs to a long-retention S3 bucket when enabled.
+    gh variable set AUDIT_ENABLED_PROD --body "false"
+    gh variable set AUDIT_RETENTION_DAYS --body "400"
+    if $setup_staging; then
+        gh variable set AUDIT_ENABLED_STAGING --body "false"
+    fi
+
     # Infrastructure Configuration
     gh variable set VPC_MAX_AVAILABILITY_ZONES --body "2"
     # VPC Endpoint Mode: 'gateway' (free S3+DynamoDB), 'minimal' (~$22/mo), 'full' (~$45/mo)
