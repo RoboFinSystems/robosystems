@@ -341,7 +341,7 @@ pip install robosystems-client
 **Security & Compliance:**
 
 - **[SECURITY.md](/SECURITY.md)** - Security control catalog with implementation references
-- **[Security & Compliance (Wiki)](https://github.com/RoboFinSystems/robosystems/wiki/Security-and-Compliance)** - Operator guide: the optional compliance stacks, their toggles, and the SOC 2 posture for forks
+- **[Compliance](https://github.com/RoboFinSystems/robosystems/wiki/Security-and-Compliance)** - Compliance stacks, toggles, and SOC 2 posture
 
 ## API Reference
 
