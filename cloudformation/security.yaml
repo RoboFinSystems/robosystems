@@ -258,12 +258,16 @@ Resources:
       RecordingMode:
         RecordingFrequency: !Ref ConfigRecordingFrequency
 
-  # A delivery channel must exist before the recorder can record, so order the
-  # recorder after the channel, and the channel after the bucket policy.
+  # The delivery channel can only be created once the configuration recorder
+  # exists (otherwise CloudFormation fails with "configuration recorder is not
+  # available to put delivery channel"), and it needs the bucket policy in place
+  # to write. Order it after both.
   ConfigDeliveryChannel:
     Type: AWS::Config::DeliveryChannel
     Condition: ConfigOn
-    DependsOn: ConfigBucketPolicy
+    DependsOn:
+      - ConfigBucketPolicy
+      - ConfigRecorder
     Properties:
       Name: default
       S3BucketName: !Ref ConfigBucket
