@@ -383,17 +383,19 @@ just setup-gha
 
 #### Compliance & Security
 
-| Variable                         | Default  | Description          |
-| -------------------------------- | -------- | -------------------- |
-| `VPC_FLOW_LOGS_ENABLED`          | `false`  | Enable VPC flow logs |
-| `VPC_FLOW_LOGS_RETENTION_DAYS`   | `90`     | Flow log retention   |
-| `VPC_FLOW_LOGS_TRAFFIC_TYPE`     | `REJECT` | Traffic type to log  |
-| `CLOUDTRAIL_ENABLED`             | `false`  | Enable CloudTrail    |
-| `CLOUDTRAIL_LOG_RETENTION_DAYS`  | `90`     | CloudTrail retention |
-| `CLOUDTRAIL_DATA_EVENTS_ENABLED` | `false`  | Log S3 data events   |
-| `SECRETS_ROTATION_ENABLED_*`     | `false`  | Monthly key rotation |
-| `AUDIT_ENABLED_*`                | `false`  | Retain audit logs to S3 |
-| `AUDIT_RETENTION_DAYS`           | `400`    | Audit S3 retention (days) |
+| Variable                         | Default  | Description                                                                        |
+| -------------------------------- | -------- | ---------------------------------------------------------------------------------- |
+| `VPC_FLOW_LOGS_ENABLED`          | `false`  | Enable VPC flow logs                                                               |
+| `VPC_FLOW_LOGS_RETENTION_DAYS`   | `90`     | Flow log retention                                                                 |
+| `VPC_FLOW_LOGS_TRAFFIC_TYPE`     | `REJECT` | Traffic type to log                                                                |
+| `CLOUDTRAIL_ENABLED`             | `false`  | Enable CloudTrail                                                                  |
+| `CLOUDTRAIL_LOG_RETENTION_DAYS`  | `90`     | CloudTrail retention                                                               |
+| `CLOUDTRAIL_DATA_EVENTS_ENABLED` | `false`  | Log S3 data events                                                                 |
+| `SECRETS_ROTATION_ENABLED_*`     | `false`  | Monthly key rotation                                                               |
+| `AUDIT_ENABLED_*`                | `false`  | Retain audit logs to S3                                                            |
+| `AUDIT_RETENTION_DAYS`           | `400`    | Audit S3 retention (days)                                                          |
+| `SECURITY_ENABLED`               | `false`  | Enable the security baseline (GuardDuty, Security Hub, Access Analyzer, Inspector) |
+| `SECURITY_CONFIG_ENABLED`        | `false`  | Also enable the AWS Config recorder (cost scales with resource count)              |
 
 #### WAF Configuration
 

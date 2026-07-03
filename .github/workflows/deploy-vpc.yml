@@ -88,6 +88,23 @@ on:
         type: string
         default: ""
 
+      # Security Baseline Configuration (account-global detective controls, SOC 2)
+      security_enabled:
+        description: "Enable the account-global security baseline (GuardDuty, Security Hub, Access Analyzer, optional Config + Inspector)"
+        required: false
+        type: string
+        default: "false"
+      security_stack_name:
+        description: "Security baseline CloudFormation stack name"
+        required: false
+        type: string
+        default: "RoboSystemsSecurity"
+      security_config_enabled:
+        description: "Enable the AWS Config recorder inside the security stack (cost scales with resource count)"
+        required: false
+        type: string
+        default: "false"
+
     outputs:
       vpc_id:
         description: "VPC ID"
@@ -349,3 +366,114 @@ jobs:
           stack-name: "${{ inputs.cloudtrail_stack_name }}"
           timeout: "900"
           interval: "10"
+
+  # Security baseline deployment as a separate job (only runs when enabled).
+  # Account-global detective controls — a sibling to the cloudtrail job, gated
+  # on its own SECURITY_ENABLED variable so the two toggle independently.
+  security:
+    needs: deploy
+    if: inputs.security_enabled == 'true'
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ github.token }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy Security Baseline Stack
+        id: deploy-security
+        run: |
+          SECURITY_STACK_NAME="${{ inputs.security_stack_name }}"
+          echo "Deploying security baseline stack: $SECURITY_STACK_NAME"
+
+          if aws cloudformation describe-stacks --stack-name $SECURITY_STACK_NAME 2>&1 | grep -q 'Stack with id .* does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new security stack $SECURITY_STACK_NAME"
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing security stack $SECURITY_STACK_NAME"
+          fi
+
+          # The security services are account-global; VPC deploys as 'shared'
+          # for production, so normalize to 'prod' for tagging.
+          if [ "${{ inputs.environment }}" = "shared" ]; then
+            SECURITY_ENV="prod"
+          else
+            SECURITY_ENV="${{ inputs.environment }}"
+          fi
+
+          SECURITY_PARAMS="ParameterKey=Environment,ParameterValue=$SECURITY_ENV \
+                      ParameterKey=EnableConfig,ParameterValue=${{ inputs.security_config_enabled }}"
+
+          echo "AWS Config recorder enabled: ${{ inputs.security_config_enabled }}"
+
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            aws cloudformation $STACK_ACTION \
+              --stack-name $SECURITY_STACK_NAME \
+              --template-body file://cloudformation/security.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $SECURITY_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Security \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions || {
+                  echo "Failed to create security stack"
+                  exit 1
+                }
+          else
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name $SECURITY_STACK_NAME \
+              --template-body file://cloudformation/security.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $SECURITY_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Security \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Security stack is already up to date - no changes needed"
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating security stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Security stack update initiated successfully"
+            fi
+          fi
+
+      - name: Monitor Security Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: "${{ inputs.security_stack_name }}"
+          timeout: "900"
+          interval: "10"
+
+      # Amazon Inspector v2 has no native single-account CloudFormation resource,
+      # so enable it here via the idempotent inspector2:enable API. Re-running is
+      # safe — already-enabled resource types are returned unchanged.
+      - name: Enable Amazon Inspector
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "Enabling Amazon Inspector (EC2, ECR, LAMBDA) for account $ACCOUNT_ID"
+          aws inspector2 enable \
+            --resource-types EC2 ECR LAMBDA \
+            --account-ids "$ACCOUNT_ID" || {
+              echo "inspector2:enable returned non-zero (may already be enabled) — continuing"
+            }

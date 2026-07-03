@@ -181,6 +181,7 @@ Resources:
                       - delivery.logs.amazonaws.com
                       - grafana.amazonaws.com
                       - cloudfront.amazonaws.com
+                      - config.amazonaws.com
 
               # PassRole for audit-stack service roles — the Firehose delivery
               # role and the CloudWatch Logs subscription-filter role. Scoped to
@@ -343,6 +344,41 @@ Resources:
                 Effect: Allow
                 Action:
                   - firehose:*
+                Resource: "*"
+
+              # Security baseline (security.yaml) — account-global detective
+              # controls. Off by default; these grants let the deploy role create
+              # the stack when SECURITY_ENABLED is turned on. Service-linked-role
+              # creation (GuardDuty/Security Hub/Inspector/Access Analyzer) and the
+              # Config recorder role are already covered by the IAM statements above.
+              - Sid: GuardDuty
+                Effect: Allow
+                Action:
+                  - guardduty:*
+                Resource: "*"
+
+              - Sid: SecurityHub
+                Effect: Allow
+                Action:
+                  - securityhub:*
+                Resource: "*"
+
+              - Sid: Config
+                Effect: Allow
+                Action:
+                  - config:*
+                Resource: "*"
+
+              - Sid: Inspector
+                Effect: Allow
+                Action:
+                  - inspector2:*
+                Resource: "*"
+
+              - Sid: AccessAnalyzer
+                Effect: Allow
+                Action:
+                  - access-analyzer:*
                 Resource: "*"
 
               # SNS

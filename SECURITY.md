@@ -236,12 +236,18 @@ Security controls implemented at the infrastructure, application, and data level
   - Operations: data import, timeout, financial transaction
 - Risk level classification: LOW, MEDIUM, HIGH, CRITICAL
 - Controlled by `SECURITY_AUDIT_ENABLED` environment variable
-- Centralized collection via CloudWatch
+- Centralized collection via CloudWatch; emits custom security metrics off the request path (see CloudWatch Integration)
+- Compliance-relevant records (`SECURITY_AUDIT:` marker) forwarded to long-retention S3 storage (see Audit Log Retention)
 
 ### CloudWatch Integration
 
 - Log groups for ECS tasks with configurable retention (default 30 days)
-- `FailedAdminAuthAlarm`: triggers on >5 failed admin auth attempts in 5 minutes
+- Custom security metrics emitted off the request path to the `RoboSystems/Security/{environment}` namespace (`robosystems/security/audit_logger.py`)
+- Alarms (actions wired to the `robosystems-{environment}-security-alerts` SNS topic when an alert email is configured):
+  - `FailedAdminAuthAlarm`: `FailedAdminAuth` > 5 in 5 minutes
+  - `AuthFailureSpikeAlarm`: `AuthFailure` > 50 in 5 minutes
+  - `InjectionAttemptAlarm`: `InjectionAttempt` > 0
+  - `PrivilegeEscalationAlarm`: `PrivilegeEscalationAttempt` > 0
 - Optional Container Insights for deeper metrics
 
 ### Managed Monitoring
@@ -275,6 +281,7 @@ Optional features disabled by default to minimize costs. Configured as CloudForm
 - Multi-region trail with log file validation
 - S3 storage with AES256 encryption and Intelligent-Tiering
 - Automatic lifecycle rules for retention enforcement
+- SSM Session Manager command logging: the `SSM-SessionManagerRunShell` document streams bastion session commands to the `/robosystems/ssm-sessions` CloudWatch log group (400-day retention); deployed with the trail, gated on `EnableCloudTrail`
 - Tagged as SOC2-Compliance
 
 ### VPC Flow Logs
@@ -289,6 +296,40 @@ Optional features disabled by default to minimize costs. Configured as CloudForm
 
 - S3 storage with enhanced log format and 10-minute aggregation
 - AES256 encryption at rest
+- Tagged as SOC2-Compliance
+
+### Security Baseline (Detective Controls)
+
+**Implementation:** `cloudformation/security.yaml`
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `SECURITY_ENABLED` (GitHub variable) | Enable/disable the baseline stack | `false` |
+| `EnableGuardDuty` | GuardDuty threat detection | `true` |
+| `EnableSecurityHub` | Security Hub + AWS FSBP standard | `true` |
+| `EnableCISStandard` | Also enable the CIS Foundations benchmark | `false` |
+| `EnableAccessAnalyzer` | IAM Access Analyzer (account scope) | `true` |
+| `EnableConfig` (`SECURITY_CONFIG_ENABLED` GitHub variable) | AWS Config recorder | `false` |
+
+- Account-global shared stack (`RoboSystemsSecurity`), deployed by the gated `security` job in `deploy-vpc.yml` (sibling to the CloudTrail job)
+- GuardDuty, Security Hub (FSBP), and Access Analyzer enable together via `SECURITY_ENABLED`; AWS Config is gated separately (`SECURITY_CONFIG_ENABLED`) as the cost outlier
+- Amazon Inspector v2 is enabled via an idempotent `inspector2:enable` step in the deploy job (no native single-account CloudFormation resource)
+- AWS Config records to a dedicated versioned, AES256-encrypted, retained S3 bucket
+- Deploy-role IAM grants for these services live in `cloudformation/bootstrap-oidc.yaml` (re-run `just bootstrap` before enabling)
+- Tagged as SOC2-Compliance
+
+### Audit Log Retention
+
+**Implementation:** `cloudformation/audit.yaml`
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `AUDIT_ENABLED_{PROD,STAGING}` (GitHub variable) | Enable/disable the retention pipeline | `false` |
+| `AUDIT_RETENTION_DAYS` (`RetentionDays`) | Days to retain audit records in S3 | `400` |
+
+- CloudWatch Logs subscription filter on `/robosystems/{environment}/api` forwards only compliance records (`SECURITY_AUDIT:` marker and structured operation-audit entries) to Kinesis Data Firehose → a dedicated S3 bucket
+- Bucket is versioned, AES256-encrypted, public-access-blocked, with ~13-month retention (`RetentionDays`)
+- Preserves security evidence beyond the short operational-log retention; entirely log-side (no request-path impact)
 - Tagged as SOC2-Compliance
 
 ### Validation Commands
@@ -308,12 +349,26 @@ aws secretsmanager list-secrets --filters Key=name,Values=robosystems
 
 # S3 encryption
 aws s3api get-bucket-encryption --bucket robosystems-deployment-prod
+
+# Security baseline
+aws guardduty list-detectors
+aws securityhub get-enabled-standards
+aws configservice describe-configuration-recorders
+aws accessanalyzer list-analyzers
+aws inspector2 batch-get-account-status
+
+# Audit log retention + SSM session logs
+aws logs describe-subscription-filters --log-group-name /robosystems/prod/api
+aws logs describe-log-groups --log-group-name-prefix /robosystems/ssm-sessions
 ```
 
 ### Log Locations
 
 - CloudTrail: `s3://robosystems-cloudtrail-{environment}-{account-id}`
 - VPC Flow Logs: `s3://robosystems-vpc-flow-logs-{environment}-{account-id}`
+- AWS Config: `s3://robosystems-config-{account-id}`
+- Audit retention: `s3://robosystems-audit-{environment}-{account-id}`
+- SSM sessions: CloudWatch `/robosystems/ssm-sessions`
 - Application: CloudWatch `/aws/ecs/{service-name}`
 
 ## Startup Validation
