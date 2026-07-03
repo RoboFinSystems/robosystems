@@ -291,6 +291,26 @@ Optional features disabled by default to minimize costs. Configured as CloudForm
 - AES256 encryption at rest
 - Tagged as SOC2-Compliance
 
+### Security Baseline (Detective Controls)
+
+**Implementation:** `cloudformation/security.yaml`
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `SECURITY_ENABLED` (GitHub variable) | Enable/disable the baseline stack | `false` |
+| `EnableGuardDuty` | GuardDuty threat detection | `true` |
+| `EnableSecurityHub` | Security Hub + AWS FSBP standard | `true` |
+| `EnableCISStandard` | Also enable the CIS Foundations benchmark | `false` |
+| `EnableAccessAnalyzer` | IAM Access Analyzer (account scope) | `true` |
+| `EnableConfig` (`SECURITY_CONFIG_ENABLED` GitHub variable) | AWS Config recorder | `false` |
+
+- Account-global shared stack (`RoboSystemsSecurity`), deployed by the gated `security` job in `deploy-vpc.yml` (sibling to the CloudTrail job)
+- GuardDuty, Security Hub (FSBP), and Access Analyzer enable together via `SECURITY_ENABLED`; AWS Config is gated separately (`SECURITY_CONFIG_ENABLED`) as the cost outlier
+- Amazon Inspector v2 is enabled via an idempotent `inspector2:enable` step in the deploy job (no native single-account CloudFormation resource)
+- AWS Config records to a dedicated versioned, AES256-encrypted, retained S3 bucket
+- Deploy-role IAM grants for these services live in `cloudformation/bootstrap-oidc.yaml` (re-run `just bootstrap` before enabling)
+- Tagged as SOC2-Compliance
+
 ### Validation Commands
 
 ```bash
@@ -308,12 +328,20 @@ aws secretsmanager list-secrets --filters Key=name,Values=robosystems
 
 # S3 encryption
 aws s3api get-bucket-encryption --bucket robosystems-deployment-prod
+
+# Security baseline
+aws guardduty list-detectors
+aws securityhub get-enabled-standards
+aws configservice describe-configuration-recorders
+aws accessanalyzer list-analyzers
+aws inspector2 batch-get-account-status
 ```
 
 ### Log Locations
 
 - CloudTrail: `s3://robosystems-cloudtrail-{environment}-{account-id}`
 - VPC Flow Logs: `s3://robosystems-vpc-flow-logs-{environment}-{account-id}`
+- AWS Config: `s3://robosystems-config-{account-id}`
 - Application: CloudWatch `/aws/ecs/{service-name}`
 
 ## Startup Validation
