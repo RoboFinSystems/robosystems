@@ -71,6 +71,7 @@ jobs:
       grafana_stack: ${{ steps.load.outputs.grafana_stack }}
       bastion_stack: ${{ steps.load.outputs.bastion_stack }}
       waf_stack: ${{ steps.load.outputs.waf_stack }}
+      audit_stack: ${{ steps.load.outputs.audit_stack }}
       cloudtrail_stack: ${{ steps.load.outputs.cloudtrail_stack }}
       dagster_stack: ${{ steps.load.outputs.dagster_stack }}
       worker_stack: ${{ steps.load.outputs.worker_stack }}
@@ -120,6 +121,7 @@ jobs:
           echo "grafana_stack=$(./bin/tools/stack-config.sh $ENV monitoring.grafana)" >> $GITHUB_OUTPUT
           echo "bastion_stack=$(./bin/tools/stack-config.sh $ENV bastion)" >> $GITHUB_OUTPUT
           echo "waf_stack=$(./bin/tools/stack-config.sh $ENV waf)" >> $GITHUB_OUTPUT
+          echo "audit_stack=$(./bin/tools/stack-config.sh $ENV audit)" >> $GITHUB_OUTPUT
           echo "cloudtrail_stack=$(./bin/tools/stack-config.sh $ENV cloudtrail)" >> $GITHUB_OUTPUT
           echo "dagster_stack=$(./bin/tools/stack-config.sh $ENV dagster)" >> $GITHUB_OUTPUT
           echo "worker_stack=$(./bin/tools/stack-config.sh $ENV workers)" >> $GITHUB_OUTPUT
@@ -567,6 +569,9 @@ jobs:
       waf_rate_limit_per_ip: ${{ vars.WAF_RATE_LIMIT_PER_IP || '3000' }}
       waf_enable_geo_blocking: ${{ vars.WAF_GEO_BLOCKING_ENABLED || 'false' }}
       waf_enable_aws_managed_rules: ${{ vars.WAF_AWS_MANAGED_RULES_ENABLED || 'true' }}
+      audit_enabled: ${{ vars.AUDIT_ENABLED_PROD || 'false' }}
+      audit_stack_name: ${{ needs.stack-config.outputs.audit_stack }}
+      audit_retention_days: ${{ vars.AUDIT_RETENTION_DAYS || '400' }}
       # S3 Bucket Configuration (from S3 stack outputs)
       shared_processed_bucket_arn: ${{ needs.deploy-s3.outputs.shared_processed_bucket_arn }}
       deployment_bucket_arn: ${{ needs.deploy-s3.outputs.deployment_bucket_arn }}

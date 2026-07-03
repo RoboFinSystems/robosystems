@@ -185,6 +185,57 @@ Resources:
         - Key: Purpose
           Value: SOC2-Compliance
 
+  # SSM Session Manager command logging — captures the commands run during
+  # bastion `start-session` shells (admin-tunnel accountability beyond
+  # CloudTrail's "who connected"). The SSM-SessionManagerRunShell document is
+  # account/region-global, so it lives in this single shared stack rather than
+  # the per-env bastion stacks (which would collide on the reserved name). The
+  # bastion instance role already carries logs:CreateLogStream/PutLogEvents.
+  SessionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CreateCloudTrail
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /robosystems/ssm-sessions
+      RetentionInDays: 400
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Purpose
+          Value: SOC2-Compliance
+
+  SessionManagerPreferences:
+    Type: AWS::SSM::Document
+    Condition: CreateCloudTrail
+    Properties:
+      Name: SSM-SessionManagerRunShell
+      DocumentType: Session
+      DocumentFormat: JSON
+      Content:
+        schemaVersion: "1.0"
+        description: Session Manager preferences with CloudWatch command logging
+        sessionType: Standard_Stream
+        inputs:
+          cloudWatchLogGroupName: !Ref SessionLogGroup
+          cloudWatchEncryptionEnabled: false
+          cloudWatchStreamingEnabled: true
+          idleSessionTimeout: "20"
+          runAsEnabled: false
+          shellProfile:
+            linux: ""
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
 Outputs:
   CloudTrailArn:
     Description: ARN of the CloudTrail

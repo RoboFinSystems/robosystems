@@ -1,0 +1,199 @@
+Description: RoboSystems Audit Service - Long-Retention Forwarding of Security-Audit Logs to S3
+
+# Forwards ONLY the compliance-relevant audit records out of the API log group
+# (/robosystems/{env}/api) to a dedicated, long-retention S3 bucket, so security
+# evidence survives the short operational-log retention. Entirely log-side: a
+# CloudWatch Logs subscription filter -> Kinesis Firehose -> S3. No application
+# code and nothing on the request path. Deployed by the `audit` job in
+# deploy-api.yml, gated on the AUDIT_ENABLED_{PROD,STAGING} variable (mirrors WAF).
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name (e.g., prod, staging)
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    ConstraintDescription: Must be prod or staging
+
+  # Retention
+  RetentionDays:
+    Type: Number
+    Description: Days to retain audit records in S3 (default ~13 months for a SOC 2 Type II window)
+    Default: 400
+    MinValue: 1
+    MaxValue: 2555
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: Audit
+
+Resources:
+  # Durable, versioned, private bucket for the retained audit evidence.
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub robosystems-audit-${Environment}-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: AuditRetention
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 0
+                StorageClass: INTELLIGENT_TIERING
+            ExpirationInDays: !Ref RetentionDays
+            NoncurrentVersionExpirationInDays: !Ref RetentionDays
+      Tags:
+        - Key: Name
+          Value: !Sub ${ServiceTag}-audit-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Purpose
+          Value: SOC2-Compliance
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Error/diagnostics stream for the Firehose delivery (short retention).
+  FirehoseLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /robosystems/${Environment}/audit-firehose
+      RetentionInDays: 30
+
+  FirehoseLogStream:
+    Type: AWS::Logs::LogStream
+    Properties:
+      LogGroupName: !Ref FirehoseLogGroup
+      LogStreamName: S3Delivery
+
+  # Role Firehose assumes to write delivered records to the audit bucket.
+  FirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub robosystems-audit-firehose-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub robosystems-audit-firehose-${Environment}
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt AuditBucket.Arn
+                  - !Sub ${AuditBucket.Arn}/*
+              - Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                Resource: !GetAtt FirehoseLogGroup.Arn
+
+  # Direct-put Firehose stream: subscription filter -> here -> S3 (gzip, buffered).
+  AuditFirehose:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: !Sub robosystems-audit-${Environment}
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt AuditBucket.Arn
+        RoleARN: !GetAtt FirehoseRole.Arn
+        Prefix: !Sub audit/${Environment}/
+        ErrorOutputPrefix: !Sub audit-errors/${Environment}/
+        BufferingHints:
+          IntervalInSeconds: 300
+          SizeInMBs: 5
+        CompressionFormat: GZIP
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Ref FirehoseLogGroup
+          LogStreamName: !Ref FirehoseLogStream
+
+  # Role CloudWatch Logs assumes to push matching events into Firehose.
+  SubscriptionFilterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub robosystems-audit-cwl-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub logs.${AWS::Region}.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub robosystems-audit-cwl-${Environment}
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - firehose:PutRecord
+                  - firehose:PutRecordBatch
+                Resource: !GetAtt AuditFirehose.Arn
+
+  # Forward only audit records from the API log group. The pattern OR-matches the
+  # two audit streams: SecurityAuditLogger's "SECURITY_AUDIT:" messages and the
+  # operation-audit records (structured "audit": key). Operational INFO stays put.
+  AuditSubscriptionFilter:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      LogGroupName: !Sub /robosystems/${Environment}/api
+      FilterName: !Sub robosystems-audit-${Environment}
+      FilterPattern: '?SECURITY_AUDIT ?"\"audit\":"'
+      DestinationArn: !GetAtt AuditFirehose.Arn
+      RoleArn: !GetAtt SubscriptionFilterRole.Arn
+
+Outputs:
+  AuditBucketName:
+    Description: S3 bucket retaining the forwarded audit records
+    Value: !Ref AuditBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-AuditBucket
+
+  AuditFirehoseArn:
+    Description: ARN of the audit Firehose delivery stream
+    Value: !GetAtt AuditFirehose.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-AuditFirehoseArn
+
+  EstimatedMonthlyCost:
+    Description: Rough monthly cost (Firehose + S3 at audit-event volume)
+    Value: "~$1-3/month (Firehose ingestion + S3 storage at low audit volume)"

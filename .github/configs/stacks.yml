@@ -122,6 +122,10 @@ prod:
       web_acl_id: WebACLId
       web_acl_arn: WebACLArn
 
+  # Audit Trail Retention (compliance log forwarding)
+  audit:
+    stack_name: RoboSystemsAuditProd
+
   # GitHub Actions Runner
   gha_runner:
     stack_name: RoboSystemsGHARunner # Shared between environments
@@ -267,6 +271,10 @@ staging:
     outputs:
       web_acl_id: WebACLId
       web_acl_arn: WebACLArn
+
+  # Audit Trail Retention (compliance log forwarding)
+  audit:
+    stack_name: RoboSystemsAuditStaging
 
   # Shared Resources (reference same as prod)
   gha_runner:
