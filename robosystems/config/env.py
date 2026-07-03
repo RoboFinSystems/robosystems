@@ -981,7 +981,7 @@ class EnvConfig:
   # SEC
   # SEC_GOV_USER_AGENT is a secret identity for API access
   SEC_GOV_USER_AGENT = get_secret_value(
-    "SEC_GOV_USER_AGENT", "RoboSystems hello@robosystems.ai"
+    "SEC_GOV_USER_AGENT", "YourCompany your-email@example.com"
   )
 
   # OpenFIGI (financial identifiers)
