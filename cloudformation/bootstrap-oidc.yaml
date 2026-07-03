@@ -327,6 +327,13 @@ Resources:
                   - cloudtrail:*
                 Resource: "*"
 
+              # Kinesis Data Firehose (audit-log retention forwarding)
+              - Sid: Firehose
+                Effect: Allow
+                Action:
+                  - firehose:*
+                Resource: "*"
+
               # SNS
               - Sid: SNS
                 Effect: Allow
