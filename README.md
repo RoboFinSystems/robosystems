@@ -272,7 +272,7 @@ pip install robosystems-client
 
 **Getting Started & Platform:**
 
-- [Home / Overview](https://github.com/RoboFinSystems/robosystems/wiki) · [Quick Start](https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start) · [Core Concepts](https://github.com/RoboFinSystems/robosystems/wiki/Core-Concepts) · [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) · [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide)
+- [Home / Overview](https://github.com/RoboFinSystems/robosystems/wiki) · [Quick Start](https://github.com/RoboFinSystems/robosystems/wiki/Quick-Start) · [Core Concepts](https://github.com/RoboFinSystems/robosystems/wiki/Core-Concepts) · [Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview) · [Bootstrap Guide](https://github.com/RoboFinSystems/robosystems/wiki/Bootstrap-Guide) · [Security & Compliance](https://github.com/RoboFinSystems/robosystems/wiki/Security-and-Compliance)
 
 **Operations Layer:**
 
@@ -340,7 +340,8 @@ pip install robosystems-client
 
 **Security & Compliance:**
 
-- **[SECURITY.md](/SECURITY.md)** - Security features and compliance configuration
+- **[SECURITY.md](/SECURITY.md)** - Security control catalog with implementation references
+- **[Security & Compliance (Wiki)](https://github.com/RoboFinSystems/robosystems/wiki/Security-and-Compliance)** - Operator guide: the optional compliance stacks, their toggles, and the SOC 2 posture for forks
 
 ## API Reference
 
