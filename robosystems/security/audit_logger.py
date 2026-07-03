@@ -6,6 +6,8 @@ authorization violations, and suspicious activities.
 """
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -49,6 +51,121 @@ class SecurityEventType(Enum):
   SUBGRAPH_DELETED = "subgraph_deleted"
   # Graph lifecycle events
   GRAPH_DELETED = "graph_deleted"
+
+
+# CloudWatch metrics: the compliance/alerting-relevant subset of security
+# events is published to RoboSystems/Security/{env} so the detective-control
+# alarms in cloudformation/api.yaml can actually fire. Operational events
+# (email_sent, auth_success, operation_timeout, …) are deliberately excluded
+# to keep the metric stream low-volume and the alarms meaningful.
+_METRIC_FOR_EVENT: dict[SecurityEventType, str] = {
+  SecurityEventType.AUTH_FAILURE: "AuthFailure",
+  SecurityEventType.AUTH_TOKEN_EXPIRED: "AuthFailure",
+  SecurityEventType.AUTH_TOKEN_INVALID: "AuthFailure",
+  SecurityEventType.API_KEY_INVALID: "AuthFailure",
+  SecurityEventType.API_KEY_EXPIRED: "AuthFailure",
+  SecurityEventType.AUTHORIZATION_DENIED: "AuthorizationDenied",
+  SecurityEventType.INJECTION_ATTEMPT: "InjectionAttempt",
+  SecurityEventType.PATH_TRAVERSAL_ATTEMPT: "InjectionAttempt",
+  SecurityEventType.PRIVILEGE_ESCALATION_ATTEMPT: "PrivilegeEscalationAttempt",
+}
+
+# Emitted in addition to AuthFailure when the failure is on the admin surface,
+# so FailedAdminAuthAlarm has a dedicated, low-noise trigger.
+_ADMIN_AUTH_FAILURE_METRIC = "FailedAdminAuth"
+
+# Auth-failure event types that count as an admin failure when details.admin is set.
+_ADMIN_FLAGGABLE_EVENTS = frozenset(
+  {
+    SecurityEventType.AUTH_FAILURE,
+    SecurityEventType.API_KEY_INVALID,
+    SecurityEventType.AUTH_TOKEN_INVALID,
+  }
+)
+
+# Metric publishing runs OFF the request path. log_security_event is called
+# synchronously from async auth handlers (get_current_user, AdminAuthMiddleware),
+# so a blocking put_metric_data would stall the whole event loop — worst during
+# an auth-failure spike, which is exactly when these alarms matter. Publish on a
+# small bounded thread pool instead, with short client timeouts, and shed load
+# past _METRIC_MAX_INFLIGHT rather than let work queue without bound under a flood.
+_METRIC_MAX_INFLIGHT = 256
+
+_cloudwatch_client: Any = None
+_metric_executor: ThreadPoolExecutor | None = None
+_metric_inflight = 0
+_metric_lock = threading.Lock()
+
+
+def _get_cloudwatch_client() -> Any:
+  global _cloudwatch_client
+  if _cloudwatch_client is None:
+    import boto3
+    from botocore.config import Config
+
+    # Short timeouts + no retries: a stalled CloudWatch endpoint must fail fast,
+    # never hold a pool thread (or, historically, the event loop) for ~60s.
+    _cloudwatch_client = boto3.client(
+      "cloudwatch",
+      region_name=env.AWS_REGION,
+      config=Config(connect_timeout=2, read_timeout=3, retries={"max_attempts": 1}),
+    )
+  return _cloudwatch_client
+
+
+def _get_metric_executor() -> ThreadPoolExecutor:
+  global _metric_executor
+  if _metric_executor is None:
+    _metric_executor = ThreadPoolExecutor(
+      max_workers=2, thread_name_prefix="security-metrics"
+    )
+  return _metric_executor
+
+
+def _put_metric_data(namespace: str, metric_names: list[str]) -> None:
+  """Blocking CloudWatch publish — runs on the metric pool, never the caller."""
+  global _metric_inflight
+  try:
+    _get_cloudwatch_client().put_metric_data(
+      Namespace=namespace,
+      MetricData=[
+        {"MetricName": name, "Value": 1, "Unit": "Count"} for name in metric_names
+      ],
+    )
+  except Exception as e:
+    # Metrics are best-effort; a publish failure must not surface anywhere.
+    logger.debug(f"Failed to publish security metric(s) {metric_names}: {e}")
+  finally:
+    with _metric_lock:
+      _metric_inflight -= 1
+
+
+def _publish_security_metrics(metric_names: list[str]) -> None:
+  """Queue security alerting metrics for CloudWatch, off the request path.
+
+  Best-effort and prod/staging-only: skipped where there is no CloudWatch or
+  credentials (dev/test). The actual publish runs on a bounded thread pool so it
+  never blocks the (often async) auth path, and load is shed past
+  ``_METRIC_MAX_INFLIGHT`` so a flood can't grow the queue without bound. Never
+  raises into the caller.
+  """
+  global _metric_inflight
+  if not metric_names:
+    return
+  if not (env.is_production() or env.is_staging()):
+    return
+  with _metric_lock:
+    if _metric_inflight >= _METRIC_MAX_INFLIGHT:
+      return
+    _metric_inflight += 1
+  namespace = f"RoboSystems/Security/{env.ENVIRONMENT}"
+  try:
+    _get_metric_executor().submit(_put_metric_data, namespace, list(metric_names))
+  except Exception as e:
+    # Executor rejected the task (e.g. interpreter shutdown) — release the slot.
+    with _metric_lock:
+      _metric_inflight -= 1
+    logger.debug(f"Failed to queue security metric(s) {metric_names}: {e}")
 
 
 class SecurityAuditLogger:
@@ -96,6 +213,38 @@ class SecurityAuditLogger:
 
     # Log as structured JSON for security monitoring
     logger.warning(f"SECURITY_AUDIT: {json.dumps(audit_data)}")
+
+    # Publish the alerting metric for the compliance-relevant subset so the
+    # CloudWatch detective-control alarms can fire (no-op outside prod/staging).
+    metric_names: list[str] = []
+    metric = _METRIC_FOR_EVENT.get(event_type)
+    if metric:
+      metric_names.append(metric)
+    if (details or {}).get("admin") and event_type in _ADMIN_FLAGGABLE_EVENTS:
+      metric_names.append(_ADMIN_AUTH_FAILURE_METRIC)
+    _publish_security_metrics(metric_names)
+
+  @staticmethod
+  def log_admin_auth_failure(
+    reason: str,
+    ip_address: str | None = None,
+    endpoint: str | None = None,
+    user_agent: str | None = None,
+  ):
+    """Log an admin-surface authentication failure.
+
+    Flags the event as admin so a dedicated ``FailedAdminAuth`` CloudWatch
+    metric is emitted alongside the generic ``AuthFailure`` signal, giving
+    ``FailedAdminAuthAlarm`` a low-noise trigger.
+    """
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.AUTH_FAILURE,
+      ip_address=ip_address,
+      user_agent=user_agent,
+      endpoint=endpoint,
+      details={"admin": True, "failure_reason": reason},
+      risk_level="high",
+    )
 
   @staticmethod
   def log_auth_failure(
