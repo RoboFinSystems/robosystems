@@ -124,7 +124,7 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 | Shared Replicas | `SHARED_REPLICAS_*`, `SHARED_REPOSITORIES_*` | Read-only replica fleet for shared repos |
 | Valkey | `VALKEY_NODE_TYPE_*`, `VALKEY_ENCRYPTION_ENABLED_*` | Cache configuration |
 | OpenSearch | `OPENSEARCH_ENABLED_*`, `OPENSEARCH_INSTANCE_TYPE_*`, `OPENSEARCH_EBS_SIZE_*` | Document search (disabled by default) |
-| Security | `WAF_ENABLED_*`, `VPC_FLOW_LOGS_ENABLED`, `CLOUDTRAIL_ENABLED` | WAF, audit logging, compliance |
+| Security | `WAF_ENABLED_*`, `CLOUDTRAIL_ENABLED`, `VPC_FLOW_LOGS_ENABLED`, `SECURITY_ENABLED`, `AUDIT_ENABLED_*`, `SECRETS_ROTATION_ENABLED_*` | WAF, CloudTrail, flow logs, detective baseline, audit retention, key rotation (all off by default) |
 | Infrastructure | `VPC_ENDPOINT_MODE`, `VPC_SECOND_OCTET`, `VPC_MAX_AVAILABILITY_ZONES` | VPC and networking |
 
 **When to run:**
@@ -132,6 +132,8 @@ While bootstrap sets the core OIDC variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, 
 - Standalone via `just setup-gha` if you skipped during bootstrap
 
 **Note:** Workflows have sensible defaults. You can skip this during bootstrap for basic deployments and run it later when you need custom infrastructure sizing, staging environment, or production features (WAF, Multi-AZ, etc.).
+
+For the security and compliance toggles (WAF, CloudTrail, the detective baseline, audit retention), see [Security & Compliance](Security-and-Compliance). The Security Baseline needs a `just bootstrap` re-run before its first enable so the deploy role picks up the required IAM grants.
 
 ### Application Secrets (`just setup-aws`)
 

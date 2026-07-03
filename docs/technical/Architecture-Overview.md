@@ -974,6 +974,8 @@ See individual app repositories for specific deployment workflows.
 - **Encryption**: TLS in transit, at rest
 - **Audit Logging**: All operations tracked
 
+For the full posture — built-in controls, the optional compliance stacks (WAF, CloudTrail, VPC flow logs, detective baseline, audit retention) and their toggles, and the SOC 2 story for forks — see **[Security & Compliance](Security-and-Compliance)** (and [`SECURITY.md`](https://github.com/RoboFinSystems/robosystems/blob/main/SECURITY.md) for the control catalog).
+
 ## Related Documentation
 
 **Wiki Guides:**

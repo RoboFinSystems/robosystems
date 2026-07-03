@@ -5,6 +5,7 @@
 - [Core Concepts](Core-Concepts)
 - [Architecture Overview](Architecture-Overview)
 - [Bootstrap Guide](Bootstrap-Guide)
+- [Security & Compliance](Security-and-Compliance)
 
 ### Demos
 - [RoboLedger Demos](RoboLedger-Demo-Walkthrough)
