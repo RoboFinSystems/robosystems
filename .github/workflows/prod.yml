@@ -73,6 +73,7 @@ jobs:
       waf_stack: ${{ steps.load.outputs.waf_stack }}
       audit_stack: ${{ steps.load.outputs.audit_stack }}
       cloudtrail_stack: ${{ steps.load.outputs.cloudtrail_stack }}
+      security_stack: ${{ steps.load.outputs.security_stack }}
       dagster_stack: ${{ steps.load.outputs.dagster_stack }}
       worker_stack: ${{ steps.load.outputs.worker_stack }}
       opensearch_stack: ${{ steps.load.outputs.opensearch_stack }}
@@ -123,6 +124,7 @@ jobs:
           echo "waf_stack=$(./bin/tools/stack-config.sh $ENV waf)" >> $GITHUB_OUTPUT
           echo "audit_stack=$(./bin/tools/stack-config.sh $ENV audit)" >> $GITHUB_OUTPUT
           echo "cloudtrail_stack=$(./bin/tools/stack-config.sh $ENV cloudtrail)" >> $GITHUB_OUTPUT
+          echo "security_stack=$(./bin/tools/stack-config.sh $ENV security)" >> $GITHUB_OUTPUT
           echo "dagster_stack=$(./bin/tools/stack-config.sh $ENV dagster)" >> $GITHUB_OUTPUT
           echo "worker_stack=$(./bin/tools/stack-config.sh $ENV workers)" >> $GITHUB_OUTPUT
           echo "opensearch_stack=$(./bin/tools/stack-config.sh $ENV opensearch)" >> $GITHUB_OUTPUT
@@ -197,6 +199,10 @@ jobs:
       cloudtrail_enabled: ${{ vars.CLOUDTRAIL_ENABLED || 'false' }}
       cloudtrail_log_retention_days: ${{ vars.CLOUDTRAIL_LOG_RETENTION_DAYS || '90' }}
       cloudtrail_data_events_enabled: ${{ vars.CLOUDTRAIL_DATA_EVENTS_ENABLED || 'false' }}
+      # Security Baseline Configuration (account-level, not environment-specific)
+      security_enabled: ${{ vars.SECURITY_ENABLED || 'false' }}
+      security_stack_name: ${{ needs.stack-config.outputs.security_stack }}
+      security_config_enabled: ${{ vars.SECURITY_CONFIG_ENABLED || 'false' }}
     secrets: inherit
 
   deploy-s3:

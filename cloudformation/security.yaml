@@ -1,0 +1,290 @@
+Description: RoboSystems Security Baseline - Account-Global Detective Controls (SOC 2)
+
+# Account/region-global detective services for SOC 2 (CC4/CC6/CC7). Every
+# resource here is a per-account singleton, so this is ONE shared stack
+# (RoboSystemsSecurity) like cloudtrail.yaml — never per-environment, or the
+# second environment's deploy would collide. Deployed by the `security` job in
+# deploy-api's VPC workflow, gated on the SECURITY_ENABLED variable (mirrors
+# CloudTrail). Off by default.
+#
+# Covers: GuardDuty (threat detection), Security Hub (+ FSBP standard),
+# AWS Config (config recorder — the cost outlier, gated separately), and
+# IAM Access Analyzer. Amazon Inspector v2 has no native single-account
+# CloudFormation resource (enablement is the inspector2:Enable API), so it is
+# turned on by a small idempotent CLI step in the deploy job, not here.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    Description: Environment name (tagging only; the services are account-global)
+
+  EnableGuardDuty:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Enable Amazon GuardDuty threat detection
+
+  EnableSecurityHub:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Enable AWS Security Hub with the FSBP standard
+
+  EnableCISStandard:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Also enable the CIS AWS Foundations Benchmark standard (in addition to FSBP)
+
+  EnableAccessAnalyzer:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Enable IAM Access Analyzer (account scope)
+
+  EnableConfig:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enable AWS Config recorder (cost scales with resource count — off by default)
+
+  ConfigRecordingFrequency:
+    Type: String
+    Default: DAILY
+    AllowedValues:
+      - DAILY
+      - CONTINUOUS
+    Description: Config recording cadence (DAILY is far cheaper than CONTINUOUS)
+
+  ConfigRetentionDays:
+    Type: Number
+    Default: 400
+    MinValue: 1
+    MaxValue: 2555
+    Description: Days to retain Config snapshots in S3 (~13 months for a SOC 2 window)
+
+  ServiceTag:
+    Type: String
+    Default: RoboSystems
+    Description: Service tag for resource identification
+
+  ComponentTag:
+    Type: String
+    Default: Security
+    Description: Component tag for resource identification
+
+Conditions:
+  GuardDutyOn: !Equals [!Ref EnableGuardDuty, "true"]
+  SecurityHubOn: !Equals [!Ref EnableSecurityHub, "true"]
+  CISOn: !And
+    - !Condition SecurityHubOn
+    - !Equals [!Ref EnableCISStandard, "true"]
+  AccessAnalyzerOn: !Equals [!Ref EnableAccessAnalyzer, "true"]
+  ConfigOn: !Equals [!Ref EnableConfig, "true"]
+
+Resources:
+  # --- GuardDuty: continuous threat detection over CloudTrail/VPC/DNS telemetry.
+  GuardDutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Condition: GuardDutyOn
+    Properties:
+      Enable: true
+      FindingPublishingFrequency: FIFTEEN_MINUTES
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Purpose
+          Value: SOC2-Compliance
+
+  # --- Security Hub: aggregates findings + scores controls against standards.
+  SecurityHub:
+    Type: AWS::SecurityHub::Hub
+    Condition: SecurityHubOn
+    Properties:
+      ControlFindingGenerator: SECURITY_CONTROL
+      AutoEnableControls: true
+
+  # AWS Foundational Security Best Practices — the AWS-recommended baseline.
+  SecurityHubFSBP:
+    Type: AWS::SecurityHub::Standard
+    Condition: SecurityHubOn
+    DependsOn: SecurityHub
+    Properties:
+      StandardsArn: !Sub arn:${AWS::Partition}:securityhub:${AWS::Region}::standards/aws-foundational-security-best-practices/v/1.0.0
+
+  # CIS AWS Foundations Benchmark — optional, in addition to FSBP.
+  SecurityHubCIS:
+    Type: AWS::SecurityHub::Standard
+    Condition: CISOn
+    DependsOn: SecurityHub
+    Properties:
+      StandardsArn: !Sub arn:${AWS::Partition}:securityhub:::ruleset/cis-aws-foundations-benchmark/v/1.2.0
+
+  # --- IAM Access Analyzer: flags resources shared outside the account.
+  AccessAnalyzer:
+    Type: AWS::AccessAnalyzer::Analyzer
+    Condition: AccessAnalyzerOn
+    Properties:
+      AnalyzerName: robosystems-account-analyzer
+      Type: ACCOUNT
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Purpose
+          Value: SOC2-Compliance
+
+  # --- AWS Config: records resource configuration history for drift/compliance.
+  # Heavier + cost-bearing, so gated behind EnableConfig (default off). Needs a
+  # dedicated S3 bucket, a delivery role, a recorder, and a delivery channel.
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    Condition: ConfigOn
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub robosystems-config-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ConfigRetention
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 0
+                StorageClass: INTELLIGENT_TIERING
+            ExpirationInDays: !Ref ConfigRetentionDays
+            NoncurrentVersionExpirationInDays: !Ref ConfigRetentionDays
+      Tags:
+        - Key: Name
+          Value: !Sub ${ServiceTag}-config
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Purpose
+          Value: SOC2-Compliance
+
+  ConfigBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: ConfigOn
+    Properties:
+      Bucket: !Ref ConfigBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSConfigBucketPermissionsCheck
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+              - s3:ListBucket
+            Resource: !GetAtt ConfigBucket.Arn
+            Condition:
+              StringEquals:
+                "AWS:SourceAccount": !Ref AWS::AccountId
+          - Sid: AWSConfigBucketDelivery
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub ${ConfigBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*
+            Condition:
+              StringEquals:
+                "s3:x-amz-acl": bucket-owner-full-control
+                "AWS:SourceAccount": !Ref AWS::AccountId
+
+  ConfigRole:
+    Type: AWS::IAM::Role
+    Condition: ConfigOn
+    Properties:
+      RoleName: robosystems-config-recorder
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWS_ConfigRole
+      Policies:
+        - PolicyName: config-s3-delivery
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetBucketAcl
+                Resource: !GetAtt ConfigBucket.Arn
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub ${ConfigBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+                Condition:
+                  StringEquals:
+                    "s3:x-amz-acl": bucket-owner-full-control
+
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Condition: ConfigOn
+    Properties:
+      Name: default
+      RoleARN: !GetAtt ConfigRole.Arn
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: true
+      RecordingMode:
+        RecordingFrequency: !Ref ConfigRecordingFrequency
+
+  # A delivery channel must exist before the recorder can record, so order the
+  # recorder after the channel, and the channel after the bucket policy.
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Condition: ConfigOn
+    DependsOn: ConfigBucketPolicy
+    Properties:
+      Name: default
+      S3BucketName: !Ref ConfigBucket
+      ConfigSnapshotDeliveryProperties:
+        DeliveryFrequency: TwentyFour_Hours
+
+Outputs:
+  GuardDutyDetectorId:
+    Condition: GuardDutyOn
+    Description: GuardDuty detector id
+    Value: !Ref GuardDutyDetector
+    Export:
+      Name: !Sub ${AWS::StackName}-GuardDutyDetectorId
+
+  ConfigBucketName:
+    Condition: ConfigOn
+    Description: S3 bucket holding AWS Config snapshots
+    Value: !Ref ConfigBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-ConfigBucket
+
+  EstimatedMonthlyCost:
+    Description: Rough monthly cost at low account volume
+    Value: "~$5-15/mo without Config; Config adds cost scaling with resource count (DAILY keeps it low)"

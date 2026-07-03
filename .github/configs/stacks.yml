@@ -146,6 +146,10 @@ prod:
       bucket_name: CloudTrailBucketName
       enabled: CloudTrailEnabled
 
+  # Security Baseline (GuardDuty, Security Hub, Config, Access Analyzer)
+  security:
+    stack_name: RoboSystemsSecurity # Shared between environments (account-global)
+
   # Dagster Orchestration
   dagster:
     stack_name: RoboSystemsDagsterProd
@@ -294,6 +298,10 @@ staging:
       trail_arn: CloudTrailArn
       bucket_name: CloudTrailBucketName
       enabled: CloudTrailEnabled
+
+  # Security Baseline (GuardDuty, Security Hub, Config, Access Analyzer)
+  security:
+    stack_name: RoboSystemsSecurity # Shared between environments (account-global)
 
   # Dagster Orchestration
   dagster:

@@ -361,6 +361,13 @@ function setup_full_config() {
     gh variable set CLOUDTRAIL_LOG_RETENTION_DAYS --body "90"
     gh variable set CLOUDTRAIL_DATA_EVENTS_ENABLED --body "false"
 
+    # Security Baseline (SOC 2 - Account-level detective controls, not environment-specific)
+    # Disabled by default - enables GuardDuty, Security Hub + FSBP, Access Analyzer, Inspector.
+    # AWS Config is a separate switch (SECURITY_CONFIG_ENABLED) because its cost scales
+    # with resource count. Requires the deploy role grants from bootstrap-oidc (re-run bootstrap).
+    gh variable set SECURITY_ENABLED --body "false"
+    gh variable set SECURITY_CONFIG_ENABLED --body "false"
+
     # Secrets Rotation Configuration (monthly automatic rotation via secrets-rotation.yml)
     # Disabled by default - enable after testing in staging
     gh variable set SECRETS_ROTATION_ENABLED_PROD --body "false"
