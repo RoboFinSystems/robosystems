@@ -340,9 +340,15 @@ jobs:
       # AWS Configuration
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
-      subnet_id: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Instance Configuration
       instance_type: ${{ vars.OPENSEARCH_INSTANCE_TYPE_STAGING || 't3.medium.search' }}
+      instance_count: ${{ vars.OPENSEARCH_INSTANCE_COUNT_STAGING || '1' }}
+      zone_awareness_enabled: ${{ vars.OPENSEARCH_ZONE_AWARENESS_STAGING || 'false' }}
+      availability_zone_count: ${{ vars.OPENSEARCH_AZ_COUNT_STAGING || '2' }}
+      dedicated_master_enabled: ${{ vars.OPENSEARCH_DEDICATED_MASTER_STAGING || 'false' }}
+      dedicated_master_type: ${{ vars.OPENSEARCH_MASTER_TYPE_STAGING || 't3.small.search' }}
+      dedicated_master_count: ${{ vars.OPENSEARCH_MASTER_COUNT_STAGING || '3' }}
       ebs_volume_size: ${{ vars.OPENSEARCH_EBS_SIZE_STAGING || '100' }}
       # Engine Version Configuration
       engine_version: ${{ vars.OPENSEARCH_VERSION_STAGING || '2.19' }}

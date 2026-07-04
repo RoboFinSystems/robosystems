@@ -29,8 +29,8 @@ on:
         description: "VPC ID for OpenSearch"
         required: true
         type: string
-      subnet_id:
-        description: "Private subnet ID for OpenSearch (single-AZ)"
+      subnet_ids:
+        description: "Comma-separated private subnet IDs (first is used for single-AZ; first N for Multi-AZ)"
         required: true
         type: string
 
@@ -40,6 +40,36 @@ on:
         required: false
         type: string
         default: "t3.small.search"
+      instance_count:
+        description: "Number of data nodes (1 = single-AZ; >=2 for Multi-AZ)"
+        required: false
+        type: string
+        default: "1"
+      zone_awareness_enabled:
+        description: "Distribute data nodes across AZs (requires instance_count >= 2)"
+        required: false
+        type: string
+        default: "false"
+      availability_zone_count:
+        description: "Number of AZs to spread data nodes across when zone awareness enabled (2 or 3)"
+        required: false
+        type: string
+        default: "2"
+      dedicated_master_enabled:
+        description: "Enable dedicated master nodes (independent HA/quorum lever; recommended at Multi-AZ rollout)"
+        required: false
+        type: string
+        default: "false"
+      dedicated_master_type:
+        description: "Instance type for dedicated masters (used only when enabled; small is fine)"
+        required: false
+        type: string
+        default: "t3.small.search"
+      dedicated_master_count:
+        description: "Number of dedicated masters (used only when enabled; 3 recommended, odd)"
+        required: false
+        type: string
+        default: "3"
       ebs_volume_size:
         description: "EBS volume size in GB"
         required: false
@@ -112,13 +142,26 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
-          # Extract first subnet from comma-separated list (single-AZ deployment)
-          SUBNET_ID=$(echo "${{ inputs.subnet_id }}" | cut -d ',' -f1)
+          # Select subnets for the domain. Single-AZ (default) uses the first subnet —
+          # byte-identical to the prior `cut -f1` behavior. Multi-AZ uses the first N
+          # (one per AZ); CFN List<AWS::EC2::Subnet::Id> params need commas escaped as
+          # "\," in the CLI shorthand so the list stays one ParameterValue.
+          if [ "${{ inputs.zone_awareness_enabled }}" = "true" ]; then
+            SUBNET_IDS=$(echo "${{ inputs.subnet_ids }}" | cut -d ',' -f1-${{ inputs.availability_zone_count }} | sed 's/,/\\,/g')
+          else
+            SUBNET_IDS=$(echo "${{ inputs.subnet_ids }}" | cut -d ',' -f1)
+          fi
 
           OPENSEARCH_STACK_PARAMS="ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
-                ParameterKey=SubnetId,ParameterValue=${SUBNET_ID} \
+                ParameterKey=SubnetIds,ParameterValue=${SUBNET_IDS} \
                 ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
+                ParameterKey=InstanceCount,ParameterValue=${{ inputs.instance_count }} \
+                ParameterKey=ZoneAwarenessEnabled,ParameterValue=${{ inputs.zone_awareness_enabled }} \
+                ParameterKey=AvailabilityZoneCount,ParameterValue=${{ inputs.availability_zone_count }} \
+                ParameterKey=DedicatedMasterEnabled,ParameterValue=${{ inputs.dedicated_master_enabled }} \
+                ParameterKey=DedicatedMasterType,ParameterValue=${{ inputs.dedicated_master_type }} \
+                ParameterKey=DedicatedMasterCount,ParameterValue=${{ inputs.dedicated_master_count }} \
                 ParameterKey=EBSVolumeSize,ParameterValue=${{ inputs.ebs_volume_size }} \
                 ParameterKey=EngineVersion,ParameterValue=OpenSearch_${{ inputs.engine_version }} \
                 ParameterKey=BastionSecurityGroupId,ParameterValue=${{ inputs.bastion_sg_id }} \

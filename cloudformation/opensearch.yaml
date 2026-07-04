@@ -12,9 +12,11 @@ Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: VPC ID for OpenSearch deployment
-  SubnetId:
-    Type: AWS::EC2::Subnet::Id
-    Description: Private subnet ID for OpenSearch domain (single-AZ)
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >-
+      Private subnet IDs for the OpenSearch domain. One subnet = single-AZ
+      (today's default); pass 2-3 subnets (one per AZ) at the Multi-AZ rollout.
 
   # Instance Configuration
   InstanceType:
@@ -46,7 +48,48 @@ Parameters:
     Description: EBS volume size in GB
     Default: 100
     MinValue: 10
-    MaxValue: 1000
+    MaxValue: 2048
+
+  # Cluster Scaling / High Availability (all default to today's single-node domain)
+  InstanceCount:
+    Type: Number
+    Description: >-
+      Number of data nodes. 1 = single-node (default). Set >=2 (with
+      ZoneAwarenessEnabled and one subnet per AZ) for a Multi-AZ cluster.
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+  ZoneAwarenessEnabled:
+    Type: String
+    Description: Distribute data nodes across AZs (requires InstanceCount >= 2 and matching subnets)
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  AvailabilityZoneCount:
+    Type: Number
+    Description: Number of AZs to spread data nodes across when ZoneAwarenessEnabled
+    Default: 2
+    AllowedValues: [2, 3]
+
+  # Dedicated master nodes — an INDEPENDENT HA/quorum lever, separate from data-node scaling.
+  # Off by default. Masters hold no data and serve neither reads nor writes; they only manage
+  # cluster state. At Multi-AZ rollout: 3 masters (odd, for quorum), sized small.
+  DedicatedMasterEnabled:
+    Type: String
+    Description: Enable dedicated master nodes for cluster-management stability + quorum (independent of InstanceCount)
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  DedicatedMasterType:
+    Type: String
+    Description: >-
+      Instance type for dedicated masters (used only when enabled). Small is fine — masters
+      manage cluster state, not queries. Note: t3 works for standard Multi-AZ; Multi-AZ-with-
+      Standby requires a current-gen/Graviton type (e.g. m7g.large.search).
+    Default: t3.small.search
+  DedicatedMasterCount:
+    Type: Number
+    Description: Number of dedicated masters (used only when enabled). 3 recommended; never even, never 1.
+    Default: 3
+    AllowedValues: [3, 5]
 
   # Engine Configuration
   EngineVersion:
@@ -84,6 +127,8 @@ Parameters:
 Conditions:
   IsProduction: !Equals [!Ref Environment, prod]
   HasBastion: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
+  IsZoneAware: !Equals [!Ref ZoneAwarenessEnabled, "true"]
+  HasDedicatedMaster: !Equals [!Ref DedicatedMasterEnabled, "true"]
 
 Resources:
   # Security Group for OpenSearch Domain
@@ -155,12 +200,18 @@ Resources:
       DomainName: !Sub "robosystems-${Environment}"
       EngineVersion: !Ref EngineVersion
 
-      # Cluster Configuration — single node, no dedicated masters
+      # Cluster Configuration — parameterized; defaults preserve the single-node domain
       ClusterConfig:
         InstanceType: !Ref InstanceType
-        InstanceCount: 1
-        DedicatedMasterEnabled: false
-        ZoneAwarenessEnabled: false
+        InstanceCount: !Ref InstanceCount
+        DedicatedMasterEnabled: !If [HasDedicatedMaster, true, false]
+        DedicatedMasterType: !If [HasDedicatedMaster, !Ref DedicatedMasterType, !Ref "AWS::NoValue"]
+        DedicatedMasterCount: !If [HasDedicatedMaster, !Ref DedicatedMasterCount, !Ref "AWS::NoValue"]
+        ZoneAwarenessEnabled: !If [IsZoneAware, true, false]
+        ZoneAwarenessConfig: !If
+          - IsZoneAware
+          - AvailabilityZoneCount: !Ref AvailabilityZoneCount
+          - !Ref "AWS::NoValue"
         WarmEnabled: false
 
       # Storage
@@ -171,10 +222,9 @@ Resources:
         Iops: 3000
         Throughput: 125
 
-      # VPC Configuration — private subnet only
+      # VPC Configuration — one subnet (single-AZ) or one-per-AZ (Multi-AZ)
       VPCOptions:
-        SubnetIds:
-          - !Ref SubnetId
+        SubnetIds: !Ref SubnetIds
         SecurityGroupIds:
           - !Ref OpenSearchSecurityGroup
 
