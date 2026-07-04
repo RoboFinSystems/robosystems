@@ -12,6 +12,7 @@ Orientation and self-hosting: stand up a local stack, learn the vocabulary, and 
 - **[Core Concepts](Core-Concepts)** - The vocabulary: graphs, tiers, blocks, operators, operational vs analytical
 - **[Architecture Overview](Architecture-Overview)** - System design and components
 - **[Bootstrap Guide](Bootstrap-Guide)** - Set up AWS OIDC federation and GitHub Actions (self-hosting)
+- **[Security & Compliance](Security-and-Compliance)** - The security posture, built-in controls, and optional compliance stacks for forks
 
 ## Demos
 
