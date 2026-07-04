@@ -945,3 +945,29 @@ class TestPublishSensorSleepsMaster:
       "shared_replicas_refresh",
       "sec_master_sleep",
     }
+
+
+@pytest.mark.unit
+class TestSensorRequestJobsDeclared:
+  """Every job a sensor yields must be declared in its ``request_jobs``, or
+  Dagster rejects the RunRequest at tick time. Calling the sensor function
+  directly (as the other tests do) does NOT exercise that validation, so these
+  assert the declaration explicitly — the gap that shipped the sec_master_wake
+  "Expected one of [...]" prod error.
+  """
+
+  def test_pipeline_sensor_declares_wake(self):
+    names = {j.name for j in sec_incremental_pipeline_sensor.jobs}
+    assert "sec_master_wake" in names  # drained-queue branch yields this
+    assert "sec_process" in names
+
+  def test_wake_to_stage_declares_stage(self):
+    assert "sec_incremental_stage" in {j.name for j in sec_wake_to_stage_sensor.jobs}
+
+  def test_publish_sensor_declares_sleep_and_refresh(self):
+    names = {j.name for j in sec_post_materialize_publish_sensor.jobs}
+    assert {"sec_master_sleep", "shared_replicas_refresh"} <= names
+
+  def test_failure_sensor_declares_sleep(self):
+    names = {j.name for j in sec_master_sleep_on_failure_sensor.jobs}
+    assert "sec_master_sleep" in names

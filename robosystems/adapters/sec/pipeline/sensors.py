@@ -293,7 +293,7 @@ def sec_incremental_download_schedule(context):
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_download_job, sec_process_job],
-  request_jobs=[sec_process_job, sec_incremental_stage_job],
+  request_jobs=[sec_process_job, sec_master_wake_job],
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
   description="Chain: download → process (batched) → stage. Self-contained incremental pipeline.",
