@@ -31,7 +31,7 @@ For each detective service that IS on, pull and *triage* findings (don't just du
 **Amazon Inspector** (usually the loudest — container/host CVEs):
 - Aggregate by severity, by repo (`list-finding-aggregations --aggregation-type REPOSITORY`), and by CVE (`--aggregation-type TITLE`). **Dedup**: the same CVE is replicated across many image copies — N findings ≈ a handful of distinct CVEs × many images.
 - Check **fix availability** (`fixAvailable` filter) — if ~100% have fixes, it's a stale-image backlog, not an incident.
-- Classify each CVE: **base-image OS/runtime** (openssl, glibc, node) → one base-image bump clears many at once; **language deps** (npm/pip) → bump the package or add an override; **no upstream fix** (`fixedInVersion=NotAvailable`) → suppress.
+- Classify each CVE: **base-image OS/runtime** (openssl, glibc, node) → one base-image bump clears many at once (stay **in-major** when the runtime/`engines` constrains it); **language deps** (npm/pip) → if the flagged dep is a **devDependency-only transitive** (test/build tooling — jsdom, vitest, eslint), exclude it from the runtime image (`npm ci --omit=dev`, don't copy dev `node_modules` into the runner stage) rather than override it — that clears the whole devDep CVE class; only override a genuine *runtime* transitive; **no upstream fix** (`fixedInVersion=NotAvailable`) → suppress.
 - Watch for **inert vendored lockfiles** (e.g. a `package.json`/`package-lock.json` bundled in a non-node image with no `node_modules`) — Inspector flags declared deps that never run; strip the lockfile from the image instead of chasing the CVE.
 - Check the Inspector **`ecrConfiguration.rescanDuration`** (`get-configuration`) — that, not the ECR lifecycle policy, is the real scan-surface knob.
 
