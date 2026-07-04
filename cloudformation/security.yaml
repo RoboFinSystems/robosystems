@@ -121,6 +121,11 @@ Resources:
     Properties:
       ControlFindingGenerator: SECURITY_CONTROL
       AutoEnableControls: true
+      # Do not auto-enable default standards on Hub creation — the explicit
+      # SecurityHubFSBP / SecurityHubCIS resources own standards deterministically.
+      # Leaving this on makes the Hub enable FSBP itself, which then collides with
+      # SecurityHubFSBP ("Standards is already enabled") and fails the stack.
+      EnableDefaultStandards: false
       # Hub Tags is a JSON map (not the Key/Value list the other resources use).
       Tags:
         Environment: !Ref Environment
