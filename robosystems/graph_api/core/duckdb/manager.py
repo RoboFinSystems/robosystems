@@ -581,6 +581,14 @@ class DuckDBTableManager:
               return '"to" AS dst'
             if null_cols and table_col in null_cols:
               return f'NULL AS "{table_col}"'
+            # Target has a column the source parquet lacks — e.g. a property
+            # removed from the schema after this table was first created (an
+            # older full-rebuild left the column behind; schema evolution only
+            # adds source columns, never drops stale target-only ones). NULL it
+            # rather than referencing a nonexistent source column, which would
+            # raise "Values list 't' does not have a column named ...".
+            if table_col not in parquet_columns:
+              return f'NULL AS "{table_col}"'
             return f't."{table_col}"'
 
           select_expr = ", ".join(_explicit_col_expr(c) for c in post_cols)

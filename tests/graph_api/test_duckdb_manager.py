@@ -485,6 +485,76 @@ class TestInsertIntoTable:
     assert '"identifier"' in insert_sql[0]
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
+  def test_insert_deduplicate_true_target_column_absent_from_parquet(
+    self, mock_get_pool
+  ):
+    """Target column missing from the source parquet is NULLed, not selected.
+
+    Regression: a full rebuild created the table with a column (e.g.
+    "classification") that a later schema change dropped from the parquet.
+    Schema evolution only adds source columns, never drops stale target-only
+    ones, so the target-column-driven INSERT must not reference t."classification"
+    (which raises 'Values list "t" does not have a column named ...').
+    """
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_get_pool.return_value = mock_pool
+
+    mock_count_before = MagicMock()
+    mock_count_before.fetchone.return_value = (100,)
+
+    # Table has a stale "classification" column left by an older full rebuild.
+    mock_probe = MagicMock()
+    mock_probe.description = [
+      ("identifier", None),
+      ("name", None),
+      ("classification", None),
+      ("embedding", None),
+    ]
+
+    # Current parquet no longer emits "classification".
+    mock_parquet_probe = MagicMock()
+    mock_parquet_probe.description = [
+      ("identifier", None),
+      ("name", None),
+      ("embedding", None),
+    ]
+
+    mock_count_after = MagicMock()
+    mock_count_after.fetchone.return_value = (120,)
+
+    mock_conn.execute.side_effect = [
+      mock_count_before,  # COUNT before
+      mock_probe,  # table schema probe
+      mock_parquet_probe,  # parquet schema probe
+      None,  # INSERT INTO (no ALTER — no new source columns)
+      mock_count_after,  # COUNT after
+      None,  # CHECKPOINT
+    ]
+
+    request = TableCreateRequest(
+      graph_id="test_graph",
+      table_name="Element",
+      s3_pattern="s3://bucket/data/*.parquet",
+      deduplicate=True,
+    )
+
+    response = self.manager.insert_into_table(request)
+
+    assert response.status == "success"
+    execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
+    insert_sql = [c for c in execute_calls if "INSERT INTO" in c]
+    assert len(insert_sql) == 1
+    # The stale column is present in the INSERT column list but NULLed in SELECT.
+    assert '"classification"' in insert_sql[0]
+    assert 'NULL AS "classification"' in insert_sql[0]
+    assert 't."classification"' not in insert_sql[0]
+    # Columns that do exist in the parquet are still selected normally.
+    assert 't."identifier"' in insert_sql[0]
+    assert 't."name"' in insert_sql[0]
+
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_insert_deduplicate_true_relationship_src_dst(self, mock_get_pool):
     """deduplicate=True on table with src/dst but parquet with from/to renames columns."""
     mock_pool = MagicMock()
