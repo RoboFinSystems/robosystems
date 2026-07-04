@@ -180,6 +180,13 @@ COPY robosystems/ /app/robosystems/
 RUN rm -rf /app/robosystems/adapters/sec/arelle
 # Copy builder's complete arelle directory (includes EDGAR + cache + bundles)
 COPY --from=builder /build/robosystems/adapters/sec/arelle/ /app/robosystems/adapters/sec/arelle/
+# Strip vendored Node manifests from the bundled SEC EDGAR iXViewer. node_modules is
+# never installed or executed in this Python image — only the compiled viewer assets
+# are served — so these lockfiles serve only to trip Inspector's SBOM scanner on inert
+# third-party deps (e.g. lodash, flatted). Removing them clears those container-image
+# findings with no functional impact.
+RUN find /app/robosystems/adapters/sec/arelle -type f \
+    \( -name package-lock.json -o -name package.json -o -name yarn.lock \) -delete
 # Copy reporting-framework library (top-level, peer to robosystems/;
 # loaded by extensions migrations at provision time). Resolved via
 # FRAMEWORKS_DIR in robosystems/taxonomy/discovery.py.
