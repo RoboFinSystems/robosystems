@@ -393,11 +393,17 @@ function setup_full_config() {
     gh variable set OPENSEARCH_INSTANCE_TYPE_PROD --body "t3.medium.search"
     gh variable set OPENSEARCH_EBS_SIZE_PROD --body "100"
     gh variable set OPENSEARCH_VERSION_PROD --body "2.19"
+    # Scaling / HA — minimal single-node install. AZ count rides the workflow default;
+    # set the switches (count/zone) to roll out Multi-AZ later (see specs/opensearch-scaling-ha).
+    gh variable set OPENSEARCH_INSTANCE_COUNT_PROD --body "1"
+    gh variable set OPENSEARCH_ZONE_AWARENESS_PROD --body "false"
     if $setup_staging; then
         gh variable set OPENSEARCH_ENABLED_STAGING --body "false"
         gh variable set OPENSEARCH_INSTANCE_TYPE_STAGING --body "t3.medium.search"
         gh variable set OPENSEARCH_EBS_SIZE_STAGING --body "100"
         gh variable set OPENSEARCH_VERSION_STAGING --body "2.19"
+        gh variable set OPENSEARCH_INSTANCE_COUNT_STAGING --body "1"
+        gh variable set OPENSEARCH_ZONE_AWARENESS_STAGING --body "false"
     fi
 
     # LadybugDB Writer Configuration - Standard Tier
