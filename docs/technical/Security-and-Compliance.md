@@ -66,14 +66,14 @@ Then run a deploy (via the `staging.yml` / `prod.yml` workflows). The gated job 
 
 ## SOC 2 Posture for Forks
 
-A SOC 2 report attests to *an organization operating a system over time* — it is not a property of the source code, and nothing here is a SOC 2 "certification" by itself. What that means for a fork:
+RoboSystems is **aligning its controls to SOC 2 in preparation for a future audit** — the platform is not SOC 2 attested today, and this page describes the groundwork rather than a completed report. A SOC 2 report attests to *an organization operating a system over time* — it is not a property of the source code, and nothing here is a SOC 2 "certification" by itself. What that means for a fork:
 
-- **You inherit the control _design_.** A large share of the technical controls a SOC 2 expects are already implemented in the platform and its optional stacks. That's a strong head start toward a **Type I** report (controls designed and in place at a point in time).
+- **You inherit the control _design_.** A large share of the technical controls a SOC 2 expects map to controls implemented in the platform and its optional stacks — a foundation you build on, not a finished attestation. That's a head start toward a **Type I** report (controls designed and in place at a point in time).
 - **You do not inherit operating evidence.** A **Type II** report attests that controls operated effectively across an observation window (commonly 3–12 months). That evidence can only be produced by *your* deployment running over time — you can't inherit someone else's.
 - **AWS covers the infrastructure layer** via its own SOC reports, which you rely on as a subservice organization (the same way any AWS customer does).
 - **The report itself is your engagement.** Only a licensed CPA firm can issue a SOC 2 report. Turn the technical controls on *before* engaging one, because the observation window only counts time during which the controls were actually running.
 
-In short: RoboSystems gives you audit-ready control **design** plus the optional **evidence infrastructure**; achieving a report is your organization's engagement with an auditor.
+In short: RoboSystems aligns its control **design** to what SOC 2 expects and ships the optional **evidence infrastructure**; achieving a report is your organization's engagement with an auditor.
 
 > This page is operator guidance, not legal or attestation advice. Confirm scope and requirements with the CPA firm you engage.
 
