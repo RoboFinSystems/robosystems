@@ -369,6 +369,78 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
+  OpenSearchJVMMemoryPressureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub "robosystems-opensearch-${Environment}-high-jvm-memory"
+      AlarmDescription: >-
+        OpenSearch JVM heap pressure >= 80% sustained — trim old documents or
+        scale the instance before the ~85% circuit breaker starts blocking writes
+      MetricName: JVMMemoryPressure
+      Namespace: AWS/ES
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: DomainName
+          Value: !Ref OpenSearchDomain
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+      AlarmActions:
+        - !Ref OpenSearchNotificationTopic
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-opensearch-${Environment}-high-jvm-memory"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  OpenSearchWritesBlockedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub "robosystems-opensearch-${Environment}-writes-blocked"
+      AlarmDescription: >-
+        OpenSearch is blocking index writes — cluster has hit a memory or storage
+        wall and needs immediate attention (trim documents, scale, or expand EBS)
+      MetricName: ClusterIndexWritesBlocked
+      Namespace: AWS/ES
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: DomainName
+          Value: !Ref OpenSearchDomain
+        - Name: ClientId
+          Value: !Ref "AWS::AccountId"
+      AlarmActions:
+        - !Ref OpenSearchNotificationTopic
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-opensearch-${Environment}-writes-blocked"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
 Outputs:
   OpenSearchEndpoint:
     Description: OpenSearch domain endpoint
