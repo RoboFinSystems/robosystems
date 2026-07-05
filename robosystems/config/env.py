@@ -1363,12 +1363,16 @@ class EnvConfig:
         "https://roboledger.ai",
         "https://roboinvestor.ai",
         "https://robosystems.ai",
+        # Holon Viewer — static SPA that calls the API client-side with a
+        # user-supplied API key (no app backend of its own).
+        "https://holon.robosystems.ai",
       ]
     elif cls.is_staging():
       return [
         "https://staging.roboledger.ai",
         "https://staging.roboinvestor.ai",
         "https://staging.robosystems.ai",
+        "https://staging.holon.robosystems.ai",
       ]
     else:
       # Development
