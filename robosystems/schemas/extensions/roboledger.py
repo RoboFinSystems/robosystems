@@ -271,7 +271,7 @@ TRANSACTION_NODES = [
       Property(
         name="provenance", type="STRING"
       ),  # entry origin: source_sync | ai_generated | manual_entry |
-      # schedule_derived | system_computed (see ck_entries_provenance)
+      # schedule_derived | system_computed | event_handler (ck_entries_provenance)
       Property(name="updated_at", type="STRING"),
     ],
   ),

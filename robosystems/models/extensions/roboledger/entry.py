@@ -23,6 +23,21 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
+# Allowed values for Entry.provenance (entry origin). Single source of truth for
+# the model CHECK constraint below AND the value any write path may assign — the
+# `event_handler` value (entries created by the event-block engine) was written
+# in code before it was permitted here, so keep this in lockstep with the write
+# paths (see tests/operations/event_block/test_engine.py). Migrations carry
+# their own static snapshot of this set (they must not import model constants).
+ENTRY_PROVENANCE_VALUES = (
+  "source_sync",
+  "ai_generated",
+  "manual_entry",
+  "schedule_derived",
+  "system_computed",
+  "event_handler",
+)
+
 
 class Entry(ExtensionsBase):
   __tablename__ = "entries"
@@ -48,6 +63,12 @@ class Entry(ExtensionsBase):
     CheckConstraint(
       "type IN ('standard', 'adjusting', 'closing', 'reversing')",
       name="check_entry_type",
+    ),
+    CheckConstraint(
+      "provenance IN ("
+      + ", ".join(f"'{v}'" for v in ENTRY_PROVENANCE_VALUES)
+      + ") OR provenance IS NULL",
+      name="ck_entries_provenance",
     ),
   )
 
@@ -76,7 +97,8 @@ class Entry(ExtensionsBase):
   # Origin tracking — where this entry came from
   provenance = Column(
     String, nullable=True
-  )  # source_sync, ai_generated, manual_entry, schedule_derived, system_computed
+  )  # ENTRY_PROVENANCE_VALUES: source_sync, ai_generated, manual_entry,
+  # schedule_derived, system_computed, event_handler
 
   # Dates
   posting_date = Column(Date, nullable=False)
