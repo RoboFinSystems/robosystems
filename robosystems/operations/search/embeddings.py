@@ -14,6 +14,13 @@ MODEL_NAME = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIMENSIONS = 384
 EMBEDDING_MODEL_ID = "fastembed"
 
+# onnxruntime intra-op thread count. Pinned to 1 on purpose: in CPU-limited
+# containers (ECS Fargate), letting onnxruntime auto-size its thread pool
+# oversubscribes the CFS quota — the spin-wait threads contend instead of
+# compute, making embedding ~5x SLOWER. Benchmarked on this workload:
+# threads=None ~1280ms/section vs threads=1 ~240ms/section.
+EMBEDDING_THREADS = 1
+
 
 class EmbeddingService:
   """Text embedding using fastembed (included, no credits)."""
@@ -27,7 +34,7 @@ class EmbeddingService:
     if self._model is None:
       from fastembed import TextEmbedding
 
-      self._model = TextEmbedding(MODEL_NAME)
+      self._model = TextEmbedding(MODEL_NAME, threads=EMBEDDING_THREADS)
       logger.info(f"Loaded embedding model: {MODEL_NAME} ({EMBEDDING_DIMENSIONS}d)")
     return self._model
 
