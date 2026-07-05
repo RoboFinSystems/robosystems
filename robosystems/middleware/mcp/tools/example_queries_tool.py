@@ -104,12 +104,20 @@ List of example queries with explanations, tailored to the actual schema present
 
       # Basic exploration queries (always include)
       if not category or category == "exploration":
+        # Derive the count-by-type query from the labels actually present so we
+        # don't assume an XBRL/SEC shape (Fact/Element/Entity) on a graph that
+        # may not have it.
+        count_labels = node_types[:4] or ["Node"]
+        count_query = " UNION ALL ".join(
+          f"MATCH (n:{lbl}) RETURN '{lbl}' AS node_type, count(n) AS count"
+          for lbl in count_labels
+        )
         examples.append(
           {
             "category": "exploration",
-            "description": "Count all nodes by type",
-            "query": "MATCH (n:Fact) RETURN 'Fact' as node_type, count(n) as count UNION ALL MATCH (n:Element) RETURN 'Element' as node_type, count(n) as count UNION ALL MATCH (n:Entity) RETURN 'Entity' as node_type, count(n) as count",
-            "explanation": "Shows distribution of data across node types",
+            "description": "Count nodes by type",
+            "query": count_query,
+            "explanation": "Distribution across this graph's main node types (derived from the live schema, not assumed).",
           }
         )
         examples.append(
@@ -138,12 +146,12 @@ List of example queries with explanations, tailored to the actual schema present
               "category": "financial",
               "description": "Get company information",
               "query": "MATCH (e:Entity) RETURN e.name, e.cik, e.ticker, e.sic_description LIMIT 25",
-              "explanation": "Entity nodes contain company master data. Filter by ticker (e.ticker = 'MRMD') or CIK for one company — this repo holds thousands of entities, so always LIMIT or filter.",
+              "explanation": "Entity nodes contain company master data. Filter by ticker (e.ticker = 'NVDA') or CIK for one company — this repo holds thousands of entities, so always LIMIT or filter.",
             },
             {
               "category": "financial",
               "description": "⭐ CONSOLIDATED Revenue for one company (cross-filer robust)",
-              "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: 'MRMD'}), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
+              "query": """MATCH (f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element), (f)-[:FACT_HAS_ENTITY]->(ent:Entity {ticker: 'NVDA'}), (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'})
 WHERE e.canonical_concept = 'revenue' AND f.numeric_value IS NOT NULL
 RETURN ent.ticker, e.qname, p.end_date, f.numeric_value AS revenue
 ORDER BY p.end_date DESC LIMIT 10""",
@@ -152,7 +160,7 @@ ORDER BY p.end_date DESC LIMIT 10""",
             {
               "category": "financial",
               "description": "Full income statement by ticker (fast Structure traversal)",
-              "query": """MATCH (ent:Entity {ticker: 'MRMD'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element),
+              "query": """MATCH (ent:Entity {ticker: 'NVDA'})<-[:FACT_HAS_ENTITY]-(f:Fact {has_dimensions: false})-[:FACT_HAS_ELEMENT]->(e:Element),
       (f)-[:FACT_HAS_PERIOD]->(p:Period {duration_type: 'annual'}),
       (fs:FactSet)-[:FACT_SET_CONTAINS_FACT]->(f),
       (s:Structure {canonical_type: 'income_statement'})-[:STRUCTURE_HAS_FACT_SET]->(fs)
@@ -279,27 +287,18 @@ ORDER BY t.date DESC LIMIT 25""",
           ]
         )
 
-      # Aggregation examples
+      # Aggregation examples — kept anchored on a single labelled set so they
+      # never model the `MATCH (n)` / unfiltered-Fact global scan the operator
+      # is told to avoid (it scans every node and times out on a large graph).
       if not category or category == "aggregations":
-        examples.extend(
-          [
-            {
-              "category": "aggregations",
-              "description": "Group and sum values",
-              "query": """MATCH (f:Fact)
-WHERE f.numeric_value IS NOT NULL
-RETURN 'Fact' as type, sum(f.numeric_value) as total, count(f) as count""",
-              "explanation": "LadybugDB supports aggregation functions like sum(), avg(), count()",
-            },
-            {
-              "category": "aggregations",
-              "description": "Find min/max values",
-              "query": """MATCH (n)
-WHERE n.numeric_value IS NOT NULL
-RETURN min(n.numeric_value) as min_val, max(n.numeric_value) as max_val""",
-              "explanation": "Use min() and max() for range analysis",
-            },
-          ]
+        agg_label = node_types[0] if node_types else "Node"
+        examples.append(
+          {
+            "category": "aggregations",
+            "description": "Aggregate over one labelled set",
+            "query": f"MATCH (n:{agg_label}) RETURN count(n) AS count",
+            "explanation": "count(), sum(), avg(), min(), max() are supported. Always aggregate over ONE labelled, filtered set and anchor first (by ticker, qname, date, or id) — never sum/scan `MATCH (n)` or an unfiltered label across the whole graph.",
+          }
         )
 
       # Add note about available nodes and relationships
