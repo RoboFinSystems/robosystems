@@ -188,6 +188,17 @@ class TestREAStaging:
     assert "'entries'" in sql
     assert "e.id = li.entry_id" in sql
 
+  def test_entry_provenance_materialized_and_in_schema(self):
+    """Entry.provenance (origin: manual_entry / schedule_derived / etc.) is
+    carried into the graph AND declared as a schema Property. The materializer
+    has always SELECTed it, but a missing schema Property meant the by-name
+    graph loader silently dropped it — this guards against that regressing."""
+    from robosystems.schemas.extensions.roboledger import TRANSACTION_NODES
+
+    assert "provenance" in _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Entry"]
+    entry_node = next(n for n in TRANSACTION_NODES if n.name == "Entry")
+    assert "provenance" in {p.name for p in entry_node.properties}
+
   def test_entity_has_agent_and_event_fan_out_from_entity_id(self):
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
     assert ENTITY_ID in tables["ENTITY_HAS_AGENT"]
