@@ -247,6 +247,7 @@ def test_get_main_cors_origins_respects_environment(monkeypatch):
     "https://roboledger.ai",
     "https://roboinvestor.ai",
     "https://robosystems.ai",
+    "https://holon.robosystems.ai",
   ]
 
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "staging", raising=False)
@@ -254,6 +255,7 @@ def test_get_main_cors_origins_respects_environment(monkeypatch):
     "https://staging.roboledger.ai",
     "https://staging.roboinvestor.ai",
     "https://staging.robosystems.ai",
+    "https://staging.holon.robosystems.ai",
   ]
 
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "dev", raising=False)
