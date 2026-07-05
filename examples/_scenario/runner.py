@@ -1023,48 +1023,13 @@ def generate_annual_report(
 def _download_bundles(
   client, graph_id: str, report_id: str, out_dir: Path, scenario: Scenario
 ) -> None:
-  """Download the JSON-LD + XBRL bundles, validate (SHACL + Arelle), and write
-  a DataBook — all into ``out_dir`` under the scenario's slug."""
-  from examples._common.databook import write_databook
-  from examples._common.validate import validate_arelle, validate_shacl
+  """Render the aligned report-artifact set for the scenario's report — the
+  same shared pipeline every RoboLedger demo uses (``_common/artifacts.py``)."""
+  from examples._common.artifacts import render_report_artifacts
 
-  out_dir.mkdir(parents=True, exist_ok=True)
   base = scenario.slug.replace("_", "-")
   label = scenario.company_name.split(",")[0]
-  jsonld_path = out_dir / f"{base}-demo.jsonld"
-  holon_path = out_dir / f"{base}-demo.holon.jsonld"
-  xbrl_path = out_dir / f"{base}-demo.zip"
-
-  jsonld = client.download_report_bundle(
-    graph_id, report_id, format="jsonld", to=jsonld_path
-  )
-  holon = client.download_report_bundle(
-    graph_id, report_id, format="holon-jsonld", to=holon_path
-  )
-  xbrl = client.download_report_bundle(
-    graph_id, report_id, format="xbrl-2.1", to=xbrl_path
-  )
-  print(f"  JSON-LD:      {jsonld.path} ({len(jsonld.content):,} bytes)")
-  print(f"  Holon:        {holon.path} ({len(holon.content):,} bytes)")
-  print(f"  XBRL 2.1:     {xbrl.path} ({len(xbrl.content):,} bytes)")
-
-  shacl_md = out_dir / f"{base}-demo-shacl-validation.md"
-  xbrl_md = out_dir / f"{base}-demo-xbrl-validation.md"
-  conforms = validate_shacl(jsonld_path, shacl_md, label)
-  valid = validate_arelle(xbrl_path, xbrl_md, label)
-  print(f"  SHACL:        {shacl_md} ({'conforms' if conforms else 'VIOLATIONS'})")
-  print(f"  Arelle:       {xbrl_md} ({'valid' if valid else 'INVALID'})")
-
-  databook_md = out_dir / f"{base}-demo.databook.md"
-  write_databook(
-    jsonld_path,
-    databook_md,
-    f"{label} Demo",
-    shacl_md=shacl_md,
-    xbrl_md=xbrl_md,
-    derive_holon=False,
-  )
-  print(f"  DataBook:     {databook_md}")
+  render_report_artifacts(client, graph_id, report_id, out_dir, f"{base}-demo", label)
 
 
 # ---------------------------------------------------------------------------
