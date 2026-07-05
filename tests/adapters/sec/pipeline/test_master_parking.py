@@ -188,3 +188,45 @@ def test_asg_name_from_config():
   from robosystems.config import env
 
   assert get_shared_master_asg_name() == env.SHARED_MASTER_ASG_NAME
+
+
+@pytest.mark.unit
+class TestSleepAssetParkingGate:
+  """The sleep asset honors SHARED_MASTER_PARKING_ENABLED.
+
+  The pure ``sleep_master`` always scales to 0 (unit-tested above); the gate
+  lives in the asset wrapper so both the happy-path and failure-path sleep
+  sensors respect it via a single check.
+  """
+
+  @patch("robosystems.adapters.sec.pipeline.master_sleep.sleep_master")
+  @patch("robosystems.adapters.sec.pipeline.master_sleep.env")
+  def test_parking_disabled_skips_scale_down(self, mock_env, m_sleep):
+    from dagster import build_asset_context
+
+    from robosystems.adapters.sec.pipeline.master_sleep import sec_master_asleep
+
+    mock_env.ENVIRONMENT = "prod"
+    mock_env.SHARED_MASTER_PARKING_ENABLED = False
+
+    result = sec_master_asleep(build_asset_context())
+
+    m_sleep.assert_not_called()
+    assert result.metadata["status"] == "skipped"
+    assert result.metadata["reason"] == "parking_disabled"
+
+  @patch("robosystems.adapters.sec.pipeline.master_sleep.sleep_master")
+  @patch("robosystems.adapters.sec.pipeline.master_sleep.env")
+  def test_parking_enabled_scales_down(self, mock_env, m_sleep):
+    from dagster import build_asset_context
+
+    from robosystems.adapters.sec.pipeline.master_sleep import sec_master_asleep
+
+    mock_env.ENVIRONMENT = "prod"
+    mock_env.SHARED_MASTER_PARKING_ENABLED = True
+    m_sleep.return_value = {"status": "asleep", "instance_id": "i-xyz"}
+
+    result = sec_master_asleep(build_asset_context())
+
+    m_sleep.assert_called_once()
+    assert result.metadata["instance_id"] == "i-xyz"

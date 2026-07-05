@@ -217,6 +217,7 @@ function create_ssm_feature_flags() {
         "RATE_LIMIT_ENABLED=false"
         "SECURITY_AUDIT_ENABLED=false"
         "SHARED_MASTER_READS_ENABLED=true"
+        "SHARED_MASTER_PARKING_ENABLED=true"
         "MCP_VECTOR_SEARCH_ENABLED=false"
         "SEMANTIC_SEARCH_ENABLED=false"
         "SSE_ENABLED=true"
