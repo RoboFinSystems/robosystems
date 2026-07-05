@@ -629,6 +629,16 @@ def _maybe_snapshot_pre_detach(
   for empty pool volumes (no data to preserve). CreateSnapshot is async —
   AWS copies blocks from the volume in the background even after detach,
   so we don't wait. Failure logs + alerts but does NOT block the detach.
+
+  For shared_master the snapshot is a *rolling single*: after the new snapshot
+  is created we delete any prior pre-detach snapshots of the same volume, so at
+  most one exists at a time. The master detaches on every park cycle and its
+  graph is fully rebuilt nightly (each snapshot delta ≈ the whole volume), so
+  retaining a window's worth accumulates expensively — and the master's real
+  backup is S3 anyway, making the EBS snapshot a single last-known-good fallback
+  rather than a history. Prune runs only AFTER a successful create, so there is
+  never a moment with zero fallback. Dedicated writers keep the every-detach,
+  3-day multi-snapshot history unchanged (unique data, infrequent detaches).
   """
   if node_type == "shared_replica":
     logger.info(f"Skipping pre-detach snapshot for {volume_id}: shared_replica")
@@ -645,7 +655,7 @@ def _maybe_snapshot_pre_detach(
   )[:255]
 
   try:
-    snap = ec2.create_snapshot(
+    snapshot = ec2.create_snapshot(
       VolumeId=volume_id,
       Description=description,
       TagSpecifications=[
@@ -665,10 +675,6 @@ def _maybe_snapshot_pre_detach(
         }
       ],
     )
-    logger.info(
-      f"Created pre-detach snapshot {snap['SnapshotId']} for {volume_id} "
-      f"(node_type={node_type}, databases={databases})"
-    )
   except Exception as e:
     # Don't block detach on snapshot failure — alert and continue.
     logger.error(f"Failed to create pre-detach snapshot for {volume_id}: {e}")
@@ -677,6 +683,51 @@ def _maybe_snapshot_pre_detach(
       f"Failed to snapshot {volume_id} (node_type={node_type}, "
       f"databases={databases}) before detach: {e}",
     )
+    return
+
+  snapshot_id = snapshot["SnapshotId"]
+  logger.info(
+    f"Created pre-detach snapshot {snapshot_id} for {volume_id} "
+    f"(node_type={node_type}, databases={databases})"
+  )
+
+  # Rolling single: keep only the just-created snapshot for the shared master.
+  if node_type == "shared_master":
+    _prune_prior_pre_detach_snapshots(volume_id, keep_snapshot_id=snapshot_id)
+
+
+def _prune_prior_pre_detach_snapshots(volume_id: str, keep_snapshot_id: str) -> None:
+  """Delete every pre-detach snapshot of ``volume_id`` except ``keep_snapshot_id``.
+
+  Enforces the shared master's rolling-single policy. Best effort and never
+  raises: a snapshot mid-use (e.g. a volume being created from it) cannot be
+  deleted and is left for the retention cleanup to reap. Pruning must never
+  block the detach.
+  """
+  try:
+    response = ec2.describe_snapshots(
+      OwnerIds=["self"],
+      Filters=[
+        {"Name": "volume-id", "Values": [volume_id]},
+        {"Name": "tag:Type", "Values": ["pre_detach"]},
+        {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
+      ],
+    )
+  except Exception as e:
+    logger.error(f"Failed to list prior pre-detach snapshots for {volume_id}: {e}")
+    return
+
+  for snap in response.get("Snapshots", []):
+    snap_id = snap["SnapshotId"]
+    if snap_id == keep_snapshot_id:
+      continue
+    try:
+      ec2.delete_snapshot(SnapshotId=snap_id)
+      logger.info(f"Pruned prior pre-detach snapshot {snap_id} for {volume_id}")
+    except Exception as e:
+      logger.warning(
+        f"Could not prune pre-detach snapshot {snap_id} for {volume_id}: {e}"
+      )
 
 
 def expand_volume(event: dict[str, Any]) -> dict[str, Any]:
