@@ -662,12 +662,18 @@ class ReportDownloadFormat(Enum):
   """Serialization flavor for a Report bundle download.
 
   Names map to the operations-layer ``RdfFlavor`` / ``XbrlFlavor``
-  string values (``jsonld``, ``xbrl-2.1``). The hyphenated XBRL value
-  isn't a valid GraphQL enum *name*, so the wire name is ``XBRL_2_1``
-  while the resolver forwards the ``.value`` to the ops read.
+  string values (``jsonld``, ``holon-jsonld``, ``xbrl-2.1``). The
+  hyphenated values aren't valid GraphQL enum *names*, so the wire names
+  are ``HOLON_JSONLD`` / ``XBRL_2_1`` while the resolver forwards the
+  ``.value`` to the ops read.
+
+  ``JSONLD`` is the flat canonical bundle stamped at publish;
+  ``HOLON_JSONLD`` is the dataset-form named-graph holon (scene /
+  boundary / projection), materialized on demand off the same bundle.
   """
 
   JSONLD = "jsonld"
+  HOLON_JSONLD = "holon-jsonld"
   XBRL_2_1 = "xbrl-2.1"
 
 

@@ -1,6 +1,6 @@
 # Seattle Method Cross-Taxonomy — Test Case 1 Reconciliation
 
-**Graph**: `kg19ede94dda6b99013d06`
+**Graph**: `kg19f310982ab9e45ea66e`
 **Period**: 2024-01-01 → 2024-01-31
 **Dataset**: Charlie Hoffman's lemonade-stand 14-JE Q1 2024 fixture
 **Expected output reference**: [luca.pacioli.ai/luca/view/0f24fd35…](https://luca.pacioli.ai/luca/view/0f24fd35e961e167a727b663c75a4c5ec9fb7eb86730d6292f46e6e180fc2018980cd52e/index)
@@ -145,8 +145,8 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 | Flow concept | Value | Matched lines | Event ids |
 |---|---:|---:|---|
-| `mini:PurchasesInventoryForSaleOnAccount` | $(8,000.00) | 2 | evt_01KVF99TH397VY15RMQJZAQJ58, evt_01KVF99THE86Y2RPX7JFHHMCFG |
-| `mini:DecreaseFromPaymentAccountsPayable` | $7,000.00 | 1 | evt_01KVF99TJM7TQK038XYQVFE73Y |
+| `mini:PurchasesInventoryForSaleOnAccount` | $(8,000.00) | 2 | evt_01KWRGK3Z885G81T38Y7GQCWWN, evt_01KWRGK3ZPTFGXV90T83B57A9H |
+| `mini:DecreaseFromPaymentAccountsPayable` | $7,000.00 | 1 | evt_01KWRGK40YFHTF7MB9BF9S60BG |
 
 ### Accrued Expenses (mini:AccruedExpenses)
 
@@ -154,8 +154,8 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 | Flow concept | Value | Matched lines | Event ids |
 |---|---:|---:|---|
-| `mini:InterestAccrued` | $(550.00) | 2 | evt_01KVF99TKDQGY91XA8A6JW70E8, evt_01KVF99TMYX02313T3J24YZATV |
-| `mini:DecreaseFromPaymentOfInterest` | $150.00 | 1 | evt_01KVF99TK0NCATQEY35DMREF84 |
+| `mini:InterestAccrued` | $(550.00) | 2 | evt_01KWRGK41SW1N9A8YFGPZ91QKE, evt_01KWRGK439H95HGG641J8XKY7S |
+| `mini:DecreaseFromPaymentOfInterest` | $150.00 | 1 | evt_01KWRGK41B1TEQZWX72BVV59Q2 |
 
 ### Cash and Cash Equivalents (mini:CashAndCashEquivalents)
 
@@ -163,13 +163,13 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 | Flow concept | Value | Matched lines | Event ids |
 |---|---:|---:|---|
-| `mini:ProceedsFromInvestmentsByOwner` | $10,000.00 | 1 | evt_01KVF99TFFNK8ZB3WY2JXS8TVK |
-| `mini:ProceedsFromAdditionalLongtermBorrowings` | $2,000.00 | 1 | evt_01KVF99TG8WAHFKHT1WJAA3FMR |
-| `mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment` | $(1,000.00) | 1 | evt_01KVF99TGN1ZW0A14ZQZDZN721 |
-| `mini:PaymentInterest` | $(150.00) | 1 | evt_01KVF99TK0NCATQEY35DMREF84 |
-| `mini:ProceedsFromCollectionOfReceivables` | $8,000.00 | 1 | evt_01KVF99TJ92J3VAQSXMAABM2A7 |
-| `mini:PaymentOfAccountsPayable` | $(7,000.00) | 1 | evt_01KVF99TJM7TQK038XYQVFE73Y |
-| `mini:PaymentForReductionOfLongtermBorrowings` | $(1,000.00) | 1 | evt_01KVF99TK0NCATQEY35DMREF84 |
+| `mini:ProceedsFromInvestmentsByOwner` | $10,000.00 | 1 | evt_01KWRGK3XAN4H1C3K8P8XN26MF |
+| `mini:ProceedsFromAdditionalLongtermBorrowings` | $2,000.00 | 1 | evt_01KWRGK3Y914X430WEF8ZFRF9K |
+| `mini:PaymentForCapitalAdditionsOfPropertyPlantEquipment` | $(1,000.00) | 1 | evt_01KWRGK3YTYQSN3WQNY3B1FD1D |
+| `mini:PaymentInterest` | $(150.00) | 1 | evt_01KWRGK41B1TEQZWX72BVV59Q2 |
+| `mini:ProceedsFromCollectionOfReceivables` | $8,000.00 | 1 | evt_01KWRGK40HMMV983AAVPJ7K5P5 |
+| `mini:PaymentOfAccountsPayable` | $(7,000.00) | 1 | evt_01KWRGK40YFHTF7MB9BF9S60BG |
+| `mini:PaymentForReductionOfLongtermBorrowings` | $(1,000.00) | 1 | evt_01KWRGK41B1TEQZWX72BVV59Q2 |
 
 ### Inventories (mini:Inventories)
 
@@ -177,9 +177,9 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 | Flow concept | Value | Matched lines | Event ids |
 |---|---:|---:|---|
-| `mini:InventoryWrittenOff` | $(300.00) | 1 | evt_01KVF99TKVJSP9Y279HB3F2G7J |
-| `mini:PurchasesOfInventoryForSale` | $5,000.00 | 1 | evt_01KVF99TH397VY15RMQJZAQJ58 |
-| `mini:DecreaseInInventoriesFromSales` | $(2,000.00) | 1 | evt_01KVF99THW3S8DYNTDPEY66HFK |
+| `mini:InventoryWrittenOff` | $(300.00) | 1 | evt_01KWRGK42733JFD82H9SBK3KNA |
+| `mini:PurchasesOfInventoryForSale` | $5,000.00 | 1 | evt_01KWRGK3Z885G81T38Y7GQCWWN |
+| `mini:DecreaseInInventoriesFromSales` | $(2,000.00) | 1 | evt_01KWRGK40424DCHW30FXPNP544 |
 
 ### Long-term Debt (mini:LongtermDebt)
 
@@ -187,8 +187,8 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 | Flow concept | Value | Matched lines | Event ids |
 |---|---:|---:|---|
-| `mini:AdditionalLongtermBorrowings` | $(2,000.00) | 1 | evt_01KVF99TG8WAHFKHT1WJAA3FMR |
-| `mini:RepaymentLongtermBorrowings` | $1,000.00 | 1 | evt_01KVF99TK0NCATQEY35DMREF84 |
+| `mini:AdditionalLongtermBorrowings` | $(2,000.00) | 1 | evt_01KWRGK3Y914X430WEF8ZFRF9K |
+| `mini:RepaymentLongtermBorrowings` | $1,000.00 | 1 | evt_01KWRGK41B1TEQZWX72BVV59Q2 |
 
 ### Paid In Capital (mini:PaidInCapital)
 
@@ -196,7 +196,7 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 | Flow concept | Value | Matched lines | Event ids |
 |---|---:|---:|---|
-| `mini:InvestmentsByOwner` | $(10,000.00) | 1 | evt_01KVF99TFFNK8ZB3WY2JXS8TVK |
+| `mini:InvestmentsByOwner` | $(10,000.00) | 1 | evt_01KWRGK3XAN4H1C3K8P8XN26MF |
 
 ### Property, Plant and Equipment (mini:PropertyPlantAndEquipment)
 
@@ -204,8 +204,8 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 | Flow concept | Value | Matched lines | Event ids |
 |---|---:|---:|---|
-| `mini:CapitalAdditionsPropertyPlantAndEquipment` | $1,000.00 | 1 | evt_01KVF99TGN1ZW0A14ZQZDZN721 |
-| `mini:DecreaseFromDepreciationAndAmortization` | $(100.00) | 1 | evt_01KVF99TM92X8R8N60SMXGZS5H |
+| `mini:CapitalAdditionsPropertyPlantAndEquipment` | $1,000.00 | 1 | evt_01KWRGK3YTYQSN3WQNY3B1FD1D |
+| `mini:DecreaseFromDepreciationAndAmortization` | $(100.00) | 1 | evt_01KWRGK42K7CZ1RVF19J400ARP |
 
 ### Receivables (mini:Receivables)
 
@@ -213,8 +213,8 @@ Each rollforward IB decomposes its BS source's period delta across declared TDC 
 
 | Flow concept | Value | Matched lines | Event ids |
 |---|---:|---:|---|
-| `mini:IncreaseInReceivablesFromSalesOnAccount` | $8,000.00 | 1 | evt_01KVF99THW3S8DYNTDPEY66HFK |
-| `mini:CollectionOfReceivables` | $(8,000.00) | 1 | evt_01KVF99TJ92J3VAQSXMAABM2A7 |
+| `mini:IncreaseInReceivablesFromSalesOnAccount` | $8,000.00 | 1 | evt_01KWRGK40424DCHW30FXPNP544 |
+| `mini:CollectionOfReceivables` | $(8,000.00) | 1 | evt_01KWRGK40HMMV983AAVPJ7K5P5 |
 
 ## Findings
 

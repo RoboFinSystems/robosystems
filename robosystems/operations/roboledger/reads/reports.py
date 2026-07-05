@@ -366,6 +366,19 @@ def get_report_download_url(
     )
   generation_count = int(report.generation_count or 0)
 
+  # HOLON_JSONLD is a *derived* projection — materialized + cached on demand
+  # like XBRL, not stamped at publish. It's a member of RdfFlavor, so it's also
+  # in _RDF_FLAVOR_VALUES: this branch MUST stay above the _RDF_FLAVOR_VALUES
+  # check below, which presigns the publish-stamped JSON-LD and rejects every
+  # other RDF flavor as "reserved for future use".
+  if flavor == RdfFlavor.HOLON_JSONLD.value:
+    return _materialize_and_presign_holon(
+      session=session,
+      graph_id=graph_id,
+      report_id=report_id,
+      generation_count=generation_count,
+      expires_in=expires_in,
+    )
   if flavor in _RDF_FLAVOR_VALUES:
     return _presign_stored_rdf_bundle(
       bundle_uri=str(report.bundle_url),
@@ -490,6 +503,74 @@ def _materialize_and_presign_xbrl(
     expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
     content_type="application/zip",
     format=flavor.value,
+    generation_count=generation_count,
+  )
+
+
+def _materialize_and_presign_holon(
+  session: Session,
+  graph_id: str,
+  report_id: str,
+  generation_count: int,
+  expires_in: int,
+) -> ReportBundleDownloadResponse:
+  """Presign the dataset-form JSON-LD **holon**, materializing + caching it on
+  first download.
+
+  The holon is a *derived* projection of the same bundle the flat JSON-LD is
+  stamped from — the report as ``#scene`` / ``#boundary`` / ``#projection``
+  named graphs (see ``operations/serialization/rdf/holon.py``). Like XBRL it's
+  built on demand and cached under a ``generation_count``-versioned key
+  (immutable per generation, so an existing object is always a valid cache
+  hit), rather than stamped at publish. Serialization imports are deferred so
+  the reads module stays import-light.
+  """
+  bucket = env.USER_DATA_BUCKET
+  key = get_report_bundle_key(
+    graph_id, report_id, generation_count, extension=".holon.jsonld"
+  )
+  s3 = S3Client()
+
+  if not s3.object_exists(bucket, key):
+    from robosystems.operations.serialization import (
+      build_report_bundle,
+      serialize_to_holon_jsonld,
+    )
+
+    bundle = build_report_bundle(session, graph_id, report_id)
+    holon = serialize_to_holon_jsonld(bundle)
+    uploaded = s3.upload_string(
+      content=holon,
+      bucket=bucket,
+      key=key,
+      content_type="application/ld+json",
+      metadata={"report-id": report_id, "graph-id": graph_id},
+    )
+    if not uploaded:
+      raise BundleSigningError(
+        f"Failed to materialize holon bundle for report '{report_id}' "
+        f"to s3://{bucket}/{key}."
+      )
+
+  download_url = s3.generate_presigned_url(
+    bucket=bucket,
+    key=key,
+    expires_in=expires_in,
+    response_content_type="application/ld+json",
+    response_content_disposition=(
+      f'attachment; filename="{report_id}-g{generation_count}.holon.jsonld"'
+    ),
+  )
+  if download_url is None:
+    raise BundleSigningError(
+      f"Failed to sign download URL for report '{report_id}' holon bundle."
+    )
+
+  return ReportBundleDownloadResponse(
+    download_url=download_url,
+    expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+    content_type="application/ld+json",
+    format=RdfFlavor.HOLON_JSONLD.value,
     generation_count=generation_count,
   )
 

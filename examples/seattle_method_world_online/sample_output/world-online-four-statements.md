@@ -1,7 +1,7 @@
 # The World Online — Four-Statement Report (rs-gaap projection)
 
-**Graph**: `kg19ede9348fb40461119b`
-**Report**: `rpt_01KVF986ZHG0852N6R7P77VEYM` (published)
+**Graph**: `kg19f310eb3b8272a718bd`
+**Report**: `rpt_01KWRGZE0Q574X3Z17TK0T7F69` (published)
 **Period**: 2024-01-01 → 2028-12-31 (cumulative; opening balance 12/31/2023)
 **Dataset**: Charlie Hoffman's *The World Online* — 22,288 GL lines, 3,389 entries
 **Source vocabulary**: `mini` (Seattle Method MINI 2026)
@@ -128,5 +128,5 @@ number.
 
 ```bash
 just demo-world-online                         # full pipeline
-just demo-world-online-create-report kg19ede9348fb40461119b  # this report only
+just demo-world-online-create-report kg19f310eb3b8272a718bd  # this report only
 ```

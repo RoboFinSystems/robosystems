@@ -26,4 +26,10 @@ def serialize_to_rdf(
     )
 
     return serialize_to_jsonld(bundle)
+  if flavor is RdfFlavor.HOLON_JSONLD:
+    from robosystems.operations.serialization.rdf.holon import (
+      serialize_to_holon_jsonld,
+    )
+
+    return serialize_to_holon_jsonld(bundle)
   raise ValueError(f"Unsupported RDF flavor: {flavor!r}")

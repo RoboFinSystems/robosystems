@@ -1,9 +1,9 @@
-# Seattle Method (Test Case 1) — SHACL Ontology Conformance
+# Seattle Method — SHACL Ontology Conformance
 
 ## Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
 - **Bundle**: `seattle-method-case-1.jsonld`
-- **Graph triples**: 3,051
+- **Graph triples**: 3,127
 - **rs:Fact nodes**: 48
 - **rs:Association nodes**: 162
 - **rs:Element nodes**: 93

@@ -37,9 +37,32 @@ rs:Structure a rdfs:Class ;
   rdfs:label "Structure" ;
   rdfs:comment "An extended-link-role network grouping a set of rs:Association arcs." .
 
+# Logical concept-arrangement types — added alongside rs:Structure so a
+# consumer queries `?s a rs:RollUp` instead of inferring the pattern from
+# blockType + associationType. Additive: a structure keeps its rs:Structure type.
+rs:RollUp a rdfs:Class ;
+  rdfs:subClassOf rs:Structure ;
+  rdfs:label "Roll Up" ;
+  rdfs:comment "A network whose children sum to their parent (calculation summation-item arcs)." .
+
+rs:RollForward a rdfs:Class ;
+  rdfs:subClassOf rs:Structure ;
+  rdfs:label "Roll Forward" ;
+  rdfs:comment "A movement network: opening balance + period changes = closing balance (e.g. the equity statement)." .
+
+rs:Hierarchy a rdfs:Class ;
+  rdfs:subClassOf rs:Structure ;
+  rdfs:label "Hierarchy" ;
+  rdfs:comment "A presentation-only network — order and indentation, no calculation." .
+
 rs:Association a rdfs:Class ;
   rdfs:label "Association" ;
   rdfs:comment "A reified taxonomy arc (presentation/calculation/definition) carrying xlink:from/to, xlink:arcrole, link:weight/order." .
+
+rs:RollUpRelationship a rdfs:Class ;
+  rdfs:subClassOf rs:Association ;
+  rdfs:label "Roll Up Relationship" ;
+  rdfs:comment "A calculation summation-item arc — a child that rolls up into its parent with a signed weight." .
 
 # ── Instance layer ────────────────────────────────────────────
 

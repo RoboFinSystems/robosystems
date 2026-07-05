@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-"""Download the latest filed Report's bundle artifacts — Step 10 of
-the World Online demo.
+"""Render the latest filed Report's aligned artifact set — Step 10 of the
+World Online demo.
 
-Pulls both serialization flavors via the published Python SDK
-(``LedgerClient.download_report_bundle``) and writes them to the
-demo's ``output/`` folder:
+Delegates to the shared ``render_report_artifacts``
+(``examples/_common/artifacts.py``) — the single definition of what a report
+demo emits: the flat JSON-LD bundle, the native holon (``.holon.jsonld``), the
+XBRL 2.1 zip, the SHACL + Arelle verdicts, and the DataBook. All flavors are
+pulled from the report endpoint via the published SDK.
 
-- ``world-online.jsonld`` — the canonical JSON-LD bundle (stamped on
-  publish in S3 at ``g{generation}.jsonld``)
-- ``world-online.zip`` — the XBRL 2.1 report package (flat zip with
-  ``instance.xml`` + ``report.xsd`` + the three linkbases), rebuilt
-  on-demand by the backend at download time
-
-Same shape as ``examples/seattle_method_demo/download_bundles.py``;
-the two are intentionally parallel so each demo is self-contained.
+The value-parity oracles (``reconcile.py`` / ``statement_reconcile.py``) are
+separate steps checking the *numbers* against the reference; this step proves
+the *shape* and writes the artifacts to disk — including the holon the viewer
+picks up.
 
 Usage:
     uv run python -m examples.seattle_method_world_online.download_bundles <graph_id>
@@ -26,13 +24,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from examples._common.config import REPO_ROOT, require_cached_graph_id, require_config
+from examples._common.artifacts import render_report_artifacts
+from examples._common.config import require_cached_graph_id, require_config
 from examples._common.sdk import latest_report_id, make_ledger_client
 
 DEMO_ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = DEMO_ROOT / "output"
-JSONLD_PATH = OUTPUT_DIR / "world-online.jsonld"
-XBRL_PATH = OUTPUT_DIR / "world-online.zip"
+STEM = "world-online"
+LABEL = "World Online"
 
 GRAPH_SLOT = "world_online_test"
 DEMO_RECIPE = "just demo-world-online"
@@ -41,8 +40,8 @@ DEMO_RECIPE = "just demo-world-online"
 def main() -> None:
   parser = argparse.ArgumentParser(
     description=(
-      "Download the JSON-LD + XBRL bundle artifacts for the World "
-      "Online demo's latest filed Report."
+      "Download the aligned bundle artifact set for the World Online "
+      "demo's latest filed Report."
     )
   )
   parser.add_argument(
@@ -64,19 +63,7 @@ def main() -> None:
   report_id = args.report_id or latest_report_id(client, graph_id)
 
   print(f"Downloading bundle artifacts for graph={graph_id}, report={report_id}")
-  OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-  jsonld = client.download_report_bundle(
-    graph_id, report_id, format="jsonld", to=JSONLD_PATH
-  )
-  print(
-    f"  JSON-LD: {JSONLD_PATH.relative_to(REPO_ROOT)} ({len(jsonld.content):,} bytes)"
-  )
-
-  xbrl = client.download_report_bundle(
-    graph_id, report_id, format="xbrl-2.1", to=XBRL_PATH
-  )
-  print(f"  XBRL 2.1: {XBRL_PATH.relative_to(REPO_ROOT)} ({len(xbrl.content):,} bytes)")
+  render_report_artifacts(client, graph_id, report_id, OUTPUT_DIR, STEM, LABEL)
 
 
 if __name__ == "__main__":

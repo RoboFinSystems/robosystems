@@ -1,10 +1,10 @@
-# World Online — SHACL Ontology Conformance
+# Cadence Labs — SHACL Ontology Conformance
 
 ## Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
-- **Bundle**: `world-online.jsonld`
-- **Graph triples**: 3,204
-- **rs:Fact nodes**: 55
+- **Bundle**: `saas-startup-demo.jsonld`
+- **Graph triples**: 3,451
+- **rs:Fact nodes**: 77
 - **rs:Association nodes**: 162
 - **rs:Element nodes**: 93
 - **SHACL shapes checked**: 8 (positive instance shapes + negative shapes banning the retired dialects)

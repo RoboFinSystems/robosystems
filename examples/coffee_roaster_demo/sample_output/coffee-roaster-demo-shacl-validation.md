@@ -1,10 +1,10 @@
-# World Online — SHACL Ontology Conformance
+# Driftline Coffee Roasters — SHACL Ontology Conformance
 
 ## Result: ✅ **Conforms to RoboSystems RDF Ontology v1**
 
-- **Bundle**: `world-online.jsonld`
-- **Graph triples**: 3,204
-- **rs:Fact nodes**: 55
+- **Bundle**: `coffee-roaster-demo.jsonld`
+- **Graph triples**: 3,473
+- **rs:Fact nodes**: 79
 - **rs:Association nodes**: 162
 - **rs:Element nodes**: 93
 - **SHACL shapes checked**: 8 (positive instance shapes + negative shapes banning the retired dialects)
