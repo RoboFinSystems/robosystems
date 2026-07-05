@@ -147,7 +147,7 @@ CYPHER RULES:
 - Anchor every query on a selective, indexed starting point (an Entity by ticker, a Report by identifier, an Element by qname) and expand from there. Never start a MATCH from an unfiltered global pattern like `(f:Fact)` or `(n)` on a large graph — it will time out.
 
 LEDGER DATA (only when the schema has Entry / Transaction / LineItem nodes):
-- The graph keeps cancelled/replaced rows. When counting or summing ledger data, filter to live rows: match Entry `status = 'posted'` for balances and debit/credit sums; exclude Event rows where `status = 'voided' OR status = 'superseded'`. Aggregate realized amounts through posted Entry/LineItem, not by summing Transaction.amount.
+- The graph keeps cancelled/replaced rows for audit. When counting or summing ledger data, restrict to live rows using the materialized `is_live` boolean — it exists on every spine node (`Entry`, `LineItem`, `Event`, `Transaction`) and is the one rule to remember: `WHERE e.is_live`, `WHERE li.is_live`, `WHERE ev.is_live`, `WHERE t.is_live`. For balances/debit-credit sums, aggregate through live Entry/LineItem (`e.is_live`, ⇔ status = 'posted'), not by summing Transaction.amount. `is_live` keeps open obligations (pending/committed/fulfilled events); for a specific realized set, filter `status` explicitly.
 """
     if output_mode == "answer":
       prompt += (

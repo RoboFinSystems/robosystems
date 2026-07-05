@@ -168,6 +168,26 @@ class TestREAStaging:
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
     assert "CAST(amount AS DOUBLE) / 100.0" in tables["Event"]
 
+  def test_ledger_spine_carries_is_live_flag(self):
+    """Every ledger-spine node materializes an is_live boolean so ad-hoc /
+    AI Cypher can restrict to live rows with one uniform `WHERE n.is_live`
+    instead of a non-uniform per-node status filter."""
+    tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
+    assert "(status NOT IN ('voided', 'superseded')) AS is_live" in tables["Event"]
+    assert "(status <> 'void')" in tables["Transaction"]
+    assert "(status = 'posted')" in tables["Entry"]
+    for node in ("Event", "Transaction", "Entry", "LineItem"):
+      assert "is_live" in tables[node]
+
+  def test_line_item_is_live_denormalizes_parent_entry(self):
+    """LineItem has no status column; its liveness is its parent Entry's,
+    joined in at materialization so `WHERE li.is_live` needs no Entry hop.
+    entry_id is NOT NULL, so the inner join drops no rows."""
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["LineItem"]
+    assert "(e.status = 'posted')" in sql
+    assert "'entries'" in sql
+    assert "e.id = li.entry_id" in sql
+
   def test_entity_has_agent_and_event_fan_out_from_entity_id(self):
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
     assert ENTITY_ID in tables["ENTITY_HAS_AGENT"]
