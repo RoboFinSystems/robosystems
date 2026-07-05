@@ -213,30 +213,30 @@ LIMIT 10""",
             },
             {
               "category": "ledger",
-              "description": "⭐ Account balances from POSTED entries only",
+              "description": "⭐ Account balances from LIVE entries only",
               "query": """MATCH (e:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(el:Element)
-WHERE e.status = 'posted'
+WHERE e.is_live
 RETURN el.qname, sum(li.debit_amount) AS debits, sum(li.credit_amount) AS credits
 ORDER BY debits DESC LIMIT 25""",
-              "explanation": "CRITICAL: filter `e.status = 'posted'`. The graph keeps draft/reversed entries (and entries of voided events stay as 'draft'); without this filter cancelled amounts inflate every balance.",
+              "explanation": "CRITICAL: filter `e.is_live` (⇔ status = 'posted'). The graph keeps draft/reversed entries (and entries of voided events stay as 'draft'); without this filter cancelled amounts inflate every balance. You can filter LineItem directly too — `li.is_live` denormalizes the parent entry's liveness.",
             },
             {
               "category": "ledger",
-              "description": "Count / sum events excluding voided & superseded",
+              "description": "Count / sum live events (excludes voided & superseded)",
               "query": """MATCH (ev:Event)
-WHERE ev.status <> 'voided' AND ev.status <> 'superseded'
+WHERE ev.is_live
 RETURN ev.event_type, count(ev) AS count, sum(ev.amount) AS total
 ORDER BY count DESC LIMIT 25""",
-              "explanation": "Event.status keeps voided (cancelled) and superseded (replaced) rows for audit. Exclude both from counts/sums. For open obligations instead, match the positive set (e.g. status IN ['committed','fulfilled','pending']).",
+              "explanation": "`ev.is_live` ⇔ status NOT IN ('voided','superseded') — the graph keeps cancelled/replaced events for audit. It keeps open obligations; for a specific realized set, filter `status` explicitly (e.g. status IN ['committed','fulfilled','pending']).",
             },
             {
               "category": "ledger",
-              "description": "Transaction amounts via posted entries (NOT Transaction.amount)",
+              "description": "Transaction amounts via live entries (NOT Transaction.amount)",
               "query": """MATCH (t:Transaction)-[:TRANSACTION_HAS_ENTRY]->(e:Entry)-[:ENTRY_HAS_LINE_ITEM]->(li:LineItem)
-WHERE e.status = 'posted'
+WHERE e.is_live
 RETURN t.number, t.date, sum(li.debit_amount) AS posted_debits
 ORDER BY t.date DESC LIMIT 25""",
-              "explanation": "The Transaction node exposes only a `pending` boolean, NOT the full status — a voided transaction looks identical to a live one. Aggregate realized effect through its posted Entry/LineItem instead of summing Transaction.amount directly.",
+              "explanation": "A voided transaction still holds posted-looking rows; measure realized effect through its live Entry/LineItem (`e.is_live`) rather than summing Transaction.amount directly. To filter transactions themselves, use `t.is_live` (⇔ status <> 'void').",
             },
           ]
         )

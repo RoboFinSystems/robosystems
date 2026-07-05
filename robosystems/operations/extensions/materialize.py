@@ -522,6 +522,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       CAST(occurred_at AS VARCHAR)    AS occurred_at,
       CAST(effective_at AS VARCHAR)   AS effective_at,
       status,
+      (status NOT IN ('voided', 'superseded')) AS is_live,
       source,
       external_id,
       external_url,
@@ -548,6 +549,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       merchant_name,
       category,
       CASE WHEN status = 'pending' THEN true ELSE false END AS pending,
+      (status <> 'void')              AS is_live,
       CAST(updated_at AS VARCHAR)     AS updated_at
     FROM postgres_scan('{c}', '{s}', 'transactions')
   """
@@ -562,24 +564,32 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       posting_date,
       type,
       status,
+      (status = 'posted')             AS is_live,
       reversal_of,
       provenance,
       CAST(updated_at AS VARCHAR)     AS updated_at
     FROM postgres_scan('{c}', '{s}', 'entries')
   """
 
+  # LineItem has no status of its own; its liveness is its parent Entry's.
+  # Denormalize (e.status = 'posted') as is_live via the entry join so ad-hoc /
+  # AI aggregations anchored at LineItem can filter with `WHERE li.is_live`
+  # without traversing back to Entry. entry_id is NOT NULL, so the inner join
+  # drops no rows.
   tables["LineItem"] = f"""
     CREATE OR REPLACE TABLE LineItem AS
     SELECT
-      id                                         AS identifier,
+      li.id                                      AS identifier,
       NULL::VARCHAR                              AS uri,
-      description,
-      CAST(debit_amount AS DOUBLE) / 100.0       AS debit_amount,
-      CAST(credit_amount AS DOUBLE) / 100.0      AS credit_amount,
+      li.description,
+      CAST(li.debit_amount AS DOUBLE) / 100.0    AS debit_amount,
+      CAST(li.credit_amount AS DOUBLE) / 100.0   AS credit_amount,
       false                                      AS has_dimensions,
       0::BIGINT                                  AS dimension_count,
-      CAST(updated_at AS VARCHAR)                AS updated_at
-    FROM postgres_scan('{c}', '{s}', 'line_items')
+      (e.status = 'posted')                      AS is_live,
+      CAST(li.updated_at AS VARCHAR)             AS updated_at
+    FROM postgres_scan('{c}', '{s}', 'line_items') li
+    JOIN postgres_scan('{c}', '{s}', 'entries') e ON e.id = li.entry_id
   """
 
   tables["Dimension"] = f"""

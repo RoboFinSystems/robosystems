@@ -240,6 +240,9 @@ TRANSACTION_NODES = [
       Property(name="merchant_name", type="STRING"),
       Property(name="category", type="STRING"),
       Property(name="pending", type="BOOLEAN"),
+      Property(
+        name="is_live", type="BOOLEAN"
+      ),  # status <> 'void' — live-row filter for counts/sums
       Property(name="updated_at", type="STRING"),
     ],
   ),
@@ -259,6 +262,9 @@ TRANSACTION_NODES = [
       ),  # When it hits the books (may differ from transaction date)
       Property(name="type", type="STRING"),  # standard, adjusting, closing, reversing
       Property(name="status", type="STRING"),  # draft, posted, reversed
+      Property(
+        name="is_live", type="BOOLEAN"
+      ),  # status = 'posted' — the only status that affects balances
       Property(
         name="reversal_of", type="STRING"
       ),  # Entry identifier this reverses (null if not a reversal)
@@ -281,6 +287,9 @@ TRANSACTION_NODES = [
       Property(
         name="dimension_count", type="INT64"
       ),  # Number of dimensional qualifiers (0=no dimensions)
+      Property(
+        name="is_live", type="BOOLEAN"
+      ),  # denormalized parent Entry.is_live (parent status = 'posted')
       Property(name="updated_at", type="STRING"),
     ],
   ),

@@ -329,6 +329,9 @@ BASE_NODES = [
         name="status", type="STRING"
       ),  # captured | classified | committed | pending | fulfilled | voided | superseded
       Property(
+        name="is_live", type="BOOLEAN"
+      ),  # status NOT IN ('voided','superseded') — safe default for counts/sums
+      Property(
         name="source", type="STRING"
       ),  # manual|system|schedule|quickbooks|xero|plaid
       Property(name="external_id", type="STRING"),
