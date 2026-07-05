@@ -366,9 +366,12 @@ def get_report_download_url(
     )
   generation_count = int(report.generation_count or 0)
 
+  # HOLON_JSONLD is a *derived* projection — materialized + cached on demand
+  # like XBRL, not stamped at publish. It's a member of RdfFlavor, so it's also
+  # in _RDF_FLAVOR_VALUES: this branch MUST stay above the _RDF_FLAVOR_VALUES
+  # check below, which presigns the publish-stamped JSON-LD and rejects every
+  # other RDF flavor as "reserved for future use".
   if flavor == RdfFlavor.HOLON_JSONLD.value:
-    # The holon is a derived projection of the same bundle — built + cached on
-    # demand like XBRL, not stamped at publish.
     return _materialize_and_presign_holon(
       session=session,
       graph_id=graph_id,
