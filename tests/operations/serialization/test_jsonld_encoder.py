@@ -29,9 +29,14 @@ from robosystems.operations.serialization.bundle import (
   ReportMeta,
   StatementBundle,
 )
+from robosystems.operations.serialization.rdf.holon import (
+  partition_report_graph,
+  serialize_to_holon_jsonld,
+)
 from robosystems.operations.serialization.rdf.jsonld import (
   SERIALIZATION_VERSION,
   BundleValidationError,
+  _structure_arrangement,
   build_graph,
   serialize_to_jsonld,
   serialize_to_turtle,
@@ -185,6 +190,40 @@ class TestStructures:
     assert (assoc, LINK.weight, Literal("1.0", datatype=rdflib.XSD.decimal)) in g
 
 
+# ── Logical naming: RollUp / RollForward / Hierarchy (§6, additive) ───────
+
+
+class TestStructureArrangement:
+  def test_arrangement_mapping(self) -> None:
+    # No calc arcs → presentation hierarchy.
+    assert _structure_arrangement(False, "balance_sheet") == RS.Hierarchy
+    assert _structure_arrangement(False, None) == RS.Hierarchy
+    # Calc arcs → roll-up, except equity which rolls forward.
+    assert _structure_arrangement(True, "balance_sheet") == RS.RollUp
+    assert _structure_arrangement(True, None) == RS.RollUp
+    assert _structure_arrangement(True, "equity_statement") == RS.RollForward
+
+  def test_calc_structure_typed_rollup_additively(self) -> None:
+    g = build_graph(_bundle(with_arc=True))
+    structure = next(g.subjects(RDF.type, RS.RollUp))
+    # The logical type is added alongside — never replaces — rs:Structure.
+    assert (structure, RDF.type, RS.Structure) in g
+    # The legible name is promoted to skos:prefLabel; the UUID stays internal.
+    assert (structure, SKOS.prefLabel, Literal("Balance Sheet")) in g
+    assert (structure, RS.internalId, Literal("struct_01")) in g
+
+  def test_calc_arc_typed_rollup_relationship_additively(self) -> None:
+    g = build_graph(_bundle(with_arc=True))
+    arc = next(g.subjects(RDF.type, RS.RollUpRelationship))
+    # Still a first-class rs:Association (AssociationShape still applies).
+    assert (arc, RDF.type, RS.Association) in g
+    assert (arc, RS.associationType, Literal("calculation")) in g
+
+  def test_enrichment_keeps_shacl_conformance(self) -> None:
+    # Additive types + skos:prefLabel don't trip any positive/negative shape.
+    validate_graph(build_graph(_bundle(with_arc=True)), _bundle(with_arc=True))
+
+
 # ── Periods / units (aspect nodes) ───────────────────────────────────────
 
 
@@ -269,3 +308,48 @@ class TestValidation:
     g.add((fact, XBRLI.contextRef, Literal("ctx_1")))
     with pytest.raises(BundleValidationError):
       validate_graph(g, _bundle())
+
+
+# ── Holon (dataset-form JSON-LD, named graphs) ───────────────────────────
+
+
+class TestHolon:
+  def _named_graphs(self, holon: str) -> dict[str, list[dict]]:
+    """{suffix: node-list} for each named graph in a dataset-form JSON-LD doc."""
+    import json
+
+    doc = json.loads(holon)
+    out: dict[str, list[dict]] = {}
+    for node in doc.get("@graph", []):
+      if isinstance(node, dict) and "@graph" in node:
+        out[str(node["@id"]).rsplit("#", 1)[-1]] = node["@graph"]
+    return out
+
+  def test_partition_places_facts_and_calc_arcs(self) -> None:
+    parts = partition_report_graph(build_graph(_bundle(with_arc=True)))
+    assert set(parts) == {"scene", "boundary", "projection"}
+    # The fact lands in scene; the calculation arc in boundary.
+    assert list(parts["scene"].subjects(RDF.type, RS.Fact))
+    assert list(parts["boundary"].subjects(RDF.type, RS.Association))
+    # Lineage is never emitted — a report is an aggregation of the books.
+    assert "lineage" not in parts
+
+  def test_serializes_dataset_form_with_three_named_graphs(self) -> None:
+    holon = serialize_to_holon_jsonld(_bundle(with_arc=True))
+    named = self._named_graphs(holon)
+    assert set(named) == {"scene", "boundary", "projection"}
+    assert named["scene"], "scene graph is non-empty"
+
+  def test_holon_round_trips_losslessly(self) -> None:
+    from rdflib import Dataset
+
+    holon = serialize_to_holon_jsonld(_bundle(with_arc=True))
+    src = partition_report_graph(build_graph(_bundle(with_arc=True)))
+    ds = Dataset()
+    ds.parse(data=holon, format="json-ld")
+    rt = {
+      str(c.identifier).rsplit("#", 1)[-1]: len(list(c))
+      for c in ds.graphs()
+      if str(c.identifier) != "urn:x-rdflib:default" and len(list(c))
+    }
+    assert rt == {k: len(v) for k, v in src.items()}

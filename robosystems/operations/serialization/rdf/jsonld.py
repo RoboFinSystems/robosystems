@@ -287,16 +287,46 @@ def _add_schema_concepts(g: Graph, bundle: StatementBundle, root: URIRef) -> Non
 
 
 def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
-  for link in (
+  all_links = (
     *bundle.linkbases.presentation_links,
     *bundle.linkbases.calculation_links,
     *bundle.linkbases.definition_links,
-  ):
+  )
+  # A Structure's *logical* type is the concept-arrangement pattern, derived
+  # from its arcs + block_type across all its link groups (a structure_id can
+  # span a presentation + a calculation link). Precompute once so the type is
+  # consistent no matter which link group we're emitting.
+  calc_structures: set[str] = {
+    link.structure_id for link in bundle.linkbases.calculation_links if link.arcs
+  }
+  block_type_by_structure: dict[str, str] = {}
+  for link in all_links:
+    if link.block_type and link.structure_id not in block_type_by_structure:
+      block_type_by_structure[link.structure_id] = link.block_type
+
+  for link in all_links:
     s_uri = _scoped(root, "structure", link.structure_id)
     g.add((root, RS.structure, s_uri))
     g.add((s_uri, RDF.type, RS.Structure))
+    # Logical structure type (additive, alongside rs:Structure + rs:blockType):
+    # a roll-up network — or a roll-forward for the equity statement — when it
+    # carries calculation arcs, else a presentation hierarchy. Lets consumers
+    # query `?s a rs:RollUp` instead of string-matching blockType/associationType.
+    g.add(
+      (
+        s_uri,
+        RDF.type,
+        _structure_arrangement(
+          link.structure_id in calc_structures,
+          block_type_by_structure.get(link.structure_id),
+        ),
+      )
+    )
     g.add((s_uri, RS.internalId, Literal(link.structure_id)))
     g.add((s_uri, RS.structureName, Literal(link.structure_name)))
+    # Promote the legible name to the predicate consumers render; the UUID
+    # stays on rs:internalId. (§ logical-naming pass.)
+    g.add((s_uri, SKOS.prefLabel, Literal(link.structure_name)))
     if link.role_uri:
       g.add((s_uri, RS.roleUri, Literal(link.role_uri)))
     if link.block_type:
@@ -312,9 +342,14 @@ def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
       a_uri = _scoped(root, f"association/{link.structure_id}/{group}", str(idx))
       g.add((s_uri, RS.hasAssociation, a_uri))
       g.add((a_uri, RDF.type, RS.Association))
+      assoc_type = _assoc_type_for_arc(arc.arc_type)
+      # A calculation summation-item arc IS a roll-up relationship — type it
+      # first-class so the rule is queryable without dereferencing the arcrole.
+      if assoc_type == "calculation":
+        g.add((a_uri, RDF.type, RS.RollUpRelationship))
       g.add((a_uri, XLINK["from"], _concept_uri(arc.from_qname)))
       g.add((a_uri, XLINK.to, _concept_uri(arc.to_qname)))
-      g.add((a_uri, RS.associationType, Literal(_assoc_type_for_arc(arc.arc_type))))
+      g.add((a_uri, RS.associationType, Literal(assoc_type)))
       if arc.arcrole:
         g.add((a_uri, XLINK.arcrole, _arcrole_uri(arc.arcrole)))
       if link.role_uri:
@@ -339,6 +374,23 @@ def _assoc_type_for_arc(arc_type: str) -> str:
     "calculationArc": "calculation",
     "definitionArc": "definition",
   }.get(arc_type, "presentation")
+
+
+def _structure_arrangement(has_calc: bool, block_type: str | None) -> URIRef:
+  """The Structure's logical concept-arrangement type.
+
+  A network that carries calculation (summation) arcs is a **roll-up** — the
+  children sum to the parent — except the equity statement, whose calculation
+  is a **roll-forward** (opening balance + period changes = closing balance). A
+  network with no calculation arcs is a presentation **hierarchy**. This is the
+  first-class type consumers query (`?s a rs:RollUp`) instead of inferring the
+  pattern from blockType + associationType.
+  """
+  if not has_calc:
+    return RS.Hierarchy
+  if block_type == "equity_statement":
+    return RS.RollForward
+  return RS.RollUp
 
 
 def _arcrole_uri(arcrole: str) -> URIRef:

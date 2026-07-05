@@ -24,6 +24,7 @@ from robosystems.operations.serialization.bundle import (
 )
 from robosystems.operations.serialization.flavors import RdfFlavor, XbrlFlavor
 from robosystems.operations.serialization.rdf import serialize_to_rdf
+from robosystems.operations.serialization.rdf.holon import serialize_to_holon_jsonld
 from robosystems.operations.serialization.xbrl import serialize_to_xbrl
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
   "StatementBundle",
   "XbrlFlavor",
   "build_report_bundle",
+  "serialize_to_holon_jsonld",
   "serialize_to_rdf",
   "serialize_to_xbrl",
 ]

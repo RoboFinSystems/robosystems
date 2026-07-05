@@ -20,6 +20,10 @@ class RdfFlavor(StrEnum):
   """RDF-family serialization flavor."""
 
   JSONLD = "jsonld"
+  # Dataset-form JSON-LD carrying the scene/boundary/projection named graphs
+  # (the report holon) — API-native, materialized on demand off the same
+  # bundle. See ``rdf/holon.py``.
+  HOLON_JSONLD = "holon-jsonld"
   # Future flavors:
   # TURTLE = "turtle"
   # NQUADS = "nquads"
