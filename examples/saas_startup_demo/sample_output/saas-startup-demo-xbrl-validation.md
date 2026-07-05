@@ -1,10 +1,10 @@
-# Seattle Method — XBRL 2.1 Validation (Arelle)
+# Cadence Labs — XBRL 2.1 Validation (Arelle)
 
 ## Result: ✅ **Valid XBRL 2.1**
 
-- **Package**: `seattle-method-case-1.zip` (13,592 bytes)
+- **Package**: `saas-startup-demo.zip` (13,948 bytes)
 - **Files in zip**: 5 (`instance.xml, report-cal.xml, report-lab.xml, report-pre.xml, report.xsd`)
-- **Facts loaded by Arelle**: 43
+- **Facts loaded by Arelle**: 68
 - **Load errors**: 0
 - **Validation errors**: 0
 

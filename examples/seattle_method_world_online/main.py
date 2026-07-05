@@ -350,19 +350,21 @@ def step_trial_balance(graph_id: str, dry_run: bool = False) -> None:
 
 
 def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
-  """Step 10 — Download the latest filed Report's bundle artifacts.
+  """Step 10 — Render the latest filed Report's aligned artifact set.
 
-  Pulls both serialization flavors via the published Python SDK and
-  writes them to ``output/`` so a reviewer can inspect them directly:
-
-  - ``world-online.jsonld`` — the canonical JSON-LD bundle
-  - ``world-online.zip`` — the XBRL 2.1 report package
-
+  Delegates to the shared ``render_report_artifacts`` (via
+  ``download_bundles.py``): pulls the flat JSON-LD, the native holon
+  (``.holon.jsonld`` — the viewer's input), and the XBRL 2.1 zip from the
+  report endpoint, then validates them container-free (SHACL over the JSON-LD,
+  Arelle over the XBRL 2.1) and writes the DataBook with the verdicts inlined.
   Subprocess invocation for the same isolation reason as the other
   rendering / download steps.
   """
   print("─" * 70)
-  print(f"Step 10 — Download JSON-LD + XBRL bundle artifacts → graph {graph_id}")
+  print(
+    f"Step 10 — Render bundle artifacts (download + validate + DataBook) → "
+    f"graph {graph_id}"
+  )
   print("─" * 70)
   if dry_run:
     print("  (dry-run — skipping download-bundles)")
@@ -412,72 +414,6 @@ def step_statement_reconcile(graph_id: str, dry_run: bool = False) -> None:
     raise SystemExit(f"statement_reconcile exited with code {result.returncode}")
 
 
-def step_validate(graph_id: str, dry_run: bool = False) -> None:
-  """Step 12 — Validate the downloaded bundle artifacts, container-free.
-
-  Reads step 10's downloaded ``output/`` files back and checks both projections
-  on the host (no API, no DB, no container):
-
-  - ``world-online.jsonld`` → **SHACL** vs the published ontology
-    (``frameworks/ontology/v1/shapes.ttl``)
-  - ``world-online.zip``    → **Arelle** vs the XBRL 2.1 spec
-  """
-  print("─" * 70)
-  print(f"Step 12 — Validate downloaded bundle (SHACL + Arelle) → graph {graph_id}")
-  print("─" * 70)
-  if dry_run:
-    print("  (dry-run — skipping validate)")
-    return
-  out_dir = REPO_ROOT / "examples" / "seattle_method_world_online" / "output"
-  result = subprocess.run(
-    [
-      "uv",
-      "run",
-      "python",
-      "-m",
-      "examples._common.validate",
-      "--jsonld",
-      str(out_dir / "world-online.jsonld"),
-      "--zip",
-      str(out_dir / "world-online.zip"),
-      "--label",
-      "The World Online",
-    ],
-    cwd=str(REPO_ROOT),
-    check=False,
-  )
-  if result.returncode != 0:
-    raise SystemExit(f"validate exited with code {result.returncode}")
-
-  # DataBook: assemble the validated bundle into one self-describing markdown
-  # file (Charlie Hoffman's serialization) — report = collection of Information
-  # Blocks, each a table + an addressable turtle slice, with the SHACL/Arelle
-  # verdicts (just written above) inlined as embedded evidence.
-  databook = subprocess.run(
-    [
-      "uv",
-      "run",
-      "python",
-      "-m",
-      "examples._common.databook",
-      "--jsonld",
-      str(out_dir / "world-online.jsonld"),
-      "--out",
-      str(out_dir / "world-online.databook.md"),
-      "--shacl-md",
-      str(out_dir / "world-online-shacl-validation.md"),
-      "--xbrl-md",
-      str(out_dir / "world-online-xbrl-validation.md"),
-      "--label",
-      "The World Online",
-    ],
-    cwd=str(REPO_ROOT),
-    check=False,
-  )
-  if databook.returncode != 0:
-    raise SystemExit(f"databook exited with code {databook.returncode}")
-
-
 # ── Step registry ──────────────────────────────────────────────────────────
 
 STEPS = {
@@ -494,16 +430,12 @@ STEPS = {
   "create-report": ("Materialize the rs-gaap 4-statement Report", step_create_report),
   "trial-balance": ("Render the trial balance", step_trial_balance),
   "download-bundles": (
-    "Download the JSON-LD + XBRL bundle artifacts into output/",
+    "Render the aligned artifact set (download + validate + DataBook)",
     step_download_bundles,
   ),
   "statement-reconcile": (
     "Reconcile rendered-statement anchors vs Charlie's reference instance",
     step_statement_reconcile,
-  ),
-  "validate": (
-    "Validate the downloaded bundle: SHACL (JSON-LD) + Arelle (XBRL 2.1)",
-    step_validate,
   ),
 }
 
@@ -581,8 +513,6 @@ def main() -> None:
   print()
   step_statement_reconcile(graph_id, dry_run=args.dry_run)
   print()
-  step_validate(graph_id, dry_run=args.dry_run)
-  print()
 
   print("─" * 70)
   print(f"✓ End-to-end demo run complete against graph {graph_id}")
@@ -591,8 +521,12 @@ def main() -> None:
   print("  - world-online-reconciliation.md   (mini pivot vs SummaryOfTransactions)")
   print("  - world-online-four-statements.md  (rs-gaap 4-statement Report)")
   print("  - world-online-trial-balance.md    (trial balance)")
-  print("  - world-online.jsonld              (JSON-LD bundle)")
+  print("  - world-online.jsonld              (flat JSON-LD bundle)")
+  print("  - world-online.holon.jsonld        (native holon — viewer input)")
   print("  - world-online.zip                 (XBRL 2.1 report package)")
+  print("  - world-online-shacl-validation.md (SHACL conformance)")
+  print("  - world-online-xbrl-validation.md  (Arelle conformance)")
+  print("  - world-online.databook.md         (DataBook)")
 
 
 if __name__ == "__main__":

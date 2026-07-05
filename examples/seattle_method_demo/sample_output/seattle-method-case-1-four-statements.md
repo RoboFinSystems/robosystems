@@ -1,7 +1,7 @@
 # Seattle Method Cross-Taxonomy — Test Case 1: Four-Statement Report
 
-**Graph**: `kg19ede94dda6b99013d06`
-**Report**: `rpt_01KVF99WPYN17GS13R5DJY87HC` (published)
+**Graph**: `kg19f310982ab9e45ea66e`
+**Report**: `rpt_01KWRGK66V55V8NY74RJVF8WPT` (published)
 **Entity**: Lemonade Stand (Charlie Hoffman Test Case 1)
 **Period**: 2024-01-01 → 2024-03-31 (Current)
 **Comparative**: 2023-10-02 → 2023-12-31 (Prior — zero opening balances)
@@ -161,12 +161,12 @@ The architectural piece that powers this lives in
 
 ## Provenance
 
-- **Report ID**: `rpt_01KVF99WPYN17GS13R5DJY87HC`
-- **Graph**: `kg19ede94dda6b99013d06`
+- **Report ID**: `rpt_01KWRGK66V55V8NY74RJVF8WPT`
+- **Graph**: `kg19f310982ab9e45ea66e`
 - **Taxonomy**: `rs-gaap` (resolved at create-report time)
-- **Mapping**: `struct_01KVF99T0DG1YQY22T7D0H4VFE`
-- **Created**: 2026-06-19T06:32:43.998191
-- **Last generated**: 2026-06-19T06:32:44.168060
+- **Mapping**: `struct_01KWRGK3C8KQYMMDGE4WRJ60K9`
+- **Created**: 2026-07-05T06:49:00.379806
+- **Last generated**: 2026-07-05T06:49:00.567243
 
 ### How to reproduce
 

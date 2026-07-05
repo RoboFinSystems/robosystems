@@ -341,22 +341,22 @@ def step_reconcile(graph_id: str, dry_run: bool = False) -> None:
 
 
 def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
-  """Step 9 — Download the latest filed Report's bundle artifacts.
+  """Step 9 — Render the latest filed Report's aligned artifact set.
 
-  Pulls both serialization flavors via the published Python SDK and
-  writes them to ``output/`` so a reviewer can inspect them directly:
-
-  - ``seattle-method-case-1.jsonld`` — the canonical JSON-LD bundle
-    (the artifact stamped on publish in S3)
-  - ``seattle-method-case-1.zip`` — the XBRL 2.1 report package
-
-  The next step (``validate``) reads these files back and checks them with
-  SHACL (JSON-LD) + Arelle (XBRL) — container-free, against what we received.
-  Subprocess invocation for the same isolation reason as the other
-  download/render steps.
+  Delegates to the shared ``render_report_artifacts`` (via
+  ``download_bundles.py``): pulls the flat JSON-LD, the native holon
+  (``.holon.jsonld`` — the viewer's input), and the XBRL 2.1 zip from the
+  report endpoint, then validates them container-free (SHACL over the
+  JSON-LD, Arelle over the XBRL 2.1) and writes the DataBook with the verdicts
+  inlined. Pairs with ``reconcile.py``'s value-parity check (Charlie's data →
+  our DB → export → SHACL + Arelle say it's well-formed). Subprocess
+  invocation for the same isolation reason as the other download/render steps.
   """
   print("─" * 70)
-  print(f"Step 9 — Download JSON-LD + XBRL bundle artifacts → graph {graph_id}")
+  print(
+    f"Step 9 — Render bundle artifacts (download + validate + DataBook) → "
+    f"graph {graph_id}"
+  )
   print("─" * 70)
   if dry_run:
     print("  (dry-run — skipping download-bundles)")
@@ -375,77 +375,6 @@ def step_download_bundles(graph_id: str, dry_run: bool = False) -> None:
   )
   if result.returncode != 0:
     raise SystemExit(f"download_bundles exited with code {result.returncode}")
-
-
-def step_validate(graph_id: str, dry_run: bool = False) -> None:
-  """Step 10 — Validate the downloaded bundle artifacts, container-free.
-
-  Treats step 9's downloaded ``output/`` files as "what we received" and
-  validates them on the host — no API, no DB, no container:
-
-  - ``seattle-method-case-1.jsonld`` → **SHACL** vs the published ontology
-    (``frameworks/ontology/v1/shapes.ttl``) — semantic conformance
-  - ``seattle-method-case-1.zip``    → **Arelle** vs the XBRL 2.1 spec —
-    structural conformance
-
-  Pairs with ``reconcile.py``'s value check: Charlie's data → our DB
-  (reconcile — value parity) → our export → SHACL + Arelle say it's
-  well-formed (this step — shape parity). Requires step 9 (download-bundles).
-  """
-  print("─" * 70)
-  print(f"Step 10 — Validate downloaded bundle (SHACL + Arelle) → graph {graph_id}")
-  print("─" * 70)
-  if dry_run:
-    print("  (dry-run — skipping validate)")
-    return
-  out_dir = REPO_ROOT / "examples" / "seattle_method_demo" / "output"
-  result = subprocess.run(
-    [
-      "uv",
-      "run",
-      "python",
-      "-m",
-      "examples._common.validate",
-      "--jsonld",
-      str(out_dir / "seattle-method-case-1.jsonld"),
-      "--zip",
-      str(out_dir / "seattle-method-case-1.zip"),
-      "--label",
-      "Seattle Method (Test Case 1)",
-    ],
-    cwd=str(REPO_ROOT),
-    check=False,
-  )
-  if result.returncode != 0:
-    raise SystemExit(f"validate exited with code {result.returncode}")
-
-  # DataBook: assemble the validated bundle into one self-describing markdown
-  # file (Charlie Hoffman's serialization) — report = collection of Information
-  # Blocks, each a table + an addressable turtle slice, with the SHACL/Arelle
-  # verdicts (just written above) inlined as embedded evidence.
-  databook = subprocess.run(
-    [
-      "uv",
-      "run",
-      "python",
-      "-m",
-      "examples._common.databook",
-      "--jsonld",
-      str(out_dir / "seattle-method-case-1.jsonld"),
-      "--out",
-      str(out_dir / "seattle-method-case-1.databook.md"),
-      "--shacl-md",
-      str(out_dir / "seattle-method-case-1-shacl-validation.md"),
-      "--xbrl-md",
-      str(out_dir / "seattle-method-case-1-xbrl-validation.md"),
-      "--label",
-      "Seattle Method (Test Case 1)",
-    ],
-    cwd=str(REPO_ROOT),
-    check=False,
-  )
-  if databook.returncode != 0:
-    raise SystemExit(f"databook exited with code {databook.returncode}")
 
 
 def step_create_report(graph_id: str, dry_run: bool = False) -> None:
@@ -500,12 +429,8 @@ STEPS = {
     step_create_report,
   ),
   "download-bundles": (
-    "Download the JSON-LD + XBRL bundle artifacts into output/",
+    "Render the aligned artifact set (download + validate + DataBook)",
     step_download_bundles,
-  ),
-  "validate": (
-    "Validate the downloaded bundle: SHACL (JSON-LD) + Arelle (XBRL 2.1)",
-    step_validate,
   ),
 }
 
@@ -586,21 +511,20 @@ def main() -> None:
   print()
   step_download_bundles(graph_id, dry_run=args.dry_run)
   print()
-  step_validate(graph_id, dry_run=args.dry_run)
-  print()
 
   print("─" * 70)
   print(f"✓ End-to-end demo run complete against graph {graph_id}")
   print("─" * 70)
   print()
   print("Artifacts in examples/seattle_method_demo/output/:")
-  print("  - seattle-method-case-1.md                       (mini reconciliation)")
-  print(
-    "  - seattle-method-case-1-four-statements.md       (rs-gaap 4-statement Report)"
-  )
-  print("  - seattle-method-case-1.jsonld                   (JSON-LD bundle)")
-  print("  - seattle-method-case-1.zip                      (XBRL 2.1 report package)")
-  print("  - seattle-method-case-1-xbrl-validation.md       (Arelle conformance)")
+  print("  - seattle-method-case-1.md                   (mini reconciliation)")
+  print("  - seattle-method-case-1-four-statements.md   (rs-gaap 4-statement Report)")
+  print("  - seattle-method-case-1.jsonld               (flat JSON-LD bundle)")
+  print("  - seattle-method-case-1.holon.jsonld         (native holon — viewer input)")
+  print("  - seattle-method-case-1.zip                  (XBRL 2.1 report package)")
+  print("  - seattle-method-case-1-shacl-validation.md  (SHACL conformance)")
+  print("  - seattle-method-case-1-xbrl-validation.md   (Arelle conformance)")
+  print("  - seattle-method-case-1.databook.md          (DataBook)")
 
 
 if __name__ == "__main__":
