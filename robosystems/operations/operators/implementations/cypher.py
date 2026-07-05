@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from robosystems.config import OperatorConfig
+from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.operations.operators.base import (
   ExecutionProfile,
   Operator,
@@ -98,8 +99,9 @@ class CypherOperator(Operator):
     max_iterations = int(limits.get("max_tools", 5)) + 1
     max_tokens = int(limits.get("max_output_tokens", 4000))
     output_mode = "answer" if ctx.extra.get("output_mode") == "answer" else "narrative"
+    is_shared = is_shared_repository_or_subgraph(ctx.graph_id)
 
-    system = self._build_system_prompt(max_results, output_mode)
+    system = self._build_system_prompt(max_results, output_mode, is_shared)
 
     result = await run_tool_loop(
       ctx,
@@ -130,7 +132,35 @@ class CypherOperator(Operator):
       confidence_score=self._calculate_confidence(result),
     )
 
-  def _build_system_prompt(self, max_results: int, output_mode: str) -> str:
+  def _build_system_prompt(
+    self, max_results: int, output_mode: str, is_shared: bool
+  ) -> str:
+    if is_shared:
+      # Shared repository (e.g. SEC): thousands of filers, so the selective
+      # anchors are the cross-filer identifiers (ticker/CIK/Report).
+      anchor_rule = (
+        "- Anchor every query on a selective, indexed starting point and expand "
+        "from there — this is a shared repository with thousands of filers. Good "
+        "anchors: an Entity by ticker or CIK, a Report by identifier, an Element "
+        "by qname. Reach broad shared nodes (a Structure by canonical_type, or an "
+        "unfiltered `(f:Fact)`/`(n)` scan) LAST — leading a MATCH with one scans "
+        "the whole graph and times out."
+      )
+    else:
+      # Tenant graph (roboledger / custom): a single company's ledger, not a
+      # multi-filer repository. Ticker/CIK are SEC identifiers and usually null.
+      anchor_rule = (
+        "- Anchor every query on a selective, indexed starting point and expand "
+        "from there; never lead a MATCH with an unfiltered global pattern like "
+        "`(f:Fact)` or `(n)`. This is a single company's graph, not the multi-filer "
+        "SEC repository: there is typically one Entity, and `ticker`/`cik` are SEC "
+        "identifiers that are usually null here — anchor on the Entity itself, an "
+        "`Element`/account by qname, a `Transaction`/`Entry` by date, or a `Period`, "
+        "rather than filtering by ticker or CIK. For accounting questions prefer the "
+        "ledger spine (`Entry`/`Transaction`/`LineItem`) over the XBRL `Fact` "
+        "hypercube unless the question is about a published financial statement."
+      )
+
     prompt = f"""You are a graph database analyst for RoboSystems. You answer the user's question by querying a LadybugDB graph with read-only Cypher.
 
 WORKFLOW:
@@ -144,7 +174,7 @@ CYPHER RULES:
 - Read-only only: MATCH, WHERE, WITH, RETURN, ORDER BY, LIMIT. Never CREATE, SET, DELETE, MERGE, or DROP.
 - Always include a LIMIT (max {max_results}).
 - Use CONTAINS for text search; guard against NULLs with IS NOT NULL.
-- Anchor every query on a selective, indexed starting point (an Entity by ticker, a Report by identifier, an Element by qname) and expand from there. Never start a MATCH from an unfiltered global pattern like `(f:Fact)` or `(n)` on a large graph — it will time out.
+{anchor_rule}
 
 LEDGER DATA (only when the schema has Entry / Transaction / LineItem nodes):
 - The graph keeps cancelled/replaced rows for audit. When counting or summing ledger data, restrict to live rows using the materialized `is_live` boolean — it exists on every spine node (`Entry`, `LineItem`, `Event`, `Transaction`) and is the one rule to remember: `WHERE e.is_live`, `WHERE li.is_live`, `WHERE ev.is_live`, `WHERE t.is_live`. For balances/debit-credit sums, aggregate through live Entry/LineItem (`e.is_live`, ⇔ status = 'posted'), not by summing Transaction.amount. `is_live` keeps open obligations (pending/committed/fulfilled events); for a specific realized set, filter `status` explicitly.
