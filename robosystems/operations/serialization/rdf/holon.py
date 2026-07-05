@@ -17,9 +17,9 @@ the books. The access boundary holds by graph omission, no filter code.
 
 The holon is a **shape, not a file format**. JSON-LD's data model *is* an RDF
 dataset, so dataset-form JSON-LD carries these named graphs natively — the
-canonical, API-native holon (no ``.trig`` file required). TriG is available as a
-≈free RDF export off the same :class:`~rdflib.Dataset` for triplestore / SPARQL
-tooling, but is not on the product critical path.
+single canonical, API-native holon. (rdflib can serialize the same
+:class:`~rdflib.Dataset` to TriG / N-Quads, but the platform does not emit
+them: JSON-LD is the one holon format.)
 
 This module is the **single source of truth** for the partition. Two entry
 paths converge on :func:`build_holon_dataset`:
@@ -40,33 +40,14 @@ from rdflib import RDF, Dataset, Graph, URIRef
 from robosystems.operations.serialization.bundle import StatementBundle
 from robosystems.operations.serialization.rdf.jsonld import (
   RS,
-  SKOS,
   _build_context,
   _root_uri,
   build_graph,
 )
 
-# The named-graph suffixes on the report IRI. Stable across whichever syntax the
-# dataset is serialized to (JSON-LD dataset form, TriG, N-Quads).
+# The named-graph suffixes on the report IRI — the scene / boundary / projection
+# partition, keyed under the report IRI.
 HOLON_GRAPHS: tuple[str, str, str] = ("scene", "boundary", "projection")
-
-# Prefixes bound on the Dataset so a TriG/Turtle export compacts concept qnames
-# (``rs-gaap:Assets`` rather than the full IRI). JSON-LD compaction is driven by
-# the ``@context`` instead, so these only affect the RDF-export flavors.
-_HOLON_PREFIXES: dict[str, str] = {
-  "rs": str(RS),
-  "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
-  "disclosures": "https://robosystems.ai/taxonomy/rs-gaap/disclosures/v1/",
-  "fac": "http://www.xbrlsite.com/fac#",
-  "us-gaap": "http://fasb.org/us-gaap/",
-  "dei": "http://xbrl.sec.gov/dei/",
-  "skos": str(SKOS),
-  "xbrli": "http://www.xbrl.org/2003/instance#",
-  "xlink": "http://www.w3.org/1999/xlink#",
-  "link": "http://www.xbrl.org/2003/linkbase#",
-  "iso4217": "http://www.xbrl.org/2003/iso4217#",
-  "xsd": "http://www.w3.org/2001/XMLSchema#",
-}
 
 
 # ── Partition ──────────────────────────────────────────────────────────────
@@ -138,8 +119,6 @@ def build_holon_dataset(g: Graph, root: URIRef) -> Dataset:
   must stay stable.
   """
   ds = Dataset()
-  for prefix, ns in _HOLON_PREFIXES.items():
-    ds.bind(prefix, ns, replace=True)
   for name, sub in partition_report_graph(g).items():
     ctx = ds.graph(URIRef(f"{root}#{name}"))
     for triple in sub:
@@ -166,12 +145,6 @@ def serialize_holon_jsonld_from_graph(g: Graph, root: URIRef) -> str:
     indent=2,
     sort_keys=True,
   )
-
-
-def serialize_holon_trig_from_graph(g: Graph, root: URIRef) -> str:
-  """Serialize a flat report graph to a TriG holon — the optional RDF export
-  off the same :class:`~rdflib.Dataset`, for triplestore / SPARQL ingestion."""
-  return build_holon_dataset(g, root).serialize(format="trig")
 
 
 def serialize_to_holon_jsonld(bundle: StatementBundle) -> str:

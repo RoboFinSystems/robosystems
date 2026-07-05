@@ -39,7 +39,6 @@ from rdflib import RDF, Graph, URIRef
 from rdflib.namespace import Namespace
 
 from robosystems.operations.serialization.rdf.holon import (
-  build_holon_dataset,
   serialize_holon_jsonld_from_graph,
 )
 
@@ -565,17 +564,6 @@ def write_holon_jsonld(jsonld_path: Path, out_jsonld: Path) -> Path:
   return out_jsonld
 
 
-def write_holon_trig(jsonld_path: Path, out_trig: Path) -> Path:
-  """Serialize the report's published holon as a TriG file — the optional RDF
-  export off the same :class:`~rdflib.Dataset`, for triplestore / SPARQL
-  ingestion. Same three named graphs as :func:`write_holon_jsonld`; kept because
-  it's ≈free and RDF-native tooling imports TriG/N-Quads most directly."""
-  g = rdflib.Graph().parse(str(jsonld_path), format="json-ld")
-  root = _root(g)
-  out_trig.write_text(build_holon_dataset(g, root).serialize(format="trig"))
-  return out_trig
-
-
 def write_databook(
   jsonld_path: Path,
   out_md: Path,
@@ -602,11 +590,10 @@ def write_databook(
   # The canonical, API-native holon (dataset-form JSON-LD) — what the holon
   # viewer picks up. In the demo flow it's downloaded natively from the report
   # endpoint (``derive_holon=False``); the standalone CLI derives it locally
-  # from the flat bundle, with a TriG copy alongside for RDF-native tooling.
+  # from the flat bundle.
   out_holon = out_md.parent / (jsonld_path.stem + ".holon.jsonld")
   if derive_holon:
     write_holon_jsonld(jsonld_path, out_holon)
-    write_holon_trig(jsonld_path, out_md.parent / (jsonld_path.stem + ".holon.trig"))
 
   ibs = sorted(
     g.subjects(RDF.type, RS.InformationBlock),
@@ -687,9 +674,6 @@ def main() -> None:
   holon = written.parent / (jsonld.stem + ".holon.jsonld")
   if holon.exists():
     print(f"  + holon:  {_rel(holon)} ({holon.stat().st_size:,} bytes)")
-  trig = written.parent / (jsonld.stem + ".holon.trig")
-  if trig.exists():
-    print(f"  + trig:   {_rel(trig)} ({trig.stat().st_size:,} bytes)")
 
 
 if __name__ == "__main__":
