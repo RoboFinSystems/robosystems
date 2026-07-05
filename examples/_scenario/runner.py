@@ -1032,15 +1032,20 @@ def _download_bundles(
   base = scenario.slug.replace("_", "-")
   label = scenario.company_name.split(",")[0]
   jsonld_path = out_dir / f"{base}-demo.jsonld"
+  holon_path = out_dir / f"{base}-demo.holon.jsonld"
   xbrl_path = out_dir / f"{base}-demo.zip"
 
   jsonld = client.download_report_bundle(
     graph_id, report_id, format="jsonld", to=jsonld_path
   )
+  holon = client.download_report_bundle(
+    graph_id, report_id, format="holon-jsonld", to=holon_path
+  )
   xbrl = client.download_report_bundle(
     graph_id, report_id, format="xbrl-2.1", to=xbrl_path
   )
   print(f"  JSON-LD:      {jsonld.path} ({len(jsonld.content):,} bytes)")
+  print(f"  Holon:        {holon.path} ({len(holon.content):,} bytes)")
   print(f"  XBRL 2.1:     {xbrl.path} ({len(xbrl.content):,} bytes)")
 
   shacl_md = out_dir / f"{base}-demo-shacl-validation.md"
@@ -1052,7 +1057,12 @@ def _download_bundles(
 
   databook_md = out_dir / f"{base}-demo.databook.md"
   write_databook(
-    jsonld_path, databook_md, f"{label} Demo", shacl_md=shacl_md, xbrl_md=xbrl_md
+    jsonld_path,
+    databook_md,
+    f"{label} Demo",
+    shacl_md=shacl_md,
+    xbrl_md=xbrl_md,
+    derive_holon=False,
   )
   print(f"  DataBook:     {databook_md}")
 

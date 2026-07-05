@@ -32,6 +32,7 @@ from examples._common.sdk import latest_report_id, make_ledger_client
 DEMO_ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = DEMO_ROOT / "output"
 JSONLD_PATH = OUTPUT_DIR / "world-online.jsonld"
+HOLON_PATH = OUTPUT_DIR / "world-online.holon.jsonld"
 XBRL_PATH = OUTPUT_DIR / "world-online.zip"
 
 GRAPH_SLOT = "world_online_test"
@@ -72,6 +73,11 @@ def main() -> None:
   print(
     f"  JSON-LD: {JSONLD_PATH.relative_to(REPO_ROOT)} ({len(jsonld.content):,} bytes)"
   )
+
+  holon = client.download_report_bundle(
+    graph_id, report_id, format="holon-jsonld", to=HOLON_PATH
+  )
+  print(f"  Holon:   {HOLON_PATH.relative_to(REPO_ROOT)} ({len(holon.content):,} bytes)")
 
   xbrl = client.download_report_bundle(
     graph_id, report_id, format="xbrl-2.1", to=XBRL_PATH

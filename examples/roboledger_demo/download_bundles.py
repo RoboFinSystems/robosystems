@@ -37,6 +37,7 @@ from examples._common.sdk import latest_report_id, make_ledger_client
 DEMO_ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = DEMO_ROOT / "output"
 JSONLD_PATH = OUTPUT_DIR / "roboledger-demo.jsonld"
+HOLON_PATH = OUTPUT_DIR / "roboledger-demo.holon.jsonld"
 XBRL_PATH = OUTPUT_DIR / "roboledger-demo.zip"
 
 GRAPH_SLOT = "roboledger_demo"
@@ -59,10 +60,14 @@ def download_bundles_for_report(
   jsonld = client.download_report_bundle(
     graph_id, report_id, format="jsonld", to=out_dir / JSONLD_PATH.name
   )
+  holon = client.download_report_bundle(
+    graph_id, report_id, format="holon-jsonld", to=out_dir / HOLON_PATH.name
+  )
   xbrl = client.download_report_bundle(
     graph_id, report_id, format="xbrl-2.1", to=out_dir / XBRL_PATH.name
   )
   print(f"  JSON-LD:      {jsonld.path} ({len(jsonld.content):,} bytes)")
+  print(f"  Holon:        {holon.path} ({len(holon.content):,} bytes)")
   print(f"  XBRL 2.1:     {xbrl.path} ({len(xbrl.content):,} bytes)")
 
   # Validate the just-received artifacts on the host — container-free:
@@ -87,6 +92,7 @@ def download_bundles_for_report(
     "RoboLedger Demo",
     shacl_md=shacl_md,
     xbrl_md=xbrl_md,
+    derive_holon=False,
   )
   print(f"  DataBook:     {databook_md}")
 

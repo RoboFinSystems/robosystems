@@ -35,8 +35,13 @@ from collections import defaultdict
 from pathlib import Path
 
 import rdflib
-from rdflib import RDF, Dataset, Graph, URIRef
+from rdflib import RDF, Graph, URIRef
 from rdflib.namespace import Namespace
+
+from robosystems.operations.serialization.rdf.holon import (
+  build_holon_dataset,
+  serialize_holon_jsonld_from_graph,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -350,7 +355,7 @@ def _graph_index(
 ) -> list[str]:
   """The holon map — the decomposition, made explicit, with **resolvable**
   IRIs. The three published graphs are real named graphs in the companion
-  ``holon.trig`` (``href``): **scene** (facts, also inlined + folded here),
+  ``holon.jsonld`` (``href``): **scene** (facts, also inlined + folded here),
   **boundary** (calculation arcs) and **projection** (presentation arcs +
   structures) — boundary/projection also name the versioned framework they
   derive from. The fourth graph, **lineage** (the ledger), carries no IRI
@@ -546,76 +551,28 @@ def _evidence_section(shacl_md: Path | None, xbrl_md: Path | None) -> str:
 # ── Top-level render ─────────────────────────────────────────────────────────
 
 
-def _partition_holon(g: Graph, root: URIRef) -> dict[str, Graph]:
-  """Split the flat report graph into the three *published* holon graphs —
-  ``scene`` (facts, the InformationBlock that groups them, and the
-  element/period/unit/entity/factSet they reference), ``boundary``
-  (calculation arcs) and ``projection`` (presentation arcs + structures). The
-  fourth graph, lineage/event, is intentionally absent: a report is an
-  aggregation of the books, not the books, and the ledger is internal.
-  Everything here already lives in the bundle, so this is a pure repartition —
-  no upstream/ledger access needed."""
-  scene, boundary, projection = Graph(), Graph(), Graph()
-
-  scene_subjects: set[URIRef] = set()
-  for fact in g.subjects(RDF.type, RS.Fact):
-    scene_subjects.add(fact)  # type: ignore[arg-type]
-    for ref in (RS.element, RS.period, RS.unit, RS.entity, RS.factSet):
-      v = g.value(fact, ref)
-      if isinstance(v, URIRef):
-        scene_subjects.add(v)
-  # the InformationBlock molecule groups its facts via the shared factSet
-  # (Fact --factSet--> FactSet <--factSet-- InformationBlock); include it so its
-  # blockType / prefLabel and that grouping link land in scene.
-  for ib in g.subjects(RDF.type, RS.InformationBlock):
-    scene_subjects.add(ib)  # type: ignore[arg-type]
-  for s in scene_subjects:
-    for p, o in g.predicate_objects(s):
-      if p == RS.envelopeJson:
-        continue
-      scene.add((s, p, o))
-
-  for assoc in g.subjects(RDF.type, RS.Association):
-    at = str(g.value(assoc, RS.associationType) or "")
-    target = (
-      boundary if at == "calculation" else projection if at == "presentation" else None
-    )
-    if target is None:
-      continue
-    for p, o in g.predicate_objects(assoc):
-      target.add((assoc, p, o))
-
-  for struct in g.subjects(RDF.type, RS.Structure):
-    for p, o in g.predicate_objects(struct):
-      if p == RS.envelopeJson:
-        continue
-      if p == RS.hasAssociation:
-        at = str(g.value(o, RS.associationType) or "")
-        (boundary if at == "calculation" else projection).add((struct, p, o))
-      else:
-        projection.add((struct, p, o))
-
-  return {"scene": scene, "boundary": boundary, "projection": projection}
+def write_holon_jsonld(jsonld_path: Path, out_jsonld: Path) -> Path:
+  """Serialize the report's published holon as **dataset-form JSON-LD** — the
+  canonical, API-native holon: one document with the three named graphs
+  ``<report>#scene`` / ``#boundary`` / ``#projection`` (``@id`` + nested
+  ``@graph``), derived purely from the on-disk flat ``.jsonld``. This is the
+  file the holon viewer picks up; JSON is native to the JSON API, so no ``.trig``
+  is required on the critical path. The partition is the shared
+  ``operations/serialization/rdf/holon.py`` logic — one source of truth."""
+  g = rdflib.Graph().parse(str(jsonld_path), format="json-ld")
+  root = _root(g)
+  out_jsonld.write_text(serialize_holon_jsonld_from_graph(g, root))
+  return out_jsonld
 
 
 def write_holon_trig(jsonld_path: Path, out_trig: Path) -> Path:
-  """Serialize the report's published holon as a TriG file with three real
-  named graphs — ``<report>#scene`` / ``#boundary`` / ``#projection`` — derived
-  purely from the on-disk ``.jsonld`` (the machine skin the human DataBook
-  references). The named-graph IRIs are exactly the ones the DataBook's
-  ``graph:`` map declares, so those references resolve to actual content."""
+  """Serialize the report's published holon as a TriG file — the optional RDF
+  export off the same :class:`~rdflib.Dataset`, for triplestore / SPARQL
+  ingestion. Same three named graphs as :func:`write_holon_jsonld`; kept because
+  it's ≈free and RDF-native tooling imports TriG/N-Quads most directly."""
   g = rdflib.Graph().parse(str(jsonld_path), format="json-ld")
   root = _root(g)
-
-  ds = Dataset()
-  for prefix, ns in _TURTLE_PREFIXES.items():
-    ds.bind(prefix, ns, replace=True)
-  for name, sub in _partition_holon(g, root).items():
-    ctx = ds.graph(URIRef(f"{root}#{name}"))
-    for triple in sub:
-      ctx.add(triple)
-
-  out_trig.write_text(ds.serialize(format="trig"))
+  out_trig.write_text(build_holon_dataset(g, root).serialize(format="trig"))
   return out_trig
 
 
@@ -626,18 +583,30 @@ def write_databook(
   *,
   shacl_md: Path | None = None,
   xbrl_md: Path | None = None,
+  derive_holon: bool = True,
 ) -> Path:
   """Render the JSON-LD report bundle at ``jsonld_path`` to a DataBook ``.md``.
 
   When ``shacl_md`` / ``xbrl_md`` are given, their verdict reports are inlined
   as a trailing evidence section so the DataBook is fully self-contained.
+
+  ``derive_holon`` controls where the ``.holon.jsonld`` companion comes from.
+  The standalone CLI (default ``True``) derives it locally from the flat
+  bundle; the demos download it **natively** from the report endpoint first
+  and pass ``False``, so this render only references it.
   """
   g = rdflib.Graph().parse(str(jsonld_path), format="json-ld")
   root = _root(g)
   columns = _period_columns(g, root)
 
-  out_trig = out_md.parent / (jsonld_path.stem + ".holon.trig")
-  write_holon_trig(jsonld_path, out_trig)
+  # The canonical, API-native holon (dataset-form JSON-LD) — what the holon
+  # viewer picks up. In the demo flow it's downloaded natively from the report
+  # endpoint (``derive_holon=False``); the standalone CLI derives it locally
+  # from the flat bundle, with a TriG copy alongside for RDF-native tooling.
+  out_holon = out_md.parent / (jsonld_path.stem + ".holon.jsonld")
+  if derive_holon:
+    write_holon_jsonld(jsonld_path, out_holon)
+    write_holon_trig(jsonld_path, out_md.parent / (jsonld_path.stem + ".holon.trig"))
 
   ibs = sorted(
     g.subjects(RDF.type, RS.InformationBlock),
@@ -652,7 +621,7 @@ def write_databook(
   title = f"{label} — {entity_name}" if entity_name else label
 
   parts: list[str] = [
-    _frontmatter(g, root, ibs, columns, title, out_trig.name)  # type: ignore[arg-type]
+    _frontmatter(g, root, ibs, columns, title, out_holon.name)  # type: ignore[arg-type]
   ]
   parts.append(
     f"\n# {title}\n\n"
@@ -662,13 +631,13 @@ def write_databook(
     f"view) and a foldable, addressable `turtle` slice (machine view, the same "
     f"facts as RDF). The **boundary** (calculation) and **projection** "
     f"(presentation) graphs live as real named graphs in the companion "
-    f"`{out_trig.name}` and derive from their versioned framework — referenced "
-    f"here rather than inlined, since they're shared by every report on that "
-    f"framework. The **lineage** graph — the ledger behind the facts — is "
-    f"internal and not published: a report is an aggregation of the books, not "
-    f"the books. The `Validation evidence` section is the published "
-    f"substantiation that the referenced rules hold. Everything here derives from "
-    f"`{jsonld_path.name}`.\n"
+    f"`{out_holon.name}` — dataset-form JSON-LD, the API-native holon — and derive "
+    f"from their versioned framework, referenced here rather than inlined since "
+    f"they're shared by every report on that framework. The **lineage** graph — "
+    f"the ledger behind the facts — is internal and not published: a report is an "
+    f"aggregation of the books, not the books. The `Validation evidence` section "
+    f"is the published substantiation that the referenced rules hold. Everything "
+    f"here derives from `{jsonld_path.name}`.\n"
   )
 
   for ib in ibs:
@@ -715,9 +684,12 @@ def main() -> None:
     jsonld, out, args.label, shacl_md=args.shacl_md, xbrl_md=args.xbrl_md
   )
   print(f"DataBook: {jsonld.name} → {_rel(written)} ({written.stat().st_size:,} bytes)")
-  holon = written.parent / (jsonld.stem + ".holon.trig")
+  holon = written.parent / (jsonld.stem + ".holon.jsonld")
   if holon.exists():
     print(f"  + holon:  {_rel(holon)} ({holon.stat().st_size:,} bytes)")
+  trig = written.parent / (jsonld.stem + ".holon.trig")
+  if trig.exists():
+    print(f"  + trig:   {_rel(trig)} ({trig.stat().st_size:,} bytes)")
 
 
 if __name__ == "__main__":
