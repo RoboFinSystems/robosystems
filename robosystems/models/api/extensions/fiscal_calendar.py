@@ -345,7 +345,10 @@ class DraftEntryResponse(BaseModel):
   memo: str | None = None
   provenance: str | None = Field(
     None,
-    description="Where the entry came from: 'ai_generated', 'manual_entry', etc.",
+    description=(
+      "Where the entry came from (ENTRY_PROVENANCE_VALUES): source_sync, "
+      "ai_generated, manual_entry, schedule_derived, system_computed, event_handler"
+    ),
   )
   source_structure_id: str | None = Field(
     None, description="Schedule structure that generated this entry (if any)"
