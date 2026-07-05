@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
-from robosystems.models.extensions.roboledger.entry import Entry
+from robosystems.models.extensions.roboledger.entry import (
+  ENTRY_PROVENANCE_VALUES,
+  Entry,
+)
 from robosystems.models.extensions.roboledger.event import Event
 from robosystems.models.extensions.roboledger.event_handler import EventHandler
 from robosystems.models.extensions.roboledger.transaction import Transaction
@@ -56,3 +59,11 @@ def test_apply_handler_links_entry_and_transaction_to_originating_event() -> Non
   assert len(transactions) == 1
   assert transaction.triggered_by_event_id == "evt_invoice"
   assert entry.triggered_by_event_id == "evt_invoice"
+
+  # Regression (ck_entries_provenance / migration 0019): the engine tags its
+  # entries provenance='event_handler'. That value MUST be in the model's
+  # permitted set — before 0019 the DB CHECK rejected it, so the first real
+  # (non-mocked) GL insert would have CheckViolated. This session is a mock,
+  # so it never hit the constraint; assert the invariant explicitly instead.
+  assert entry.provenance == "event_handler"
+  assert entry.provenance in ENTRY_PROVENANCE_VALUES
