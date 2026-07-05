@@ -658,6 +658,17 @@ class EnvConfig:
     get_parameter_value("INTUIT_REPORTS_TESTING_MIGRATION", "true").lower() == "true",
   )
 
+  # SEC shared-master parking on/off (ASG name/timeout live in section 3).
+  # When False, the nightly SEC pipeline still wakes and health-gates the master
+  # (staging depends on the wake job succeeding) but never sleeps it back to 0 —
+  # so a reserved-instance-backed master stays pinned awake and utilized. Flip to
+  # True via SSM (features/SHARED_MASTER_PARKING_ENABLED) once the master is 100%
+  # on-demand to reclaim the ~85% of idle hours it otherwise sits unused.
+  SHARED_MASTER_PARKING_ENABLED = get_bool_env(
+    "SHARED_MASTER_PARKING_ENABLED",
+    get_parameter_value("SHARED_MASTER_PARKING_ENABLED", "true").lower() == "true",
+  )
+
   # ==========================================================================
   # EXTENSIONS — RoboLedger & RoboInvestor product surfaces
   # ==========================================================================

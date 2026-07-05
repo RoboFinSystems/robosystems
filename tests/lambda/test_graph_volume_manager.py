@@ -370,6 +370,76 @@ def test_detach_creates_snapshot_for_shared_master(gvm):
   assert "sec" in tags["Databases"]
 
 
+def test_detach_shared_master_rolls_to_single_snapshot(gvm):
+  """Shared master keeps only the newest pre-detach snapshot across park cycles.
+
+  Each detach creates a fresh snapshot then prunes the prior one, so the master
+  never accumulates a snapshot per nightly park — at most one exists at a time.
+  """
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume(size=300)
+
+  def _attach_and_seed():
+    _attach(volume_id, instance_id)
+    _seed_registry(
+      "test-volume-registry",
+      volume_id,
+      ["sec"],
+      status="attached",
+      node_type="shared_master",
+      tier="ladybug-shared",
+      instance_id=instance_id,
+    )
+
+  # First park cycle → one snapshot.
+  _attach_and_seed()
+  with _moto_safe_detach_volume(gvm):
+    gvm.detach_volume({"volume_id": volume_id})
+  first = _describe_pre_detach_snapshots(volume_id)
+  assert len(first) == 1
+  first_id = first[0]["SnapshotId"]
+
+  # Second park cycle → new snapshot created, the prior one pruned.
+  _attach_and_seed()
+  with _moto_safe_detach_volume(gvm):
+    gvm.detach_volume({"volume_id": volume_id})
+
+  snaps = _describe_pre_detach_snapshots(volume_id)
+  assert len(snaps) == 1, "shared master must retain only the newest snapshot"
+  assert snaps[0]["SnapshotId"] != first_id, "prior snapshot should be pruned"
+
+
+def test_detach_writer_keeps_snapshot_history(gvm):
+  """Writers are NOT rolled — each detach retains its own snapshot.
+
+  Dedicated writers hold unique customer data with no guaranteed S3 backup and
+  detach only on instance replacement, so the rolling-single prune must not
+  touch them.
+  """
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+
+  def _attach_and_seed():
+    _attach(volume_id, instance_id)
+    _seed_registry(
+      "test-volume-registry",
+      volume_id,
+      ["kgcustomer1234567"],
+      status="attached",
+      node_type="writer",
+      tier="ladybug-standard",
+      instance_id=instance_id,
+    )
+
+  for _ in range(2):
+    _attach_and_seed()
+    with _moto_safe_detach_volume(gvm):
+      gvm.detach_volume({"volume_id": volume_id})
+
+  snaps = _describe_pre_detach_snapshots(volume_id)
+  assert len(snaps) == 2, "writer snapshots must not be pruned to a single"
+
+
 def test_detach_skips_snapshot_for_shared_replica(gvm):
   """Shared replicas hydrate from S3 on boot — must NOT be snapshotted.
 
