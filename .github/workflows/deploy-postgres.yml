@@ -88,6 +88,18 @@ on:
         type: string
         default: "120"
 
+      # Performance Insights (CloudWatch Database Insights - Standard mode; free at 7-day retention)
+      performance_insights_enabled:
+        description: "Enable RDS Performance Insights / Database Insights Standard mode"
+        required: false
+        type: string
+        default: "false"
+      performance_insights_retention_days:
+        description: "Performance Insights retention in days (7 = free tier; 31/62/93/186/372/731 = paid)"
+        required: false
+        type: string
+        default: "7"
+
       # Lambda Configuration
       lambda_image_uri:
         description: "ECR image URI for Lambda functions (container-based deployment)"
@@ -167,6 +179,8 @@ jobs:
                 ParameterKey=EnableRDSProxy,ParameterValue=${{ inputs.rds_proxy_enabled }} \
                 ParameterKey=RDSProxyMaxConnectionsPercent,ParameterValue=${{ inputs.rds_proxy_max_connections_percent }} \
                 ParameterKey=RDSProxyConnectionBorrowTimeout,ParameterValue=${{ inputs.rds_proxy_connection_borrow_timeout }} \
+                ParameterKey=EnablePerformanceInsights,ParameterValue=${{ inputs.performance_insights_enabled }} \
+                ParameterKey=PerformanceInsightsRetentionPeriod,ParameterValue=${{ inputs.performance_insights_retention_days }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
                 ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
