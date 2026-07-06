@@ -148,6 +148,32 @@ Parameters:
     Description: Email for SNS alerts
     ConstraintDescription: Must be a valid email address
 
+  # Performance Insights / CloudWatch Database Insights (Standard mode).
+  # Free at the default 7-day retention; longer retention is billed per vCPU/month.
+  # RDS for PostgreSQL has no instance-class restriction, so this is safe on t4g.micro.
+  EnablePerformanceInsights:
+    Type: String
+    Description: Enable RDS Performance Insights / Database Insights Standard mode
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    ConstraintDescription: Must be true or false
+  PerformanceInsightsRetentionPeriod:
+    Type: Number
+    Description: Performance Insights retention in days (7 = free tier; 31/62/93/186/372
+      are month*31; 731 = 24 months). Ignored when EnablePerformanceInsights=false.
+    Default: 7
+    AllowedValues:
+      - 7
+      - 31
+      - 62
+      - 93
+      - 186
+      - 372
+      - 731
+    ConstraintDescription: Must be 7 or a valid Performance Insights retention value
+
   # Tagging Configuration
   ServiceTag:
     Type: String
@@ -163,6 +189,7 @@ Conditions:
   EnableMultiAZCondition: !Equals [!Ref EnableMultiAZ, "true"]
   DeletionProtectionCondition: !Equals [!Ref EnableDeletionProtection, "true"]
   RDSProxyEnabledCondition: !Equals [!Ref EnableRDSProxy, "true"]
+  PerformanceInsightsEnabledCondition: !Equals [!Ref EnablePerformanceInsights, "true"]
 
 Resources:
   # Common IAM policy for EC2 instances
@@ -492,6 +519,9 @@ Resources:
       PubliclyAccessible: false
       MultiAZ: !If [EnableMultiAZCondition, true, false]
       DeletionProtection: !If [DeletionProtectionCondition, true, false]
+      EnablePerformanceInsights: !If [PerformanceInsightsEnabledCondition, true, false]
+      PerformanceInsightsRetentionPeriod:
+        !If [PerformanceInsightsEnabledCondition, !Ref PerformanceInsightsRetentionPeriod, !Ref "AWS::NoValue"]
       BackupRetentionPeriod: 30
       PreferredBackupWindow: 03:00-04:00
       PreferredMaintenanceWindow: sun:04:30-sun:05:30
@@ -774,6 +804,12 @@ Outputs:
     Value: !If [DeletionProtectionCondition, "true", "false"]
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-DeletionProtectionEnabled
+
+  PerformanceInsightsEnabled:
+    Description: Whether Performance Insights / Database Insights Standard mode is enabled
+    Value: !If [PerformanceInsightsEnabledCondition, "true", "false"]
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PerformanceInsightsEnabled
 
   PostgresEngineVersionConfigured:
     Description: PostgreSQL engine version configured for this deployment

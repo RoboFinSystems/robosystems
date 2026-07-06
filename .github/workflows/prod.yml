@@ -275,6 +275,9 @@ jobs:
       rds_proxy_enabled: ${{ vars.RDS_PROXY_ENABLED_PROD || 'false' }}
       rds_proxy_max_connections_percent: ${{ vars.RDS_PROXY_MAX_CONNECTIONS_PERCENT_PROD || '100' }}
       rds_proxy_connection_borrow_timeout: ${{ vars.RDS_PROXY_CONNECTION_BORROW_TIMEOUT_PROD || '120' }}
+      # Performance Insights (Database Insights Standard mode - enabled via DATABASE_PI_ENABLED_PROD; free at 7-day retention)
+      performance_insights_enabled: ${{ vars.DATABASE_PI_ENABLED_PROD || 'false' }}
+      performance_insights_retention_days: ${{ vars.DATABASE_PI_RETENTION_DAYS_PROD || '7' }}
       # Lambda Configuration (container-based)
       lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration
