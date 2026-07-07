@@ -78,7 +78,7 @@ async def _check_search_rate_limit(
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail=f"Access to {graph_id.upper()} repository requires a subscription. "
-      "Visit https://roboledger.ai/pricing",
+      f"Visit {env.ROBOSYSTEMS_URL}/billing",
     )
 
   redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITS)

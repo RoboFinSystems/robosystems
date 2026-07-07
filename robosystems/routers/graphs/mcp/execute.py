@@ -368,7 +368,7 @@ async def call_mcp_tool(
       if not repo_access:
         raise HTTPException(
           status_code=http_status.HTTP_403_FORBIDDEN,
-          detail=f"Access to {graph_id.upper()} repository requires a subscription. Visit https://roboledger.ai/pricing",
+          detail=f"Access to {graph_id.upper()} repository requires a subscription. Visit {env.ROBOSYSTEMS_URL}/billing",
         )
 
       # Get Redis client for rate limiting with proper ElastiCache support
@@ -394,7 +394,7 @@ async def call_mcp_tool(
           if reason == "no_access":
             raise HTTPException(
               status_code=http_status.HTTP_403_FORBIDDEN,
-              detail=f"{message}. Subscribe at https://roboledger.ai/pricing",
+              detail=f"{message}. Subscribe at {env.ROBOSYSTEMS_URL}/billing",
             )
           elif reason == "endpoint_not_allowed":
             raise HTTPException(
@@ -406,7 +406,7 @@ async def call_mcp_tool(
             raise HTTPException(
               status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
               detail=f"{message}. Limit: {detail.get('limit', 0)} per {detail.get('window', 'period')}. "
-              f"Upgrade for higher limits at https://roboledger.ai/pricing",
+              f"Upgrade for higher limits at {env.ROBOSYSTEMS_URL}/billing",
               headers={
                 "Retry-After": str(detail.get("retry_after", 60)),
                 "X-RateLimit-Repository": graph_id,

@@ -814,7 +814,7 @@ async def _check_shared_repository_limits(
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail=f"You don't have access to the '{graph_id}' repository. "
-      "Subscribe at https://roboledger.ai/upgrade",
+      f"Subscribe at {env.ROBOSYSTEMS_URL}/billing",
     )
 
   # Rate limiting is optional - skip if disabled (dev environments)
@@ -853,7 +853,7 @@ async def _check_shared_repository_limits(
       if reason == "no_access":
         raise HTTPException(
           status_code=http_status.HTTP_403_FORBIDDEN,
-          detail=f"{message}. Subscribe at https://roboledger.ai/upgrade",
+          detail=f"{message}. Subscribe at {env.ROBOSYSTEMS_URL}/billing",
         )
       elif reason == "endpoint_not_allowed":
         raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail=message)
@@ -862,7 +862,7 @@ async def _check_shared_repository_limits(
         raise HTTPException(
           status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
           detail=f"{message}. Limit: {detail.get('limit', 0)} per {detail.get('window', 'period')}. "
-          f"Upgrade for higher limits at https://roboledger.ai/upgrade",
+          f"Upgrade for higher limits at {env.ROBOSYSTEMS_URL}/billing",
         )
       else:
         raise HTTPException(
