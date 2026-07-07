@@ -117,18 +117,14 @@ REPORTING_RELATIONSHIPS = [
     from_node="Entity",
     to_node="Report",
     description="Entity has filed reports",
-    properties=[
-      Property(name="filing_context", type="STRING"),
-    ],
+    properties=[],
   ),
   Relationship(
     name="REPORT_HAS_FACT",
     from_node="Report",
     to_node="Fact",
     description="Report contains facts",
-    properties=[
-      Property(name="fact_context", type="STRING"),
-    ],
+    properties=[],
   ),
   Relationship(
     name="FACT_HAS_ELEMENT",
@@ -142,27 +138,21 @@ REPORTING_RELATIONSHIPS = [
     from_node="Fact",
     to_node="Entity",
     description="Fact belongs to reporting entity",
-    properties=[
-      Property(name="entity_context", type="STRING"),
-    ],
+    properties=[],
   ),
   Relationship(
     name="FACT_HAS_PERIOD",
     from_node="Fact",
     to_node="Period",
     description="Fact applies to specific period",
-    properties=[
-      Property(name="period_context", type="STRING"),
-    ],
+    properties=[],
   ),
   Relationship(
     name="FACT_HAS_UNIT",
     from_node="Fact",
     to_node="Unit",
     description="Fact has unit of measurement",
-    properties=[
-      Property(name="unit_context", type="STRING"),
-    ],
+    properties=[],
   ),
   # Fact → Dimension relationship (XBRL dimensional qualifiers)
   Relationship(
@@ -202,9 +192,7 @@ REPORTING_RELATIONSHIPS = [
     from_node="Report",
     to_node="Taxonomy",
     description="Report uses XBRL taxonomy",
-    properties=[
-      Property(name="taxonomy_context", type="STRING"),
-    ],
+    properties=[],
   ),
   # NOTE: STRUCTURE_HAS_ASSOCIATION, ASSOCIATION_HAS_FROM_ELEMENT,
   # ASSOCIATION_HAS_TO_ELEMENT, ASSOCIATION_HAS_CLASSIFICATION, and
@@ -305,9 +293,7 @@ TRANSACTION_RELATIONSHIPS = [
     from_node="Entity",
     to_node="Transaction",
     description="Entity has financial transactions (business events)",
-    properties=[
-      Property(name="transaction_context", type="STRING"),
-    ],
+    properties=[],
   ),
   # Transaction → Entry (one-to-many: a transaction can produce multiple entries)
   Relationship(
@@ -315,9 +301,7 @@ TRANSACTION_RELATIONSHIPS = [
     from_node="Transaction",
     to_node="Entry",
     description="Transaction produces ledger entries (posting, reversal, adjustment)",
-    properties=[
-      Property(name="entry_context", type="STRING"),
-    ],
+    properties=[],
   ),
   # Entry → LineItem (one-to-many: each entry has balanced debit/credit lines)
   Relationship(
@@ -325,9 +309,7 @@ TRANSACTION_RELATIONSHIPS = [
     from_node="Entry",
     to_node="LineItem",
     description="Ledger entry contains line items (debits and credits that must balance)",
-    properties=[
-      Property(name="line_item_context", type="STRING"),
-    ],
+    properties=[],
   ),
   # Entry → Dimension (fund, trust account, product channel, etc.)
   Relationship(
@@ -350,9 +332,7 @@ TRANSACTION_RELATIONSHIPS = [
     from_node="LineItem",
     to_node="Element",
     description="Line item maps to XBRL element for reporting",
-    properties=[
-      Property(name="mapping_context", type="STRING"),
-    ],
+    properties=[],
   ),
   # LineItem → Dimension relationship (department, class, location, project, etc.)
   Relationship(

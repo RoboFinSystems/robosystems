@@ -697,4 +697,96 @@ class TestInitProcessedElements:
     """processed_elements starts as an empty set."""
     processor = _create_processor(temp_output_dir, basic_schema_config)
     assert processor.processed_elements == set()
+
+
+@pytest.mark.unit
+class TestTaxonomyLabelElementUri:
+  """make_element_labels tags each TAXONOMY_HAS_LABEL edge with element_uri.
+
+  On the SEC shared repo the taxonomy is the filer's per-report extension
+  taxonomy, so the edge is report-scoped; element_uri re-attaches the element a
+  label belongs to, which is what makes "this report's label for element X" an
+  exact lookup against the content-addressed shared Label pool. See
+  sec-label-scoping spec (Option A).
+  """
+
+  @staticmethod
+  def _label_rel(role, text, lang="en-US"):
+    rel = MagicMock()
+    rel.toModelObject.role = role
+    rel.toModelObject.text = text
+    rel.toModelObject.xmlLang = lang
+    return rel
+
+  def _run(self, temp_output_dir, basic_schema_config, rels):
+    processor = _create_processor(temp_output_dir, basic_schema_config)
+    processor.labels_df = pd.DataFrame()
+    processor.element_labels_df = pd.DataFrame()
+    processor.taxonomy_labels_df = pd.DataFrame()
+    processor.taxonomy_data = {
+      "identifier": "tax-1",
+      "uri": "http://filer.example.com/20240101",
+    }
+
+    mock_cntlr = MagicMock()
+    mock_cntlr.relationshipSet.return_value.fromModelObject.return_value = rels
+    processor.arelle_cntlr = mock_cntlr
+
+    element_data = {
+      "identifier": "el-ppe",
+      "uri": "http://fasb.org/us-gaap/2024#PropertyPlantAndEquipmentNet",
+      "qname": "us-gaap:PropertyPlantAndEquipmentNet",
+    }
+    processor.make_element_labels(element_data, MagicMock())
+    return processor
+
+  def test_taxonomy_label_carries_element_uri(
+    self, temp_output_dir, basic_schema_config
+  ):
+    rels = [
+      self._label_rel(
+        "http://www.xbrl.org/2003/role/label", "Property and equipment, net"
+      ),
+      self._label_rel(
+        "http://www.xbrl.org/2003/role/totalLabel", "Total property and equipment"
+      ),
+    ]
+    processor = self._run(temp_output_dir, basic_schema_config, rels)
+
+    tax_df = processor.taxonomy_labels_df
+    assert len(tax_df) == 2
+    # every taxonomy→label edge is attributed to the element it labels
+    assert set(tax_df["element_uri"]) == {
+      "http://fasb.org/us-gaap/2024#PropertyPlantAndEquipmentNet"
+    }
+    assert set(tax_df["from"]) == {"tax-1"}
+    # the (report-scoped) taxonomy label + role pair is recoverable per element
+    labels_df = processor.labels_df
+    by_id = dict(zip(labels_df["identifier"], labels_df["value"], strict=True))
+    resolved = {by_id[to] for to in tax_df["to"]}
+    assert resolved == {"Property and equipment, net", "Total property and equipment"}
+
+  def test_no_taxonomy_still_writes_element_labels(
+    self, temp_output_dir, basic_schema_config
+  ):
+    """Without a per-report taxonomy, element→label edges still form; the
+    taxonomy edge is simply skipped (no element_qname to anchor)."""
+    processor = _create_processor(temp_output_dir, basic_schema_config)
+    processor.labels_df = pd.DataFrame()
+    processor.element_labels_df = pd.DataFrame()
+    processor.taxonomy_labels_df = pd.DataFrame()
+    # deliberately no processor.taxonomy_data
+
+    mock_cntlr = MagicMock()
+    mock_cntlr.relationshipSet.return_value.fromModelObject.return_value = [
+      self._label_rel("http://www.xbrl.org/2003/role/label", "Assets")
+    ]
+    processor.arelle_cntlr = mock_cntlr
+
+    processor.make_element_labels(
+      {"identifier": "el-a", "uri": "u", "qname": "us-gaap:Assets"}, MagicMock()
+    )
+
+    assert len(processor.element_labels_df) == 1
+    assert processor.taxonomy_labels_df.empty
     assert isinstance(processor.processed_elements, set)
