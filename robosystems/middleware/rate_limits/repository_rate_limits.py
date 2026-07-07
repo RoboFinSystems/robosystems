@@ -105,6 +105,8 @@ class DualLayerRateLimiter:
     Returns:
         Dict with allowed status and details
     """
+    from robosystems.config import env
+
     # Only shared repositories (including subgraphs like sec_historical) are
     # gated here; other graphs rely on the upstream burst dependency alone.
     if not is_shared_repository_or_subgraph(graph_id):
@@ -128,7 +130,7 @@ class DualLayerRateLimiter:
         "allowed": False,
         "reason": "no_access",
         "message": f"Access to {graph_id} repository requires a paid subscription",
-        "upgrade_url": "/upgrade",
+        "upgrade_url": f"{env.ROBOSYSTEMS_URL}/billing",
       }
 
     repo_check = await self._check_repository_limit(

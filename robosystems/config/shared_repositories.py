@@ -276,6 +276,8 @@ def is_endpoint_allowed(endpoint: str, repo_id: str | None = None) -> bool:
 
 def get_all_repository_pricing() -> dict:
   """Get complete pricing information for all repository plans."""
+  from robosystems.config import env
+
   _ensure_loaded()
 
   # Build plans dict keyed by plan string from manifests
@@ -298,7 +300,7 @@ def get_all_repository_pricing() -> dict:
     "plans": plans,
     "repositories": repositories,
     "billing_model": "No credit consumption for queries, rate-limited by subscription tier",
-    "upgrade_url": "https://roboledger.ai/upgrade",
+    "upgrade_url": f"{env.ROBOSYSTEMS_URL}/billing",
   }
 
 
