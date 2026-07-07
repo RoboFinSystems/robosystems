@@ -59,17 +59,16 @@ class TestSubscriptionRateLimits:
     )
 
   def test_get_endpoint_category_query_endpoints(self):
-    """Test endpoint categorization for query endpoints."""
-    query_paths = [
-      "/v1/graphs/kg1234/query",
-      "/v1/graphs/sec/query",
-      "/v1/abc123/cypher",
-    ]
+    """POST /v1/graphs/{graph_id}/query must be GRAPH_QUERY, not GRAPH_WRITE.
 
-    for path in query_paths:
-      category = get_endpoint_category(path, "POST")
-      # Should be categorized appropriately
-      assert category is None or isinstance(category, EndpointCategory)
+    Regression guard: the direct-query branch used to require
+    `endpoint_type == "graph"`, which never matched the real route, so
+    queries (including read-only shared repos like SEC) fell through to the
+    GRAPH_WRITE default and surfaced a misleading "graph write operations"
+    rate-limit error.
+    """
+    for path in ["/v1/graphs/kg1234/query", "/v1/graphs/sec/query"]:
+      assert get_endpoint_category(path, "POST") == EndpointCategory.GRAPH_QUERY
 
   def test_get_endpoint_category_ingestion_endpoints(self):
     """Test endpoint categorization for ingestion endpoints."""

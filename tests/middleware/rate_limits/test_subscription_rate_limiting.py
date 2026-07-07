@@ -47,21 +47,26 @@ class TestSubscriptionRateLimits:
       get_endpoint_category("/v1/graphs/kg1a2b3c/operator/query")
       == EndpointCategory.GRAPH_OPERATOR
     )
+    # Real route is POST /v1/graphs/{graph_id}/query (not /graph/query/cypher).
+    # Must be GRAPH_QUERY — never GRAPH_WRITE — even for read-only shared repos.
     assert (
-      get_endpoint_category("/v1/graphs/kg1a2b3c/graph/query/cypher")
+      get_endpoint_category("/v1/graphs/kg1a2b3c/query", "POST")
       == EndpointCategory.GRAPH_QUERY
     )
+    # Data sync lives under connections; only the /sync trigger is GRAPH_SYNC,
+    # while connection reads are ordinary GRAPH_READ.
     assert (
-      get_endpoint_category("/v1/graphs/kg1a2b3c/graph/analytics/metrics")
-      == EndpointCategory.GRAPH_ANALYTICS
-    )
-    assert (
-      get_endpoint_category("/v1/graphs/kg1a2b3c/graph/backup/create")
-      == EndpointCategory.GRAPH_BACKUP
-    )
-    assert (
-      get_endpoint_category("/v1/graphs/kg1a2b3c/sync/quickbooks")
+      get_endpoint_category("/v1/graphs/kg1a2b3c/connections/c1/sync", "POST")
       == EndpointCategory.GRAPH_SYNC
+    )
+    assert (
+      get_endpoint_category("/v1/graphs/kg1a2b3c/connections", "GET")
+      == EndpointCategory.GRAPH_READ
+    )
+    # Lifecycle operations get their own management bucket
+    assert (
+      get_endpoint_category("/v1/graphs/kg1a2b3c/operations/create-subgraph", "POST")
+      == EndpointCategory.GRAPH_MANAGEMENT
     )
 
   def test_should_use_subscription_limits(self):

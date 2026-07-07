@@ -209,9 +209,10 @@ class EndpointCategory(str, Enum):
     # Graph-scoped endpoints
     GRAPH_READ = "graph_read"              # GET operations
     GRAPH_WRITE = "graph_write"            # POST/PUT/DELETE
-    GRAPH_ANALYTICS = "graph_analytics"    # Heavy computations
-    GRAPH_BACKUP = "graph_backup"
-    GRAPH_SYNC = "graph_sync"
+    GRAPH_ANALYTICS = "graph_analytics"    # Usage analytics (aggregation reads)
+    GRAPH_BACKUP = "graph_backup"          # create-/restore-backup operations
+    GRAPH_MANAGEMENT = "graph_management"  # Lifecycle ops (subgraph/tier/style)
+    GRAPH_SYNC = "graph_sync"              # Connection /sync trigger only
     GRAPH_MCP = "graph_mcp"                # MCP operations
     GRAPH_OPERATOR = "graph_operator"      # AI Operator operations
     GRAPH_SEARCH = "graph_search"          # OpenSearch full-text search
@@ -239,8 +240,10 @@ GRAPH_WRITE: 30/min
 GRAPH_QUERY: 60/min
 GRAPH_OPERATOR: 15/min   # AI Operator operations
 
-# Larger tiers apply graph.yml api_rate_multiplier (e.g. 1.5x large, higher for xlarge)
-# on top of these base values.
+# Burst enforcement is deliberately tier-flat: the limiter classifies every
+# authenticated user as ladybug-standard. Per-tier differentiation is governed
+# by the credit system (volume), not by a rate-limit multiplier. The
+# graph.yml api_rate_multiplier is surfaced for display (see /limits) only.
 ```
 
 **Usage:**
@@ -251,9 +254,6 @@ from robosystems.config.rate_limits import RateLimitConfig, EndpointCategory
 # Get limits for tier and operation — returns (limit, window_seconds) or None
 result = RateLimitConfig.get_rate_limit("large", EndpointCategory.GRAPH_QUERY)
 limit, window_seconds = result  # e.g. (300, 60)
-
-# Or apply the tier-config multiplier
-RateLimitConfig.get_rate_limit_with_multiplier("xlarge", EndpointCategory.GRAPH_READ)
 
 # Classify a request path/method into a category
 category = RateLimitConfig.get_endpoint_category(path, method)
