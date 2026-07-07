@@ -363,11 +363,13 @@ class RateLimitConfig:
 
       # Graph lifecycle operations — POST /operations/{op_name}. Dedicated
       # buckets so expensive rebuild/backup work can't be abused by sharing
-      # the generic write limit.
+      # the generic write limit. Match the op-name segment specifically rather
+      # than the whole path, so a graph_id can't accidentally route the bucket.
       elif endpoint_type == "operations":
-        if "backup" in path:  # create-backup, restore-backup
+        op_name = path_parts[3] if len(path_parts) > 3 else ""
+        if "backup" in op_name:  # create-backup, restore-backup
           return EndpointCategory.GRAPH_BACKUP
-        elif "materialize" in path:  # heavy OLAP rebuild
+        elif "materialize" in op_name:  # heavy OLAP rebuild
           return EndpointCategory.GRAPH_IMPORT
         else:  # create/delete subgraph, delete-graph, change-tier/style
           return EndpointCategory.GRAPH_MANAGEMENT
