@@ -10,6 +10,7 @@ from starlette import status as http_status
 
 from robosystems.database import SessionFactory
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.search import (
   DocumentDetailResponse,
@@ -25,7 +26,11 @@ from robosystems.operations.document_service import DocumentService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/documents", tags=["Documents"])
+router = APIRouter(
+  prefix="/documents",
+  tags=["Documents"],
+  dependencies=[Depends(subscription_aware_rate_limit_dependency)],
+)
 
 
 def _block_shared_repository(graph_id: str) -> None:

@@ -11,6 +11,7 @@ from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_ID_PATTERN, SUBGRAPH_NAME_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.subgraphs import SubgraphResponse, SubgraphType
 from robosystems.models.core.user import User
@@ -23,7 +24,7 @@ from .utils import (
   record_operation_start,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(subscription_aware_rate_limit_dependency)])
 
 
 @router.get(
