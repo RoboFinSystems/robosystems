@@ -337,19 +337,28 @@ async def call_mcp_tool(
     try:
       await validate_mcp_access(graph_id, current_user, sess, access_type)
 
-      # Look up shared-repo subscription while session is still open
-      if MultiTenantUtils.is_shared_repository(graph_id):
+      # Look up shared-repo subscription while session is still open.
+      # Covers subgraphs (e.g. sec_historical) too — subscriptions live on
+      # the parent, so resolve to it before the lookup, matching the query
+      # path in query/execute.py::_check_shared_repository_limits.
+      if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
+        from robosystems.config.shared_repositories import (
+          resolve_shared_repository_parent,
+        )
         from robosystems.models.core.user.user_repository import UserRepository
 
         repo_access = UserRepository.get_by_user_and_repository(
-          current_user.id, graph_id, sess
+          current_user.id, resolve_shared_repository_parent(graph_id), sess
         )
     finally:
       sess.close()
 
-    # Apply dual-layer rate limiting for shared repositories
+    # Apply dual-layer rate limiting for shared repositories (incl. subgraphs)
     # Rate limiting is optional - skip if disabled (dev environments)
-    if MultiTenantUtils.is_shared_repository(graph_id) and env.RATE_LIMIT_ENABLED:
+    if (
+      MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
+      and env.RATE_LIMIT_ENABLED
+    ):
       from robosystems.config.valkey_registry import (
         ValkeyDatabase,
         create_async_redis_client,
@@ -368,19 +377,13 @@ async def call_mcp_tool(
       try:
         limiter = DualLayerRateLimiter(redis_client)
 
-        # Get user's subscription tier for burst protection
-        user_tier = "ladybug-standard"  # Default for authenticated users
-        if hasattr(current_user, "subscription") and current_user.subscription:
-          if current_user.subscription.billing_plan:
-            user_tier = current_user.subscription.billing_plan.name
-
-        # Check both rate limit layers
+        # Check shared-repository per-plan volume limits (burst protection is
+        # already enforced upstream by subscription_aware_rate_limit_dependency).
         limit_check = await limiter.check_limits(
           user_id=str(current_user.id),
           graph_id=graph_id,
           operation="mcp",
           endpoint=f"mcp/call-tool/{tool_call.name}",
-          user_tier=user_tier,
           repository_plan=repo_access.repository_plan,
         )
 
@@ -397,18 +400,6 @@ async def call_mcp_tool(
             raise HTTPException(
               status_code=http_status.HTTP_403_FORBIDDEN,
               detail=message,
-            )
-          elif reason == "burst_limit":
-            detail = limit_check.get("detail", {})
-            raise HTTPException(
-              status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-              detail=f"Rate limit exceeded: {detail.get('current', 0)}/{detail.get('limit', 0)} "
-              f"requests per {detail.get('window', 0)} seconds",
-              headers={
-                "Retry-After": str(detail.get("window", 60)),
-                "X-RateLimit-Limit": str(detail.get("limit", 0)),
-                "X-RateLimit-Remaining": str(detail.get("remaining", 0)),
-              },
             )
           elif reason == "repository_limit":
             detail = limit_check.get("detail", {})

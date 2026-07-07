@@ -833,19 +833,16 @@ async def _check_shared_repository_limits(
   try:
     limiter = DualLayerRateLimiter(redis_client)
 
-    # Get user's subscription tier (for burst protection)
-    user_tier = getattr(user, "subscription_tier", "ladybug-standard")
-
     # repo_access already fetched above for access check
     repo_plan = repo_access.repository_plan if repo_access else None
 
-    # Check both rate limit layers
+    # Check shared-repository per-plan volume limits (burst protection is
+    # already enforced upstream by subscription_aware_rate_limit_dependency).
     limit_check = await limiter.check_limits(
       user_id=user.id,
       graph_id=graph_id,
       operation="query",  # Direct queries
       endpoint=endpoint,
-      user_tier=user_tier,
       repository_plan=repo_plan,
     )
 
@@ -860,13 +857,6 @@ async def _check_shared_repository_limits(
         )
       elif reason == "endpoint_not_allowed":
         raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail=message)
-      elif reason == "burst_limit":
-        detail = limit_check.get("detail", {})
-        raise HTTPException(
-          status_code=http_status.HTTP_429_TOO_MANY_REQUESTS,
-          detail=f"Rate limit exceeded: {detail.get('current', 0)}/{detail.get('limit', 0)} "
-          f"requests per {detail.get('window', 0)} seconds",
-        )
       elif reason == "repository_limit":
         detail = limit_check.get("detail", {})
         raise HTTPException(
