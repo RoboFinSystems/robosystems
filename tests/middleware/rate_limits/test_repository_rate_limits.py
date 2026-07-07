@@ -1,6 +1,6 @@
 """Repository-specific rate limiting tests."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -51,14 +51,9 @@ class TestDualLayerRateLimiter:
   @pytest.fixture
   def mock_redis(self):
     redis = AsyncMock()
-    # pipeline() is sync in redis.asyncio — returns a Pipeline, not a coroutine
-    pipe = MagicMock()
-    pipe.zremrangebyscore = MagicMock()
-    pipe.zadd = MagicMock()
-    pipe.zcount = MagicMock()
-    pipe.expire = MagicMock()
-    pipe.execute = AsyncMock(return_value=[0, True, 1, True])
-    redis.pipeline = MagicMock(return_value=pipe)
+    # Repository volume limits use INCR + EXPIRE. Default: first hit in window.
+    redis.incr = AsyncMock(return_value=1)
+    redis.expire = AsyncMock(return_value=True)
     return redis
 
   @pytest.fixture
@@ -72,8 +67,7 @@ class TestDualLayerRateLimiter:
       graph_id="sec",
       operation="query",
       endpoint="backup",
-      user_tier="ladybug-standard",
-      repository_plan="sec-starter",
+      repository_plan="starter",
     )
     assert result["allowed"] is False
     assert result["reason"] == "endpoint_not_allowed"
@@ -85,60 +79,46 @@ class TestDualLayerRateLimiter:
       graph_id="sec",
       operation="query",
       endpoint="query",
-      user_tier="ladybug-standard",
       repository_plan=None,
     )
     assert result["allowed"] is False
     assert result["reason"] == "no_access"
 
   @pytest.mark.asyncio
-  async def test_burst_limit_exceeded(self, limiter, mock_redis):
-    # Mock pipeline properly for async context manager
-    pipe = MagicMock()
-    pipe.zremrangebyscore = MagicMock()
-    pipe.zadd = MagicMock()
-    pipe.zcount = MagicMock()
-    pipe.expire = MagicMock()
-    pipe.execute = AsyncMock(return_value=[0, True, 1000, True])
-    mock_redis.pipeline.return_value = pipe
-
+  async def test_repository_volume_limit_exceeded(self, limiter, mock_redis):
+    # Push the per-window counter above the starter plan's queries_per_minute.
+    mock_redis.incr = AsyncMock(return_value=10_000)
     result = await limiter.check_limits(
       user_id="u1",
       graph_id="sec",
       operation="query",
       endpoint="query",
-      user_tier="ladybug-standard",
-      repository_plan="sec-starter",
+      repository_plan="starter",
     )
-    assert isinstance(result, dict)
+    assert result["allowed"] is False
+    assert result["reason"] == "repository_limit"
 
   @pytest.mark.asyncio
-  async def test_allowed_non_shared_repo(self, limiter, mock_redis):
-    pipe = MagicMock()
-    pipe.zremrangebyscore = MagicMock()
-    pipe.zadd = MagicMock()
-    pipe.zcount = MagicMock()
-    pipe.expire = MagicMock()
-    pipe.execute = AsyncMock(return_value=[0, True, 1, True])
-    mock_redis.pipeline.return_value = pipe
-
+  async def test_allowed_within_repository_limits(self, limiter):
     result = await limiter.check_limits(
       user_id="u1",
-      graph_id="kg123",  # NOT a shared repo
+      graph_id="sec",
       operation="query",
       endpoint="query",
-      user_tier="ladybug-standard",
+      repository_plan="starter",
     )
     assert result["allowed"] is True
 
-  def test_operation_to_category(self, limiter):
-    from robosystems.config.rate_limits import EndpointCategory
-
-    assert limiter._operation_to_category("query") == EndpointCategory.GRAPH_QUERY
-    assert limiter._operation_to_category("mcp") == EndpointCategory.GRAPH_MCP
-    assert limiter._operation_to_category("operator") == EndpointCategory.GRAPH_OPERATOR
-    assert limiter._operation_to_category("search") == EndpointCategory.GRAPH_SEARCH
-    assert limiter._operation_to_category("unknown") == EndpointCategory.GRAPH_READ
+  @pytest.mark.asyncio
+  async def test_allowed_non_shared_repo(self, limiter):
+    result = await limiter.check_limits(
+      user_id="u1",
+      graph_id="kg123",  # NOT a shared repo — burst handled upstream
+      operation="query",
+      endpoint="query",
+    )
+    assert result["allowed"] is True
+    assert result["repo"] is None
 
   @pytest.mark.asyncio
   async def test_get_usage_stats_no_limits(self, limiter):

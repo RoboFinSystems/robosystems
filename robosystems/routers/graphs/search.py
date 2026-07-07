@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from starlette import status as http_status
 
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.search import (
   DocumentSection,
@@ -17,7 +18,14 @@ from robosystems.operations.search import get_search_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/search", tags=["Search"])
+# Per-tier burst limiting (GRAPH_SEARCH) applies to ALL graphs, shared or
+# user-owned — OpenSearch is a shared resource. The shared-repo per-plan
+# volume caps in _check_search_rate_limit run on top for SEC et al.
+router = APIRouter(
+  prefix="/search",
+  tags=["Search"],
+  dependencies=[Depends(subscription_aware_rate_limit_dependency)],
+)
 
 
 def _require_search_service():
@@ -77,14 +85,12 @@ async def _check_search_rate_limit(
 
   try:
     limiter = DualLayerRateLimiter(redis_client)
-    user_tier = getattr(current_user, "subscription_tier", None) or "ladybug-standard"
 
     limit_check = await limiter.check_limits(
       user_id=str(current_user.id),
       graph_id=graph_id,
       operation="search",
       endpoint=endpoint,
-      user_tier=user_tier,
       repository_plan=repo_access.repository_plan,
     )
 

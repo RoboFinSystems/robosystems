@@ -17,6 +17,7 @@ from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.subgraphs import (
   CreateSubgraphRequest,
@@ -41,7 +42,7 @@ from .utils import (
   verify_subgraph_tier_support,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(subscription_aware_rate_limit_dependency)])
 
 
 async def get_database_size_mb(graph_id: str) -> float | None:

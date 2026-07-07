@@ -1,8 +1,10 @@
 """
 Repository-specific rate limiting for shared repositories like SEC.
 
-This module implements the second layer of rate limiting specifically for
-shared repositories, working in conjunction with the existing burst protection.
+This module implements the subscription-plan *volume* limits for shared
+repositories. Per-request *burst* protection is handled upstream by the
+per-tier FastAPI dependency (``subscription_aware_rate_limit_dependency``),
+so this layer only enforces the manifest's per-plan volume caps.
 
 IMPORTANT: Both direct API queries and MCP queries are included.
 Rate limits are applied to prevent abuse and ensure fair usage across tiers.
@@ -14,7 +16,6 @@ from enum import Enum
 
 import redis.asyncio as redis
 
-from robosystems.config.rate_limits import EndpointCategory, RateLimitConfig
 from robosystems.config.shared_repositories import (
   get_rate_limits as _get_rate_limits,
 )
@@ -72,9 +73,12 @@ class SharedRepositoryRateLimits:
 
 class DualLayerRateLimiter:
   """
-  Implements two-layer rate limiting:
-  1. Burst protection (existing) - prevents API abuse
-  2. Repository limits (new) - subscription-based volume control
+  Enforce shared-repository subscription-plan *volume* limits.
+
+  Per-request burst protection is applied upstream by the per-tier FastAPI
+  dependency (``subscription_aware_rate_limit_dependency``); this class only
+  layers the manifest's per-plan volume caps on top for shared repos. (The
+  name is historical — there is now a single layer here.)
   """
 
   def __init__(self, redis_client: redis.Redis):
@@ -86,110 +90,59 @@ class DualLayerRateLimiter:
     graph_id: str,
     operation: str,
     endpoint: str,
-    user_tier: str,
     repository_plan: str | None = None,
   ) -> dict:
     """
-    Check both burst and repository-specific limits.
+    Check shared-repository per-plan volume limits.
 
     Args:
         user_id: User making the request
-        graph_id: Graph ID (could be "sec" for shared repo)
-        operation: Operation type (query, mcp, agent, export)
+        graph_id: Graph ID (could be "sec"/"sec_historical" for a shared repo)
+        operation: Operation type (query, mcp, search)
         endpoint: The actual endpoint being called
-        user_tier: User's subscription tier (for burst limits)
         repository_plan: Repository subscription plan (for volume limits)
 
     Returns:
         Dict with allowed status and details
     """
+    # Only shared repositories (including subgraphs like sec_historical) are
+    # gated here; other graphs rely on the upstream burst dependency alone.
+    if not is_shared_repository_or_subgraph(graph_id):
+      return {"allowed": True, "repo": None}
 
-    # Check if this is a shared repository (including subgraphs like sec_historical)
-    if is_shared_repository_or_subgraph(graph_id):
-      # Resolve subgraph to parent for policy lookups
-      parent_repo_id = resolve_shared_repository_parent(graph_id)
+    # Resolve subgraph to parent for policy + subscription lookups
+    parent_repo_id = resolve_shared_repository_parent(graph_id)
 
-      # First check if the endpoint is even allowed
-      if not SharedRepositoryRateLimits.is_endpoint_allowed(parent_repo_id, endpoint):
-        return {
-          "allowed": False,
-          "reason": "endpoint_not_allowed",
-          "message": f"Endpoint '{endpoint}' is not allowed for shared repository '{graph_id}'",
-          "allowed_endpoints": list(AllowedSharedEndpoints),
-        }
-
-      # Check if user has access (subscription required - must have valid plan)
-      if not repository_plan:
-        return {
-          "allowed": False,
-          "reason": "no_access",
-          "message": f"Access to {graph_id} repository requires a paid subscription",
-          "upgrade_url": "/upgrade",
-        }
-
-    # Layer 1: Check burst protection (existing system)
-    burst_check = await self._check_burst_limit(user_id, operation, user_tier)
-    if not burst_check["allowed"]:
+    # The endpoint must be allowed for shared repositories
+    if not SharedRepositoryRateLimits.is_endpoint_allowed(parent_repo_id, endpoint):
       return {
         "allowed": False,
-        "reason": "burst_limit",
-        "detail": burst_check,
-        "message": "Rate limit exceeded (burst protection)",
+        "reason": "endpoint_not_allowed",
+        "message": f"Endpoint '{endpoint}' is not allowed for shared repository '{graph_id}'",
+        "allowed_endpoints": list(AllowedSharedEndpoints),
       }
 
-    # Layer 2: Check repository-specific limits (if applicable)
-    repo_check = None
-    if is_shared_repository_or_subgraph(graph_id) and repository_plan:
-      parent_id = resolve_shared_repository_parent(graph_id)
-      repo_check = await self._check_repository_limit(
-        user_id, parent_id, operation, repository_plan
-      )
-      if not repo_check["allowed"]:
-        return {
-          "allowed": False,
-          "reason": "repository_limit",
-          "detail": repo_check,
-          "message": f"Repository {operation} limit exceeded for {repository_plan} plan",
-        }
+    # Access requires a valid (paid) subscription plan
+    if not repository_plan:
+      return {
+        "allowed": False,
+        "reason": "no_access",
+        "message": f"Access to {graph_id} repository requires a paid subscription",
+        "upgrade_url": "/upgrade",
+      }
 
-    return {
-      "allowed": True,
-      "burst": burst_check,
-      "repo": repo_check if is_shared_repository_or_subgraph(graph_id) else None,
-    }
+    repo_check = await self._check_repository_limit(
+      user_id, parent_repo_id, operation, repository_plan
+    )
+    if not repo_check["allowed"]:
+      return {
+        "allowed": False,
+        "reason": "repository_limit",
+        "detail": repo_check,
+        "message": f"Repository {operation} limit exceeded for {repository_plan} plan",
+      }
 
-  async def _check_burst_limit(self, user_id: str, operation: str, tier: str) -> dict:
-    """Check existing burst protection limits."""
-    category = self._operation_to_category(operation)
-    limit_config = RateLimitConfig.get_rate_limit(tier, category)
-
-    if not limit_config:
-      return {"allowed": True}
-
-    limit, window = limit_config
-
-    # Use sliding window counter
-    now = int(datetime.now(UTC).timestamp())
-    window_start = now - window
-    key = f"burst:{user_id}:{operation}"
-
-    # Remove old entries and count current window
-    pipe = self.redis.pipeline()
-    pipe.zremrangebyscore(key, 0, window_start)
-    pipe.zadd(key, {str(now): now})
-    pipe.zcount(key, window_start, now)
-    pipe.expire(key, window)
-    results = await pipe.execute()
-
-    count = results[2]
-
-    return {
-      "allowed": count <= limit,
-      "limit": limit,
-      "current": count,
-      "window": window,
-      "reset_at": now + window,
-    }
+    return {"allowed": True, "repo": repo_check}
 
   async def _check_repository_limit(
     self, user_id: str, repository: str, operation: str, plan: str
@@ -278,16 +231,6 @@ class DualLayerRateLimiter:
 
     return {"allowed": True, "checks": checks}
 
-  def _operation_to_category(self, operation: str) -> EndpointCategory:
-    """Map operation to endpoint category for burst limits."""
-    mapping = {
-      "query": EndpointCategory.GRAPH_QUERY,
-      "mcp": EndpointCategory.GRAPH_MCP,
-      "operator": EndpointCategory.GRAPH_OPERATOR,
-      "search": EndpointCategory.GRAPH_SEARCH,
-    }
-    return mapping.get(operation, EndpointCategory.GRAPH_READ)
-
   async def get_usage_stats(self, user_id: str, repository: str, plan: str) -> dict:
     """Get current usage statistics for a user."""
     limits = SharedRepositoryRateLimits.get_limits(repository, plan)
@@ -301,15 +244,15 @@ class DualLayerRateLimiter:
     for operation in ["query", "mcp", "agent", "search"]:
       operation_stats = {}
 
-      # Check each time window
-      for window, fmt in [
-        ("minute", "%Y%m%d%H%M"),
-        ("hour", "%Y%m%d%H"),
-        ("day", "%Y%m%d"),
+      # Check each time window. The token must match exactly what
+      # _check_repository_limit writes ("min"/"hour"/"day") — using
+      # window[:3] produced "hou" for the hour bucket and silently read 0.
+      for window, token, fmt in [
+        ("minute", "min", "%Y%m%d%H%M"),
+        ("hour", "hour", "%Y%m%d%H"),
+        ("day", "day", "%Y%m%d"),
       ]:
-        key = (
-          f"repo:{repository}:{user_id}:{operation}:{window[:3]}:{now.strftime(fmt)}"
-        )
+        key = f"repo:{repository}:{user_id}:{operation}:{token}:{now.strftime(fmt)}"
         count = await self.redis.get(key)
         operation_stats[window] = int(count) if count else 0
 

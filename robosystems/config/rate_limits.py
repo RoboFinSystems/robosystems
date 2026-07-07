@@ -7,8 +7,6 @@ and endpoint categories.
 
 from enum import Enum
 
-from .graph_tier import get_tier_api_rate_multiplier
-
 
 class RateLimitPeriod(str, Enum):
   """Time periods for rate limiting."""
@@ -42,6 +40,7 @@ class EndpointCategory(str, Enum):
   GRAPH_WRITE = "graph_write"
   GRAPH_ANALYTICS = "graph_analytics"
   GRAPH_BACKUP = "graph_backup"
+  GRAPH_MANAGEMENT = "graph_management"  # Lifecycle ops (subgraph/tier/style)
   GRAPH_SYNC = "graph_sync"
   GRAPH_MCP = "graph_mcp"
   GRAPH_OPERATOR = "graph_operator"
@@ -116,6 +115,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_WRITE: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_ANALYTICS: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_BACKUP: (2, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MANAGEMENT: (3, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (3, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MCP: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_OPERATOR: (3, RateLimitPeriod.MINUTE),
@@ -143,6 +143,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MANAGEMENT: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_OPERATOR: (15, RateLimitPeriod.MINUTE),
@@ -161,7 +162,10 @@ class RateLimitConfig:
       EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
     # ladybug-large: r7g.large (16GB, 2 vCPU)
-    # Same base values as standard — graph.yml api_rate_multiplier (1.5x) handles scaling
+    # Identical enforcement to standard: the API limiter classifies all
+    # authenticated users as ladybug-standard, so these per-tier tables are
+    # reference/parity only. Burst protection is deliberately tier-flat;
+    # per-tier volume is governed by credits, not by a rate-limit multiplier.
     "ladybug-large": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
@@ -174,6 +178,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MANAGEMENT: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_OPERATOR: (15, RateLimitPeriod.MINUTE),
@@ -192,7 +197,8 @@ class RateLimitConfig:
       EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
     # ladybug-xlarge: r7g.xlarge (32GB, 4 vCPU)
-    # Same base values as standard — graph.yml api_rate_multiplier (2.5x) handles scaling
+    # Identical enforcement to standard (see ladybug-large note): reference/
+    # parity only; the limiter treats all authenticated users as standard.
     "ladybug-xlarge": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
@@ -205,6 +211,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MANAGEMENT: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_OPERATOR: (15, RateLimitPeriod.MINUTE),
@@ -245,36 +252,6 @@ class RateLimitConfig:
 
     limit, period = limit_config
     return limit, period.to_seconds()
-
-  @classmethod
-  def get_rate_limit_with_multiplier(
-    cls, tier: str, category: EndpointCategory, use_tier_config: bool = True
-  ) -> tuple[int, int] | None:
-    """
-    Get rate limit with optional tier config multiplier applied.
-
-    Args:
-        tier: Subscription tier
-        category: Endpoint category
-        use_tier_config: If True, apply multiplier from tier config
-
-    Returns:
-        Tuple of (limit, window_seconds) or None if not configured
-    """
-    # Get base rate limit
-    base_result = cls.get_rate_limit(tier, category)
-    if not base_result:
-      return None
-
-    base_limit, window_seconds = base_result
-
-    # Apply tier config multiplier if enabled
-    if use_tier_config:
-      multiplier = get_tier_api_rate_multiplier(tier)
-      adjusted_limit = int(base_limit * multiplier)
-      return adjusted_limit, window_seconds
-
-    return base_limit, window_seconds
 
   @classmethod
   def get_endpoint_category(
@@ -365,21 +342,48 @@ class RateLimitConfig:
       elif endpoint_type == "search":
         return EndpointCategory.GRAPH_SEARCH
 
-      # Backup operations
-      elif endpoint_type == "graph" and "backup" in path:
-        return EndpointCategory.GRAPH_BACKUP
+      # Schema inspection / export / validation — all read-only
+      elif endpoint_type == "schema":
+        return EndpointCategory.GRAPH_READ
 
-      # Direct queries
-      elif endpoint_type == "graph" and "query" in path:
+      # Direct Cypher queries — POST /v1/graphs/{graph_id}/query, so the
+      # segment after graph_id (endpoint_type) is "query". This previously
+      # checked `endpoint_type == "graph"`, which never matches the real
+      # route, so every query (including read-only shared repos like SEC)
+      # fell through to the GRAPH_WRITE default below and reported the
+      # misleading "graph write operations" limit.
+      elif endpoint_type == "query":
         return EndpointCategory.GRAPH_QUERY
 
-      # Analytics
-      elif endpoint_type == "graph" and "analytics" in path:
+      # Usage analytics — aggregation-heavy reads get a dedicated bucket
+      # (the endpoint segment is "analytics"; this previously checked
+      # `endpoint_type == "graph"` and never matched).
+      elif endpoint_type == "analytics":
         return EndpointCategory.GRAPH_ANALYTICS
 
-      # Sync operations
-      elif endpoint_type in ["sync", "connections"]:
-        return EndpointCategory.GRAPH_SYNC
+      # Graph lifecycle operations — POST /operations/{op_name}. Dedicated
+      # buckets so expensive rebuild/backup work can't be abused by sharing
+      # the generic write limit. Match the op-name segment specifically rather
+      # than the whole path, so a graph_id can't accidentally route the bucket.
+      elif endpoint_type == "operations":
+        op_name = path_parts[3] if len(path_parts) > 3 else ""
+        if "backup" in op_name:  # create-backup, restore-backup
+          return EndpointCategory.GRAPH_BACKUP
+        elif "materialize" in op_name:  # heavy OLAP rebuild
+          return EndpointCategory.GRAPH_IMPORT
+        else:  # create/delete subgraph, delete-graph, change-tier/style
+          return EndpointCategory.GRAPH_MANAGEMENT
+
+      # Connection management (reads/mutations) + the data-sync trigger.
+      # Only the actual /sync call belongs in the tight sync bucket; listing
+      # connections, options, and OAuth callbacks are ordinary reads/writes.
+      elif endpoint_type == "connections":
+        if "sync" in path:
+          return EndpointCategory.GRAPH_SYNC
+        elif method in ["POST", "PUT", "DELETE", "PATCH"]:
+          return EndpointCategory.GRAPH_WRITE
+        else:
+          return EndpointCategory.GRAPH_READ
 
       # Import operations
       elif "import" in path or "ingest" in path:
