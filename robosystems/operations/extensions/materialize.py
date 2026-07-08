@@ -1005,7 +1005,9 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   tables["FactSet"] = f"""
     CREATE OR REPLACE TABLE FactSet AS
     SELECT
-      id                              AS identifier
+      id                              AS identifier,
+      COALESCE(factset_type, '')      AS factset_type,
+      COALESCE(CAST(provenance AS VARCHAR), '')  AS provenance
     FROM postgres_scan('{c}', '{s}', 'fact_sets')
   """
 

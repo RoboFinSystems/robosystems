@@ -55,7 +55,6 @@ from .jobs import (
   sec_narratives_index_job,
   sec_process_job,
   sec_stage_job,
-  sec_vector_s3_publish_job,
 )
 
 
@@ -604,7 +603,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
 #
 # Sequential to avoid overloading the instance with concurrent uploads.
 # LadybugDB publish serves the replica fleet (downloaded to local disk on boot).
-# DuckDB publish serves vector search (embedding columns for MCP tools).
+# DuckDB publish serves the offline knowledge-artifacts build.
 # Replica refresh cycles instances to pick up new S3 databases.
 
 
@@ -614,20 +613,16 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     sec_materialize_job,
     sec_lbug_s3_publish_job,
     sec_duckdb_s3_publish_job,
-    sec_vector_s3_publish_job,
   ],
   request_jobs=[
     sec_lbug_s3_publish_job,
     sec_duckdb_s3_publish_job,
-    sec_vector_s3_publish_job,
     shared_replicas_refresh_job,
     sec_master_sleep_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
-  description=(
-    "Chain: materialize → lbug S3 → duckdb S3 → vector S3 → replica refresh"
-  ),
+  description=("Chain: materialize → lbug S3 → duckdb S3 → replica refresh"),
 )
 def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
   """Publish databases to S3 and refresh replicas after materialization.
@@ -635,8 +630,7 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
   Sequential chain to avoid overloading the instance:
   - On materialize success: triggers lbug S3 publish
   - On lbug publish success: triggers duckdb S3 publish
-  - On duckdb publish success: triggers vector index S3 publish
-  - On vector publish success: triggers rolling replica refresh
+  - On duckdb publish success: triggers rolling replica refresh
 
   The replica refresh uses conservative policies (min_healthy=100%,
   max_healthy=200%) so old instances stay alive serving traffic until
@@ -665,16 +659,11 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     context.log.info("LadybugDB S3 publish complete, triggering DuckDB S3 publish")
 
   elif dagster_run.job_name == "sec_duckdb_s3_publish":
-    next_job_name = "sec_vector_s3_publish"
-    next_phase = "vector_s3_publish"
-    context.log.info("DuckDB S3 publish complete, triggering vector index S3 publish")
-
-  elif dagster_run.job_name == "sec_vector_s3_publish":
     # Final publish done — the master is now dead weight (replicas refresh from
     # S3, never from the master). Trigger the replica refresh AND sleep the
     # master, in parallel; sleep does not depend on the refresh outcome.
     context.log.info(
-      "Vector S3 publish complete, triggering replica refresh and master sleep"
+      "DuckDB S3 publish complete, triggering replica refresh and master sleep"
     )
     for job_name, phase in (
       ("shared_replicas_refresh", "replica_refresh"),
@@ -742,7 +731,6 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     sec_materialize_job,
     sec_lbug_s3_publish_job,
     sec_duckdb_s3_publish_job,
-    sec_vector_s3_publish_job,
   ],
   request_job=sec_master_sleep_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready

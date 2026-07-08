@@ -258,43 +258,12 @@ aws dynamodb update-item \
   --region ${AWS_REGION}
 
 # ==================================================================================
-# LANCEDB VECTOR INDEX DOWNLOAD (Optional — for MCP vector search)
-# ==================================================================================
-# Downloads LanceDB vector search indexes from S3 if available. These enable
-# fast (~5ms) semantic search over element embeddings in the resolve-element
-# MCP tool. Non-fatal: replicas boot normally without them (falls back to canonical matching).
-#
-# Index files follow the pattern: {graph_id}.{table_name}.lance.tar.gz
-# Extracted to: /mnt/ladybug-data/databases/lance/{graph_id}/{table_name}/
-echo "Downloading LanceDB vector indexes from S3 (optional)..."
-
-LANCE_DIR="/mnt/ladybug-data/databases/lance"
-mkdir -p "${LANCE_DIR}"
-
-# Download vector index for each shared repository
-IFS=',' read -ra REPOS <<< "${SHARED_REPOSITORIES}"
-for REPO in "${REPOS[@]}"; do
-  REPO=$(echo "$REPO" | tr -d ' ')
-  # Element table vector index
-  LANCE_ARCHIVE_URI="${SHARED_DATABASE_S3_PREFIX%/}/${REPO}.Element.lance.tar.gz"
-  START_TIME=$(date +%s)
-  aws s3 cp "${LANCE_ARCHIVE_URI}" "/tmp/${REPO}.Element.lance.tar.gz" \
-    --region "${AWS_REGION}" --only-show-errors 2>/dev/null && {
-    tar -xzf "/tmp/${REPO}.Element.lance.tar.gz" -C "${LANCE_DIR}/"
-    rm -f "/tmp/${REPO}.Element.lance.tar.gz"
-    ELAPSED=$(( $(date +%s) - START_TIME ))
-    echo "LanceDB index for ${REPO}/Element extracted to ${LANCE_DIR} in ${ELAPSED}s"
-  } || {
-    echo "LanceDB index for ${REPO}/Element not available (non-fatal)"
-  }
-done
-
-# ==================================================================================
 # DUCKDB STAGING DOWNLOAD (Skipped)
 # ==================================================================================
-# DuckDB staging files are not needed on replicas — MCP tools use LanceDB for
-# vector search and canonical concept matching on the graph. Skipping this download
-# saves ~10 minutes of boot time and avoids downloading a 100GB+ file.
+# DuckDB staging files are not needed on replicas — the MCP resolve-element tool
+# resolves concepts via canonical-concept matching + text search on the graph
+# (the LanceDB element-vector index was retired). Skipping this download saves
+# ~10 minutes of boot time and avoids downloading a 100GB+ file.
 echo "Skipping DuckDB staging download (not used on replicas)"
 
 # ==================================================================================

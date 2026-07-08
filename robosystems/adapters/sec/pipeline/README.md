@@ -75,7 +75,7 @@ uv run dagster asset materialize -m robosystems.dagster \
 
 ### 4. Materialize (`sec_graph_materialized`)
 
-Full LadybugDB rebuild from DuckDB staging. Skips embedding columns (vector search served by DuckDB directly).
+Full LadybugDB rebuild from DuckDB staging.
 
 ```bash
 uv run dagster asset materialize -m robosystems.dagster \
@@ -101,10 +101,10 @@ uv run dagster asset materialize -m robosystems.dagster \
 
 ### 6. Publish
 
-Publish databases to S3 for the replica fleet and vector search:
+Publish databases to S3 for the replica fleet and offline artifact generation:
 
 - `sec_lbug_s3_published` — LadybugDB .lbug file for replica fleet
-- `sec_duckdb_s3_published` — DuckDB .duckdb file for embedding/vector search
+- `sec_duckdb_s3_published` — DuckDB .duckdb file for the offline knowledge-artifacts build
 - `sec_lbug_r2_published` — R2 copy for zero-egress subscriber downloads (manual/weekly)
 
 ## Automated Nightly Pipeline

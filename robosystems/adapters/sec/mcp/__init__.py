@@ -7,9 +7,9 @@ generic graph-schema code. Current contents:
   codes (10-K/10-Q/20-F/40-F). Used by the
   ``financial-statement-analysis`` view op.
 - ``resolve_sec_element`` — natural-language → XBRL element resolution
-  via LanceDB vector search + canonical concept matching. Used by the
-  ``resolve-element`` MCP tool. SEC-only because both the embeddings
-  index and the canonical concept taxonomy are SEC artifacts.
+  via canonical concept matching + a text-label fallback. Used by the
+  ``resolve-element`` MCP tool. SEC-only because the canonical concept
+  taxonomy is an SEC artifact.
 
 Not a general "adapter contributes MCP tools" framework — just a home
 for SEC-scoped logic the MCP tools can import.

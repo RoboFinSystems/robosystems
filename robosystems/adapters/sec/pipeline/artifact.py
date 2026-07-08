@@ -146,10 +146,6 @@ def sec_knowledge_artifacts(
         context, disc_consensus_path, "disclosure_consensus.parquet", config.publish_r2
       )
 
-    # NOTE: LanceDB vector index is now built as part of sec_duckdb_staged
-    # (via Graph API vector/build endpoint on the graph instance).
-    # It no longer runs here in the knowledge artifacts job.
-
   return MaterializeResult(
     metadata={
       "element_knowledge_path": str(element_path),

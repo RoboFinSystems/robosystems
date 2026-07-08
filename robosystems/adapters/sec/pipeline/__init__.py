@@ -31,16 +31,15 @@ Pipeline stages (run independently via separate jobs):
    - sec_historical_lbug_s3_published - Publish historical .lbug to S3 for replica cluster
    - sec_duckdb_s3_published - Publish raw .duckdb to S3
    - sec_historical_duckdb_s3_published - Publish historical .duckdb to S3
-   - sec_vector_s3_published - Export and publish vector index to S3 for replica cluster
    - sec_lbug_r2_published - Publish raw .lbug to R2 for zero-egress subscriber downloads
 
 6. ARTIFACTS (graph-based confidence refinement):
    - sec_knowledge_artifacts - Generate element + structure knowledge artifacts
 
 Nightly incremental chain (sensor-driven):
-  download → process (250 batch loop) → stage (DuckDB INSERT + vector build)
+  download → process (250 batch loop) → stage (DuckDB INSERT)
   → materialize (full LadybugDB rebuild) → lbug S3 publish
-  → duckdb S3 publish → vector S3 publish → replica refresh
+  → duckdb S3 publish → replica refresh
   → text index (parallel with materialize: textblocks + narratives → OpenSearch)
 
 Usage:
@@ -97,7 +96,6 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_process_job,
   sec_stage_job,
   sec_staged_materialize_job,
-  sec_vector_s3_publish_job,
 )
 from robosystems.adapters.sec.pipeline.master_sleep import sec_master_asleep
 from robosystems.adapters.sec.pipeline.master_wake import sec_master_awake
@@ -131,7 +129,6 @@ from robosystems.adapters.sec.pipeline.text_index import (
   sec_ixbrl_disclosures_indexed,
   sec_narratives_indexed,
 )
-from robosystems.adapters.sec.pipeline.vector_publish import sec_vector_s3_published
 
 
 def get_dagster_components():
@@ -158,7 +155,6 @@ def get_dagster_components():
       sec_duckdb_s3_published,
       sec_historical_duckdb_s3_published,
       sec_lbug_r2_published,
-      sec_vector_s3_published,
       sec_knowledge_artifacts,
       sec_narratives_indexed,
       sec_ixbrl_disclosures_indexed,
@@ -179,7 +175,6 @@ def get_dagster_components():
       sec_duckdb_s3_publish_job,
       sec_historical_duckdb_s3_publish_job,
       sec_lbug_r2_publish_job,
-      sec_vector_s3_publish_job,
       sec_artifact_generation_job,
       sec_historical_lbug_s3_publish_job,
       sec_narratives_index_job,
@@ -263,7 +258,5 @@ __all__ = [
   "sec_stage_job",
   "sec_stage_to_materialize_sensor",
   "sec_staged_materialize_job",
-  "sec_vector_s3_publish_job",
-  "sec_vector_s3_published",
   "sec_wake_to_stage_sensor",
 ]

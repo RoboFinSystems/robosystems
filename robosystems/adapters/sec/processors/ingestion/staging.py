@@ -31,7 +31,6 @@ from robosystems.operations.aws.s3 import S3Client
 from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
 from .models import (
-  EMBEDDING_NULL_TABLES,
   LARGE_STAGING_TABLES,
   STAGING_MAX_RETRIES,
   STAGING_RETRY_BACKOFF_BASE,
@@ -56,9 +55,6 @@ class DuckDBStager:
   - DuckDB pool lives on Graph API side, not on worker
   - Supports both full rebuild and incremental staging modes
 
-  Embedding columns are NULLed per-table during staging: Label and Structure
-  embeddings (only used during enrichment) are dropped, while Element embeddings
-  are preserved for the LanceDB vector search index.
   """
 
   def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
@@ -74,16 +70,6 @@ class DuckDBStager:
     self.bucket = env.SHARED_PROCESSED_BUCKET
     # New structure: sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
     self.source_prefix = source_prefix or "sec/processed"
-
-  @staticmethod
-  def _get_null_columns(table_name: str) -> list[str] | None:
-    """Get columns to NULL out for a given table during DuckDB staging.
-
-    Label and Structure embeddings are only used during enrichment and are
-    not needed after staging. Element embeddings are preserved for the
-    LanceDB vector search index.
-    """
-    return ["embedding"] if table_name in EMBEDDING_NULL_TABLES else None
 
   async def stage_to_duckdb(
     self,
@@ -371,7 +357,6 @@ class DuckDBStager:
         )
 
         timeout = get_staging_timeout(table_name)
-        table_null_columns = self._get_null_columns(table_name)
         is_entity = table_name == "Entity"
 
         if is_entity:
@@ -504,7 +489,6 @@ class DuckDBStager:
                 table_name=table_name,
                 s3_pattern=s3_pattern,
                 timeout=timeout,
-                null_columns=table_null_columns,
               )
 
               if response.get("status") == "failed":
@@ -764,7 +748,6 @@ class DuckDBStager:
     chunk_start_year: int,
     chunk_end_year: int,
     graph_client: "GraphClient",
-    null_columns: list[str] | None = None,
     log_progress: ProgressCallback | None = None,
     table_index: int = 0,
     total_tables: int = 0,
@@ -774,12 +757,12 @@ class DuckDBStager:
 
     Downloads each quarter from S3, then inserts only new rows (by dedup key)
     into an accumulator table. Uses NOT EXISTS with a hash join on identifier
-    strings — no GROUP BY or FIRST() on wide embedding columns.
+    strings rather than a GROUP BY / FIRST() aggregate.
 
-    DuckDB's hash aggregate cannot spill FLOAT[384] aggregate state to disk,
-    causing OOM for tables with 10M+ unique groups. This approach avoids hash
-    aggregates entirely — the NOT EXISTS hash join only holds identifier strings
-    (~500MB for 10.6M identifiers), which DuckDB spills correctly.
+    DuckDB's hash aggregate cannot spill large aggregate state to disk, causing
+    OOM for tables with 10M+ unique groups. This approach avoids hash aggregates
+    entirely — the NOT EXISTS hash join only holds identifier strings (~500MB for
+    10.6M identifiers), which DuckDB spills correctly.
 
     Steps:
     1. Download first quarter from S3 → becomes the accumulator
@@ -831,7 +814,6 @@ class DuckDBStager:
             graph_id=self.graph_id,
             table_name=temp_name,
             s3_pattern=quarter_pattern,
-            null_columns=null_columns,
             timeout=timeout,
           )
 
@@ -1043,7 +1025,6 @@ class DuckDBStager:
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       is_large = table_name in LARGE_STAGING_TABLES
-      null_columns = self._get_null_columns(table_name)
 
       timeout = get_staging_timeout(table_name)
 
@@ -1080,7 +1061,6 @@ class DuckDBStager:
           chunk_start_year=chunk_start,
           chunk_end_year=chunk_end,
           graph_client=graph_client,
-          null_columns=null_columns,
           log_progress=log_progress,
           table_index=i,
           total_tables=total_tables,
@@ -1116,7 +1096,6 @@ class DuckDBStager:
               graph_id=self.graph_id,
               table_name=table_name,
               s3_pattern=s3_pattern,
-              null_columns=null_columns,
               timeout=timeout,
             )
 

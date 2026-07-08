@@ -196,9 +196,15 @@ SEC EDGAR API
 
 ### Enrichment (inline, per-filing)
 
-During the Process step, `SemanticEnricher` adds semantic metadata:
+During the Process step, `SemanticEnricher` adds semantic metadata. Embeddings
+are computed **transiently** to assign canonical concepts/types — the per-element
+`embedding` vector is **not persisted** and the LanceDB element-vector "semantic
+search" tier was retired (it indexed ~8M elements dominated by single-filing filer
+extensions and returned long-tail noise; `resolve-element` is now canonical-concept
+→ text-label fallback). The persisted outputs are `canonical_concept` /
+`canonical_type`, not vectors.
 
-- **Canonical concepts**: Maps XBRL element qnames to canonical concepts (e.g. `us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax` → `revenue`) using fastembed cosine similarity
+- **Canonical concepts**: Maps XBRL element qnames to canonical concepts (e.g. `us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax` → `revenue`) using fastembed cosine similarity against the curated `ConceptTaxonomy`
 - **Structure classification**: Assigns `canonical_type` to Structure nodes (income_statement, balance_sheet, cash_flow_statement, equity_statement)
 - **Association classification**: Creates Classification nodes linking Associations to disclosure types (AssetsRollUp, RevenueBreakdown, etc.)
 - **Confidence refinement**: Uses knowledge artifacts to crush bad semantic matches and boost well-connected elements

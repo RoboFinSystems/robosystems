@@ -20,6 +20,10 @@ discipline as ``ArtifactMechanics``, which discriminates on ``kind``):
                  now; wired when Metrics un-parks.
 * ``asserted`` — provided/manual/external/cross-graph-share; the value is
                  the assertion, with no ledger lineage in this graph.
+* ``filed``    — as-filed public disclosure filed with a regulator/authority
+                 (SEC EDGAR XBRL); the filing itself is the source of record,
+                 citable by accession + filing date. No posted-ledger lineage
+                 in this graph — distinct from ``asserted`` (manual/custom).
 
 Carried at the **FactSet grain** (one descriptor per period-construction);
 facts inherit their parent FactSet's provenance. Stamping is mandatory at
@@ -130,9 +134,39 @@ class AssertedProvenance(BaseModel):
   )
 
 
+class FiledProvenance(BaseModel):
+  """As-filed public disclosure filed with a regulator/authority.
+
+  SEC EDGAR XBRL filings are the canonical case: the filing itself is the
+  source of record, citable by accession + filing date. Distinct from
+  ``asserted`` — the value is not a manual/custom assertion but a public,
+  regulator-filed disclosure. There is no posted-ledger lineage in this
+  graph; the filing IS the origin. ``source`` stays generic so other
+  regulator feeds can reuse the arm.
+  """
+
+  origin: Literal["filed"] = "filed"
+  source: str = Field(
+    ...,
+    description="Filing system of record (e.g. 'sec_edgar').",
+  )
+  accession: str | None = Field(
+    None, description="Filing accession number, when known."
+  )
+  filing_date: str | None = Field(
+    None, description="Date the filing was accepted (YYYY-MM-DD)."
+  )
+  filer_cik: str | None = Field(None, description="Filer identifier (CIK for SEC).")
+  form: str | None = Field(None, description="Filing form type (10-K, 10-Q, ...).")
+
+
 # New provenance classes add an `origin` literal and extend this union.
 # Pydantic dispatches on `origin` via the discriminator tag.
 FactProvenance = Annotated[
-  PivotProvenance | ScheduleProvenance | DerivedProvenance | AssertedProvenance,
+  PivotProvenance
+  | ScheduleProvenance
+  | DerivedProvenance
+  | AssertedProvenance
+  | FiledProvenance,
   Field(discriminator="origin"),
 ]

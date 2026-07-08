@@ -1,21 +1,19 @@
 """SEC-specific natural-language → XBRL element resolution.
 
 Backing logic for the ``resolve-element`` MCP tool. Lives in the SEC
-adapter because it relies on:
+adapter because it relies on the **canonical concept taxonomy** curated
+inside ``adapters/sec/enrichment`` (us-gaap-oriented) — a small, in-memory
+set of concept embeddings, not a persisted per-element vector index.
 
-- The **LanceDB Element embeddings index** (2.6M+ SEC elements) sitting
-  on the replica's local disk.
-- The **canonical concept taxonomy** curated inside
-  ``adapters/sec/enrichment`` (us-gaap-oriented).
+Resolution is canonical-first with a text-label fallback (the LanceDB
+element-vector semantic search was retired — it indexed ~8M elements
+dominated by single-filing filer extensions and returned low-signal
+noise for non-canonical concepts). The tool is manifest-gated to
+``has_semantic_enrichment`` repos, which only SEC sets.
 
-Both artifacts are SEC-only today; the tool is manifest-gated to
-``has_semantic_enrichment`` repos, which only SEC sets. If a future
-tenant graph is materialized with its own embeddings index, that graph's
-adapter can contribute its own resolver — this one stays SEC-scoped.
-
-Takes a duck-typed ``graph_client`` that exposes ``execute_query`` and
-``vector_search`` coroutines (the MCP client today). Returns a dict —
-variable number of matches + optional canonical / query-hint fields.
+Takes a duck-typed ``graph_client`` that exposes an ``execute_query``
+coroutine (the MCP client today). Returns a dict — variable number of
+matches + optional canonical / query-hint fields.
 """
 
 from __future__ import annotations
@@ -35,15 +33,6 @@ class _GraphClientLike(Protocol):
 
   async def execute_query(
     self, query: str, parameters: dict[str, Any] | None = None
-  ) -> list[dict[str, Any]]: ...
-
-  async def vector_search(
-    self,
-    *,
-    graph_id: str,
-    table_name: str,
-    embedding: list[float],
-    limit: int,
   ) -> list[dict[str, Any]]: ...
 
 
@@ -66,24 +55,20 @@ async def resolve_sec_element(
   concept: str,
   ticker: str | None = None,
   report_id: str | None = None,
-  vector_search_enabled: bool = True,
 ) -> dict[str, Any]:
   """Resolve a natural-language concept to matching SEC XBRL elements.
 
   Resolution order:
 
-  1. LanceDB vector search (if ``vector_search_enabled`` and the index is
-     available) — ~5ms ANN search over all elements.
-  2. Canonical concept matching — curated concepts, deterministic.
-  3. Text search on element labels — final fallback.
+  1. Canonical concept matching — curated concepts, deterministic.
+  2. Text search on element labels — final fallback.
 
   Args:
-      graph_client: Duck-typed client exposing ``execute_query`` and
-        ``vector_search``. Usually a ``GraphMCPClient``.
+      graph_client: Duck-typed client exposing ``execute_query``.
+        Usually a ``GraphMCPClient``.
       concept: Natural-language concept to resolve (e.g. ``"revenue"``).
       ticker: Optional entity ticker filter (e.g. ``"NVDA"``).
       report_id: Optional report identifier filter.
-      vector_search_enabled: Whether to attempt the LanceDB vector path.
 
   Returns:
       A dict with keys: ``concept``, ``ticker``, ``report_id``,
@@ -102,14 +87,14 @@ async def resolve_sec_element(
     "query_hint": None,
   }
 
-  # Step 1: Embed the query once; reused by canonical match + vector search.
+  # Embed the query once for canonical concept matching (small curated set).
   query_embedding: list[float] | None = None
   try:
     query_embedding = enricher.embed_batch([concept])[0]
   except Exception as e:
     logger.warning(f"Embedding failed: {e}")
 
-  # Step 2: Try canonical concept matching first (curated, deterministic).
+  # Try canonical concept matching first (curated, deterministic).
   if query_embedding:
     try:
       canonical = enricher.match_canonical_from_query(query_embedding)
@@ -121,14 +106,7 @@ async def resolve_sec_element(
 
   canonical_id = result["canonical_id"]
 
-  # Step 3: If no canonical match, try vector search (covers all elements).
-  if not canonical_id and query_embedding and vector_search_enabled:
-    lance_result = await _resolve_via_lance(
-      graph_client, result, query_embedding, ticker, report_id
-    )
-    if lance_result["matches"]:
-      return lance_result
-
+  # No canonical match → fall back to text search on element labels.
   if not canonical_id:
     return await _resolve_text_fallback(
       graph_client, result, concept, ticker, report_id
@@ -161,138 +139,6 @@ async def resolve_sec_element(
   result["matches"] = result["matches"][:10]
   _build_query_hint(result, ticker, report_id)
   return result
-
-
-# ── LanceDB vector search path ────────────────────────────────────────────
-
-
-async def _resolve_via_lance(
-  graph_client: _GraphClientLike,
-  result: dict[str, Any],
-  query_embedding: list[float],
-  ticker: str | None,
-  report_id: str | None,
-) -> dict[str, Any]:
-  """Resolve using LanceDB vector search via the graph API.
-
-  The Graph API's vector-search endpoint runs LanceDB on the replica's
-  local disk (~5ms ANN search). We then filter and enrich results with
-  fact counts, labels, and optional ticker/report scope via Cypher.
-  """
-  try:
-    lance_results = await graph_client.vector_search(
-      graph_id=graph_client.graph_id,
-      table_name="Element",
-      embedding=query_embedding,
-      limit=20,
-    )
-    if not lance_results:
-      return result
-
-    # Dedup qnames (safety net — the index should already be deduped).
-    seen_qnames: set[str] = set()
-    unique_results: list[dict[str, Any]] = []
-    for r in lance_results:
-      qname = r.get("qname")
-      if qname and qname not in seen_qnames:
-        seen_qnames.add(qname)
-        unique_results.append(r)
-
-    qnames = [r["qname"] for r in unique_results]
-    similarity_by_qname = {
-      r["qname"]: round(1.0 - r.get("distance", 0.0), 4) for r in unique_results
-    }
-
-    rows = await _fetch_lance_candidates(graph_client, qnames, ticker, report_id)
-    labels = await _fetch_labels_by_qname(
-      graph_client, [r["qname"] for r in rows] if rows else qnames
-    )
-
-    if rows:
-      for row in rows:
-        qname = row["qname"]
-        result["matches"].append(
-          {
-            "qname": qname,
-            "confidence": row.get("confidence"),
-            "label": labels.get(qname),
-            "fact_count": row.get("fact_count", 0),
-            "score": similarity_by_qname.get(qname, 0.0),
-          }
-        )
-    else:
-      # No graph results in scope — fall back to raw vector matches.
-      for r in unique_results:
-        qname = r["qname"]
-        result["matches"].append(
-          {
-            "qname": qname,
-            "confidence": r.get("canonical_confidence"),
-            "label": labels.get(qname),
-            "fact_count": 0,
-            "score": similarity_by_qname.get(qname, 0.0),
-          }
-        )
-
-    result["matches"].sort(key=lambda m: m.get("score", 0.0), reverse=True)
-
-    if result["matches"] and unique_results[0].get("canonical_concept"):
-      result["canonical_id"] = unique_results[0]["canonical_concept"]
-
-    result["matches"] = result["matches"][:10]
-    _build_query_hint(result, ticker, report_id)
-  except Exception as e:
-    logger.warning(f"Vector search failed, falling back: {e}")
-
-  return result
-
-
-async def _fetch_lance_candidates(
-  graph_client: _GraphClientLike,
-  qnames: list[str],
-  ticker: str | None,
-  report_id: str | None,
-) -> list[dict[str, Any]]:
-  """Filter vector-search candidates through the graph for fact counts and
-  optional ticker/report scoping."""
-  if not qnames:
-    return []
-  try:
-    params: dict[str, Any] = {"qnames": qnames}
-    if report_id:
-      query = (
-        "MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-        "WHERE e.qname IN $qnames AND r.identifier = $report_id "
-        "AND f.has_dimensions = false "
-        "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
-        "count(f) AS fact_count "
-        "ORDER BY fact_count DESC"
-      )
-      params["report_id"] = report_id
-    elif ticker:
-      query = (
-        "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element), "
-        "(f)-[:FACT_HAS_ENTITY]->(ent:Entity) "
-        "WHERE e.qname IN $qnames AND ent.ticker = $ticker "
-        "AND f.has_dimensions = false "
-        "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
-        "count(f) AS fact_count "
-        "ORDER BY fact_count DESC"
-      )
-      params["ticker"] = ticker
-    else:
-      query = (
-        "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element) "
-        "WHERE e.qname IN $qnames "
-        "AND f.has_dimensions = false "
-        "RETURN DISTINCT e.qname AS qname, e.canonical_confidence AS confidence, "
-        "count(f) AS fact_count "
-        "ORDER BY fact_count DESC"
-      )
-    return await graph_client.execute_query(query, parameters=params) or []
-  except Exception as e:
-    logger.warning(f"Lance candidate graph query failed: {e}")
-    return []
 
 
 # ── Canonical concept path ────────────────────────────────────────────────

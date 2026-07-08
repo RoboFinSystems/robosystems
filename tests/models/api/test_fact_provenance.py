@@ -7,6 +7,7 @@ from robosystems.models.api.fact_provenance import (
   AssertedProvenance,
   DerivedProvenance,
   FactProvenance,
+  FiledProvenance,
   PivotProvenance,
   ScheduleProvenance,
 )
@@ -32,6 +33,16 @@ class TestArmValidation:
     assert a.origin == "asserted"
     with pytest.raises(ValidationError):
       AssertedProvenance()  # type: ignore[call-arg]
+
+  def test_filed_requires_source(self) -> None:
+    f = FiledProvenance(
+      source="sec_edgar", accession="0001", filing_date="2024-01-15", form="10-K"
+    )
+    assert f.origin == "filed"
+    # filing coordinates are optional (accession/date may be unknown), source is not
+    assert FiledProvenance(source="sec_edgar").accession is None
+    with pytest.raises(ValidationError):
+      FiledProvenance()  # type: ignore[call-arg]
 
 
 class TestDerivedValidator:
@@ -69,6 +80,10 @@ class TestDiscriminatorRouting:
     assert isinstance(
       _adapter.validate_python({"origin": "asserted", "source_system": "x"}),
       AssertedProvenance,
+    )
+    assert isinstance(
+      _adapter.validate_python({"origin": "filed", "source": "sec_edgar"}),
+      FiledProvenance,
     )
 
   def test_rejects_unknown_origin(self) -> None:

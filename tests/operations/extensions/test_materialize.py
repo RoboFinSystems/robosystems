@@ -199,6 +199,24 @@ class TestREAStaging:
     entry_node = next(n for n in TRANSACTION_NODES if n.name == "Entry")
     assert "provenance" in {p.name for p in entry_node.properties}
 
+  def test_factset_type_and_provenance_materialized_and_in_schema(self):
+    """FactSet.factset_type + provenance are carried into the graph AND declared
+    as schema Properties. The graph FactSet node was degenerate ({identifier}
+    only) and materialize collapsed the OLTP FactSet to `SELECT id AS identifier`,
+    silently dropping provenance — this alignment carries both columns. A column
+    present in the staging SELECT but missing as a schema Property is dropped by
+    the by-name graph loader (same failure class as Entry.provenance), so guard
+    both ends stay in sync."""
+    from robosystems.schemas.extensions.roboledger import REPORTING_NODES
+
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["FactSet"]
+    assert "factset_type" in sql
+    assert "provenance" in sql
+    factset_node = next(n for n in REPORTING_NODES if n.name == "FactSet")
+    prop_names = {p.name for p in factset_node.properties}
+    assert "factset_type" in prop_names
+    assert "provenance" in prop_names
+
   def test_entity_has_agent_and_event_fan_out_from_entity_id(self):
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
     assert ENTITY_ID in tables["ENTITY_HAS_AGENT"]
