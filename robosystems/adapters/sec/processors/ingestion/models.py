@@ -197,12 +197,6 @@ LARGE_STAGING_TABLES = frozenset(
 )
 
 
-# Tables whose embedding columns should be NULLed out during DuckDB staging.
-# Label and Structure embeddings are only used during enrichment (classification),
-# not queried after staging. Element embeddings are kept for the LanceDB index.
-# Data stays in parquet source files if future use is needed.
-EMBEDDING_NULL_TABLES = frozenset({"Label", "Structure"})
-
 # Tables kept even in instance-only mode (critical for fact exploration):
 # - Taxonomy: Single node per report (small)
 # - TAXONOMY_HAS_ELEMENT: Links taxonomy to elements (needed for element context)

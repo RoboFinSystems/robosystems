@@ -538,10 +538,13 @@ class TestSecPostMaterializePublishSensor:
 
       result = list(sec_post_materialize_publish_sensor(context))
 
-    assert len(result) == 1
-    assert isinstance(result[0], RunRequest)
-    assert result[0].job_name == "sec_vector_s3_publish"
-    assert result[0].tags["phase"] == "vector_s3_publish"
+    # DuckDB publish is the terminal publish — it fans out directly to the
+    # replica refresh and the master sleep (the vector S3 publish was removed).
+    assert all(isinstance(r, RunRequest) for r in result)
+    assert {r.job_name for r in result} == {
+      "shared_replicas_refresh",
+      "sec_master_sleep",
+    }
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_when_next_job_already_running(self, mock_env):
@@ -933,11 +936,11 @@ class TestPublishSensorSleepsMaster:
   """The publish sensor sleeps the master alongside the replica refresh."""
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
-  def test_vector_publish_triggers_refresh_and_sleep(self, mock_env):
+  def test_duckdb_publish_triggers_refresh_and_sleep(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_post_materialize_publish_sensor",
-      job_name="sec_vector_s3_publish",
+      job_name="sec_duckdb_s3_publish",
       tags={"mode": "incremental"},
     )
     result = list(sec_post_materialize_publish_sensor(context))

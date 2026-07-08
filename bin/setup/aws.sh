@@ -218,7 +218,6 @@ function create_ssm_feature_flags() {
         "SECURITY_AUDIT_ENABLED=false"
         "SHARED_MASTER_READS_ENABLED=true"
         "SHARED_MASTER_PARKING_ENABLED=true"
-        "MCP_VECTOR_SEARCH_ENABLED=false"
         "SEMANTIC_SEARCH_ENABLED=false"
         "SSE_ENABLED=true"
         "SUBGRAPH_CREATION_ENABLED=true"

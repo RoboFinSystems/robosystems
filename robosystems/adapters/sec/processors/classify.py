@@ -24,6 +24,7 @@ from typing import Any
 import pandas as pd
 
 from robosystems.logger import logger
+from robosystems.models.api.fact_provenance import FiledProvenance
 from robosystems.utils.uuid import generate_uuid7
 
 # ---------------------------------------------------------------------------
@@ -759,14 +760,27 @@ class AssociationClassifier:
     # we still emit one edge per (report, fact_set) pair without
     # multiplying duplicates.
     report_ids: list[str] = []
+    filing_accession: str | None = None
+    filing_date: str | None = None
+    filing_form: str | None = None
     try:
-      report_rows = ctx.execute("MATCH (r:Report) RETURN r.identifier AS report_id")
+      report_rows = ctx.execute(
+        "MATCH (r:Report) RETURN r.identifier AS report_id, "
+        "r.accession_number AS accession, r.filing_date AS filing_date, "
+        "r.form AS form"
+      )
       seen: set[str] = set()
       for row in report_rows:
         rid = row.get("report_id")
         if rid and rid not in seen:
           seen.add(rid)
           report_ids.append(rid)
+          # SEC loads one Report per ingestion; capture its filing
+          # coordinates once for the FactSet provenance stamp below.
+          if filing_accession is None:
+            filing_accession = row.get("accession")
+            filing_date = row.get("filing_date")
+            filing_form = row.get("form")
     except Exception as e:
       # A miss here means REPORT_HAS_FACT_SET edges never land for this
       # filing — the package query won't be able to traverse from Report
@@ -801,6 +815,17 @@ class AssociationClassifier:
     except Exception:
       from_elements = []
 
+    # One `filed` provenance descriptor for the whole filing — every FactSet
+    # in this report shares the same filing coordinates. JSON-encoded so the
+    # graph FactSet.provenance reads identically to the tenant materializer's
+    # (which carries the OLTP fact_sets.provenance blob).
+    provenance_json = FiledProvenance(
+      source="sec_edgar",
+      accession=filing_accession,
+      filing_date=filing_date,
+      form=filing_form,
+    ).model_dump_json()
+
     # Merge FROM and TO element sets per structure
     from_by_struct = {
       row["structure_id"]: set(row["from_elements"]) for row in from_elements
@@ -831,9 +856,17 @@ class AssociationClassifier:
       if not facts:
         continue
 
-      # Create FactSet for this structure
+      # Create FactSet for this structure. Column order matches the graph
+      # FactSet node schema (identifier, factset_type, provenance) — LadybugDB
+      # COPY is positional.
       fs_id = generate_uuid7()
-      factsets.append({"identifier": fs_id})
+      factsets.append(
+        {
+          "identifier": fs_id,
+          "factset_type": "report",
+          "provenance": provenance_json,
+        }
+      )
       structure_factset_rels.append({"from": structure_id, "to": fs_id})
       for report_id in report_ids:
         report_factset_rels.append({"from": report_id, "to": fs_id})

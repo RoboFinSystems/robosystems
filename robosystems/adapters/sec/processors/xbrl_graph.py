@@ -347,7 +347,12 @@ class XBRLGraphProcessor:
       logger.warning(f"Association classification failed (non-critical): {e}")
 
   def enrich_dataframes(self):
-    """Batch enrichment of Element, Label, and Structure DataFrames with embeddings and canonical concepts."""
+    """Batch canonical enrichment of Element and Structure DataFrames.
+
+    Query embeddings are computed transiently to assign canonical concepts /
+    types, but no embedding vector is persisted (the LanceDB semantic-element
+    search was retired). Labels are no longer enriched at all — their
+    embeddings were computed and then dropped at staging."""
     from robosystems.adapters.sec.enrichment import (
       SemanticEnricher,
       camel_case_to_words,
@@ -366,9 +371,9 @@ class XBRLGraphProcessor:
     if hasattr(self, "elements_df") and not self.elements_df.empty:
       logger.info(f"Enriching {len(self.elements_df)} elements")
 
-      # Column order must match schema: canonical_concept, canonical_confidence, embedding
+      # Column order must match schema: canonical_concept, canonical_confidence
       # LadybugDB COPY FROM uses positional matching, not column names
-      for col in ("canonical_concept", "canonical_confidence", "embedding"):
+      for col in ("canonical_concept", "canonical_confidence"):
         if col not in self.elements_df.columns:
           self.elements_df[col] = None
 
@@ -404,7 +409,6 @@ class XBRLGraphProcessor:
         canonical_concepts.append(concept_id)
         canonical_confidences.append(confidence if concept_id else None)
 
-      self.elements_df["embedding"] = embeddings
       self.elements_df["canonical_concept"] = canonical_concepts
       self.elements_df["canonical_confidence"] = canonical_confidences
 
@@ -413,37 +417,18 @@ class XBRLGraphProcessor:
         f"Element enrichment complete: {matched}/{len(self.elements_df)} matched to canonical concepts"
       )
 
-    # ----- Labels ----------------------------------------------------------
-    if hasattr(self, "labels_df") and not self.labels_df.empty:
-      # Only embed English labels
-      en_mask = self.labels_df["language"].fillna("").str.startswith("en")
-      en_labels = self.labels_df[en_mask]
-      logger.info(
-        f"Enriching {len(en_labels)} English labels (of {len(self.labels_df)} total)"
-      )
-
-      if "embedding" not in self.labels_df.columns:
-        self.labels_df["embedding"] = None
-
-      if not en_labels.empty:
-        label_texts = en_labels["value"].fillna("").tolist()
-        label_embeddings = enricher.embed_batch(label_texts)
-
-        # Write embeddings only for English labels — use pd.Series with matching index
-        # to avoid pandas interpreting list-of-lists as a 2D array
-        self.labels_df.loc[en_mask, "embedding"] = pd.Series(
-          label_embeddings, index=self.labels_df.index[en_mask]
-        )
-
-      logger.info("Label enrichment complete")
+    # Labels are intentionally not enriched — they carry no canonical concept,
+    # and their embeddings (the only thing enrichment ever produced for them)
+    # were dropped at staging. Retiring the vector index removes the last
+    # reason to embed them.
 
     # ----- Structures ------------------------------------------------------
     if hasattr(self, "structures_df") and not self.structures_df.empty:
       logger.info(f"Enriching {len(self.structures_df)} structures")
 
-      # Column order must match schema: canonical_type, canonical_confidence, embedding
+      # Column order must match schema: canonical_type, canonical_confidence
       # LadybugDB COPY FROM uses positional matching, not column names
-      for col in ("canonical_type", "canonical_confidence", "embedding"):
+      for col in ("canonical_type", "canonical_confidence"):
         if col not in self.structures_df.columns:
           self.structures_df[col] = None
 
@@ -613,7 +598,8 @@ class XBRLGraphProcessor:
           canonical_types[i] = refined_type
           canonical_confidences[i] = refined_conf
 
-      self.structures_df["embedding"] = all_embeddings
+      # `all_embeddings` is used transiently above for canonical_type matching
+      # (match_structure_canonical); the vector itself is not persisted.
       self.structures_df["canonical_type"] = canonical_types
       self.structures_df["canonical_confidence"] = canonical_confidences
 

@@ -104,9 +104,20 @@ REPORTING_NODES = [
   # a formal taxonomy traverses these nodes. See INVARIANT 1 in base.py.
   Node(
     name="FactSet",
-    description="Logical grouping of related facts",
+    description="Period-specific instantiation of a Structure — the facts a "
+    "structure produced for one period, as a rendering manifest. The graph "
+    "mirror of the OLTP FactSet (models/extensions/roboledger/fact_set.py): "
+    "both the tenant materializer and the SEC adapter populate the same "
+    "self-describing fields so provenance reads identically across graphs.",
     properties=[
       Property(name="identifier", type="STRING", is_primary_key=True),
+      # 'report' | 'schedule' | 'custom' (tenant); SEC filings are 'report'.
+      Property(name="factset_type", type="STRING"),
+      # JSON-encoded FactProvenance descriptor (discriminated on `origin`) —
+      # how this FactSet's facts were constructed. Tenant carries the OLTP
+      # fact_sets.provenance blob; SEC stamps a `filed` descriptor. See
+      # models/api/fact_provenance.py.
+      Property(name="provenance", type="STRING"),
     ],
   ),
 ]

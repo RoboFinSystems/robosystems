@@ -141,7 +141,6 @@ BASE_NODES = [
       Property(name="item_type", type="STRING"),
       Property(name="canonical_concept", type="STRING"),
       Property(name="canonical_confidence", type="DOUBLE"),
-      Property(name="embedding", type="FLOAT[384]"),
     ],
   ),
   Node(
@@ -152,7 +151,6 @@ BASE_NODES = [
       Property(name="value", type="STRING"),
       Property(name="type", type="STRING"),
       Property(name="language", type="STRING"),
-      Property(name="embedding", type="FLOAT[384]"),
     ],
   ),
   Node(
@@ -221,7 +219,6 @@ BASE_NODES = [
       Property(name="name", type="STRING"),
       Property(name="canonical_type", type="STRING"),
       Property(name="canonical_confidence", type="DOUBLE"),
-      Property(name="embedding", type="FLOAT[384]"),
     ],
   ),
   Node(

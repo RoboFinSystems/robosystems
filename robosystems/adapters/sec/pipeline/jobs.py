@@ -67,7 +67,6 @@ from .text_index import (
   sec_ixbrl_disclosures_indexed,
   sec_narratives_indexed,
 )
-from .vector_publish import sec_vector_s3_published
 
 # ============================================================================
 # SEC Pipeline Jobs
@@ -417,34 +416,6 @@ sec_historical_lbug_s3_publish_job = define_asset_job(
     "ecs/memory": "2048",
     "ecs/ephemeral_storage": "21",
     # On-demand to avoid interruptions during large uploads
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-
-
-# ============================================================================
-# Phase 4b: Vector Index S3 Publish
-# ============================================================================
-# Exports LanceDB vector index from graph instance and uploads to S3.
-# Runs after DuckDB S3 publish in the nightly chain.
-# The index was built during DuckDB staging (sec_duckdb_staged).
-
-sec_vector_s3_publish_job = define_asset_job(
-  name="sec_vector_s3_publish",
-  description="Export and publish SEC vector index to S3 for replica cluster.",
-  selection=AssetSelection.assets(sec_vector_s3_published),
-  tags={
-    "pipeline": "sec",
-    "phase": "vector_s3_publish",
-    # Light profile: HTTP orchestration to Graph API
-    "ecs/cpu": "512",
-    "ecs/memory": "2048",
-    "ecs/ephemeral_storage": "21",
-    # On-demand to avoid interruptions during uploads
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},

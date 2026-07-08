@@ -1,12 +1,11 @@
 """Resolve Element MCP tool — thin wrapper over
 ``adapters.sec.mcp.element_resolver.resolve_sec_element``.
 
-The resolution logic (LanceDB vector search over the SEC Element
-embeddings index, SEC canonical concept matching, text fallback,
-query-hint construction) is SEC-specific and lives in the SEC adapter
-alongside ``resolve_sec_report``. The tool itself is manifest-gated
-(``has_semantic_enrichment``) so it only registers on graphs where
-the required SEC artifacts are present.
+The resolution logic (SEC canonical concept matching, text-label
+fallback, query-hint construction) is SEC-specific and lives in the SEC
+adapter alongside ``resolve_sec_report``. The tool itself is
+manifest-gated (``has_semantic_enrichment``) so it only registers on
+graphs where the required SEC artifacts are present.
 """
 
 from __future__ import annotations
@@ -20,22 +19,6 @@ from .base_tool import BaseTool
 
 class ResolveElementTool(BaseTool):
   """MCP tool that resolves a natural-language concept to XBRL elements."""
-
-  def __init__(self, client):
-    super().__init__(client)
-    self._vector_search_enabled: bool | None = None
-
-  @property
-  def vector_search_enabled(self) -> bool:
-    """Read the ``MCP_VECTOR_SEARCH_ENABLED`` flag once, cache the result."""
-    if self._vector_search_enabled is None:
-      try:
-        from robosystems.config import env
-
-        self._vector_search_enabled = env.MCP_VECTOR_SEARCH_ENABLED
-      except Exception:
-        self._vector_search_enabled = False
-    return self._vector_search_enabled
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
@@ -98,5 +81,4 @@ Use the returned query_hint directly in read-graph-cypher for immediate results.
       concept=concept,
       ticker=ticker,
       report_id=report_id,
-      vector_search_enabled=self.vector_search_enabled,
     )
