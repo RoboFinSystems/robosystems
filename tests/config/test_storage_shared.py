@@ -1,5 +1,8 @@
 """Shared data source storage configuration tests."""
 
+from unittest.mock import patch
+
+from robosystems.config.env import EnvConfig
 from robosystems.config.storage.shared import (
   DATA_SOURCES,
   DataSourceConfig,
@@ -7,6 +10,7 @@ from robosystems.config.storage.shared import (
   get_data_source,
   get_processed_key,
   get_processed_uri,
+  get_public_data_url,
   get_raw_key,
   get_raw_uri,
   is_source_enabled,
@@ -119,3 +123,65 @@ class TestIsSourceEnabled:
 
   def test_fred_disabled(self):
     assert is_source_enabled(DataSourceType.FRED) is False
+
+
+class TestGetPublicDataUrl:
+  """Tests for get_public_data_url environment-aware resolution."""
+
+  def test_cdn_takes_precedence(self):
+    with patch.object(EnvConfig, "AWS_ENDPOINT_URL", "http://localstack:4566"):
+      result = get_public_data_url(
+        "robosystems-public-data",
+        "2025/320193/fact_abc.html",
+        cdn_url="https://cdn.example.com",
+      )
+    assert result == "https://cdn.example.com/2025/320193/fact_abc.html"
+
+  def test_localstack_prefers_presign_endpoint(self):
+    with (
+      patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", "http://localhost:4566"),
+      patch.object(EnvConfig, "AWS_ENDPOINT_URL", "http://localstack:4566"),
+    ):
+      result = get_public_data_url(
+        "robosystems-public-data", "2025/320193/fact_abc.html"
+      )
+    # Path-style against the browser-reachable localhost endpoint, not the
+    # docker-DNS localstack hostname the pipeline uploads through.
+    assert (
+      result
+      == "http://localhost:4566/robosystems-public-data/2025/320193/fact_abc.html"
+    )
+
+  def test_localstack_falls_back_to_endpoint_url(self):
+    with (
+      patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", ""),
+      patch.object(EnvConfig, "AWS_ENDPOINT_URL", "http://localstack:4566"),
+    ):
+      result = get_public_data_url(
+        "robosystems-public-data", "2025/320193/fact_abc.html"
+      )
+    assert (
+      result
+      == "http://localstack:4566/robosystems-public-data/2025/320193/fact_abc.html"
+    )
+
+  def test_real_aws_without_cdn(self):
+    with (
+      patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", ""),
+      patch.object(EnvConfig, "AWS_ENDPOINT_URL", ""),
+    ):
+      result = get_public_data_url(
+        "robosystems-public-data", "2025/320193/fact_abc.html"
+      )
+    assert (
+      result
+      == "https://robosystems-public-data.s3.amazonaws.com/2025/320193/fact_abc.html"
+    )
+
+  def test_leading_slash_stripped(self):
+    with (
+      patch.object(EnvConfig, "AWS_S3_PRESIGN_ENDPOINT_URL", ""),
+      patch.object(EnvConfig, "AWS_ENDPOINT_URL", ""),
+    ):
+      result = get_public_data_url("bucket", "/path/to/obj.html")
+    assert result == "https://bucket.s3.amazonaws.com/path/to/obj.html"

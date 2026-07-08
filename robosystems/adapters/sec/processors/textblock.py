@@ -2,6 +2,7 @@ import hashlib
 from datetime import datetime
 from typing import Any
 
+from robosystems.config.storage.shared import get_public_data_url
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
@@ -82,10 +83,7 @@ class TextBlockExternalizer:
         logger.debug(
           f"S3 object already exists for content hash {content_hash[:CONTENT_HASH_LOG_LENGTH]}: {s3_key}"
         )
-        if self.cdn_url:
-          external_url = f"{self.cdn_url}/{s3_key}"
-        else:
-          external_url = f"https://{self.bucket}.s3.amazonaws.com/{s3_key}"
+        external_url = get_public_data_url(self.bucket, s3_key, self.cdn_url)
 
         result = {
           "url": external_url,
@@ -98,10 +96,7 @@ class TextBlockExternalizer:
 
       self.upload_queue.append((value_str, self.bucket, s3_key))
 
-      if self.cdn_url:
-        external_url = f"{self.cdn_url}/{s3_key}"
-      else:
-        external_url = f"https://{self.bucket}.s3.amazonaws.com/{s3_key}"
+      external_url = get_public_data_url(self.bucket, s3_key, self.cdn_url)
 
       self.upload_map[fact_id] = {
         "url": external_url,

@@ -31,6 +31,7 @@ from robosystems.config import env
 from robosystems.config.storage.shared import (
   DataSourceType,
   get_processed_key,
+  get_public_data_url,
   get_raw_key,
 )
 from robosystems.logger import logger
@@ -532,12 +533,9 @@ def sec_narratives_indexed(
                 Body=section.content.encode("utf-8"),
                 ContentType="text/plain; charset=utf-8",
               )
-              if cdn_url:
-                content_url_value = f"{cdn_url}/{narrative_key}"
-              else:
-                content_url_value = (
-                  f"https://{public_bucket}.s3.amazonaws.com/{narrative_key}"
-                )
+              content_url_value = get_public_data_url(
+                public_bucket, narrative_key, cdn_url
+              )
             except Exception as e:
               context.log.debug(f"Failed to externalize {narrative_key}: {e}")
 

@@ -271,7 +271,11 @@ class TestQueueValueForS3:
 
     assert result is not None
     assert result["content_type"] == "text/plain"
-    assert "s3.amazonaws.com" in result["url"]
+    # No CDN configured: the URL points at the browser-reachable LocalStack
+    # endpoint (pytest sets AWS_ENDPOINT_URL=http://localhost:4566), path-style,
+    # never the production virtual-hosted s3.amazonaws.com host.
+    assert "localhost:4566/test-bucket/" in result["url"]
+    assert "s3.amazonaws.com" not in result["url"]
 
   def test_queue_value_cache_hit(self, mock_s3_client, entity_data, report_data):
     externalizer = TextBlockExternalizer(
