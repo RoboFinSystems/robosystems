@@ -381,18 +381,14 @@ BASE_RELATIONSHIPS = [
     from_node="Element",
     to_node="Label",
     description="Element has human-readable labels (global taxonomy concepts)",
-    properties=[
-      Property(name="label_context", type="STRING"),
-    ],
+    properties=[],
   ),
   Relationship(
     name="ELEMENT_HAS_REFERENCE",
     from_node="Element",
     to_node="Reference",
     description="Element has authoritative references (global taxonomy concepts)",
-    properties=[
-      Property(name="reference_context", type="STRING"),
-    ],
+    properties=[],
   ),
   # Global Taxonomy Structure Relationships
   Relationship(
@@ -400,17 +396,26 @@ BASE_RELATIONSHIPS = [
     from_node="Element",
     to_node="Taxonomy",
     description="Element belongs to a global taxonomy (us-gaap, ifrs-full, etc.)",
-    properties=[
-      Property(name="taxonomy_context", type="STRING"),
-    ],
+    properties=[],
   ),
   Relationship(
     name="TAXONOMY_HAS_LABEL",
     from_node="Taxonomy",
     to_node="Label",
-    description="Global taxonomy defines labels",
+    description="Taxonomy defines a label FOR a specific element. On the SEC "
+    "shared repository the from-Taxonomy is the filer's per-report extension "
+    "taxonomy, so this edge is report-scoped: it says 'this report labels "
+    "element_uri as <Label> under <Label.type> role'. The `element_uri` property "
+    "re-attaches the element the label is for — without it, the report-scoped "
+    "lookup (taxonomy ∩ element via the content-addressed shared Label pool) "
+    "bleeds cross-concept label texts. URI (not qname) is the join key so it "
+    "stays exact for filer-extension elements whose prefix isn't reconstructible "
+    "downstream. See sec-label-scoping spec.",
     properties=[
-      Property(name="label_context", type="STRING"),
+      Property(
+        name="element_uri", type="STRING"
+      ),  # URI (namespace#localName) of the element this label is for —
+      # the report-scoped join key; matches Element.uri and Dimension.{axis,member}_uri
     ],
   ),
   Relationship(
@@ -418,9 +423,7 @@ BASE_RELATIONSHIPS = [
     from_node="Taxonomy",
     to_node="Reference",
     description="Global taxonomy has authoritative references",
-    properties=[
-      Property(name="reference_context", type="STRING"),
-    ],
+    properties=[],
   ),
   # Dimension → Element relationships (axis and member definitions)
   Relationship(
@@ -444,18 +447,14 @@ BASE_RELATIONSHIPS = [
     from_node="Structure",
     to_node="Taxonomy",
     description="Structure belongs to taxonomy",
-    properties=[
-      Property(name="taxonomy_context", type="STRING"),
-    ],
+    properties=[],
   ),
   Relationship(
     name="STRUCTURE_HAS_ASSOCIATION",
     from_node="Structure",
     to_node="Association",
     description="Structure contains element associations",
-    properties=[
-      Property(name="association_context", type="STRING"),
-    ],
+    properties=[],
   ),
   Relationship(
     name="ASSOCIATION_HAS_FROM_ELEMENT",

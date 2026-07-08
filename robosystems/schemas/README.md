@@ -333,8 +333,8 @@ validator.validate_node("Entity", {
 
 # Validate relationships
 validator.validate_relationship(
-    "Entity", "Report", "ENTITY_HAS_REPORT",
-    {"filing_context": "10-K"}
+    "Entity", "Taxonomy", "ENTITY_HAS_TAXONOMY",
+    {"basis": "reporting", "adoption_context": "required_by_regulation"}
 )
 ```
 

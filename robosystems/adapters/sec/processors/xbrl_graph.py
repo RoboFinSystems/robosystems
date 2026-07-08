@@ -818,7 +818,6 @@ class XBRLGraphProcessor:
       entity_report_rel = {
         "from": self.entity_data["identifier"],
         "to": report_data["identifier"],
-        "report_context": f"Filing: {report_data.get('form', 'Unknown')}",
       }
       if self.schema_adapter:
         new_entity_report_df = self.schema_adapter.process_dataframe_for_schema(
@@ -1082,7 +1081,6 @@ class XBRLGraphProcessor:
       report_fact_rel = {
         "from": self.report_data["identifier"],
         "to": identifier,
-        "fact_context": f"Fact from {fact_data.get('type', 'unknown')} fact",
       }
       new_report_fact_df = pd.DataFrame([report_fact_rel])
       self.report_facts_df = self.safe_concat(self.report_facts_df, new_report_fact_df)
@@ -1196,7 +1194,6 @@ class XBRLGraphProcessor:
       fact_unit_rel = {
         "from": fact_data["identifier"],
         "to": unit_identifier,
-        "unit_context": f"Unit: {unit_data.get('measure', 'unknown')}",
       }
       new_fact_unit_df = pd.DataFrame([fact_unit_rel])
       self.fact_units_df = self.safe_concat(self.fact_units_df, new_fact_unit_df)
@@ -1470,7 +1467,6 @@ class XBRLGraphProcessor:
     fact_entity_rel = {
       "from": fact_data["identifier"],
       "to": entity_identifier,
-      "entity_context": f"Entity: {entity_id}",
     }
     new_fact_entity_df = pd.DataFrame([fact_entity_rel])
     self.fact_entities_df = self.safe_concat(self.fact_entities_df, new_fact_entity_df)
@@ -1735,7 +1731,6 @@ class XBRLGraphProcessor:
       fact_period_rel = {
         "from": fact_data["identifier"],
         "to": period_identifier,
-        "period_context": f"Period: {period_uri.split('#')[-1] if '#' in period_uri else 'unknown'}",
       }
       new_fact_period_df = pd.DataFrame([fact_period_rel])
       self.fact_periods_df = self.safe_concat(self.fact_periods_df, new_fact_period_df)
@@ -1769,7 +1764,6 @@ class XBRLGraphProcessor:
       report_taxonomy_rel = {
         "from": self.report_data["identifier"],
         "to": taxonomy_identifier,
-        "taxonomy_context": f"Uses taxonomy: {self.taxonomy_uri.split('/')[-1] if '/' in self.taxonomy_uri else 'unknown'}",
       }
       new_report_taxonomy_df = pd.DataFrame([report_taxonomy_rel])
       if (
@@ -1853,7 +1847,6 @@ class XBRLGraphProcessor:
           structure_taxonomy_rel = {
             "from": structure_id,
             "to": self.taxonomy_data["identifier"],
-            "taxonomy_context": f"Taxonomy: {self.taxonomy_data.get('uri', 'unknown')}",
           }
           new_structure_taxonomy_df = pd.DataFrame([structure_taxonomy_rel])
           self.structure_taxonomies_df = self.safe_concat(
@@ -1946,7 +1939,6 @@ class XBRLGraphProcessor:
         structure_assoc_rel = {
           "from": structure_data["identifier"],
           "to": association_id,
-          "association_context": f"Association: {association_data.get('type', 'unknown')}",
         }
         new_structure_assoc_df = pd.DataFrame([structure_assoc_rel])
         self.structure_associations_df = self.safe_concat(
@@ -2121,19 +2113,23 @@ class XBRLGraphProcessor:
       element_label_rel = {
         "from": element_data["identifier"],
         "to": label_identifier,
-        "label_context": f"Label: {label_data.get('type', 'unknown')}",
       }
       new_element_label_df = pd.DataFrame([element_label_rel])
       self.element_labels_df = self.safe_concat(
         self.element_labels_df, new_element_label_df
       )
 
-      # Create taxonomy-label relationship
+      # Create taxonomy-label relationship. On the SEC shared repo the taxonomy
+      # is the filer's per-report extension taxonomy, so this edge is
+      # report-scoped. Carry element_uri so "this report's label for element X"
+      # is an exact lookup — the shared, content-addressed Label pool alone can't
+      # distinguish which element a label belongs to. URI (not qname) keeps the
+      # join exact for filer-extension elements. See sec-label-scoping spec.
       if hasattr(self, "taxonomy_data"):
         taxonomy_label_rel = {
           "from": self.taxonomy_data["identifier"],
           "to": label_identifier,
-          "label_context": f"Taxonomy label: {label_data.get('type', 'unknown')}",
+          "element_uri": element_data.get("uri"),
         }
         new_taxonomy_label_df = pd.DataFrame([taxonomy_label_rel])
         self.taxonomy_labels_df = self.safe_concat(
@@ -2168,7 +2164,6 @@ class XBRLGraphProcessor:
         element_ref_rel = {
           "from": element_data["identifier"],
           "to": reference_identifier,
-          "reference_context": f"Reference: {reference_data.get('type', 'unknown')}",
         }
         new_element_ref_df = pd.DataFrame([element_ref_rel])
         self.element_references_df = self.safe_concat(
@@ -2180,7 +2175,6 @@ class XBRLGraphProcessor:
           taxonomy_ref_rel = {
             "from": self.taxonomy_data["identifier"],
             "to": reference_identifier,
-            "reference_context": f"Taxonomy reference: {reference_data.get('type', 'unknown')}",
           }
           new_taxonomy_ref_df = pd.DataFrame([taxonomy_ref_rel])
           self.taxonomy_references_df = self.safe_concat(

@@ -687,8 +687,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE ENTITY_HAS_TRANSACTION AS
     SELECT
       '{entity_id}'                   AS src,
-      id                              AS dst,
-      NULL::VARCHAR                   AS transaction_context
+      id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'transactions')
   """
 
@@ -696,8 +695,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE TRANSACTION_HAS_ENTRY AS
     SELECT
       transaction_id                  AS src,
-      id                              AS dst,
-      NULL::VARCHAR                   AS entry_context
+      id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'entries')
     WHERE transaction_id IS NOT NULL
   """
@@ -706,8 +704,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE ENTRY_HAS_LINE_ITEM AS
     SELECT
       entry_id                        AS src,
-      id                              AS dst,
-      NULL::VARCHAR                   AS line_item_context
+      id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'line_items')
   """
 
@@ -715,8 +712,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE LINE_ITEM_RELATES_TO_ELEMENT AS
     SELECT
       id                              AS src,
-      element_id                      AS dst,
-      NULL::VARCHAR                   AS mapping_context
+      element_id                      AS dst
     FROM postgres_scan('{c}', '{s}', 'line_items')
   """
 
@@ -725,8 +721,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     -- CoA structure → CoA associations
     SELECT
       '{graph_id}_coa'                AS src,
-      child.id || '_assoc'            AS dst,
-      NULL::VARCHAR                   AS association_context
+      child.id || '_assoc'            AS dst
     FROM postgres_scan('{c}', '{s}', 'elements') child
     WHERE child.parent_id IS NOT NULL
       AND child.is_active = true
@@ -734,8 +729,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     -- Seed structures → seed associations
     SELECT
       structure_id                    AS src,
-      id                              AS dst,
-      NULL::VARCHAR                   AS association_context
+      id                              AS dst
     FROM postgres_scan('{c}', '{s}', 'associations')
     -- See _MATERIALIZED_ASSOCIATION_TYPES for the curated list.
     WHERE association_type IN {_MATERIALIZED_ASSOCIATION_TYPES_SQL}
@@ -1047,8 +1041,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE STRUCTURE_HAS_TAXONOMY AS
     SELECT
       id                              AS src,
-      taxonomy_id                     AS dst,
-      NULL::VARCHAR                   AS taxonomy_context
+      taxonomy_id                     AS dst
     FROM postgres_scan('{c}', '{s}', 'structures')
     WHERE taxonomy_id IS NOT NULL
       AND block_type NOT IN ('chart_of_accounts', 'coa_mapping')
@@ -1060,8 +1053,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     -- Native reports (no source_graph_id) belong to the graph's own entity
     SELECT
       '{entity_id}'                   AS src,
-      rd.id                           AS dst,
-      NULL::VARCHAR                   AS filing_context
+      rd.id                           AS dst
     FROM postgres_scan('{c}', '{s}', 'reports') rd
     WHERE rd.generation_status = 'published'
       AND rd.source_graph_id IS NULL
@@ -1069,8 +1061,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     -- Shared reports belong to the linked entity matching source_graph_id
     SELECT
       e.id                            AS src,
-      rd.id                           AS dst,
-      NULL::VARCHAR                   AS filing_context
+      rd.id                           AS dst
     FROM postgres_scan('{c}', '{s}', 'reports') rd
     JOIN postgres_scan('{c}', '{s}', 'entities') e
       ON e.metadata->>'source_graph_id' = rd.source_graph_id
@@ -1082,8 +1073,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE REPORT_USES_TAXONOMY AS
     SELECT
       id                              AS src,
-      taxonomy_id                     AS dst,
-      NULL::VARCHAR                   AS taxonomy_context
+      taxonomy_id                     AS dst
     FROM postgres_scan('{c}', '{s}', 'reports')
     WHERE generation_status = 'published'
   """
@@ -1092,8 +1082,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE REPORT_HAS_FACT AS
     SELECT
       fs.report_id                    AS src,
-      f.id                            AS dst,
-      NULL::VARCHAR                   AS fact_context
+      f.id                            AS dst
     FROM postgres_scan('{c}', '{s}', 'facts') f
     JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
       ON fs.id = f.fact_set_id
@@ -1115,8 +1104,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       md5(COALESCE(CAST(period_start AS VARCHAR), 'null')
           || '_' || CAST(period_end AS VARCHAR)
           || '_' || period_type)
-                                      AS dst,
-      NULL::VARCHAR                   AS period_context
+                                      AS dst
     FROM postgres_scan('{c}', '{s}', 'facts')
   """
 
@@ -1124,8 +1112,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     CREATE OR REPLACE TABLE FACT_HAS_UNIT AS
     SELECT
       id                              AS src,
-      'unit_usd'                      AS dst,
-      NULL::VARCHAR                   AS unit_context
+      'unit_usd'                      AS dst
     FROM postgres_scan('{c}', '{s}', 'facts')
   """
 
@@ -1134,8 +1121,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     -- Native facts: entity_id references a local entity directly
     SELECT
       rf.id                           AS src,
-      rf.entity_id                    AS dst,
-      NULL::VARCHAR                   AS entity_context
+      rf.entity_id                    AS dst
     FROM postgres_scan('{c}', '{s}', 'facts') rf
     JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
       ON fs.id = rf.fact_set_id
@@ -1146,8 +1132,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     -- Shared facts: remap entity_id to the linked entity on this graph
     SELECT
       rf.id                           AS src,
-      e.id                            AS dst,
-      NULL::VARCHAR                   AS entity_context
+      e.id                            AS dst
     FROM postgres_scan('{c}', '{s}', 'facts') rf
     JOIN postgres_scan('{c}', '{s}', 'fact_sets') fs
       ON fs.id = rf.fact_set_id
