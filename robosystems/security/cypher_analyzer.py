@@ -126,16 +126,22 @@ class CypherSecurityAnalyzer:
     # Pattern to find CALL procedures
     self.call_pattern = re.compile(r"\bCALL\s+(\w+)\s*\(", re.IGNORECASE)
 
-    # Pattern to identify comments
-    self.comment_pattern = re.compile(r"(/\*.*?\*/|//.*?$)", re.DOTALL | re.MULTILINE)
-
-    # Pattern to identify string literals (single and double quotes)
-    self.string_pattern = re.compile(
-      r"""(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""", re.DOTALL
+    # Pattern to identify comments. Block comments use the linear "unrolled"
+    # form (not `/\*.*?\*/`, which backtracks polynomially on unterminated
+    # comments); line comments use an explicit non-newline class.
+    self.comment_pattern = re.compile(
+      r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/|//[^\n]*", re.MULTILINE
     )
 
-    # Pattern to identify backtick-quoted identifiers
-    self.identifier_pattern = re.compile(r"`(?:[^`\\]|\\.)*`", re.DOTALL)
+    # Pattern to identify string literals (single and double quotes). The inner
+    # repetitions are possessive (`*+`) so the enforcement path can't be made to
+    # backtrack on unterminated literals (py/polynomial-redos).
+    self.string_pattern = re.compile(
+      r"""(?:"(?:[^"\\]|\\.)*+"|'(?:[^'\\]|\\.)*+')""", re.DOTALL
+    )
+
+    # Pattern to identify backtick-quoted identifiers (possessive inner group).
+    self.identifier_pattern = re.compile(r"`(?:[^`\\]|\\.)*+`", re.DOTALL)
 
   def analyze_query(self, query: str) -> CypherOperationType:
     """

@@ -568,10 +568,20 @@ class GraphQueryValidator:
         )
 
       elif pattern == "where_in_match":
-        # Move WHERE out of MATCH
+        # Move WHERE out of MATCH. Extract the (...) content first — `[^)]*` to
+        # the closing paren is unambiguous/linear — then split on WHERE in
+        # Python, avoiding the `([^)]*)\s+WHERE\s+([^)]*)` overlap that CodeQL
+        # flags as polynomial-redos.
+        def _move_where(match: "re.Match") -> str:
+          inner = match.group(1)
+          parts = re.split(r"\s+WHERE\s+", inner, maxsplit=1, flags=re.IGNORECASE)
+          if len(parts) == 2:
+            return f"MATCH ({parts[0]}) WHERE {parts[1]}"
+          return match.group(0)
+
         fixed_query = re.sub(
-          r"MATCH\s*\(([^)]*)\s+WHERE\s+([^)]*)\)",
-          r"MATCH (\1) WHERE \2",
+          r"MATCH\s*\(([^)]*)\)",
+          _move_where,
           fixed_query,
           flags=re.IGNORECASE,
         )
