@@ -372,11 +372,8 @@ class TestDuckDBTableManagerQueryTableStreaming:
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_cursor.description = [("id",), ("name",)]
-    mock_cursor.fetchmany.side_effect = [
-      [(1, "a"), (2, "b")],
-      [(3, "c")],
-      [],
-    ]
+    # Buffered fetch: one fetchmany call returns all rows, then chunked in-memory.
+    mock_cursor.fetchmany.return_value = [(1, "a"), (2, "b"), (3, "c")]
     mock_conn.execute.return_value = mock_cursor
     mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
@@ -390,6 +387,8 @@ class TestDuckDBTableManagerQueryTableStreaming:
     assert len(chunks) == 2
     assert chunks[0]["chunk_index"] == 0
     assert chunks[0]["row_count"] == 2
+    assert chunks[0]["is_last_chunk"] is False
+    assert chunks[1]["row_count"] == 1
     assert chunks[1]["is_last_chunk"] is True
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
@@ -566,3 +565,60 @@ class TestDuckDBTableManagerListTables:
     assert len(result) == 2
     assert result[0].table_name == "Entity"
     assert result[0].row_count == 42
+
+
+@pytest.mark.unit
+class TestStreamingLockSafety:
+  """Regression: streaming must NOT hold the per-graph lock across `yield`.
+
+  The streaming response driver resumes the generator on arbitrary worker
+  threads; a threading lock released on a different thread than acquired raises
+  and wedges the lock. The buffered design fetches (and releases the lock) on
+  one thread before the first yield.
+  """
+
+  def test_streaming_releases_lock_before_yield(self, tmp_path):
+    import threading
+
+    import duckdb
+
+    from robosystems.graph_api.core.duckdb.pool import DuckDBConnectionPool
+    from robosystems.graph_api.models.tables import TableQueryRequest
+    from robosystems.utils.path_validation import get_duckdb_staging_path
+
+    graph_id = "kgstream00000001"
+    path = get_duckdb_staging_path(graph_id, base_path=str(tmp_path))
+    con = duckdb.connect(str(path))
+    con.execute("CREATE TABLE t AS SELECT i FROM range(5) AS r(i)")
+    con.execute("CHECKPOINT")
+    con.close()
+
+    pool = DuckDBConnectionPool(base_path=str(tmp_path))
+    manager = DuckDBTableManager()
+
+    with patch(
+      "robosystems.graph_api.core.duckdb.manager.get_duckdb_pool", return_value=pool
+    ):
+      gen = manager.query_table_streaming(
+        TableQueryRequest(graph_id=graph_id, sql="SELECT * FROM t"), chunk_size=2
+      )
+      first = next(gen)  # triggers the buffered fetch + releases the lock
+      assert first["row_count"] >= 1
+
+      # From another thread, the per-graph lock must be immediately acquirable —
+      # it would be held (→ False) if the generator held it across the yield.
+      acquired = []
+
+      def _try_lock():
+        lock = pool._get_database_lock(graph_id)
+        got = lock.acquire(blocking=False)
+        acquired.append(got)
+        if got:
+          lock.release()
+
+      t = threading.Thread(target=_try_lock)
+      t.start()
+      t.join()
+      assert acquired == [True]
+
+      list(gen)  # drain the rest

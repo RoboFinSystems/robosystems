@@ -175,6 +175,15 @@ class DuckDBConnectionPool:
     with self._get_database_lock(graph_id):
       # DuckDB won't open a second connection with a different configuration to
       # the same file, so release any read-write connection holding it first.
+      #
+      # KNOWN LIMITATION: the staging write methods (create_table /
+      # insert_into_table) execute their statements outside this per-graph lock,
+      # so evicting here can close a connection a concurrent staging run is
+      # mid-statement on, aborting that run (it is Dagster-retryable, not data
+      # loss). Exposure is low — shared repos are blocked from the tenant read
+      # surface, and interactive reads rarely overlap a graph's own
+      # materialization. A full fix (writers hold this lock for their duration)
+      # is tracked as a follow-up.
       self.close_database_connections(graph_id)
 
       if not db_path.exists():
