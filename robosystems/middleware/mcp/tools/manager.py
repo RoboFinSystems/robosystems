@@ -390,6 +390,28 @@ class GraphMCPTools:
       self.search_documents_tool = SearchDocumentsTool(graph_client)
       self.get_document_section_tool = GetDocumentSectionTool(graph_client)
 
+    # Layer 3: Semantic memory tools (LanceDB) — gated by SEMANTIC_MEMORY_ENABLED
+    # plus the MCP sub-gate. Recall is read-capable; remember/forget need a
+    # writable, non-shared graph. Distinct from the subgraph-Cypher memory tools.
+    self.semantic_remember_tool = None
+    self.semantic_recall_tool = None
+    self.semantic_forget_tool = None
+    if (
+      env.SEMANTIC_MEMORY_ENABLED
+      and env.MCP_SEMANTIC_MEMORY_ENABLED
+      and not self._is_shared_repository()
+    ):
+      from .semantic_memory_tools import (
+        SemanticForgetTool,
+        SemanticRecallTool,
+        SemanticRememberTool,
+      )
+
+      self.semantic_recall_tool = SemanticRecallTool(graph_client)
+      if not read_only:
+        self.semantic_remember_tool = SemanticRememberTool(graph_client)
+        self.semantic_forget_tool = SemanticForgetTool(graph_client)
+
     # Layer 3: Document management tools (user graphs only, not shared repos)
     # Shared repos (SEC) use OpenSearch directly — no PG document rows.
     # Read tools (list/get) are available on read-only user graphs.
@@ -561,6 +583,17 @@ class GraphMCPTools:
       self.add_node_table_tool.get_tool_definition(),
       self.add_relationship_table_tool.get_tool_definition(),
     ]
+
+  def _get_semantic_memory_tool_definitions(self) -> list[dict[str, Any]]:
+    """Get semantic memory (LanceDB) tool definitions (remember/recall/forget)."""
+    tools = []
+    if self.semantic_recall_tool is not None:
+      tools.append(self.semantic_recall_tool.get_tool_definition())
+    if self.semantic_remember_tool is not None:
+      tools.append(self.semantic_remember_tool.get_tool_definition())
+    if self.semantic_forget_tool is not None:
+      tools.append(self.semantic_forget_tool.get_tool_definition())
+    return tools
 
   def _get_fact_grid_tool_definitions(self) -> list[dict[str, Any]]:
     """
@@ -750,6 +783,7 @@ class GraphMCPTools:
     if self.set_write_policy_tool is not None:
       tools.append(self.set_write_policy_tool.get_tool_definition())
     tools.extend(self._get_memory_tool_definitions())
+    tools.extend(self._get_semantic_memory_tool_definitions())
     tools.extend(self._get_search_tool_definitions())
     tools.extend(self._get_document_tool_definitions())
 
@@ -968,6 +1002,30 @@ class GraphMCPTools:
             )
           )
         result = await self.add_relationship_table_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "remember":
+        if self.semantic_remember_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("remember", "MCP_SEMANTIC_MEMORY_ENABLED")
+          )
+        result = await self.semantic_remember_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "recall":
+        if self.semantic_recall_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("recall", "MCP_SEMANTIC_MEMORY_ENABLED")
+          )
+        result = await self.semantic_recall_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "forget":
+        if self.semantic_forget_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("forget", "MCP_SEMANTIC_MEMORY_ENABLED")
+          )
+        result = await self.semantic_forget_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "build-fact-grid":

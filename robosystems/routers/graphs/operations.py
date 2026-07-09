@@ -40,7 +40,9 @@ from robosystems.models.api.graphs.operations import (
   ChangeTierOp,
   DeleteGraphOp,
   DeleteSubgraphOp,
+  ForgetOp,
   MaterializeOp,
+  RememberOp,
   RestoreBackupOp,
 )
 from robosystems.models.api.graphs.subgraphs import CreateSubgraphRequest
@@ -81,6 +83,43 @@ async def _dispatch(ctx, runner, cache, on_fresh_success=None):
     )
   except IdempotencyKeyConflictError as exc:
     raise HTTPException(status_code=409, detail=str(exc))
+
+
+def _require_memory_enabled() -> None:
+  from robosystems.config import env
+
+  if not env.SEMANTIC_MEMORY_ENABLED:
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="Semantic memory is not enabled",
+    )
+
+
+def _block_shared_repo(graph_id: str) -> None:
+  from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
+
+  if is_shared_repository_or_subgraph(graph_id):
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail="Semantic memory is not available on shared repositories",
+    )
+
+
+def _require_memory_write_access(graph_id: str) -> None:
+  """Enforce write-level graph access (subscription state + write role).
+
+  get_current_user_with_graph only proves *some* access (incl. viewer); memory
+  writes must also pass the subscription/lifecycle + write-role checks the other
+  write surfaces (documents, governance router) apply.
+  """
+  from robosystems.database import SessionFactory
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  session = SessionFactory()
+  try:
+    require_graph_access(graph_id, session, require_write=True)
+  finally:
+    session.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -964,3 +1003,125 @@ async def materialize_op(
     event=_AUDIT_EVENT,
   )
   return envelope
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# remember (semantic memory — content op)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/remember",
+  response_model=OperationEnvelope,
+  operation_id="opRemember",
+  summary="Remember (write semantic memory)",
+  description="Store a semantic memory in the graph's per-graph memory store. "
+  "The text is embedded locally; recall it later via `POST /search/recall`.",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/remember",
+  method="POST",
+  business_event_type="graph_remember",
+)
+async def remember_op(
+  body: RememberOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  from robosystems.graph_api.client.factory import get_graph_client
+  from robosystems.models.api.memory import MemoryCreateRequest
+  from robosystems.operations.memory import get_memory_service
+
+  _require_memory_enabled()
+  _block_shared_repo(graph_id)
+  _require_memory_write_access(graph_id)
+
+  op_name = "remember"
+  user_id = str(user.id)
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=user_id,
+    op=op_name,
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    client = await get_graph_client(graph_id=graph_id, operation_type="write")
+    try:
+      service = get_memory_service(client)
+      if service is None:  # pragma: no cover - gated above
+        raise HTTPException(status_code=503, detail="Semantic memory is not enabled")
+      record = await service.remember(
+        graph_id,
+        MemoryCreateRequest(**body.model_dump()),
+        created_by=user_id,
+      )
+      return record.model_dump(mode="json")
+    finally:
+      await client.close()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# forget (semantic memory — content op)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/forget",
+  response_model=OperationEnvelope,
+  operation_id="opForget",
+  summary="Forget (delete a semantic memory)",
+  description="Delete a semantic memory by its server-generated id.",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/forget",
+  method="POST",
+  business_event_type="graph_forget",
+)
+async def forget_op(
+  body: ForgetOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  from robosystems.graph_api.client.factory import get_graph_client
+  from robosystems.operations.memory import get_memory_service
+
+  _require_memory_enabled()
+  _block_shared_repo(graph_id)
+  _require_memory_write_access(graph_id)
+
+  op_name = "forget"
+  user_id = str(user.id)
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=user_id,
+    op=op_name,
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    client = await get_graph_client(graph_id=graph_id, operation_type="write")
+    try:
+      service = get_memory_service(client)
+      if service is None:  # pragma: no cover - gated above
+        raise HTTPException(status_code=503, detail="Semantic memory is not enabled")
+      result = await service.forget(graph_id, body.memory_id)
+      return result.model_dump(mode="json")
+    finally:
+      await client.close()
+
+  return await _dispatch(ctx, _runner, cache)

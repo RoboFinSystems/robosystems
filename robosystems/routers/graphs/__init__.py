@@ -45,10 +45,21 @@ __all__ = [
 # schema-specific and now lives on the extensions surface. See main.py
 # for the new mount.
 
-# Conditionally export search and documents routers based on feature flag
+# Conditionally export search, documents, and memory routers based on flags.
+# The search router hosts both document search and memory `recall`, so it mounts
+# when EITHER feature is on; documents CRUD is search-only; memory governance is
+# memory-only.
 if env.SEMANTIC_SEARCH_ENABLED:
   from .documents import router as documents_router  # noqa: F401
+
+  __all__.append("documents_router")
+
+if env.SEMANTIC_SEARCH_ENABLED or env.SEMANTIC_MEMORY_ENABLED:
   from .search import router as search_router  # noqa: F401
 
   __all__.append("search_router")
-  __all__.append("documents_router")
+
+if env.SEMANTIC_MEMORY_ENABLED:
+  from .memory import router as memory_router  # noqa: F401
+
+  __all__.append("memory_router")

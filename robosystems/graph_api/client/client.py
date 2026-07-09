@@ -19,6 +19,7 @@ from robosystems.logger import logger
 from .base import BaseGraphClient
 from .config import GraphClientConfig
 from .exceptions import (
+  GraphAPIError,
   GraphTimeoutError,
   GraphTransientError,
 )
@@ -1127,6 +1128,117 @@ class GraphClient(BaseGraphClient):
       f"/databases/{graph_id}/tables/{table_name}/vector/export",
       json_data=json_data if json_data else None,
       timeout=float(timeout),
+    )
+    return response.json()
+
+  # ---------------------------------------------------------------------------
+  # Semantic memory (per-graph LanceDB "memory" table)
+  # ---------------------------------------------------------------------------
+
+  async def memory_add(
+    self,
+    graph_id: str,
+    records: list[dict[str, Any]],
+    timeout: float = 30.0,
+  ) -> dict[str, Any]:
+    """Add pre-embedded memory rows to the graph's semantic-memory store."""
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/semantic-memory/rows",
+      json_data={"records": records},
+      timeout=timeout,
+    )
+    return response.json()
+
+  async def memory_search(
+    self,
+    graph_id: str,
+    embedding: list[float],
+    limit: int = 10,
+    where: str | None = None,
+    select: list[str] | None = None,
+    timeout: float = 10.0,
+  ) -> list[dict[str, Any]]:
+    """Vector recall (cosine top-k) over the graph's semantic-memory store."""
+    json_data: dict[str, Any] = {"embedding": embedding, "limit": limit}
+    if where is not None:
+      json_data["where"] = where
+    if select is not None:
+      json_data["select_columns"] = select
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/semantic-memory/search",
+      json_data=json_data,
+      timeout=timeout,
+    )
+    return response.json().get("results", [])
+
+  async def memory_list(
+    self,
+    graph_id: str,
+    where: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    timeout: float = 10.0,
+  ) -> dict[str, Any]:
+    """List/filter memory rows (metadata scan)."""
+    json_data: dict[str, Any] = {"limit": limit, "offset": offset}
+    if where is not None:
+      json_data["where"] = where
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/semantic-memory/list",
+      json_data=json_data,
+      timeout=timeout,
+    )
+    return response.json()
+
+  async def memory_get(
+    self,
+    graph_id: str,
+    memory_id: str,
+    timeout: float = 10.0,
+  ) -> dict[str, Any] | None:
+    """Get one memory row by id, or None if it does not exist."""
+    try:
+      response = await self._request(
+        "GET",
+        f"/databases/{graph_id}/semantic-memory/rows/{memory_id}",
+        timeout=timeout,
+      )
+    except GraphAPIError as e:
+      if getattr(e, "status_code", None) == 404:
+        return None
+      raise
+    return response.json()
+
+  async def memory_update(
+    self,
+    graph_id: str,
+    memory_id: str,
+    row: dict[str, Any],
+    timeout: float = 30.0,
+  ) -> dict[str, Any]:
+    """Full-row upsert on id (caller supplies a re-embedded vector)."""
+    response = await self._request(
+      "PATCH",
+      f"/databases/{graph_id}/semantic-memory/rows/{memory_id}",
+      json_data=row,
+      timeout=timeout,
+    )
+    return response.json()
+
+  async def memory_delete(
+    self,
+    graph_id: str,
+    memory_id: str,
+    timeout: float = 30.0,
+  ) -> dict[str, Any]:
+    """Delete a memory row by id."""
+    response = await self._request(
+      "DELETE",
+      f"/databases/{graph_id}/semantic-memory/rows/{memory_id}",
+      timeout=timeout,
     )
     return response.json()
 

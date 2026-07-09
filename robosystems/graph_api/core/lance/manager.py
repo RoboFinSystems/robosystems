@@ -31,6 +31,11 @@ import tarfile
 import time
 from pathlib import Path
 
+from robosystems.utils.path_validation import (
+  get_lance_index_path,
+  validate_table_name,
+)
+
 logger = logging.getLogger(__name__)
 
 # Minimum rows to build IVF-PQ index; below this brute-force is fine
@@ -57,20 +62,20 @@ class LanceManager:
   # ---------------------------------------------------------------------------
 
   def _graph_dir(self, graph_id: str) -> Path:
-    """Get the lance directory for a graph."""
-    return self.base_path / graph_id
+    """Get the lance directory for a graph (path-validated)."""
+    return get_lance_index_path(graph_id, base_path=str(self.base_path))
 
   def _table_dir(self, graph_id: str, table_name: str) -> Path:
-    """Get the lance DB directory for a specific table's index.
+    """Get the lance DB directory for a specific table's index (path-validated).
 
     LanceDB creates {table_name}.lance/ inside this directory, so the full
     on-disk path is: {base_path}/{graph_id}/{table_name}/{table_name}.lance/
     """
-    return self._graph_dir(graph_id) / table_name
+    return get_lance_index_path(graph_id, table_name, base_path=str(self.base_path))
 
   def _build_dir(self, graph_id: str, table_name: str) -> Path:
     """Get a temporary build directory (atomic swap on success)."""
-    return self._graph_dir(graph_id) / f"{table_name}.building"
+    return self._graph_dir(graph_id) / f"{validate_table_name(table_name)}.building"
 
   def index_exists(self, graph_id: str, table_name: str) -> bool:
     """Check if a lance index exists for this graph + table."""

@@ -350,6 +350,9 @@ def create_app() -> FastAPI:
   app.include_router(
     databases.vector_search.router
   )  # LanceDB vector index (build/export on writers, search on all)
+  app.include_router(
+    databases.semantic_memory.router
+  )  # LanceDB per-graph semantic memory (AI memory CRUD)
   app.include_router(databases.swap.router)  # Blue-green swap and rollback
 
   # Task management (generic for all task types)
