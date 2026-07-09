@@ -105,6 +105,23 @@ def _block_shared_repo(graph_id: str) -> None:
     )
 
 
+def _require_memory_write_access(graph_id: str) -> None:
+  """Enforce write-level graph access (subscription state + write role).
+
+  get_current_user_with_graph only proves *some* access (incl. viewer); memory
+  writes must also pass the subscription/lifecycle + write-role checks the other
+  write surfaces (documents, governance router) apply.
+  """
+  from robosystems.database import SessionFactory
+  from robosystems.middleware.billing.enforcement import require_graph_access
+
+  session = SessionFactory()
+  try:
+    require_graph_access(graph_id, session, require_write=True)
+  finally:
+    session.close()
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # create-subgraph
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1022,6 +1039,7 @@ async def remember_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
+  _require_memory_write_access(graph_id)
 
   op_name = "remember"
   user_id = str(user.id)
@@ -1083,6 +1101,7 @@ async def forget_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
+  _require_memory_write_access(graph_id)
 
   op_name = "forget"
   user_id = str(user.id)

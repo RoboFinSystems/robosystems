@@ -111,7 +111,9 @@ class LanceMemoryStore:
 
   @staticmethod
   def _validate_id(memory_id: str) -> str:
-    if not isinstance(memory_id, str) or not _MEMORY_ID_RE.match(memory_id):
+    # fullmatch (not match) so a trailing newline can't sneak through Python's
+    # `$`, which matches before a final "\n".
+    if not isinstance(memory_id, str) or not _MEMORY_ID_RE.fullmatch(memory_id):
       raise ValueError(f"Invalid memory id: {memory_id!r}")
     return memory_id
 
@@ -172,20 +174,23 @@ class LanceMemoryStore:
     return {"added": len(prepared), "total": table.count_rows()}
 
   def update(self, graph_id: str, memory_id: str, row: dict) -> dict:
-    """Full-row upsert on id (the kernel always supplies a re-embedded vector)."""
+    """Update an existing memory by id (never inserts).
+
+    Uses ``when_not_matched_do_nothing`` so a concurrently-deleted memory is NOT
+    resurrected (the kernel checks existence via a separate read first, so this
+    is a strict update; the do-nothing branch closes that read→write TOCTOU).
+    """
     self._validate_id(memory_id)
     merged = self._complete_row({**row, "id": memory_id})
     self._check_vector(merged.get("vector"))
     _, table = self._connect(graph_id, create=False)
     if table is None:
-      raise ValueError("No memory store exists for this graph")
-    (
-      table.merge_insert("id")
-      .when_matched_update_all()
-      .when_not_matched_insert_all()
-      .execute([merged])
-    )
-    return {"id": memory_id, "updated": True}
+      return {"id": memory_id, "updated": False}
+    # No when_not_matched clause → unmatched source rows are NOT inserted, so a
+    # concurrently-deleted memory is not resurrected (update-only semantics).
+    table.merge_insert("id").when_matched_update_all().execute([merged])
+    updated = bool(table.search().where(f"id = '{memory_id}'").limit(1).to_list())
+    return {"id": memory_id, "updated": updated}
 
   def delete(self, graph_id: str, memory_id: str) -> dict:
     self._validate_id(memory_id)
@@ -258,7 +263,9 @@ class LanceMemoryStore:
     _, table = self._connect(graph_id, create=False)
     if table is None or table.count_rows() == 0:
       return {"results": [], "total": 0}
-    total = table.count_rows()
+    # total must reflect the FILTER, not the whole table, or filtered pagination
+    # is wrong.
+    total = table.count_rows(where) if where else table.count_rows()
     query = table.search()
     if where:
       query = query.where(where)

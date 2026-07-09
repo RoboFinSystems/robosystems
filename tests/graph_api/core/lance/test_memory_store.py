@@ -159,6 +159,28 @@ class TestGetListUpdateDelete:
     assert store.count(GRAPH) == 0
     assert store.get(GRAPH, row["id"]) is None
 
+  def test_update_missing_id_does_not_resurrect(self, store):
+    store.add_rows(GRAPH, [_row("keep", _vec(1.0))])
+    ghost = _mem_id()
+    res = store.update(GRAPH, ghost, _row("resurrected", _vec(0.5)))
+    assert res["updated"] is False
+    assert store.get(GRAPH, ghost) is None
+    assert store.count(GRAPH) == 1  # no insert of the ghost row
+
+  def test_list_filtered_total_reflects_filter(self, store):
+    store.add_rows(
+      GRAPH,
+      [
+        _row("a", _vec(1.0), memory_type="fact"),
+        _row("b", _vec(2.0), memory_type="note"),
+        _row("c", _vec(3.0), memory_type="note"),
+      ],
+    )
+    out = store.list(GRAPH, where="memory_type = 'note'")
+    assert out["total"] == 2
+    assert len(out["results"]) == 2
+    assert all(r["memory_type"] == "note" for r in out["results"])
+
 
 class TestPredicateAndIdGuards:
   def test_get_rejects_injection_id(self, store):
