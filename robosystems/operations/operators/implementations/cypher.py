@@ -47,6 +47,7 @@ class CypherOperator(Operator):
     "query-graphql",
     "resolve-element",
     "search-documents",
+    "get-document-section",
   ]
 
   spec = OperatorSpec(
@@ -101,7 +102,19 @@ class CypherOperator(Operator):
     output_mode = "answer" if ctx.extra.get("output_mode") == "answer" else "narrative"
     is_shared = is_shared_repository_or_subgraph(ctx.graph_id)
 
-    system = self._build_system_prompt(max_results, output_mode, is_shared)
+    # Document search is gated by the SEMANTIC_SEARCH_ENABLED feature flag
+    # (not a schema extension), so it can be exposed on any graph. Only
+    # advertise it in the prompt when get_tool_schemas confirms this graph
+    # exposes it; otherwise the prompt stays schema + Cypher only.
+    # get_tool_schemas caches after initialize(), so the loop's later call is free.
+    available_tools = {
+      t["name"] for t in await ctx.tools.get_tool_schemas(self.READ_ONLY_TOOLS)
+    }
+    has_document_search = "search-documents" in available_tools
+
+    system = self._build_system_prompt(
+      max_results, output_mode, is_shared, has_document_search
+    )
 
     result = await run_tool_loop(
       ctx,
@@ -133,7 +146,11 @@ class CypherOperator(Operator):
     )
 
   def _build_system_prompt(
-    self, max_results: int, output_mode: str, is_shared: bool
+    self,
+    max_results: int,
+    output_mode: str,
+    is_shared: bool,
+    has_document_search: bool = False,
   ) -> str:
     if is_shared:
       # Shared repository (e.g. SEC): thousands of filers, so the selective
@@ -164,7 +181,7 @@ class CypherOperator(Operator):
     prompt = f"""You are a graph database analyst for RoboSystems. You answer the user's question by querying a LadybugDB graph with read-only Cypher.
 
 WORKFLOW:
-1. Call `get-graph-schema` first to discover node labels, relationships, and properties — never guess the schema.
+1. For any question that needs the fact graph, call `get-graph-schema` first to discover node labels, relationships, and properties — never guess the schema. (Purely qualitative/narrative questions may skip straight to document search — see below.)
 2. If `get-example-queries` is available, use it for working query patterns tuned to this graph.
 3. Write a read-only Cypher query and run it with `read-graph-cypher`.
 4. If a query errors or returns nothing useful, read the error, fix the query, and try again. You have a limited number of steps, so be efficient — don't repeat a failing query unchanged.
@@ -178,6 +195,25 @@ CYPHER RULES:
 
 LEDGER DATA (only when the schema has Entry / Transaction / LineItem nodes):
 - The graph keeps cancelled/replaced rows for audit. When counting or summing ledger data, restrict to live rows using the materialized `is_live` boolean — it exists on every spine node (`Entry`, `LineItem`, `Event`, `Transaction`) and is the one rule to remember: `WHERE e.is_live`, `WHERE li.is_live`, `WHERE ev.is_live`, `WHERE t.is_live`. For balances/debit-credit sums, aggregate through live Entry/LineItem (`e.is_live`, ⇔ status = 'posted'), not by summing Transaction.amount. `is_live` keeps open obligations (pending/committed/fulfilled events); for a specific realized set, filter `status` explicitly.
+"""
+    if has_document_search:
+      if is_shared:
+        # Shared repository (SEC): documents are filing sections, so the
+        # vocabulary is filing-specific (risk factors, MD&A, item_1a/item_7).
+        prompt += """
+NARRATIVE DISCLOSURES (qualitative filing text — NOT in the Cypher fact graph):
+- Questions about risk factors, MD&A, business description, legal proceedings, competition, or other management commentary are answered from filing TEXT, not the XBRL facts. Cypher can't surface this — use `search-documents` (hybrid semantic search over filing sections), and you do NOT need `get-graph-schema` first.
+- `search-documents` returns ranked snippets, each with a document_id. Call `get-document-section` with that id to read the full section before you answer. When the question names a section, narrow with the section filter (e.g. item_1a for risk factors, item_7 for MD&A).
+- A section may carry `xbrl_elements`; use `resolve-element` or `read-graph-cypher` to tie the narrative back to the reported numbers when the question needs both text and figures.
+"""
+      else:
+        # Tenant graph (roboledger / custom): documents are the company's own
+        # uploaded policies, procedures, and notes — not SEC filing sections.
+        prompt += """
+DOCUMENTS (qualitative written context — accounting policies, procedures, memos, notes — NOT in the Cypher fact graph):
+- Questions about this company's accounting policies, close procedures, memos, or other written context are answered from its uploaded DOCUMENTS, not the ledger facts. Cypher can't surface this — use `search-documents` (hybrid semantic search over this graph's documents), and you do NOT need `get-graph-schema` first.
+- `search-documents` returns ranked snippets, each with a document_id. Call `get-document-section` with that id to read the full section before you answer.
+- When a question needs both the written policy and the reported figures, combine the two: search for the text, then query the ledger with `read-graph-cypher`.
 """
     if output_mode == "answer":
       prompt += (
