@@ -6,8 +6,10 @@ from fastapi import HTTPException
 
 from robosystems.utils.path_validation import (
   get_duckdb_staging_path,
+  get_lance_index_path,
   get_lbug_database_path,
   validate_graph_id,
+  validate_table_name,
 )
 
 
@@ -169,6 +171,115 @@ class TestGetDuckDBStagingPath:
       assert lbug_path != duckdb_path
       assert lbug_path.suffix == ".lbug"
       assert duckdb_path.suffix == ".duckdb"
+
+
+class TestValidateTableName:
+  def test_valid_simple_name(self):
+    assert validate_table_name("memory") == "memory"
+
+  def test_valid_with_underscores(self):
+    assert validate_table_name("sec_elements_v2") == "sec_elements_v2"
+
+  def test_valid_leading_underscore(self):
+    assert validate_table_name("_internal") == "_internal"
+
+  def test_empty_raises_error(self):
+    with pytest.raises(HTTPException) as exc_info:
+      validate_table_name("")
+    assert exc_info.value.status_code == 400
+    assert "cannot be empty" in exc_info.value.detail
+
+  def test_path_traversal_double_dot_raises_error(self):
+    with pytest.raises(HTTPException) as exc_info:
+      validate_table_name("..")
+    assert exc_info.value.status_code == 400
+    assert "illegal characters" in exc_info.value.detail
+
+  def test_forward_slash_raises_error(self):
+    with pytest.raises(HTTPException) as exc_info:
+      validate_table_name("../../etc/passwd")
+    assert exc_info.value.status_code == 400
+    assert "illegal characters" in exc_info.value.detail
+
+  def test_backslash_raises_error(self):
+    with pytest.raises(HTTPException) as exc_info:
+      validate_table_name("dir\\table")
+    assert exc_info.value.status_code == 400
+    assert "illegal characters" in exc_info.value.detail
+
+  def test_null_byte_raises_error(self):
+    with pytest.raises(HTTPException) as exc_info:
+      validate_table_name("table\x00")
+    assert exc_info.value.status_code == 400
+    assert "illegal characters" in exc_info.value.detail
+
+  def test_leading_digit_raises_error(self):
+    with pytest.raises(HTTPException) as exc_info:
+      validate_table_name("1table")
+    assert exc_info.value.status_code == 400
+    assert "format" in exc_info.value.detail
+
+  def test_dot_in_name_raises_error(self):
+    # ".lance" / ".building" suffixes must be composed after validation,
+    # not passed through the validator.
+    with pytest.raises(HTTPException) as exc_info:
+      validate_table_name("memory.building")
+    assert exc_info.value.status_code == 400
+    assert "format" in exc_info.value.detail
+
+  def test_hyphen_raises_error(self):
+    with pytest.raises(HTTPException) as exc_info:
+      validate_table_name("my-table")
+    assert exc_info.value.status_code == 400
+    assert "format" in exc_info.value.detail
+
+
+class TestGetLanceIndexPath:
+  def test_graph_only_path(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      result = get_lance_index_path("test_graph", base_path=tmpdir)
+      assert result == Path(tmpdir) / "test_graph"
+
+  def test_graph_and_table_path(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      result = get_lance_index_path("test_graph", "memory", base_path=tmpdir)
+      assert result == Path(tmpdir) / "test_graph" / "memory"
+
+  def test_path_stays_within_base_directory(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      result = get_lance_index_path("kg123_dev", "memory", base_path=tmpdir)
+      resolved = result.resolve()
+      base_resolved = Path(tmpdir).resolve()
+      assert str(resolved).startswith(str(base_resolved))
+
+  def test_subgraph_id_accepted(self):
+    # subgraph ids ({parent}_{name}) contain an underscore and must pass.
+    with tempfile.TemporaryDirectory() as tmpdir:
+      result = get_lance_index_path("kgabc123_dev", base_path=tmpdir)
+      assert result == Path(tmpdir) / "kgabc123_dev"
+
+  def test_invalid_graph_id_raises_error(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      with pytest.raises(HTTPException) as exc_info:
+        get_lance_index_path("../etc", "memory", base_path=tmpdir)
+      assert exc_info.value.status_code == 400
+
+  def test_invalid_table_name_raises_error(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      with pytest.raises(HTTPException) as exc_info:
+        get_lance_index_path("test_graph", "../../etc", base_path=tmpdir)
+      assert exc_info.value.status_code == 400
+
+  def test_empty_graph_id_raises_error(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      with pytest.raises(HTTPException) as exc_info:
+        get_lance_index_path("", base_path=tmpdir)
+      assert exc_info.value.status_code == 400
+
+  def test_uses_env_config_when_no_base_path(self):
+    result = get_lance_index_path("test_graph", "memory")
+    assert "test_graph" in str(result)
+    assert result.name == "memory"
 
 
 class TestPathValidationIntegration:

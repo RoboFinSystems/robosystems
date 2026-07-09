@@ -596,6 +596,12 @@ class EnvConfig:
     "SEMANTIC_SEARCH_ENABLED",
     get_parameter_value("SEMANTIC_SEARCH_ENABLED", "true").lower() == "true",
   )
+  # Master gate for AI semantic memory (REST + ops + recall + governance).
+  # MCP_SEMANTIC_MEMORY_ENABLED is an additional sub-gate for the MCP tools.
+  SEMANTIC_MEMORY_ENABLED = get_bool_env(
+    "SEMANTIC_MEMORY_ENABLED",
+    get_parameter_value("SEMANTIC_MEMORY_ENABLED", "false").lower() == "true",
+  )
 
   # --- OpenSearch ---
   OPENSEARCH_URL = get_str_env("OPENSEARCH_URL", "http://localhost:9200")

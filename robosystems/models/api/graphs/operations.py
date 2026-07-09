@@ -134,3 +134,30 @@ class MaterializeOp(BaseModel):
   materialize_embeddings: bool = Field(
     default=False, description="Generate vector embeddings during materialization"
   )
+
+
+class RememberOp(BaseModel):
+  """Body for the remember operation (write a semantic memory)."""
+
+  text: str = Field(..., min_length=1, max_length=10_000, description="Memory content")
+  source: str = Field(default="api", max_length=64, description="Origin of the memory")
+  memory_type: str = Field(
+    default="note", max_length=64, description="Freeform classifier"
+  )
+  tags: list[str] | None = Field(default=None, description="Optional labels")
+  source_ref: str | None = Field(
+    default=None, max_length=2048, description="Optional external reference/URI"
+  )
+  provenance: dict | None = Field(
+    default=None, description="Opaque provenance metadata"
+  )
+
+
+class ForgetOp(BaseModel):
+  """Body for the forget operation (delete a semantic memory by id)."""
+
+  memory_id: str = Field(
+    ...,
+    pattern="^mem_[0-9a-f]{32}$",
+    description="Server-generated memory id to forget",
+  )

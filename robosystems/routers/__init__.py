@@ -105,12 +105,22 @@ router.include_router(
 # fact grid is roboledger-schema-specific (XBRL hypercube), so it never
 # really belonged on the platform graph surface.
 
-# Conditionally include search router based on feature flag
-if env.SEMANTIC_SEARCH_ENABLED:
-  from .graphs import documents_router, search_router
+# Conditionally include search / documents / memory routers based on flags.
+# search_router hosts document search AND memory recall → mount under either flag.
+if env.SEMANTIC_SEARCH_ENABLED or env.SEMANTIC_MEMORY_ENABLED:
+  from .graphs import search_router
 
   router.include_router(search_router)  # No prefix - handles /search internally
+
+if env.SEMANTIC_SEARCH_ENABLED:
+  from .graphs import documents_router
+
   router.include_router(documents_router)  # No prefix - handles /documents internally
+
+if env.SEMANTIC_MEMORY_ENABLED:
+  from .graphs import memory_router
+
+  router.include_router(memory_router)  # No prefix - handles /memory internally
 
 router.include_router(graph_operations_router, prefix="/operations")
 router.include_router(files_router)  # No prefix - handles /files endpoint
