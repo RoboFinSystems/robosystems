@@ -283,10 +283,26 @@ class XBRLGraphProcessor:
       return
 
     try:
-      from robosystems.adapters.sec.processors.classify import AssociationClassifier
+      from robosystems.adapters.sec.processors.classify import (
+        AssociationClassifier,
+        FilingMeta,
+      )
 
       classifier = AssociationClassifier()
-      result = classifier.classify(self.output_dir)
+      # Source filing coordinates from the enriched report/entity metadata the
+      # processor already holds — classify can't read them from its
+      # identifier-only Report table. Feeds FactSet `filed` provenance +
+      # REPORT_HAS_FACT_SET edges.
+      filing_meta = FilingMeta(
+        report_id=self.report_data.get("identifier") if self.report_data else None,
+        accession=self.report_data.get("accession_number")
+        if self.report_data
+        else None,
+        filing_date=self.report_data.get("filing_date") if self.report_data else None,
+        form=self.report_data.get("form") if self.report_data else None,
+        filer_cik=self.entity_data.get("cik") if self.entity_data else None,
+      )
+      result = classifier.classify(self.output_dir, filing_meta)
 
       if not result.classifications_df.empty:
         self.parquet_writer.write_dataframe(

@@ -27,6 +27,25 @@ from robosystems.logger import logger
 from robosystems.models.api.fact_provenance import FiledProvenance
 from robosystems.utils.uuid import generate_uuid7
 
+
+@dataclass(frozen=True)
+class FilingMeta:
+  """Enriched filing coordinates passed into FactSet construction.
+
+  Sourced from the processor (which holds the SEC report metadata) rather than
+  read back out of the graph: the classify context deliberately carries only an
+  identifier-only Report table, so a ``MATCH (r:Report)`` lookup can never
+  populate these. Stamped onto every FactSet's ``filed`` provenance and used to
+  emit the ``REPORT_HAS_FACT_SET`` (report → its many block FactSets) edges.
+  """
+
+  report_id: str | None = None
+  accession: str | None = None
+  filing_date: str | None = None
+  form: str | None = None
+  filer_cik: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Disclosure mechanics concept map (Seattle Method taxonomy, 143 entries)
 # ---------------------------------------------------------------------------
@@ -249,12 +268,8 @@ def _generate_ddl() -> list[str]:
       identifier STRING,
       PRIMARY KEY (identifier)
     )""",
-    # Fact and Report: minimal for FactSet building
+    # Fact: minimal for FactSet building
     """CREATE NODE TABLE IF NOT EXISTS Fact (
-      identifier STRING,
-      PRIMARY KEY (identifier)
-    )""",
-    """CREATE NODE TABLE IF NOT EXISTS Report (
       identifier STRING,
       PRIMARY KEY (identifier)
     )""",
@@ -263,7 +278,6 @@ def _generate_ddl() -> list[str]:
     "CREATE REL TABLE IF NOT EXISTS ASSOCIATION_HAS_TO_ELEMENT (FROM Association TO Element)",
     "CREATE REL TABLE IF NOT EXISTS STRUCTURE_HAS_ASSOCIATION (FROM Structure TO Association, association_context STRING)",
     "CREATE REL TABLE IF NOT EXISTS FACT_HAS_ELEMENT (FROM Fact TO Element)",
-    "CREATE REL TABLE IF NOT EXISTS REPORT_HAS_FACT (FROM Report TO Fact, fact_context STRING)",
   ]
 
 
@@ -515,7 +529,9 @@ class AssociationClassifier:
     factset_fact_rels_df: pd.DataFrame
     report_factset_rels_df: pd.DataFrame
 
-  def classify(self, output_dir: Path) -> ClassifyResult:
+  def classify(
+    self, output_dir: Path, filing_meta: FilingMeta | None = None
+  ) -> ClassifyResult:
     """Run classification on a filing's parquet output.
 
     Runs two layers of classification, then builds structure-level FactSets:
@@ -525,6 +541,10 @@ class AssociationClassifier:
 
     Args:
         output_dir: Directory containing nodes/ and relationships/ parquet subdirs.
+        filing_meta: Enriched filing coordinates (accession/filing_date/form/
+            filer_cik + report_id) for stamping FactSet ``filed`` provenance and
+            emitting REPORT_HAS_FACT_SET edges. Sourced from the processor, not
+            the graph — see ``FilingMeta``.
 
     Returns:
         ClassifyResult with classification DataFrames, canonical hints, and FactSet data.
@@ -550,9 +570,7 @@ class AssociationClassifier:
     struct_path = nodes_dir / "Structure.parquet"
     struct_assoc_path = rels_dir / "STRUCTURE_HAS_ASSOCIATION.parquet"
     fact_path = nodes_dir / "Fact.parquet"
-    report_path = nodes_dir / "Report.parquet"
     fact_elem_path = rels_dir / "FACT_HAS_ELEMENT.parquet"
-    report_fact_path = rels_dir / "REPORT_HAS_FACT.parquet"
 
     if not assoc_path.exists() or not elem_path.exists():
       logger.debug("Association or Element parquet not found, skipping classification")
@@ -570,9 +588,7 @@ class AssociationClassifier:
       ctx.load_parquet("Structure", struct_path)
       ctx.load_parquet("STRUCTURE_HAS_ASSOCIATION", struct_assoc_path)
       ctx.load_parquet("Fact", fact_path)
-      ctx.load_parquet("Report", report_path)
       ctx.load_parquet("FACT_HAS_ELEMENT", fact_elem_path)
-      ctx.load_parquet("REPORT_HAS_FACT", report_fact_path)
 
       # Layer 1: Structural classification
       for classification_type, cypher in CLASSIFICATION_QUERIES.items():
@@ -615,7 +631,7 @@ class AssociationClassifier:
         struct_fs_rels_df,
         fs_fact_rels_df,
         report_fs_rels_df,
-      ) = self._build_structure_factsets(ctx)
+      ) = self._build_structure_factsets(ctx, filing_meta or FilingMeta())
 
     classifications_df = (
       pd.DataFrame(classifications) if classifications else pd.DataFrame()
@@ -735,7 +751,7 @@ class AssociationClassifier:
     return classifications, relationships, canonical_hints
 
   def _build_structure_factsets(
-    self, ctx: TempLadybugContext
+    self, ctx: TempLadybugContext, filing_meta: FilingMeta
   ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Build pre-computed FactSets per Structure.
 
@@ -754,41 +770,12 @@ class AssociationClassifier:
     factset_fact_rels: list[dict] = []
     report_factset_rels: list[dict] = []
 
-    # SEC filings produce one Report per ingestion; pull its identifier
-    # so each new FactSet can emit a REPORT_HAS_FACT_SET edge. Dedupe
-    # defensively — if a filing somehow loaded multiple Report nodes,
-    # we still emit one edge per (report, fact_set) pair without
-    # multiplying duplicates.
-    report_ids: list[str] = []
-    filing_accession: str | None = None
-    filing_date: str | None = None
-    filing_form: str | None = None
-    try:
-      report_rows = ctx.execute(
-        "MATCH (r:Report) RETURN r.identifier AS report_id, "
-        "r.accession_number AS accession, r.filing_date AS filing_date, "
-        "r.form AS form"
-      )
-      seen: set[str] = set()
-      for row in report_rows:
-        rid = row.get("report_id")
-        if rid and rid not in seen:
-          seen.add(rid)
-          report_ids.append(rid)
-          # SEC loads one Report per ingestion; capture its filing
-          # coordinates once for the FactSet provenance stamp below.
-          if filing_accession is None:
-            filing_accession = row.get("accession")
-            filing_date = row.get("filing_date")
-            filing_form = row.get("form")
-    except Exception as e:
-      # A miss here means REPORT_HAS_FACT_SET edges never land for this
-      # filing — the package query won't be able to traverse from Report
-      # to its FactSets. Log loud enough to be noticed in CloudWatch.
-      logger.warning(
-        f"FactSet report lookup failed; REPORT_HAS_FACT_SET edges will "
-        f"be missing for this filing: {e}"
-      )
+    # Filing coordinates come from the processor (FilingMeta), not a graph
+    # lookup: the classify context carries an identifier-only Report table, so
+    # accession/filing_date/form can only be sourced from the enriched report
+    # metadata passed in. report_id (when present) drives the one-to-many
+    # REPORT_HAS_FACT_SET edges (report → each of its block FactSets).
+    report_ids: list[str] = [filing_meta.report_id] if filing_meta.report_id else []
 
     # Get all structures and their elements (both FROM and TO)
     try:
@@ -801,7 +788,12 @@ class AssociationClassifier:
       )
     except Exception as e:
       logger.debug(f"FactSet structure query failed: {e}")
-      return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+      return (
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        pd.DataFrame(),
+      )
 
     # Also get FROM elements per structure
     try:
@@ -821,9 +813,10 @@ class AssociationClassifier:
     # (which carries the OLTP fact_sets.provenance blob).
     provenance_json = FiledProvenance(
       source="sec_edgar",
-      accession=filing_accession,
-      filing_date=filing_date,
-      form=filing_form,
+      accession=filing_meta.accession,
+      filing_date=filing_meta.filing_date,
+      form=filing_meta.form,
+      filer_cik=filing_meta.filer_cik,
     ).model_dump_json()
 
     # Merge FROM and TO element sets per structure
