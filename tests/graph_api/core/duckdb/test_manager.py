@@ -7,12 +7,67 @@ from fastapi import HTTPException
 
 from robosystems.graph_api.core.duckdb.manager import (
   DuckDBTableManager,
+  validate_read_only_sql,
   validate_table_name,
   validate_table_name_decorator,
 )
 from robosystems.graph_api.models.tables import (
   TableQueryRequest,
 )
+
+
+@pytest.mark.unit
+class TestValidateReadOnlySql:
+  """The advertised SELECT-only / single-statement contract, now enforced."""
+
+  def test_allows_select(self):
+    validate_read_only_sql("SELECT * FROM Element")
+
+  def test_allows_with_cte(self):
+    validate_read_only_sql("WITH x AS (SELECT 1 AS a) SELECT a FROM x")
+
+  def test_allows_leading_whitespace_and_case(self):
+    validate_read_only_sql("   select 1")
+    validate_read_only_sql("\n\tSeLeCt 1")
+
+  def test_allows_trailing_semicolon(self):
+    validate_read_only_sql("SELECT 1;")
+
+  def test_allows_semicolon_inside_string_literal(self):
+    validate_read_only_sql("SELECT 'a;b' AS x")
+
+  def test_rejects_empty(self):
+    with pytest.raises(HTTPException) as e:
+      validate_read_only_sql("   ")
+    assert e.value.status_code == 400
+
+  def test_rejects_statement_chaining(self):
+    with pytest.raises(HTTPException) as e:
+      validate_read_only_sql("SELECT 1; DROP TABLE Element")
+    assert e.value.status_code == 400
+    assert "single statement" in e.value.detail
+
+  def test_rejects_write_statements(self):
+    for sql in [
+      "INSERT INTO Element VALUES (1)",
+      "UPDATE Element SET a=1",
+      "DELETE FROM Element",
+      "CREATE TABLE x (i INT)",
+      "DROP TABLE Element",
+      "ATTACH '/etc/passwd' AS p",
+      "COPY Element TO '/tmp/x.csv'",
+      "PRAGMA database_list",
+      "CALL pragma_version()",
+      "SET enable_external_access=true",
+      "INSTALL httpfs",
+    ]:
+      with pytest.raises(HTTPException) as e:
+        validate_read_only_sql(sql)
+      assert e.value.status_code == 400, sql
+
+  def test_rejects_write_hidden_after_comment(self):
+    with pytest.raises(HTTPException):
+      validate_read_only_sql("-- harmless\nDROP TABLE Element")
 
 
 @pytest.mark.unit
@@ -241,13 +296,15 @@ class TestDuckDBTableManagerQueryTable:
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_with_parameters(self, mock_get_pool):
-    """Should pass parameters to DuckDB execute."""
+    """Should pass parameters to DuckDB execute (via the read-only sandbox)."""
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
     mock_conn = MagicMock()
-    mock_conn.execute.return_value.fetchall.return_value = [(1, "test")]
-    mock_conn.description = [("id",), ("name",)]
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_cursor = MagicMock()
+    mock_cursor.fetchmany.return_value = [(1, "test")]
+    mock_cursor.description = [("id",), ("name",)]
+    mock_conn.execute.return_value = mock_cursor
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
@@ -266,9 +323,11 @@ class TestDuckDBTableManagerQueryTable:
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
     mock_conn = MagicMock()
-    mock_conn.execute.return_value.fetchall.return_value = []
-    mock_conn.description = []
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_cursor = MagicMock()
+    mock_cursor.fetchmany.return_value = []
+    mock_cursor.description = []
+    mock_conn.execute.return_value = mock_cursor
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
@@ -281,16 +340,16 @@ class TestDuckDBTableManagerQueryTable:
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_error_raises_400(self, mock_get_pool):
-    """Should raise 400 on query error."""
+    """Should raise 400 on query execution error."""
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
     mock_conn = MagicMock()
     mock_conn.execute.side_effect = RuntimeError("Query syntax error")
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
-      sql="INVALID SQL",
+      sql="SELECT * FROM nonexistent_table",
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -313,13 +372,10 @@ class TestDuckDBTableManagerQueryTableStreaming:
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
     mock_cursor.description = [("id",), ("name",)]
-    mock_cursor.fetchmany.side_effect = [
-      [(1, "a"), (2, "b")],
-      [(3, "c")],
-      [],
-    ]
+    # Buffered fetch: one fetchmany call returns all rows, then chunked in-memory.
+    mock_cursor.fetchmany.return_value = [(1, "a"), (2, "b"), (3, "c")]
     mock_conn.execute.return_value = mock_cursor
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
@@ -331,6 +387,8 @@ class TestDuckDBTableManagerQueryTableStreaming:
     assert len(chunks) == 2
     assert chunks[0]["chunk_index"] == 0
     assert chunks[0]["row_count"] == 2
+    assert chunks[0]["is_last_chunk"] is False
+    assert chunks[1]["row_count"] == 1
     assert chunks[1]["is_last_chunk"] is True
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
@@ -340,11 +398,11 @@ class TestDuckDBTableManagerQueryTableStreaming:
     mock_get_pool.return_value = mock_pool
     mock_conn = MagicMock()
     mock_conn.execute.side_effect = RuntimeError("Query failed")
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
-      sql="BAD SQL",
+      sql="SELECT * FROM t",
     )
 
     chunks = list(self.manager.query_table_streaming(request))
@@ -507,3 +565,60 @@ class TestDuckDBTableManagerListTables:
     assert len(result) == 2
     assert result[0].table_name == "Entity"
     assert result[0].row_count == 42
+
+
+@pytest.mark.unit
+class TestStreamingLockSafety:
+  """Regression: streaming must NOT hold the per-graph lock across `yield`.
+
+  The streaming response driver resumes the generator on arbitrary worker
+  threads; a threading lock released on a different thread than acquired raises
+  and wedges the lock. The buffered design fetches (and releases the lock) on
+  one thread before the first yield.
+  """
+
+  def test_streaming_releases_lock_before_yield(self, tmp_path):
+    import threading
+
+    import duckdb
+
+    from robosystems.graph_api.core.duckdb.pool import DuckDBConnectionPool
+    from robosystems.graph_api.models.tables import TableQueryRequest
+    from robosystems.utils.path_validation import get_duckdb_staging_path
+
+    graph_id = "kgstream00000001"
+    path = get_duckdb_staging_path(graph_id, base_path=str(tmp_path))
+    con = duckdb.connect(str(path))
+    con.execute("CREATE TABLE t AS SELECT i FROM range(5) AS r(i)")
+    con.execute("CHECKPOINT")
+    con.close()
+
+    pool = DuckDBConnectionPool(base_path=str(tmp_path))
+    manager = DuckDBTableManager()
+
+    with patch(
+      "robosystems.graph_api.core.duckdb.manager.get_duckdb_pool", return_value=pool
+    ):
+      gen = manager.query_table_streaming(
+        TableQueryRequest(graph_id=graph_id, sql="SELECT * FROM t"), chunk_size=2
+      )
+      first = next(gen)  # triggers the buffered fetch + releases the lock
+      assert first["row_count"] >= 1
+
+      # From another thread, the per-graph lock must be immediately acquirable —
+      # it would be held (→ False) if the generator held it across the yield.
+      acquired = []
+
+      def _try_lock():
+        lock = pool._get_database_lock(graph_id)
+        got = lock.acquire(blocking=False)
+        acquired.append(got)
+        if got:
+          lock.release()
+
+      t = threading.Thread(target=_try_lock)
+      t.start()
+      t.join()
+      assert acquired == [True]
+
+      list(gen)  # drain the rest

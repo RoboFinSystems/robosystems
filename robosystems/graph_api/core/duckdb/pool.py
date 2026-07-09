@@ -140,6 +140,89 @@ class DuckDBConnectionPool:
       if connection_info:
         self._release_connection(graph_id, connection_info)
 
+  @contextmanager
+  def get_readonly_connection(self, graph_id: str):
+    """
+    Yield a hardened, sandboxed READ-ONLY connection for untrusted tenant SQL.
+
+    Security posture (closes the tenant-SQL isolation hole): opens the staging
+    file ``read_only`` with ``enable_external_access=false`` +
+    ``lock_configuration=true`` and does NOT load httpfs/postgres_scanner. This
+    blocks external ``ATTACH``, httpfs egress, ``read_text``/``read_blob``,
+    ``postgres_scan`` and ``COPY ... TO`` — the connection can only read the
+    graph's own local materialized staging tables. It is SEPARATE from the
+    read-write connection used by staging/materialization (which legitimately
+    needs external access).
+
+    DuckDB forbids a second connection with a different configuration to the
+    same file in-process, so any read-write pool connection for this graph is
+    released first, under the per-graph lock. The connection is not pooled — it
+    is opened per query and closed on exit.
+
+    Yields:
+        duckdb.DuckDBPyConnection: A read-only, externally-sandboxed connection.
+
+    Raises:
+        FileNotFoundError: If no staging database exists for the graph yet.
+        ValueError: If the resolved path escapes the base directory.
+    """
+    db_path = self._get_database_path(graph_id)
+
+    # Defense-in-depth: verify resolved path stays under base_path
+    if not db_path.resolve().is_relative_to(self.base_path.resolve()):
+      raise ValueError(f"Path escapes base directory: {db_path}")
+
+    with self._get_database_lock(graph_id):
+      # DuckDB won't open a second connection with a different configuration to
+      # the same file, so release any read-write connection holding it first.
+      #
+      # KNOWN LIMITATION: the staging write methods (create_table /
+      # insert_into_table) execute their statements outside this per-graph lock,
+      # so evicting here can close a connection a concurrent staging run is
+      # mid-statement on, aborting that run (it is Dagster-retryable, not data
+      # loss). Exposure is low — shared repos are blocked from the tenant read
+      # surface, and interactive reads rarely overlap a graph's own
+      # materialization. A full fix (writers hold this lock for their duration)
+      # is tracked as a follow-up.
+      self.close_database_connections(graph_id)
+
+      if not db_path.exists():
+        raise FileNotFoundError(
+          f"No staging database for {graph_id} — create staging tables first."
+        )
+
+      # NOTE: temp_directory (spill-to-disk) cannot be set with external access
+      # disabled — DuckDB treats it as external file access. Read queries are
+      # therefore memory-bound (memory_limit); an over-limit sort/aggregation
+      # errors out (bounded failure), which is acceptable for a read surface.
+      config = {
+        "enable_external_access": "false",
+        "lock_configuration": "true",
+      }
+      # Best-effort resource caps (never let their resolution break the
+      # security-critical connection open).
+      try:
+        config["threads"] = str(self._get_duckdb_max_threads())
+      except Exception as e:
+        logger.debug(f"Could not resolve DuckDB threads for read-only conn: {e}")
+      try:
+        config["memory_limit"] = self._get_duckdb_memory_limit(graph_id)
+      except Exception as e:
+        logger.debug(f"Could not resolve DuckDB memory_limit for read-only conn: {e}")
+
+      conn = duckdb.connect(str(db_path), read_only=True, config=config)
+      logger.debug(
+        f"Opened hardened read-only DuckDB connection for {graph_id} "
+        f"(external access disabled, config locked)"
+      )
+      try:
+        yield conn
+      finally:
+        try:
+          conn.close()
+        except Exception as e:
+          logger.debug(f"Error closing read-only DuckDB connection: {e}")
+
   def _acquire_connection(self, graph_id: str) -> DuckDBConnectionInfo:
     """Acquire a connection from the pool."""
     self._maybe_run_maintenance()

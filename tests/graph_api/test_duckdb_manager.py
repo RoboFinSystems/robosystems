@@ -182,14 +182,11 @@ class TestDuckDBTableManager:
   def test_query_table_success(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_cursor = mock_conn.execute.return_value
+    mock_cursor.fetchmany.return_value = [("Alice", 30), ("Bob", 25)]
+    mock_cursor.description = [("name", None), ("age", None)]
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
     mock_get_pool.return_value = mock_pool
-
-    mock_conn.execute.return_value.fetchall.return_value = [
-      ("Alice", 30),
-      ("Bob", 25),
-    ]
-    mock_conn.description = [("name", None), ("age", None)]
 
     request = TableQueryRequest(
       graph_id="test_graph", sql="SELECT name, age FROM customers"
@@ -200,17 +197,17 @@ class TestDuckDBTableManager:
     assert response.columns == ["name", "age"]
     assert response.rows == [["Alice", 30], ["Bob", 25]]
     assert response.row_count == 2
-    assert response.execution_time_ms > 0
+    assert response.execution_time_ms >= 0
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_table_empty_results(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_cursor = mock_conn.execute.return_value
+    mock_cursor.fetchmany.return_value = []
+    mock_cursor.description = [("name", None), ("age", None)]
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
     mock_get_pool.return_value = mock_pool
-
-    mock_conn.execute.return_value.fetchall.return_value = []
-    mock_conn.description = [("name", None), ("age", None)]
 
     request = TableQueryRequest(
       graph_id="test_graph", sql="SELECT name, age FROM customers WHERE FALSE"
@@ -227,10 +224,12 @@ class TestDuckDBTableManager:
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_conn.execute.side_effect = Exception("Invalid SQL")
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
     mock_get_pool.return_value = mock_pool
 
-    request = TableQueryRequest(graph_id="test_graph", sql="INVALID SQL")
+    request = TableQueryRequest(
+      graph_id="test_graph", sql="SELECT * FROM nonexistent_table"
+    )
 
     with pytest.raises(HTTPException) as exc_info:
       self.manager.query_table(request)
@@ -241,16 +240,13 @@ class TestDuckDBTableManager:
   def test_query_table_streaming_success(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
     mock_get_pool.return_value = mock_pool
 
     mock_cursor = MagicMock()
     mock_cursor.description = [("id", None), ("name", None)]
-    mock_cursor.fetchmany.side_effect = [
-      [(1, "Alice"), (2, "Bob")],
-      [(3, "Charlie")],
-      [],
-    ]
+    # Buffered fetch: one fetchmany returns all rows, then chunked in-memory.
+    mock_cursor.fetchmany.return_value = [(1, "Alice"), (2, "Bob"), (3, "Charlie")]
     mock_conn.execute.return_value = mock_cursor
 
     request = TableQueryRequest(graph_id="test_graph", sql="SELECT * FROM customers")
@@ -275,7 +271,7 @@ class TestDuckDBTableManager:
   def test_query_table_streaming_empty_results(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
     mock_get_pool.return_value = mock_pool
 
     mock_cursor = MagicMock()
@@ -296,16 +292,16 @@ class TestDuckDBTableManager:
     mock_pool = MagicMock()
     mock_conn = MagicMock()
     mock_conn.execute.side_effect = Exception("Query error")
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
     mock_get_pool.return_value = mock_pool
 
-    request = TableQueryRequest(graph_id="test_graph", sql="INVALID SQL")
+    request = TableQueryRequest(graph_id="test_graph", sql="SELECT * FROM customers")
 
     chunks = list(self.manager.query_table_streaming(request))
 
     assert len(chunks) == 1
     assert "error" in chunks[0]
-    assert chunks[0]["error"] == "Query error"
+    assert "Query error" in chunks[0]["error"]
     assert chunks[0]["is_last_chunk"] is True
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")

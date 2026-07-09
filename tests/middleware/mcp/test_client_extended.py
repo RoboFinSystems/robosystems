@@ -208,6 +208,34 @@ class TestInjectLimitToSimpleQuery:
     )
     assert result == "MATCH (n) RETURN n ORDER BY n.id LIMIT 50"
 
+  def test_order_by_desc_with_semicolon(self):
+    client = _create_client()
+    result = client._inject_limit_to_simple_query(
+      "MATCH (n) RETURN n ORDER BY n.x DESC;", 50
+    )
+    assert result == "MATCH (n) RETURN n ORDER BY n.x DESC LIMIT 50"
+
+  def test_limit_injected_after_last_order_by(self):
+    client = _create_client()
+    result = client._inject_limit_to_simple_query(
+      "MATCH (n) WITH n ORDER BY n.a RETURN n ORDER BY n.b", 50
+    )
+    assert result == "MATCH (n) WITH n ORDER BY n.a RETURN n ORDER BY n.b LIMIT 50"
+
+  def test_no_order_by_is_not_polynomial(self):
+    """Regression: the previous `(.*)(ORDER BY ...)$` regex backtracked
+    O(n^2) on queries without a trailing ORDER BY (ReDoS). The linear finder
+    must handle a large no-ORDER-BY query near-instantly."""
+    import time
+
+    client = _create_client()
+    query = "MATCH (n) RETURN " + "a" * 40000
+    start = time.perf_counter()
+    result = client._inject_limit_to_simple_query(query, 50)
+    elapsed = time.perf_counter() - start
+    assert result.endswith(" LIMIT 50")
+    assert elapsed < 0.5, f"suspiciously slow ({elapsed:.2f}s) — possible ReDoS"
+
 
 @pytest.mark.unit
 class TestSanitizeErrorMessage:

@@ -923,16 +923,20 @@ class GraphMCPClient:
     if query_trimmed.endswith(";"):
       query_trimmed = query_trimmed[:-1].rstrip()
 
-    # Check if query ends with ORDER BY clause
-    # Pattern: ORDER BY <expression> [ASC|DESC]
-    order_by_pattern = r"(.*)(\bORDER\s+BY\s+[^;]+?)$"
-    match = re.match(order_by_pattern, query_trimmed, re.IGNORECASE | re.DOTALL)
-
-    if match:
-      # Query has ORDER BY at the end
-      before_order = match.group(1).rstrip()
-      order_clause = match.group(2)
-      return f"{before_order} {order_clause} LIMIT {limit}"
+    # Inject LIMIT after a trailing ORDER BY clause. Find the LAST "ORDER BY"
+    # via a linear keyword scan — the previous `(.*)(\bORDER\s+BY\s+[^;]+?)$`
+    # regex backtracks polynomially (O(n^2)) on queries WITHOUT a trailing
+    # ORDER BY (py/polynomial-redos, verified catastrophic).
+    order_by_matches = list(
+      re.finditer(r"\bORDER\s+BY\s+", query_trimmed, re.IGNORECASE)
+    )
+    if order_by_matches:
+      last = order_by_matches[-1]
+      order_clause = query_trimmed[last.start() :]
+      # Preserve the original contract: the clause runs to end with no ';'.
+      if ";" not in order_clause:
+        before_order = query_trimmed[: last.start()].rstrip()
+        return f"{before_order} {order_clause} LIMIT {limit}"
 
     # No ORDER BY, just append LIMIT
     return f"{query_trimmed} LIMIT {limit}"
