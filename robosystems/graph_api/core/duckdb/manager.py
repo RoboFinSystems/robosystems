@@ -1,4 +1,6 @@
 import re
+import threading
+from contextlib import contextmanager
 from functools import wraps
 from typing import Any
 
@@ -62,6 +64,77 @@ def validate_table_name_decorator(func):
     return func(self, *args, **kwargs)
 
   return wrapper
+
+
+# Tenant read-query safety limits — the contract the endpoint advertises,
+# now actually enforced (alongside the hardened read-only sandbox connection).
+MAX_QUERY_ROWS = 10_000
+QUERY_TIMEOUT_SECONDS = 30
+
+
+def _strip_sql_noise(sql: str) -> str:
+  """Remove comments and string/identifier literals so structural checks
+  (statement count, leading keyword) can't be fooled by their contents.
+
+  Uses linear (unrolled block comment) / possessive (`*+`) forms so this
+  validator can't itself be turned into a ReDoS on the tenant SQL path.
+  """
+  s = re.sub(r"--[^\n]*", " ", sql)
+  s = re.sub(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/", " ", s)
+  s = re.sub(r"'(?:[^']|'')*+'", "''", s)
+  s = re.sub(r'"(?:[^"]|"")*+"', '""', s)
+  return s
+
+
+def validate_read_only_sql(sql: str) -> None:
+  """Enforce the advertised SELECT-only, single-statement contract.
+
+  The hardened read-only + external-access-off connection already blocks writes
+  and exfiltration at the engine level; this rejects non-read statements and
+  statement chaining up front (defense-in-depth + a clear error message).
+
+  Raises:
+      HTTPException: 400 if the SQL is empty, chains statements, or does not
+          begin with SELECT/WITH.
+  """
+  if not sql or not sql.strip():
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty query")
+
+  stripped = _strip_sql_noise(sql).strip().rstrip(";").strip()
+
+  # Any remaining ';' sits between statements — reject chaining.
+  if ";" in stripped:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Only a single statement is allowed.",
+    )
+
+  match = re.match(r"\s*([a-zA-Z]+)", stripped)
+  first_keyword = match.group(1).lower() if match else ""
+  if first_keyword not in ("select", "with"):
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Only read-only SELECT/WITH queries are allowed on this surface.",
+    )
+
+
+@contextmanager
+def _interrupt_after(conn, timeout: float, timed_out: dict):
+  """Interrupt `conn` if the wrapped work runs past `timeout` seconds."""
+
+  def _interrupt():
+    timed_out["v"] = True
+    try:
+      conn.interrupt()
+    except Exception:
+      pass
+
+  timer = threading.Timer(timeout, _interrupt)
+  timer.start()
+  try:
+    yield
+  finally:
+    timer.cancel()
 
 
 class DuckDBTableManager:
@@ -718,17 +791,32 @@ class DuckDBTableManager:
 
     start_time = time.time()
 
+    validate_read_only_sql(request.sql)
+
     logger.info(f"Executing query for graph {request.graph_id}: {request.sql[:100]}...")
 
     pool = get_duckdb_pool()
+    timed_out = {"v": False}
 
     try:
-      with pool.get_connection(request.graph_id) as conn:
-        if request.parameters:
-          result = conn.execute(request.sql, request.parameters).fetchall()
-        else:
-          result = conn.execute(request.sql).fetchall()
-        description = conn.description
+      # Hardened, sandboxed read-only connection: external access disabled,
+      # config locked, no httpfs/postgres_scanner — reads local staging only.
+      with pool.get_readonly_connection(request.graph_id) as conn:
+        with _interrupt_after(conn, QUERY_TIMEOUT_SECONDS, timed_out):
+          if request.parameters:
+            cursor = conn.execute(request.sql, request.parameters)
+          else:
+            cursor = conn.execute(request.sql)
+          # Fetch one past the cap so we can detect + flag truncation.
+          result = cursor.fetchmany(MAX_QUERY_ROWS + 1)
+
+        description = cursor.description
+
+        if len(result) > MAX_QUERY_ROWS:
+          result = result[:MAX_QUERY_ROWS]
+          logger.warning(
+            f"Query for {request.graph_id} truncated to {MAX_QUERY_ROWS} rows"
+          )
 
         columns = [desc[0] for desc in description] if description else []
         rows = [list(row) for row in result]
@@ -744,7 +832,16 @@ class DuckDBTableManager:
           execution_time_ms=execution_time_ms,
         )
 
+    except HTTPException:
+      raise
+    except FileNotFoundError as e:
+      raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
+      if timed_out["v"]:
+        raise HTTPException(
+          status_code=status.HTTP_408_REQUEST_TIMEOUT,
+          detail=f"Query exceeded {QUERY_TIMEOUT_SECONDS}s time limit.",
+        )
       logger.error(f"Query failed for graph {request.graph_id}: {e}")
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -769,59 +866,79 @@ class DuckDBTableManager:
 
     start_time = time.time()
 
+    try:
+      validate_read_only_sql(request.sql)
+    except HTTPException as e:
+      yield {
+        "error": e.detail,
+        "error_type": "ValidationError",
+        "chunk_index": 0,
+        "is_last_chunk": True,
+        "row_count": 0,
+        "total_rows_sent": 0,
+        "execution_time_ms": 0,
+      }
+      return
+
     logger.info(
       f"Executing streaming query for graph {request.graph_id}: {request.sql[:100]}..."
     )
 
     pool = get_duckdb_pool()
+    timed_out = {"v": False}
 
     try:
-      with pool.get_connection(request.graph_id) as conn:
-        # Execute query and get cursor (does NOT fetch all results)
-        if request.parameters:
-          cursor = conn.execute(request.sql, request.parameters)
-        else:
-          cursor = conn.execute(request.sql)
-        description = cursor.description
+      # Hardened, sandboxed read-only connection (see query_table).
+      with pool.get_readonly_connection(request.graph_id) as conn:
+        with _interrupt_after(conn, QUERY_TIMEOUT_SECONDS, timed_out):
+          # Execute query and get cursor (does NOT fetch all results)
+          if request.parameters:
+            cursor = conn.execute(request.sql, request.parameters)
+          else:
+            cursor = conn.execute(request.sql)
+          description = cursor.description
 
-        columns = [desc[0] for desc in description] if description else []
+          columns = [desc[0] for desc in description] if description else []
 
-        chunk_index = 0
-        total_rows_sent = 0
+          chunk_index = 0
+          total_rows_sent = 0
 
-        # Fetch results in chunks to avoid memory exhaustion
-        while True:
-          chunk_rows_raw = cursor.fetchmany(chunk_size)
+          # Fetch in chunks, bounded by the advertised row cap.
+          while total_rows_sent < MAX_QUERY_ROWS:
+            fetch_size = min(chunk_size, MAX_QUERY_ROWS - total_rows_sent)
+            chunk_rows_raw = cursor.fetchmany(fetch_size)
 
-          if not chunk_rows_raw:
-            break
+            if not chunk_rows_raw:
+              break
 
-          chunk_rows = [list(row) for row in chunk_rows_raw]
-          total_rows_sent += len(chunk_rows)
-          is_last_chunk = len(chunk_rows) < chunk_size
-
-          chunk_data = {
-            "columns": columns,
-            "rows": chunk_rows,
-            "chunk_index": chunk_index,
-            "is_last_chunk": is_last_chunk,
-            "row_count": len(chunk_rows),
-            "total_rows_sent": total_rows_sent,
-            "execution_time_ms": (time.time() - start_time) * 1000,
-          }
-
-          # Log only every 10th chunk or the last chunk to reduce overhead
-          if chunk_index % 10 == 0 or is_last_chunk:
-            logger.debug(
-              f"Yielding chunk {chunk_index} with {len(chunk_rows)} rows "
-              f"(total: {total_rows_sent})"
+            chunk_rows = [list(row) for row in chunk_rows_raw]
+            total_rows_sent += len(chunk_rows)
+            is_last_chunk = (
+              len(chunk_rows) < fetch_size or total_rows_sent >= MAX_QUERY_ROWS
             )
 
-          yield chunk_data
-          chunk_index += 1
+            chunk_data = {
+              "columns": columns,
+              "rows": chunk_rows,
+              "chunk_index": chunk_index,
+              "is_last_chunk": is_last_chunk,
+              "row_count": len(chunk_rows),
+              "total_rows_sent": total_rows_sent,
+              "execution_time_ms": (time.time() - start_time) * 1000,
+            }
 
-          if is_last_chunk:
-            break
+            # Log only every 10th chunk or the last chunk to reduce overhead
+            if chunk_index % 10 == 0 or is_last_chunk:
+              logger.debug(
+                f"Yielding chunk {chunk_index} with {len(chunk_rows)} rows "
+                f"(total: {total_rows_sent})"
+              )
+
+            yield chunk_data
+            chunk_index += 1
+
+            if is_last_chunk:
+              break
 
         execution_time_ms = (time.time() - start_time) * 1000
         logger.info(
@@ -829,16 +946,28 @@ class DuckDBTableManager:
         )
 
     except Exception as e:
-      logger.error(f"Streaming query failed for graph {request.graph_id}: {e}")
-      yield {
-        "error": str(e),
-        "error_type": type(e).__name__,
-        "chunk_index": 0,
-        "is_last_chunk": True,
-        "row_count": 0,
-        "total_rows_sent": 0,
-        "execution_time_ms": (time.time() - start_time) * 1000,
-      }
+      if timed_out["v"]:
+        logger.warning(f"Streaming query timed out for graph {request.graph_id}")
+        yield {
+          "error": f"Query exceeded {QUERY_TIMEOUT_SECONDS}s time limit.",
+          "error_type": "QueryTimeout",
+          "chunk_index": 0,
+          "is_last_chunk": True,
+          "row_count": 0,
+          "total_rows_sent": 0,
+          "execution_time_ms": (time.time() - start_time) * 1000,
+        }
+      else:
+        logger.error(f"Streaming query failed for graph {request.graph_id}: {e}")
+        yield {
+          "error": str(e),
+          "error_type": type(e).__name__,
+          "chunk_index": 0,
+          "is_last_chunk": True,
+          "row_count": 0,
+          "total_rows_sent": 0,
+          "execution_time_ms": (time.time() - start_time) * 1000,
+        }
 
   def list_tables(self, graph_id: str) -> list[TableInfo]:
     logger.info(f"Listing tables for graph {graph_id}")

@@ -551,3 +551,61 @@ class TestDuckDBMemoryOverrides:
     """Should return None when no previous override exists."""
     old = set_duckdb_memory_override("58GB", graph_id="sec")
     assert old is None
+
+
+@pytest.mark.unit
+class TestReadOnlySandbox:
+  """The hardened read-only tenant connection (P0 security fix)."""
+
+  def _stage_table(self, base_dir, graph_id="kgtest001"):
+    """Create a local materialized staging table at the pool's expected path."""
+    import duckdb
+
+    from robosystems.utils.path_validation import get_duckdb_staging_path
+
+    path = get_duckdb_staging_path(graph_id, base_path=str(base_dir))
+    con = duckdb.connect(str(path))
+    con.execute("CREATE TABLE Element AS SELECT i AS id FROM range(2000) AS r(i)")
+    con.execute("CHECKPOINT")
+    con.close()
+    return graph_id
+
+  def test_local_reads_work(self, tmp_path):
+    pool = _make_pool(tmp_path)
+    gid = self._stage_table(tmp_path)
+    with pool.get_readonly_connection(gid) as conn:
+      assert conn.execute("SELECT count(*) FROM Element").fetchone()[0] == 2000
+
+  def test_external_access_blocked(self, tmp_path):
+    pool = _make_pool(tmp_path)
+    gid = self._stage_table(tmp_path)
+    with pool.get_readonly_connection(gid) as conn:
+      for bad in [
+        "SELECT read_text('/etc/hostname')",
+        "SELECT * FROM read_csv('/etc/hostname')",
+        "ATTACH '/tmp/x.db' AS p",
+        "SET enable_external_access=true",
+        "INSTALL postgres_scanner",
+        "COPY Element TO '/tmp/leak.csv'",
+        "CREATE TABLE evil (i INT)",
+      ]:
+        with pytest.raises(Exception):
+          conn.execute(bad)
+
+  def test_evicts_readwrite_connection_to_open(self, tmp_path):
+    """A live read-write pool connection must not block the read-only open
+    (DuckDB forbids mixed-config coexistence — the read path evicts first)."""
+    pool = _make_pool(tmp_path)
+    gid = self._stage_table(tmp_path)
+    # Warm a read-write pool connection (external access on) for the graph.
+    with pool.get_connection(gid) as rw:
+      rw.execute("SELECT 1").fetchone()
+    # Read-only open should succeed by evicting the cached read-write conn.
+    with pool.get_readonly_connection(gid) as conn:
+      assert conn.execute("SELECT count(*) FROM Element").fetchone()[0] == 2000
+
+  def test_missing_staging_db_raises(self, tmp_path):
+    pool = _make_pool(tmp_path)
+    with pytest.raises(FileNotFoundError):
+      with pool.get_readonly_connection("kgnostaging"):
+        pass

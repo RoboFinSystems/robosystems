@@ -7,12 +7,67 @@ from fastapi import HTTPException
 
 from robosystems.graph_api.core.duckdb.manager import (
   DuckDBTableManager,
+  validate_read_only_sql,
   validate_table_name,
   validate_table_name_decorator,
 )
 from robosystems.graph_api.models.tables import (
   TableQueryRequest,
 )
+
+
+@pytest.mark.unit
+class TestValidateReadOnlySql:
+  """The advertised SELECT-only / single-statement contract, now enforced."""
+
+  def test_allows_select(self):
+    validate_read_only_sql("SELECT * FROM Element")
+
+  def test_allows_with_cte(self):
+    validate_read_only_sql("WITH x AS (SELECT 1 AS a) SELECT a FROM x")
+
+  def test_allows_leading_whitespace_and_case(self):
+    validate_read_only_sql("   select 1")
+    validate_read_only_sql("\n\tSeLeCt 1")
+
+  def test_allows_trailing_semicolon(self):
+    validate_read_only_sql("SELECT 1;")
+
+  def test_allows_semicolon_inside_string_literal(self):
+    validate_read_only_sql("SELECT 'a;b' AS x")
+
+  def test_rejects_empty(self):
+    with pytest.raises(HTTPException) as e:
+      validate_read_only_sql("   ")
+    assert e.value.status_code == 400
+
+  def test_rejects_statement_chaining(self):
+    with pytest.raises(HTTPException) as e:
+      validate_read_only_sql("SELECT 1; DROP TABLE Element")
+    assert e.value.status_code == 400
+    assert "single statement" in e.value.detail
+
+  def test_rejects_write_statements(self):
+    for sql in [
+      "INSERT INTO Element VALUES (1)",
+      "UPDATE Element SET a=1",
+      "DELETE FROM Element",
+      "CREATE TABLE x (i INT)",
+      "DROP TABLE Element",
+      "ATTACH '/etc/passwd' AS p",
+      "COPY Element TO '/tmp/x.csv'",
+      "PRAGMA database_list",
+      "CALL pragma_version()",
+      "SET enable_external_access=true",
+      "INSTALL httpfs",
+    ]:
+      with pytest.raises(HTTPException) as e:
+        validate_read_only_sql(sql)
+      assert e.value.status_code == 400, sql
+
+  def test_rejects_write_hidden_after_comment(self):
+    with pytest.raises(HTTPException):
+      validate_read_only_sql("-- harmless\nDROP TABLE Element")
 
 
 @pytest.mark.unit
@@ -241,13 +296,15 @@ class TestDuckDBTableManagerQueryTable:
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_with_parameters(self, mock_get_pool):
-    """Should pass parameters to DuckDB execute."""
+    """Should pass parameters to DuckDB execute (via the read-only sandbox)."""
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
     mock_conn = MagicMock()
-    mock_conn.execute.return_value.fetchall.return_value = [(1, "test")]
-    mock_conn.description = [("id",), ("name",)]
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_cursor = MagicMock()
+    mock_cursor.fetchmany.return_value = [(1, "test")]
+    mock_cursor.description = [("id",), ("name",)]
+    mock_conn.execute.return_value = mock_cursor
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
@@ -266,9 +323,11 @@ class TestDuckDBTableManagerQueryTable:
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
     mock_conn = MagicMock()
-    mock_conn.execute.return_value.fetchall.return_value = []
-    mock_conn.description = []
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_cursor = MagicMock()
+    mock_cursor.fetchmany.return_value = []
+    mock_cursor.description = []
+    mock_conn.execute.return_value = mock_cursor
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
@@ -281,16 +340,16 @@ class TestDuckDBTableManagerQueryTable:
 
   @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_error_raises_400(self, mock_get_pool):
-    """Should raise 400 on query error."""
+    """Should raise 400 on query execution error."""
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
     mock_conn = MagicMock()
     mock_conn.execute.side_effect = RuntimeError("Query syntax error")
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
-      sql="INVALID SQL",
+      sql="SELECT * FROM nonexistent_table",
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -319,7 +378,7 @@ class TestDuckDBTableManagerQueryTableStreaming:
       [],
     ]
     mock_conn.execute.return_value = mock_cursor
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
@@ -340,11 +399,11 @@ class TestDuckDBTableManagerQueryTableStreaming:
     mock_get_pool.return_value = mock_pool
     mock_conn = MagicMock()
     mock_conn.execute.side_effect = RuntimeError("Query failed")
-    mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_readonly_connection.return_value.__enter__.return_value = mock_conn
 
     request = TableQueryRequest(
       graph_id="g1",
-      sql="BAD SQL",
+      sql="SELECT * FROM t",
     )
 
     chunks = list(self.manager.query_table_streaming(request))
