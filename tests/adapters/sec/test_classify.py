@@ -4,6 +4,7 @@ Tests TempLadybugContext lifecycle and AssociationClassifier pattern detection
 for RollUp, RollForward, Hypercube, LineItems, MemberList, and Dimension.
 """
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +14,7 @@ from robosystems.adapters.sec.processors.classify import (
   DISCLOSURE_CONCEPT_MAP,
   DISCLOSURE_TO_CANONICAL,
   AssociationClassifier,
+  FilingMeta,
   TempLadybugContext,
   _generate_ddl,
 )
@@ -1049,6 +1051,134 @@ class TestStructureFactSets:
 
     # FactSet should contain all 3 facts (rev, cogs, and unrelated — all reference structure elements)
     assert len(result.factset_fact_rels_df) == 3
+
+  def test_filing_meta_stamps_provenance_and_report_edges(self, tmp_path):
+    """FilingMeta populates FactSet `filed` provenance detail + REPORT_HAS_FACT_SET.
+
+    Regression for the provenance-sourcing fix: coordinates come from the
+    passed-in FilingMeta (the classify context can't read them from its
+    identifier-only Report table), and report_id drives the one-to-many
+    report → block-FactSet edges.
+    """
+    elements = [
+      {
+        "identifier": "elem_rev",
+        "qname": "us-gaap:Revenues",
+        "name": "Revenues",
+        "period_type": "duration",
+        "classification": None,
+        "balance": "credit",
+        "uri": "http://example.com#Revenues",
+      },
+    ]
+    associations = [
+      {
+        "identifier": "assoc1",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+        "order_value": 1.0,
+        "association_type": "Presentation",
+        "weight": None,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    structures = [{"identifier": "struct_is"}]
+    struct_assoc_rels = [
+      {"from": "struct_is", "to": "assoc1", "association_context": "pres"},
+    ]
+    to_rels = [{"from": "assoc1", "to": "elem_rev"}]
+    facts = [{"identifier": "fact_rev"}]
+    fact_element_rels = [{"from": "fact_rev", "to": "elem_rev"}]
+
+    output_dir = _make_test_data(
+      tmp_path,
+      associations,
+      elements,
+      from_rels=[],
+      to_rels=to_rels,
+      structures=structures,
+      struct_assoc_rels=struct_assoc_rels,
+      facts=facts,
+      fact_element_rels=fact_element_rels,
+    )
+
+    filing_meta = FilingMeta(
+      report_id="report1",
+      accession="0001045810-25-000023",
+      filing_date="2025-02-26",
+      form="10-K",
+      filer_cik="0001045810",
+    )
+    result = AssociationClassifier().classify(output_dir, filing_meta)
+
+    # One FactSet, with fully-populated `filed` provenance detail.
+    assert len(result.factsets_df) == 1
+    provenance = json.loads(result.factsets_df.iloc[0]["provenance"])
+    assert provenance["origin"] == "filed"
+    assert provenance["source"] == "sec_edgar"
+    assert provenance["accession"] == "0001045810-25-000023"
+    assert provenance["filing_date"] == "2025-02-26"
+    assert provenance["form"] == "10-K"
+    assert provenance["filer_cik"] == "0001045810"
+
+    # Report → FactSet edge (one-to-many report→block containment).
+    assert len(result.report_factset_rels_df) == 1
+    edge = result.report_factset_rels_df.iloc[0]
+    assert edge["from"] == "report1"
+    assert edge["to"] == result.factsets_df.iloc[0]["identifier"]
+
+  def test_no_filing_meta_yields_null_provenance_no_report_edges(self, tmp_path):
+    """Without FilingMeta, FactSets still build — detail-null provenance and no
+    REPORT_HAS_FACT_SET edges — a graceful, non-crashing fallback."""
+    elements = [
+      {
+        "identifier": "elem_rev",
+        "qname": "us-gaap:Revenues",
+        "name": "Revenues",
+        "period_type": "duration",
+        "classification": None,
+        "balance": "credit",
+        "uri": "http://example.com#Revenues",
+      },
+    ]
+    associations = [
+      {
+        "identifier": "assoc1",
+        "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+        "order_value": 1.0,
+        "association_type": "Presentation",
+        "weight": None,
+        "root": "True",
+        "preferred_label": None,
+      },
+    ]
+    structures = [{"identifier": "struct_is"}]
+    struct_assoc_rels = [
+      {"from": "struct_is", "to": "assoc1", "association_context": "pres"},
+    ]
+    to_rels = [{"from": "assoc1", "to": "elem_rev"}]
+    facts = [{"identifier": "fact_rev"}]
+    fact_element_rels = [{"from": "fact_rev", "to": "elem_rev"}]
+
+    output_dir = _make_test_data(
+      tmp_path,
+      associations,
+      elements,
+      from_rels=[],
+      to_rels=to_rels,
+      structures=structures,
+      struct_assoc_rels=struct_assoc_rels,
+      facts=facts,
+      fact_element_rels=fact_element_rels,
+    )
+
+    result = AssociationClassifier().classify(output_dir)
+
+    assert len(result.factsets_df) == 1
+    provenance = json.loads(result.factsets_df.iloc[0]["provenance"])
+    assert provenance["origin"] == "filed"
+    assert provenance["accession"] is None
+    assert result.report_factset_rels_df.empty
 
   def test_two_structures_separate_factsets(self, tmp_path):
     """Two structures in same report get independent FactSets."""
