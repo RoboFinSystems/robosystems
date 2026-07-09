@@ -175,7 +175,7 @@ Built end-to-end on open-source engines — PostgreSQL, LadybugDB, DuckDB, Lance
 - Embedded columnar graph database purpose-built for financial analytics
 - Base + extension schema architecture — extensions define domain models
 - Native DuckDB integration for high-performance staging and ingestion
-- LanceDB vector search for semantic element resolution (IVF-PQ indexes, 384-dim embeddings)
+- LanceDB as the semantic-modality engine — per-graph, on-disk vector stores (IVF-PQ, 384-dim embeddings) for AI memory (remember/recall) and vector-search offload
 - Tiered infrastructure with configurable memory, rate limits, and subgraph allocations
 - Shared tier hosts public repositories with read replicas
 
