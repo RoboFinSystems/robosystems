@@ -30,9 +30,12 @@ awslocal s3api create-bucket \
   --bucket robosystems-public-data \
   --region us-east-1 || echo "Bucket robosystems-public-data already exists"
 
+# NOTE: the S3 API key is MaxAgeSeconds (not MaxAge — that silently fails
+# param validation and leaves the bucket with no CORS, blocking browser
+# fetches of externalized fact HTML from the frontends).
 awslocal s3api put-bucket-cors \
   --bucket robosystems-public-data \
-  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"MaxAge":3600}]}' || echo "CORS already configured for robosystems-public-data"
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type"],"MaxAgeSeconds":3600}]}' || echo "WARNING: failed to configure CORS for robosystems-public-data"
 
 # Note: deployment and logs buckets are infrastructure-only (prod/staging)
 # They're not needed for local development
