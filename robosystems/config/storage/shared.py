@@ -266,6 +266,56 @@ def get_artifact_r2_key(name: str) -> str:
 
 
 # =============================================================================
+# Public Data URL Helpers
+# =============================================================================
+
+
+def get_public_data_url(bucket: str, key: str, cdn_url: str | None = None) -> str:
+  """Build a browser-reachable URL for an object in the public-data bucket.
+
+  Externalized SEC content (large XBRL text blocks, narrative sections) is
+  uploaded to the public-data bucket, and its URL is persisted on the graph
+  Fact / OpenSearch document for later retrieval by the frontend. This
+  resolves that URL so it works across environments:
+
+    1. CDN (prod/staging): ``{cdn_url}/{key}`` when a CloudFront distribution
+       is configured.
+    2. LocalStack (dev): path-style against the *browser-reachable* endpoint
+       (``AWS_S3_PRESIGN_ENDPOINT_URL`` — e.g. ``http://localhost:4566`` —
+       falling back to ``AWS_ENDPOINT_URL``). The pipeline uploads through a
+       docker-DNS hostname (``http://localstack:4566``) that isn't reachable
+       from the host browser, so the stored URL must use the localhost one.
+    3. Real AWS without a CDN: the virtual-hosted-style public S3 URL.
+
+  Args:
+      bucket: The public-data bucket name the object was uploaded to.
+      key: The object key within the bucket (leading slash optional).
+      cdn_url: Optional CDN base URL; when truthy it takes precedence over
+          both the LocalStack and raw-S3 forms.
+
+  Returns:
+      An absolute URL to the object.
+
+  Example:
+      >>> get_public_data_url("robosystems-public-data", "2025/320193/f.html")
+      'https://robosystems-public-data.s3.amazonaws.com/2025/320193/f.html'
+  """
+  from robosystems.config import env
+
+  key = key.lstrip("/")
+
+  if cdn_url:
+    return f"{cdn_url.rstrip('/')}/{key}"
+
+  endpoint = env.AWS_S3_PRESIGN_ENDPOINT_URL or env.AWS_ENDPOINT_URL
+  if endpoint:
+    # LocalStack (and other custom S3 endpoints) use path-style addressing.
+    return f"{endpoint.rstrip('/')}/{bucket}/{key}"
+
+  return f"https://{bucket}.s3.amazonaws.com/{key}"
+
+
+# =============================================================================
 # DuckDB Staging Path Helpers
 # =============================================================================
 
