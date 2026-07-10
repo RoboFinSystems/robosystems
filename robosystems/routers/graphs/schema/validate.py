@@ -5,13 +5,12 @@ import json
 import time
 
 import yaml
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.auth.dependencies import get_current_user
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -51,9 +50,6 @@ router = APIRouter()
   },
 )
 async def validate_schema(
-  graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
-  ),
   request: SchemaValidationRequest = Body(
     ...,
     description="Schema definition to validate",
@@ -192,7 +188,7 @@ relationships:
       },
     },
   ),
-  current_user: User = Depends(get_current_user_with_graph),
+  current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> SchemaValidationResponse:
@@ -207,8 +203,8 @@ relationships:
     operation_type=OperationType.SCHEMA_OPERATION,
     status=OperationStatus.SUCCESS,  # Will be updated on completion
     duration_ms=0.0,  # Will be updated on completion
-    endpoint="/v1/graphs/{graph_id}/schema/validate",
-    graph_id=graph_id,
+    endpoint="/v1/graphs/schema/validate",
+    graph_id=None,
     user_id=current_user.id,
     operation_name="validate_schema",
     metadata={
@@ -222,7 +218,7 @@ relationships:
 
   try:
     # Check circuit breaker before processing
-    circuit_breaker.check_circuit(graph_id, "schema_validation")
+    circuit_breaker.check_circuit(current_user.id, "schema_validation")
 
     # Set up timeout coordination for schema validation (can be complex)
     operation_timeout = timeout_coordinator.calculate_timeout(
@@ -238,12 +234,12 @@ relationships:
 
     # Log the request with operation logger
     operation_logger.log_external_service_call(
-      endpoint="/v1/graphs/{graph_id}/schema/validate",
+      endpoint="/v1/graphs/schema/validate",
       service_name="schema_manager",
       operation="validate_schema",
       duration_ms=0.0,  # Will be updated on completion
       status="processing",
-      graph_id=graph_id,
+      graph_id=None,
       user_id=current_user.id,
       metadata={
         "format": request.format,
@@ -356,15 +352,15 @@ relationships:
 
     # Record successful operation
     operation_duration_ms = (time.time() - operation_start_time) * 1000
-    circuit_breaker.record_success(graph_id, "schema_validation")
+    circuit_breaker.record_success(current_user.id, "schema_validation")
 
     # Record success metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.SUCCESS,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/schema/validate",
-      graph_id=graph_id,
+      endpoint="/v1/graphs/schema/validate",
+      graph_id=None,
       user_id=current_user.id,
       operation_name="validate_schema",
       metadata={
@@ -385,7 +381,7 @@ relationships:
 
   except TimeoutError:
     # Record circuit breaker failure and timeout metrics
-    circuit_breaker.record_failure(graph_id, "schema_validation")
+    circuit_breaker.record_failure(current_user.id, "schema_validation")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     # Record timeout failure metrics
@@ -393,8 +389,8 @@ relationships:
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/schema/validate",
-      graph_id=graph_id,
+      endpoint="/v1/graphs/schema/validate",
+      graph_id=None,
       user_id=current_user.id,
       operation_name="validate_schema",
       metadata={
@@ -412,7 +408,7 @@ relationships:
     )
   except HTTPException:
     # Record circuit breaker failure for HTTP exceptions
-    circuit_breaker.record_failure(graph_id, "schema_validation")
+    circuit_breaker.record_failure(current_user.id, "schema_validation")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     # Record failure metrics
@@ -420,8 +416,8 @@ relationships:
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/schema/validate",
-      graph_id=graph_id,
+      endpoint="/v1/graphs/schema/validate",
+      graph_id=None,
       user_id=current_user.id,
       operation_name="validate_schema",
       metadata={
@@ -432,7 +428,7 @@ relationships:
     raise
   except Exception as e:
     # Record circuit breaker failure for general exceptions
-    circuit_breaker.record_failure(graph_id, "schema_validation")
+    circuit_breaker.record_failure(current_user.id, "schema_validation")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     # Record failure metrics
@@ -440,8 +436,8 @@ relationships:
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/schema/validate",
-      graph_id=graph_id,
+      endpoint="/v1/graphs/schema/validate",
+      graph_id=None,
       user_id=current_user.id,
       operation_name="validate_schema",
       metadata={

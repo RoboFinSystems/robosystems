@@ -306,6 +306,13 @@ class RateLimitConfig:
     # Check if it's a graph-scoped endpoint
     path_parts = path.strip("/").split("/")
 
+    # Non-graph-scoped schema validation (/graphs/schema/validate) — validate a
+    # candidate schema BEFORE a graph exists, so it carries no graph_id. It is
+    # read-like, so use the graph-read bucket rather than the default POST write
+    # bucket. Unambiguous: a graph named "schema" would be /graphs/schema/schema/…
+    if path_parts[:3] == ["graphs", "schema", "validate"]:
+      return EndpointCategory.GRAPH_READ
+
     # Graph-scoped endpoints (format: /graphs/{graph_id}/...)
     if len(path_parts) >= 2 and path_parts[0] == "graphs":
       # For graph-scoped endpoints, endpoint_type is the part after graph_id

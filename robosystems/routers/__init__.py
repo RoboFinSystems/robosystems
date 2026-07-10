@@ -64,6 +64,7 @@ from .graphs.operations import router as graph_operations_router
 from .graphs.operator import (
   router as operator_router,
 )  # AI Operator module with modular structure
+from .graphs.schema import validate_router as schema_validate_router
 from .offering import offering_router
 from .operations import router as operations_router
 from .orgs import router as orgs_router
@@ -128,6 +129,15 @@ router.include_router(graph_content_ops_router, prefix="/operations")
 router.include_router(files_router)  # No prefix - handles /files endpoint
 
 # Non-graph-scoped routes that don't require a graph_id
+
+# Schema VALIDATION is graph-independent (validate a candidate schema BEFORE a
+# graph exists) so it gets its own dedicated, Schema-tagged /v1/graphs router
+# (single "Schema" tag) — NOT the graph-scoped router (info/export read a
+# deployed graph) and NOT the Graphs CRUD router (which would double-tag it).
+# Mounted in main.py → POST /v1/graphs/schema/validate.
+graph_schema_router_v1 = APIRouter(prefix="/v1/graphs", tags=["Schema"])
+graph_schema_router_v1.include_router(schema_validate_router)
+
 user_router_v1 = APIRouter(prefix="/v1", tags=[])
 user_router_v1.include_router(user_router, prefix="")
 
@@ -181,6 +191,7 @@ __all__ = [
   "auth_router_v1",
   "billing_router_v1",
   "graph_router",
+  "graph_schema_router_v1",
   "offering_router_v1",
   "operations_router_v1",
   "orgs_router_v1",

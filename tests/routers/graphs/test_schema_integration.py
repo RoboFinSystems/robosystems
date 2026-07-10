@@ -128,7 +128,7 @@ class TestSchemaManagementIntegration:
 
         # Validate the schema
         response = client_with_mocked_auth.post(
-          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/schema/validate",
+          "/v1/graphs/schema/validate",
           json={
             "schema_definition": schema_def,
             "format": "json",
@@ -319,7 +319,7 @@ class TestSchemaManagementIntegration:
           mock_instance.create_from_dict.return_value = mock_schema
 
           validate_response = client_with_mocked_auth.post(
-            f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
+            "/v1/graphs/schema/validate",
             json={"schema_definition": schema_definition, "format": "json"},
           )
 
@@ -425,7 +425,7 @@ class TestSchemaManagementIntegration:
         )
 
         compat_response = client_with_mocked_auth.post(
-          f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
+          "/v1/graphs/schema/validate",
           json={
             "schema_definition": financial_schema,
             "format": "json",
@@ -531,7 +531,7 @@ relationships:
 
         # Validate YAML schema
         response = client_with_mocked_auth.post(
-          f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
+          "/v1/graphs/schema/validate",
           json={"schema_definition": yaml_schema, "format": "yaml"},
         )
 

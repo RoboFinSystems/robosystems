@@ -48,9 +48,10 @@ def test_unknown_tier_falls_back_to_base_limits():
     ("/v1/graphs/abc/search/doc123", "GET", EndpointCategory.GRAPH_SEARCH),
     # Cypher query layer
     ("/v1/graphs/abc/query/cypher", "POST", EndpointCategory.GRAPH_QUERY),
-    # Schema surface is read-only (info/export/validate)
+    # Schema surface: info/export are graph-scoped reads; validate is
+    # graph-independent (no graph_id) but still read-like.
     ("/v1/graphs/abc/schema", "GET", EndpointCategory.GRAPH_READ),
-    ("/v1/graphs/abc/schema/validate", "POST", EndpointCategory.GRAPH_READ),
+    ("/v1/graphs/schema/validate", "POST", EndpointCategory.GRAPH_READ),
     # Usage analytics — dedicated bucket
     ("/v1/graphs/abc/analytics", "GET", EndpointCategory.GRAPH_ANALYTICS),
     ("/v1/graphs/abc/analytics/usage", "GET", EndpointCategory.GRAPH_ANALYTICS),
