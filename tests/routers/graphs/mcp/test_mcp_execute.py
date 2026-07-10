@@ -223,7 +223,12 @@ class TestCallMcpToolValidation:
 
   @pytest.mark.asyncio
   async def test_write_on_shared_repo_rejected(self):
-    """Test that write operations on shared repos are rejected with 403."""
+    """A write via read-graph-cypher on a shared repo is rejected with 403.
+
+    Routed through the shared StatementKernel now — 'sec' is not a subgraph, so
+    the main-graph write block fires; the security outcome (writes rejected) is
+    what this pins.
+    """
     from robosystems.routers.graphs.mcp.execute import call_mcp_tool
 
     mock_request = Mock()
@@ -237,9 +242,7 @@ class TestCallMcpToolValidation:
     with (
       patch("robosystems.routers.graphs.mcp.execute.record_operation_metric"),
       patch("robosystems.routers.graphs.mcp.execute.circuit_breaker"),
-      patch("robosystems.routers.graphs.mcp.execute.MultiTenantUtils") as mock_utils,
     ):
-      mock_utils.is_shared_repository.return_value = True
       with pytest.raises(HTTPException) as exc_info:
         await call_mcp_tool(
           full_request=mock_request,
@@ -251,7 +254,7 @@ class TestCallMcpToolValidation:
           _rate_limit=None,
         )
       assert exc_info.value.status_code == 403
-      assert "Write operations not allowed" in exc_info.value.detail
+      assert "not allowed" in exc_info.value.detail.lower()
 
   def test_non_cypher_tool_not_in_cypher_tool_list(self):
     """Test that non-cypher tools are not in the cypher validation tool list.

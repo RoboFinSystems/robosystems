@@ -467,6 +467,19 @@ class CypherSecurityAnalyzer:
     if re.search(r"\bDROP\s+(NODE|REL)\s+TABLE\b", query, re.IGNORECASE):
       found_operations.add("DROP_TABLE")
 
+    # Check for bare CREATE/DROP TABLE. LadybugDB/Kuzu drops with `DROP TABLE
+    # <name>` (no NODE/REL qualifier), which the qualified regexes above miss —
+    # leaving a table-destroying statement classified as a plain write.
+    if re.search(r"\b(CREATE|DROP)\s+TABLE\b", query, re.IGNORECASE):
+      found_operations.add("TABLE_DDL")
+
+    # Check for CREATE/DROP INDEX (incl. vector/FTS indexes) and SEQUENCE —
+    # DDL that is_write_operation would otherwise pass through as a write.
+    if re.search(r"\b(CREATE|DROP)\s+INDEX\b", query, re.IGNORECASE):
+      found_operations.add("INDEX_DDL")
+    if re.search(r"\b(CREATE|DROP)\s+SEQUENCE\b", query, re.IGNORECASE):
+      found_operations.add("SEQUENCE_DDL")
+
     # Check for ALTER TABLE
     if re.search(r"\bALTER\s+TABLE\b", query, re.IGNORECASE):
       found_operations.add("ALTER_TABLE")

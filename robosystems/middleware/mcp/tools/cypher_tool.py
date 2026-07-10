@@ -187,17 +187,17 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
     Raises:
         ValueError: If query contains write, bulk, admin, or schema-DDL operations
     """
-    import re
-
-    # Delegate the dangerous categories to the central security analyzer — the
-    # same one the REST /query endpoint uses — so this read path can't diverge
-    # from it. The hand-rolled keyword list below previously missed LOAD / COPY /
-    # ATTACH / INSTALL / EXPORT, letting a "read-only" tool read local files,
-    # reach instance metadata (SSRF), and ATTACH other tenants' databases.
+    # Route every category through the central security analyzer — the same
+    # predicates the StatementKernel (REST /query/cypher) composes — so this
+    # tool-layer guard can't diverge. It also protects the Operator path, which
+    # invokes this tool directly (bypassing the HTTP handler + kernel). The
+    # write check was previously a hand-rolled keyword regex duplicating
+    # is_write_operation; the dangerous-category checks already delegated here.
     from robosystems.security.cypher_analyzer import (
       is_admin_operation,
       is_bulk_operation,
       is_schema_ddl,
+      is_write_operation,
     )
 
     if is_bulk_operation(query):
@@ -215,42 +215,8 @@ RETURN DISTINCT labels(a)[0] AS from_type, type(r) AS rel_type, labels(b)[0] AS 
       logger.warning("Blocked schema DDL in read-graph-cypher")
       raise ValueError("Only read-only queries are allowed")
 
-    # Remove string literals to avoid false positives
-    # Replace single-quoted strings with empty placeholder
-    query_without_strings = re.sub(r"'[^']*'", "''", query)
-    # Replace double-quoted strings with empty placeholder
-    query_without_strings = re.sub(r'"[^"]*"', '""', query_without_strings)
-
-    query_upper = query_without_strings.upper()
-
-    # Write operations that are not allowed - check with word boundaries
-    # These need word boundary checks
-    word_operations = [
-      "CREATE",
-      "SET",
-      "DELETE",
-      "REMOVE",
-      "MERGE",
-      "DROP",
-    ]
-
-    # These are checked as-is (with dots/spaces)
-    special_operations = [
-      "DETACH DELETE",
-      "CALL DB.",
-      "CALL APOC.",
-    ]
-
-    # Check word boundary operations
-    for operation in word_operations:
-      # Use word boundaries to avoid matching within words
-      pattern = r"\b" + re.escape(operation) + r"\b"
-      if re.search(pattern, query_upper):
-        logger.warning(f"Blocked write operation '{operation}' in query")
-        raise ValueError("Only read-only queries are allowed")
-
-    # Check special operations (these include spaces/dots so less likely to have false positives)
-    for operation in special_operations:
-      if operation in query_upper:
-        logger.warning(f"Blocked write operation '{operation}' in query")
-        raise ValueError("Only read-only queries are allowed")
+    if is_write_operation(query):
+      logger.warning(
+        "Blocked write operation (CREATE/MERGE/SET/DELETE) in read-graph-cypher"
+      )
+      raise ValueError("Only read-only queries are allowed")
