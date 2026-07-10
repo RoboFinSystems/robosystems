@@ -300,10 +300,16 @@ async def update_memory_op(
       service = get_memory_service(client)
       if service is None:  # pragma: no cover - gated above
         raise HTTPException(status_code=503, detail="Semantic memory is not enabled")
+      # exclude_unset so a partial update only forwards the fields the caller
+      # actually set — otherwise the unset fields dump as None and the service
+      # (which keys on model_fields_set) wipes memory_type/tags/source_ref/
+      # provenance to NULL.
       record = await service.update_memory(
         graph_id,
         body.memory_id,
-        MemoryUpdateRequest(**body.model_dump(exclude={"memory_id"})),
+        MemoryUpdateRequest(
+          **body.model_dump(exclude={"memory_id"}, exclude_unset=True)
+        ),
       )
       if record is None:
         raise HTTPException(status_code=404, detail="Memory not found")
