@@ -106,8 +106,16 @@ sec_process_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "process",
-    # Retry on Spot reclaim: S3 cache means retries skip already-processed filings.
-    "dagster/max_retries": 5,
+    # No dagster/max_retries here on purpose: the sec_processing_sensor is the
+    # single recovery authority. It re-triggers any quarter with pending
+    # SourceFiles every 5 min (skipping already-processed filings via the S3
+    # cache + SourceFile status), so a Spot-killed run is picked up on the next
+    # tick. Dagster's async auto-retry was redundant with that and raced the
+    # sensor's active-run guard (which only sees STARTED/QUEUED), spawning a
+    # second concurrent run for the same quarter → duplicate parquet part files.
+    # Omitting the tag disables auto-retry for THIS job only; global
+    # run_retries stays on for jobs that carry the tag. tag_concurrency_limits
+    # on `quarter` (dagster_prod.yaml) is the structural backstop.
     # Enhanced profile: 4 vCPU, 16 GB, 50 GB storage - embedding enrichment is memory-intensive
     "ecs/cpu": "4096",
     "ecs/memory": "16384",

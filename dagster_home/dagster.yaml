@@ -69,6 +69,14 @@ run_coordinator:
     max_concurrent_runs: 2
     dequeue_use_threads: true
     dequeue_num_workers: 2
+    # Parity with dagster_prod.yaml: one running job per quarterly partition
+    # (the sec_processing_sensor is skipped in dev, so this is documentation of
+    # intent here, but keeps the two configs from drifting).
+    tag_concurrency_limits:
+      - key: "quarter"
+        limit: 1
+        value:
+          applyLimitPerUniqueValue: true
 
 # Telemetry - disable for privacy
 telemetry:
