@@ -467,7 +467,7 @@ class TestExtensionsMaterializer:
 
     mock_client = AsyncMock()
     mock_client.database_exists.return_value = True
-    mock_client.query_table.return_value = {"success": True}
+    mock_client.execute_write.return_value = {"success": True}
     mock_client.materialize_table.return_value = {"rows_ingested": 10}
 
     materializer = ExtensionsMaterializer()
@@ -517,7 +517,7 @@ class TestExtensionsMaterializer:
     mock_client.database_exists.return_value = False
     mock_client.create_database.return_value = {"success": True}
     mock_client.install_schema.return_value = {"success": True}
-    mock_client.query_table.return_value = {"success": True}
+    mock_client.execute_write.return_value = {"success": True}
     mock_client.materialize_table.return_value = {"rows_ingested": 0}
 
     materializer = ExtensionsMaterializer()

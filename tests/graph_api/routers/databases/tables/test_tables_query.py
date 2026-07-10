@@ -19,6 +19,7 @@ def client(monkeypatch):
   fake_manager = SimpleNamespace(
     query_table=None,
     query_table_streaming=None,
+    execute_write=None,
   )
   monkeypatch.setattr(query, "table_manager", fake_manager)
 
@@ -44,6 +45,50 @@ def test_query_tables_json_response(client):
   payload = response.json()
   assert payload["row_count"] == 1
   assert payload["columns"] == ["id"]
+
+
+def test_execute_table_write_json_response(client):
+  # /tables/execute runs on the read-write connection — DDL/writes are allowed,
+  # unlike the read-only /tables/query surface — so internal materialization
+  # and ingestion can run CREATE TABLE AS / INSERT / DELETE.
+  captured = {}
+
+  def _execute_write(req):
+    captured["sql"] = req.sql
+    return TableQueryResponse(
+      columns=["Count"],
+      rows=[[3]],
+      execution_time_ms=12.0,
+      row_count=1,
+    )
+
+  client.fake_manager.execute_write = _execute_write
+
+  response = client.post(
+    "/databases/graph-123/tables/execute",
+    json={
+      "graph_id": "graph-ignored",
+      "sql": 'CREATE OR REPLACE TABLE "Event" AS SELECT 1 AS id',
+    },
+  )
+
+  assert response.status_code == 200
+  assert captured["sql"].startswith("CREATE OR REPLACE TABLE")
+  assert response.json()["row_count"] == 1
+
+
+def test_execute_table_write_error(client):
+  def _raise(req):
+    raise RuntimeError("boom")
+
+  client.fake_manager.execute_write = _raise
+
+  response = client.post(
+    "/databases/graph-123/tables/execute",
+    json={"graph_id": "graph-ignored", "sql": "INSERT INTO t VALUES (1)"},
+  )
+
+  assert response.status_code == 400
 
 
 def test_query_tables_streaming_ndjson(client):

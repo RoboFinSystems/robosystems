@@ -1591,7 +1591,9 @@ class ExtensionsMaterializer:
 
       try:
         logger.info(f"Staging {table_name} from PostgreSQL → DuckDB")
-        await client.query_table(graph_id, sql.strip(), timeout=120.0)
+        # CREATE TABLE AS SELECT ... postgres_scan(...) — internal write path
+        # (read-only /tables/query rejects DDL + has postgres_scanner disabled).
+        await client.execute_write(graph_id, sql.strip(), timeout=120.0)
         result.tables_staged.append(table_name)
       except Exception as e:
         error_msg = f"Failed to stage {table_name}: {e!s}"

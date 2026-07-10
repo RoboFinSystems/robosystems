@@ -894,6 +894,60 @@ class DuckDBTableManager:
       execution_time_ms=execution_time_ms,
     )
 
+  def execute_write(self, request: TableQueryRequest) -> TableQueryResponse:
+    """Execute a write/DDL statement on the read-write staging connection.
+
+    Internal-only companion to ``query_table``. Where ``query_table`` runs
+    tenant SQL on the hardened, sandboxed read-only connection (SELECT/WITH
+    only, external access off, no httpfs/postgres_scanner), this runs on the
+    read-write connection with httpfs + postgres_scanner available — the
+    surface the extensions materializer and connector loaders need for
+    ``CREATE TABLE AS SELECT ... postgres_scan(...)`` staging and
+    INSERT/DELETE upserts.
+
+    NOT reachable from the tenant ``/query/sql`` path: only the internal graph
+    client (materialization, ingestion) calls the ``/tables/execute`` endpoint
+    this backs. It mirrors the existing internal write endpoints
+    (``create_table``, ``insert_into_table``) that the read-only hardening left
+    in place; it adds no surface beyond them.
+    """
+    import time
+
+    start_time = time.time()
+
+    logger.info(f"Executing write for graph {request.graph_id}: {request.sql[:100]}...")
+
+    pool = get_duckdb_pool()
+
+    try:
+      with pool.get_connection(request.graph_id) as conn:
+        if request.parameters:
+          result = conn.execute(request.sql, request.parameters).fetchall()
+        else:
+          result = conn.execute(request.sql).fetchall()
+        description = conn.description
+
+      columns = [desc[0] for desc in description] if description else []
+      rows = [list(row) for row in result]
+      execution_time_ms = (time.time() - start_time) * 1000
+
+      logger.info(f"Write returned {len(rows)} rows in {execution_time_ms:.2f}ms")
+
+      return TableQueryResponse(
+        columns=columns,
+        rows=rows,
+        row_count=len(rows),
+        execution_time_ms=execution_time_ms,
+      )
+    except HTTPException:
+      raise
+    except Exception as e:
+      logger.error(f"Write failed for graph {request.graph_id}: {e}")
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Query failed: {e!s}",
+      )
+
   def query_table_streaming(self, request: TableQueryRequest, chunk_size: int = 1000):
     """
     Execute SQL query and yield results in chunks for TRUE streaming.
