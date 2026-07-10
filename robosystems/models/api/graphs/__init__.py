@@ -71,8 +71,8 @@ from .operator import (
 from .query import (
   DEFAULT_QUERY_TIMEOUT,
   MAX_QUERY_LENGTH,
-  CypherQueryRequest,
-  CypherQueryResponse,
+  CypherStatementRequest,
+  CypherStatementResponse,
   translate_neo4j_to_lbug,
 )
 from .schema import (
@@ -106,14 +106,14 @@ from .tables import (
   FileUploadStatus,
   GetFileInfoResponse,
   ListTableFilesResponse,
+  SqlStatementRequest,
+  SqlStatementResponse,
   TableCreate,
   TableInfo,
   TableIngestRequest,
   TableIngestResponse,
   TableIngestResult,
   TableListResponse,
-  TableQueryRequest,
-  TableQueryResponse,
 )
 from .tier import (
   AvailableGraphTiersResponse,
@@ -153,8 +153,8 @@ __all__ = [
   "CreateSubgraphRequest",
   "CreditLimits",
   "CustomSchemaDefinition",
-  "CypherQueryRequest",
-  "CypherQueryResponse",
+  "CypherStatementRequest",
+  "CypherStatementResponse",
   "DatabaseHealthResponse",
   "DatabaseInfoResponse",
   "DeleteFileResponse",
@@ -210,6 +210,8 @@ __all__ = [
   "SchemaValidationRequest",
   "SchemaValidationResponse",
   "SelectionCriteria",
+  "SqlStatementRequest",
+  "SqlStatementResponse",
   "StorageLimits",
   "SubgraphAccessRequest",
   "SubgraphAccessResponse",
@@ -224,8 +226,6 @@ __all__ = [
   "TableIngestResponse",
   "TableIngestResult",
   "TableListResponse",
-  "TableQueryRequest",
-  "TableQueryResponse",
   "TierCapacity",
   "translate_neo4j_to_lbug",
 ]

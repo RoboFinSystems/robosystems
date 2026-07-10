@@ -1,15 +1,24 @@
-"""SQL query endpoint for DuckDB staging tables."""
+"""SQL statement execution over the graph's columnar tables (DuckDB).
+
+Peer to the Cypher endpoint in the query layer: a relational lens on the same
+graph-centric data. Read-only for now (writes gated on the DuckDB
+write-connection sandbox). Shared repositories are blocked (no user columnar
+tables). Authorization runs through the shared StatementKernel.
+"""
 
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
-from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_universal_repository
+from robosystems.middleware.graph.statement_kernel import (
+  StatementEngine,
+  statement_kernel,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
@@ -18,7 +27,10 @@ from robosystems.middleware.otel.metrics import (
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
-from robosystems.models.api.graphs.tables import TableQueryRequest, TableQueryResponse
+from robosystems.models.api.graphs.tables import (
+  SqlStatementRequest,
+  SqlStatementResponse,
+)
 from robosystems.models.core import User
 
 router = APIRouter()
@@ -27,45 +39,44 @@ circuit_breaker = CircuitBreakerManager()
 
 
 @router.post(
-  "/tables/query",
-  response_model=TableQueryResponse,
-  operation_id="queryTables",
-  summary="Query Staging Tables with SQL",
-  description="Execute SQL against DuckDB staging tables for pre-ingestion validation. Use `?` placeholders with the `parameters` array to prevent injection. Read-only (SELECT only), 30s timeout, 10K row limit. Not allowed on shared repositories.",
+  "/query/sql",
+  response_model=SqlStatementResponse,
+  operation_id="executeSql",
+  summary="Execute SQL Statement",
+  description="SQL over the graph's columnar tables (DuckDB) — a relational lens on the same graph-centric data, often ahead of the materialized graph. Use `?` placeholders with the `parameters` array to prevent injection. Read-only (SELECT only), 30s timeout, 10K row limit. Not available on shared repositories.",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     408: {"description": "Query timeout"},
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/tables/query", business_event_type="table_query_executed"
+  "/v1/graphs/{graph_id}/query/sql", business_event_type="table_query_executed"
 )
-async def query_tables(
+async def execute_sql(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  request: TableQueryRequest = Body(..., description="SQL query request"),
+  request: SqlStatementRequest = Body(..., description="SQL statement request"),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
-) -> TableQueryResponse:
+) -> SqlStatementResponse:
   start_time = datetime.now(UTC)
 
   # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "table_query")
 
-  # Block shared repositories
-  if is_shared_repository_or_subgraph(graph_id.lower()):
-    logger.warning(
-      f"User {current_user.id} attempted SQL query on shared repository {graph_id}"
-    )
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories do not allow direct SQL table queries. "
-      "Use the graph query endpoint (POST /query) to access shared repository data through the structured graph interface.",
-    )
+  # Authorize the statement — SQL is read-only and blocked on shared repos.
+  # Shared, transport-independent path (also used by /query/cypher, MCP).
+  statement_kernel.authorize(
+    engine=StatementEngine.SQL,
+    graph_id=graph_id,
+    statement=request.sql,
+    user=current_user,
+    session=db,
+  )
 
   try:
     # Verify graph access
@@ -79,15 +90,15 @@ async def query_tables(
 
     # Log structured query attempt
     api_logger.info(
-      "SQL table query execution started",
+      "SQL statement execution started",
       extra={
-        "component": "tables_api",
-        "action": "query_started",
+        "component": "query_api",
+        "action": "sql_query_started",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "query_length": len(request.sql),
         "metadata": {
-          "endpoint": "/v1/graphs/{graph_id}/tables/query",
+          "endpoint": "/v1/graphs/{graph_id}/query/sql",
         },
       },
     )
@@ -110,7 +121,7 @@ async def query_tables(
     # Record business event
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/query",
+      endpoint="/v1/graphs/{graph_id}/query/sql",
       method="POST",
       event_type="table_query_executed_successfully",
       event_data={
@@ -124,10 +135,10 @@ async def query_tables(
 
     # Log structured completion
     api_logger.info(
-      "SQL table query completed successfully",
+      "SQL statement completed successfully",
       extra={
-        "component": "tables_api",
-        "action": "query_completed",
+        "component": "query_api",
+        "action": "sql_query_completed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "duration_ms": execution_time,
@@ -136,7 +147,7 @@ async def query_tables(
       },
     )
 
-    return TableQueryResponse(**response)
+    return SqlStatementResponse(**response)
 
   except HTTPException:
     circuit_breaker.record_failure(graph_id, "table_query")
@@ -148,7 +159,7 @@ async def query_tables(
     # Record business event for failure
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/query",
+      endpoint="/v1/graphs/{graph_id}/query/sql",
       method="POST",
       event_type="table_query_failed",
       event_data={
@@ -161,10 +172,10 @@ async def query_tables(
     )
 
     logger.error(
-      f"SQL query failed for graph {graph_id}: {e}",
+      f"SQL statement failed for graph {graph_id}: {e}",
       extra={
-        "component": "tables_api",
-        "action": "query_failed",
+        "component": "query_api",
+        "action": "sql_query_failed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "error_type": type(e).__name__,

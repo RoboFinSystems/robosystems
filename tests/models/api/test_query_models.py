@@ -6,29 +6,29 @@ from pydantic import ValidationError
 from robosystems.models.api.graphs.query import (
   DEFAULT_QUERY_TIMEOUT,
   MAX_QUERY_LENGTH,
-  CypherQueryRequest,
-  CypherQueryResponse,
+  CypherStatementRequest,
+  CypherStatementResponse,
   translate_neo4j_to_lbug,
 )
 
 
 @pytest.mark.unit
-class TestCypherQueryRequest:
+class TestCypherStatementRequest:
   def test_valid_simple_query(self):
-    model = CypherQueryRequest(query="MATCH (n) RETURN n LIMIT 10")
+    model = CypherStatementRequest(query="MATCH (n) RETURN n LIMIT 10")
     assert model.query == "MATCH (n) RETURN n LIMIT 10"
     assert model.parameters is None
     assert model.timeout == DEFAULT_QUERY_TIMEOUT
 
   def test_query_with_parameters(self):
-    model = CypherQueryRequest(
+    model = CypherStatementRequest(
       query="MATCH (n:Entity {type: $type}) RETURN n",
       parameters={"type": "Company"},
     )
     assert model.parameters == {"type": "Company"}
 
   def test_query_with_timeout(self):
-    model = CypherQueryRequest(
+    model = CypherStatementRequest(
       query="MATCH (n) RETURN n",
       timeout=120,
     )
@@ -36,80 +36,80 @@ class TestCypherQueryRequest:
 
   def test_empty_query_rejected(self):
     with pytest.raises(ValidationError):
-      CypherQueryRequest(query="")
+      CypherStatementRequest(query="")
 
   def test_whitespace_only_query_rejected(self):
     with pytest.raises(ValidationError) as exc_info:
-      CypherQueryRequest(query="   ")
+      CypherStatementRequest(query="   ")
     errors = exc_info.value.errors()
     assert any(e["loc"] == ("query",) for e in errors)
 
   def test_query_max_length(self):
     long_query = "MATCH (n) RETURN n" + " " * (MAX_QUERY_LENGTH - 18)
-    model = CypherQueryRequest(query=long_query)
+    model = CypherStatementRequest(query=long_query)
     assert len(model.query) == MAX_QUERY_LENGTH
 
   def test_query_exceeds_max_length(self):
     too_long_query = "x" * (MAX_QUERY_LENGTH + 1)
     with pytest.raises(ValidationError) as exc_info:
-      CypherQueryRequest(query=too_long_query)
+      CypherStatementRequest(query=too_long_query)
     errors = exc_info.value.errors()
     assert any(e["loc"] == ("query",) for e in errors)
 
   def test_timeout_minimum(self):
-    model = CypherQueryRequest(query="MATCH (n) RETURN n", timeout=1)
+    model = CypherStatementRequest(query="MATCH (n) RETURN n", timeout=1)
     assert model.timeout == 1
 
   def test_timeout_below_minimum(self):
     with pytest.raises(ValidationError) as exc_info:
-      CypherQueryRequest(query="MATCH (n) RETURN n", timeout=0)
+      CypherStatementRequest(query="MATCH (n) RETURN n", timeout=0)
     errors = exc_info.value.errors()
     assert any(e["loc"] == ("timeout",) for e in errors)
 
   def test_timeout_maximum(self):
-    model = CypherQueryRequest(query="MATCH (n) RETURN n", timeout=300)
+    model = CypherStatementRequest(query="MATCH (n) RETURN n", timeout=300)
     assert model.timeout == 300
 
   def test_timeout_above_maximum(self):
     with pytest.raises(ValidationError) as exc_info:
-      CypherQueryRequest(query="MATCH (n) RETURN n", timeout=301)
+      CypherStatementRequest(query="MATCH (n) RETURN n", timeout=301)
     errors = exc_info.value.errors()
     assert any(e["loc"] == ("timeout",) for e in errors)
 
   def test_extra_fields_forbidden(self):
     with pytest.raises(ValidationError) as exc_info:
-      CypherQueryRequest(query="MATCH (n) RETURN n", extra="bad")  # type: ignore[call-arg]
+      CypherStatementRequest(query="MATCH (n) RETURN n", extra="bad")  # type: ignore[call-arg]
     errors = exc_info.value.errors()
     assert any("extra" in e["type"] for e in errors)
 
   def test_query_required(self):
     with pytest.raises(ValidationError):
-      CypherQueryRequest()  # type: ignore[call-arg]
+      CypherStatementRequest()  # type: ignore[call-arg]
 
   def test_model_dump(self):
-    model = CypherQueryRequest(query="MATCH (n) RETURN n")
+    model = CypherStatementRequest(query="MATCH (n) RETURN n")
     dumped = model.model_dump()
     assert dumped["query"] == "MATCH (n) RETURN n"
     assert dumped["parameters"] is None
     assert dumped["timeout"] == DEFAULT_QUERY_TIMEOUT
 
   def test_json_round_trip(self):
-    model = CypherQueryRequest(
+    model = CypherStatementRequest(
       query="MATCH (n) RETURN n",
       parameters={"limit": 10},
       timeout=30,
     )
     json_str = model.model_dump_json()
-    restored = CypherQueryRequest.model_validate_json(json_str)
+    restored = CypherStatementRequest.model_validate_json(json_str)
     assert restored.query == model.query
     assert restored.parameters == model.parameters
     assert restored.timeout == model.timeout
 
 
 @pytest.mark.unit
-class TestCypherQueryResponse:
+class TestCypherStatementResponse:
   def test_successful_response(self):
-    model = CypherQueryResponse(
+    model = CypherStatementResponse(
       success=True,
       data=[{"n": {"name": "Test"}}],
       columns=["n"],
@@ -123,7 +123,7 @@ class TestCypherQueryResponse:
     assert model.error is None
 
   def test_error_response(self):
-    model = CypherQueryResponse(
+    model = CypherStatementResponse(
       success=False,
       data=None,
       columns=None,
@@ -137,7 +137,7 @@ class TestCypherQueryResponse:
     assert model.error == "Syntax error at line 1"
 
   def test_empty_result(self):
-    model = CypherQueryResponse(
+    model = CypherStatementResponse(
       success=True,
       data=[],
       columns=["n"],

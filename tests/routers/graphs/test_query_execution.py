@@ -349,7 +349,7 @@ class TestQueryQueueIntegration:
       }
 
       response = await async_client.post(
-        f"/v1/graphs/{test_user_graph.graph_id}/query",
+        f"/v1/graphs/{test_user_graph.graph_id}/query/cypher",
         json=request_data,
         headers=headers,
       )

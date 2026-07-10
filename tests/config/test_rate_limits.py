@@ -26,7 +26,8 @@ def test_unknown_tier_falls_back_to_base_limits():
 @pytest.mark.parametrize(
   "path,method,expected",
   [
-    ("/v1/graphs/abc/tables/query", "POST", EndpointCategory.TABLE_QUERY),
+    # SQL query layer — keeps the DuckDB/columnar bucket (former /tables/query)
+    ("/v1/graphs/abc/query/sql", "POST", EndpointCategory.TABLE_QUERY),
     ("/v1/graphs/abc/tables/ingest", "POST", EndpointCategory.GRAPH_IMPORT),
     # New first-class files endpoints
     ("/v1/graphs/abc/files", "POST", EndpointCategory.TABLE_UPLOAD),
@@ -45,8 +46,8 @@ def test_unknown_tier_falls_back_to_base_limits():
     # Search endpoints (OpenSearch)
     ("/v1/graphs/abc/search", "POST", EndpointCategory.GRAPH_SEARCH),
     ("/v1/graphs/abc/search/doc123", "GET", EndpointCategory.GRAPH_SEARCH),
-    # Direct Cypher query (real route: no /graph segment)
-    ("/v1/graphs/abc/query", "POST", EndpointCategory.GRAPH_QUERY),
+    # Cypher query layer
+    ("/v1/graphs/abc/query/cypher", "POST", EndpointCategory.GRAPH_QUERY),
     # Schema surface is read-only (info/export/validate)
     ("/v1/graphs/abc/schema", "GET", EndpointCategory.GRAPH_READ),
     ("/v1/graphs/abc/schema/validate", "POST", EndpointCategory.GRAPH_READ),

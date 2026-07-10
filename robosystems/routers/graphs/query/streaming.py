@@ -22,7 +22,7 @@ from robosystems.middleware.sse.event_storage import EventType
 from robosystems.middleware.sse.streaming import emit_event_to_operation
 from robosystems.models.api.graphs.query import (
   DEFAULT_QUERY_TIMEOUT,
-  CypherQueryRequest,
+  CypherStatementRequest,
 )
 from robosystems.models.core import User
 
@@ -73,7 +73,7 @@ async def execute_query_with_timeout(
 
 async def stream_ndjson_response(
   repository: Any,
-  request: CypherQueryRequest,
+  request: CypherStatementRequest,
   graph_id: str,
   current_user: User,
   chunk_size: int = 1000,
@@ -235,7 +235,7 @@ async def stream_ndjson_response(
 
 async def stream_sse_response(
   repository: Any,
-  request: CypherQueryRequest,
+  request: CypherStatementRequest,
   graph_id: str,
   current_user: User,
   chunk_size: int = 100,
@@ -453,7 +453,7 @@ async def stream_sse_response(
 
 
 async def stream_sse_with_queue(
-  request: CypherQueryRequest,
+  request: CypherStatementRequest,
   graph_id: str,
   repository: Any,
   current_user: User,
