@@ -367,6 +367,29 @@ class _Validator:
     except Exception as exc:
       self._check("SumEquals rule deleted after dispose", False, str(exc))
 
+    # Delete the disposal entry this smoke test drafted into close_target.
+    # The asset_disposed handler posts a real (draft) disposal entry dated on
+    # the last day of close_target; the queued delete_schedule cleanup removes
+    # the throwaway schedule but NOT this entry. Left behind, it lingers as an
+    # orphan draft in the very period the demo then tells the user to close, so
+    # it would post as a spurious extra closing entry. Clean it up here.
+    try:
+      drafts = client.list_period_drafts(self.graph_id, close_target) or {}
+      disposal_ids = [
+        d.get("entry_id")
+        for d in drafts.get("drafts", [])
+        if d.get("memo") == "Validation disposal" and d.get("entry_id")
+      ]
+      for eid in disposal_ids:
+        client.delete_journal_entry(self.graph_id, eid)
+      self._check(
+        "disposal draft cleaned up",
+        len(disposal_ids) >= 1,
+        f"deleted {len(disposal_ids)} draft(s) from {close_target}",
+      )
+    except Exception as exc:
+      self._check("disposal draft cleaned up", False, str(exc))
+
   # ── Ad-hoc rollforward ───────────────────────────────────────────────────
 
   def adhoc_rollforward(self, dr_id: str, cr_id: str) -> None:
