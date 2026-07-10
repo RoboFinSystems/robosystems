@@ -126,16 +126,9 @@ class CypherSecurityAnalyzer:
     # Pattern to find CALL procedures
     self.call_pattern = re.compile(r"\bCALL\s+(\w+)\s*\(", re.IGNORECASE)
 
-    # Pattern to identify comments
-    self.comment_pattern = re.compile(r"(/\*.*?\*/|//.*?$)", re.DOTALL | re.MULTILINE)
-
-    # Pattern to identify string literals (single and double quotes)
-    self.string_pattern = re.compile(
-      r"""(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""", re.DOTALL
-    )
-
-    # Pattern to identify backtick-quoted identifiers
-    self.identifier_pattern = re.compile(r"`(?:[^`\\]|\\.)*`", re.DOTALL)
+    # Comments, string literals, and backtick identifiers are masked by the
+    # single-pass scanner in `_clean_query` (not by regex) so an in-string
+    # comment marker can't hide a trailing write keyword.
 
   def analyze_query(self, query: str) -> CypherOperationType:
     """
@@ -298,25 +291,80 @@ class CypherSecurityAnalyzer:
 
   def _clean_query(self, query: str) -> str:
     """
-    Remove comments, strings, and quoted identifiers from the query
-    to avoid false positives in write operation detection.
+    Mask comments, string literals, and backtick-quoted identifiers so that
+    keyword detection only ever sees *code*, not data.
+
+    This is a single left-to-right scan that decides context (string vs.
+    comment vs. identifier vs. code) at each position. A staged
+    strip-comments-then-strings approach is unsafe: a ``//`` (or ``/*``)
+    sequence *inside* a string literal would be treated as a comment and eat a
+    real write keyword that follows the closed string
+    (e.g. ``... WHERE n.x = '//' CREATE (m) ...``), causing a write to be
+    misclassified as a read. Scanning once, quotes toggle string context
+    before any comment marker is honoured, so an in-string ``//`` can never
+    hide the code after the string.
 
     Args:
         query: The original query
 
     Returns:
-        Cleaned query with comments and strings removed
+        Cleaned query with comments blanked and strings/identifiers replaced
+        by neutral placeholder tokens.
     """
-    # Step 1: Remove comments
-    cleaned = self.comment_pattern.sub(" ", query)
+    out: list[str] = []
+    i = 0
+    n = len(query)
+    while i < n:
+      ch = query[i]
 
-    # Step 2: Remove string literals
-    cleaned = self.string_pattern.sub(" STRING_LITERAL ", cleaned)
+      # Line comment: // ... to end of line
+      if ch == "/" and i + 1 < n and query[i + 1] == "/":
+        nl = query.find("\n", i)
+        i = n if nl == -1 else nl
+        out.append(" ")
+        continue
 
-    # Step 3: Remove backtick-quoted identifiers
-    cleaned = self.identifier_pattern.sub(" IDENTIFIER ", cleaned)
+      # Block comment: /* ... */  (unbalanced -> consume to end; the security
+      # pre-check already rejects unbalanced blocks fail-closed)
+      if ch == "/" and i + 1 < n and query[i + 1] == "*":
+        end = query.find("*/", i + 2)
+        i = n if end == -1 else end + 2
+        out.append(" ")
+        continue
 
-    return cleaned
+      # String literal: '...' or "..."  (backslash escapes the next char)
+      if ch == "'" or ch == '"':
+        quote = ch
+        i += 1
+        while i < n:
+          c = query[i]
+          if c == "\\":
+            i += 2
+            continue
+          i += 1
+          if c == quote:
+            break
+        out.append(" STRING_LITERAL ")
+        continue
+
+      # Backtick-quoted identifier
+      if ch == "`":
+        i += 1
+        while i < n:
+          c = query[i]
+          if c == "\\":
+            i += 2
+            continue
+          i += 1
+          if c == "`":
+            break
+        out.append(" IDENTIFIER ")
+        continue
+
+      out.append(ch)
+      i += 1
+
+    return "".join(out)
 
   def _find_write_operations(self, query: str) -> set[str]:
     """

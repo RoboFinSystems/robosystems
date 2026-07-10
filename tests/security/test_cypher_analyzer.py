@@ -247,3 +247,49 @@ class TestKeywordContextValidation:
     # "CREATE" should not match inside "RECREATE"
     result = analyzer.analyze_query("MATCH (n) WHERE n.name = 'RECREATED' RETURN n")
     assert result == CypherOperationType.READ
+
+
+class TestInStringCommentMarkerBypass:
+  """Regression: a comment marker (// or /*) inside a string literal must not
+  hide a real write keyword that follows the closed string (appsec F2).
+
+  The old `_clean_query` stripped comments *before* strings, so an in-string
+  ``//`` ate everything to end-of-line — including a trailing CREATE/SET/etc —
+  and the analyzer reported READ. The single-pass scanner masks strings first.
+  """
+
+  # Appendix B payloads — each must classify as a WRITE.
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "MATCH (n) WHERE n.x = '//' CREATE (m:Hacked) RETURN m",
+      'MATCH (n) WHERE n.name = "x//y" SET n.hacked = true RETURN n',
+      'MATCH (n) WHERE n.x = "//" DETACH DELETE n',
+      "MATCH (n) WHERE n.note = '// comment' MERGE (m:Evil {id:1}) RETURN m",
+      # unbalanced /* inside a string -> fail-closed WRITE (pre-check rejects)
+      "MATCH (n) WHERE n.x = '/*' RETURN n",
+    ],
+  )
+  def test_in_string_marker_does_not_hide_write(self, analyzer, query):
+    assert analyzer.is_write_operation(query) is True
+
+  def test_in_string_marker_hides_nothing_when_read(self, analyzer):
+    # An in-string // with no trailing write keyword stays a READ.
+    result = analyzer.analyze_query("MATCH (n) WHERE n.url = 'http://x' RETURN n")
+    assert result == CypherOperationType.READ
+
+  def test_real_line_comment_still_masks_write(self, analyzer):
+    # A genuine trailing line comment (outside any string) is still a comment.
+    result = analyzer.analyze_query("MATCH (n) RETURN n // CREATE (m) here")
+    assert result == CypherOperationType.READ
+
+  def test_real_block_comment_still_masks_write(self, analyzer):
+    result = analyzer.analyze_query("MATCH (n) RETURN n /* CREATE (m) */")
+    assert result == CypherOperationType.READ
+
+  def test_in_string_marker_does_not_hide_admin_verb(self, analyzer):
+    # The same ordering flaw weakened is_admin/is_bulk/is_schema_ddl.
+    assert analyzer.is_admin_operation("MATCH (n) WHERE n.x = '//' ATTACH 'db'") is True
+    assert (
+      analyzer.is_bulk_operation("MATCH (n) WHERE n.x = '//' LOAD FROM 'f'") is True
+    )
