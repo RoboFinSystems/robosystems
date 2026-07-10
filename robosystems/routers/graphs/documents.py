@@ -16,9 +16,6 @@ from robosystems.models.api.search import (
   DocumentDetailResponse,
   DocumentListItem,
   DocumentListResponse,
-  DocumentUpdateRequest,
-  DocumentUploadRequest,
-  DocumentUploadResponse,
 )
 from robosystems.models.core import User
 from robosystems.models.core.document import Document
@@ -59,22 +56,6 @@ def _enforce_graph_access(graph_id: str, require_write: bool = False) -> None:
     require_graph_access(graph_id, session, require_write=require_write)
   finally:
     session.close()
-
-
-def _resolve_tier(graph_id: str, session) -> str:
-  """Resolve the subscription tier for a graph using an existing session."""
-  from robosystems.models.core.graph import Graph
-
-  try:
-    graph = Graph.get_by_id(graph_id, session)
-    if graph is None or graph.graph_tier is None:
-      raise HTTPException(500, "Unable to determine subscription tier")
-    return graph.graph_tier
-  except HTTPException:
-    raise
-  except Exception as e:
-    logger.error(f"Tier lookup failed for {graph_id}: {e}")
-    raise HTTPException(500, "Unable to determine subscription tier")
 
 
 def _document_to_list_item(doc: Document) -> DocumentListItem:
@@ -156,108 +137,5 @@ async def get_document(
     if doc is None:
       raise HTTPException(status_code=404, detail="Document not found")
     return _document_to_detail(doc)
-  finally:
-    session.close()
-
-
-@router.post(
-  "",
-  summary="Upload Document",
-  description="Stored in PostgreSQL, synced to OpenSearch for search. Not allowed on shared repositories.",
-  operation_id="upload_document",
-  responses={**RESOURCE_ERROR_RESPONSES},
-)
-async def upload_document(
-  graph_id: str,
-  request: DocumentUploadRequest,
-  current_user: User = Depends(get_current_user_with_graph),
-) -> DocumentUploadResponse:
-  _block_shared_repository(graph_id)
-  _enforce_graph_access(graph_id, require_write=True)
-  session = SessionFactory()
-  try:
-    tier = _resolve_tier(graph_id, session)
-    service = DocumentService(session)
-    _doc, response = service.create_document(
-      graph_id=graph_id,
-      user_id=current_user.id,
-      request=request,
-      tier=tier,
-    )
-    return response
-  except ValueError as e:
-    raise HTTPException(
-      status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-      detail=str(e),
-    )
-  finally:
-    session.close()
-
-
-@router.put(
-  "/{document_id}",
-  summary="Update Document",
-  description="Updates content and/or metadata. Re-syncs to OpenSearch.",
-  operation_id="update_document",
-  responses={**RESOURCE_ERROR_RESPONSES},
-)
-async def update_document(
-  graph_id: str,
-  document_id: str,
-  request: DocumentUpdateRequest,
-  current_user: User = Depends(get_current_user_with_graph),
-) -> DocumentUploadResponse:
-  _block_shared_repository(graph_id)
-  _enforce_graph_access(graph_id, require_write=True)
-  session = SessionFactory()
-  try:
-    service = DocumentService(session)
-    # Only pass fields that were explicitly provided in the request
-    kwargs: dict = {}
-    if "title" in request.model_fields_set:
-      kwargs["title"] = request.title
-    if "content" in request.model_fields_set:
-      kwargs["content"] = request.content
-    if "tags" in request.model_fields_set:
-      kwargs["tags"] = request.tags
-    if "folder" in request.model_fields_set:
-      kwargs["folder"] = request.folder
-    _doc, response = service.update_document(
-      graph_id=graph_id,
-      document_id=document_id,
-      **kwargs,
-    )
-    return response
-  except KeyError as e:
-    raise HTTPException(status_code=404, detail=str(e))
-  except ValueError as e:
-    raise HTTPException(
-      status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
-      detail=str(e),
-    )
-  finally:
-    session.close()
-
-
-@router.delete(
-  "/{document_id}",
-  summary="Delete Document",
-  operation_id="delete_document",
-  status_code=http_status.HTTP_204_NO_CONTENT,
-  responses={**RESOURCE_ERROR_RESPONSES},
-)
-async def delete_document(
-  graph_id: str,
-  document_id: str,
-  current_user: User = Depends(get_current_user_with_graph),
-) -> None:
-  _block_shared_repository(graph_id)
-  _enforce_graph_access(graph_id, require_write=True)
-  session = SessionFactory()
-  try:
-    service = DocumentService(session)
-    deleted = service.delete_document(graph_id, document_id)
-    if not deleted:
-      raise HTTPException(status_code=404, detail="Document not found")
   finally:
     session.close()

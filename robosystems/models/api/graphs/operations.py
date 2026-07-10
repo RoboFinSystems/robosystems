@@ -161,3 +161,57 @@ class ForgetOp(BaseModel):
     pattern="^mem_[0-9a-f]{32}$",
     description="Server-generated memory id to forget",
   )
+
+
+class IndexDocumentOp(BaseModel):
+  """Body for index-document (corpus content-op).
+
+  Create a new document when ``document_id`` is absent; update the named
+  document (partial — only supplied fields) when present.
+  """
+
+  document_id: str | None = Field(
+    default=None,
+    description="Present → update that document; absent → create a new one",
+  )
+  title: str | None = Field(
+    default=None, max_length=500, description="Required when creating"
+  )
+  content: str | None = Field(
+    default=None, max_length=500_000, description="Required when creating"
+  )
+  tags: list[str] | None = Field(default=None, description="Optional labels")
+  folder: str | None = Field(default=None, description="Optional folder")
+  external_id: str | None = Field(
+    default=None, description="Upsert key (create): re-indexing the same id replaces"
+  )
+
+
+class DeleteDocumentOp(BaseModel):
+  """Body for delete-document (corpus content-op)."""
+
+  document_id: str = Field(..., min_length=1, description="Document id to delete")
+
+
+class IngestFileOp(BaseModel):
+  """Body for ingest-file (raw→staging content flow).
+
+  Marks an uploaded file ready and triggers DuckDB staging. Set
+  ``ingest_to_graph`` to auto-chain graph materialization after staging.
+  """
+
+  file_id: str = Field(..., min_length=1, description="Uploaded file id to ingest")
+  ingest_to_graph: bool = Field(
+    default=False,
+    description="Auto-materialize into the graph after DuckDB staging",
+  )
+
+
+class DeleteFileOp(BaseModel):
+  """Body for delete-file (raw content-op)."""
+
+  file_id: str = Field(..., min_length=1, description="File id to delete")
+  cascade: bool = Field(
+    default=False,
+    description="Also delete the file's rows from DuckDB tables and mark the graph stale",
+  )
