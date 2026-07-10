@@ -437,16 +437,17 @@ class OperationRegistrar:
       idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
       cache: IdempotencyCache = Depends(get_idempotency_cache),
     ) -> OperationEnvelope:
+      # Every registrar op is a command (write). The extension gate proves
+      # provisioning and `user_dep` proves graph membership — neither checks
+      # the write role, so a read-only `viewer` would otherwise reach the
+      # OLTP command surface. Enforce member/admin first, fail-closed, before
+      # running any request-shaping logic for an unauthorized caller.
+      require_graph_write_role(str(user.id), graph_id)
+
       # Optional pre-validation hook — lets specs do lightweight
       # parse/format checks before we open a DB session.
       if pre_validate is not None:
         pre_validate(body)
-
-      # Every registrar op is a command (write). The extension gate proves
-      # provisioning and `user_dep` proves graph membership — neither checks
-      # the write role, so a read-only `viewer` would otherwise reach the
-      # OLTP command surface. Enforce member/admin here, fail-closed.
-      require_graph_write_role(str(user.id), graph_id)
 
       ctx = ctx_builder(
         graph_id=graph_id,

@@ -166,6 +166,14 @@ def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
     return []
 
 
+# Hard backstop on rows pulled from a single streaming query (F5). Streaming is
+# the large-export path (100x the non-streaming 10k cap), but an unbounded
+# cartesian/variable-length query would otherwise pin an instance pulling rows
+# forever. When hit, the stream stops and the final chunk is flagged `truncated`
+# so the client can detect it and paginate rather than silently losing data.
+MAX_STREAMING_ROWS = 1_000_000
+
+
 def validate_cypher_query(cypher: str) -> None:
   """
   Validate Cypher query for basic safety checks.
@@ -205,6 +213,32 @@ def validate_cypher_query(cypher: str) -> None:
         status_code=status.HTTP_403_FORBIDDEN,
         detail=f"Query contains forbidden keyword: {keyword}",
       )
+
+  # Engine-adjacent hardening (F4): the substring blocklist above misses
+  # LadybugDB/Kuzu's real filesystem/cross-database verbs (LOAD FROM, COPY,
+  # ATTACH, INSTALL, CREATE NODE TABLE) and is trivially evadable. graph_api is
+  # the process holding the embedded engine with disk access; if this path is
+  # reached without the platform kernel (SSRF, misconfig, a future internal
+  # caller), those verbs become arbitrary file read / cross-db read. Reuse the
+  # shared analyzer's tokenizer-based predicates (same ones the MCP write-query
+  # guard uses) as a defense-in-depth backstop. Ordinary graph writes
+  # (CREATE/SET/MERGE/DELETE) stay allowed so writer instances still work;
+  # legitimate DDL/bulk load runs through the dedicated schema-install and
+  # table-materialize paths, which never reach this validator.
+  from robosystems.security.cypher_analyzer import (
+    is_admin_operation,
+    is_bulk_operation,
+    is_schema_ddl,
+  )
+
+  if is_bulk_operation(cypher) or is_admin_operation(cypher) or is_schema_ddl(cypher):
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail=(
+        "Query contains an engine-level operation (bulk load, attach/install, "
+        "or schema DDL) that is not permitted on the ad-hoc query endpoint."
+      ),
+    )
 
   # Check query length
   max_query_length = MAX_QUERY_LENGTH
@@ -328,10 +362,37 @@ class LadybugService:
         ) as conn:
           # Execute query with comprehensive error handling
           try:
-            if request.parameters:
-              query_result = conn.execute(translated_cypher, request.parameters)
-            else:
-              query_result = conn.execute(translated_cypher)
+            # F5: bound query planning/execution with a thread-based timeout,
+            # mirroring the non-streaming path. Cancelling the HTTP coroutine
+            # does not stop the engine server-side, so without this an
+            # expensive streaming query could pin the instance.
+            query_timeout = TuningConfig.get_graph_query_timeout()
+
+            def _execute_streaming():
+              if request.parameters:
+                return conn.execute(translated_cypher, request.parameters)
+              return conn.execute(translated_cypher)
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+              future = executor.submit(_execute_streaming)
+              try:
+                query_result = future.result(timeout=query_timeout)
+              except TimeoutError:
+                future.cancel()
+                logger.warning(
+                  f"Streaming query timeout for {validated_graph_id} "
+                  f"after {query_timeout} seconds"
+                )
+                yield {
+                  "error": f"Query execution timeout ({query_timeout} seconds)",
+                  "error_type": "QueryTimeout",
+                  "chunk_index": 0,
+                  "is_last_chunk": True,
+                  "row_count": 0,
+                  "total_rows_sent": 0,
+                  "execution_time_ms": (time.time() - start_time) * 1000,
+                }
+                return
 
             # Handle case where execute returns a list of QueryResults
             if isinstance(query_result, list):
@@ -433,8 +494,15 @@ class LadybugService:
         chunk_index = 0
         total_rows_sent = 0
         rows_buffer = []
+        truncated = False
 
         while query_result.has_next():
+          # F5: hard row backstop so an unbounded query can't stream forever.
+          if total_rows_sent + len(rows_buffer) >= MAX_STREAMING_ROWS:
+            truncated = True
+            if hasattr(query_result, "close"):
+              query_result.close()
+            break
           row = query_result.get_next()
 
           # Convert row to dict
@@ -467,8 +535,10 @@ class LadybugService:
             total_rows_sent += len(rows_buffer)
             rows_buffer = []
 
-        # Yield final chunk with remaining rows
-        if rows_buffer or chunk_index == 0:  # Always send at least one chunk
+        # Yield final chunk with remaining rows. Always send at least one chunk,
+        # and always send a closing chunk when truncated so the client sees the
+        # flag even if the cap landed exactly on a chunk boundary (empty buffer).
+        if rows_buffer or chunk_index == 0 or truncated:
           execution_time = (time.time() - start_time) * 1000
           chunk_data = {
             "chunk_index": chunk_index,
@@ -479,6 +549,7 @@ class LadybugService:
             "total_rows_sent": total_rows_sent + len(rows_buffer),
             "execution_time_ms": execution_time,
             "database": validated_graph_id,
+            "truncated": truncated,
           }
           yield chunk_data
 
