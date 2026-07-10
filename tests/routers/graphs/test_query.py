@@ -62,7 +62,9 @@ async def test_cypher_query_success(
   request_data = {"query": "MATCH (n) RETURN count(n) as node_count", "timeout": 30}
 
   response = await async_client.post(
-    f"/v1/graphs/{test_user_graph.graph_id}/query", json=request_data, headers=headers
+    f"/v1/graphs/{test_user_graph.graph_id}/query/cypher",
+    json=request_data,
+    headers=headers,
   )
 
   # Query can return either 200 (immediate execution) or 202 (queued)
@@ -112,7 +114,9 @@ async def test_cypher_query_with_parameters(
   }
 
   response = await async_client.post(
-    f"/v1/graphs/{test_user_graph.graph_id}/query", json=request_data, headers=headers
+    f"/v1/graphs/{test_user_graph.graph_id}/query/cypher",
+    json=request_data,
+    headers=headers,
   )
 
   # Query can return either 200 (immediate execution) or 202 (queued)
@@ -156,7 +160,9 @@ async def test_cypher_query_write_operations_blocked(
     request_data = {"query": query}
 
     response = await async_client.post(
-      f"/v1/graphs/{test_user_graph.graph_id}/query", json=request_data, headers=headers
+      f"/v1/graphs/{test_user_graph.graph_id}/query/cypher",
+      json=request_data,
+      headers=headers,
     )
 
     # Write operations are blocked and should return 403
@@ -206,7 +212,9 @@ async def test_cypher_query_timeout(
   }
 
   response = await async_client.post(
-    f"/v1/graphs/{test_user_graph.graph_id}/query", json=request_data, headers=headers
+    f"/v1/graphs/{test_user_graph.graph_id}/query/cypher",
+    json=request_data,
+    headers=headers,
   )
 
   # With the new execution strategy, timeout handling might return different responses:
@@ -253,7 +261,7 @@ async def test_cypher_query_unauthorized(test_user_graph: GraphUser, test_db):
 
       # No auth header
       response = await client.post(
-        f"/v1/graphs/{test_user_graph.graph_id}/query", json=request_data
+        f"/v1/graphs/{test_user_graph.graph_id}/query/cypher", json=request_data
       )
 
       assert response.status_code == 401
@@ -281,7 +289,7 @@ async def test_cypher_query_forbidden_graph(
   request_data = {"query": "MATCH (n) RETURN n LIMIT 1"}
 
   response = await auth_integration_client.post(
-    f"/v1/graphs/{forbidden_graph_id}/query", json=request_data, headers=headers
+    f"/v1/graphs/{forbidden_graph_id}/query/cypher", json=request_data, headers=headers
   )
 
   # Should be rejected: 402 (no credits), 403 (no access), or 500 (credit pool error)
@@ -356,7 +364,7 @@ async def test_cypher_query_sec_repository_with_access(
   request_data = {"query": "MATCH (c:Entity) RETURN c.name LIMIT 5"}
 
   response = await async_client.post(
-    "/v1/graphs/sec/query", json=request_data, headers=headers
+    "/v1/graphs/sec/query/cypher", json=request_data, headers=headers
   )
 
   # Query should succeed since we've properly granted SEC access and credits
@@ -399,7 +407,7 @@ async def test_cypher_query_sec_repository_no_access(
   # The test may fail in different ways depending on how credits are handled
   try:
     response = await async_client.post(
-      "/v1/graphs/sec/query", json=request_data, headers=headers
+      "/v1/graphs/sec/query/cypher", json=request_data, headers=headers
     )
 
     # Should fail with either 402, 403, or 500
@@ -444,7 +452,9 @@ async def test_cypher_query_empty(
   request_data = {"query": ""}
 
   response = await async_client.post(
-    f"/v1/graphs/{test_user_graph.graph_id}/query", json=request_data, headers=headers
+    f"/v1/graphs/{test_user_graph.graph_id}/query/cypher",
+    json=request_data,
+    headers=headers,
   )
 
   assert response.status_code == 422  # Validation error
@@ -470,7 +480,9 @@ async def test_cypher_query_too_long(
   request_data = {"query": long_query}
 
   response = await async_client.post(
-    f"/v1/graphs/{test_user_graph.graph_id}/query", json=request_data, headers=headers
+    f"/v1/graphs/{test_user_graph.graph_id}/query/cypher",
+    json=request_data,
+    headers=headers,
   )
 
   assert response.status_code == 422  # Validation error

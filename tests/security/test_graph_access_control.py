@@ -166,7 +166,7 @@ class TestGraphEndpointAccessControl:
   ):
     """Test /v1/graphs/{graph_id}/query denies unauthorized users."""
     response = await auth_integration_client.post(
-      f"/v1/graphs/{sample_graph.graph_id}/query",
+      f"/v1/graphs/{sample_graph.graph_id}/query/cypher",
       headers={"Authorization": f"Bearer {other_user_token}"},
       json={"cypher": "MATCH (n) RETURN n LIMIT 1"},
     )
