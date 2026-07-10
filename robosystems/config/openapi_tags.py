@@ -23,6 +23,10 @@ MAIN_API_TAGS = [
     "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
   },
   {
+    "name": "Memory",
+    "description": "🧠 Memory - Recall, list, and inspect the graph's per-graph semantic memory store",
+  },
+  {
     "name": "Query",
     "description": "🕸️ Graph queries - Execute Cypher queries on the knowledge graph",
   },
@@ -33,6 +37,10 @@ MAIN_API_TAGS = [
   {
     "name": "Files",
     "description": "📄 File management - Upload, track, and manage data files for generic graphs",
+  },
+  {
+    "name": "Content Operations",
+    "description": "✍️ Content operations - Non-language knowledge writes (memory, documents, file staging) via the operation envelope",
   },
   {
     "name": "Extensions: GraphQL",

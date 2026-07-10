@@ -56,15 +56,19 @@ from robosystems.models.api.graphs.operations import (
   MaterializeOp,
   RememberOp,
   RestoreBackupOp,
+  UpdateMemoryOp,
 )
 from robosystems.models.api.graphs.subgraphs import CreateSubgraphRequest
 from robosystems.models.core import User
 
 logger = get_logger(__name__)
 
-router = APIRouter(tags=["Graph Operations"])
+router = APIRouter()
 
 _OP_TAG = "Graph Operations"
+# Content operations (knowledge writes) get their own tag, separate from the
+# graph-lifecycle operations that share the /operations/{op} path.
+_CONTENT_OP_TAG = "Content Operations"
 _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 _GRAPH_OPS_PATH = "/v1/graphs/{graph_id}/operations"
 _AUDIT_EVENT = "graph.operation"
@@ -1050,8 +1054,8 @@ async def materialize_op(
   operation_id="opRemember",
   summary="Remember (write semantic memory)",
   description="Store a semantic memory in the graph's per-graph memory store. "
-  "The text is embedded locally; recall it later via `POST /search/recall`.",
-  tags=[_OP_TAG],
+  "The text is embedded locally; recall it later via `POST /memory/recall`.",
+  tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
 )
@@ -1114,7 +1118,7 @@ async def remember_op(
   operation_id="opForget",
   summary="Forget (delete a semantic memory)",
   description="Delete a semantic memory by its server-generated id.",
-  tags=[_OP_TAG],
+  tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
 )
@@ -1162,6 +1166,72 @@ async def forget_op(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# update-memory (semantic memory — content op)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/update-memory",
+  response_model=OperationEnvelope,
+  operation_id="opUpdateMemory",
+  summary="Update Memory (edit a semantic memory)",
+  description="Partially update a stored memory by its server-generated id. "
+  "Only supplied fields change; the memory is re-embedded when `text` changes.",
+  tags=[_CONTENT_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/update-memory",
+  method="POST",
+  business_event_type="graph_update_memory",
+)
+async def update_memory_op(
+  body: UpdateMemoryOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  from robosystems.graph_api.client.factory import get_graph_client
+  from robosystems.models.api.memory import MemoryUpdateRequest
+  from robosystems.operations.memory import get_memory_service
+
+  _require_memory_enabled()
+  _block_shared_repo(graph_id)
+  _require_graph_write_access(graph_id)
+
+  op_name = "update-memory"
+  user_id = str(user.id)
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=user_id,
+    op=op_name,
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    client = await get_graph_client(graph_id=graph_id, operation_type="write")
+    try:
+      service = get_memory_service(client)
+      if service is None:  # pragma: no cover - gated above
+        raise HTTPException(status_code=503, detail="Semantic memory is not enabled")
+      record = await service.update_memory(
+        graph_id,
+        body.memory_id,
+        MemoryUpdateRequest(**body.model_dump(exclude={"memory_id"})),
+      )
+      if record is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+      return record.model_dump(mode="json")
+    finally:
+      await client.close()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # index-document (corpus content op)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1173,7 +1243,7 @@ async def forget_op(
   summary="Index Document (write to the corpus)",
   description="Create a document (omit `document_id`) or update one (provide it). "
   "Stored in PostgreSQL, synced to OpenSearch for search.",
-  tags=[_OP_TAG],
+  tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
 )
@@ -1261,7 +1331,7 @@ async def index_document_op(
   operation_id="opDeleteDocument",
   summary="Delete Document (remove from the corpus)",
   description="Delete a document from PostgreSQL and OpenSearch by id.",
-  tags=[_OP_TAG],
+  tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
 )
@@ -1322,7 +1392,7 @@ async def delete_document_op(
   "stage directly (sync); large files stage via a background job (returns a "
   "pending envelope with an `operation_id` to monitor). Set `ingest_to_graph` to "
   "auto-materialize into the graph after staging.",
-  tags=[_OP_TAG],
+  tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
 )
@@ -1404,7 +1474,7 @@ async def ingest_file_op(
   summary="Delete File",
   description="Delete a file from S3 and PostgreSQL. `cascade=true` also removes "
   "its rows from DuckDB staging tables and marks the graph stale.",
-  tags=[_OP_TAG],
+  tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
   responses={**OPERATION_ERROR_RESPONSES},
 )

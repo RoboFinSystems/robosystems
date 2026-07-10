@@ -1,10 +1,9 @@
-"""Semantic memory governance — list / get / update / delete.
-
-The control plane that makes agent-written memory safe to ship. Writes
-(remember/forget) go through the content-ops envelope in operations.py; recall
-goes through the search surface. This router is the deterministic governance half.
+"""Semantic memory reads — recall / list / get.
 
 Backed by the per-graph LanceDB memory store on the writer/master instance.
+Writes (remember / forget / update-memory) go through the content-ops envelope
+in operations.py; this router is the read half: ranked semantic `recall` plus
+the deterministic list / get governance reads.
 """
 
 import logging
@@ -17,11 +16,11 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.memory import (
-  MemoryDeleteResponse,
   MemoryListResponse,
+  MemoryRecallRequest,
   MemoryRecord,
-  MemoryUpdateRequest,
 )
+from robosystems.models.api.search import SearchResponse
 from robosystems.models.core import User
 
 logger = logging.getLogger(__name__)
@@ -137,52 +136,29 @@ async def get_memory(
     await client.close()
 
 
-@router.put(
-  "/{memory_id}",
-  summary="Update Memory",
-  operation_id="update_memory",
-  responses={**RESOURCE_ERROR_RESPONSES},
+@router.post(
+  "/recall",
+  summary="Recall Semantic Memory",
+  description="Ranked semantic recall over the graph's per-graph memory store. "
+  "Returns scored hits in the same shape as document search.",
+  operation_id="recall_memory",
+  responses={
+    **RESOURCE_ERROR_RESPONSES,
+    503: {"description": "Semantic memory not available"},
+  },
 )
-async def update_memory(
+async def recall_memory(
   graph_id: str,
-  memory_id: str,
-  request: MemoryUpdateRequest,
+  request: MemoryRecallRequest,
   current_user: User = Depends(get_current_user_with_graph),
-) -> MemoryRecord:
+) -> SearchResponse:
   _require_memory_enabled()
   _block_shared_repository(graph_id)
-  _enforce_graph_access(graph_id, require_write=True)
+  _enforce_graph_access(graph_id)
 
   client = await _get_writer_client(graph_id)
   try:
     service = _require_service(client)
-    record = await service.update_memory(graph_id, memory_id, request)
-    if record is None:
-      raise HTTPException(status_code=404, detail="Memory not found")
-    return record
-  finally:
-    await client.close()
-
-
-@router.delete(
-  "/{memory_id}",
-  status_code=http_status.HTTP_200_OK,
-  summary="Delete Memory",
-  operation_id="delete_memory",
-  responses={**RESOURCE_ERROR_RESPONSES},
-)
-async def delete_memory(
-  graph_id: str,
-  memory_id: str,
-  current_user: User = Depends(get_current_user_with_graph),
-) -> MemoryDeleteResponse:
-  _require_memory_enabled()
-  _block_shared_repository(graph_id)
-  _enforce_graph_access(graph_id, require_write=True)
-
-  client = await _get_writer_client(graph_id)
-  try:
-    service = _require_service(client)
-    return await service.forget(graph_id, memory_id)
+    return await service.recall(graph_id, request)
   finally:
     await client.close()
