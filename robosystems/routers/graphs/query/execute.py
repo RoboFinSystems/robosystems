@@ -24,6 +24,10 @@ from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.graph.query_queue import get_query_queue
+from robosystems.middleware.graph.statement_kernel import (
+  StatementEngine,
+  statement_kernel,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (
@@ -42,12 +46,6 @@ from robosystems.models.api.graphs.query import (
   CypherQueryResponse,
 )
 from robosystems.models.core import User
-from robosystems.security.cypher_analyzer import (
-  is_admin_operation,
-  is_bulk_operation,
-  is_schema_ddl,
-  is_write_operation,
-)
 
 from .handlers import (
   get_query_operation_type,
@@ -144,92 +142,17 @@ async def execute_cypher_query(
   client_info = {"is_interactive": False}
 
   try:
-    # Analyze query
-    is_write = is_write_operation(request.query)
-    access_type = "write" if is_write else "read"
-
-    # Check if this is a subgraph (allows writes) or main graph (read-only)
-    from robosystems.middleware.graph.utils import parse_subgraph_id
-
-    is_subgraph = parse_subgraph_id(graph_id) is not None
-
-    # Block write operations for main graphs only - subgraphs allow writes
-    if is_write and not is_subgraph:
-      logger.warning(
-        f"User {current_user.id} attempted write operation through query endpoint on main graph: {request.query[:100]}"
-      )
-      raise HTTPException(
-        status_code=http_status.HTTP_403_FORBIDDEN,
-        detail="Write operations (CREATE, MERGE, SET, DELETE) are not allowed on main graphs. "
-        "The query endpoint is read-only for main graphs. Use the staging pipeline to load data:\n"
-        "1. Create file upload: POST /v1/graphs/{graph_id}/tables/{table_name}/files\n"
-        "2. Ingest to graph: POST /v1/graphs/{graph_id}/tables/ingest\n"
-        "This ensures data integrity and enables pipeline benefits (audit, rollback, validation).\n"
-        "Note: Subgraphs support write operations for scratch/workspace use (e.g. agent memory).",
-      )
-
-    # Log write operations on subgraphs for audit
-    if is_write and is_subgraph:
-      logger.info(
-        f"User {current_user.id} executing write operation on subgraph {graph_id}: {request.query[:100]}"
-      )
-
-    # Check for bulk operations (COPY, LOAD, IMPORT) - should never reach here due to write check above
-    if is_bulk_operation(request.query):
-      logger.warning(
-        f"User {current_user.id} attempted bulk operation through query endpoint: {request.query[:100]}"
-      )
-      raise HTTPException(
-        status_code=http_status.HTTP_400_BAD_REQUEST,
-        detail="Bulk operations (COPY, LOAD, IMPORT) are not allowed through the query endpoint. "
-        "Please use the staging pipeline for data ingestion.",
-      )
-
-    # Check for admin operations (EXPORT, INSTALL, ATTACH, etc.)
-    if is_admin_operation(request.query):
-      logger.warning(
-        f"User {current_user.id} attempted admin operation through query endpoint: {request.query[:100]}"
-      )
-      raise HTTPException(
-        status_code=http_status.HTTP_403_FORBIDDEN,
-        detail="Administrative operations (EXPORT, IMPORT DATABASE, INSTALL, ATTACH, etc.) require admin privileges.",
-      )
-
-    # Check for schema DDL operations (CREATE/DROP/ALTER TABLE, etc.)
-    if is_schema_ddl(request.query):
-      logger.warning(
-        f"User {current_user.id} attempted schema DDL through query endpoint: {request.query[:100]}"
-      )
-      raise HTTPException(
-        status_code=http_status.HTTP_403_FORBIDDEN,
-        detail="Schema DDL operations (CREATE/DROP/ALTER TABLE, etc.) are not allowed. "
-        "Graph schemas are immutable after creation to ensure consistency with staging tables.",
-      )
-
-    # Block writes on shared repositories
-    if is_write and MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
-      logger.warning(
-        f"User {current_user.id} attempted write on shared repository {graph_id}"
-      )
-      raise HTTPException(
-        status_code=http_status.HTTP_403_FORBIDDEN,
-        detail=f"Write operations not allowed on shared repository '{graph_id}'",
-      )
-
-    # Enforce role-based write access on user subgraphs (viewer is read-only).
-    # At this point a write is confirmed to target a non-shared subgraph.
-    if is_write:
-      from robosystems.models.core.graph.graph_user import GraphUser
-
-      if not GraphUser.user_has_write_access(current_user.id, graph_id, session):
-        logger.warning(
-          f"User {current_user.id} with read-only role attempted write on {graph_id}"
-        )
-        raise HTTPException(
-          status_code=http_status.HTTP_403_FORBIDDEN,
-          detail="Write operations require the 'member' or 'admin' role for this "
-          "graph. Your access is read-only (viewer).",
-        )
+    # Authorize the statement — write policy, engine validation, role gate.
+    # Shared, transport-independent path (also used by /query/sql, MCP).
+    auth = statement_kernel.authorize(
+      engine=StatementEngine.CYPHER,
+      graph_id=graph_id,
+      statement=request.query,
+      user=current_user,
+      session=session,
+    )
+    is_write = auth.is_write
+    access_type = auth.access_type
 
     # Apply dual-layer rate limiting for shared repositories
     await _check_shared_repository_limits(
