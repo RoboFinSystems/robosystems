@@ -91,6 +91,21 @@ run_coordinator:
     max_concurrent_runs:
       env: DAGSTER_MAX_CONCURRENT_RUNS
     dequeue_interval_seconds: 5
+    # Enforce one running job per quarterly partition. The sec_processing_sensor
+    # tags every sec_process run (and its auto-retries) with `quarter`. Its own
+    # active-run guard only checks STARTED/QUEUED, so it races Dagster's async
+    # auto-retry: a Spot-killed run sits in FAILURE+will_retry limbo (neither
+    # STARTED nor QUEUED) while its retry has not enqueued yet, and a sensor tick
+    # landing in that gap submits a second run for the same quarter. Two runs then
+    # process the partition concurrently and emit duplicate parquet part files
+    # (benign — DuckDB staging dedups on identifier / (from,to) — but wasteful).
+    # This limit queues the second run instead; by the time it dequeues the winner
+    # has drained the quarter's pending SourceFiles, so it no-ops.
+    tag_concurrency_limits:
+      - key: "quarter"
+        limit: 1
+        value:
+          applyLimitPerUniqueValue: true
 
 # Telemetry - disable for privacy
 telemetry:
