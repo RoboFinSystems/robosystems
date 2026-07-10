@@ -37,6 +37,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
+from robosystems.middleware.auth.dependencies import require_graph_write_role
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.operations import (
   IdempotencyCache,
@@ -440,6 +441,12 @@ class OperationRegistrar:
       # parse/format checks before we open a DB session.
       if pre_validate is not None:
         pre_validate(body)
+
+      # Every registrar op is a command (write). The extension gate proves
+      # provisioning and `user_dep` proves graph membership — neither checks
+      # the write role, so a read-only `viewer` would otherwise reach the
+      # OLTP command surface. Enforce member/admin here, fail-closed.
+      require_graph_write_role(str(user.id), graph_id)
 
       ctx = ctx_builder(
         graph_id=graph_id,

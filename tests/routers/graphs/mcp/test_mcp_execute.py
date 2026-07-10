@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.routers.graphs.mcp.execute import (
+  READ_ONLY_MCP_TOOLS,
   _get_mcp_cache,
   _get_mcp_operation_type,
   _get_user_priority,
@@ -15,6 +16,58 @@ from robosystems.routers.graphs.mcp.execute import (
   _set_mcp_cache,
   execute_tool_directly,
 )
+
+
+class TestWriteClassificationFailClosed:
+  """appsec F1: write-intent must default to write. Any tool NOT on the
+  read-only allowlist is classified as a write and requires the member/admin
+  role, so a viewer can't reach the command surface."""
+
+  def test_dangerous_writes_are_not_read_only(self):
+    for tool in (
+      # registrar-generated OLTP command ops
+      "update-journal-entry",
+      "delete-journal-entry",
+      "close-period",
+      "reopen-period",
+      "execute-event-block",
+      "create-information-block",
+      "delete-information-block",
+      "create-mapping-association",
+      "update-agent",
+      "link-entity-taxonomy",
+      "promote-obligations",
+      # hand-written writes
+      "write-graph-cypher",
+      "add-node-table",
+      "remember",
+      "update-memory",
+      "forget",
+      "create-document",
+      "update-document",
+      "delete-document",
+      "materialize",
+      "set-write-policy",
+      "create-subgraph",
+    ):
+      assert tool not in READ_ONLY_MCP_TOOLS, f"{tool} must classify as a write"
+
+  def test_core_reads_are_read_only(self):
+    for tool in (
+      "get-graph-schema",
+      "search-documents",
+      "recall",
+      "list-documents",
+      "get-document",
+      "financial-statement-analysis",
+      "build-fact-grid",
+      "list-agents",
+    ):
+      assert tool in READ_ONLY_MCP_TOOLS, f"{tool} should be allowed for viewers"
+
+  def test_cypher_read_tools_excluded_from_static_set(self):
+    # These are classified per-query by the StatementKernel, not this set.
+    assert "read-graph-cypher" not in READ_ONLY_MCP_TOOLS
 
 
 def _make_mock_user(user_id="user-123", tier_name=None):

@@ -75,6 +75,65 @@ _MCP_SCHEMA_CACHE_TTL = 3600  # 1 hour
 # Lazily initialized on first use to avoid import-time URL resolution issues.
 _mcp_redis_client: Any = None
 
+# Write classification is FAIL-CLOSED: any tool NOT in this read-only allowlist
+# is treated as a write and must pass the member/admin role check (a `viewer`
+# is read-only). This is deliberately an inverted allowlist so that every new
+# tool — including every registrar-generated OLTP command op — defaults to
+# write and cannot silently become viewer-writable.
+#
+# The `read-*-cypher` tools are intentionally ABSENT: they are classified per
+# query by the StatementKernel (they can carry a write statement), handled
+# separately below.
+#
+# When adding a new READ tool, add it here (otherwise viewers can't call it —
+# safe, but over-restrictive). New WRITE tools need no change.
+READ_ONLY_MCP_TOOLS: frozenset[str] = frozenset(
+  {
+    # Graph introspection / exploration
+    "get-graph-info",
+    "get-graph-schema",
+    "get-graphql-schema",
+    "get-graph-sync-status",
+    "get-example-queries",
+    "query-graphql",
+    "list-subgraphs",
+    "switch-workspace",
+    # Financial analysis / reporting reads
+    "financial-statement-analysis",
+    "live-financial-statement",
+    "build-fact-grid",
+    "resolve-element",
+    # Fiscal calendar / close reads
+    "get-fiscal-calendar",
+    "get-period-close-status",
+    "get-close-playbook",
+    "list-period-drafts",
+    # Mapping reads
+    "get-unmapped-elements",
+    "suggest-mapping",
+    "list-mapping-structures",
+    "get-mapping-summary",
+    # Agent reads
+    "get-agent",
+    "list-agents",
+    "agent-activity",
+    # Event block / handler reads
+    "get-event-block",
+    "list-event-blocks",
+    "get-event-handler",
+    "list-event-handlers",
+    # Information block reads
+    "get-information-block",
+    "list-information-blocks",
+    # Document / memory reads
+    "get-document",
+    "list-documents",
+    "get-document-section",
+    "search-documents",
+    "recall",
+  }
+)
+
 
 def _get_mcp_redis_client() -> Any:
   """Return the shared async Redis client for MCP_CACHE, creating it on first call."""
@@ -283,20 +342,22 @@ async def call_mcp_tool(
     # session block below.
     from robosystems.database import SessionFactory
 
-    is_write_query = False
     is_cypher_read_tool = tool_call.name in (
       "read-graph-cypher",
       "read-neo4j-cypher",
       "read-ladybug-cypher",
     )
-    # Schema-mutating / write tools aren't cypher-analyzed; flag them as writes
-    # so write-role authorization applies below (viewer is read-only).
-    if tool_call.name in (
-      "write-graph-cypher",
-      "add-node-table",
-      "add-relationship-table",
-    ):
-      is_write_query = True
+    # Fail-closed write classification: a tool is a WRITE unless it is on the
+    # read-only allowlist. This makes every non-read tool — including all
+    # registrar-generated OLTP command ops (update-journal-entry, close-period,
+    # execute-event-block, the content-op writes, …) — require the member/admin
+    # role via `validate_mcp_access(..., "write")` below, closing the prior
+    # fail-open gap where only three tool names were flagged as writes and a
+    # `viewer` could reach the whole command surface. Cypher read tools are
+    # classified precisely by the StatementKernel (they can carry a write).
+    is_write_query = (not is_cypher_read_tool) and (
+      tool_call.name not in READ_ONLY_MCP_TOOLS
+    )
 
     # Validate access using a short-lived session.  The MCP endpoint's
     # tool execution can take minutes; using a scoped session or FastAPI

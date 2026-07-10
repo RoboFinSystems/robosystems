@@ -172,6 +172,15 @@ class DocumentService:
     if doc is None:
       raise KeyError(f"Document {document_id} not found in graph {graph_id}")
 
+    # Enforce the 500k content cap in the kernel. Create + the REST paths cap it
+    # via the Pydantic request models, but the MCP `update-document` tool
+    # forwards raw content with no length check — an uncapped multi-MB update
+    # would bloat the PG row and the OpenSearch re-index.
+    if content is not None and len(content) > 500_000:
+      raise ValueError(
+        f"Content exceeds 500,000 character limit ({len(content):,} chars)"
+      )
+
     if content is not None:
       # _apply_frontmatter returns the Ellipsis sentinel through as `object`;
       # the caller intentionally re-accepts it. Narrow types match the
