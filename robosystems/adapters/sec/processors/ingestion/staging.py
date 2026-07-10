@@ -401,7 +401,7 @@ class DuckDBStager:
               # DELETE+INSERT is not atomic — if interrupted between steps,
               # deleted rows are lost but recovered automatically on retry
               # since the upsert re-creates the temp table from S3.
-              await client.query_table(
+              await client.execute_write(
                 graph_id=self.graph_id,
                 sql=(
                   f'DELETE FROM "{table_name}" WHERE identifier IN '
@@ -411,7 +411,7 @@ class DuckDBStager:
               )
 
               # Insert all rows from temp (fresh data replaces deleted rows)
-              await client.query_table(
+              await client.execute_write(
                 graph_id=self.graph_id,
                 sql=f'INSERT INTO "{table_name}" SELECT * FROM "{temp_name}"',
                 timeout=timeout,
@@ -851,7 +851,7 @@ class DuckDBStager:
             return False, None, f"{table_name} schema probe failed: {e}"
 
           rename_sql = f'ALTER TABLE "{temp_name}" RENAME TO "{accumulator_name}"'
-          await graph_client.query_table(
+          await graph_client.execute_write(
             graph_id=self.graph_id, sql=rename_sql, timeout=30.0
           )
           current_temp = None
@@ -882,7 +882,7 @@ class DuckDBStager:
         )
 
         merge_start = time.monotonic()
-        await graph_client.query_table(
+        await graph_client.execute_write(
           graph_id=self.graph_id, sql=insert_sql, timeout=float(timeout)
         )
         merge_elapsed = time.monotonic() - merge_start
@@ -927,11 +927,13 @@ class DuckDBStager:
 
       # Drop existing target table before renaming accumulator
       drop_sql = f'DROP TABLE IF EXISTS "{table_name}"'
-      await graph_client.query_table(graph_id=self.graph_id, sql=drop_sql, timeout=30.0)
+      await graph_client.execute_write(
+        graph_id=self.graph_id, sql=drop_sql, timeout=30.0
+      )
 
       # Rename accumulator to final target table
       rename_sql = f'ALTER TABLE "{accumulator_name}" RENAME TO "{table_name}"'
-      await graph_client.query_table(
+      await graph_client.execute_write(
         graph_id=self.graph_id, sql=rename_sql, timeout=30.0
       )
 

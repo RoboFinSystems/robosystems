@@ -197,3 +197,33 @@ async def query_tables(
       status_code=http_status.HTTP_400_BAD_REQUEST,
       detail=f"Query failed: {e!s}",
     )
+
+
+@router.post("/execute", response_model=None)
+async def execute_table_write(
+  graph_id: str = Path(..., description="Graph database identifier"),
+  request: TableQueryRequest = Body(...),
+) -> TableQueryResponse:
+  """Execute a write/DDL statement against DuckDB staging (**internal**).
+
+  Read-write companion to ``POST /query``. ``/query`` runs tenant SQL on the
+  hardened read-only connection (SELECT/WITH only, external access off); this
+  runs on the read-write connection with httpfs + postgres_scanner enabled, for
+  the internal materialization + ingestion paths — ``CREATE TABLE AS
+  SELECT ... postgres_scan(...)`` staging and INSERT/DELETE upserts.
+
+  Not proxied by the tenant ``/query/sql`` surface; only the internal graph
+  client calls it. Mirrors the existing internal write endpoints
+  (``POST /tables`` create, ``POST /tables/{name}/insert``).
+  """
+  request.graph_id = graph_id
+  try:
+    return table_manager.execute_write(request)
+  except HTTPException:
+    raise
+  except Exception as e:
+    logger.error(f"Write failed for graph {graph_id}: {e}")
+    raise HTTPException(
+      status_code=http_status.HTTP_400_BAD_REQUEST,
+      detail=f"Write failed: {e!s}",
+    )

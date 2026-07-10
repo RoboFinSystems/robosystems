@@ -435,11 +435,14 @@ class TestStageIncrementalToDuckDB:
     assert "Entity" in result.table_names
     assert result.total_rows == 50
 
-    # Entity should use create_table (temp), query_table (DELETE+INSERT+COUNT),
-    # and delete_table (cleanup) — NOT insert_into_table
+    # Entity should use create_table (temp), execute_write (DELETE+INSERT),
+    # query_table (COUNT), and delete_table (cleanup) — NOT insert_into_table.
+    # DELETE/INSERT go through the write endpoint; the hardened read-only
+    # query_table only carries the COUNT.
     mock_client.create_table.assert_called_once()
     mock_client.insert_into_table.assert_not_called()
-    assert mock_client.query_table.call_count == 3  # DELETE, INSERT, COUNT
+    assert mock_client.execute_write.call_count == 2  # DELETE, INSERT
+    assert mock_client.query_table.call_count == 1  # COUNT
 
   @pytest.mark.asyncio
   @patch("robosystems.adapters.sec.processors.ingestion.staging.asyncio.sleep")

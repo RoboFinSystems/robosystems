@@ -1871,6 +1871,44 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
+  async def execute_write(
+    self,
+    graph_id: str,
+    sql: str,
+    parameters: list[Any] | None = None,
+    timeout: float | None = None,
+  ) -> dict[str, Any]:
+    """Execute a write/DDL statement on DuckDB staging (internal write path).
+
+    Read-write companion to :meth:`query_table`. ``query_table`` hits the
+    hardened read-only ``/tables/query`` (SELECT/WITH only); this hits
+    ``/tables/execute``, which runs on the read-write connection with
+    httpfs + postgres_scanner enabled — for ``CREATE TABLE AS SELECT ...
+    postgres_scan(...)`` staging and INSERT/DELETE upserts used by the
+    materialization and ingestion pipelines.
+
+    Args:
+        graph_id: Graph database identifier
+        sql: Write/DDL statement to execute
+        parameters: Optional query parameters for safe value substitution
+        timeout: Optional request timeout in seconds. Use a longer timeout for
+                 DDL like CREATE TABLE AS SELECT.
+
+    Returns:
+        Result payload (columns/rows for statements that return a set).
+    """
+    json_data = {"graph_id": graph_id, "sql": sql}
+    if parameters is not None:
+      json_data["parameters"] = parameters
+
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables/execute",
+      json_data=json_data,
+      timeout=timeout,
+    )
+    return response.json()
+
   async def delete_table(self, graph_id: str, table_name: str) -> dict[str, Any]:
     """
     Delete a DuckDB staging table.
