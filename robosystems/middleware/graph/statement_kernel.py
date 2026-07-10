@@ -71,7 +71,8 @@ class StatementKernel:
     """
     if engine is StatementEngine.CYPHER:
       return self._authorize_cypher(graph_id, statement, user, session)
-    # SQL wired in Phase B2 (read-only, shared-repos blocked).
+    if engine is StatementEngine.SQL:
+      return self._authorize_sql(graph_id, user)
     raise NotImplementedError(f"StatementKernel: engine {engine!r} not wired yet")
 
   def _authorize_cypher(
@@ -162,6 +163,26 @@ class StatementKernel:
 
     return StatementAuthorization(
       is_write=is_write, access_type=access_type, is_subgraph=is_subgraph
+    )
+
+  def _authorize_sql(self, graph_id: str, user: User) -> StatementAuthorization:
+    # SQL is read-only for now — writes are gated on the DuckDB
+    # write-connection sandbox (Phase B3). Shared repositories have no user
+    # columnar tables to query, so SQL is blocked there entirely (unlike
+    # Cypher, which serves shared-repo reads from the graph).
+    if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id.lower()):
+      logger.warning(
+        f"User {user.id} attempted SQL query on shared repository {graph_id}"
+      )
+      raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail="Shared repositories do not allow direct SQL queries. "
+        "Use POST /query/cypher to access shared repository data through the "
+        "structured graph interface.",
+      )
+    is_subgraph = parse_subgraph_id(graph_id) is not None
+    return StatementAuthorization(
+      is_write=False, access_type="read", is_subgraph=is_subgraph
     )
 
 

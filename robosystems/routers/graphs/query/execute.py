@@ -42,8 +42,8 @@ from robosystems.middleware.sse.operation_manager import create_operation_respon
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.query import (
   DEFAULT_QUERY_TIMEOUT,
-  CypherQueryRequest,
-  CypherQueryResponse,
+  CypherStatementRequest,
+  CypherStatementResponse,
 )
 from robosystems.models.core import User
 
@@ -82,11 +82,11 @@ router = APIRouter()
 
 
 @router.post(
-  "/query",
+  "/query/cypher",
   response_model=None,
-  summary="Execute Cypher Query",
-  description='Main graphs are **read-only** — use the staging pipeline to ingest data. Subgraphs support full writes. Always use parameterized queries (`parameters: {"key": "val"}`) to prevent injection. Response modes: `auto` (default), `sync`, `async`, `stream`. Under load, queries are queued and emit an `operation_id` for SSE monitoring at `/v1/operations/{id}/stream`.',
-  operation_id="executeCypherQuery",
+  summary="Execute Cypher Statement",
+  description='Cypher over the graph (LadybugDB). Main graphs are **read-only** — use the staging pipeline to ingest data. Subgraphs support full writes. Always use parameterized queries (`parameters: {"key": "val"}`) to prevent injection. Response modes: `auto` (default), `sync`, `async`, `stream`. Under load, queries are queued and emit an `operation_id` for SSE monitoring at `/v1/operations/{id}/stream`.',
+  operation_id="executeCypher",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     202: {
@@ -97,10 +97,10 @@ router = APIRouter()
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/query", business_event_type="query_executed"
+  "/v1/graphs/{graph_id}/query/cypher", business_event_type="query_executed"
 )
 async def execute_cypher_query(
-  request: CypherQueryRequest,
+  request: CypherStatementRequest,
   full_request: Request,
   graph_id: str = Path(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
@@ -117,7 +117,7 @@ async def execute_cypher_query(
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> CypherQueryResponse | JSONResponse | StreamingResponse | EventSourceResponse:
+) -> CypherStatementResponse | JSONResponse | StreamingResponse | EventSourceResponse:
   start_time = datetime.now(UTC)
 
   # Enforce graph lifecycle and subscription status (reads allowed)
@@ -433,7 +433,7 @@ async def execute_cypher_query(
         )
 
         # Return complete result
-        return CypherQueryResponse(
+        return CypherStatementResponse(
           success=True,
           data=result,
           columns=columns,

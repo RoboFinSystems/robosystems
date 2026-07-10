@@ -45,10 +45,10 @@ class TableListResponse(BaseModel):
   total_count: int = Field(..., description="Total number of tables")
 
 
-class TableQueryRequest(BaseModel):
+class SqlStatementRequest(BaseModel):
   sql: str = Field(
     ...,
-    description="SQL query to execute on staging tables. Use ? placeholders or $param_name for dynamic values to prevent SQL injection.",
+    description="SQL query over the graph's columnar tables (DuckDB) — a relational lens on the same graph-centric data, often ahead of the materialized graph. Use ? placeholders or $param_name for dynamic values to prevent SQL injection.",
     examples=[
       "SELECT * FROM Entity WHERE entity_type = ? LIMIT ?",
       "SELECT COUNT(*) FROM Transaction WHERE amount > ? AND date >= ?",
@@ -85,7 +85,7 @@ class TableQueryRequest(BaseModel):
     }
 
 
-class TableQueryResponse(BaseModel):
+class SqlStatementResponse(BaseModel):
   columns: list[str] = Field(..., description="Column names")
   rows: list[list[Any]] = Field(..., description="Query results")
   row_count: int = Field(..., description="Number of rows returned")

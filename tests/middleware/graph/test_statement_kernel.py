@@ -130,13 +130,33 @@ def test_schema_ddl_blocked():
   assert "Schema DDL" in e.value.detail
 
 
-def test_sql_engine_not_wired_yet():
-  # Phase B2 wires SQL; until then the kernel refuses it loudly.
-  with pytest.raises(NotImplementedError):
-    statement_kernel.authorize(
-      engine=StatementEngine.SQL,
-      graph_id="kg1234567890abcdef",
-      statement="SELECT 1",
-      user=_user(),
-      session=MagicMock(),
-    )
+def _authorize_sql(graph_id, statement="SELECT 1"):
+  return statement_kernel.authorize(
+    engine=StatementEngine.SQL,
+    graph_id=graph_id,
+    statement=statement,
+    user=_user(),
+    session=MagicMock(),
+  )
+
+
+def test_sql_on_user_graph_ok():
+  # SQL is read-only; a non-shared graph is allowed.
+  with patch(
+    f"{MOD}.MultiTenantUtils.is_shared_repository_or_subgraph", return_value=False
+  ):
+    auth = _authorize_sql("kg1234567890abcdef")
+  assert auth.is_write is False
+  assert auth.access_type == "read"
+
+
+def test_sql_on_shared_repo_blocked():
+  # Shared repos have no user columnar tables — SQL is blocked (unlike reads
+  # on the Cypher side, which the graph serves).
+  with patch(
+    f"{MOD}.MultiTenantUtils.is_shared_repository_or_subgraph", return_value=True
+  ):
+    with pytest.raises(HTTPException) as e:
+      _authorize_sql("sec")
+  assert e.value.status_code == 403
+  assert "Shared repositories do not allow direct SQL" in e.value.detail

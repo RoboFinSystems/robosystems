@@ -346,13 +346,13 @@ class RateLimitConfig:
       elif endpoint_type == "schema":
         return EndpointCategory.GRAPH_READ
 
-      # Direct Cypher queries — POST /v1/graphs/{graph_id}/query, so the
-      # segment after graph_id (endpoint_type) is "query". This previously
-      # checked `endpoint_type == "graph"`, which never matches the real
-      # route, so every query (including read-only shared repos like SEC)
-      # fell through to the GRAPH_WRITE default below and reported the
-      # misleading "graph write operations" limit.
+      # Query layer — POST /v1/graphs/{graph_id}/query/{cypher,sql}, so the
+      # segment after graph_id (endpoint_type) is "query" and the language is
+      # the next segment. Cypher → GRAPH_QUERY; SQL keeps the DuckDB/columnar
+      # bucket (TABLE_QUERY) it had as the former /tables/query route.
       elif endpoint_type == "query":
+        if len(path_parts) >= 4 and path_parts[3] == "sql":
+          return EndpointCategory.TABLE_QUERY
         return EndpointCategory.GRAPH_QUERY
 
       # Usage analytics — aggregation-heavy reads get a dedicated bucket

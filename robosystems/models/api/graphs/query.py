@@ -118,7 +118,7 @@ class GraphUsageResponse(BaseModel):
   timestamp: str = Field(..., description="Usage collection timestamp")
 
 
-class CypherQueryRequest(BaseModel):
+class CypherStatementRequest(BaseModel):
   """Request model for Cypher query execution."""
 
   query: str = Field(
@@ -207,7 +207,7 @@ class CypherQueryRequest(BaseModel):
     return v
 
 
-class CypherQueryResponse(BaseModel):
+class CypherStatementResponse(BaseModel):
   """Response model for Cypher query results."""
 
   success: bool = Field(..., description="Whether the query executed successfully")

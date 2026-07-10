@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from . import main, query
+from . import main
 
 router = APIRouter(
   tags=["Tables"],
@@ -12,6 +12,5 @@ router = APIRouter(
 )
 
 router.include_router(main.router)
-router.include_router(query.router)
 
 __all__ = ["router"]
