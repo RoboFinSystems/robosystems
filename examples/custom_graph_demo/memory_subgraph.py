@@ -23,7 +23,7 @@ import sys
 import time
 from pathlib import Path
 
-from robosystems_client.api.query.execute_cypher_query import (
+from robosystems_client.api.query.execute_cypher import (
   sync_detailed as api_execute_query,
 )
 from robosystems_client.api.graph_operations.op_create_subgraph import (
@@ -34,9 +34,9 @@ from robosystems_client.api.subgraphs.list_subgraphs import (
 )
 from robosystems_client.client import AuthenticatedClient
 from robosystems_client.models.create_subgraph_request import CreateSubgraphRequest
-from robosystems_client.models.cypher_query_request import CypherQueryRequest
-from robosystems_client.models.cypher_query_request_parameters_type_0 import (
-  CypherQueryRequestParametersType0,
+from robosystems_client.models.cypher_statement_request import CypherStatementRequest
+from robosystems_client.models.cypher_statement_request_parameters_type_0 import (
+  CypherStatementRequestParametersType0,
 )
 from robosystems_client.models.subgraph_type import SubgraphType
 from robosystems_client.types import UNSET
@@ -51,9 +51,9 @@ CREDENTIALS_FILE = PROJECT_ROOT / ".local" / "config.json"
 DEMO_NAME = "custom_graph_demo"
 
 
-def make_params(params: dict) -> CypherQueryRequestParametersType0:
+def make_params(params: dict) -> CypherStatementRequestParametersType0:
   """Wrap a dict into the generated parameters model."""
-  obj = CypherQueryRequestParametersType0()
+  obj = CypherStatementRequestParametersType0()
   for k, v in params.items():
     obj.additional_properties[k] = v
   return obj
@@ -149,7 +149,7 @@ def execute_query(
   """Execute a Cypher query and print results."""
   print(f"\n   🔍 {description}")
 
-  request = CypherQueryRequest(query=query)
+  request = CypherStatementRequest(query=query)
   response = api_execute_query(graph_id=graph_id, client=client, body=request)
 
   if response.status_code != 200:
@@ -265,7 +265,7 @@ CREATE (c:Concept {
 })
 RETURN c.name AS name
 """
-    request = CypherQueryRequest(query=query, parameters=make_params(concept))
+    request = CypherStatementRequest(query=query, parameters=make_params(concept))
     response = api_execute_query(
       graph_id=subgraph_id, client=client, body=request
     )
@@ -309,7 +309,7 @@ CREATE (o:Observation {
 })
 RETURN o.identifier AS id
 """
-    request = CypherQueryRequest(query=query, parameters=make_params(obs))
+    request = CypherStatementRequest(query=query, parameters=make_params(obs))
     response = api_execute_query(
       graph_id=subgraph_id, client=client, body=request
     )
@@ -339,7 +339,7 @@ CREATE (s:Session {
 })
 RETURN s.name AS name
 """
-  request = CypherQueryRequest(query=query, parameters=make_params(session))
+  request = CypherStatementRequest(query=query, parameters=make_params(session))
   response = api_execute_query(
     graph_id=subgraph_id, client=client, body=request
   )
@@ -428,7 +428,7 @@ RETURN s.name, c.name
   ]
 
   for rel in relationships:
-    request = CypherQueryRequest(
+    request = CypherStatementRequest(
       query=rel["query"], parameters=make_params({"now": now})
     )
     response = api_execute_query(
