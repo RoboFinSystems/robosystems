@@ -2,8 +2,8 @@
 Semantic memory MCP tools (LanceDB vector store).
 
 Gives AI Operators a stateful memory layer: `remember` (write), `recall` (ranked
-semantic read), `forget` (delete). Thin adapters over the transport-independent
-``MemoryService`` kernel — no business logic here.
+semantic read), `update-memory` (edit in place), `forget` (delete). Thin adapters
+over the transport-independent ``MemoryService`` kernel — no business logic here.
 
 DISTINCT from ``memory_tools.py`` (write-graph-cypher / add-node-table), which is
 structural knowledge-graph construction on memory *subgraphs*. This is the
@@ -188,6 +188,78 @@ class SemanticRecallTool(_SemanticMemoryToolMixin, BaseTool):
           for h in response.hits
         ],
       }
+
+    return await self._with_service(_run)
+
+
+class SemanticUpdateMemoryTool(_SemanticMemoryToolMixin, BaseTool):
+  """Partially update a stored semantic memory by id."""
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "update-memory",
+      "description": (
+        "Update a previously stored semantic memory in place by its id (from a "
+        "prior `remember`/`recall`). Only the fields you supply change; the "
+        "memory is re-embedded when `text` changes. Use to correct or refine a "
+        "memory instead of forgetting and re-remembering (which would mint a new "
+        "id and drop its history)."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "description": "The memory id to update (e.g. 'mem_...').",
+          },
+          "text": {
+            "type": "string",
+            "description": "New memory content (omit to keep current).",
+          },
+          "memory_type": {
+            "type": "string",
+            "description": "New classifier (omit to keep current).",
+          },
+          "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "New labels (omit to keep current).",
+          },
+        },
+        "required": ["memory_id"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    self._log_tool_execution("update-memory", arguments)
+    memory_id = (arguments.get("memory_id") or "").strip()
+    if not memory_id:
+      return {"error": "invalid_input", "message": "memory_id is required"}
+
+    from robosystems.models.api.memory import MemoryUpdateRequest
+
+    # Forward only the fields the caller actually set, so the service (which
+    # keys on model_fields_set) does a true partial update instead of wiping
+    # the omitted fields to NULL.
+    update_fields: dict[str, Any] = {}
+    for field in ("text", "memory_type", "tags"):
+      if field in arguments:
+        update_fields[field] = arguments[field]
+    if not update_fields:
+      return {"error": "invalid_input", "message": "No fields to update"}
+
+    request = MemoryUpdateRequest(**update_fields)
+
+    async def _run(service, graph_id):
+      try:
+        record = await service.update_memory(graph_id, memory_id, request)
+      except Exception as e:
+        logger.error(f"update-memory failed: {e}")
+        raise GraphAPIError(f"update-memory failed: {e}")
+      if record is None:
+        return {"error": "not_found", "message": "Memory not found"}
+      return {"success": True, "memory": record.model_dump(mode="json")}
 
     return await self._with_service(_run)
 

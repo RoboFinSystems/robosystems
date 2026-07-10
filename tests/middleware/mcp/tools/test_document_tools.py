@@ -8,6 +8,7 @@ import pytest
 
 from robosystems.middleware.mcp.tools.document_tools import (
   CreateDocumentTool,
+  DeleteDocumentTool,
   GetDocumentTool,
   ListDocumentsTool,
   UpdateDocumentTool,
@@ -200,6 +201,77 @@ class TestUpdateDocumentTool:
       )
 
     assert result["error"] == "not_found"
+
+
+class TestDeleteDocumentTool:
+  def test_tool_definition(self, mock_graph_client):
+    tool = DeleteDocumentTool(mock_graph_client)
+    defn = tool.get_tool_definition()
+    assert defn["name"] == "delete-document"
+    assert "document_id" in defn["inputSchema"]["required"]
+
+  @pytest.mark.asyncio
+  async def test_deletes_document(self, mock_graph_client):
+    mock_service = MagicMock()
+    mock_service.delete_document.return_value = True
+
+    mock_session = MagicMock()
+
+    tool = DeleteDocumentTool(mock_graph_client)
+    with (
+      patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
+      patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+      patch(DOC_SVC, return_value=mock_service),
+    ):
+      result = await tool.execute({"document_id": "doc_01ABC"})
+
+    assert result["success"] is True
+    assert result["document_id"] == "doc_01ABC"
+    mock_service.delete_document.assert_called_once_with("kgtest123", "doc_01ABC")
+
+  @pytest.mark.asyncio
+  async def test_returns_not_found(self, mock_graph_client):
+    mock_service = MagicMock()
+    mock_service.delete_document.return_value = False
+
+    mock_session = MagicMock()
+
+    tool = DeleteDocumentTool(mock_graph_client)
+    with (
+      patch(f"{DOC_MODULE}._get_platform_session", return_value=mock_session),
+      patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(f"{DOC_MODULE}._check_graph_access", return_value=None),
+      patch(DOC_SVC, return_value=mock_service),
+    ):
+      result = await tool.execute({"document_id": "doc_missing"})
+
+    assert result["error"] == "not_found"
+
+  @pytest.mark.asyncio
+  async def test_blocks_shared_repository(self, mock_shared_client):
+    tool = DeleteDocumentTool(mock_shared_client)
+    with patch(
+      f"{DOC_MODULE}._block_shared_repository",
+      return_value={"error": "not_allowed", "message": "shared repo"},
+    ):
+      result = await tool.execute({"document_id": "doc_01ABC"})
+
+    assert result["error"] == "not_allowed"
+
+  @pytest.mark.asyncio
+  async def test_requires_write_access(self, mock_graph_client):
+    tool = DeleteDocumentTool(mock_graph_client)
+    with (
+      patch(f"{DOC_MODULE}._block_shared_repository", return_value=None),
+      patch(
+        f"{DOC_MODULE}._check_graph_access",
+        return_value={"error": "access_denied", "message": "read-only"},
+      ),
+    ):
+      result = await tool.execute({"document_id": "doc_01ABC"})
+
+    assert result["error"] == "access_denied"
 
 
 class TestGetDocumentTool:
