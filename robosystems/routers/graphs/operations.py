@@ -10,7 +10,15 @@ URL surface: ``POST /v1/graphs/{graph_id}/operations/{op_name}``
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
+from fastapi import (
+  APIRouter,
+  BackgroundTasks,
+  Depends,
+  Header,
+  HTTPException,
+  Path,
+  status,
+)
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
@@ -39,10 +47,12 @@ from robosystems.models.api.graphs.operations import (
   ChangeReportingStyleOp,
   ChangeTierOp,
   DeleteDocumentOp,
+  DeleteFileOp,
   DeleteGraphOp,
   DeleteSubgraphOp,
   ForgetOp,
   IndexDocumentOp,
+  IngestFileOp,
   MaterializeOp,
   RememberOp,
   RestoreBackupOp,
@@ -103,7 +113,7 @@ def _block_shared_repo(graph_id: str) -> None:
   if is_shared_repository_or_subgraph(graph_id):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Semantic memory is not available on shared repositories",
+      detail="Content operations are not available on shared repositories",
     )
 
 
@@ -1294,5 +1304,146 @@ async def delete_document_op(
       return {"document_id": body.document_id, "deleted": True}
     finally:
       session.close()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ingest-file (raw → staging content flow)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/ingest-file",
+  response_model=OperationEnvelope,
+  operation_id="opIngestFile",
+  summary="Ingest File (stage an uploaded file)",
+  description="Mark an uploaded file ready and stage it into DuckDB. Small files "
+  "stage directly (sync); large files stage via a background job (returns a "
+  "pending envelope with an `operation_id` to monitor). Set `ingest_to_graph` to "
+  "auto-materialize into the graph after staging.",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/ingest-file",
+  method="POST",
+  business_event_type="graph_ingest_file",
+)
+async def ingest_file_op(
+  body: IngestFileOp,
+  background_tasks: BackgroundTasks,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  db: Session = Depends(get_async_db_session),
+) -> OperationEnvelope:
+  from robosystems.operations.graph.commands.ingest_file import ingest_file_cmd
+
+  _block_shared_repo(graph_id)
+  _require_graph_write_access(graph_id)
+
+  op_name = "ingest-file"
+  user_id = str(user.id)
+  body_fp = fingerprint_body(body)
+
+  replay = await check_idempotency(
+    cache, user_id, graph_id, op_name, idempotency_key, body_fp
+  )
+  if replay is not None:
+    return replay
+
+  result = await ingest_file_cmd(
+    graph_id=graph_id,
+    file_id=body.file_id,
+    ingest_to_graph=body.ingest_to_graph,
+    current_user=user,
+    db=db,
+    background_tasks=background_tasks,
+  )
+
+  # Async staging (Dagster) returns an operation_id → pending; direct staging with
+  # no follow-on ingest completes inline → completed.
+  if result.get("operation_id"):
+    envelope = wrap_pending(
+      op_name,
+      operation_id=result["operation_id"],
+      partial_result=result,
+      created_by=user_id,
+    )
+  else:
+    envelope = wrap_completed(op_name, result=result, created_by=user_id)
+
+  if idempotency_key is not None:
+    await cache.put(user_id, graph_id, op_name, idempotency_key, envelope, body_fp)
+
+  log_operation_audit(
+    operation_name=op_name,
+    operation_id=envelope.operation_id,
+    user_id=user_id,
+    graph_id=graph_id,
+    duration_ms=0.0,
+    status=envelope.status,
+    idempotency_key=idempotency_key,
+    event=_AUDIT_EVENT,
+  )
+  return envelope
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# delete-file (raw content op)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/delete-file",
+  response_model=OperationEnvelope,
+  operation_id="opDeleteFile",
+  summary="Delete File",
+  description="Delete a file from S3 and PostgreSQL. `cascade=true` also removes "
+  "its rows from DuckDB staging tables and marks the graph stale.",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/delete-file",
+  method="POST",
+  business_event_type="graph_delete_file",
+)
+async def delete_file_op(
+  body: DeleteFileOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  db: Session = Depends(get_async_db_session),
+) -> OperationEnvelope:
+  from robosystems.operations.graph.commands.delete_file import delete_file_cmd
+
+  _block_shared_repo(graph_id)
+  _require_graph_write_access(graph_id)
+
+  op_name = "delete-file"
+  user_id = str(user.id)
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=user_id,
+    op=op_name,
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    result = await delete_file_cmd(
+      graph_id=graph_id,
+      file_id=body.file_id,
+      cascade=body.cascade,
+      current_user=user,
+      db=db,
+    )
+    return result.model_dump(mode="json")
 
   return await _dispatch(ctx, _runner, cache)

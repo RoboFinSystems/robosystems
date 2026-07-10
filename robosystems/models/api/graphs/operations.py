@@ -189,3 +189,27 @@ class DeleteDocumentOp(BaseModel):
   """Body for delete-document (corpus content-op)."""
 
   document_id: str = Field(..., min_length=1, description="Document id to delete")
+
+
+class IngestFileOp(BaseModel):
+  """Body for ingest-file (raw→staging content flow).
+
+  Marks an uploaded file ready and triggers DuckDB staging. Set
+  ``ingest_to_graph`` to auto-chain graph materialization after staging.
+  """
+
+  file_id: str = Field(..., min_length=1, description="Uploaded file id to ingest")
+  ingest_to_graph: bool = Field(
+    default=False,
+    description="Auto-materialize into the graph after DuckDB staging",
+  )
+
+
+class DeleteFileOp(BaseModel):
+  """Body for delete-file (raw content-op)."""
+
+  file_id: str = Field(..., min_length=1, description="File id to delete")
+  cascade: bool = Field(
+    default=False,
+    description="Also delete the file's rows from DuckDB tables and mark the graph stale",
+  )
