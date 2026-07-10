@@ -43,8 +43,8 @@ MAIN_API_TAGS = [
     "description": "📄 File management - Upload, track, and manage data files for generic graphs",
   },
   {
-    "name": "Content",
-    "description": "✍️ Content operations - Non-language knowledge writes for memory, documents, file staging",
+    "name": "Content Operations",
+    "description": "✍️ Content management - Non-language knowledge writes for memory, documents, file staging",
   },
   {
     "name": "Extensions: GraphQL",
