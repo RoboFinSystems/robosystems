@@ -43,7 +43,9 @@ class Document(Model):
   )
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("doc"))
-  graph_id = Column(String, ForeignKey("graphs.graph_id"), nullable=False)
+  graph_id = Column(
+    String, ForeignKey("graphs.graph_id", ondelete="CASCADE"), nullable=False
+  )
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
   title = Column(String(500), nullable=False)
   content = Column(Text, nullable=False)

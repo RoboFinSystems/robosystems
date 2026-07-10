@@ -15,9 +15,7 @@ class SubgraphType(str, Enum):
   """Types of subgraphs."""
 
   STATIC = "static"  # Traditional environment-based subgraphs
-  TEMPORAL = "temporal"  # Short-lived memory contexts (future)
   VERSIONED = "versioned"  # Git-like version control (future)
-  MEMORY = "memory"  # Memory layer subgraphs (future)
 
 
 class CreateSubgraphRequest(BaseModel):
