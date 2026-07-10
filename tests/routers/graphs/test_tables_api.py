@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from robosystems.models.api.graphs.tables import FileUploadRequest
-from robosystems.routers.graphs.files import upload as files_upload
+from robosystems.operations.graph.commands import create_file_upload as files_upload
 from robosystems.routers.graphs.tables import main as tables_main
 
 
@@ -62,7 +62,6 @@ async def test_list_tables_success(monkeypatch):
   result = await tables_main.list_tables(
     graph_id="graph-123",
     current_user=SimpleNamespace(id="user-123"),
-    _rate_limit=None,
     db=fake_db,
   )
 
@@ -86,7 +85,6 @@ async def test_list_tables_not_found(monkeypatch):
     await tables_main.list_tables(
       graph_id="graph-404",
       current_user=SimpleNamespace(id="user-123"),
-      _rate_limit=None,
       db=SimpleNamespace(),
     )
 
@@ -124,11 +122,10 @@ async def test_get_upload_url_rejects_extension(monkeypatch):
   )
 
   with pytest.raises(Exception) as exc:
-    await files_upload.create_file_upload(
+    await files_upload.create_file_upload_cmd(
       graph_id="graph-123",
       request=request,
       current_user=SimpleNamespace(id="user-1"),
-      _rate_limit=None,
       db=SimpleNamespace(),
     )
 
@@ -185,11 +182,10 @@ async def test_get_upload_url_success(monkeypatch):
     table_name="Entity",
   )
 
-  result = await files_upload.create_file_upload(
+  result = await files_upload.create_file_upload_cmd(
     graph_id="graph-123",
     request=request,
     current_user=SimpleNamespace(id="user-1"),
-    _rate_limit=None,
     db=SimpleNamespace(),
   )
 

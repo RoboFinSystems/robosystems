@@ -34,7 +34,7 @@ This clean namespace design enables:
 
 from fastapi import APIRouter
 
-from . import main, upload
+from . import main
 
 router = APIRouter(
   tags=["Files"],
@@ -46,6 +46,5 @@ router = APIRouter(
 )
 
 router.include_router(main.router)
-router.include_router(upload.router)
 
 __all__ = ["router"]

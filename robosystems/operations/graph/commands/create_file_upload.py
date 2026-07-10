@@ -1,38 +1,27 @@
-"""File upload via presigned S3 URL and upload status management."""
+"""Create-file-upload command — presign an S3 upload + register the GraphFile.
+
+Extracted verbatim from the former ``POST /files`` router so the file-upload
+write goes through the content-ops envelope
+(``POST /operations/create-file-upload``) like ingest-file / delete-file.
+Validates format/extension/name, auto-creates the staging table if missing,
+presigns an S3 PUT URL, and records a PENDING GraphFile. Returns the presign
+details; the caller uploads to S3 then calls ingest-file to stage.
+"""
 
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path as PathLib
 
-from fastapi import (
-  APIRouter,
-  Body,
-  Depends,
-  HTTPException,
-  Path,
-  status,
-)
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.config import env
-from robosystems.config.constants import (
-  PRESIGNED_URL_EXPIRY_SECONDS,
-)
+from robosystems.config.constants import PRESIGNED_URL_EXPIRY_SECONDS
 from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
-from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_universal_repository
-from robosystems.middleware.graph.types import (
-  GRAPH_OR_SUBGRAPH_ID_PATTERN,
-  SHARED_REPO_WRITE_ERROR_MESSAGE,
-)
-from robosystems.middleware.otel.metrics import (
-  endpoint_metrics_decorator,
-  get_endpoint_metrics,
-)
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
+from robosystems.middleware.graph.types import SHARED_REPO_WRITE_ERROR_MESSAGE
+from robosystems.middleware.otel.metrics import get_endpoint_metrics
 from robosystems.models.api.graphs.tables import (
   FileUploadRequest,
   FileUploadResponse,
@@ -41,31 +30,17 @@ from robosystems.models.api.graphs.tables import (
 from robosystems.models.core import GraphFile, GraphTable, User
 from robosystems.operations.aws.s3 import S3Client
 
-router = APIRouter()
+_OPS_ENDPOINT = "/v1/graphs/{graph_id}/operations/create-file-upload"
 
 
-@router.post(
-  "/files",
-  response_model=FileUploadResponse,
-  operation_id="createFileUpload",
-  summary="Create File Upload",
-  description="Returns a presigned S3 URL for direct upload. After uploading, call `POST /v1/graphs/{graph_id}/operations/ingest-file` to stage the file into DuckDB. Tables are auto-created if missing. Not allowed on entity graphs or shared repositories.",
-  responses={**RESOURCE_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/files", business_event_type="file_upload_created"
-)
-async def create_file_upload(
-  graph_id: str = Path(
-    ...,
-    description="Graph database identifier",
-    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
-  ),
-  request: FileUploadRequest = Body(..., description="Upload request with table_name"),
-  current_user: User = Depends(get_current_user_with_graph),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-  db: Session = Depends(get_db_session),
+async def create_file_upload_cmd(
+  *,
+  graph_id: str,
+  request: FileUploadRequest,
+  current_user: User,
+  db: Session,
 ) -> FileUploadResponse:
+  """Presign an S3 upload URL and register a PENDING GraphFile."""
   start_time = datetime.now(UTC)
 
   # Enforce graph lifecycle and subscription status (write operation)
@@ -213,7 +188,7 @@ async def create_file_upload(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/files",
+      endpoint=_OPS_ENDPOINT,
       method="POST",
       event_type="upload_url_generated_successfully",
       event_data={
@@ -226,21 +201,6 @@ async def create_file_upload(
         "execution_time_ms": execution_time,
       },
       user_id=current_user.id,
-    )
-
-    api_logger.info(
-      "Upload URL generated successfully",
-      extra={
-        "component": "files_api",
-        "action": "upload_url_completed",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "table_name": table_name,
-        "file_id": graph_file.id,
-        "file_name": request.file_name,
-        "duration_ms": execution_time,
-        "success": True,
-      },
     )
 
     logger.info(f"Generated upload URL for file {graph_file.id}: {s3_key}")
@@ -260,7 +220,7 @@ async def create_file_upload(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/files",
+      endpoint=_OPS_ENDPOINT,
       method="POST",
       event_type="upload_url_generation_failed",
       event_data={
@@ -272,20 +232,6 @@ async def create_file_upload(
         "execution_time_ms": execution_time,
       },
       user_id=current_user.id,
-    )
-
-    api_logger.error(
-      "Upload URL generation failed",
-      extra={
-        "component": "files_api",
-        "action": "upload_url_failed",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "table_name": table_name,
-        "file_name": request.file_name,
-        "duration_ms": execution_time,
-        "error_type": type(e).__name__,
-      },
     )
 
     logger.error(
