@@ -139,7 +139,7 @@ class StatementKernel:
       )
 
     # Block writes on shared repositories
-    if is_write and MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
+    if is_write and MultiTenantUtils.is_shared_repository_or_subgraph(graph_id.lower()):
       logger.warning(f"User {user.id} attempted write on shared repository {graph_id}")
       raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,

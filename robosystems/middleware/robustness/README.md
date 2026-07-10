@@ -233,7 +233,7 @@ record_operation_metric(
 ## Putting It Together
 
 The graph routers (`routers/graphs/usage.py`, `health.py`, `limits.py`,
-`info.py`, `tables/query.py`, `mcp/handlers.py`) construct these helpers at
+`info.py`, `query/sql.py`, `mcp/handlers.py`) construct these helpers at
 module scope and wire them together inside the handler: check the circuit,
 compute a timeout, run under `asyncio.wait_for`, then record success/failure on
 the breaker and emit logs/metrics.
