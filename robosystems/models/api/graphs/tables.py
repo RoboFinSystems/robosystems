@@ -169,21 +169,20 @@ class FileUploadResponse(BaseModel):
 class FileStatusUpdate(BaseModel):
   status: str = Field(
     ...,
-    description="File status: 'uploaded' (ready for ingest), 'disabled' (exclude from ingest), 'archived' (soft deleted)",
-    examples=["uploaded", "disabled", "archived"],
-  )
-  ingest_to_graph: bool = Field(
-    default=False,
-    description="Auto-ingest to graph after DuckDB staging. Default=false (batch mode). Set to true for real-time incremental updates.",
+    description=(
+      "File status change: 'disabled' (exclude from ingest) or 'archived' "
+      "(soft deleted). To stage an uploaded file into DuckDB, use "
+      "POST /v1/graphs/{graph_id}/operations/ingest-file."
+    ),
+    examples=["disabled", "archived"],
   )
 
   class Config:
     extra = "forbid"
     json_schema_extra = {
       "examples": [
-        {"status": "uploaded"},
-        {"status": "uploaded", "ingest_to_graph": True},
         {"status": "disabled"},
+        {"status": "archived"},
       ]
     }
 

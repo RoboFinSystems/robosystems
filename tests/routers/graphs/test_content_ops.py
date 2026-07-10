@@ -152,6 +152,16 @@ async def test_delete_document_404_when_missing():
   assert e.value.status_code == 404
 
 
+def test_index_document_title_capped_at_500():
+  # matches the documents.title String(500) DB column — over-long titles must
+  # fail validation (clean 422), not slip through to a DB-layer error.
+  from pydantic import ValidationError
+
+  IndexDocumentOp(title="x" * 500, content="c")  # ok
+  with pytest.raises(ValidationError):
+    IndexDocumentOp(title="x" * 501, content="c")
+
+
 async def test_ingest_file_async_when_operation_id():
   body = IngestFileOp(file_id="gf_1", ingest_to_graph=True)
   g1, g2, g3 = _guards()

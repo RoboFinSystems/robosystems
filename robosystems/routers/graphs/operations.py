@@ -110,7 +110,7 @@ def _require_memory_enabled() -> None:
 def _block_shared_repo(graph_id: str) -> None:
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
 
-  if is_shared_repository_or_subgraph(graph_id):
+  if is_shared_repository_or_subgraph(graph_id.lower()):
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
       detail="Content operations are not available on shared repositories",

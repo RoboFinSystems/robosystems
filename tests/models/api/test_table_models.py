@@ -5,10 +5,6 @@ from robosystems.models.api.graphs.tables import FileStatusUpdate
 
 
 class TestFileStatusUpdate:
-  def test_valid_uploaded_status(self):
-    model = FileStatusUpdate(status="uploaded")
-    assert model.status == "uploaded"
-
   def test_valid_disabled_status(self):
     model = FileStatusUpdate(status="disabled")
     assert model.status == "disabled"
@@ -27,16 +23,16 @@ class TestFileStatusUpdate:
 
   def test_extra_fields_forbidden(self):
     with pytest.raises(ValidationError) as exc_info:
-      FileStatusUpdate(status="uploaded", extra_field="not_allowed")  # type: ignore[call-arg]
+      FileStatusUpdate(status="disabled", extra_field="not_allowed")  # type: ignore[call-arg]
 
     errors = exc_info.value.errors()
     assert any("extra" in error["type"] for error in errors)
 
   def test_model_dump(self):
-    model = FileStatusUpdate(status="uploaded")
+    model = FileStatusUpdate(status="disabled")
     dumped = model.model_dump()
 
-    assert dumped == {"status": "uploaded", "ingest_to_graph": False}
+    assert dumped == {"status": "disabled"}
 
   def test_model_json_schema(self):
     schema = FileStatusUpdate.model_json_schema()
@@ -44,10 +40,11 @@ class TestFileStatusUpdate:
     assert "properties" in schema
     assert "status" in schema["properties"]
     assert schema["properties"]["status"]["type"] == "string"
-    assert (
-      "File status: 'uploaded' (ready for ingest), 'disabled' (exclude from ingest), 'archived' (soft deleted)"
-      in schema["properties"]["status"]["description"]
-    )
+    description = schema["properties"]["status"]["description"]
+    assert "disabled" in description
+    assert "archived" in description
+    # ingest-file staging has left this endpoint; the schema must not advertise it
+    assert "ingest_to_graph" not in schema["properties"]
 
   def test_from_json(self):
     json_data = '{"status": "disabled"}'
@@ -60,4 +57,4 @@ class TestFileStatusUpdate:
     json_str = model.model_dump_json()
 
     assert '"status":"archived"' in json_str
-    assert '"ingest_to_graph":false' in json_str
+    assert "ingest_to_graph" not in json_str

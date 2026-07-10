@@ -570,7 +570,7 @@ class TestUpdateFileStatusValidation:
 
   @pytest.mark.asyncio
   async def test_rejects_shared_repo_status_update(self):
-    request = FileStatusUpdate(status="uploaded")
+    request = FileStatusUpdate(status="disabled")
 
     with patch.object(
       upload_module, "is_shared_repository_or_subgraph", return_value=True
@@ -617,7 +617,7 @@ class TestUpdateFileStatusValidation:
 
   @pytest.mark.asyncio
   async def test_returns_404_when_file_not_found(self):
-    request = FileStatusUpdate(status="uploaded")
+    request = FileStatusUpdate(status="disabled")
 
     with (
       patch.object(
@@ -639,7 +639,7 @@ class TestUpdateFileStatusValidation:
 
   @pytest.mark.asyncio
   async def test_returns_404_when_file_graph_mismatch(self):
-    request = FileStatusUpdate(status="uploaded")
+    request = FileStatusUpdate(status="disabled")
     mock_file = Mock()
     mock_file.graph_id = "kg_different_graph_id"
 

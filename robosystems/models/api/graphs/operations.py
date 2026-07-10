@@ -174,7 +174,9 @@ class IndexDocumentOp(BaseModel):
     default=None,
     description="Present → update that document; absent → create a new one",
   )
-  title: str | None = Field(default=None, description="Required when creating")
+  title: str | None = Field(
+    default=None, max_length=500, description="Required when creating"
+  )
   content: str | None = Field(
     default=None, max_length=500_000, description="Required when creating"
   )
