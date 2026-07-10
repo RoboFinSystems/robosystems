@@ -38,9 +38,11 @@ from robosystems.models.api.graphs.backups import BackupCreateRequest
 from robosystems.models.api.graphs.operations import (
   ChangeReportingStyleOp,
   ChangeTierOp,
+  DeleteDocumentOp,
   DeleteGraphOp,
   DeleteSubgraphOp,
   ForgetOp,
+  IndexDocumentOp,
   MaterializeOp,
   RememberOp,
   RestoreBackupOp,
@@ -105,12 +107,12 @@ def _block_shared_repo(graph_id: str) -> None:
     )
 
 
-def _require_memory_write_access(graph_id: str) -> None:
+def _require_graph_write_access(graph_id: str) -> None:
   """Enforce write-level graph access (subscription state + write role).
 
-  get_current_user_with_graph only proves *some* access (incl. viewer); memory
-  writes must also pass the subscription/lifecycle + write-role checks the other
-  write surfaces (documents, governance router) apply.
+  ``get_current_user_with_graph`` only proves *some* access (incl. viewer);
+  content-op writes must also pass the subscription/lifecycle + write-role checks
+  the resource write surfaces apply. Shared by all content-op write handlers.
   """
   from robosystems.database import SessionFactory
   from robosystems.middleware.billing.enforcement import require_graph_access
@@ -120,6 +122,28 @@ def _require_memory_write_access(graph_id: str) -> None:
     require_graph_access(graph_id, session, require_write=True)
   finally:
     session.close()
+
+
+def _require_search_enabled() -> None:
+  from robosystems.config import env
+
+  if not env.SEMANTIC_SEARCH_ENABLED:
+    raise HTTPException(
+      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+      detail="Document search is not enabled",
+    )
+
+
+def _resolve_graph_tier(graph_id: str, session) -> str:
+  from robosystems.models.core.graph import Graph
+
+  graph = Graph.get_by_id(graph_id, session)
+  if graph is None or graph.graph_tier is None:
+    raise HTTPException(
+      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+      detail="Unable to determine subscription tier",
+    )
+  return graph.graph_tier
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1039,7 +1063,7 @@ async def remember_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
-  _require_memory_write_access(graph_id)
+  _require_graph_write_access(graph_id)
 
   op_name = "remember"
   user_id = str(user.id)
@@ -1101,7 +1125,7 @@ async def forget_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
-  _require_memory_write_access(graph_id)
+  _require_graph_write_access(graph_id)
 
   op_name = "forget"
   user_id = str(user.id)
@@ -1123,5 +1147,152 @@ async def forget_op(
       return result.model_dump(mode="json")
     finally:
       await client.close()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# index-document (corpus content op)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/index-document",
+  response_model=OperationEnvelope,
+  operation_id="opIndexDocument",
+  summary="Index Document (write to the corpus)",
+  description="Create a document (omit `document_id`) or update one (provide it). "
+  "Stored in PostgreSQL, synced to OpenSearch for search.",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/index-document",
+  method="POST",
+  business_event_type="graph_index_document",
+)
+async def index_document_op(
+  body: IndexDocumentOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  from robosystems.database import SessionFactory
+  from robosystems.models.api.search import DocumentUploadRequest
+  from robosystems.operations.document_service import DocumentService
+
+  _require_search_enabled()
+  _block_shared_repo(graph_id)
+  _require_graph_write_access(graph_id)
+
+  op_name = "index-document"
+  user_id = str(user.id)
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=user_id,
+    op=op_name,
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    session = SessionFactory()
+    try:
+      service = DocumentService(session)
+      if body.document_id:
+        kwargs = {
+          f: getattr(body, f)
+          for f in ("title", "content", "tags", "folder")
+          if f in body.model_fields_set
+        }
+        _doc, response = service.update_document(
+          graph_id=graph_id, document_id=body.document_id, **kwargs
+        )
+      else:
+        if not body.title or body.content is None:
+          raise HTTPException(
+            status_code=422,
+            detail="title and content are required to create a document",
+          )
+        tier = _resolve_graph_tier(graph_id, session)
+        request = DocumentUploadRequest(
+          title=body.title,
+          content=body.content,
+          tags=body.tags,
+          folder=body.folder,
+          external_id=body.external_id,
+        )
+        _doc, response = service.create_document(
+          graph_id=graph_id, user_id=user.id, request=request, tier=tier
+        )
+      return response.model_dump(mode="json")
+    except HTTPException:
+      raise
+    except KeyError as e:
+      raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+      raise HTTPException(status_code=422, detail=str(e))
+    finally:
+      session.close()
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# delete-document (corpus content op)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/delete-document",
+  response_model=OperationEnvelope,
+  operation_id="opDeleteDocument",
+  summary="Delete Document (remove from the corpus)",
+  description="Delete a document from PostgreSQL and OpenSearch by id.",
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/delete-document",
+  method="POST",
+  business_event_type="graph_delete_document",
+)
+async def delete_document_op(
+  body: DeleteDocumentOp,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+) -> OperationEnvelope:
+  from robosystems.database import SessionFactory
+  from robosystems.operations.document_service import DocumentService
+
+  _require_search_enabled()
+  _block_shared_repo(graph_id)
+  _require_graph_write_access(graph_id)
+
+  op_name = "delete-document"
+  user_id = str(user.id)
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=user_id,
+    op=op_name,
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    session = SessionFactory()
+    try:
+      service = DocumentService(session)
+      deleted = service.delete_document(graph_id, body.document_id)
+      if not deleted:
+        raise HTTPException(status_code=404, detail="Document not found")
+      return {"document_id": body.document_id, "deleted": True}
+    finally:
+      session.close()
 
   return await _dispatch(ctx, _runner, cache)
