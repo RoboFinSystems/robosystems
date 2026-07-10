@@ -395,6 +395,7 @@ class GraphMCPTools:
     # writable, non-shared graph. Distinct from the subgraph-Cypher memory tools.
     self.semantic_remember_tool = None
     self.semantic_recall_tool = None
+    self.semantic_update_memory_tool = None
     self.semantic_forget_tool = None
     if (
       env.SEMANTIC_MEMORY_ENABLED
@@ -405,11 +406,13 @@ class GraphMCPTools:
         SemanticForgetTool,
         SemanticRecallTool,
         SemanticRememberTool,
+        SemanticUpdateMemoryTool,
       )
 
       self.semantic_recall_tool = SemanticRecallTool(graph_client)
       if not read_only:
         self.semantic_remember_tool = SemanticRememberTool(graph_client)
+        self.semantic_update_memory_tool = SemanticUpdateMemoryTool(graph_client)
         self.semantic_forget_tool = SemanticForgetTool(graph_client)
 
     # Layer 3: Document management tools (user graphs only, not shared repos)
@@ -418,11 +421,13 @@ class GraphMCPTools:
     # Write tools (create/update) require writable user graphs.
     self.create_document_tool = None
     self.update_document_tool = None
+    self.delete_document_tool = None
     self.get_document_tool = None
     self.list_documents_tool = None
     if env.SEMANTIC_SEARCH_ENABLED and not self._is_shared_repository():
       from .document_tools import (
         CreateDocumentTool,
+        DeleteDocumentTool,
         GetDocumentTool,
         ListDocumentsTool,
         UpdateDocumentTool,
@@ -436,6 +441,7 @@ class GraphMCPTools:
       if not read_only:
         self.create_document_tool = CreateDocumentTool(graph_client)
         self.update_document_tool = UpdateDocumentTool(graph_client)
+        self.delete_document_tool = DeleteDocumentTool(graph_client)
 
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
@@ -591,6 +597,8 @@ class GraphMCPTools:
       tools.append(self.semantic_recall_tool.get_tool_definition())
     if self.semantic_remember_tool is not None:
       tools.append(self.semantic_remember_tool.get_tool_definition())
+    if self.semantic_update_memory_tool is not None:
+      tools.append(self.semantic_update_memory_tool.get_tool_definition())
     if self.semantic_forget_tool is not None:
       tools.append(self.semantic_forget_tool.get_tool_definition())
     return tools
@@ -803,6 +811,8 @@ class GraphMCPTools:
       tools.append(self.create_document_tool.get_tool_definition())
     if self.update_document_tool is not None:
       tools.append(self.update_document_tool.get_tool_definition())
+    if self.delete_document_tool is not None:
+      tools.append(self.delete_document_tool.get_tool_definition())
     if self.get_document_tool is not None:
       tools.append(self.get_document_tool.get_tool_definition())
     if self.list_documents_tool is not None:
@@ -1018,6 +1028,16 @@ class GraphMCPTools:
             self._tool_unavailable_reason("recall", "MCP_SEMANTIC_MEMORY_ENABLED")
           )
         result = await self.semantic_recall_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "update-memory":
+        if self.semantic_update_memory_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason(
+              "update-memory", "MCP_SEMANTIC_MEMORY_ENABLED"
+            )
+          )
+        result = await self.semantic_update_memory_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "forget":
@@ -1268,6 +1288,14 @@ class GraphMCPTools:
             self._tool_unavailable_reason("update-document", "SEMANTIC_SEARCH_ENABLED")
           )
         result = await self.update_document_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "delete-document":
+        if self.delete_document_tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason("delete-document", "SEMANTIC_SEARCH_ENABLED")
+          )
+        result = await self.delete_document_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "get-document":

@@ -3,11 +3,12 @@
 Replaces the semantic memory tools (remember-text, recall-text) with full
 document CRUD. Memories become documents with folder="memory".
 
-Four tools:
+Five tools:
 1. create-document: Create a markdown document (PG + OpenSearch)
 2. update-document: Edit an existing document's content or metadata
-3. get-document: Retrieve full document content by ID
-4. list-documents: Browse documents in the graph (filter by folder/source_type)
+3. delete-document: Remove a document from PG + OpenSearch by ID
+4. get-document: Retrieve full document content by ID
+5. list-documents: Browse documents in the graph (filter by folder/source_type)
 
 Discovery (search) is handled by the existing search-documents tool.
 """
@@ -392,6 +393,69 @@ class GetDocumentTool:
     except Exception as e:
       logger.error(f"get-document failed for graph_id={graph_id}: {e}")
       return {"error": "retrieval_failed", "message": str(e)}
+    finally:
+      session.close()
+
+
+class DeleteDocumentTool:
+  """Delete a document by ID from PostgreSQL and OpenSearch."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "delete-document",
+      "description": """Delete a document by ID from the graph's document store.
+
+**WHEN TO USE:**
+- To remove an outdated or incorrect policy/procedure document
+- To clean up a memory note that is no longer relevant
+
+Removes the document from PostgreSQL (source of truth) and its indexed sections
+from OpenSearch. This is permanent — use get-document to review before deleting.""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "description": "Document ID to delete",
+          },
+        },
+        "required": ["document_id"],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    from robosystems.operations.document_service import DocumentService
+
+    graph_id = self.client.graph_id
+
+    blocked = _block_shared_repository(graph_id)
+    if blocked:
+      return blocked
+
+    access_error = _check_graph_access(graph_id, require_write=True)
+    if access_error:
+      return access_error
+
+    document_id = arguments["document_id"]
+
+    session = _get_platform_session()
+    try:
+      service = DocumentService(session)
+      deleted = service.delete_document(graph_id, document_id)
+      if not deleted:
+        return {"error": "not_found", "message": f"Document '{document_id}' not found"}
+      return {
+        "success": True,
+        "document_id": document_id,
+        "deleted": True,
+        "message": "Document deleted from PostgreSQL and OpenSearch",
+      }
+    except Exception as e:
+      logger.error(f"delete-document failed for graph_id={graph_id}: {e}")
+      return {"error": "delete_failed", "message": str(e)}
     finally:
       session.close()
 
