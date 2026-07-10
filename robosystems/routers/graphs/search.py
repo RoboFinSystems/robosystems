@@ -8,7 +8,6 @@ from starlette import status as http_status
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
-from robosystems.models.api.memory import MemoryRecallRequest
 from robosystems.models.api.search import (
   DocumentSection,
   SearchRequest,
@@ -141,48 +140,6 @@ async def search_documents(
   await _check_search_rate_limit(graph_id, current_user, "search")
   service = _require_search_service()
   return service.search_documents(graph_id, request)
-
-
-@router.post(
-  "/recall",
-  summary="Recall Semantic Memory",
-  description="Ranked semantic recall over the graph's per-graph memory store. "
-  "Returns scored hits in the same shape as document search.",
-  operation_id="recall_memory",
-  responses={
-    **RESOURCE_ERROR_RESPONSES,
-    503: {"description": "Semantic memory not available"},
-  },
-)
-async def recall_memory(
-  graph_id: str,
-  request: MemoryRecallRequest,
-  current_user: User = Depends(get_current_user_with_graph),
-) -> SearchResponse:
-  from robosystems.config import env
-  from robosystems.database import SessionFactory
-  from robosystems.graph_api.client.factory import get_graph_client
-  from robosystems.middleware.billing.enforcement import require_graph_access
-  from robosystems.operations.memory import get_memory_service
-
-  if not env.SEMANTIC_MEMORY_ENABLED:
-    raise HTTPException(status_code=503, detail="Semantic memory is not enabled")
-
-  session = SessionFactory()
-  try:
-    require_graph_access(graph_id, session)
-  finally:
-    session.close()
-
-  # Memory lives only on the writer/master (not in replica sync).
-  client = await get_graph_client(graph_id=graph_id, operation_type="write")
-  try:
-    service = get_memory_service(client)
-    if service is None:  # pragma: no cover - gated above
-      raise HTTPException(status_code=503, detail="Semantic memory is not enabled")
-    return await service.recall(graph_id, request)
-  finally:
-    await client.close()
 
 
 @router.get(

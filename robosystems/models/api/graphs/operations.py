@@ -163,6 +163,33 @@ class ForgetOp(BaseModel):
   )
 
 
+class UpdateMemoryOp(BaseModel):
+  """Body for the update-memory operation (partial update of a stored memory).
+
+  Only supplied fields are changed; the memory is re-embedded when ``text``
+  changes.
+  """
+
+  memory_id: str = Field(
+    ...,
+    pattern="^mem_[0-9a-f]{32}$",
+    description="Server-generated memory id to update",
+  )
+  text: str | None = Field(
+    default=None, min_length=1, max_length=10_000, description="New memory content"
+  )
+  memory_type: str | None = Field(
+    default=None, max_length=64, description="Freeform classifier"
+  )
+  tags: list[str] | None = Field(default=None, description="Optional labels")
+  source_ref: str | None = Field(
+    default=None, max_length=2048, description="Optional external reference/URI"
+  )
+  provenance: dict | None = Field(
+    default=None, description="Opaque provenance metadata"
+  )
+
+
 class IndexDocumentOp(BaseModel):
   """Body for index-document (corpus content-op).
 

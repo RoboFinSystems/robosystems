@@ -7,6 +7,10 @@ MAIN_API_TAGS = [
     "description": "🏗️ Graphs - Create and manage knowledge graph tenants",
   },
   {
+    "name": "Graph Operations",
+    "description": "⚙️ Graph lifecycle — Subgraphs, backups, tier changes, and materialization",
+  },
+  {
     "name": "MCP",
     "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
   },
@@ -23,6 +27,10 @@ MAIN_API_TAGS = [
     "description": "🔎 Search - Full-text and semantic search on documents, narratives and disclosures",
   },
   {
+    "name": "Memory",
+    "description": "🧠 Memory - Recall, list, and inspect the graph's per-graph semantic memory store",
+  },
+  {
     "name": "Query",
     "description": "🕸️ Graph queries - Execute Cypher queries on the knowledge graph",
   },
@@ -35,6 +43,10 @@ MAIN_API_TAGS = [
     "description": "📄 File management - Upload, track, and manage data files for generic graphs",
   },
   {
+    "name": "Content Operations",
+    "description": "✍️ Content management - Non-language knowledge writes for memory, documents, file staging",
+  },
+  {
     "name": "Extensions: GraphQL",
     "description": "🧩 GraphQL endpoint - Unified GraphQL endpoint for extensions read queries",
   },
@@ -45,10 +57,6 @@ MAIN_API_TAGS = [
   {
     "name": "Extensions: RoboInvestor",
     "description": "📈 RoboInvestor operations - Named commands for portfolio management writes and analytical views",
-  },
-  {
-    "name": "Graph Operations",
-    "description": "⚙️ Graph lifecycle — Subgraphs, backups, tier changes, and materialization",
   },
   {
     "name": "Connections",

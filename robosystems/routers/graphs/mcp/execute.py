@@ -25,6 +25,10 @@ from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.middleware.graph.query_queue import get_query_queue
+from robosystems.middleware.graph.statement_kernel import (
+  StatementEngine,
+  statement_kernel,
+)
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (
@@ -44,11 +48,6 @@ from robosystems.middleware.sse.operation_manager import create_operation_respon
 from robosystems.models.api.common import RESOURCE_ERROR_RESPONSES
 from robosystems.models.api.graphs.mcp import MCPToolCall, MCPToolResult
 from robosystems.models.core import User
-from robosystems.security.cypher_analyzer import (
-  is_admin_operation,
-  is_bulk_operation,
-  is_write_operation,
-)
 
 # Import MCP components
 from .handlers import MCPHandler, validate_mcp_access
@@ -276,47 +275,22 @@ async def call_mcp_tool(
   circuit_breaker.check_circuit(graph_id, tool_call.name)
 
   try:
-    # Validate write operations for Cypher tools
+    # Determine write intent, and for cypher read tools run the statement
+    # policy — bulk/admin/DDL validation, the three-tier write policy, and the
+    # role gate — through the shared StatementKernel, the same path REST
+    # /query/cypher uses, so the MCP HTTP surface can't drift from it. The
+    # kernel needs a live session, so the call runs inside the short-lived
+    # session block below.
+    from robosystems.database import SessionFactory
+
     is_write_query = False
-    if tool_call.name in [
+    is_cypher_read_tool = tool_call.name in (
       "read-graph-cypher",
       "read-neo4j-cypher",
       "read-ladybug-cypher",
-    ]:
-      query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
-      is_write_query = is_write_operation(query)
-
-      # Check for bulk operations (COPY, LOAD, IMPORT)
-      if is_bulk_operation(query):
-        logger.warning(
-          f"User {current_user.id} attempted bulk operation through MCP: {query[:100]}"
-        )
-        raise HTTPException(
-          status_code=http_status.HTTP_400_BAD_REQUEST,
-          detail="Bulk operations (COPY, LOAD, IMPORT) are not allowed through the MCP endpoint. "
-          "Please use file upload (/v1/graphs/{graph_id}/tables/files/upload) to ingest data via DuckDB staging.",
-        )
-
-      # Check for admin operations
-      if is_admin_operation(query):
-        logger.warning(
-          f"User {current_user.id} attempted admin operation through MCP: {query[:100]}"
-        )
-        # For now, block all admin operations - we can add admin flag to User model later
-        raise HTTPException(
-          status_code=http_status.HTTP_403_FORBIDDEN,
-          detail="Administrative operations require admin privileges.",
-        )
-
-      # Block writes on shared repositories
-      if is_write_query and MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
-        raise HTTPException(
-          status_code=http_status.HTTP_403_FORBIDDEN,
-          detail=f"Write operations not allowed on shared repository '{graph_id}'",
-        )
-
-    # Schema-mutating / write tools aren't query-analyzed above; flag them as
-    # writes so write-role authorization applies below (viewer is read-only).
+    )
+    # Schema-mutating / write tools aren't cypher-analyzed; flag them as writes
+    # so write-role authorization applies below (viewer is read-only).
     if tool_call.name in (
       "write-graph-cypher",
       "add-node-table",
@@ -329,12 +303,26 @@ async def call_mcp_tool(
     # db dependency would hold a pool connection for the entire duration.
     # A plain SessionFactory() session is closed immediately after the
     # DB work, returning the connection to the pool before tool execution.
-    from robosystems.database import SessionFactory
-
-    access_type = "write" if is_write_query else "read"
     repo_access = None
     sess = SessionFactory()
     try:
+      if is_cypher_read_tool:
+        cypher_query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
+        # Only authorize an actual statement. An empty/missing query is a
+        # validation error the tool surfaces ("Query parameter is required"),
+        # not a policy decision — and is_write_operation fail-safes empty input
+        # to "write", which would otherwise mis-trigger the write block.
+        if cypher_query.strip():
+          authz = statement_kernel.authorize(
+            engine=StatementEngine.CYPHER,
+            graph_id=graph_id,
+            statement=cypher_query,
+            user=current_user,
+            session=sess,
+          )
+          is_write_query = authz.is_write
+
+      access_type = "write" if is_write_query else "read"
       await validate_mcp_access(graph_id, current_user, sess, access_type)
 
       # Look up shared-repo subscription while session is still open.

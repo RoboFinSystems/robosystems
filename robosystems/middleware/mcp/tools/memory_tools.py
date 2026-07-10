@@ -27,23 +27,6 @@ def _get_is_shared_repository_or_subgraph():
   return _is_shared_repository_or_subgraph
 
 
-# Write operations allowed in Cypher
-ALLOWED_WRITE_KEYWORDS = {"CREATE", "MERGE", "SET", "DELETE", "DETACH DELETE", "REMOVE"}
-
-# Patterns to block in write queries
-BLOCKED_WRITE_PATTERNS = [
-  r"\bDROP\b",
-  r"\bALTER\b",
-  r"\bTRUNCATE\b",
-  r"\bLOAD\s+CSV\b",
-  r"\bCOPY\s+FROM\b",
-  r"\bCALL\s+DB\.",
-  r"\bCALL\s+APOC\.",
-  r"\bCREATE\s+NODE\s+TABLE\b",
-  r"\bCREATE\s+REL\s+TABLE\b",
-  r"\bCREATE\s+INDEX\b",
-]
-
 # Valid LadybugDB property types
 VALID_PROPERTY_TYPES = {"STRING", "INT32", "INT64", "DOUBLE", "BOOLEAN"}
 
@@ -81,25 +64,26 @@ def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
 
 
 def _validate_write_query(query: str) -> str | None:
-  """Validate a Cypher write query. Returns error message if invalid."""
-  # Remove string literals to avoid false positives
-  sanitized = re.sub(r"'[^']*'", "''", query)
-  sanitized = re.sub(r'"[^"]*"', '""', sanitized)
-  query_upper = sanitized.upper().strip()
+  """Validate a Cypher write query. Returns error message if invalid.
 
-  # Check for blocked patterns
-  for pattern in BLOCKED_WRITE_PATTERNS:
-    if re.search(pattern, query_upper):
-      return "Blocked operation detected. DDL and system operations are not allowed in write queries."
+  Uses the central security analyzer (the same predicates the StatementKernel
+  composes) rather than hand-rolled keyword/pattern regexes, so this tool-layer
+  guard — which also protects the Operator path — can't diverge from the kernel.
+  """
+  from robosystems.security.cypher_analyzer import (
+    is_admin_operation,
+    is_bulk_operation,
+    is_schema_ddl,
+    is_write_operation,
+  )
 
-  # Verify query contains at least one write keyword
-  has_write = False
-  for keyword in ALLOWED_WRITE_KEYWORDS:
-    if re.search(r"\b" + re.escape(keyword) + r"\b", query_upper):
-      has_write = True
-      break
+  # Block DDL / bulk / admin — the same dangerous categories the kernel and the
+  # read tool reject (DROP/ALTER/TABLE/INDEX, LOAD CSV/COPY, CALL DB./APOC.).
+  if is_schema_ddl(query) or is_bulk_operation(query) or is_admin_operation(query):
+    return "Blocked operation detected. DDL and system operations are not allowed in write queries."
 
-  if not has_write:
+  # A write tool requires an actual write operation.
+  if not is_write_operation(query):
     return (
       "Query must contain a write operation (CREATE, MERGE, SET, DELETE, REMOVE). "
       "For read queries, use read-graph-cypher instead."

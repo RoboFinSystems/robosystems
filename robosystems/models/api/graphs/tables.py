@@ -10,14 +10,12 @@ class FileUploadStatus(str, Enum):
   Status lifecycle:
   - PENDING: Upload URL generated, awaiting file upload
   - UPLOADED: File successfully uploaded to S3 and validated
-  - DISABLED: File excluded from ingestion (soft exclusion)
-  - ARCHIVED: File soft-deleted (not shown in listings)
+  - FAILED: Upload or validation failed
   """
 
   PENDING = "pending"
   UPLOADED = "uploaded"
-  DISABLED = "disabled"
-  ARCHIVED = "archived"
+  FAILED = "failed"
 
 
 class TableCreate(BaseModel):
@@ -164,27 +162,6 @@ class FileUploadResponse(BaseModel):
   expires_in: int = Field(..., description="URL expiration time in seconds")
   file_id: str = Field(..., description="File tracking ID")
   s3_key: str = Field(..., description="S3 object key")
-
-
-class FileStatusUpdate(BaseModel):
-  status: str = Field(
-    ...,
-    description=(
-      "File status change: 'disabled' (exclude from ingest) or 'archived' "
-      "(soft deleted). To stage an uploaded file into DuckDB, use "
-      "POST /v1/graphs/{graph_id}/operations/ingest-file."
-    ),
-    examples=["disabled", "archived"],
-  )
-
-  class Config:
-    extra = "forbid"
-    json_schema_extra = {
-      "examples": [
-        {"status": "disabled"},
-        {"status": "archived"},
-      ]
-    }
 
 
 class BulkIngestRequest(BaseModel):

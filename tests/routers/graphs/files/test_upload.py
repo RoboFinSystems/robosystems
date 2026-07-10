@@ -6,10 +6,9 @@ import pytest
 from fastapi import HTTPException
 
 from robosystems.models.api.graphs.tables import (
-  FileStatusUpdate,
   FileUploadRequest,
 )
-from robosystems.routers.graphs.files import upload as upload_module
+from robosystems.operations.graph.commands import create_file_upload as upload_module
 
 
 def _make_mock_user(user_id="user-123"):
@@ -87,11 +86,10 @@ class TestCreateFileUploadFormatValidation:
     ):
       p, _ = _patch_s3_client()
       with p:
-        result = await upload_module.create_file_upload(
+        result = await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
         assert result.file_id == "file-1"
@@ -114,11 +112,10 @@ class TestCreateFileUploadFormatValidation:
     ):
       p, _ = _patch_s3_client()
       with p:
-        result = await upload_module.create_file_upload(
+        result = await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
         assert result.file_id == "file-1"
@@ -143,11 +140,10 @@ class TestCreateFileUploadFormatValidation:
     ):
       p, _ = _patch_s3_client()
       with p:
-        result = await upload_module.create_file_upload(
+        result = await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
         assert result.file_id == "file-1"
@@ -170,11 +166,10 @@ class TestCreateFileUploadFormatValidation:
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 400
@@ -202,11 +197,10 @@ class TestCreateFileUploadExtensionMatching:
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 400
@@ -227,11 +221,10 @@ class TestCreateFileUploadExtensionMatching:
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 400
@@ -261,11 +254,10 @@ class TestCreateFileUploadFileNameValidation:
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 400
@@ -291,11 +283,10 @@ class TestCreateFileUploadFileNameValidation:
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 400
@@ -319,11 +310,10 @@ class TestCreateFileUploadFileNameValidation:
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 400
@@ -348,11 +338,10 @@ class TestCreateFileUploadFileNameValidation:
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 400
@@ -381,11 +370,10 @@ class TestCreateFileUploadPresignedURL:
     ):
       p, mock_s3 = _patch_s3_client("https://bucket.s3.aws.com/signed")
       with p:
-        result = await upload_module.create_file_upload(
+        result = await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
         assert result.upload_url == "https://bucket.s3.aws.com/signed"
@@ -409,11 +397,10 @@ class TestCreateFileUploadPresignedURL:
     ):
       p, _ = _patch_s3_client()
       with p:
-        result = await upload_module.create_file_upload(
+        result = await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user("user-456"),
-          _rate_limit=None,
           db=Mock(),
         )
         # S3 key format: user-staging/{user_id}/{graph_id}/{table_name}/{file_id}/{file_name}
@@ -450,11 +437,10 @@ class TestCreateFileUploadTableAutoCreation:
           "create",
           return_value=mock_file,
         ):
-          await upload_module.create_file_upload(
+          await upload_module.create_file_upload_cmd(
             graph_id="kg01234567890abcdef",
             request=request,
             current_user=_make_mock_user(),
-            _rate_limit=None,
             db=Mock(),
           )
           mock_create.assert_called_once()
@@ -482,11 +468,10 @@ class TestCreateFileUploadTableAutoCreation:
           "create",
           return_value=mock_file,
         ):
-          await upload_module.create_file_upload(
+          await upload_module.create_file_upload_cmd(
             graph_id="kg01234567890abcdef",
             request=request,
             current_user=_make_mock_user(),
-            _rate_limit=None,
             db=Mock(),
           )
           mock_create.assert_not_called()
@@ -509,11 +494,10 @@ class TestCreateFileUploadSharedRepoAccess:
       ),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="sec",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 403
@@ -527,11 +511,10 @@ class TestCreateFileUploadSharedRepoAccess:
 
     with _patch_require_graph_access():
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 400
@@ -554,172 +537,10 @@ class TestCreateFileUploadGraphNotFound:
       _patch_universal_repo(return_value=None),
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await upload_module.create_file_upload(
+        await upload_module.create_file_upload_cmd(
           graph_id="kg01234567890abcdef",
           request=request,
           current_user=_make_mock_user(),
-          _rate_limit=None,
           db=Mock(),
         )
       assert exc_info.value.status_code == 404
-
-
-@pytest.mark.unit
-class TestUpdateFileStatusValidation:
-  """Test file status update validation."""
-
-  @pytest.mark.asyncio
-  async def test_rejects_shared_repo_status_update(self):
-    request = FileStatusUpdate(status="disabled")
-
-    with patch.object(
-      upload_module, "is_shared_repository_or_subgraph", return_value=True
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await upload_module.update_file(
-          graph_id="sec",
-          file_id="file-1",
-          request=request,
-          current_user=_make_mock_user(),
-          _rate_limit=None,
-          db=Mock(),
-        )
-      assert exc_info.value.status_code == 403
-
-  @pytest.mark.asyncio
-  async def test_rejects_invalid_status(self):
-    request = FileStatusUpdate(status="pending")
-    mock_file = Mock()
-    mock_file.graph_id = "kg01234567890abcdef"
-
-    with (
-      patch.object(
-        upload_module, "is_shared_repository_or_subgraph", return_value=False
-      ),
-      _patch_universal_repo(),
-      patch.object(
-        upload_module.GraphFile,
-        "get_by_id",
-        return_value=mock_file,
-      ),
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await upload_module.update_file(
-          graph_id="kg01234567890abcdef",
-          file_id="file-1",
-          request=request,
-          current_user=_make_mock_user(),
-          _rate_limit=None,
-          db=Mock(),
-        )
-      assert exc_info.value.status_code == 400
-      assert "Invalid status" in exc_info.value.detail
-
-  @pytest.mark.asyncio
-  async def test_returns_404_when_file_not_found(self):
-    request = FileStatusUpdate(status="disabled")
-
-    with (
-      patch.object(
-        upload_module, "is_shared_repository_or_subgraph", return_value=False
-      ),
-      _patch_universal_repo(),
-      patch.object(upload_module.GraphFile, "get_by_id", return_value=None),
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await upload_module.update_file(
-          graph_id="kg01234567890abcdef",
-          file_id="file-missing",
-          request=request,
-          current_user=_make_mock_user(),
-          _rate_limit=None,
-          db=Mock(),
-        )
-      assert exc_info.value.status_code == 404
-
-  @pytest.mark.asyncio
-  async def test_returns_404_when_file_graph_mismatch(self):
-    request = FileStatusUpdate(status="disabled")
-    mock_file = Mock()
-    mock_file.graph_id = "kg_different_graph_id"
-
-    with (
-      patch.object(
-        upload_module, "is_shared_repository_or_subgraph", return_value=False
-      ),
-      _patch_universal_repo(),
-      patch.object(
-        upload_module.GraphFile,
-        "get_by_id",
-        return_value=mock_file,
-      ),
-    ):
-      with pytest.raises(HTTPException) as exc_info:
-        await upload_module.update_file(
-          graph_id="kg01234567890abcdef",
-          file_id="file-1",
-          request=request,
-          current_user=_make_mock_user(),
-          _rate_limit=None,
-          db=Mock(),
-        )
-      assert exc_info.value.status_code == 404
-
-  @pytest.mark.asyncio
-  async def test_disable_file_succeeds(self):
-    request = FileStatusUpdate(status="disabled")
-    mock_db = Mock()
-    mock_file = Mock()
-    mock_file.graph_id = "kg01234567890abcdef"
-    mock_file.upload_status = "uploaded"
-
-    with (
-      patch.object(
-        upload_module, "is_shared_repository_or_subgraph", return_value=False
-      ),
-      _patch_universal_repo(),
-      patch.object(
-        upload_module.GraphFile,
-        "get_by_id",
-        return_value=mock_file,
-      ),
-    ):
-      result = await upload_module.update_file(
-        graph_id="kg01234567890abcdef",
-        file_id="file-1",
-        request=request,
-        current_user=_make_mock_user(),
-        _rate_limit=None,
-        db=mock_db,
-      )
-      assert result["upload_status"] == "disabled"
-      mock_db.commit.assert_called()
-
-  @pytest.mark.asyncio
-  async def test_archive_file_succeeds(self):
-    request = FileStatusUpdate(status="archived")
-    mock_db = Mock()
-    mock_file = Mock()
-    mock_file.graph_id = "kg01234567890abcdef"
-    mock_file.upload_status = "uploaded"
-
-    with (
-      patch.object(
-        upload_module, "is_shared_repository_or_subgraph", return_value=False
-      ),
-      _patch_universal_repo(),
-      patch.object(
-        upload_module.GraphFile,
-        "get_by_id",
-        return_value=mock_file,
-      ),
-    ):
-      result = await upload_module.update_file(
-        graph_id="kg01234567890abcdef",
-        file_id="file-1",
-        request=request,
-        current_user=_make_mock_user(),
-        _rate_limit=None,
-        db=mock_db,
-      )
-      assert result["upload_status"] == "archived"

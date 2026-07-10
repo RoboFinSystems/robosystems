@@ -155,6 +155,23 @@ def build_instructions(
   if len(explore_lines) > 1:
     sections.append(_block(*explore_lines))
 
+  # Semantic memory — durable notes the agent writes and recalls across sessions.
+  if has("recall") or has("remember"):
+    mem_lines = ["MEMORY"]
+    if has("recall"):
+      mem_lines.append(
+        "- Recall what you've stored before → `recall` (ranked semantic search "
+        "over this graph's memory); check it before re-deriving context you may "
+        "already know."
+      )
+    if has("remember") and not read_only:
+      mem_lines.append(
+        "- Persist a durable fact or decision → `remember`; remove a stale one → "
+        "`forget`."
+      )
+    if len(mem_lines) > 1:
+      sections.append(_block(*mem_lines))
+
   # Tenant-specific procedure docs (the per-graph layer the generic playbooks
   # defer to) — only meaningful on a writable entity graph.
   if has("search-documents") and not is_shared_repo:

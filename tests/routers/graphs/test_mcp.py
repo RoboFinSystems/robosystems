@@ -227,7 +227,12 @@ class TestMCPToolExecution:
     db_session: Session,
     mock_mcp_handler: Mock,
   ):
-    """Test that write operations through MCP are blocked."""
+    """A write via read-graph-cypher on a main graph is blocked at the boundary.
+
+    Routed through the shared StatementKernel: a CREATE on a (non-subgraph) user
+    graph hits the main-graph write block and returns 403 before reaching the
+    tool — an improvement over the previous tool-layer ValueError wrapped in 500.
+    """
     test_user_graph = test_graph_with_credits["user_graph"]
 
     with (
@@ -239,10 +244,6 @@ class TestMCPToolExecution:
       mock_repo.return_value = mock_repository
 
       MockHandler.return_value = mock_mcp_handler
-      # Mock call_tool to raise error for write operations
-      mock_mcp_handler.call_tool.side_effect = ValueError(
-        "Only read-only queries are allowed"
-      )
 
       token = create_jwt_token(test_user.id)
       headers = {"Authorization": f"Bearer {token}"}
@@ -258,10 +259,9 @@ class TestMCPToolExecution:
         headers=headers,
       )
 
-      # The endpoint wraps errors in HTTPException(500)
-      assert response.status_code == 500
-      data = response.json()
-      assert "Tool execution failed" in data.get("detail", "")
+      # The kernel blocks the write at the boundary with a 403.
+      assert response.status_code == 403
+      assert "not allowed on main graphs" in response.json().get("detail", "")
 
   @pytest.mark.asyncio
   async def test_execute_tool_timeout(

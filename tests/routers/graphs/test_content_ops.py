@@ -14,19 +14,29 @@ from robosystems.models.api.graphs.operations import (
   DeleteFileOp,
   IndexDocumentOp,
   IngestFileOp,
+  UpdateMemoryOp,
 )
-from robosystems.models.api.graphs.tables import DeleteFileResponse
+from robosystems.models.api.graphs.tables import (
+  DeleteFileResponse,
+  FileUploadRequest,
+  FileUploadResponse,
+)
 from robosystems.models.api.search import DocumentUploadResponse
-from robosystems.routers.graphs.operations import (
+from robosystems.routers.graphs.content_ops import (
+  create_file_upload_op,
   delete_document_op,
   delete_file_op,
   index_document_op,
   ingest_file_op,
+  update_memory_op,
 )
 
-MODULE = "robosystems.routers.graphs.operations"
+MODULE = "robosystems.routers.graphs.content_ops"
 INGEST_CMD = "robosystems.operations.graph.commands.ingest_file.ingest_file_cmd"
 DELETE_FILE_CMD = "robosystems.operations.graph.commands.delete_file.delete_file_cmd"
+CREATE_UPLOAD_CMD = (
+  "robosystems.operations.graph.commands.create_file_upload.create_file_upload_cmd"
+)
 
 
 def _user():
@@ -240,3 +250,87 @@ async def test_delete_file():
   assert env.status == "completed"
   assert env.result["file_id"] == "gf_1"
   assert env.result["cascade_deleted"] is True
+
+
+async def test_update_memory_op():
+  body = UpdateMemoryOp(memory_id="mem_" + "0" * 32, text="revised note")
+  record = MagicMock()
+  record.model_dump.return_value = {
+    "memory_id": "mem_" + "0" * 32,
+    "text": "revised note",
+  }
+  client = MagicMock()
+  client.close = AsyncMock()
+  service = MagicMock()
+  service.update_memory = AsyncMock(return_value=record)
+  with (
+    patch(f"{MODULE}._require_memory_enabled"),
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(f"{MODULE}._require_graph_write_access"),
+    patch(
+      "robosystems.graph_api.client.factory.get_graph_client",
+      new=AsyncMock(return_value=client),
+    ),
+    patch("robosystems.operations.memory.get_memory_service", return_value=service),
+  ):
+    env = await update_memory_op(
+      body, graph_id="kg_test", user=_user(), idempotency_key=None, cache=MagicMock()
+    )
+  assert env.status == "completed"
+  assert env.result["text"] == "revised note"
+  service.update_memory.assert_awaited_once()
+  # Partial update: only the field the caller set is forwarded — unset fields
+  # must NOT be sent (else the service wipes memory_type/tags/... to NULL).
+  forwarded = service.update_memory.call_args.args[2]
+  assert forwarded.model_fields_set == {"text"}
+
+
+async def test_update_memory_op_404_when_missing():
+  body = UpdateMemoryOp(memory_id="mem_" + "0" * 32, text="x")
+  client = MagicMock()
+  client.close = AsyncMock()
+  service = MagicMock()
+  service.update_memory = AsyncMock(return_value=None)
+  with (
+    patch(f"{MODULE}._require_memory_enabled"),
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(f"{MODULE}._require_graph_write_access"),
+    patch(
+      "robosystems.graph_api.client.factory.get_graph_client",
+      new=AsyncMock(return_value=client),
+    ),
+    patch("robosystems.operations.memory.get_memory_service", return_value=service),
+  ):
+    with pytest.raises(HTTPException) as e:
+      await update_memory_op(
+        body, graph_id="kg_test", user=_user(), idempotency_key=None, cache=MagicMock()
+      )
+  assert e.value.status_code == 404
+
+
+async def test_create_file_upload_op():
+  body = FileUploadRequest(
+    file_name="x.parquet", table_name="t", content_type="application/x-parquet"
+  )
+  resp = FileUploadResponse(
+    upload_url="https://s3.example/presigned",
+    expires_in=3600,
+    file_id="gf_1",
+    s3_key="user-staging/u/kg_test/t/gf_1/x.parquet",
+  )
+  with patch(CREATE_UPLOAD_CMD, new=AsyncMock(return_value=resp)):
+    env = await create_file_upload_op(
+      body,
+      graph_id="kg_test",
+      user=_user(),
+      idempotency_key=None,
+      cache=MagicMock(),
+      db=MagicMock(),
+    )
+  assert env.status == "completed"
+  assert env.result == {
+    "upload_url": "https://s3.example/presigned",
+    "expires_in": 3600,
+    "file_id": "gf_1",
+    "s3_key": "user-staging/u/kg_test/t/gf_1/x.parquet",
+  }

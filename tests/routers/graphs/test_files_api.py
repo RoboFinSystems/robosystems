@@ -65,7 +65,6 @@ async def test_list_files_all_in_graph(monkeypatch):
     table_name=None,
     file_status=None,
     current_user=SimpleNamespace(id="user-123"),
-    _rate_limit=None,
     db=fake_db,
   )
 
@@ -126,7 +125,6 @@ async def test_list_files_filtered_by_table(monkeypatch):
     table_name="Entity",
     file_status=None,
     current_user=SimpleNamespace(id="user-123"),
-    _rate_limit=None,
     db=fake_db,
   )
 
@@ -192,7 +190,6 @@ async def test_get_file_returns_enhanced_status(monkeypatch):
     graph_id="graph-123",
     file_id="file-123",
     current_user=SimpleNamespace(id="user-123"),
-    _rate_limit=None,
     db=fake_db,
   )
 
@@ -230,7 +227,6 @@ async def test_get_file_not_found(monkeypatch):
       graph_id="graph-123",
       file_id="file-404",
       current_user=SimpleNamespace(id="user-123"),
-      _rate_limit=None,
       db=fake_db,
     )
 
@@ -239,7 +235,7 @@ async def test_get_file_not_found(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_file_upload_generates_presigned_url(monkeypatch):
-  from robosystems.routers.graphs.files import upload as upload_router
+  from robosystems.operations.graph.commands import create_file_upload as upload_router
 
   monkeypatch.setattr(
     "robosystems.middleware.billing.enforcement.require_graph_access",
@@ -269,7 +265,9 @@ async def test_create_file_upload_generates_presigned_url(monkeypatch):
     classmethod(lambda cls, **kwargs: mock_file),
   )
 
-  with patch("robosystems.routers.graphs.files.upload.S3Client") as mock_s3_class:
+  with patch(
+    "robosystems.operations.graph.commands.create_file_upload.S3Client"
+  ) as mock_s3_class:
     mock_s3_instance = SimpleNamespace()
     mock_s3_instance.s3_client = SimpleNamespace()
     mock_s3_instance.s3_client.generate_presigned_url = lambda *args, **kwargs: (
@@ -283,11 +281,10 @@ async def test_create_file_upload_generates_presigned_url(monkeypatch):
       table_name="Entity",
     )
 
-    result = await upload_router.create_file_upload(
+    result = await upload_router.create_file_upload_cmd(
       graph_id="graph-123",
       request=request,
       current_user=SimpleNamespace(id="user-123"),
-      _rate_limit=None,
       db=SimpleNamespace(),
     )
 
@@ -302,7 +299,7 @@ async def test_create_file_upload_requires_table_name(monkeypatch):
     lambda *args, **kwargs: None,
   )
 
-  from robosystems.routers.graphs.files import upload as upload_router
+  from robosystems.operations.graph.commands import create_file_upload as upload_router
 
   request = FileUploadRequest(
     file_name="data.parquet",
@@ -310,11 +307,10 @@ async def test_create_file_upload_requires_table_name(monkeypatch):
   )
 
   with pytest.raises(Exception) as exc:
-    await upload_router.create_file_upload(
+    await upload_router.create_file_upload_cmd(
       graph_id="graph-123",
       request=request,
       current_user=SimpleNamespace(id="user-123"),
-      _rate_limit=None,
       db=SimpleNamespace(),
     )
 

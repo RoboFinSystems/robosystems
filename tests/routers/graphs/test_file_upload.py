@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from robosystems.models.api.graphs.tables import FileUploadRequest
-from robosystems.routers.graphs.files.upload import create_file_upload
+from robosystems.operations.graph.commands.create_file_upload import (
+  create_file_upload_cmd,
+)
 from tests.conftest import VALID_TEST_GRAPH_ID
 
 
@@ -28,7 +30,7 @@ class TestUploadRouterAutoTableCreation:
     mock_created_table.table_name = "Company"
 
     with patch(
-      "robosystems.routers.graphs.files.upload.get_universal_repository",
+      "robosystems.operations.graph.commands.create_file_upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
@@ -55,11 +57,10 @@ class TestUploadRouterAutoTableCreation:
             mock_file.id = "file_123"
             mock_file_create.return_value = mock_file
 
-            await create_file_upload(
+            await create_file_upload_cmd(
               graph_id=graph_id,
               request=file_request,
               current_user=mock_user,
-              _rate_limit=None,
               db=mock_db,
             )
 
@@ -87,7 +88,7 @@ class TestUploadRouterAutoTableCreation:
     mock_created_table.id = "table_456"
 
     with patch(
-      "robosystems.routers.graphs.files.upload.get_universal_repository",
+      "robosystems.operations.graph.commands.create_file_upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
@@ -114,11 +115,10 @@ class TestUploadRouterAutoTableCreation:
             mock_file.id = "file_456"
             mock_file_create.return_value = mock_file
 
-            await create_file_upload(
+            await create_file_upload_cmd(
               graph_id=graph_id,
               request=file_request,
               current_user=mock_user,
-              _rate_limit=None,
               db=mock_db,
             )
 
@@ -146,7 +146,7 @@ class TestUploadRouterAutoTableCreation:
     existing_table.id = "existing_table_123"
 
     with patch(
-      "robosystems.routers.graphs.files.upload.get_universal_repository",
+      "robosystems.operations.graph.commands.create_file_upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
@@ -172,11 +172,10 @@ class TestUploadRouterAutoTableCreation:
             mock_file.id = "file_789"
             mock_file_create.return_value = mock_file
 
-            await create_file_upload(
+            await create_file_upload_cmd(
               graph_id=graph_id,
               request=file_request,
               current_user=mock_user,
-              _rate_limit=None,
               db=mock_db,
             )
 
