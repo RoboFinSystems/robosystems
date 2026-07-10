@@ -72,6 +72,17 @@ class TestJWTTokenType:
     # bearer verification path.
     assert verify_jwt_claims(token) is None
 
+  def test_sso_bearer_rejection_is_audited(self):
+    token, _token_id = create_sso_token("usr_1")
+    with patch(
+      "robosystems.security.SecurityAuditLogger.log_security_event"
+    ) as mock_audit:
+      assert verify_jwt_claims(token) is None
+    assert mock_audit.call_count == 1
+    kwargs = mock_audit.call_args.kwargs
+    assert kwargs["details"]["reason"] == "non_access_token_as_bearer"
+    assert kwargs["details"]["token_type"] == "sso"
+
   def test_legacy_token_without_type_is_grandfathered(self):
     from datetime import UTC, datetime, timedelta
 

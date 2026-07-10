@@ -198,6 +198,20 @@ def verify_jwt_claims(
     token_type = payload.get("type")
     if payload.get("sso") or (token_type is not None and token_type != "access"):
       logger.info("JWT token verification failed: non-access token presented as bearer")
+      # A signature-valid but wrong-purpose token used as a bearer is a distinct
+      # signal (possible replay of a leaked single-use SSO handoff) that the
+      # generic AUTH_TOKEN_INVALID at the caller would otherwise bury.
+      from ...security import SecurityAuditLogger, SecurityEventType
+
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+        user_id=payload.get("user_id"),
+        details={
+          "reason": "non_access_token_as_bearer",
+          "token_type": "sso" if payload.get("sso") else token_type,
+        },
+        risk_level="high",
+      )
       return None
 
     # Verify device fingerprint if both token and request fingerprint are available
