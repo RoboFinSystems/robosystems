@@ -208,23 +208,24 @@ class SuggestMappingTool:
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.roboledger.reports.network_picker import (
-      load_graph_reporting_style,
+      load_primary_reporting_style,
     )
 
     graph_id = self.client.graph_id
     element_id = arguments["element_id"]
     classification_override = arguments.get("classification")
 
-    # Resolve the active Reporting Style so candidate filtering matches
-    # what the renderer actually walks (not the wider rs-gaap-presentation
-    # taxonomy). Soft-fail to wider filter if Style lookup fails.
-    try:
-      reporting_style_id = load_graph_reporting_style(graph_id)
-    except LookupError:
-      reporting_style_id = None
-
     try:
       with extensions_session(graph_id) as session:
+        # Resolve the entity's active Reporting Style so candidate filtering
+        # matches what the renderer walks (not the wider rs-gaap-presentation
+        # taxonomy). Resolved from this same session; soft-fail to the wider
+        # filter when the tenant has no entity yet.
+        try:
+          reporting_style_id = load_primary_reporting_style(session)
+        except LookupError:
+          reporting_style_id = None
+
         source = get_element(session, element_id)
         if source is None:
           return {"error": f"Element {element_id} not found"}
@@ -389,17 +390,19 @@ rs-gaap parent, then return rs-gaap-type-subtype children as specific filing-lev
 
   async def execute(self, arguments: dict[str, Any]) -> Any:
     from robosystems.operations.roboledger.reports.network_picker import (
-      load_graph_reporting_style,
+      load_primary_reporting_style,
     )
 
     graph_id = self.client.graph_id
     fac_element_id = arguments["fac_element_id"]
     try:
-      reporting_style_id = load_graph_reporting_style(graph_id)
-    except LookupError:
-      reporting_style_id = None
-    try:
       with extensions_session(graph_id) as session:
+        # Resolve the entity's Style from this session; soft-fail to the
+        # wider filter when the tenant has no entity yet.
+        try:
+          reporting_style_id = load_primary_reporting_style(session)
+        except LookupError:
+          reporting_style_id = None
         result = expand_to_rs_gaap_candidates(
           session, fac_element_id, reporting_style_id=reporting_style_id
         )

@@ -66,9 +66,9 @@ def get_render_network(
       session: Extensions database session (tenant schema active via
           ``SET search_path``). The same session that holds the rest of
           the renderer's reads — no fan-out to platform DB.
-      reporting_style_id: The graph's ``Graph.reporting_style_id``. The
-          column is NOT NULL with the Default Style as server default,
-          so callers can pass it verbatim.
+      reporting_style_id: The entity's ``entities.reporting_style_id``
+          (resolve via ``load_entity_reporting_style`` /
+          ``load_primary_reporting_style``). NOT NULL, so pass it verbatim.
       statement_type: One of ``balance_sheet`` / ``income_statement`` /
           ``cash_flow_statement`` / ``equity_statement`` /
           ``comprehensive_income``.
@@ -141,24 +141,6 @@ def load_primary_reporting_style(session: Session) -> str:
   return str(row.reporting_style_id) if row.reporting_style_id else DEFAULT_STYLE_ID
 
 
-def load_graph_reporting_style(graph_id: str) -> str:
-  """Resolve the primary entity's Reporting Style for a bare ``graph_id``.
-
-  Convenience for callers that hold only a graph_id and no session (MCP
-  taxonomy tools, bundle serialization). Opens a short-lived extensions
-  session and returns the primary entity's Style id. Callers that already
-  have an extensions session should call ``load_primary_reporting_style``
-  (or ``load_entity_reporting_style``) directly to avoid a second session.
-
-  Raises:
-      LookupError: when the tenant schema is missing or has no entity.
-  """
-  from robosystems.db.extensions import extensions_session
-
-  with extensions_session(graph_id) as session:
-    return load_primary_reporting_style(session)
-
-
 # Corporate default — the form whose accumulated earnings get their own
 # named line. Partnership/LLC/etc. Styles override this in their metadata
 # (stamped from the package's ``retainedEarningsConcept`` by migration 0008).
@@ -177,7 +159,7 @@ def load_close_target_concept(session: Session, reporting_style_id: str) -> str:
 
   Args:
       session: Extensions session with the tenant schema active.
-      reporting_style_id: The graph's ``Graph.reporting_style_id``.
+      reporting_style_id: The entity's ``entities.reporting_style_id``.
   """
   # Read from the tenant's ``structures`` (search_path), NOT ``public`` —
   # the Style row is mirrored into each tenant with its stamped metadata by
