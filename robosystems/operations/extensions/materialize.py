@@ -440,11 +440,19 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     SELECT
       e.id                            AS identifier,
       CASE
-        WHEN e.external_source = 'quickbooks' THEN 'qb:'
-        WHEN e.external_source = 'xero' THEN 'xero:'
-        WHEN e.external_source = 'plaid' THEN 'plaid:'
-        ELSE 'rl:'
-      END || e.code                   AS qname,
+        WHEN e.external_source = 'quickbooks' THEN 'qb:' || e.code
+        WHEN e.external_source = 'xero' THEN 'xero:' || e.code
+        WHEN e.external_source = 'plaid' THEN 'plaid:' || e.code
+        -- Library/taxonomy concepts (rs-gaap, fac, us-gaap, cm, disclosures,
+        -- styles, …) already carry a canonical namespaced qname; emit it
+        -- verbatim so report-concept facts stay rs-gaap:X, not rl:rs-gaap:X
+        -- (the double prefix broke build-fact-grid and every canonical
+        -- consumer on tenant graphs). Native/import/system CoA accounts keep
+        -- the 'rl:' tenant prefix.
+        WHEN e.source NOT IN ('native', 'import', 'system')
+          THEN COALESCE(e.qname, e.code)
+        ELSE 'rl:' || e.code
+      END                             AS qname,
       e.name,
       e.description,
       NULL::VARCHAR                   AS item_type,
