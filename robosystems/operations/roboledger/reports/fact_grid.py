@@ -289,8 +289,8 @@ def render_structure_view(
       facts: Pre-generated ReportFact objects (from generate_report_facts).
       block_type: Structure type to render (income_statement, balance_sheet, etc.).
       periods: Ordered list of period specifications for columns.
-      reporting_style_id: The graph's Reporting Style id
-          (``Graph.reporting_style_id``). Resolves which Network this
+      reporting_style_id: The entity's Reporting Style id
+          (``entities.reporting_style_id``). Resolves which Network this
           statement type renders against via the Reporting Style picker.
 
   Returns:

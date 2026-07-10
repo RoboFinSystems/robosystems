@@ -106,7 +106,7 @@ class InitialEntityData(BaseModel):
   reporting_style_id: str | None = Field(
     None,
     description=(
-      "Optional explicit Reporting Style Structure id to pin on the graph, "
+      "Optional explicit Reporting Style Structure id to pin on the entity, "
       "overriding the entity_type-derived default. Leave blank to derive "
       "from entity_type. Change later via the change-reporting-style "
       "operation."

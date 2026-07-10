@@ -22,6 +22,10 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from robosystems.config.constants import ReportingStyleConstants
+
+DEFAULT_STYLE_ID = ReportingStyleConstants.DEFAULT_STYLE_ID
+
 
 class NoNetworkForStatementTypeError(LookupError):
   """Raised when a Reporting Style has no Network composed for this statement."""
@@ -62,9 +66,9 @@ def get_render_network(
       session: Extensions database session (tenant schema active via
           ``SET search_path``). The same session that holds the rest of
           the renderer's reads — no fan-out to platform DB.
-      reporting_style_id: The graph's ``Graph.reporting_style_id``. The
-          column is NOT NULL with the Default Style as server default,
-          so callers can pass it verbatim.
+      reporting_style_id: The entity's ``entities.reporting_style_id``
+          (resolve via ``load_entity_reporting_style`` /
+          ``load_primary_reporting_style``). NOT NULL, so pass it verbatim.
       statement_type: One of ``balance_sheet`` / ``income_statement`` /
           ``cash_flow_statement`` / ``equity_statement`` /
           ``comprehensive_income``.
@@ -97,24 +101,44 @@ def get_render_network(
   )
 
 
-def load_graph_reporting_style(graph_id: str) -> str:
-  """Fetch ``graphs.reporting_style_id`` from the platform DB.
+def load_entity_reporting_style(session: Session, entity_id: str) -> str:
+  """The Reporting Style pinned on a specific entity (tenant schema).
 
-  Helper for callers that have a graph_id but not a platform session.
-  Opens a short-lived session and returns the Style id; the actual
-  picker query runs against the caller's extensions session.
+  The style now lives on the entity, co-located with the ``structures`` /
+  ``reporting_style_networks`` it points at — no cross-DB hop. Used by the
+  render path once it has resolved which entity a report belongs to.
 
   Raises:
-      LookupError: when the graph doesn't exist or has been deprovisioned.
+      LookupError: when the entity doesn't exist in the tenant schema.
   """
-  from robosystems.database import platform_session
-  from robosystems.models.core.graph.graph import Graph
+  row = session.execute(
+    text("SELECT reporting_style_id FROM entities WHERE id = :eid"),
+    {"eid": entity_id},
+  ).fetchone()
+  if row is None:
+    raise LookupError(f"Entity {entity_id!r} not found in tenant schema.")
+  # NOT NULL in the model, but tolerate a legacy null by falling back to the
+  # corporate Default rather than handing a null id to the picker.
+  return str(row.reporting_style_id) if row.reporting_style_id else DEFAULT_STYLE_ID
 
-  with platform_session() as pdb:
-    graph = pdb.query(Graph).filter(Graph.graph_id == graph_id).first()
-    if graph is None:
-      raise LookupError(f"Graph {graph_id!r} not found in platform DB.")
-    return str(graph.reporting_style_id)
+
+def load_primary_reporting_style(session: Session) -> str:
+  """The Reporting Style of the graph's primary (earliest-created) entity.
+
+  Matches how ``_get_entity_id`` (commands/reports.py) selects the primary
+  entity for single-entity graphs, so the style the renderer resolves lines
+  up with the entity whose facts it walks. Callers that already know the
+  target entity should prefer ``load_entity_reporting_style``.
+
+  Raises:
+      LookupError: when the tenant has no entity yet (import data first).
+  """
+  row = session.execute(
+    text("SELECT reporting_style_id FROM entities ORDER BY created_at ASC LIMIT 1")
+  ).fetchone()
+  if row is None:
+    raise LookupError("No entity found in tenant schema. Import data first.")
+  return str(row.reporting_style_id) if row.reporting_style_id else DEFAULT_STYLE_ID
 
 
 # Corporate default — the form whose accumulated earnings get their own
@@ -135,7 +159,7 @@ def load_close_target_concept(session: Session, reporting_style_id: str) -> str:
 
   Args:
       session: Extensions session with the tenant schema active.
-      reporting_style_id: The graph's ``Graph.reporting_style_id``.
+      reporting_style_id: The entity's ``entities.reporting_style_id``.
   """
   # Read from the tenant's ``structures`` (search_path), NOT ``public`` —
   # the Style row is mirrored into each tenant with its stamped metadata by

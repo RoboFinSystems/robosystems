@@ -10,9 +10,9 @@ Every route follows the pattern:
 4. `execute_operation(ctx, runner, cache)` handles envelope +
    idempotency + audit
 
-**Registered (37) — in logical workflow order:**
+**Registered (38) — in logical workflow order:**
 
-- Setup: `initialize`, `update-entity`
+- Setup: `initialize`, `update-entity`, `change-reporting-style`
 - Ontology / Taxonomy Blocks: `create-taxonomy-block`,
   `update-taxonomy-block`, `delete-taxonomy-block`,
   `link-entity-taxonomy`
@@ -117,6 +117,8 @@ from robosystems.models.api.extensions.agent import (
   UpdateAgentRequest,
 )
 from robosystems.models.api.extensions.entity import (
+  ChangeReportingStyleRequest,
+  ChangeReportingStyleResponse,
   LedgerEntityResponse,
   UpdateEntityRequest,
 )
@@ -307,6 +309,13 @@ from robosystems.operations.roboledger.commands.publish_lists import (
 )
 from robosystems.operations.roboledger.commands.publish_lists import (
   update_publish_list as cmd_update_publish_list,
+)
+from robosystems.operations.roboledger.commands.reporting_style import (
+  EntityNotFoundError as ReportingStyleEntityNotFoundError,
+)
+from robosystems.operations.roboledger.commands.reporting_style import (
+  ReportingStyleInvalidError,
+  change_reporting_style,
 )
 from robosystems.operations.roboledger.commands.reports import (
   BundleUploadError,
@@ -773,6 +782,32 @@ async def update_entity_op(
     return result
 
   return await _dispatch(ctx, _runner, cache)
+
+
+change_reporting_style_op = _registrar.register(
+  OperationSpec(
+    name="change-reporting-style",
+    summary="Change Reporting Style",
+    description=(
+      "Switch the reporting entity's Reporting Style — how its statements "
+      "are laid out (equity-form, close-target concept, per-statement "
+      "Networks). Validates that the target Style has a complete "
+      "composition in the tenant schema, then flips "
+      "`entities.reporting_style_id`. Omit `entity_id` to target the "
+      "graph's primary entity. Filed Reports are unaffected (their "
+      "FactSet rows pin their structures at create-time); new reports use "
+      "the new Style. Idempotent on the same id."
+    ),
+    command=change_reporting_style,
+    request_model=ChangeReportingStyleRequest,
+    result_type=ChangeReportingStyleResponse,
+    error_map={
+      ReportingStyleEntityNotFoundError: 404,
+      ReportingStyleInvalidError: 422,
+    },
+    requires_created_by=False,
+  )
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

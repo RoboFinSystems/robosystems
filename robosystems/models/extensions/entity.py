@@ -24,6 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
+from robosystems.config.constants import ReportingStyleConstants
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
@@ -62,6 +63,19 @@ class Entity(ExtensionsBase):
   industry = Column(String)
   entity_type = Column(String)  # corporation, llc, partnership, subsidiary
   phone = Column(String)
+
+  # Reporting Style — the leaf-level presentation vector (equity-form etc.)
+  # this entity reports under. A Structure id in the same tenant schema
+  # (``structures`` / ``reporting_style_networks``). Lives on the entity,
+  # not the graph, so heterogeneous subsidiaries in a future multi-entity
+  # hierarchy can each carry their own style while resolving to the same
+  # canonical calc-DAG subtotals. Defaulted from ``entity_type`` at
+  # creation (corporation→Default, partnership→PART, llc→LLC).
+  reporting_style_id = Column(
+    String,
+    nullable=False,
+    default=ReportingStyleConstants.DEFAULT_STYLE_ID,
+  )
   website = Column(String)
   status = Column(String, nullable=False, default="active")
 

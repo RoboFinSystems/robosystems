@@ -166,7 +166,7 @@ class TestGetLiveFinancialStatement:
         return_value=(mock_grid, 3),
       ),
       patch(
-        "robosystems.operations.roboledger.reports.network_picker.load_graph_reporting_style",
+        "robosystems.operations.roboledger.reports.network_picker.load_primary_reporting_style",
         return_value="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
       ),
     ):
@@ -210,7 +210,7 @@ class TestGetLiveFinancialStatement:
         return_value=(mock_grid, 0),
       ),
       patch(
-        "robosystems.operations.roboledger.reports.network_picker.load_graph_reporting_style",
+        "robosystems.operations.roboledger.reports.network_picker.load_primary_reporting_style",
         return_value="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
       ),
     ):
@@ -235,7 +235,7 @@ class TestGetLiveFinancialStatement:
         side_effect=CoaMappingNotFoundError("missing mapping"),
       ),
       patch(
-        "robosystems.operations.roboledger.reports.network_picker.load_graph_reporting_style",
+        "robosystems.operations.roboledger.reports.network_picker.load_primary_reporting_style",
         return_value="025f5d48-12ce-5d65-b9eb-4f137a10ef06",
       ),
     ):

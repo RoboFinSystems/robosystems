@@ -52,6 +52,7 @@ from robosystems.operations.roboledger.reports.fact_grid import (
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
 from robosystems.operations.roboledger.reports.network_picker import (
   load_close_target_concept,
+  load_primary_reporting_style,
 )
 from robosystems.operations.serialization.flavors import RdfFlavor, XbrlFlavor
 
@@ -141,9 +142,10 @@ def generate_adhoc_private_statement(
   active CoA→GAAP mapping. Used by the `live-financial-statement`
   operation (both REST and MCP) — no saved Report needed.
 
-  The Network is resolved via the graph's Reporting Style composition —
+  The Network is resolved via the entity's Reporting Style composition —
   the renderer doesn't pick among same-typed structures by recency. Pass
-  ``Graph.reporting_style_id`` from the platform DB.
+  the reporting entity's ``reporting_style_id`` (see
+  ``load_entity_reporting_style`` / ``load_primary_reporting_style``).
 
   ``generate_report_facts`` still wants a ``taxonomy_id`` to scope its
   CoA→GAAP arc walk; rs-gaap-presentation remains the canonical target
@@ -707,11 +709,10 @@ def get_statement(
   `StatementStructureNotFoundError` when the block_type isn't in
   the report's taxonomy. The caller translates both into HTTP 404s.
 
-  ``reporting_style_id`` resolves the graph's active Style. Callers with
-  the value already in scope (REST routes via ``GraphExtensionContext``,
-  GraphQL resolvers via ``info.context``) should pass it explicitly to
-  avoid the per-render platform-DB round-trip; if omitted, falls back to
-  ``load_graph_reporting_style`` which opens its own platform session.
+  ``reporting_style_id`` resolves the reporting entity's active Style. If
+  omitted, falls back to ``load_primary_reporting_style`` against the same
+  extensions session — the primary entity's Style — so no separate lookup
+  is needed. Callers that already know the entity's Style may pass it.
   """
   if block_type not in VALID_BLOCK_TYPES:
     raise ValueError(
@@ -801,11 +802,7 @@ def get_statement(
     )
 
   if reporting_style_id is None:
-    from robosystems.operations.roboledger.reports.network_picker import (
-      load_graph_reporting_style,
-    )
-
-    reporting_style_id = load_graph_reporting_style(graph_id)
+    reporting_style_id = load_primary_reporting_style(session)
   grid = render_structure_view(
     session=session,
     facts=facts,
@@ -952,20 +949,15 @@ def get_live_financial_statement(
   - filters subtotal rows and all-zero rows
   - caps at ``limit`` rows (marking ``truncated=True`` when capped)
 
-  ``reporting_style_id`` resolves the graph's active Style. Routes already
-  loading ``GraphExtensionContext`` (which carries it) should pass the
-  value explicitly to skip the platform-DB lookup; callers without it in
-  scope fall back to ``load_graph_reporting_style``.
+  ``reporting_style_id`` resolves the reporting entity's active Style. When
+  omitted it falls back to ``load_primary_reporting_style`` against the same
+  extensions session (the primary entity's Style).
 
   Raises ``CoaMappingNotFoundError`` when no CoA→GAAP mapping exists;
   the caller translates to a user-facing tip (400/422).
   """
   if reporting_style_id is None:
-    from robosystems.operations.roboledger.reports.network_picker import (
-      load_graph_reporting_style,
-    )
-
-    reporting_style_id = load_graph_reporting_style(graph_id)
+    reporting_style_id = load_primary_reporting_style(session)
   periods = build_current_and_prior_periods(period_start, period_end)
   grid, unmapped_count = generate_adhoc_private_statement(
     session,

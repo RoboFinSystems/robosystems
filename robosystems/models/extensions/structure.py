@@ -59,9 +59,9 @@ class Structure(ExtensionsBase):
       # resolver).
       "'validation_rules', 'regulatory_disclosure', 'taxonomy_mapping', "
       # Reporting Style — the bundle a company picks (Charlie Hoffman's
-      # term). One per entity graph, set at provision via
-      # graphs.reporting_style_id; composes Networks per statement_type
-      # via the reporting_style_networks table.
+      # term). Pinned per entity via entities.reporting_style_id (set at
+      # provision from the entity's legal form); composes Networks per
+      # statement_type via the reporting_style_networks table.
       "'reporting_style', "
       # Escape hatch for everything that doesn't fit the above
       "'custom'"

@@ -58,7 +58,7 @@ from robosystems.operations.roboledger.reports.network_picker import (
   NoNetworkForStatementTypeError,
   get_render_network,
   load_close_target_concept,
-  load_graph_reporting_style,
+  load_entity_reporting_style,
 )
 from robosystems.operations.serialization import (
   RdfFlavor,
@@ -190,9 +190,9 @@ def _build_structure_mapping(
     except NoNetworkForStatementTypeError:
       # Style doesn't compose this statement type — skip silently so a
       # Style that ships without (say) an equity Network still renders.
-      # Safety net: ``change_reporting_style_cmd`` validates that every
-      # required statement_type has a composition row before flipping
-      # ``graphs.reporting_style_id``, so by the time this loop runs the
+      # Safety net: the ``change-reporting-style`` command validates that
+      # every required statement_type has a composition row before setting
+      # ``entities.reporting_style_id``, so by the time this loop runs the
       # only `NoNetworkForStatementTypeError` we should see is for
       # genuinely optional types (e.g. a Style that deliberately omits
       # ``comprehensive_income``).
@@ -508,11 +508,12 @@ def create_report(
   session.add(report_def)
   session.flush()
 
-  # Resolve the active Style's earnings home before generating facts, so
-  # derived cumulative earnings close to the form's capital concept
-  # (CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity) and
-  # the balance sheet foots for non-corporate forms.
-  reporting_style_id = load_graph_reporting_style(graph_id)
+  # Resolve the reporting entity, then its active Style's earnings home
+  # before generating facts, so derived cumulative earnings close to the
+  # form's capital concept (CORP→RetainedEarnings, PART→PartnersCapital,
+  # LLC→MembersEquity) and the balance sheet foots for non-corporate forms.
+  entity_id = _get_entity_id(session, graph_id)
+  reporting_style_id = load_entity_reporting_style(session, entity_id)
   close_target = load_close_target_concept(session, reporting_style_id)
 
   facts = generate_report_facts(
@@ -523,7 +524,6 @@ def create_report(
     close_target_qname=close_target,
   )
 
-  entity_id = _get_entity_id(session, graph_id)
   element_to_structures, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )
@@ -635,7 +635,8 @@ def regenerate_report(
   report_def.generation_status = "generating"
   session.flush()
 
-  reporting_style_id = load_graph_reporting_style(graph_id)
+  entity_id = _get_entity_id(session, graph_id)
+  reporting_style_id = load_entity_reporting_style(session, entity_id)
   close_target = load_close_target_concept(session, reporting_style_id)
 
   facts = generate_report_facts(
@@ -646,7 +647,6 @@ def regenerate_report(
     close_target_qname=close_target,
   )
 
-  entity_id = _get_entity_id(session, graph_id)
   element_to_structures, structure_to_factset = _build_structure_mapping(
     session, reporting_style_id
   )

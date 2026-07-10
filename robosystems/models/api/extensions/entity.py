@@ -52,6 +52,13 @@ class LedgerEntityResponse(BaseModel):
   entity_type: str | None = Field(
     None, description="Legal form (e.g. 'corporation', 'llc', 'lp')."
   )
+  reporting_style_id: str | None = Field(
+    None,
+    description=(
+      "Active Reporting Style (Structure id) governing this entity's "
+      "statement layout. Change it via the change-reporting-style operation."
+    ),
+  )
   phone: str | None = None
   website: str | None = None
   status: str = Field(
@@ -153,4 +160,55 @@ class UpdateEntityRequest(BaseModel):
         {"name": "Acme Holdings, LLC"},
       ]
     }
+  )
+
+
+class ChangeReportingStyleRequest(BaseModel):
+  """Switch a reporting entity's Reporting Style.
+
+  The Reporting Style governs how the entity's statements are laid out
+  (equity-form, close-target concept, per-statement Networks). It's
+  validated against the tenant schema — the target must be a renderable
+  Style with a complete composition — before the switch is applied.
+  """
+
+  reporting_style_id: str = Field(
+    ...,
+    min_length=1,
+    description=(
+      "Structure id of the target Reporting Style. Must exist in the "
+      "tenant schema with a complete Network composition."
+    ),
+  )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "Target entity. Omit to target the graph's primary "
+      "(earliest-created) entity — the single-entity default."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"reporting_style_id": "10d05f23-8ea8-5348-b8c9-f1e65bbda4a3"},
+      ]
+    }
+  )
+
+
+class ChangeReportingStyleResponse(BaseModel):
+  """Result of a change-reporting-style operation."""
+
+  entity_id: str = Field(..., description="Entity whose Style was targeted.")
+  previous_reporting_style_id: str | None = Field(
+    None, description="Style id before the change (null for legacy/unset)."
+  )
+  reporting_style_id: str = Field(..., description="Active Style id after the call.")
+  reporting_style_code: str | None = Field(
+    None,
+    description="4-segment Style code (e.g. BSC-CORP-IS02-CF1), when stamped.",
+  )
+  changed: bool = Field(
+    ..., description="False when the target equals the current Style (no-op)."
   )

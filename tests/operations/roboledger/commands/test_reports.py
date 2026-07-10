@@ -431,9 +431,9 @@ def test_regenerate_report_allows_draft() -> None:
   session = _session_with_report(report)
   body = MagicMock()
   # ``periods`` attribute access on the MagicMock body succeeds, but
-  # downstream `load_graph_reporting_style` / `generate_report_facts`
-  # require a real platform DB + extensions schema. Assert the gate
-  # passed by asserting the failure is NOT the gate error.
+  # downstream `load_entity_reporting_style` / `generate_report_facts`
+  # require a real extensions schema. Assert the gate passed by asserting
+  # the failure is NOT the gate error.
   with pytest.raises(Exception) as exc:
     regenerate_report(session, "kg_demo", "rpt_01", body, "usr_test")
   assert not isinstance(exc.value, InvalidFilingTransitionError)
