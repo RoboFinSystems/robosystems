@@ -49,7 +49,7 @@ INDEX_MAPPING = {
       "document_id": {"type": "keyword"},
       "source_type": {
         "type": "keyword"
-      },  # "xbrl_textblock", "narrative_section", "ixbrl_disclosure", "uploaded_doc", "memory", "connection_doc"
+      },  # "xbrl_textblock", "narrative_section", "ixbrl_disclosure", "uploaded_doc", "connection_doc"
       # Entity metadata
       "entity_ticker": {"type": "keyword"},
       "entity_cik": {"type": "keyword"},

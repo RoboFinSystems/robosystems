@@ -94,7 +94,7 @@ async def get_subgraph_info(
       if subgraph.subgraph_metadata
       else None,
       subgraph_type=SubgraphType(
-        subgraph.subgraph_metadata.get("type", "static")
+        subgraph.subgraph_metadata.get("subgraph_type", "static")
         if subgraph.subgraph_metadata
         else "static"
       ),
