@@ -462,6 +462,60 @@ async def delete_document_op(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# create-file-upload (raw → presigned S3 upload content op)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.post(
+  "/create-file-upload",
+  response_model=OperationEnvelope,
+  operation_id="opCreateFileUpload",
+  summary="Create File Upload (presign an S3 upload)",
+  description="Presign an S3 URL for direct upload and register the file. After "
+  "uploading to the returned URL, call `POST /operations/ingest-file` to stage it "
+  "into DuckDB. The staging table is auto-created if missing. Not allowed on "
+  "entity graphs or shared repositories.",
+  tags=[_CONTENT_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  f"{_GRAPH_OPS_PATH}/create-file-upload",
+  method="POST",
+  business_event_type="graph_create_file_upload",
+)
+async def create_file_upload_op(
+  body: FileUploadRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  db: Session = Depends(get_async_db_session),
+) -> OperationEnvelope:
+  from robosystems.operations.graph.commands.create_file_upload import (
+    create_file_upload_cmd,
+  )
+
+  op_name = "create-file-upload"
+  user_id = str(user.id)
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=user_id,
+    op=op_name,
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  async def _runner():
+    result = await create_file_upload_cmd(
+      graph_id=graph_id, request=body, current_user=user, db=db
+    )
+    return result.model_dump(mode="json")
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # ingest-file (raw → staging content flow)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -596,60 +650,6 @@ async def delete_file_op(
       cascade=body.cascade,
       current_user=user,
       db=db,
-    )
-    return result.model_dump(mode="json")
-
-  return await _dispatch(ctx, _runner, cache)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# create-file-upload (raw → presigned S3 upload content op)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@router.post(
-  "/create-file-upload",
-  response_model=OperationEnvelope,
-  operation_id="opCreateFileUpload",
-  summary="Create File Upload (presign an S3 upload)",
-  description="Presign an S3 URL for direct upload and register the file. After "
-  "uploading to the returned URL, call `POST /operations/ingest-file` to stage it "
-  "into DuckDB. The staging table is auto-created if missing. Not allowed on "
-  "entity graphs or shared repositories.",
-  tags=[_CONTENT_OP_TAG],
-  dependencies=[_RATE_LIMIT],
-  responses={**OPERATION_ERROR_RESPONSES},
-)
-@endpoint_metrics_decorator(
-  f"{_GRAPH_OPS_PATH}/create-file-upload",
-  method="POST",
-  business_event_type="graph_create_file_upload",
-)
-async def create_file_upload_op(
-  body: FileUploadRequest,
-  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
-  user: User = Depends(get_current_user_with_graph),
-  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
-  cache: IdempotencyCache = Depends(get_idempotency_cache),
-  db: Session = Depends(get_async_db_session),
-) -> OperationEnvelope:
-  from robosystems.operations.graph.commands.create_file_upload import (
-    create_file_upload_cmd,
-  )
-
-  op_name = "create-file-upload"
-  user_id = str(user.id)
-  ctx = _ctx(
-    graph_id=graph_id,
-    user_id=user_id,
-    op=op_name,
-    idempotency_key=idempotency_key,
-    body=body,
-  )
-
-  async def _runner():
-    result = await create_file_upload_cmd(
-      graph_id=graph_id, request=body, current_user=user, db=db
     )
     return result.model_dump(mode="json")
 
