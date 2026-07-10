@@ -58,6 +58,7 @@ from .graphs import (
 from .graphs import (
   subscriptions_router as graph_subscriptions_router,
 )
+from .graphs.content_ops import router as graph_content_ops_router
 from .graphs.mcp import router as mcp_router
 from .graphs.operations import router as graph_operations_router
 from .graphs.operator import (
@@ -123,6 +124,7 @@ if env.SEMANTIC_MEMORY_ENABLED:
   router.include_router(memory_router)  # No prefix - handles /memory internally
 
 router.include_router(graph_operations_router, prefix="/operations")
+router.include_router(graph_content_ops_router, prefix="/operations")
 router.include_router(files_router)  # No prefix - handles /files endpoint
 
 # Non-graph-scoped routes that don't require a graph_id

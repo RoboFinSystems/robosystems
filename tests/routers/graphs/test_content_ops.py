@@ -18,7 +18,7 @@ from robosystems.models.api.graphs.operations import (
 )
 from robosystems.models.api.graphs.tables import DeleteFileResponse
 from robosystems.models.api.search import DocumentUploadResponse
-from robosystems.routers.graphs.operations import (
+from robosystems.routers.graphs.content_ops import (
   delete_document_op,
   delete_file_op,
   index_document_op,
@@ -26,7 +26,7 @@ from robosystems.routers.graphs.operations import (
   update_memory_op,
 )
 
-MODULE = "robosystems.routers.graphs.operations"
+MODULE = "robosystems.routers.graphs.content_ops"
 INGEST_CMD = "robosystems.operations.graph.commands.ingest_file.ingest_file_cmd"
 DELETE_FILE_CMD = "robosystems.operations.graph.commands.delete_file.delete_file_cmd"
 
