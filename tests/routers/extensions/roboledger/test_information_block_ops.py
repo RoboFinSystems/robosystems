@@ -36,6 +36,20 @@ _TEST_ENTRY_TEMPLATE = EntryTemplateRequest(
 )
 
 GRAPH_ID = "kg01234567890abcdef"
+
+
+@pytest.fixture(autouse=True)
+def _bypass_write_role():
+  """Registrar handlers enforce the member/admin write role via
+  ``require_graph_write_role`` (unit-tested in
+  ``tests/middleware/auth/test_dependencies.py``). These direct-call wiring
+  tests use a mock user with no DB-backed ``GraphUser`` row, so no-op it."""
+  with patch(
+    "robosystems.middleware.extensions.require_graph_write_role", return_value=None
+  ):
+    yield
+
+
 CMD_PATH = "robosystems.operations.information_block.commands.create_information_block"
 UPDATE_CMD_PATH = (
   "robosystems.operations.information_block.commands.update_information_block"

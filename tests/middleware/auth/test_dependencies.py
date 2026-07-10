@@ -22,6 +22,7 @@ from robosystems.middleware.auth.dependencies import (
   get_current_user_with_repository_access,
   get_optional_user,
   get_repository_user_dependency,
+  require_graph_write_role,
   verify_jwt_claims,
 )
 from robosystems.models.core import User
@@ -1278,3 +1279,31 @@ class TestPerformanceAndCaching:
           assert result.id == user_id
           # API key validation should not be called
           mock_validate_api_key.assert_not_called()
+
+
+class TestRequireGraphWriteRole:
+  """The shared write-role gate used by the command surfaces (appsec F1)."""
+
+  def test_viewer_denied(self):
+    with (
+      patch("robosystems.database.SessionFactory", return_value=Mock()),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access",
+        return_value=False,
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        require_graph_write_role("user_1", "kg0123456789abcdef")
+      assert exc.value.status_code == status.HTTP_403_FORBIDDEN
+      assert "read-only" in exc.value.detail
+
+  def test_write_role_allowed(self):
+    with (
+      patch("robosystems.database.SessionFactory", return_value=Mock()),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access",
+        return_value=True,
+      ),
+    ):
+      # member/admin -> no raise
+      require_graph_write_role("user_1", "kg0123456789abcdef")

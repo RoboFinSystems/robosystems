@@ -52,6 +52,19 @@ from robosystems.routers.extensions.roboledger.operations import (
 GRAPH_ID = "kg01234567890abcdef"
 
 
+@pytest.fixture(autouse=True)
+def _bypass_write_role():
+  """The registrar handler enforces the member/admin write role via
+  ``require_graph_write_role`` (unit-tested in
+  ``tests/middleware/auth/test_dependencies.py``; the deny path is asserted in
+  ``TestRegistrarWriteRoleGate`` below). These direct-call wiring tests use a
+  mock user with no DB-backed ``GraphUser`` row, so no-op the gate here."""
+  with patch(
+    "robosystems.middleware.extensions.require_graph_write_role", return_value=None
+  ):
+    yield
+
+
 def _make_user() -> MagicMock:
   user = MagicMock()
   user.id = "usr_test123"
@@ -1164,3 +1177,28 @@ class TestUpdateEventBlockOp:
         )
     assert exc.value.status_code == 422
     assert "balance" in exc.value.detail
+
+
+class TestRegistrarWriteRoleGate:
+  """appsec F1: every registrar command handler enforces the member/admin
+  write role, so a read-only viewer can't reach the OLTP command surface."""
+
+  @pytest.mark.asyncio
+  async def test_viewer_is_denied(self) -> None:
+    body = UpdateJournalEntryRequest(entry_id="je_abc", memo="x")
+    # Re-patch over the autouse no-op to simulate a read-only viewer.
+    with patch(
+      "robosystems.middleware.extensions.require_graph_write_role",
+      side_effect=HTTPException(
+        status_code=403, detail="Write access denied; your role is read-only."
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await update_journal_entry_op(
+          body=body,
+          graph_id=GRAPH_ID,
+          user=_make_user(),
+          idempotency_key=None,
+          cache=_FakeCache(),
+        )
+    assert exc.value.status_code == 403

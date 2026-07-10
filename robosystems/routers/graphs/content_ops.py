@@ -87,16 +87,25 @@ def _block_shared_repo(graph_id: str) -> None:
     )
 
 
-def _require_graph_write_access(graph_id: str) -> None:
-  """Enforce write-level graph access (subscription state + write role).
+def _require_graph_write_access(graph_id: str, user_id: str) -> None:
+  """Enforce write-level graph access: the member/admin **write role** AND
+  subscription/lifecycle state.
 
-  ``get_current_user_with_graph`` only proves *some* access (incl. viewer);
-  content-op writes must also pass the subscription/lifecycle + write-role checks
-  the resource write surfaces apply. Shared by all content-op write handlers.
+  ``get_current_user_with_graph`` only proves graph *membership* — a read-only
+  ``viewer`` passes it. And ``require_graph_access(require_write=True)`` is a
+  billing/lifecycle gate that takes **no user** (it blocks writes during a
+  subscription grace period, not by role). So both checks are required: the
+  role check is what actually keeps a viewer off the content-op write surface.
+  Shared by all content-op write handlers.
   """
   from robosystems.database import SessionFactory
+  from robosystems.middleware.auth.dependencies import require_graph_write_role
   from robosystems.middleware.billing.enforcement import require_graph_access
 
+  # Write role (member/admin) — viewer is read-only.
+  require_graph_write_role(user_id, graph_id)
+
+  # Subscription/lifecycle gate (blocks writes during a grace period).
   session = SessionFactory()
   try:
     require_graph_access(graph_id, session, require_write=True)
@@ -160,7 +169,7 @@ async def remember_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
-  _require_graph_write_access(graph_id)
+  _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "remember"
   user_id = str(user.id)
@@ -222,7 +231,7 @@ async def forget_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
-  _require_graph_write_access(graph_id)
+  _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "forget"
   user_id = str(user.id)
@@ -282,7 +291,7 @@ async def update_memory_op(
 
   _require_memory_enabled()
   _block_shared_repo(graph_id)
-  _require_graph_write_access(graph_id)
+  _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "update-memory"
   user_id = str(user.id)
@@ -354,7 +363,7 @@ async def index_document_op(
 
   _require_search_enabled()
   _block_shared_repo(graph_id)
-  _require_graph_write_access(graph_id)
+  _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "index-document"
   user_id = str(user.id)
@@ -441,7 +450,7 @@ async def delete_document_op(
 
   _require_search_enabled()
   _block_shared_repo(graph_id)
-  _require_graph_write_access(graph_id)
+  _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "delete-document"
   user_id = str(user.id)
@@ -556,7 +565,7 @@ async def ingest_file_op(
   from robosystems.operations.graph.commands.ingest_file import ingest_file_cmd
 
   _block_shared_repo(graph_id)
-  _require_graph_write_access(graph_id)
+  _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "ingest-file"
   user_id = str(user.id)
@@ -637,7 +646,7 @@ async def delete_file_op(
   from robosystems.operations.graph.commands.delete_file import delete_file_cmd
 
   _block_shared_repo(graph_id)
-  _require_graph_write_access(graph_id)
+  _require_graph_write_access(graph_id, str(user.id))
 
   op_name = "delete-file"
   user_id = str(user.id)

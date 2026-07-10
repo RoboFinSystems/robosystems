@@ -459,6 +459,34 @@ async def get_current_user_with_graph(
   )
 
 
+def require_graph_write_role(user_id: str, graph_id: str) -> None:
+  """Assert the user holds a write role (member/admin) on the graph.
+
+  ``viewer`` is read-only; bare graph *membership* (which
+  ``get_current_user_with_graph`` proves) is not sufficient to mutate a graph.
+  This is the single write-role authorization check the command surfaces share
+  — REST command ops (the extensions registrar, content-ops) call it before
+  dispatching, and the MCP surface enforces the same via
+  ``validate_mcp_access(..., "write")``. Opens a short-lived platform session
+  (``GraphUser`` lives in the platform DB, not the per-graph OLTP DB).
+
+  Raises:
+      HTTPException: 403 if the user's role on the graph is read-only.
+  """
+  from robosystems.database import SessionFactory
+  from robosystems.models.core import GraphUser
+
+  session = SessionFactory()
+  try:
+    if not GraphUser.user_has_write_access(user_id, graph_id, session):
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Write access denied to graph {graph_id}; your role is read-only.",
+      )
+  finally:
+    session.close()
+
+
 async def get_current_user_with_repository_access(
   request: Request,
   repository_id: str,
