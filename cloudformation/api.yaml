@@ -686,6 +686,12 @@ Resources:
             # AWS & Container Configuration
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            # Trust X-Forwarded-For only from inside the VPC (the ALB), so the
+            # per-IP / brute-force limiters see the real client IP instead of
+            # collapsing to the ALB's address (appsec F6). Scoped to the VPC
+            # CIDR — never "*", which would let any caller spoof the header.
+            - Name: FORWARDED_ALLOW_IPS
+              Value: !Ref VpcCidr
             # Cache & Message Queue Configuration
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl
