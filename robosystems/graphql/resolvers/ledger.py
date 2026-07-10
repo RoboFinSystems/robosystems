@@ -113,6 +113,9 @@ from robosystems.operations.roboledger.reads import (
 from robosystems.operations.roboledger.reads import (
   trial_balance as reads_trial_balance,
 )
+from robosystems.operations.roboledger.reports.network_picker import (
+  load_primary_reporting_style,
+)
 from robosystems.operations.roboledger.schedules import ScheduleService
 
 # Services are stateless and cheap to keep as module-level singletons —
@@ -601,14 +604,17 @@ class LedgerQuery:
     candidate set the MappingOperator picks from, so the mapping UI never
     offers a target that would land a fact on an unreachable branch.
     """
-    # Reporting Style is pre-loaded onto the context at request build time
-    # (graphql/context.py) for app requests; narrowing to it keeps the picker
-    # in sync with what the renderer walks. When absent (e.g. tooling paths
-    # that don't resolve a Style), suggest_mapping_candidates falls back to
-    # the rs-gaap-presentation set — still far narrower than the full vocab.
-    reporting_style_id = info.context.get("reporting_style_id")
+    # Narrow candidates to what the entity's Reporting Style actually renders,
+    # keeping the picker in sync with the renderer. Resolved from the same
+    # extensions session as the query. When the tenant has no entity yet,
+    # suggest_mapping_candidates falls back to the rs-gaap-presentation set —
+    # still far narrower than the full vocab.
     try:
       with _open_session(info, "roboledger") as session:
+        try:
+          reporting_style_id = load_primary_reporting_style(session)
+        except LookupError:
+          reporting_style_id = None
         rows = reads_taxonomies.suggest_mapping_candidates(
           session,
           trait=classification,
@@ -915,18 +921,15 @@ class LedgerQuery:
   ) -> Statement | None:
     """Rendered financial statement for a report + block_type."""
     graph_id = require_graph_id(info)
-    # Reporting Style is pre-loaded onto the context at request build
-    # time (graphql/context.py) so this resolver doesn't reopen a
-    # platform session per render.
-    reporting_style_id = info.context["reporting_style_id"]
     try:
       with _open_session(info, "roboledger") as session:
+        # Reporting Style now lives on the entity — get_statement resolves
+        # the primary entity's Style from this same session (no platform hop).
         response = reads_reports.get_statement(
           session,
           graph_id,
           report_id,
           block_type,
-          reporting_style_id=reporting_style_id,
         )
     except reads_reports.StatementStructureNotFoundError:
       return None

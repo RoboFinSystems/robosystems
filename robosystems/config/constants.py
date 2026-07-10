@@ -201,8 +201,9 @@ class ReportingStyleConstants:
   (CORP/PART/LLC) over a fixed BSC / multi-step IS / indirect CF layout.
   Each id is derived deterministically from its style's role URI via
   ``generate_deterministic_uuid(role, namespace='structure')``; pinned
-  here so the platform-side ``graphs.reporting_style_id`` default and
-  the renderer's picker share a single source of truth.
+  here so the ``entities.reporting_style_id`` default (stamped from the
+  entity's legal form at creation) and the renderer's picker share a
+  single source of truth.
   """
 
   DEFAULT_STYLE_ID = "025f5d48-12ce-5d65-b9eb-4f137a10ef06"

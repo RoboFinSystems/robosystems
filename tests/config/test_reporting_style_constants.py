@@ -1,7 +1,8 @@
 """Pin ``ReportingStyleConstants`` UUIDs to their deterministic derivation.
 
 The library-seeded Reporting Style ids in ``config/constants.py`` are
-hardcoded for use as the platform-DB default on ``graphs.reporting_style_id``.
+hardcoded for use as the default on ``entities.reporting_style_id`` (stamped
+from the entity's legal form at creation).
 They MUST equal ``generate_deterministic_uuid(role_uri, namespace="structure")``
 or migration 0008's INSERT will write a different id than the platform
 default points at, breaking provisioning silently.

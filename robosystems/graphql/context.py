@@ -103,11 +103,6 @@ class GraphQLContext(TypedDict):
   graph_id: str
   schema_extensions: tuple[str, ...]
   graph_type: str
-  # The graph's active Reporting Style. Populated from the platform DB
-  # during context build so resolvers don't reopen a platform session
-  # per render. Empty string for unauthenticated introspection traffic
-  # and the library sentinel.
-  reporting_style_id: str
 
 
 async def get_context(
@@ -152,7 +147,6 @@ async def get_context(
 
   schema_extensions: tuple[str, ...] = ()
   graph_type: str = ""
-  reporting_style_id: str = ""
   if user is not None:
     check_graph_access(user, graph_id)
     # Library sentinel — no graph row to load, no per-graph metadata.
@@ -163,11 +157,12 @@ async def get_context(
     else:
       # Load once per request; resolvers read from context, never re-hit the DB.
       # Same 403 semantics as check_graph_access: missing graph rows
-      # surface as "access denied" to avoid enumeration.
+      # surface as "access denied" to avoid enumeration. Reporting Style is
+      # NOT loaded here — it lives on the entity now and resolvers that need
+      # it resolve it from their own extensions session.
       meta = load_graph_metadata(graph_id, db)
       schema_extensions = meta.schema_extensions
       graph_type = meta.graph_type
-      reporting_style_id = meta.reporting_style_id
 
   return {
     "request": request,
@@ -175,7 +170,6 @@ async def get_context(
     "graph_id": graph_id,
     "schema_extensions": schema_extensions,
     "graph_type": graph_type,
-    "reporting_style_id": reporting_style_id,
   }
 
 

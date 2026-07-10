@@ -328,13 +328,7 @@ class GraphCreationService:
     from robosystems.models.core import GraphSchema, GraphUser
     from robosystems.models.core.graph import Graph
 
-    from .reporting_style_defaults import resolve_reporting_style_id
     from .table_service import TableService
-
-    # Derive the initial Reporting Style from the entity's legal form (an
-    # explicit reporting_style_id on the request overrides it). Reads the
-    # raw create payload — the tenant schema doesn't exist yet here.
-    reporting_style_id = resolve_reporting_style_id(config.entity_data)
 
     db_gen = get_db_session()
     db = next(db_gen)
@@ -358,7 +352,6 @@ class GraphCreationService:
           "type": config.graph_type,
           "tags": config.tags,
         },
-        reporting_style_id=reporting_style_id,
         commit=False,
       )
 
@@ -422,8 +415,15 @@ class GraphCreationService:
     from robosystems.models.api import EntityCreate
     from robosystems.models.extensions.entity import Entity as LedgerEntity
 
+    from .reporting_style_defaults import resolve_reporting_style_id
+
     entity_data = EntityCreate(**config.entity_data)
     current_time = datetime.now(UTC)
+
+    # Derive the entity's Reporting Style from its legal form (an explicit
+    # reporting_style_id on the create request overrides it). The Style now
+    # lives on the entity, not the graph — see [[architecture_reporting_style]].
+    reporting_style_id = resolve_reporting_style_id(config.entity_data)
 
     provision_tenant_schema(graph_id)
 
@@ -457,6 +457,7 @@ class GraphCreationService:
         fiscal_year_end=entity_data.fiscal_year_end,
         tax_id=entity_data.ein,
         entity_type=entity_data.entity_type,
+        reporting_style_id=reporting_style_id,
         website=entity_data.uri,
         status="active",
         is_parent=True,

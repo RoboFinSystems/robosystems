@@ -35,7 +35,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, relationship
 
-from robosystems.config.constants import ReportingStyleConstants
 from robosystems.config.graph_tier import GraphTier
 from robosystems.database import Model
 
@@ -65,7 +64,6 @@ class Graph(Model):
     Index("idx_graphs_stale", "graph_stale"),
     Index("idx_graphs_status", "status"),
     Index("idx_graphs_status_tier_created", "status", "graph_tier", "created_at"),
-    Index("idx_graphs_reporting_style", "reporting_style_id"),
     CheckConstraint(
       "graph_type IN ('generic', 'entity', 'repository')", name="check_graph_type"
     ),
@@ -179,20 +177,11 @@ class Graph(Model):
   # schema at provision time. See robosystems/taxonomy/pins.py.
   taxonomy_pin = Column(JSONB, nullable=True)
 
-  # Reporting Style — Charlie Hoffman's term for the bundle a company
-  # picks (the default family: Default / Partnership / LLC). The value is
-  # a Structure id in the per-tenant extensions schema; the renderer
-  # picker uses it to resolve which Network fills each statement-type
-  # slot via ``reporting_style_networks``. NOT NULL because every entity
-  # graph must have a Reporting Style the way it has a fiscal year start
-  # month. No DB-level FK
-  # because ``structures`` lives in a separate database (extensions);
-  # validated at application layer.
-  reporting_style_id = Column(
-    String,
-    nullable=False,
-    default=ReportingStyleConstants.DEFAULT_STYLE_ID,
-  )
+  # Reporting Style lives on the entity (extensions DB), not the graph —
+  # co-located with the ``structures`` / ``reporting_style_networks`` it
+  # points at, and at the grain where heterogeneous subsidiaries can each
+  # carry their own Style. See ``models/extensions/entity.py`` and
+  # ``operations/roboledger/reports/network_picker.py``.
 
   # Per-graph autopilot for the period-boundary obligation promoter.
   # When False (default — co-pilot), the sensor flips matured `pending`
@@ -280,7 +269,6 @@ class Graph(Model):
     is_subgraph: bool = False,
     subgraph_metadata: dict[str, Any] | None = None,
     status: GraphStatus = GraphStatus.ACTIVE,
-    reporting_style_id: str | None = None,
     commit: bool = True,
   ) -> "Graph":
     """Create a new graph metadata entry."""
@@ -323,12 +311,6 @@ class Graph(Model):
       subgraph_metadata=subgraph_metadata,
       status=status.value if isinstance(status, GraphStatus) else status,
     )
-
-    # Only set when caller supplies one; otherwise the column default
-    # (corporate DEFAULT_STYLE_ID) applies. Passing None explicitly would
-    # violate the NOT NULL constraint.
-    if reporting_style_id is not None:
-      graph.reporting_style_id = reporting_style_id
 
     session.add(graph)
     if commit:

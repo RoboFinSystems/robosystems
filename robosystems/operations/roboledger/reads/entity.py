@@ -32,6 +32,7 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
     lei=entity.lei,
     industry=entity.industry,
     entity_type=entity.entity_type,
+    reporting_style_id=entity.reporting_style_id,
     phone=entity.phone,
     website=entity.website,
     status=entity.status,

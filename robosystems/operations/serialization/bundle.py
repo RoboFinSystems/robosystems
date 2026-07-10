@@ -422,6 +422,7 @@ def build_report_bundle(
   )
   from robosystems.operations.roboledger.reports.network_picker import (
     get_render_network,
+    load_primary_reporting_style,
   )
   from robosystems.taxonomy.pins import resolve_pin
 
@@ -433,14 +434,16 @@ def build_report_bundle(
   if report is None:
     raise LookupError(f"Report {report_id!r} not found in active session.")
 
-  # Resolve Graph-level metadata (reporting style + framework pin)
-  # against the platform DB. Short-lived; doesn't bleed extensions-side
-  # state into the platform session.
+  # Reporting Style lives on the entity — resolve it from the extensions
+  # session already in scope (the primary entity's Style).
+  reporting_style_id = load_primary_reporting_style(session)
+
+  # Framework pin is still Graph-level; resolve it against the platform DB.
+  # Short-lived; doesn't bleed extensions-side state into the platform session.
   with platform_session() as pdb:
     graph = pdb.query(Graph).filter(Graph.graph_id == graph_id).first()
     if graph is None:
       raise LookupError(f"Graph {graph_id!r} not found in platform DB.")
-    reporting_style_id = str(graph.reporting_style_id)
     framework_pin_dict = resolve_pin(graph)
   framework_pins = [
     FrameworkPin(framework=name, version=ver)

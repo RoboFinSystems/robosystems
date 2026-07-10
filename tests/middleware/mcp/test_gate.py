@@ -24,8 +24,6 @@ from robosystems.middleware.mcp.tools._gate import (
   require_not_repository_mcp,
 )
 
-_FAKE_STYLE_ID = "025f5d48-12ce-5d65-b9eb-4f137a10ef06"
-
 
 def _entity_meta(
   extensions=("roboledger",), graph_type="entity"
@@ -34,7 +32,6 @@ def _entity_meta(
     graph_type=graph_type,
     schema_extensions=tuple(extensions),
     is_repository=False,
-    reporting_style_id=_FAKE_STYLE_ID,
   )
 
 
@@ -43,7 +40,6 @@ def _repo_meta() -> GraphExtensionContext:
     graph_type="repository",
     schema_extensions=("roboledger",),
     is_repository=True,
-    reporting_style_id=_FAKE_STYLE_ID,
   )
 
 
@@ -89,7 +85,6 @@ class TestRequireGraphExtensionMCP:
       graph_type="repository",
       schema_extensions=(),  # no extensions
       is_repository=True,
-      reporting_style_id=_FAKE_STYLE_ID,
     )
     with pytest.raises(MCPExtensionGateError) as exc:
       require_graph_extension_mcp(
