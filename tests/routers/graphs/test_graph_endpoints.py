@@ -33,13 +33,9 @@ class TestGraphSchemaEndpoints:
     response = client_with_mocked_auth.get(f"/v1/graphs/{sample_graph.graph_id}/schema")
     assert response.status_code in [200, 500, 502, 503]
 
-  def test_validate_schema(
-    self, client_with_mocked_auth, test_user_graph, sample_graph
-  ):
-    """Validate schema for a graph."""
-    response = client_with_mocked_auth.post(
-      f"/v1/graphs/{sample_graph.graph_id}/schema/validate"
-    )
+  def test_validate_schema(self, client_with_mocked_auth):
+    """Validate a candidate schema (graph-independent, no graph_id)."""
+    response = client_with_mocked_auth.post("/v1/graphs/schema/validate")
     assert response.status_code in [200, 422, 500, 502, 503]
 
 

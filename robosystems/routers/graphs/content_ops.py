@@ -135,7 +135,7 @@ def _resolve_graph_tier(graph_id: str, session) -> str:
   "/remember",
   response_model=OperationEnvelope,
   operation_id="opRemember",
-  summary="Remember (write semantic memory)",
+  summary="Store a Semantic Memory",
   description="Store a semantic memory in the graph's per-graph memory store. "
   "The text is embedded locally; recall it later via `POST /memory/recall`.",
   tags=[_CONTENT_OP_TAG],
@@ -199,7 +199,7 @@ async def remember_op(
   "/forget",
   response_model=OperationEnvelope,
   operation_id="opForget",
-  summary="Forget (delete a semantic memory)",
+  summary="Delete a Semantic Memory",
   description="Delete a semantic memory by its server-generated id.",
   tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -257,7 +257,7 @@ async def forget_op(
   "/update-memory",
   response_model=OperationEnvelope,
   operation_id="opUpdateMemory",
-  summary="Update Memory (edit a semantic memory)",
+  summary="Update a Semantic Memory",
   description="Partially update a stored memory by its server-generated id. "
   "Only supplied fields change; the memory is re-embedded when `text` changes.",
   tags=[_CONTENT_OP_TAG],
@@ -329,7 +329,7 @@ async def update_memory_op(
   "/index-document",
   response_model=OperationEnvelope,
   operation_id="opIndexDocument",
-  summary="Index Document (write to the corpus)",
+  summary="Index a Document",
   description="Create a document (omit `document_id`) or update one (provide it). "
   "Stored in PostgreSQL, synced to OpenSearch for search.",
   tags=[_CONTENT_OP_TAG],
@@ -418,7 +418,7 @@ async def index_document_op(
   "/delete-document",
   response_model=OperationEnvelope,
   operation_id="opDeleteDocument",
-  summary="Delete Document (remove from the corpus)",
+  summary="Delete a Document",
   description="Delete a document from PostgreSQL and OpenSearch by id.",
   tags=[_CONTENT_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -476,7 +476,7 @@ async def delete_document_op(
   "/create-file-upload",
   response_model=OperationEnvelope,
   operation_id="opCreateFileUpload",
-  summary="Create File Upload (presign an S3 upload)",
+  summary="Presign a File Upload",
   description="Presign an S3 URL for direct upload and register the file. After "
   "uploading to the returned URL, call `POST /operations/ingest-file` to stage it "
   "into DuckDB. The staging table is auto-created if missing. Not allowed on "
@@ -530,7 +530,7 @@ async def create_file_upload_op(
   "/ingest-file",
   response_model=OperationEnvelope,
   operation_id="opIngestFile",
-  summary="Ingest File (stage an uploaded file)",
+  summary="Stage an Uploaded File",
   description="Mark an uploaded file ready and stage it into DuckDB. Small files "
   "stage directly (sync); large files stage via a background job (returns a "
   "pending envelope with an `operation_id` to monitor). Set `ingest_to_graph` to "
@@ -614,7 +614,7 @@ async def ingest_file_op(
   "/delete-file",
   response_model=OperationEnvelope,
   operation_id="opDeleteFile",
-  summary="Delete File",
+  summary="Delete a File",
   description="Delete a file from S3 and PostgreSQL. `cascade=true` also removes "
   "its rows from DuckDB staging tables and marks the graph stale.",
   tags=[_CONTENT_OP_TAG],

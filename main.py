@@ -34,6 +34,7 @@ from robosystems.routers import (
   auth_router_v1,
   billing_router_v1,
   graph_router,
+  graph_schema_router_v1,
   offering_router_v1,
   operations_router_v1,
   orgs_router_v1,
@@ -415,6 +416,7 @@ def create_app() -> FastAPI:
   app.include_router(orgs_router_v1)
   app.include_router(v1_router)
   app.include_router(graph_router)
+  app.include_router(graph_schema_router_v1)
   app.include_router(offering_router_v1)
   app.include_router(operations_router_v1)
   app.include_router(billing_router_v1)

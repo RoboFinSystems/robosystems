@@ -113,7 +113,7 @@ class TestSchemaValidationEndpoint:
       }
 
       response = client_with_mocked_auth.post(
-        f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
+        "/v1/graphs/schema/validate",
         json={"schema_definition": schema_def, "format": "json"},
       )
 
@@ -156,7 +156,7 @@ class TestSchemaValidationEndpoint:
       }
 
       response = client_with_mocked_auth.post(
-        f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
+        "/v1/graphs/schema/validate",
         json={"schema_definition": schema_def, "format": "json"},
       )
 
@@ -195,7 +195,7 @@ nodes:
 """
 
       response = client_with_mocked_auth.post(
-        f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
+        "/v1/graphs/schema/validate",
         json={"schema_definition": yaml_schema, "format": "yaml"},
       )
 
@@ -204,24 +204,31 @@ nodes:
       assert data["valid"] is True
 
   @pytest.mark.asyncio
-  async def test_validate_schema_unauthorized(self, client_with_mocked_auth, test_user):
-    """Test schema validation without access to graph."""
-    try:
-      response = client_with_mocked_auth.post(
-        "/v1/unauthorized_graph/schema/validate",
+  async def test_validate_schema_is_graph_independent(self, client_with_mocked_auth):
+    """Validation needs no graph: the generic path works and the old
+    graph-scoped path is gone (a candidate schema is validated BEFORE any
+    graph exists, so there is no graph to authorize against)."""
+    with patch(
+      "robosystems.routers.graphs.schema.validate.CustomSchemaManager"
+    ) as mock_manager:
+      mock_instance = mock_manager.return_value
+      mock_schema = MagicMock()
+      mock_schema.nodes = []
+      mock_schema.relationships = []
+      mock_instance.create_from_dict.return_value = mock_schema
+
+      ok = client_with_mocked_auth.post(
+        "/v1/graphs/schema/validate",
         json={"schema_definition": {"name": "test"}, "format": "json"},
       )
+      assert ok.status_code == status.HTTP_200_OK
 
-      # Schema operations are included - should work without credit pool
-      # But unauthorized graphs may still fail for other reasons
-      assert response.status_code in [
-        status.HTTP_403_FORBIDDEN,  # Access denied
-        status.HTTP_404_NOT_FOUND,  # Graph not found
-        status.HTTP_500_INTERNAL_SERVER_ERROR,  # Other errors
-      ]
-    except ValueError as e:
-      # In test environment, the exception might propagate directly
-      assert "No credit pool found for graph unauthorized_graph" in str(e)
+    # The old graph-scoped path no longer exists.
+    gone = client_with_mocked_auth.post(
+      "/v1/graphs/somegraph/schema/validate",
+      json={"schema_definition": {"name": "test"}, "format": "json"},
+    )
+    assert gone.status_code == status.HTTP_404_NOT_FOUND
 
   @pytest.mark.asyncio
   async def test_validate_schema_with_compatibility_check(
@@ -253,7 +260,7 @@ nodes:
       mock_sm_instance.check_schema_compatibility.return_value = mock_compat_result
 
       response = client_with_mocked_auth.post(
-        f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
+        "/v1/graphs/schema/validate",
         json={
           "schema_definition": {"name": "test_schema"},
           "format": "json",
