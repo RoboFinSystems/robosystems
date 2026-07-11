@@ -70,9 +70,9 @@ def _get_writer_instances(
       }
     ]
 
-  from robosystems.middleware.graph.allocation_manager import AllocationManager
+  from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
 
-  manager = AllocationManager()
+  manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
 
   # Paginated scan of ALL instances (not just healthy)
   # Migration needs to reach every instance that has data, even temporarily unhealthy ones
