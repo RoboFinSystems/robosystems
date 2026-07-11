@@ -130,15 +130,15 @@ class CreateSubgraphTool:
         "Create an isolated subgraph under this parent graph — think of it "
         "as a sandbox or workspace that inherits the schema but keeps data "
         "separate. Use for experiments, scratch work, staging data, or "
-        "agent memory contexts without affecting the main graph.\n\n"
+        "agent knowledge/scratch contexts without affecting the main graph.\n\n"
         "**WHEN TO USE:**\n"
         "- Creating an experimentation sandbox that won't pollute the main graph\n"
         "- Staging data before promoting to the primary graph\n"
-        "- Isolating agent scratch/memory work in a separate namespace\n\n"
+        "- Isolating agent scratch/knowledge work in a separate namespace\n\n"
         "**PARAMETERS:**\n"
         "- name: Alphanumeric only, 1-20 chars (no hyphens or underscores)\n"
         "- fork_parent: Copy all parent data into the new subgraph\n"
-        "- subgraph_type: `static` (default) or `memory` (auto-includes memory schema)\n\n"
+        "- subgraph_type: `static` (default) or `knowledge` (auto-includes the knowledge schema)\n\n"
         "**RETURNS:** `subgraph_id` (format: `{parent_graph_id}_{name}`) — use it "
         "as the `graph_id` in future tool calls to target the new subgraph."
       ),
@@ -160,7 +160,7 @@ class CreateSubgraphTool:
           },
           "subgraph_type": {
             "type": "string",
-            "enum": ["static", "memory"],
+            "enum": ["static", "knowledge"],
             "default": "static",
           },
         },

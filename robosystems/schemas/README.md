@@ -72,7 +72,7 @@ Not every extension has all of these layers today. Some are schema-only (graph s
 
 | Extension | Domain |
 |-----------|--------|
-| `memory` | AI memory (concepts, observations, sessions) |
+| `knowledge` | Agent-built knowledge graph (concepts, observations, sessions) — formerly `memory` |
 
 Other RoboX products (RoboFO, RoboSCM, RoboHRM, RoboEPM, RoboWorkflow, …) are planned but unbuilt — their schemas land alongside OLTP + adapters when the product is designed and prioritized, not as speculative placeholders.
 
@@ -130,7 +130,7 @@ robosystems/schemas/
 ├── extensions/              # Per-extension declarations
 │   ├── roboledger.py        #   Financial reporting & accounting
 │   ├── roboinvestor.py      #   Portfolio & investment management
-│   └── memory.py            #   AI memory schema
+│   └── knowledge.py         #   Agent-built knowledge graph schema (formerly memory)
 │
 └── # ── Runtime layer (builders, validators, parsers) ─────────────────
     └── runtime/
@@ -279,10 +279,10 @@ The RoboInvestor extension models portfolio management, securities, and position
 - **Nodes**: Regulation, Filing, Submission, Audit, Control
 - **Key Features**: Regulatory requirement tracking, filing deadline management, compliance audit trails, control effectiveness
 
-### Memory — AI Memory Schema
+### Knowledge — Agent Knowledge Graph Schema
 
 - **Nodes**: Concept, Observation, Session
-- **Key Features**: AI knowledge graph for storing concepts and observations across AI Operator sessions
+- **Key Features**: Agent-built knowledge graph for storing concepts and observations across AI Operator sessions. Formerly the `memory` extension; renamed when semantic memory moved to LanceDB. The legacy `memory` name still resolves via a SchemaManager alias.
 
 ## Schema Management
 

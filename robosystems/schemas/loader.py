@@ -13,6 +13,7 @@ import pkgutil
 from typing import Any
 
 import robosystems.schemas.extensions as extensions_pkg
+from robosystems.schemas.aliases import resolve_extension_alias
 from robosystems.schemas.base import (
   BASE_NODES,
   BASE_RELATIONSHIPS,
@@ -57,6 +58,9 @@ class LadybugSchemaLoader:
     loaded_extensions = []
 
     for extension_name in target_extensions:
+      # Resolve legacy aliases (e.g. "memory" -> "knowledge") to the canonical
+      # module name before importing or recording it.
+      extension_name = resolve_extension_alias(extension_name)
       try:
         # Import the extension module
         extension_module = importlib.import_module(
@@ -454,7 +458,8 @@ class ContextAwareSchemaLoader(LadybugSchemaLoader):
       all_relationships = list(BASE_RELATIONSHIPS)
 
     try:
-      # Import the unified extension module
+      # Import the unified extension module (resolving legacy aliases)
+      extension = resolve_extension_alias(extension)
       extension_module = importlib.import_module(
         f"robosystems.schemas.extensions.{extension}"
       )

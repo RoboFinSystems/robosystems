@@ -68,7 +68,7 @@ mcp/
     │
     │ # Layer 4: Infrastructure (feature-flag gated)
     │ # (switch-workspace lives in graph_tools.py; it is a client-side tool)
-    └── memory_tools.py      # write-graph-cypher, add-node-table, add-relationship-table (MCP_MEMORY_ENABLED)
+    └── subgraph_write_tools.py  # write-graph-cypher, add-node-table, add-relationship-table (MCP_SUBGRAPH_OPS_ENABLED)
 ```
 
 ## Tool Layers
@@ -218,13 +218,13 @@ tools — create a subgraph with `create-subgraph` and then point
 |------|-------------|--------------|
 | `switch-workspace` | Switch active workspace context (client-side) | Yes |
 
-**Memory / write Cypher** (`MCP_MEMORY_ENABLED`, writable graphs only):
+**Subgraph writes** (`MCP_SUBGRAPH_OPS_ENABLED`, writable subgraphs only):
 
 | Tool | Description |
 |------|-------------|
-| `write-graph-cypher` | Execute write Cypher (subgraphs / memory graphs) |
-| `add-node-table` | Create staging table for nodes |
-| `add-relationship-table` | Create staging table for relationships |
+| `write-graph-cypher` | Execute write Cypher (subgraphs only — main graph is read-only) |
+| `add-node-table` | Add a node table to the subgraph schema |
+| `add-relationship-table` | Add a relationship table to the subgraph schema |
 
 ### Gating rules summary
 
@@ -238,7 +238,7 @@ tools — create a subgraph with `create-subgraph` and then point
 | `FACT_GRID_ENABLED=true` | `build-fact-grid` |
 | `SEMANTIC_SEARCH_ENABLED=true` | Layer 3 (search + document management) |
 | `MCP_WORKSPACE_ENABLED=true` | Graph-lifecycle tools (`create-subgraph`, `delete-subgraph`, `create-backup`, `switch-workspace`) |
-| `MCP_MEMORY_ENABLED=true` | Layer 4 memory / write-cypher tools |
+| `MCP_SUBGRAPH_OPS_ENABLED=true` | Layer 4 subgraph write/DDL tools |
 
 A tool that would otherwise be unavailable due to any of these gates returns a structured error via `_tool_unavailable_reason` instead of silently no-oping — clients always see a typed reason when a tool isn't mounted in a given context.
 
@@ -318,7 +318,7 @@ client = await create_graph_mcp_client(graph_id="kg1a2b3c")
 
 ### 3. MCP Tools (`tools/`)
 
-Graph-query tools (Layer 1, Layer 2a, Layer 4 memory) use `self.client.execute_query()` to talk to the Graph API for consistent routing, auth, and error handling. OLTP tools (Layer 2b, Layer 3 document management) open an extensions database session via `extensions_session(graph_id)` and delegate to the ops layer directly.
+Graph-query tools (Layer 1, Layer 2a, Layer 4 subgraph writes) use `self.client.execute_query()` to talk to the Graph API for consistent routing, auth, and error handling. OLTP tools (Layer 2b, Layer 3 document management) open an extensions database session via `extensions_session(graph_id)` and delegate to the ops layer directly.
 
 **Key patterns:**
 
@@ -389,7 +389,7 @@ ROBOINVESTOR_ENABLED=false             # Parallel flag for future roboinvestor O
 FACT_GRID_ENABLED=false                # Gates build-fact-grid tool
 SEMANTIC_SEARCH_ENABLED=false          # Gates search-documents, get-document-section, and Layer 3 document management tools
 MCP_WORKSPACE_ENABLED=false            # Gates Layer 4 workspace tools
-MCP_MEMORY_ENABLED=false               # Gates Layer 4 memory / write-cypher tools
+MCP_SUBGRAPH_OPS_ENABLED=false         # Gates Layer 4 subgraph write/DDL tools (write-cypher, add-node/rel-table)
 ```
 
 **Note on `schema_extensions` vs env flags:** Layer 2 tool availability is a two-factor check — the graph must declare `roboledger` in its `schema_extensions` (a per-graph property stored on the `Graph` model) **and** the runtime flag (`ROBOLEDGER_ENABLED` for Layer 2b, always-on for Layer 2a) must be true. Shared repositories like SEC have `roboledger` in their schema_extensions so Layer 2a analytical tools work against them, but they're detected as shared repos by `_is_shared_repository()` so Layer 2b OLTP tools are skipped automatically — SEC has no extensions database schema to write to.

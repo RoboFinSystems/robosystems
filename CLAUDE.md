@@ -506,8 +506,8 @@ Variables follow the naming convention `COMPONENT_SETTING_ENVIRONMENT` (e.g., `S
 ```bash
 just ssm-list prod features                          # List feature flags
 just ssm-list prod tuning                            # List tuning parameters
-just ssm-get prod features/MCP_MEMORY_ENABLED        # Get single parameter
-just ssm-set prod features/MCP_MEMORY_ENABLED true   # Set parameter
+just ssm-get prod features/MCP_SUBGRAPH_OPS_ENABLED  # Get single parameter
+just ssm-set prod features/MCP_SUBGRAPH_OPS_ENABLED true  # Set parameter
 just ssm-delete prod features/OLD_FLAG               # Delete parameter
 ```
 

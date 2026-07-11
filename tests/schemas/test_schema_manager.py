@@ -26,8 +26,8 @@ class TestSchemaType:
   def test_roboledger_type(self):
     assert SchemaType.ROBOLEDGER.value == "roboledger"
 
-  def test_memory_type(self):
-    assert SchemaType.MEMORY.value == "memory"
+  def test_knowledge_type(self):
+    assert SchemaType.KNOWLEDGE.value == "knowledge"
 
 
 class TestSchemaConfiguration:
@@ -97,11 +97,11 @@ class TestLoadAndCompileSchema:
     schema = manager.load_and_compile_schema(config)
     assert len(schema.nodes) > 0
 
-  def test_base_with_memory(self, manager):
+  def test_base_with_knowledge(self, manager):
     config = manager.create_schema_configuration(
-      name="Memory",
-      description="With memory",
-      extensions=["memory"],
+      name="Knowledge",
+      description="With knowledge",
+      extensions=["knowledge"],
     )
     schema = manager.load_and_compile_schema(config)
     assert len(schema.nodes) > 0
@@ -128,7 +128,7 @@ class TestLoadAndCompileSchema:
       name="Extension Only",
       description="No base",
       include_base=False,
-      extensions=["memory"],
+      extensions=["knowledge"],
     )
     schema = manager.load_and_compile_schema(config)
     assert schema is not None

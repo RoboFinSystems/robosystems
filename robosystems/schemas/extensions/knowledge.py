@@ -1,11 +1,15 @@
 """
-AI Memory Schema Extension for LadybugDB
+Knowledge Schema Extension for LadybugDB
 
-Provides a base schema for AI memory subgraphs. This schema gives AI agents
-a structured knowledge graph for storing concepts, observations, and session context.
+Provides a starter schema for agent-built knowledge subgraphs. It gives AI
+agents a structured knowledge graph for storing concepts, observations, and
+session context.
 
 AI agents can extend this schema dynamically using the add-node-table and
 add-relationship-table MCP tools.
+
+Formerly the "memory" extension; renamed when semantic memory moved to LanceDB.
+The legacy "memory" name still resolves here via an alias in the SchemaManager.
 """
 
 from ..models import Node, Property, Relationship

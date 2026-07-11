@@ -1,16 +1,16 @@
-"""Tests for AI Memory schema extension."""
+"""Tests for the knowledge schema extension (formerly "memory")."""
 
 import pytest
 
-from robosystems.schemas.extensions.memory import (
+from robosystems.schemas.extensions.knowledge import (
   EXTENSION_NODES,
   EXTENSION_RELATIONSHIPS,
 )
 from robosystems.schemas.runtime.manager import SchemaManager
 
 
-class TestMemorySchemaExtension:
-  """Tests for the memory schema extension definitions."""
+class TestKnowledgeSchemaExtension:
+  """Tests for the knowledge schema extension definitions."""
 
   @pytest.mark.unit
   def test_extension_nodes_defined(self):
@@ -59,37 +59,37 @@ class TestMemorySchemaExtension:
       assert f"FROM {rel.from_node} TO {rel.to_node}" in ddl
 
 
-class TestSchemaManagerMemorySupport:
-  """Tests for SchemaManager with memory extension."""
+class TestSchemaManagerKnowledgeSupport:
+  """Tests for SchemaManager with the knowledge extension."""
 
   @pytest.mark.unit
-  def test_memory_extension_loads(self):
+  def test_knowledge_extension_loads(self):
     manager = SchemaManager()
     config = manager.create_schema_configuration(
-      name="MemoryTest",
-      description="Test memory schema",
-      extensions=["memory"],
+      name="KnowledgeTest",
+      description="Test knowledge schema",
+      extensions=["knowledge"],
     )
     schema = manager.load_and_compile_schema(config)
     node_names = {n.name for n in schema.nodes}
-    # Should have base nodes + memory nodes
+    # Should have base nodes + knowledge nodes
     assert "Concept" in node_names
     assert "Observation" in node_names
     assert "Session" in node_names
     assert "Entity" in node_names  # base schema included
 
   @pytest.mark.unit
-  def test_memory_extension_without_base(self):
+  def test_knowledge_extension_without_base(self):
     manager = SchemaManager()
     config = manager.create_schema_configuration(
-      name="MemoryOnly",
-      description="Memory schema without base",
-      extensions=["memory"],
+      name="KnowledgeOnly",
+      description="Knowledge schema without base",
+      extensions=["knowledge"],
       include_base=False,
     )
     schema = manager.load_and_compile_schema(config)
     node_names = {n.name for n in schema.nodes}
-    # Should have only memory nodes, no base
+    # Should have only knowledge nodes, no base
     assert "Concept" in node_names
     assert "Observation" in node_names
     assert "Session" in node_names
@@ -97,12 +97,12 @@ class TestSchemaManagerMemorySupport:
     assert "Period" not in node_names
 
   @pytest.mark.unit
-  def test_memory_only_generates_valid_ddl(self):
+  def test_knowledge_only_generates_valid_ddl(self):
     manager = SchemaManager()
     config = manager.create_schema_configuration(
-      name="MemoryOnly",
-      description="Memory schema without base",
-      extensions=["memory"],
+      name="KnowledgeOnly",
+      description="Knowledge schema without base",
+      extensions=["knowledge"],
       include_base=False,
     )
     schema = manager.load_and_compile_schema(config)
@@ -113,15 +113,30 @@ class TestSchemaManagerMemorySupport:
     assert "Entity" not in ddl
 
   @pytest.mark.unit
-  def test_memory_schema_statistics(self):
+  def test_knowledge_schema_statistics(self):
     manager = SchemaManager()
     config = manager.create_schema_configuration(
-      name="MemoryOnly",
-      description="Memory schema without base",
-      extensions=["memory"],
+      name="KnowledgeOnly",
+      description="Knowledge schema without base",
+      extensions=["knowledge"],
       include_base=False,
     )
     schema = manager.load_and_compile_schema(config)
     stats = manager.get_schema_statistics(schema)
     assert stats["total_nodes"] == 3
     assert stats["total_relationships"] == 4
+
+  @pytest.mark.unit
+  def test_legacy_memory_alias_resolves_to_knowledge(self):
+    """A subgraph persisted with the legacy "memory" extension must still load
+    the knowledge schema (backward-compat alias in SchemaManager)."""
+    manager = SchemaManager()
+    config = manager.create_schema_configuration(
+      name="LegacyMemory",
+      description="Legacy memory alias",
+      extensions=["memory"],
+      include_base=False,
+    )
+    schema = manager.load_and_compile_schema(config)
+    node_names = {n.name for n in schema.nodes}
+    assert node_names == {"Concept", "Observation", "Session"}
