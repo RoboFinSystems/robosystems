@@ -403,8 +403,15 @@ class TestGraphOperationFeatureFlags:
         "SUBGRAPH_CREATION_ENABLED",
         False,
       ):
-        with patch(
-          "robosystems.routers.graphs.subgraphs.main.handle_circuit_breaker_check"
+        with (
+          patch(
+            "robosystems.routers.graphs.subgraphs.main.handle_circuit_breaker_check"
+          ),
+          # Isolate the feature-flag assertion from the write-role gate: this
+          # test simulates an authorized (write) user hitting a disabled
+          # feature, so the gate must pass to reach the SUBGRAPH_CREATION_ENABLED
+          # check. The gate itself is covered by test_write_role_gates.py.
+          patch("robosystems.routers.graphs.operations.require_graph_write_role"),
         ):
           request_data = {
             "name": "testsubgraph",
@@ -477,6 +484,9 @@ class TestGraphOperationFeatureFlags:
           patch(
             "robosystems.routers.graphs.subgraphs.main.handle_circuit_breaker_check"
           ),
+          # Pass the write-role gate deterministically (don't rely on leaked
+          # DB state); this test asserts the feature-enabled path, not authz.
+          patch("robosystems.routers.graphs.operations.require_graph_write_role"),
           patch(
             "robosystems.routers.graphs.subgraphs.main.verify_parent_graph_access"
           ) as mock_verify_access,
