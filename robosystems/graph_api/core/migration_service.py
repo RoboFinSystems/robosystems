@@ -110,7 +110,10 @@ class MigrationService:
     """
     timestamp = datetime.now(UTC)
     s3_key = get_backup_key(graph_id, "system", timestamp, extension=".lbug")
-    bucket = env.S3_GRAPH_BUCKET
+    # All graph storage (backups included) lives in USER_DATA_BUCKET — see
+    # config/storage/graph.py. env.S3_GRAPH_BUCKET never existed, so this
+    # upload raised AttributeError and aborted every migration export.
+    bucket = env.USER_DATA_BUCKET
 
     s3_client = self._get_s3_client()
     transfer_config = TransferConfig(
