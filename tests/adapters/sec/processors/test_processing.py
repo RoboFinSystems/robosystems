@@ -10,10 +10,15 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
+from arelle.UrlUtil import IXDS_DOC_SEPARATOR, IXDS_SURROGATE
 
 from robosystems.adapters.sec.processors.processing import (
   ProcessedFilingResult,
   process_single_filing_to_memory,
+)
+
+INLINE_XBRL_HTML = (
+  '<html xmlns:ix="http://www.xbrl.org/2013/inlineXBRL"><body>{}</body></html>'
 )
 
 
@@ -164,12 +169,15 @@ class TestS3DownloadHandling:
 class TestXBRLFileSelection:
   """Tests for XBRL file selection from ZIP contents."""
 
-  def _make_zip_bytes(self, filenames: list[str]) -> bytes:
+  def _make_zip_bytes(
+    self, filenames: list[str], contents: dict[str, str] | None = None
+  ) -> bytes:
     """Helper to create a ZIP in memory with given filenames."""
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
       for name in filenames:
-        zf.writestr(name, f"<content of {name}>")
+        content = (contents or {}).get(name, f"<content of {name}>")
+        zf.writestr(name, content)
     buf.seek(0)
     return buf.read()
 
@@ -242,6 +250,97 @@ class TestXBRLFileSelection:
 
     call_kwargs = mock_processor_cls.call_args.kwargs
     assert "filing.xml" in call_kwargs["local_file_path"]
+
+  @patch("robosystems.adapters.sec.processors.processing.XBRLGraphProcessor")
+  def test_multi_document_inline_xbrl_loads_as_document_set(self, mock_processor_cls):
+    """40-F/20-F style filings with facts split across .htm files load as IXDS.
+
+    Contexts/units/references live in the primary document while facts live
+    in continuation documents (_d2.htm), so the members must be loaded
+    together; untagged exhibits are excluded from the set.
+    """
+    mock_processor_cls.return_value = MagicMock()
+
+    zip_data = self._make_zip_bytes(
+      [
+        "crlbf-20241231.htm",
+        "crlbf-20241231_d2.htm",
+        "aif.htm",
+        "schema.xsd",
+      ],
+      contents={
+        "crlbf-20241231.htm": INLINE_XBRL_HTML.format("cover"),
+        "crlbf-20241231_d2.htm": INLINE_XBRL_HTML.format("financials " * 100),
+        "aif.htm": "<html><body>untagged exhibit</body></html>" * 100,
+      },
+    )
+
+    mock_s3 = MagicMock()
+    mock_s3.download_fileobj.side_effect = lambda bucket, key, buf: buf.write(zip_data)
+
+    mock_loader = MagicMock()
+    mock_loader.get_metadata.return_value = (
+      {"cik": "1832928"},
+      {"form": "40-F", "filingDate": "2025-03-14", "primaryDocument": None},
+    )
+
+    process_single_filing_to_memory(
+      storage_key="sec/raw/file.zip",
+      partition_key="2025_1832928_0001832928-25-000006",
+      source_file_id="sf1",
+      s3_client=mock_s3,
+      raw_bucket="bucket",
+      metadata_loader=mock_loader,
+    )
+
+    local_file_path = mock_processor_cls.call_args.kwargs["local_file_path"]
+    assert IXDS_SURROGATE in local_file_path
+    members = local_file_path.partition(IXDS_SURROGATE)[2].split(IXDS_DOC_SEPARATOR)
+    assert [os.path.basename(m) for m in members] == [
+      "crlbf-20241231.htm",
+      "crlbf-20241231_d2.htm",
+    ]
+
+  @patch("robosystems.adapters.sec.processors.processing.XBRLGraphProcessor")
+  def test_single_inline_xbrl_doc_wins_over_larger_untagged_htm(
+    self, mock_processor_cls
+  ):
+    """The tagged document is loaded even when an untagged exhibit is larger."""
+    mock_processor_cls.return_value = MagicMock()
+
+    zip_data = self._make_zip_bytes(
+      [
+        "filing.htm",
+        "exhibit.htm",
+        "schema.xsd",
+      ],
+      contents={
+        "filing.htm": INLINE_XBRL_HTML.format("tagged"),
+        "exhibit.htm": "<html><body>untagged</body></html>" * 1000,
+      },
+    )
+
+    mock_s3 = MagicMock()
+    mock_s3.download_fileobj.side_effect = lambda bucket, key, buf: buf.write(zip_data)
+
+    mock_loader = MagicMock()
+    mock_loader.get_metadata.return_value = (
+      {"cik": "1045810"},
+      {"form": "10-K", "filingDate": "2024-03-01", "primaryDocument": None},
+    )
+
+    process_single_filing_to_memory(
+      storage_key="sec/raw/file.zip",
+      partition_key="2024_1045810_0001045810-24-000001",
+      source_file_id="sf1",
+      s3_client=mock_s3,
+      raw_bucket="bucket",
+      metadata_loader=mock_loader,
+    )
+
+    local_file_path = mock_processor_cls.call_args.kwargs["local_file_path"]
+    assert IXDS_SURROGATE not in local_file_path
+    assert local_file_path.endswith("filing.htm")
 
   def test_no_xbrl_files_returns_error(self):
     """Returns error when ZIP contains no XBRL files."""
@@ -492,6 +591,8 @@ class TestProcessorOrchestration:
       os.makedirs(nodes_dir, exist_ok=True)
       with open(os.path.join(nodes_dir, "Entity.parquet"), "wb") as f:
         f.write(b"entity parquet data")
+      with open(os.path.join(nodes_dir, "Fact.parquet"), "wb") as f:
+        f.write(b"fact parquet data")
 
       rels_dir = os.path.join(output_dir, "relationships")
       os.makedirs(rels_dir, exist_ok=True)
@@ -516,3 +617,48 @@ class TestProcessorOrchestration:
     assert "nodes/Entity" in result.tables
     assert "relationships/ENTITY_HAS_REPORT" in result.tables
     assert result.tables["nodes/Entity"] == b"entity parquet data"
+
+  @patch("robosystems.adapters.sec.processors.processing.XBRLGraphProcessor")
+  def test_zero_facts_returns_error(self, mock_processor_cls):
+    """Processing that emits no Fact table is a failure, not silent success.
+
+    Guards against wrong-instance-document selection producing empty reports
+    that are marked success and never retried.
+    """
+    zip_data = self._make_zip_bytes(["filing.htm"])
+
+    mock_s3 = MagicMock()
+    mock_s3.download_fileobj.side_effect = lambda bucket, key, buf: buf.write(zip_data)
+
+    mock_loader = MagicMock()
+    mock_loader.get_metadata.return_value = (
+      {"cik": "1045810"},
+      {"form": "10-K", "filingDate": "2024-03-01", "primaryDocument": "filing.htm"},
+    )
+
+    def fake_process():
+      call_kwargs = mock_processor_cls.call_args.kwargs
+      output_dir = call_kwargs["output_dir"]
+      nodes_dir = os.path.join(output_dir, "nodes")
+      os.makedirs(nodes_dir, exist_ok=True)
+      with open(os.path.join(nodes_dir, "Entity.parquet"), "wb") as f:
+        f.write(b"entity parquet data")
+      with open(os.path.join(nodes_dir, "Report.parquet"), "wb") as f:
+        f.write(b"report parquet data")
+
+    mock_processor_instance = MagicMock()
+    mock_processor_instance.process.side_effect = fake_process
+    mock_processor_cls.return_value = mock_processor_instance
+
+    result = process_single_filing_to_memory(
+      storage_key="sec/raw/file.zip",
+      partition_key="2024_1045810_0001045810-24-000001",
+      source_file_id="sf1",
+      s3_client=mock_s3,
+      raw_bucket="bucket",
+      metadata_loader=mock_loader,
+    )
+
+    assert result.success is False
+    assert "zero facts" in result.error
+    assert result.tables == {}

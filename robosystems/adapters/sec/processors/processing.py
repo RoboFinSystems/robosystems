@@ -17,8 +17,33 @@ if TYPE_CHECKING:
   from robosystems.adapters.sec.processors.metadata import SECMetadataLoader
 
 # Import from specific modules to avoid circular imports
+from arelle.UrlUtil import IXDS_DOC_SEPARATOR, IXDS_SURROGATE
+
 from robosystems.adapters.sec.client.edgar import SEC_BASE_URL
 from robosystems.adapters.sec.processors.xbrl_graph import XBRLGraphProcessor
+
+INLINE_XBRL_NAMESPACE = b"http://www.xbrl.org/2013/inlineXBRL"
+
+
+def _inline_xbrl_documents(tmpdir: str, htm_files: list[str]) -> list[str]:
+  """Return the subset of .htm files that are inline XBRL documents.
+
+  Multi-document filings (common for 40-F/20-F) split one logical instance
+  across several files: contexts, units, and schema references live in the
+  primary document while tagged facts live in continuation documents. Each
+  member declares the inline XBRL namespace on its root element, so a head
+  scan is sufficient to identify them.
+  """
+  members = []
+  for f in htm_files:
+    try:
+      with open(os.path.join(tmpdir, f), "rb") as fh:
+        head = fh.read(65536)
+    except OSError:
+      continue
+    if INLINE_XBRL_NAMESPACE in head:
+      members.append(f)
+  return sorted(members)
 
 
 @dataclass
@@ -137,6 +162,18 @@ def process_single_filing_to_memory(
         f"{SEC_BASE_URL}/Archives/edgar/data/{cik_int}/{accno_clean}/{xbrl_files[0]}"
       )
 
+      # Multi-document inline XBRL filings (IXDS) split one logical instance
+      # across several .htm files; they must be loaded together so contexts
+      # defined in the primary document resolve for facts tagged in the others.
+      instance_file_path = os.path.join(tmpdir, xbrl_files[0])
+      ixds_members = _inline_xbrl_documents(tmpdir, htm_files)
+      if len(ixds_members) > 1:
+        instance_file_path = os.path.join(
+          tmpdir, IXDS_SURROGATE
+        ) + IXDS_DOC_SEPARATOR.join(os.path.join(tmpdir, f) for f in ixds_members)
+      elif len(ixds_members) == 1:
+        instance_file_path = os.path.join(tmpdir, ixds_members[0])
+
       # Schema config
       schema_config = {
         "name": "SEC Database Schema",
@@ -171,7 +208,7 @@ def process_single_filing_to_memory(
         sec_filer=sec_filer,
         sec_report=sec_report,
         output_dir=tmpdir,
-        local_file_path=os.path.join(tmpdir, xbrl_files[0]),
+        local_file_path=instance_file_path,
         schema_config=schema_config,
         enricher=enricher,
       )
@@ -195,6 +232,20 @@ def process_single_filing_to_memory(
               key = f"{entity_type}/{table_name}"
               with open(local_path, "rb") as f:
                 tables[key] = f.read()
+
+      # A processed filing with no facts means extraction silently failed
+      # (e.g. wrong instance document selected). Surface it as an error so
+      # the SourceFile lands in a retryable state instead of masking data
+      # loss as success.
+      if "nodes/Fact" not in tables:
+        return ProcessedFilingResult(
+          success=False,
+          source_file_id=source_file_id,
+          partition_key=partition_key,
+          tables={},
+          filing_date=filing_date,
+          error="XBRL processing produced zero facts",
+        )
 
       return ProcessedFilingResult(
         success=True,

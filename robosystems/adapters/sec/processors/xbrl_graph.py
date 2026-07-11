@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 from arelle import XbrlConst
+from arelle.UrlUtil import IXDS_DOC_SEPARATOR, IXDS_SURROGATE
 
 # Import from specific modules to avoid circular imports
 from robosystems.adapters.sec.client.arelle import ArelleClient
@@ -198,7 +199,19 @@ class XBRLGraphProcessor:
       )
       return
 
-    if not self.instance_path or not os.path.exists(self.instance_path):
+    # An inline XBRL document set is passed as a surrogate path that joins the
+    # member files; validate each member rather than the surrogate itself.
+    if self.instance_path and IXDS_DOC_SEPARATOR in self.instance_path:
+      member_paths = self.instance_path.partition(IXDS_SURROGATE)[2].split(
+        IXDS_DOC_SEPARATOR
+      )
+      instance_exists = bool(member_paths) and all(
+        os.path.exists(p) for p in member_paths
+      )
+    else:
+      instance_exists = bool(self.instance_path) and os.path.exists(self.instance_path)
+
+    if not instance_exists:
       logger.error(f"XBRL instance file not found: {self.instance_path}")
       # Mark report as failed
       if hasattr(self, "report_data") and self.report_data:
