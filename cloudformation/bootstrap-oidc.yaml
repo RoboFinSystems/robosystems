@@ -726,10 +726,14 @@ Resources:
                   - iam:DetachRolePolicy
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
+                # Names verified against each app repo's template.yaml: the App
+                # Runner access/instance roles are `<app>-<env>-apprunner-*`.
+                # roboledger/roboinvestor drop the `-app` segment the S3/ECR
+                # statements use, so match on the shared `-apprunner-` shape.
                 Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
               - Sid: IAMReadOnly
                 Effect: Allow
                 Action:
@@ -744,9 +748,9 @@ Resources:
                 Action:
                   - iam:PassRole
                 Resource:
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
                 Condition:
                   StringEquals:
                     "iam:PassedToService":

@@ -298,6 +298,11 @@ jobs:
 
       - name: Create release summary
         if: steps.check-tag.outputs.tag_exists == 'false'
+        # CHANGELOG is Claude-generated from the untrusted commit/file inputs, so
+        # route it through env — its markdown must not break out of the echo into
+        # the shell (same reason the prompt inputs use env above).
+        env:
+          CHANGELOG: ${{ steps.claude-changelog.outputs.changelog }}
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
 
@@ -313,7 +318,7 @@ jobs:
           echo "- **Previous Release:** ${{ steps.analyze-changes.outputs.last_tag }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🤖 Claude-Generated Changelog" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.claude-changelog.outputs.changelog }}" >> $GITHUB_STEP_SUMMARY
+          echo "$CHANGELOG" >> $GITHUB_STEP_SUMMARY
 
       - name: Set outputs
         id: set-outputs
