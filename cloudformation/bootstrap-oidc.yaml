@@ -704,25 +704,62 @@ Resources:
                   - sns:ListTagsForResource
                 Resource: "*"
 
-              # IAM - for creating ECS task roles and execution roles
-              - Sid: IAM
+              # IAM role management — mutations are pinned to the App Runner
+              # access/instance roles the frontend stacks actually create
+              # (robosystems-app-*, roboledger-*, roboinvestor-*), so a
+              # compromised frontend workflow cannot attach policies to, or pass,
+              # backend/deploy/SSO roles. Reads stay broad; PassRole is
+              # additionally constrained by iam:PassedToService. NOTE: role-name
+              # prefixing alone does not stop creating a NEW admin role within the
+              # prefix — full closure requires a permissions boundary on
+              # iam:CreateRole (tracked for a follow-up; needs the app templates
+              # to set PermissionsBoundary on the roles they create).
+              - Sid: IAMRoleManagement
                 Effect: Allow
                 Action:
                   - iam:CreateRole
                   - iam:DeleteRole
-                  - iam:GetRole
                   - iam:UpdateRole
                   - iam:TagRole
                   - iam:UntagRole
-                  - iam:ListRoleTags
                   - iam:AttachRolePolicy
                   - iam:DetachRolePolicy
                   - iam:PutRolePolicy
-                  - iam:GetRolePolicy
                   - iam:DeleteRolePolicy
+                # Names verified against each app repo's template.yaml: the App
+                # Runner access/instance roles are `<app>-<env>-apprunner-*`.
+                # roboledger/roboinvestor drop the `-app` segment the S3/ECR
+                # statements use, so match on the shared `-apprunner-` shape.
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
+              - Sid: IAMReadOnly
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListRoleTags
                   - iam:ListRolePolicies
                   - iam:ListAttachedRolePolicies
+                Resource: "*"
+              - Sid: IAMPassRole
+                Effect: Allow
+                Action:
                   - iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/robosystems-app-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboledger-*-apprunner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/roboinvestor-*-apprunner-*
+                Condition:
+                  StringEquals:
+                    "iam:PassedToService":
+                      - build.apprunner.amazonaws.com
+                      - tasks.apprunner.amazonaws.com
+                      - ecs-tasks.amazonaws.com
+              - Sid: IAMServiceLinkedRole
+                Effect: Allow
+                Action:
                   - iam:CreateServiceLinkedRole
                 Resource: "*"
 

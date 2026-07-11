@@ -145,7 +145,7 @@ jobs:
 
       - name: Install uv (GitHub-hosted runners only)
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"

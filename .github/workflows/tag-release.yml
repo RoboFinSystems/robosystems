@@ -127,10 +127,21 @@ jobs:
       - name: Generate changelog with Claude
         if: steps.check-tag.outputs.tag_exists == 'false'
         id: generate-changelog
+        # Untrusted inputs (commit messages, changed filenames) reach the shell
+        # only through env vars, never ${{ }} interpolation. In the unquoted
+        # heredoc a `$VAR` expands, but the expanded value is not re-scanned, so a
+        # `$(...)`/backtick planted in a commit message stays literal text.
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
+          LAST_TAG: ${{ steps.analyze-changes.outputs.last_tag }}
+          FILES_CHANGED: ${{ steps.analyze-changes.outputs.files_changed }}
+          COMMITS_COUNT: ${{ steps.analyze-changes.outputs.commits_count }}
+          ADDITIONS: ${{ steps.analyze-changes.outputs.additions }}
+          DELETIONS: ${{ steps.analyze-changes.outputs.deletions }}
+          COMMIT_MESSAGES: ${{ steps.analyze-changes.outputs.commit_messages }}
+          DETAILED_CHANGES: ${{ steps.analyze-changes.outputs.detailed_changes }}
+          PR_REFS: ${{ steps.analyze-changes.outputs.pr_refs }}
         run: |
-          VERSION="${{ steps.get-version.outputs.version }}"
-          LAST_TAG="${{ steps.analyze-changes.outputs.last_tag }}"
-
           # Create analysis prompt for Claude
           cat > /tmp/changelog_prompt.txt << PROMPT_EOF
           I need you to generate a concise but informative changelog for a software release.
@@ -138,19 +149,19 @@ jobs:
           **Release Info:**
           - Version: $VERSION
           - Previous Version: $LAST_TAG
-          - Files Changed: ${{ steps.analyze-changes.outputs.files_changed }}
-          - Commits: ${{ steps.analyze-changes.outputs.commits_count }}
-          - Lines Added: ${{ steps.analyze-changes.outputs.additions }}
-          - Lines Deleted: ${{ steps.analyze-changes.outputs.deletions }}
+          - Files Changed: $FILES_CHANGED
+          - Commits: $COMMITS_COUNT
+          - Lines Added: $ADDITIONS
+          - Lines Deleted: $DELETIONS
 
           **Recent Commits:**
-          ${{ steps.analyze-changes.outputs.commit_messages }}
+          $COMMIT_MESSAGES
 
           **File Changes:**
-          ${{ steps.analyze-changes.outputs.detailed_changes }}
+          $DETAILED_CHANGES
 
           **PR References:**
-          ${{ steps.analyze-changes.outputs.pr_refs }}
+          $PR_REFS
 
           Please generate a changelog that includes:
           1. A brief 1-2 sentence summary of this release
@@ -253,7 +264,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.check-tag.outputs.tag_exists == 'false'
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           tag_name: v${{ steps.get-version.outputs.version }}
           name: Release v${{ steps.get-version.outputs.version }}
@@ -287,6 +298,11 @@ jobs:
 
       - name: Create release summary
         if: steps.check-tag.outputs.tag_exists == 'false'
+        # CHANGELOG is Claude-generated from the untrusted commit/file inputs, so
+        # route it through env — its markdown must not break out of the echo into
+        # the shell (same reason the prompt inputs use env above).
+        env:
+          CHANGELOG: ${{ steps.claude-changelog.outputs.changelog }}
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
 
@@ -302,7 +318,7 @@ jobs:
           echo "- **Previous Release:** ${{ steps.analyze-changes.outputs.last_tag }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🤖 Claude-Generated Changelog" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.claude-changelog.outputs.changelog }}" >> $GITHUB_STEP_SUMMARY
+          echo "$CHANGELOG" >> $GITHUB_STEP_SUMMARY
 
       - name: Set outputs
         id: set-outputs

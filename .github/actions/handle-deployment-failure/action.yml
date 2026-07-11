@@ -64,7 +64,7 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
 
     - name: Update Deployment Status
-      uses: chrnorm/deployment-status@v2
+      uses: chrnorm/deployment-status@6df8d036fd2fee9eb82936733953da1f8382b41e # v2
       with:
         token: ${{ inputs.github-token }}
         state: failure
