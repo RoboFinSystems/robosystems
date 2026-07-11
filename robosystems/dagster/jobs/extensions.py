@@ -46,8 +46,8 @@ def materialize_extensions_to_graph(
   """Materialize extensions OLTP data to LadybugDB graph.
 
   Uses postgres_scanner to read from the extensions tenant schema,
-  stages into DuckDB, then materializes to LadybugDB via the existing
-  ATTACH + COPY FROM pipeline.
+  stages into DuckDB, then materializes to LadybugDB via the Arrow
+  record-batch streaming handoff (no intermediate file).
   """
   import asyncio
 

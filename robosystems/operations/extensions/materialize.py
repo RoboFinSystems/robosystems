@@ -6,7 +6,8 @@ regardless of which connector (QuickBooks, Xero, Plaid, native) put it there.
 
 Uses DuckDB's postgres_scanner extension to read directly from the extensions
 database, transform OLTP rows into graph-shaped staging tables, then materialize
-via the existing ATTACH + COPY FROM pipeline.
+via the Arrow record-batch streaming handoff (DuckDB result vectors → Arrow →
+LadybugDB COPY, no intermediate file).
 
 Architecture:
   Dagster sensor / worker task → ExtensionsMaterializer.materialize(graph_id, entity_id)
