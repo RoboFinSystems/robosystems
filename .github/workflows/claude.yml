@@ -33,19 +33,42 @@ jobs:
 
   claude:
     needs: [check-runner-availability]
+    # Defense-in-depth author gate: on top of the action's own permission check,
+    # only run when the triggering actor is a repo OWNER/MEMBER/COLLABORATOR, so a
+    # drive-by comment/issue from an outside account cannot invoke Claude with
+    # repo secrets in scope (this repo is public).
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (
+        github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      ) ||
+      (
+        github.event_name == 'pull_request_review' &&
+        contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)
+      ) ||
+      (
+        github.event_name == 'issues' &&
+        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+      )
     runs-on: ${{ fromJSON(needs.check-runner-availability.outputs.runner_config) }}
     timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: read
       issues: read
-      id-token: write
       actions: read # Required for Claude to read CI results on PRs
+      # id-token: write intentionally omitted — Claude authenticates with
+      # CLAUDE_CODE_OAUTH_TOKEN and assumes no cloud (OIDC) role in this workflow,
+      # so GitHub OIDC token-minting is not needed. Restore it only if a step
+      # here ever assumes an AWS role via configure-aws-credentials.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
