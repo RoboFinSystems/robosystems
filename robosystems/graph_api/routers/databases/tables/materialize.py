@@ -21,8 +21,8 @@ from robosystems.middleware.graph.instance_busy import (
 )
 
 # Rows per Arrow record batch streamed from DuckDB into LadybugDB. Bounds peak
-# memory during the zero-copy handoff — the table never fully materializes in
-# RAM regardless of its size.
+# memory — the table streams through in batches rather than materializing fully
+# in RAM regardless of its size.
 ARROW_STREAM_BATCH_ROWS = 100_000
 
 
@@ -361,11 +361,13 @@ async def _materialize_table_impl(
             null_cols=null_cols,
           )
 
-        # Stream DuckDB → Arrow record batches → LadybugDB COPY. No intermediate
-        # file: DuckDB emits Arrow batches straight from its result vectors and
-        # LadybugDB scans each batch's buffers directly (the zero-copy handoff).
-        # Batching bounds peak memory regardless of table size; DECIMAL columns
-        # (postgres_scan-staged NUMERIC) ride through the Arrow types natively.
+        # Stream DuckDB → Arrow record batches → LadybugDB COPY, no intermediate
+        # file. DuckDB hands its result vectors to Arrow (zero-copy for most
+        # types); LadybugDB reads those buffers and builds its own graph storage.
+        # The transport avoids the parquet serialization + disk round-trip — but
+        # the write into LadybugDB's CSR storage is still a copy, unavoidable for
+        # a persistent, traversable graph. Batching bounds peak memory; DECIMAL
+        # (postgres_scan-staged NUMERIC) rides through the Arrow types natively.
         select_sql = f"SELECT {select_expr} FROM {table_name}{where}"
         if query_params:
           arrow_reader = duck_conn.execute(select_sql, query_params).fetch_record_batch(
