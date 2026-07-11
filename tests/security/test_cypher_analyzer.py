@@ -211,6 +211,61 @@ class TestCleanQuery:
     assert result == CypherOperationType.READ
 
 
+class TestBacktickIdentifierBypass:
+  """Regression tests for the backtick-identifier lexer-differential bypass.
+
+  ``_clean_query`` used to treat backslash as an escape inside backtick-quoted
+  identifiers, so ``... AS `x\\` SET ...`` masked the trailing write while Kuzu
+  closed the identifier at the backtick and executed the write. The analyzer
+  now closes a backtick identifier at the FIRST backtick (backslash is a
+  literal char), matching the engine lexer, so a masked write can no longer
+  slip past classification. Each masked payload below must trip its predicate.
+  """
+
+  MASKED_SET = "MATCH (e) WITH e, 1 AS `y\\` SET e.name = 'x' RETURN e"
+  MASKED_CREATE = "MATCH (n) WITH n AS `x\\` LIMIT 1 CREATE (m:Node {v:1}) RETURN m"
+  MASKED_DETACH_DELETE = "MATCH (n) WITH n AS `z\\` DETACH DELETE n"
+  MASKED_ATTACH = "MATCH (n) WITH n AS `a\\` ATTACH 'other.lbug'"
+  MASKED_LOAD = "MATCH (n) WITH n AS `b\\` LOAD FROM 'f.csv' RETURN 1"
+  MASKED_CREATE_TABLE = (
+    "MATCH (n) WITH n AS `c\\` CREATE NODE TABLE T(id INT64, PRIMARY KEY(id))"
+  )
+
+  def test_clean_query_closes_backtick_at_first_backtick(self, analyzer):
+    # The write keyword after the closed identifier must survive cleaning.
+    cleaned = analyzer._clean_query("MATCH (n) WITH n AS `x\\` CREATE (m:Node)")
+    assert "CREATE" in cleaned.upper()
+
+  def test_masked_set_is_write(self, analyzer):
+    assert is_write_operation(self.MASKED_SET) is True
+    assert analyzer.analyze_query(self.MASKED_SET) in (
+      CypherOperationType.WRITE,
+      CypherOperationType.MIXED,
+    )
+
+  def test_masked_create_is_write(self):
+    assert is_write_operation(self.MASKED_CREATE) is True
+
+  def test_masked_detach_delete_is_write(self):
+    assert is_write_operation(self.MASKED_DETACH_DELETE) is True
+
+  def test_masked_attach_is_admin(self):
+    assert is_admin_operation(self.MASKED_ATTACH) is True
+
+  def test_masked_load_is_bulk(self):
+    assert is_bulk_operation(self.MASKED_LOAD) is True
+
+  def test_masked_create_table_is_schema_ddl(self):
+    assert is_schema_ddl(self.MASKED_CREATE_TABLE) is True
+
+  def test_legitimate_backtick_identifier_still_read(self, analyzer):
+    # A property literally named `CREATE` is an identifier, not a write — the
+    # conservative fix must not over-block ordinary backtick identifiers.
+    assert (
+      analyzer.analyze_query("MATCH (n) RETURN n.`CREATE`") == CypherOperationType.READ
+    )
+
+
 class TestGetWriteOperationDetails:
   """Tests for get_write_operation_details."""
 

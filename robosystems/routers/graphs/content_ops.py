@@ -511,6 +511,9 @@ async def create_file_upload_op(
     create_file_upload_cmd,
   )
 
+  _block_shared_repo(graph_id)
+  _require_graph_write_access(graph_id, str(user.id))
+
   op_name = "create-file-upload"
   user_id = str(user.id)
   ctx = _ctx(
