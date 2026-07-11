@@ -160,8 +160,16 @@ Resources:
           - BucketKeyEnabled: false
             ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      # Customer data — versioning gives recovery from bad overwrite/delete
+      VersioningConfiguration:
+        Status: Enabled
       LifecycleConfiguration:
         Rules:
+          # Bound versioning cost: drop noncurrent object versions after 30 days
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
           # User staging data expires after 7 days
           - Id: ExpireStagingData
             Status: Enabled
