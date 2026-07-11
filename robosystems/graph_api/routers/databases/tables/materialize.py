@@ -343,9 +343,10 @@ async def _materialize_table_impl(
 
         export_dir = f"{env.DUCKDB_STAGING_PATH}/materialize-exports"
         os.makedirs(export_dir, exist_ok=True)
-        export_path = (
-          f"{export_dir}/{duckdb_graph_id}_{table_name}_{uuid4().hex}.parquet"
-        )
+        # Filename is a bare UUID — never interpolate the request-supplied
+        # graph_id / table_name into a filesystem path (path traversal). The
+        # graph/table identity is carried in the surrounding log lines.
+        export_path = f"{export_dir}/{uuid4().hex}.parquet"
 
         export_sql = (
           f"COPY (SELECT {select_expr} FROM {table_name}{where}) "
@@ -463,7 +464,7 @@ async def _materialize_table_impl(
           os.remove(export_path)
           logger.debug(f"Cleaned up parquet export: {export_path}")
         except FileNotFoundError:
-          pass
+          pass  # already gone (export never created, or removed on a retry) — nothing to clean
         except Exception as rm_err:
           logger.warning(f"Failed to remove parquet export {export_path}: {rm_err}")
 
@@ -482,7 +483,7 @@ async def _materialize_table_impl(
       try:
         os.remove(export_path)
       except OSError:
-        pass
+        pass  # best-effort cleanup on the export-stage failure path; original error is re-raised below
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to materialize table: {outer_err!s}",
@@ -619,9 +620,9 @@ async def _fork_from_parent_duckdb_impl(
             [(col[0], col[1]) for col in source_columns],
             exclude_cols=exclude_cols,
           )
-          export_path = (
-            f"{export_dir}/{parent_graph_id}_{table_name}_{uuid4().hex}.parquet"
-          )
+          # Bare-UUID filename — never interpolate the request-supplied
+          # parent_graph_id / table_name into a filesystem path (path traversal).
+          export_path = f"{export_dir}/{uuid4().hex}.parquet"
           duck_conn.execute(
             f"COPY (SELECT {select_expr} FROM {table_name}) "
             f"TO '{export_path}' (FORMAT parquet)"
@@ -704,7 +705,7 @@ async def _fork_from_parent_duckdb_impl(
         try:
           os.remove(export_path)
         except OSError:
-          pass
+          pass  # best-effort cleanup; a leftover export is harmless staging cruft
       if exports:
         logger.info(f"Cleaned up {len(exports)} parquet exports")
 
