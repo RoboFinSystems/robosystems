@@ -203,6 +203,50 @@ class TestValidateCypherQuery:
     validate_cypher_query(query)  # Should not raise
 
 
+@pytest.mark.unit
+class TestValidateCypherQueryEngineVerbs:
+  """F4: engine-adjacent verbs (bulk load / attach / install / schema DDL) are
+  blocked via the shared analyzer, while ordinary graph writes still pass so
+  writer instances keep working."""
+
+  @pytest.mark.parametrize(
+    "ordinary_write",
+    [
+      "MATCH (n:Person) RETURN n.name",
+      "CREATE (n:Foo {id: 1}) RETURN n",
+      "MATCH (n:Foo) SET n.x = 2 RETURN n",
+      "MERGE (n:Foo {id: 1}) RETURN n",
+      "MATCH (n:Foo) DETACH DELETE n",
+    ],
+  )
+  def test_ordinary_reads_and_writes_pass(self, ordinary_write):
+    """Reads and node/relationship writes are not engine-level operations."""
+    validate_cypher_query(ordinary_write)  # Should not raise
+
+  @pytest.mark.parametrize(
+    "engine_verb",
+    [
+      "LOAD FROM '/etc/passwd' RETURN *",
+      "COPY Person FROM '/tmp/data.csv'",
+      "ATTACH '/other/db.kuzu' AS other",
+      "INSTALL httpfs",
+      "CREATE NODE TABLE Evil(id INT64, PRIMARY KEY(id))",
+      "CREATE REL TABLE Knows(FROM Person TO Person)",
+    ],
+  )
+  def test_engine_verbs_raise_403(self, engine_verb):
+    """Bulk / admin / schema-DDL verbs are rejected on the ad-hoc endpoint."""
+    with pytest.raises(HTTPException) as exc_info:
+      validate_cypher_query(engine_verb)
+    assert exc_info.value.status_code == 403
+
+  def test_in_string_comment_marker_cannot_hide_engine_verb(self):
+    """F2 + F4 compose: an in-string `//` must not mask a trailing COPY."""
+    with pytest.raises(HTTPException) as exc_info:
+      validate_cypher_query("MATCH (n) WHERE n.note = '//' COPY t FROM '/x'")
+    assert exc_info.value.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # _raise_database_not_found
 # ---------------------------------------------------------------------------
@@ -814,6 +858,98 @@ class TestLadybugServiceStreamingQuery:
       with pytest.raises(HTTPException) as exc_info:
         list(service.execute_query_streaming(request))
       assert exc_info.value.status_code == 404
+
+  def _wire_streaming_result(self, service, mock_query_result):
+    """Attach a mock query result to the service's connection for streaming."""
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value = mock_query_result
+    service.db_manager.list_databases.return_value = ["test_db"]
+    service.db_manager.get_connection.return_value.__enter__ = MagicMock(
+      return_value=mock_conn
+    )
+    service.db_manager.get_connection.return_value.__exit__ = MagicMock(
+      return_value=False
+    )
+
+  def test_streaming_row_cap_truncates(self, service):
+    """F5: pulling past MAX_STREAMING_ROWS stops the stream and flags truncated."""
+    from robosystems.graph_api.models.database import QueryRequest
+
+    mock_query_result = MagicMock()
+    mock_query_result.get_schema.return_value = {"n": "INT64"}
+    mock_query_result.has_next.return_value = True  # effectively unbounded
+    counter = [0]
+
+    def _get_next():
+      counter[0] += 1
+      return (counter[0],)
+
+    mock_query_result.get_next.side_effect = _get_next
+    self._wire_streaming_result(service, mock_query_result)
+
+    request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
+    with patch(f"{SERVICE_MODULE}.MAX_STREAMING_ROWS", 4):
+      chunks = list(service.execute_query_streaming(request, chunk_size=2))
+
+    last = chunks[-1]
+    assert last["is_last_chunk"] is True
+    assert last["truncated"] is True
+    delivered = sum(c.get("row_count", 0) for c in chunks if "error" not in c)
+    assert delivered == 4  # capped at MAX_STREAMING_ROWS, not unbounded
+    mock_query_result.close.assert_called_once()
+
+  def test_streaming_under_cap_is_not_truncated(self, service):
+    """A finite result under the cap streams fully and is not flagged."""
+    from robosystems.graph_api.models.database import QueryRequest
+
+    mock_query_result = MagicMock()
+    mock_query_result.get_schema.return_value = {"n": "INT64"}
+    rows = [(i,) for i in range(3)]
+    idx = [0]
+
+    def _has_next():
+      return idx[0] < len(rows)
+
+    def _get_next():
+      row = rows[idx[0]]
+      idx[0] += 1
+      return row
+
+    mock_query_result.has_next.side_effect = _has_next
+    mock_query_result.get_next.side_effect = _get_next
+    self._wire_streaming_result(service, mock_query_result)
+
+    request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
+    chunks = list(service.execute_query_streaming(request, chunk_size=2))
+
+    assert chunks[-1]["truncated"] is False
+    delivered = sum(c.get("row_count", 0) for c in chunks if "error" not in c)
+    assert delivered == 3
+
+  def test_streaming_timeout_yields_timeout_chunk(self, service):
+    """F5: a query that exceeds the timeout yields a QueryTimeout error chunk."""
+    from robosystems.graph_api.models.database import QueryRequest
+
+    self._wire_streaming_result(service, MagicMock())
+
+    request = QueryRequest(database="test_db", cypher="MATCH (n) RETURN n")
+    with (
+      patch(f"{SERVICE_MODULE}.TuningConfig") as mock_tuning,
+      patch(f"{SERVICE_MODULE}.ThreadPoolExecutor") as MockExecutor,
+    ):
+      mock_tuning.get_graph_query_timeout.return_value = 5
+      mock_executor = MagicMock()
+      MockExecutor.return_value.__enter__ = MagicMock(return_value=mock_executor)
+      MockExecutor.return_value.__exit__ = MagicMock(return_value=False)
+      mock_future = MagicMock()
+      mock_future.result.side_effect = TimeoutError()
+      mock_executor.submit.return_value = mock_future
+
+      chunks = list(service.execute_query_streaming(request))
+
+    assert len(chunks) == 1
+    assert chunks[0]["error_type"] == "QueryTimeout"
+    assert chunks[0]["is_last_chunk"] is True
 
 
 # ---------------------------------------------------------------------------

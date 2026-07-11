@@ -188,6 +188,32 @@ def verify_jwt_claims(
       audience=env.JWT_AUDIENCE,
     )
 
+    # F3: single-use SSO handoff tokens (`create_sso_token`: {"sso": true},
+    # no jti, unrevocable) must never authenticate as a full session bearer.
+    # They are consumed only at /sso-exchange, which decodes them directly —
+    # not through this function. Reject `sso` here, and reject any non-`access`
+    # token type so a future purpose-scoped token (e.g. an SSE stream token)
+    # can't be replayed as a session bearer. Legacy session tokens minted
+    # before the `type` claim existed have no `type` and are grandfathered.
+    token_type = payload.get("type")
+    if payload.get("sso") or (token_type is not None and token_type != "access"):
+      logger.info("JWT token verification failed: non-access token presented as bearer")
+      # A signature-valid but wrong-purpose token used as a bearer is a distinct
+      # signal (possible replay of a leaked single-use SSO handoff) that the
+      # generic AUTH_TOKEN_INVALID at the caller would otherwise bury.
+      from ...security import SecurityAuditLogger, SecurityEventType
+
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+        user_id=payload.get("user_id"),
+        details={
+          "reason": "non_access_token_as_bearer",
+          "token_type": "sso" if payload.get("sso") else token_type,
+        },
+        risk_level="high",
+      )
+      return None
+
     # Verify device fingerprint if both token and request fingerprint are available
     if device_fingerprint and payload.get("device_hash"):
       from ...security.device_fingerprinting import create_device_hash
@@ -249,6 +275,7 @@ def create_jwt_token(
   payload = {
     "user_id": user_id,
     "jti": jti,  # JWT ID for revocation tracking
+    "type": "access",  # Session bearer — distinguishes from single-use `sso` tokens
     "session_version": _get_user_session_version(user_id, session=session) or 0,
     "exp": datetime.now(UTC) + timedelta(hours=JWT_EXPIRY_HOURS),
     "iat": datetime.now(UTC),

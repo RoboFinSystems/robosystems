@@ -410,6 +410,12 @@ class _RegistrarMCPTool(BaseTool):
     self._log_tool_execution(self.spec.name, arguments)
     graph_id = self.client.graph_id
 
+    # Write-role authorization (member/admin, fail-closed) is enforced upstream
+    # at the MCP dispatch boundary in `execute.py`'s `validate_mcp_access`:
+    # every registrar op is a write, so it is absent from `READ_ONLY_MCP_TOOLS`
+    # and classified as a write there. This layer has no `current_user`, so the
+    # check cannot be repeated here — it is a single enforcement point by design.
+
     # ── 1. Feature gate ─────────────────────────────────────────────────
     try:
       pre_loaded = self._meta_getter() if self._meta_getter else None

@@ -1297,6 +1297,24 @@ class TestRequireGraphWriteRole:
       assert exc.value.status_code == status.HTTP_403_FORBIDDEN
       assert "read-only" in exc.value.detail
 
+  def test_viewer_denial_is_audited(self):
+    """The shared gate emits an authorization-denied audit event."""
+    with (
+      patch("robosystems.database.SessionFactory", return_value=Mock()),
+      patch(
+        "robosystems.models.core.GraphUser.user_has_write_access",
+        return_value=False,
+      ),
+      patch(
+        "robosystems.security.SecurityAuditLogger.log_authorization_denied"
+      ) as mock_audit,
+    ):
+      with pytest.raises(HTTPException):
+        require_graph_write_role("user_1", "kg0123456789abcdef")
+      mock_audit.assert_called_once_with(
+        user_id="user_1", resource="kg0123456789abcdef", action="write"
+      )
+
   def test_write_role_allowed(self):
     with (
       patch("robosystems.database.SessionFactory", return_value=Mock()),

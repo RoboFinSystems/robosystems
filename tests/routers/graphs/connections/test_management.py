@@ -1010,6 +1010,14 @@ class TestDeleteConnection:
 class TestSetConnectionWritePolicy:
   """Tests for the set_connection_write_policy endpoint."""
 
+  @pytest.fixture(autouse=True)
+  def _bypass_write_role(self):
+    """These tests use synthetic users with no GraphUser row, so the write-role
+    gate (F1) would 403 before reaching handler logic. The deny path is covered
+    in tests/routers/graphs/test_write_role_gates.py; bypass it here."""
+    with patch(f"{MANAGEMENT_MODULE}.require_graph_write_role"):
+      yield
+
   def _request(self, write_policy: str = "qb_authoritative"):
     from robosystems.models.api.graphs.connections import SetWritePolicyRequest
 

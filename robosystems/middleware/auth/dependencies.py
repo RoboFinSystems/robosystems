@@ -479,6 +479,15 @@ def require_graph_write_role(user_id: str, graph_id: str) -> None:
   session = SessionFactory()
   try:
     if not GraphUser.user_has_write_access(user_id, graph_id, session):
+      # Audit every under-privileged write attempt from the one shared gate:
+      # this covers MCP, the REST registrar, content-ops, and the hand-written
+      # lifecycle ops, and emits the `AuthorizationDenied` detective-control
+      # metric. (No request context here — this is a plain helper, not a dep.)
+      from robosystems.security import SecurityAuditLogger
+
+      SecurityAuditLogger.log_authorization_denied(
+        user_id=user_id, resource=graph_id, action="write"
+      )
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=f"Write access denied to graph {graph_id}; your role is read-only.",
