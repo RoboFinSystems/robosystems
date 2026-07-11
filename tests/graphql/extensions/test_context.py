@@ -192,3 +192,148 @@ class TestGetContextAuthContract:
         )
 
     assert exc_info.value.status_code == 403
+
+
+SUBGRAPH_ID = f"{GRAPH_ID}_dev"
+
+
+@pytest.mark.asyncio
+class TestSubgraphGuard:
+  """Subgraph IDs are rejected at the extensions GraphQL surface.
+
+  A subgraph is a modality container (scratch/knowledge), not an
+  extensions domain target — auth must NOT resolve subgraph→parent
+  here, and the rejection applies regardless of authentication. The
+  guard is `is_subgraph`-based, so the `library` sentinel and shared
+  repositories are unaffected (a naive non-`kg` reject would break
+  both).
+  """
+
+  async def test_authenticated_subgraph_id_rejected_and_audited(self):
+    """Authenticated request at a subgraph URL → 403 before any
+    parent-resolving access check, with an audit event."""
+    request = _make_request(headers={})
+    user = MagicMock()
+    user.id = "usr_test"
+
+    with (
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock, return_value=user),
+      patch(f"{MODULE}.check_graph_access") as mock_check,
+      patch(f"{MODULE}.load_graph_metadata") as mock_meta,
+      patch(
+        "robosystems.security.SecurityAuditLogger.log_authorization_denied"
+      ) as mock_audit,
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await get_context(
+          request=request,
+          api_key="rfs_valid",
+          graph_id=SUBGRAPH_ID,
+          db=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 403
+    # The guard must fire BEFORE check_graph_access — that helper
+    # resolves subgraph→parent, which is exactly the confusion we're
+    # closing off.
+    mock_check.assert_not_called()
+    mock_meta.assert_not_called()
+    mock_audit.assert_called_once()
+    assert mock_audit.call_args.kwargs["resource"] == SUBGRAPH_ID
+
+  async def test_anonymous_subgraph_id_rejected_without_audit(self):
+    """The address itself is invalid for this surface — introspection
+    does not bypass the guard. Anonymous probes are not audit-logged."""
+    request = _make_request(headers={})
+
+    with (
+      patch(
+        f"{MODULE}.get_current_user",
+        new_callable=AsyncMock,
+        side_effect=HTTPException(status_code=401, detail="No credentials"),
+      ),
+      patch(
+        "robosystems.security.SecurityAuditLogger.log_authorization_denied"
+      ) as mock_audit,
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await get_context(
+          request=request,
+          api_key=None,
+          graph_id=SUBGRAPH_ID,
+          db=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 403
+    mock_audit.assert_not_called()
+
+  async def test_shared_repo_subgraph_rejected(self):
+    """Shared-repo subgraphs (e.g. sec_historical) are subgraphs too."""
+    request = _make_request(headers={})
+    user = MagicMock()
+    user.id = "usr_test"
+
+    with (
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock, return_value=user),
+      patch(f"{MODULE}.check_graph_access") as mock_check,
+      patch("robosystems.security.SecurityAuditLogger.log_authorization_denied"),
+    ):
+      with pytest.raises(HTTPException) as exc_info:
+        await get_context(
+          request=request,
+          api_key="rfs_valid",
+          graph_id="sec_historical",
+          db=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 403
+    mock_check.assert_not_called()
+
+  async def test_library_sentinel_unaffected(self):
+    """The `library` sentinel is not a subgraph and must keep working."""
+    request = _make_request(headers={})
+    user = MagicMock()
+
+    with (
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock, return_value=user),
+      patch(f"{MODULE}.check_graph_access"),
+      patch(f"{MODULE}.load_graph_metadata") as mock_meta,
+    ):
+      ctx = await get_context(
+        request=request,
+        api_key="rfs_valid",
+        graph_id="library",
+        db=MagicMock(),
+      )
+
+    assert ctx["graph_id"] == "library"
+    assert ctx["schema_extensions"] == ("library",)
+    # Library sentinel has no graph row; metadata must not be loaded.
+    mock_meta.assert_not_called()
+
+  async def test_shared_repository_parent_unaffected(self):
+    """A plain shared-repo ID (no subgraph suffix) passes the guard."""
+    request = _make_request(headers={})
+    user = MagicMock()
+
+    with (
+      patch(f"{MODULE}.get_current_user", new_callable=AsyncMock, return_value=user),
+      patch(f"{MODULE}.check_graph_access") as mock_check,
+      patch(
+        f"{MODULE}.load_graph_metadata",
+        return_value=GraphExtensionContext(
+          graph_type="repository",
+          schema_extensions=(),
+          is_repository=True,
+        ),
+      ),
+    ):
+      ctx = await get_context(
+        request=request,
+        api_key="rfs_valid",
+        graph_id="sec",
+        db=MagicMock(),
+      )
+
+    assert ctx["graph_id"] == "sec"
+    mock_check.assert_called_once_with(user, "sec")

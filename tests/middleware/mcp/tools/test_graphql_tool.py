@@ -201,6 +201,16 @@ class TestGraphqlQueryTool:
     assert result["error"] == "invalid_query"
 
   @pytest.mark.asyncio
+  async def test_subgraph_workspace_rejected(self, mock_client):
+    """A subgraph-bound workspace has no extensions schema — mirror the
+    HTTP surface and reject before parsing or execution."""
+    mock_client.graph_id = "kg0123456789abcdef_dev"
+    tool = self._make_tool(mock_client)
+    result = await tool.execute({"query": "{ hello }"})
+    assert result["error"] == "invalid_target"
+    assert "parent graph" in result["message"]
+
+  @pytest.mark.asyncio
   async def test_mutation_rejected(self, mock_client):
     tool = self._make_tool(mock_client)
     result = await tool.execute({"query": "mutation { createFoo { id } }"})

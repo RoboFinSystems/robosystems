@@ -78,6 +78,7 @@ from robosystems.middleware.auth.dependencies import (
 )
 from robosystems.middleware.extensions import load_graph_metadata
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.graph.utils.subgraph import is_subgraph
 from robosystems.models.core import User
 
 
@@ -133,6 +134,10 @@ async def get_context(
        then loaded once and its `schema_extensions` + `graph_type` are
        placed on the context so resolvers can enforce the per-domain
        feature gate via `require_extension` without a second lookup.
+
+  - **Subgraph IDs are rejected (403) regardless of auth** — this is
+    the extensions domain-app surface, not a subgraph modality. See
+    the inline guard below.
   """
   has_credentials = bool(api_key) or bool(request.headers.get("Authorization"))
 
@@ -144,6 +149,33 @@ async def get_context(
       raise
     # No credentials at all → anonymous fallthrough for introspection.
     user = None
+
+  # Subgraph guard: a subgraph is a modality container (scratch/knowledge),
+  # not an extensions domain target — a `{parent}_{name}` graph_id has no
+  # extensions schema, so this surface must reject it outright rather than
+  # resolve subgraph→parent for auth and dead-end in schema resolution.
+  # Placed after auth (bad creds still 401, and denials are attributable)
+  # and before `check_graph_access` (which would resolve to the parent).
+  # NOTE: `is_subgraph` — not a naive non-`kg` reject, which would break the
+  # `library` sentinel and shared repositories.
+  if is_subgraph(graph_id):
+    if user is not None:
+      from robosystems.security import SecurityAuditLogger
+
+      SecurityAuditLogger.log_authorization_denied(
+        user_id=str(user.id),
+        resource=graph_id,
+        action="graphql",
+        ip_address=request.client.host if request.client else None,
+        endpoint=f"/extensions/{graph_id}/graphql",
+      )
+    raise HTTPException(
+      status_code=403,
+      detail=(
+        f"Subgraph '{graph_id}' is not addressable via the extensions "
+        "GraphQL endpoint; target the parent graph."
+      ),
+    )
 
   schema_extensions: tuple[str, ...] = ()
   graph_type: str = ""
