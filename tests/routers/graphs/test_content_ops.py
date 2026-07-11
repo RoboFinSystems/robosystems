@@ -318,7 +318,11 @@ async def test_create_file_upload_op():
     file_id="gf_1",
     s3_key="user-staging/u/kg_test/t/gf_1/x.parquet",
   )
-  with patch(CREATE_UPLOAD_CMD, new=AsyncMock(return_value=resp)):
+  with (
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(f"{MODULE}._require_graph_write_access"),
+    patch(CREATE_UPLOAD_CMD, new=AsyncMock(return_value=resp)),
+  ):
     env = await create_file_upload_op(
       body,
       graph_id="kg_test",
@@ -334,3 +338,31 @@ async def test_create_file_upload_op():
     "file_id": "gf_1",
     "s3_key": "user-staging/u/kg_test/t/gf_1/x.parquet",
   }
+
+
+async def test_create_file_upload_op_enforces_write_role():
+  # A read-only viewer must be rejected by the write-role gate BEFORE the
+  # command runs — create-file-upload previously skipped this gate (CO-F1).
+  body = FileUploadRequest(
+    file_name="x.parquet", table_name="t", content_type="application/x-parquet"
+  )
+  cmd = AsyncMock()
+  with (
+    patch(f"{MODULE}._block_shared_repo"),
+    patch(
+      f"{MODULE}._require_graph_write_access",
+      side_effect=HTTPException(status_code=403, detail="read-only"),
+    ),
+    patch(CREATE_UPLOAD_CMD, new=cmd),
+  ):
+    with pytest.raises(HTTPException) as e:
+      await create_file_upload_op(
+        body,
+        graph_id="kg_test",
+        user=_user(),
+        idempotency_key=None,
+        cache=MagicMock(),
+        db=MagicMock(),
+      )
+  assert e.value.status_code == 403
+  cmd.assert_not_awaited()

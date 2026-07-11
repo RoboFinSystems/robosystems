@@ -178,7 +178,12 @@ class CreateSubgraphTool:
     fork_parent = bool(arguments.get("fork_parent", False))
     subgraph_type = arguments.get("subgraph_type", "static")
 
-    if not name.isalnum() or not (1 <= len(name) <= 20):
+    from robosystems.middleware.graph.utils.subgraph import validate_subgraph_name
+
+    # Use the canonical ASCII validator (^[a-zA-Z0-9]{1,20}$) rather than
+    # Unicode-permissive str.isalnum(), which admits names like "café" that the
+    # downstream construct_subgraph_id then rejects with a generic error.
+    if not validate_subgraph_name(name):
       return {
         "error": "invalid_name",
         "message": (
