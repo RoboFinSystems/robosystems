@@ -53,11 +53,19 @@ def _get_writer_instances(
   In prod/staging, queries DynamoDB for healthy instances.
   """
   if env.is_development():
-    context.log.info("Dev mode: using localhost instance")
+    # This op runs inside the Dagster worker container and the migration client
+    # builds http://{private_ip}:8001 — so "localhost" would resolve to the
+    # worker, not graph_api. Use the graph_api host from GRAPH_API_URL
+    # (e.g. "graph-api" under Docker Compose) so the client reaches the right
+    # container. Prod/staging never take this branch (DynamoDB below).
+    from urllib.parse import urlparse
+
+    graph_api_host = urlparse(env.GRAPH_API_URL).hostname or "localhost"
+    context.log.info(f"Dev mode: using graph_api host '{graph_api_host}'")
     return [
       {
         "instance_id": "local",
-        "private_ip": "localhost",
+        "private_ip": graph_api_host,
         "node_type": "dev",
       }
     ]
