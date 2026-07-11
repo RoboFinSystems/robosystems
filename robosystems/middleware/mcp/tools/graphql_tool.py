@@ -300,6 +300,21 @@ class GraphqlQueryTool(BaseTool):
   async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     self._log_tool_execution("query-graphql", arguments)
 
+    # Subgraph guard — mirrors the HTTP surface (`graphql/context.py`):
+    # a subgraph is a modality container, not an extensions domain target,
+    # and has no extensions schema. Reject up front instead of letting
+    # resolvers dead-end (or silently resolve to the parent) downstream.
+    from robosystems.middleware.graph.utils.subgraph import is_subgraph
+
+    if is_subgraph(getattr(self.client, "graph_id", "") or ""):
+      return {
+        "error": "invalid_target",
+        "message": (
+          "query-graphql is not available on subgraphs; switch the "
+          "workspace to the parent graph to use the extensions surface"
+        ),
+      }
+
     query = arguments.get("query", "").strip()
     if not query:
       return {"error": "invalid_query", "message": "query is required"}
