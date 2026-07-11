@@ -1,8 +1,10 @@
 """
-AI Memory MCP tools.
+Subgraph write MCP tools.
 
 Provides tools for AI agents to dynamically extend schema and write data
-to memory subgraphs. All tools enforce subgraph-only access.
+to subgraphs. All tools enforce subgraph-only access — the main graph is
+read-only to raw statements (writes go through structured extension ops).
+These predate LanceDB semantic memory; the "memory" label moved there.
 """
 
 import re
@@ -48,7 +50,7 @@ def _validate_subgraph_context(graph_id: str) -> dict[str, Any] | None:
     return {
       "error": "subgraph_required",
       "message": "This tool only works on subgraphs, not the parent graph. "
-      "Use create-subgraph to create a memory subgraph first, "
+      "Use create-subgraph to create a subgraph first, "
       "then switch-workspace to activate it.",
     }
 
@@ -93,14 +95,14 @@ def _validate_write_query(query: str) -> str | None:
 
 
 class WriteCypherTool(BaseTool):
-  """Execute write Cypher queries on memory subgraphs."""
+  """Execute write Cypher queries on subgraphs."""
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "write-graph-cypher",
       "description": (
         "Execute a write Cypher query on the active subgraph. "
-        "Creates, updates, or deletes data in the memory graph. "
+        "Creates, updates, or deletes data in the subgraph. "
         "Only works on subgraphs, not the parent graph.\n\n"
         "**Allowed operations:** CREATE, MERGE, SET, DELETE, REMOVE\n\n"
         "**Examples:**\n"
@@ -166,13 +168,13 @@ class WriteCypherTool(BaseTool):
 
 
 class AddNodeTableTool(BaseTool):
-  """Dynamically add a new node table to a memory subgraph."""
+  """Dynamically add a new node table to a subgraph."""
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "add-node-table",
       "description": (
-        "Add a new node type to the memory subgraph schema. "
+        "Add a new node type to the subgraph schema. "
         "Only works on subgraphs, not the parent graph. "
         "Uses IF NOT EXISTS so it's safe to call multiple times.\n\n"
         "**Example:** Add a CompanyProfile node type:\n"
@@ -303,13 +305,13 @@ class AddNodeTableTool(BaseTool):
 
 
 class AddRelationshipTableTool(BaseTool):
-  """Dynamically add a new relationship table to a memory subgraph."""
+  """Dynamically add a new relationship table to a subgraph."""
 
   def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "add-relationship-table",
       "description": (
-        "Add a new relationship type to the memory subgraph schema. "
+        "Add a new relationship type to the subgraph schema. "
         "Only works on subgraphs, not the parent graph. "
         "Uses IF NOT EXISTS so it's safe to call multiple times.\n\n"
         "**Example:** Add a FINDING_SUPPORTS relationship:\n"

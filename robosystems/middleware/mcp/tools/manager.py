@@ -7,7 +7,7 @@ functionality for interacting with graph databases.
 Tool availability is schema-driven:
 - Core tools (cypher, schema) are always available
 - Extension tools (financial statements, etc.) require matching schema_extensions
-- Infrastructure tools (workspace, memory) are gated by feature flags
+- Infrastructure tools (workspace, subgraph writes) are gated by feature flags
 
 **Registrar-generated tools:** Extensions with an `OperationRegistrar`
 (roboledger, roboinvestor) contribute their `OperationSpec`s as
@@ -43,8 +43,12 @@ from .graph_tools import (
   SwitchWorkspaceTool,
 )
 from .graphql_tool import GraphqlQueryTool, GraphqlSchemaTool
-from .memory_tools import AddNodeTableTool, AddRelationshipTableTool, WriteCypherTool
 from .schema_tool import SchemaTool
+from .subgraph_write_tools import (
+  AddNodeTableTool,
+  AddRelationshipTableTool,
+  WriteCypherTool,
+)
 
 if TYPE_CHECKING:
   from robosystems.middleware.extensions import GraphExtensionContext
@@ -107,7 +111,7 @@ class GraphMCPTools:
   Tool availability is layered:
   - Layer 1 (Core): cypher, schema — always available
   - Layer 2 (Schema): financial tools — only when schema_extensions includes "roboledger"
-  - Layer 3 (Infrastructure): workspace, memory, data — gated by feature flags
+  - Layer 3 (Infrastructure): workspace, subgraph writes, data — gated by feature flags
   """
 
   def __init__(
@@ -203,7 +207,7 @@ class GraphMCPTools:
     self.write_cypher_tool = None
     self.add_node_table_tool = None
     self.add_relationship_table_tool = None
-    if env.MCP_MEMORY_ENABLED and not read_only:
+    if env.MCP_SUBGRAPH_OPS_ENABLED and not read_only:
       self.write_cypher_tool = WriteCypherTool(graph_client)
       self.add_node_table_tool = AddNodeTableTool(graph_client)
       self.add_relationship_table_tool = AddRelationshipTableTool(graph_client)
@@ -575,12 +579,13 @@ class GraphMCPTools:
       tools.append(self.create_backup_tool.get_tool_definition())
     return tools
 
-  def _get_memory_tool_definitions(self) -> list[dict[str, Any]]:
+  def _get_subgraph_write_tool_definitions(self) -> list[dict[str, Any]]:
     """
-    Get memory management tool definitions.
+    Get subgraph write/DDL tool definitions.
 
     Returns:
-        List of memory tool definitions (empty if MCP_MEMORY_ENABLED is false)
+        List of subgraph write tool definitions
+        (empty if MCP_SUBGRAPH_OPS_ENABLED is false)
     """
     if self.write_cypher_tool is None:
       return []
@@ -790,7 +795,7 @@ class GraphMCPTools:
     tools.extend(self._get_workspace_tool_definitions())
     if self.set_write_policy_tool is not None:
       tools.append(self.set_write_policy_tool.get_tool_definition())
-    tools.extend(self._get_memory_tool_definitions())
+    tools.extend(self._get_subgraph_write_tool_definitions())
     tools.extend(self._get_semantic_memory_tool_definitions())
     tools.extend(self._get_search_tool_definitions())
     tools.extend(self._get_document_tool_definitions())
@@ -991,7 +996,9 @@ class GraphMCPTools:
       elif name == "write-graph-cypher":
         if self.write_cypher_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("write-graph-cypher", "MCP_MEMORY_ENABLED")
+            self._tool_unavailable_reason(
+              "write-graph-cypher", "MCP_SUBGRAPH_OPS_ENABLED"
+            )
           )
         result = await self.write_cypher_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -999,7 +1006,7 @@ class GraphMCPTools:
       elif name == "add-node-table":
         if self.add_node_table_tool is None:
           raise ValueError(
-            self._tool_unavailable_reason("add-node-table", "MCP_MEMORY_ENABLED")
+            self._tool_unavailable_reason("add-node-table", "MCP_SUBGRAPH_OPS_ENABLED")
           )
         result = await self.add_node_table_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
@@ -1008,7 +1015,7 @@ class GraphMCPTools:
         if self.add_relationship_table_tool is None:
           raise ValueError(
             self._tool_unavailable_reason(
-              "add-relationship-table", "MCP_MEMORY_ENABLED"
+              "add-relationship-table", "MCP_SUBGRAPH_OPS_ENABLED"
             )
           )
         result = await self.add_relationship_table_tool.execute(arguments)

@@ -21,7 +21,7 @@ class SchemaType(Enum):
   BASE = "base"
   ROBOLEDGER = "roboledger"
   ROBOINVESTOR = "roboinvestor"
-  MEMORY = "memory"
+  KNOWLEDGE = "knowledge"
 
 
 @dataclass
@@ -98,7 +98,7 @@ class SchemaManager:
       name=config.name, description=config.description, version=config.version
     )
 
-    # Load base schema (skip if base_schema is empty, e.g. for memory-only subgraphs)
+    # Load base schema (skip if base_schema is empty, e.g. for knowledge-only subgraphs)
     if config.base_schema:
       base_module = self._load_schema_module(config.base_schema)
       if hasattr(base_module, "BASE_NODES"):
@@ -144,7 +144,10 @@ class SchemaManager:
     return self._load_module(module_path, schema_name)
 
   def _load_extension_module(self, extension_name: str):
-    """Load extension schema module."""
+    """Load extension schema module (resolving legacy aliases)."""
+    from ..aliases import resolve_extension_alias
+
+    extension_name = resolve_extension_alias(extension_name)
     module_path = f"robosystems.schemas.extensions.{extension_name}"
     return self._load_module(module_path, extension_name)
 

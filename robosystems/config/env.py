@@ -580,9 +580,14 @@ class EnvConfig:
     "MCP_WORKSPACE_ENABLED",
     get_parameter_value("MCP_WORKSPACE_ENABLED", "true").lower() == "true",
   )
-  MCP_MEMORY_ENABLED = get_bool_env(
-    "MCP_MEMORY_ENABLED",
-    get_parameter_value("MCP_MEMORY_ENABLED", "true").lower() == "true",
+  # Gates the subgraph write/DDL MCP tools (write-graph-cypher, add-node-table,
+  # add-relationship-table). These operate on subgraphs only — the main graph is
+  # read-only to raw statements (see StatementKernel / _validate_subgraph_context).
+  # Formerly MCP_MEMORY_ENABLED (the tools predate LanceDB semantic memory; the
+  # "memory" label moved there).
+  MCP_SUBGRAPH_OPS_ENABLED = get_bool_env(
+    "MCP_SUBGRAPH_OPS_ENABLED",
+    get_parameter_value("MCP_SUBGRAPH_OPS_ENABLED", "true").lower() == "true",
   )
   MCP_SEMANTIC_MEMORY_ENABLED = get_bool_env(
     "MCP_SEMANTIC_MEMORY_ENABLED",

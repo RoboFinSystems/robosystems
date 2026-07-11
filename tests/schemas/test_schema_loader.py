@@ -33,9 +33,15 @@ class TestLadybugSchemaLoaderInit:
     loader = LadybugSchemaLoader(extensions=["nonexistent_xyz"])
     assert "nonexistent_xyz" not in loader.loaded_extensions
 
-  def test_memory_extension(self):
+  def test_knowledge_extension(self):
+    loader = LadybugSchemaLoader(extensions=["knowledge"])
+    assert "knowledge" in loader.loaded_extensions
+
+  def test_legacy_memory_extension_alias(self):
+    # Legacy "memory" resolves to the canonical "knowledge" extension.
     loader = LadybugSchemaLoader(extensions=["memory"])
-    assert "memory" in loader.loaded_extensions
+    assert "knowledge" in loader.loaded_extensions
+    assert "memory" not in loader.loaded_extensions
 
 
 class TestNodeOperations:
@@ -258,7 +264,7 @@ class TestContextAwareSchemaLoader:
 
   def test_get_contextual_with_additional_extensions(self):
     loader = get_contextual_schema_loader(
-      "application", "robosystems", additional_extensions=["memory"]
+      "application", "robosystems", additional_extensions=["knowledge"]
     )
     assert isinstance(loader, LadybugSchemaLoader)
 

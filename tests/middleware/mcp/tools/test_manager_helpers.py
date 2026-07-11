@@ -26,7 +26,7 @@ def tools(mock_client):
     patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
   ):
     mock_env.MCP_WORKSPACE_ENABLED = False
-    mock_env.MCP_MEMORY_ENABLED = False
+    mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
     mock_env.FACT_GRID_ENABLED = False
     return GraphMCPTools(mock_client, schema_extensions=[])
 
@@ -39,7 +39,7 @@ def tools_with_roboledger(mock_client):
     patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
   ):
     mock_env.MCP_WORKSPACE_ENABLED = False
-    mock_env.MCP_MEMORY_ENABLED = False
+    mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
     mock_env.FACT_GRID_ENABLED = False
     return GraphMCPTools(mock_client, schema_extensions=["roboledger"])
 
@@ -69,8 +69,8 @@ class TestGetToolDefinitionHelpers:
   def test_workspace_tools_empty_when_disabled(self, tools):
     assert tools._get_workspace_tool_definitions() == []
 
-  def test_memory_tools_empty_when_disabled(self, tools):
-    assert tools._get_memory_tool_definitions() == []
+  def test_subgraph_write_tools_empty_when_disabled(self, tools):
+    assert tools._get_subgraph_write_tool_definitions() == []
 
   def test_fact_grid_tools_empty_when_disabled(self, tools):
     assert tools._get_fact_grid_tool_definitions() == []
@@ -98,7 +98,7 @@ class TestGetToolDefinitionHelpers:
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
     ):
       mock_env.MCP_WORKSPACE_ENABLED = False
-      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
       tools = GraphMCPTools(mock_client, schema_extensions=["roboledger"])
 
@@ -115,7 +115,7 @@ class TestGetToolDefinitionHelpers:
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
     ):
       mock_env.MCP_WORKSPACE_ENABLED = False
-      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
       tools = GraphMCPTools(
         mock_client, schema_extensions=["roboledger"], read_only=True
@@ -137,7 +137,7 @@ class TestGetToolDefinitionHelpers:
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
     ):
       mock_env.MCP_WORKSPACE_ENABLED = False
-      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
       tools = GraphMCPTools(mock_client, schema_extensions=["roboledger"])
 
@@ -456,7 +456,7 @@ class TestTaxonomyToolRegistration:
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
     ):
       mock_env.MCP_WORKSPACE_ENABLED = False
-      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
       mock_env.ROBOLEDGER_ENABLED = True
       mock_env.EXTENSIONS_ENABLED = True
@@ -483,7 +483,7 @@ class TestTaxonomyToolRegistration:
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
     ):
       mock_env.MCP_WORKSPACE_ENABLED = False
-      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
       mock_env.ROBOLEDGER_ENABLED = True
       mock_env.EXTENSIONS_ENABLED = True
@@ -505,7 +505,7 @@ class TestTaxonomyToolRegistration:
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
     ):
       mock_env.MCP_WORKSPACE_ENABLED = False
-      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
       mock_env.ROBOLEDGER_ENABLED = True
       mock_env.EXTENSIONS_ENABLED = True
@@ -548,7 +548,7 @@ class TestTaxonomyToolRegistration:
       patch("robosystems.middleware.mcp.tools.manager.env") as mock_env,
     ):
       mock_env.MCP_WORKSPACE_ENABLED = False
-      mock_env.MCP_MEMORY_ENABLED = False
+      mock_env.MCP_SUBGRAPH_OPS_ENABLED = False
       mock_env.FACT_GRID_ENABLED = False
       mock_env.ROBOLEDGER_ENABLED = False
       mock_env.EXTENSIONS_ENABLED = False

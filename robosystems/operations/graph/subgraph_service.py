@@ -327,11 +327,14 @@ class SubgraphService:
     try:
       # Build schema extensions list
       include_base = True
-      if subgraph_type == "memory":
-        # Memory subgraphs get only the memory extension (no base Entity/Period/etc.)
-        extensions = ["memory"]
+      # Legacy "memory" alias accepted for backward compat; canonical is "knowledge".
+      if subgraph_type in ("knowledge", "memory"):
+        # Knowledge subgraphs get only the knowledge extension (no base Entity/Period/etc.)
+        extensions = ["knowledge"]
         include_base = False
-        logger.info("Using memory-only schema (no base schema) for memory subgraph")
+        logger.info(
+          "Using knowledge-only schema (no base schema) for knowledge subgraph"
+        )
       else:
         extensions = list(parent_graph.schema_extensions or [])
 

@@ -1,10 +1,10 @@
-"""Tests for AI Memory MCP tools."""
+"""Tests for the subgraph write/DDL MCP tools."""
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from robosystems.middleware.mcp.tools.memory_tools import (
+from robosystems.middleware.mcp.tools.subgraph_write_tools import (
   AddNodeTableTool,
   AddRelationshipTableTool,
   WriteCypherTool,
@@ -17,7 +17,7 @@ from robosystems.middleware.mcp.tools.memory_tools import (
 def mock_subgraph_client():
   """Mock client pointing to a subgraph."""
   client = MagicMock()
-  client.graph_id = "kg1234567890abcdef_memory"
+  client.graph_id = "kg1234567890abcdef_scratch"
   client.execute_query = AsyncMock(return_value=[])
   client.graph_client = MagicMock()
   client.graph_client.install_schema = AsyncMock(
@@ -45,7 +45,7 @@ class TestValidateSubgraphContext:
 
   @pytest.mark.unit
   def test_subgraph_passes(self):
-    assert _validate_subgraph_context("kg1234567890abcdef_memory") is None
+    assert _validate_subgraph_context("kg1234567890abcdef_scratch") is None
 
   @pytest.mark.unit
   def test_parent_graph_blocked(self):
