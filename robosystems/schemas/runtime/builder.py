@@ -228,7 +228,7 @@ def apply_schema_to_database(database_path: str, config: dict[str, Any]):
       database_path: Path to LadybugDB database
       config: Schema configuration dictionary
   """
-  import real_ladybug as lbug
+  import ladybug as lbug
 
   db = lbug.Database(database_path)
   conn = lbug.Connection(db)

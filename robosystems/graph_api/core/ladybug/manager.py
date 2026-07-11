@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import real_ladybug as lbug
+import ladybug as lbug
 from fastapi import HTTPException, status
 
 from robosystems.config import env

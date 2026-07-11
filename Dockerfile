@@ -26,9 +26,9 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 # Copy LadybugDB extensions from official extension repository
 # Extensions pulled from ghcr.io/ladybugdb/extension-repo:latest
 ARG TARGETARCH=arm64
-# Extension version: pinned to match the real_ladybug Python package for ABI compatibility.
+# Extension version: pinned to match the ladybug Python package for ABI compatibility.
 # This version is used for both the repo source path and the runtime install path.
-ARG LADYBUG_EXT_VERSION=0.13.0
+ARG LADYBUG_EXT_VERSION=0.18.1
 
 # Create extension directories using internal version (where LadybugDB looks)
 RUN mkdir -p /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs \
@@ -59,22 +59,12 @@ COPY --from=extensions \
     /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension
 
-# Download DuckDB shared library from official release (required by LadybugDB DuckDB extension)
-# DuckDB v1.4.x uses architecture naming: arm64/amd64 (not aarch64)
-RUN DUCKDB_VERSION=1.4.4 && \
-    if [ "${TARGETARCH}" = "arm64" ]; then \
-        DUCKDB_SHA256="c8e20af1e0064bdb7bf79af4d16f17ee8be16803bc98a4df58588bed1301c042"; \
-    elif [ "${TARGETARCH}" = "amd64" ]; then \
-        DUCKDB_SHA256="1ef33048e12235115ac0d277a0aaccbb560e33248144f488b5ac005cd9ba81b5"; \
-    else \
-        echo "ERROR: Unsupported architecture: ${TARGETARCH}" && exit 1; \
-    fi && \
-    curl -L -o /tmp/libduckdb.zip \
-        "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/libduckdb-linux-${TARGETARCH}.zip" && \
-    unzip -j /tmp/libduckdb.zip "libduckdb.so" -d /usr/local/lib/ && \
-    rm /tmp/libduckdb.zip && \
-    echo "${DUCKDB_SHA256}  /usr/local/lib/libduckdb.so" | sha256sum -c - || \
-        (echo "ERROR: libduckdb.so checksum verification failed!" && exit 1)
+# DuckDB shared library (required by LadybugDB DuckDB extension): copy the
+# version-matched build shipped in the extension repo's common/ directory —
+# guarantees ABI compatibility with the duckdb extension of the same bundle.
+COPY --from=extensions \
+    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common/libduckdb.so \
+    /usr/local/lib/libduckdb.so
 
 # Verify LadybugDB extension integrity
 # Basic integrity check: verify files exist, are non-empty, and are valid ELF binaries
@@ -147,7 +137,7 @@ FROM python:3.13-slim
 # Accept architecture argument in runtime stage
 ARG TARGETARCH=arm64
 # Must match builder stage — used for extension install paths
-ARG LADYBUG_EXT_VERSION=0.13.0
+ARG LADYBUG_EXT_VERSION=0.18.1
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import real_ladybug as lbug
+import ladybug as lbug
 
 from robosystems.logger import logger
 

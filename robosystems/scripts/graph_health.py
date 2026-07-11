@@ -102,7 +102,7 @@ class GraphHealthChecker:
       return result
 
     try:
-      import real_ladybug as lbug
+      import ladybug as lbug
 
       db = lbug.Database(self.database_path)
       conn = lbug.Connection(db)
@@ -177,9 +177,9 @@ class GraphHealthChecker:
       logger.info(f"  Status: {result.status}")
 
     except ImportError:
-      logger.warning("  real_ladybug not available for direct access")
+      logger.warning("  ladybug not available for direct access")
       result.status = "unavailable"
-      result.errors.append("real_ladybug module not available")
+      result.errors.append("ladybug module not available")
     except Exception as e:
       logger.error(f"  Direct access failed: {e}")
       result.status = "error"

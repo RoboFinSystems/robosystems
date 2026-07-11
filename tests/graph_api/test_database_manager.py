@@ -123,8 +123,8 @@ class TestLadybugDatabaseManager:
     )
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_create_database_success_entity_schema(
     self, mock_conn_class, mock_db_class, mock_init_pool
   ):
@@ -177,8 +177,8 @@ class TestLadybugDatabaseManager:
     # New implementation uses connection pool, no direct database/connection storage
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_create_database_read_only(
     self, mock_conn_class, mock_db_class, mock_init_pool
   ):
@@ -263,7 +263,7 @@ class TestLadybugDatabaseManager:
     assert "already exists" in str(exc_info.value.detail)
 
   @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
-  @patch("real_ladybug.Database")
+  @patch("ladybug.Database")
   def test_create_database_lbug_error_cleanup(self, mock_db_class, mock_init_pool):
     """Test database creation error handling and cleanup."""
     from fastapi import HTTPException
@@ -749,8 +749,8 @@ class TestLadybugDatabaseManagerIntegration:
 
     # Mock LadybugDB to avoid segmentation faults while testing concurrency logic
     with (
-      patch("real_ladybug.Database") as mock_db_class,
-      patch("real_ladybug.Connection") as mock_conn_class,
+      patch("ladybug.Database") as mock_db_class,
+      patch("ladybug.Connection") as mock_conn_class,
     ):
       # Setup mocks
       mock_db = MagicMock()

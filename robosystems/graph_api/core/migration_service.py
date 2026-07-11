@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import boto3
-import real_ladybug as lbug
+import ladybug as lbug
 from boto3.s3.transfer import TransferConfig
 
 from robosystems.config import env
