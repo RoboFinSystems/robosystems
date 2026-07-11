@@ -14,8 +14,9 @@ from pydantic import BaseModel, Field, field_validator
 class SubgraphType(str, Enum):
   """Types of subgraphs."""
 
-  STATIC = "static"  # Traditional environment-based subgraphs
-  VERSIONED = "versioned"  # Git-like version control (future)
+  STATIC = "static"  # Inherits the parent's base schema + extensions
+  KNOWLEDGE = "knowledge"  # Knowledge-only schema (no base), for graph construction
+  EMPTY = "empty"  # Bare database — no base schema, no extensions; define your own
 
 
 class CreateSubgraphRequest(BaseModel):
@@ -52,7 +53,11 @@ class CreateSubgraphRequest(BaseModel):
 
   subgraph_type: SubgraphType = Field(
     SubgraphType.STATIC,
-    description="Type of subgraph (currently only 'static' is supported)",
+    description=(
+      "Type of subgraph: 'static' (parent's base + extensions), "
+      "'knowledge' (knowledge-only schema), or 'empty' (bare database, "
+      "no schema)."
+    ),
   )
 
   metadata: dict[str, object] | None = Field(

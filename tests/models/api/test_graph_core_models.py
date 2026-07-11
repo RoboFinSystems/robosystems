@@ -326,7 +326,9 @@ class TestCreateSubgraphRequest:
 class TestSubgraphType:
   def test_enum_values(self):
     assert SubgraphType.STATIC == "static"
-    assert SubgraphType.VERSIONED == "versioned"
+    assert SubgraphType.KNOWLEDGE == "knowledge"
+    assert SubgraphType.EMPTY == "empty"
+    assert {e.value for e in SubgraphType} == {"static", "knowledge", "empty"}
 
 
 @pytest.mark.unit

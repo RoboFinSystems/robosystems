@@ -138,7 +138,7 @@ class CreateSubgraphTool:
         "**PARAMETERS:**\n"
         "- name: Alphanumeric only, 1-20 chars (no hyphens or underscores)\n"
         "- fork_parent: Copy all parent data into the new subgraph\n"
-        "- subgraph_type: `static` (default) or `knowledge` (auto-includes the knowledge schema)\n\n"
+        "- subgraph_type: `static` (default), `knowledge` (auto-includes the knowledge schema), or `empty` (bare database, no schema — define your own)\n\n"
         "**RETURNS:** `subgraph_id` (format: `{parent_graph_id}_{name}`) — use it "
         "as the `graph_id` in future tool calls to target the new subgraph."
       ),
