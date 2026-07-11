@@ -31,8 +31,10 @@ ARG TARGETARCH=arm64
 ARG LADYBUG_EXT_VERSION=0.18.1
 
 # Create extension directories using internal version (where LadybugDB looks)
+# The duckdb extension is deliberately absent: materialization moved from
+# DuckDB ATTACH to a parquet handoff (LadybugDB 0.14+ creates persistent
+# shadow catalog entries on ATTACH that collide with installed schema).
 RUN mkdir -p /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs \
-             /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb \
              /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector
 
 # Copy httpfs extension from extension repository (source: repo version, dest: internal version)
@@ -40,31 +42,10 @@ COPY --from=extensions \
     /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs/libhttpfs.lbug_extension \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs/libhttpfs.lbug_extension
 
-# Copy duckdb extension (required for DuckDB → LadybugDB direct ingestion)
-# DuckDB extension requires 3 files: main extension + installer + loader
-COPY --from=extensions \
-    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb.lbug_extension \
-    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb.lbug_extension
-
-COPY --from=extensions \
-    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_installer.lbug_extension \
-    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_installer.lbug_extension
-
-COPY --from=extensions \
-    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension \
-    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension
-
 # Copy vector extension (required for FLOAT[N] column support and vector indexes)
 COPY --from=extensions \
     /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector/libvector.lbug_extension
-
-# DuckDB shared library (required by LadybugDB DuckDB extension): copy the
-# version-matched build shipped in the extension repo's common/ directory —
-# guarantees ABI compatibility with the duckdb extension of the same bundle.
-COPY --from=extensions \
-    /usr/share/nginx/html/v${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common/libduckdb.so \
-    /usr/local/lib/libduckdb.so
 
 # Verify LadybugDB extension integrity
 # Basic integrity check: verify files exist, are non-empty, and are valid ELF binaries
@@ -83,13 +64,10 @@ RUN echo "Verifying LadybugDB extension integrity..." && \
         echo "✓ Valid extension: $(basename $ext)"; \
         EXTENSIONS_FOUND=$((EXTENSIONS_FOUND + 1)); \
     done && \
-    if [ "$EXTENSIONS_FOUND" -lt 5 ]; then \
-        echo "ERROR: Expected 5 extension files, found $EXTENSIONS_FOUND" && exit 1; \
+    if [ "$EXTENSIONS_FOUND" -lt 2 ]; then \
+        echo "ERROR: Expected 2 extension files, found $EXTENSIONS_FOUND" && exit 1; \
     fi && \
     echo "Extension integrity verification complete ($EXTENSIONS_FOUND extensions validated)"
-
-# Register libduckdb.so with the dynamic linker
-RUN ldconfig
 
 WORKDIR /build
 
@@ -197,9 +175,6 @@ COPY dagster_home/ /app/dagster_home/
 RUN chmod +x bin/entrypoint.sh
 
 # Copy DuckDB shared library from builder (required by LadybugDB DuckDB extension)
-COPY --from=builder /usr/local/lib/libduckdb.so /usr/local/lib/libduckdb.so
-RUN ldconfig
-
 # Use non-root user for better security
 RUN useradd -m appuser
 # Ensure uv is accessible by appuser
@@ -207,9 +182,10 @@ RUN chown appuser:appuser /usr/local/bin/uv
 # Create data directory for persistent storage
 RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 # Create extension directory in appuser's home (where LadybugDB looks for extensions)
-# Extensions are stored at ~/.lbug/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
+# Extensions are stored at ~/.lbdb/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
+# (the directory moved from ~/.lbug to ~/.lbdb in LadybugDB 0.15+)
 # This is in the container filesystem, NOT persistent volume, so extensions refresh with each deploy
-RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH} && chown -R appuser:appuser /home/appuser/.lbug
+RUN mkdir -p /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH} && chown -R appuser:appuser /home/appuser/.lbdb
 # Give appuser write access to /app for log files
 RUN chown -R appuser:appuser /app
 
@@ -218,25 +194,14 @@ COPY --from=builder --chown=appuser:appuser \
     /app/fastembed_cache /app/fastembed_cache
 
 # Copy LadybugDB extensions to user home directory
-# LadybugDB expects extensions at ~/.lbug/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
+# LadybugDB expects extensions at ~/.lbdb/extension/{VERSION}/{PLATFORM}/{EXTENSION_NAME}/
 COPY --from=builder --chown=appuser:appuser \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs \
-    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs
-
-COPY --from=builder --chown=appuser:appuser \
-    /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb \
-    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/duckdb
+    /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/httpfs
 
 COPY --from=builder --chown=appuser:appuser \
     /ladybug-extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector \
-    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector
-
-# Copy libduckdb.so to the common extension directory where LadybugDB looks for it
-# This is required by the DuckDB extension to actually load DuckDB functionality
-RUN mkdir -p /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common
-COPY --from=builder --chown=appuser:appuser \
-    /usr/local/lib/libduckdb.so \
-    /home/appuser/.lbug/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/common/libduckdb.so
+    /home/appuser/.lbdb/extension/${LADYBUG_EXT_VERSION}/linux_${TARGETARCH}/vector
 
 # Switch to non-root user
 USER appuser

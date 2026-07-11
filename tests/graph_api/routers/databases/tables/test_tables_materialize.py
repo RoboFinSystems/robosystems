@@ -169,66 +169,43 @@ def test_materialize_endpoint_decrements_counter_on_failure(monkeypatch, app_cli
 
 
 # ---------------------------------------------------------------------------
-# _needs_reconciliation
+# _build_type_safe_select
 # ---------------------------------------------------------------------------
 
 
-def test_needs_reconciliation_returns_false_when_target_unknown():
-  assert materialize._needs_reconciliation(None, ["identifier", "type"]) is False
-
-
-def test_needs_reconciliation_false_when_orders_match():
-  target = [
-    ("identifier", "STRING"),
-    ("category", "STRING"),
-    ("type", "STRING"),
-    ("source", "STRING"),
-    ("confidence", "DOUBLE"),
+def test_type_safe_select_preserves_order_and_passthrough():
+  source = [
+    ("src", "VARCHAR"),
+    ("dst", "VARCHAR"),
+    ("weight", "DOUBLE"),
   ]
-  source = ["identifier", "category", "type", "source", "confidence"]
-  assert materialize._needs_reconciliation(target, source) is False
+  expr = materialize._build_type_safe_select(source)
+  assert expr == '"src", "dst", "weight"'
 
 
-def test_needs_reconciliation_true_on_set_mismatch():
-  target = [
-    ("identifier", "STRING"),
-    ("category", "STRING"),
-    ("type", "STRING"),
+def test_type_safe_select_casts_decimal_to_double():
+  """postgres_scan stages Postgres NUMERIC as DuckDB DECIMAL, whose parquet
+  converted type LadybugDB's reader rejects — it must be cast to DOUBLE."""
+  source = [
+    ("identifier", "VARCHAR"),
+    ("amount", "DECIMAL(18,2)"),
   ]
-  # Source missing "category" entirely.
-  source = ["identifier", "type"]
-  assert materialize._needs_reconciliation(target, source) is True
+  expr = materialize._build_type_safe_select(source)
+  assert '"identifier"' in expr
+  assert 'CAST("amount" AS DOUBLE) AS "amount"' in expr
 
 
-def test_needs_reconciliation_true_on_order_mismatch_only():
-  """Same column names, different order — must reconcile.
-
-  Regression: a mid-schema ADD COLUMN (e.g. Classification.category) caused
-  DuckDB ALTER TABLE ADD COLUMN to append the new column at the end, while
-  the LadybugDB target had it in position 2. Set comparison missed this and
-  let positional COPY misalign data into the wrong columns.
-  """
-  target = [
-    ("identifier", "STRING"),
-    ("category", "STRING"),
-    ("type", "STRING"),
-    ("source", "STRING"),
-    ("confidence", "DOUBLE"),
+def test_type_safe_select_excludes_and_nulls():
+  source = [
+    ("identifier", "VARCHAR"),
+    ("embedding", "FLOAT[384]"),
+    ("file_id", "VARCHAR"),
   ]
-  # DuckDB schema-evolved layout: category appended at end.
-  source = ["identifier", "type", "source", "confidence", "category"]
-  assert materialize._needs_reconciliation(target, source) is True
-
-
-def test_needs_reconciliation_ignores_implicit_and_synthetic_cols():
-  """file_id (synthetic) and from/to/src/dst (implicit on rel tables) don't count."""
-  target = [
-    ("prop_a", "STRING"),
-    ("prop_b", "STRING"),
-  ]
-  # Source has from/to and file_id surrounding the props in matching order.
-  source = ["from", "to", "prop_a", "prop_b", "file_id"]
-  assert materialize._needs_reconciliation(target, source) is False
+  expr = materialize._build_type_safe_select(
+    source, exclude_cols={"file_id"}, null_cols={"embedding"}
+  )
+  assert "file_id" not in expr
+  assert 'NULL::FLOAT[384] AS "embedding"' in expr
 
 
 # ---------------------------------------------------------------------------

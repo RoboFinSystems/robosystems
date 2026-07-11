@@ -1,3 +1,6 @@
+import os
+from uuid import uuid4
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from fastapi import status as http_status
 
@@ -66,29 +69,31 @@ def _get_target_columns(
     return None
 
 
-_RECONCILE_IGNORE_COLS = frozenset({"file_id", "from", "to", "src", "dst"})
+def _build_type_safe_select(
+  source_columns: list[tuple[str, str]],
+  exclude_cols: set[str] | None = None,
+  null_cols: set[str] | None = None,
+) -> str:
+  """Build a SELECT for parquet export when the target schema is unknown.
 
-
-def _needs_reconciliation(
-  target_columns: list[tuple[str, str]] | None,
-  source_column_names: list[str],
-) -> bool:
-  """Return True when source columns don't match target columns by name AND order.
-
-  LadybugDB COPY is positional, so a source table whose column names match the
-  target's but in a different order will silently misalign data into the wrong
-  columns. This commonly happens when a new property is added in the middle of
-  an existing node schema and the DuckDB staging table evolves via
-  `ALTER TABLE ADD COLUMN` (which appends at the end). A pure set comparison
-  misses this; we compare ordered lists.
-
-  `from`/`to`/`src`/`dst`/`file_id` are excluded — they're implicit/synthetic.
+  Preserves source column order; casts DECIMAL columns to DOUBLE because
+  LadybugDB's parquet reader rejects DECIMAL converted types (postgres_scan
+  stages Postgres NUMERIC as DuckDB DECIMAL). Columns in null_cols are
+  exported as typed NULLs (preserving column count for positional COPY).
   """
-  if not target_columns:
-    return False
-  target_order = [c[0] for c in target_columns if c[0] not in _RECONCILE_IGNORE_COLS]
-  source_order = [c for c in source_column_names if c not in _RECONCILE_IGNORE_COLS]
-  return target_order != source_order
+  exclude = exclude_cols or set()
+  nullify = null_cols or set()
+  parts = []
+  for col_name, duck_type in source_columns:
+    if col_name in exclude:
+      continue
+    if col_name in nullify:
+      parts.append(f'NULL::{duck_type} AS "{col_name}"')
+    elif duck_type.upper().startswith("DECIMAL"):
+      parts.append(f'CAST("{col_name}" AS DOUBLE) AS "{col_name}"')
+    else:
+      parts.append(f'"{col_name}"')
+  return ", ".join(parts)
 
 
 def _build_reconciled_select(
@@ -216,31 +221,25 @@ async def _materialize_table_impl(
 ) -> TableMaterializationResponse:
   import time
 
+  export_path: str | None = None
+
   try:
     # Blue-green: read DuckDB from source graph if specified, otherwise from target
     duckdb_graph_id = request.source_graph_id or graph_id
-    duck_path = f"{env.DUCKDB_STAGING_PATH}/{duckdb_graph_id}.duckdb"
 
-    # CRITICAL: Checkpoint DuckDB to flush WAL to main database BEFORE LadybugDB attaches
-    # LadybugDB's DuckDB extension creates a new session that won't see uncommitted WAL data
-    logger.debug(
-      f"Checkpointing DuckDB database before LadybugDB materialization: {duck_path}"
-    )
     from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
     duckdb_pool = get_duckdb_pool()
-    temp_table_name = f"{table_name}_temp_materialization"
 
     # Get target table schema from LadybugDB for column reconciliation
-    # This handles schema evolution: parquet files missing new columns or
+    # This handles schema evolution: staging tables missing new columns or
     # having mistyped NULL columns (e.g., DuckDB infers all-NULL as INT32
     # but target expects FLOAT[384])
     target_columns = _get_target_columns(ladybug_service, graph_id, table_name)
 
-    # Check if table exists, create temp copy without file_id
-    temp_table_created = False
     try:
       with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
+        # Flush WAL so the parquet export sees all committed staging data
         checkpoint_with_retry(duck_conn, duckdb_graph_id, context="DuckDB")
 
         # Check if table exists
@@ -261,21 +260,13 @@ async def _materialize_table_impl(
             execution_time_ms=0.0,
           )
 
-        # Drop temp table if it exists from previous failed run
-        try:
-          duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
-        except Exception:
-          pass
-
-        # Check if file_id column exists in the table
-        columns_result = duck_conn.execute(
-          "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+        source_columns = duck_conn.execute(
+          "SELECT column_name, data_type FROM information_schema.columns "
+          "WHERE table_name = ? ORDER BY ordinal_position",
           [table_name],
         ).fetchall()
-        column_names = [col[0] for col in columns_result]
+        column_names = [col[0] for col in source_columns]
         has_file_id = "file_id" in column_names
-
-        needs_reconciliation = _needs_reconciliation(target_columns, column_names)
 
         # Columns to NULL out (keep column for schema match, but skip data).
         # Embeddings stay in DuckDB staging for LanceDB vector search; materializing
@@ -288,140 +279,102 @@ async def _materialize_table_impl(
             f"(pass materialize_embeddings=true to include)"
           )
 
-        # Optimization: Skip temp table when not needed (no file_id, no batching, no filter, no reconciliation, no null cols)
+        # Build WHERE clause for batched materialization
+        batch_clause = ""
         has_hash_batching = (
           request.num_batches is not None and request.batch_num is not None
         )
-        can_skip_temp_table = (
-          not has_file_id
-          and not has_hash_batching
-          and not request.file_ids
-          and not needs_reconciliation
-          and not null_cols
+        if has_hash_batching:
+          assert request.batch_num is not None and request.num_batches is not None
+
+          if "identifier" in column_names:
+            hash_col = "identifier"
+          elif "src" in column_names and "dst" in column_names:
+            hash_col = "src || '|' || dst"
+          else:
+            hash_col = column_names[0] if column_names else "rowid"
+
+          batch_clause = f" WHERE abs(hash({hash_col}::VARCHAR)) % {request.num_batches} = {request.batch_num}"
+          logger.info(
+            f"Using hash-based batching for {table_name}: batch {request.batch_num + 1}/{request.num_batches}"
+          )
+
+        # Build file filter clause
+        file_filter = ""
+        query_params: list[str] = []
+        if request.file_ids and has_file_id:
+          file_ids_placeholders = ", ".join(["?" for _ in request.file_ids])
+          file_filter = f"file_id IN ({file_ids_placeholders})"
+          query_params.extend(request.file_ids)
+
+        # Build WHERE clause combining file filter and batch clause
+        where = ""
+        if file_filter and batch_clause:
+          where = f" WHERE {file_filter} AND ({batch_clause.replace(' WHERE ', '')})"
+        elif file_filter:
+          where = f" WHERE {file_filter}"
+        elif batch_clause:
+          where = batch_clause
+
+        # Columns to exclude from materialization
+        exclude_cols: set[str] = set()
+        if has_file_id:
+          exclude_cols.add("file_id")
+
+        # Build the export SELECT. When the LadybugDB target schema is known,
+        # reconcile to it — target column order, NULLs for missing columns,
+        # and casts to the target types. The casts double as parquet type
+        # normalization: LadybugDB's parquet reader rejects DECIMAL converted
+        # types, and postgres_scan-staged NUMERIC columns arrive as DECIMAL.
+        if target_columns:
+          select_expr = _build_reconciled_select(
+            target_columns,
+            column_names,
+            table_name,
+            exclude_cols=exclude_cols,
+            null_cols=null_cols,
+          )
+        else:
+          select_expr = _build_type_safe_select(
+            [(col[0], col[1]) for col in source_columns],
+            exclude_cols=exclude_cols,
+            null_cols=null_cols,
+          )
+
+        export_dir = f"{env.DUCKDB_STAGING_PATH}/materialize-exports"
+        os.makedirs(export_dir, exist_ok=True)
+        export_path = (
+          f"{export_dir}/{duckdb_graph_id}_{table_name}_{uuid4().hex}.parquet"
         )
 
-        if can_skip_temp_table:
-          # Fast path: COPY directly from source table
-          logger.info(f"Using direct COPY for {table_name} (no temp table needed)")
-          temp_table_created = False
+        export_sql = (
+          f"COPY (SELECT {select_expr} FROM {table_name}{where}) "
+          f"TO '{export_path}' (FORMAT parquet)"
+        )
+        if query_params:
+          duck_conn.execute(export_sql, query_params)
         else:
-          # Build WHERE clause for batched materialization
-          batch_clause = ""
+          duck_conn.execute(export_sql)
 
-          if has_hash_batching:
-            assert request.batch_num is not None and request.num_batches is not None
-
-            if "identifier" in column_names:
-              hash_col = "identifier"
-            elif "src" in column_names and "dst" in column_names:
-              hash_col = "src || '|' || dst"
-            else:
-              hash_col = column_names[0] if column_names else "rowid"
-
-            batch_clause = f" WHERE abs(hash({hash_col}::VARCHAR)) % {request.num_batches} = {request.batch_num}"
-            logger.info(
-              f"Using hash-based batching for {table_name}: batch {request.batch_num + 1}/{request.num_batches}"
-            )
-
-          # Build file filter clause
-          file_filter = ""
-          query_params: list[str] = []
-          if request.file_ids and has_file_id:
-            file_ids_placeholders = ", ".join(["?" for _ in request.file_ids])
-            file_filter = f"file_id IN ({file_ids_placeholders})"
-            query_params.extend(request.file_ids)
-
-          # Build WHERE clause combining file filter and batch clause
-          where = ""
-          if file_filter and batch_clause:
-            where = f" WHERE {file_filter} AND ({batch_clause.replace(' WHERE ', '')})"
-          elif file_filter:
-            where = f" WHERE {file_filter}"
-          elif batch_clause:
-            where = batch_clause
-
-          # Columns to exclude from materialization
-          exclude_cols: set[str] = set()
-          if has_file_id:
-            exclude_cols.add("file_id")
-
-          # Build SELECT expression
-          # Force reconciliation when nulling columns — the reconciled path
-          # iterates target columns (not source), so column count always matches.
-          use_reconciliation = (needs_reconciliation or null_cols) and target_columns
-          if use_reconciliation:
-            select_expr = _build_reconciled_select(
-              target_columns,
-              column_names,
-              table_name,
-              exclude_cols=exclude_cols,
-              null_cols=null_cols,
-            )
-            logger.debug(
-              f"Reconciling columns for {table_name} "
-              f"(source: {len(column_names)}, target: {len(target_columns)})"
-            )
-          elif exclude_cols:
-            exclude_list = ", ".join(exclude_cols)
-            select_expr = f"* EXCLUDE ({exclude_list})"
-          else:
-            select_expr = "*"
-
-          create_sql = (
-            f"CREATE TABLE {temp_table_name} AS "
-            f"SELECT {select_expr} FROM {table_name}{where}"
+        if request.file_ids:
+          logger.info(
+            f"Exported {table_name} to parquet with {len(request.file_ids)} file(s)"
           )
-          if query_params:
-            duck_conn.execute(create_sql, query_params)
-          else:
-            duck_conn.execute(create_sql)
-
-          if request.file_ids:
-            logger.info(
-              f"Created temp DuckDB table {temp_table_name} with {len(request.file_ids)} file(s)"
-            )
-          elif has_hash_batching:
-            assert request.batch_num is not None and request.num_batches is not None
-            logger.info(
-              f"Created temp DuckDB table {temp_table_name} for hash-based materialization "
-              f"(batch {request.batch_num + 1}/{request.num_batches})"
-            )
-          else:
-            logger.debug(
-              f"Created temp DuckDB table {temp_table_name} for full materialization"
-            )
-          temp_table_created = True
+        elif has_hash_batching:
+          assert request.batch_num is not None and request.num_batches is not None
+          logger.info(
+            f"Exported {table_name} to parquet "
+            f"(batch {request.batch_num + 1}/{request.num_batches})"
+          )
+        else:
+          logger.debug(f"Exported {table_name} to parquet for full materialization")
 
     except Exception as err:
-      logger.error(f"Could not prepare DuckDB table for materialization: {err}")
+      logger.error(f"Could not export DuckDB table for materialization: {err}")
       raise
 
     try:
       with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
-        # Install and load DuckDB extension - LadybugDB finds it at
-        # ~/.lbug/extension/{VERSION}/{PLATFORM}/duckdb/ (bundled in Docker image)
-        try:
-          conn.execute("INSTALL duckdb")
-          conn.execute("LOAD duckdb")
-          logger.debug("Loaded DuckDB extension")
-        except Exception as e:
-          if "already loaded" not in str(e).lower():
-            logger.warning(f"Failed to load DuckDB extension: {e}")
-            raise
-
-        # Detach first if already attached
-        try:
-          conn.execute("DETACH duck")
-        except Exception:
-          pass
-
-        # Attach DuckDB database
-        conn.execute(f"ATTACH '{duck_path}' AS duck (DBTYPE duckdb)")
-        logger.debug(f"Attached DuckDB database: {duck_path}")
-
-        # Determine source table for COPY (temp table or direct source)
-        source_table = table_name if not temp_table_created else temp_table_name
-
         if request.file_ids:
           logger.info(
             f"COPY {table_name} → {graph_id} ({len(request.file_ids)} file(s))"
@@ -430,11 +383,9 @@ async def _materialize_table_impl(
           logger.info(f"COPY {table_name} → {graph_id}")
 
         if request.ignore_errors:
-          copy_query = (
-            f"COPY {table_name} FROM duck.{source_table} (ignore_errors=true)"
-          )
+          copy_query = f"COPY {table_name} FROM '{export_path}' (ignore_errors=true)"
         else:
-          copy_query = f"COPY {table_name} FROM duck.{source_table}"
+          copy_query = f"COPY {table_name} FROM '{export_path}'"
 
         # Set extended timeout for COPY operations (30 minutes)
         # Default connection timeout is 120s, but large tables like Fact
@@ -506,27 +457,32 @@ async def _materialize_table_impl(
       )
 
     finally:
-      # Clean up temp table and release DuckDB memory
-      if temp_table_created:
-        # Drop temp table
+      # Clean up the parquet export and release DuckDB memory
+      if export_path:
         try:
-          with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
-            duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
-            logger.debug(f"Cleaned up temp DuckDB table: {temp_table_name}")
-        except Exception as drop_err:
-          logger.warning(f"Failed to drop temp table {temp_table_name}: {drop_err}")
+          os.remove(export_path)
+          logger.debug(f"Cleaned up parquet export: {export_path}")
+        except FileNotFoundError:
+          pass
+        except Exception as rm_err:
+          logger.warning(f"Failed to remove parquet export {export_path}: {rm_err}")
 
-        # Checkpoint and release connections (always attempt even if drop failed)
-        try:
-          with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
-            duck_conn.execute("CHECKPOINT")
-          duckdb_pool.close_database_connections(duckdb_graph_id)
-          logger.debug(f"Released DuckDB connections for {duckdb_graph_id}")
-        except Exception as release_err:
-          logger.warning(f"Failed to release DuckDB connections: {release_err}")
+      try:
+        with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
+          duck_conn.execute("CHECKPOINT")
+        duckdb_pool.close_database_connections(duckdb_graph_id)
+        logger.debug(f"Released DuckDB connections for {duckdb_graph_id}")
+      except Exception as release_err:
+        logger.warning(f"Failed to release DuckDB connections: {release_err}")
 
   except Exception as outer_err:
-    logger.error(f"Failed during table preparation or materialization: {outer_err}")
+    logger.error(f"Failed during table export or materialization: {outer_err}")
+    # An export-stage failure skips the inner finally — remove the file here too
+    if export_path:
+      try:
+        os.remove(export_path)
+      except OSError:
+        pass
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to materialize table: {outer_err!s}",
@@ -641,77 +597,55 @@ async def _fork_from_parent_duckdb_impl(
         detail="No tables to copy",
       )
 
-    # Create temp physical tables in parent DuckDB for each table (excluding file_id if exists)
-    temp_tables = []
+    # Export each table (excluding file_id) to parquet, then COPY into the
+    # subgraph. Parquet handoff replaces the previous DuckDB-ATTACH path —
+    # LadybugDB 0.14+ creates persistent shadow catalog entries on ATTACH
+    # that collide with installed schema.
+    export_dir = f"{env.DUCKDB_STAGING_PATH}/materialize-exports"
+    exports: list[tuple[str, str]] = []
     try:
+      os.makedirs(export_dir, exist_ok=True)
       with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
         for table_name in tables_to_copy:
-          temp_table = f"{table_name}_temp_fork"
-          temp_tables.append(temp_table)
-
-          # Drop if exists from previous failed run
-          duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
-
-          # Check if file_id column exists in the table
-          columns_result = duck_conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+          source_columns = duck_conn.execute(
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_name = ? ORDER BY ordinal_position",
             [table_name],
           ).fetchall()
-          column_names = [col[0] for col in columns_result]
-          has_file_id = "file_id" in column_names
+          exclude_cols = (
+            {"file_id"} if any(col[0] == "file_id" for col in source_columns) else set()
+          )
+          select_expr = _build_type_safe_select(
+            [(col[0], col[1]) for col in source_columns],
+            exclude_cols=exclude_cols,
+          )
+          export_path = (
+            f"{export_dir}/{parent_graph_id}_{table_name}_{uuid4().hex}.parquet"
+          )
+          duck_conn.execute(
+            f"COPY (SELECT {select_expr} FROM {table_name}) "
+            f"TO '{export_path}' (FORMAT parquet)"
+          )
+          exports.append((table_name, export_path))
+        logger.info(f"Exported {len(exports)} parent DuckDB tables to parquet for fork")
 
-          # Create physical temp table without file_id (if it exists)
-          if has_file_id:
-            duck_conn.execute(
-              f"CREATE TABLE {temp_table} AS SELECT * EXCLUDE (file_id) FROM {table_name}"
-            )
-          else:
-            duck_conn.execute(
-              f"CREATE TABLE {temp_table} AS SELECT * FROM {table_name}"
-            )
-        logger.info(f"Created {len(temp_tables)} temp tables in parent DuckDB for fork")
-
-      # Connect to subgraph LadybugDB and attach parent DuckDB
       total_rows = 0
       tables_copied = []
 
       with ladybug_service.db_manager.connection_pool.get_connection(
         subgraph_id
       ) as conn:
-        # Install and load DuckDB extension - LadybugDB finds it at
-        # ~/.lbug/extension/{VERSION}/{PLATFORM}/duckdb/ (bundled in Docker image)
-        try:
-          conn.execute("INSTALL duckdb")
-          conn.execute("LOAD duckdb")
-          logger.debug("Loaded DuckDB extension")
-        except Exception as e:
-          if "already loaded" not in str(e).lower():
-            logger.warning(f"Failed to load DuckDB extension: {e}")
-            raise
-
-        # Detach first if already attached
-        try:
-          conn.execute("DETACH parent_duck")
-        except Exception:
-          pass
-
-        # Attach parent DuckDB as 'parent_duck'
-        conn.execute(f"ATTACH '{parent_duck_path}' AS parent_duck (DBTYPE duckdb)")
-        logger.info(f"Attached parent DuckDB: {parent_duck_path}")
-
-        # Copy each table from the temp tables we created in parent DuckDB
-        for idx, table_name in enumerate(tables_to_copy):
+        # Copy each table from its parquet export
+        for table_name, export_path in exports:
           try:
-            temp_table = temp_tables[idx]
-
             if request.ignore_errors:
               copy_query = (
-                f"COPY {table_name} FROM parent_duck.{temp_table} (ignore_errors=true)"
+                f"COPY {table_name} FROM '{export_path}' (ignore_errors=true)"
               )
             else:
-              copy_query = f"COPY {table_name} FROM parent_duck.{temp_table}"
+              copy_query = f"COPY {table_name} FROM '{export_path}'"
 
-            logger.info(f"Copying {table_name} from parent to subgraph")
+            logger.info(f"Copying {table_name} from parent export to subgraph")
             # Set extended timeout for COPY operations (30 minutes)
             try:
               conn.execute("CALL timeout=3600000")  # 60 minutes
@@ -740,12 +674,6 @@ async def _fork_from_parent_duckdb_impl(
             if not request.ignore_errors:
               raise
 
-      # Detach parent DuckDB
-      try:
-        conn.execute("DETACH parent_duck")
-      except Exception:
-        pass
-
       execution_time_ms = (time.time() - start_time) * 1000
 
       logger.info(
@@ -771,15 +699,14 @@ async def _fork_from_parent_duckdb_impl(
       )
 
     finally:
-      # Clean up temp tables
-      if temp_tables:
+      # Clean up parquet exports
+      for _, export_path in exports:
         try:
-          with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
-            for temp_table in temp_tables:
-              duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
-            logger.info(f"Cleaned up {len(temp_tables)} temp tables from parent DuckDB")
-        except Exception as cleanup_err:
-          logger.warning(f"Failed to clean up temp tables: {cleanup_err}")
+          os.remove(export_path)
+        except OSError:
+          pass
+      if exports:
+        logger.info(f"Cleaned up {len(exports)} parquet exports")
 
   except Exception as outer_err:
     logger.error(f"Failed during fork preparation: {outer_err}")
