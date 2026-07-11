@@ -591,6 +591,8 @@ class TestProcessorOrchestration:
       os.makedirs(nodes_dir, exist_ok=True)
       with open(os.path.join(nodes_dir, "Entity.parquet"), "wb") as f:
         f.write(b"entity parquet data")
+      with open(os.path.join(nodes_dir, "Fact.parquet"), "wb") as f:
+        f.write(b"fact parquet data")
 
       rels_dir = os.path.join(output_dir, "relationships")
       os.makedirs(rels_dir, exist_ok=True)
@@ -615,3 +617,48 @@ class TestProcessorOrchestration:
     assert "nodes/Entity" in result.tables
     assert "relationships/ENTITY_HAS_REPORT" in result.tables
     assert result.tables["nodes/Entity"] == b"entity parquet data"
+
+  @patch("robosystems.adapters.sec.processors.processing.XBRLGraphProcessor")
+  def test_zero_facts_returns_error(self, mock_processor_cls):
+    """Processing that emits no Fact table is a failure, not silent success.
+
+    Guards against wrong-instance-document selection producing empty reports
+    that are marked success and never retried.
+    """
+    zip_data = self._make_zip_bytes(["filing.htm"])
+
+    mock_s3 = MagicMock()
+    mock_s3.download_fileobj.side_effect = lambda bucket, key, buf: buf.write(zip_data)
+
+    mock_loader = MagicMock()
+    mock_loader.get_metadata.return_value = (
+      {"cik": "1045810"},
+      {"form": "10-K", "filingDate": "2024-03-01", "primaryDocument": "filing.htm"},
+    )
+
+    def fake_process():
+      call_kwargs = mock_processor_cls.call_args.kwargs
+      output_dir = call_kwargs["output_dir"]
+      nodes_dir = os.path.join(output_dir, "nodes")
+      os.makedirs(nodes_dir, exist_ok=True)
+      with open(os.path.join(nodes_dir, "Entity.parquet"), "wb") as f:
+        f.write(b"entity parquet data")
+      with open(os.path.join(nodes_dir, "Report.parquet"), "wb") as f:
+        f.write(b"report parquet data")
+
+    mock_processor_instance = MagicMock()
+    mock_processor_instance.process.side_effect = fake_process
+    mock_processor_cls.return_value = mock_processor_instance
+
+    result = process_single_filing_to_memory(
+      storage_key="sec/raw/file.zip",
+      partition_key="2024_1045810_0001045810-24-000001",
+      source_file_id="sf1",
+      s3_client=mock_s3,
+      raw_bucket="bucket",
+      metadata_loader=mock_loader,
+    )
+
+    assert result.success is False
+    assert "zero facts" in result.error
+    assert result.tables == {}

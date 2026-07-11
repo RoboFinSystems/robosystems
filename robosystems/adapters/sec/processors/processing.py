@@ -233,6 +233,20 @@ def process_single_filing_to_memory(
               with open(local_path, "rb") as f:
                 tables[key] = f.read()
 
+      # A processed filing with no facts means extraction silently failed
+      # (e.g. wrong instance document selected). Surface it as an error so
+      # the SourceFile lands in a retryable state instead of masking data
+      # loss as success.
+      if "nodes/Fact" not in tables:
+        return ProcessedFilingResult(
+          success=False,
+          source_file_id=source_file_id,
+          partition_key=partition_key,
+          tables={},
+          filing_date=filing_date,
+          error="XBRL processing produced zero facts",
+        )
+
       return ProcessedFilingResult(
         success=True,
         source_file_id=source_file_id,
