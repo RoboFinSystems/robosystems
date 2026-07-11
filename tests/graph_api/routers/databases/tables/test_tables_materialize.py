@@ -184,8 +184,8 @@ def test_type_safe_select_preserves_order_and_passthrough():
 
 
 def test_type_safe_select_casts_decimal_to_double():
-  """postgres_scan stages Postgres NUMERIC as DuckDB DECIMAL, whose parquet
-  converted type LadybugDB's reader rejects — it must be cast to DOUBLE."""
+  """postgres_scan stages Postgres NUMERIC as DuckDB DECIMAL; LadybugDB has no
+  DECIMAL type (numeric targets are DOUBLE), so it's cast at the source."""
   source = [
     ("identifier", "VARCHAR"),
     ("amount", "DECIMAL(18,2)"),

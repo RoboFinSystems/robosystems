@@ -1,6 +1,6 @@
-import os
-from uuid import uuid4
+import re
 
+import pyarrow as pa
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from fastapi import status as http_status
 
@@ -19,6 +19,28 @@ from robosystems.middleware.graph.instance_busy import (
   OP_KIND_MATERIALIZATION,
   instance_busy,
 )
+
+# Rows per Arrow record batch streamed from DuckDB into LadybugDB. Bounds peak
+# memory during the zero-copy handoff — the table never fully materializes in
+# RAM regardless of its size.
+ARROW_STREAM_BATCH_ROWS = 100_000
+
+
+def _copy_result_rows(result, fallback: int) -> int:
+  """Ingested-row count from a LadybugDB COPY result, or ``fallback`` if the
+  result message can't be parsed."""
+  try:
+    if result is not None and hasattr(result, "get_as_arrow"):
+      arrow_table = result.get_as_arrow()
+      if arrow_table.num_rows > 0 and arrow_table.num_columns > 0:
+        msg = str(arrow_table.column(0)[0].as_py())
+        match = re.search(r"(\d+)\s+tuples?", msg)
+        if match:
+          return int(match.group(1))
+  except Exception:
+    return fallback
+  return fallback
+
 
 # Type mapping from LadybugDB types to DuckDB-compatible cast types
 _LBUG_TO_DUCK_TYPE = {
@@ -74,12 +96,13 @@ def _build_type_safe_select(
   exclude_cols: set[str] | None = None,
   null_cols: set[str] | None = None,
 ) -> str:
-  """Build a SELECT for parquet export when the target schema is unknown.
+  """Build the export SELECT when the target LadybugDB schema is unknown.
 
-  Preserves source column order; casts DECIMAL columns to DOUBLE because
-  LadybugDB's parquet reader rejects DECIMAL converted types (postgres_scan
-  stages Postgres NUMERIC as DuckDB DECIMAL). Columns in null_cols are
-  exported as typed NULLs (preserving column count for positional COPY).
+  Preserves source column order and casts DECIMAL to DOUBLE — LadybugDB has no
+  DECIMAL type (its numeric target columns are DOUBLE), and postgres_scan
+  stages Postgres NUMERIC as DuckDB DECIMAL, so casting at the source keeps the
+  Arrow types unambiguous. Columns in null_cols become typed NULLs (preserving
+  column count for positional COPY).
   """
   exclude = exclude_cols or set()
   nullify = null_cols or set()
@@ -221,8 +244,6 @@ async def _materialize_table_impl(
 ) -> TableMaterializationResponse:
   import time
 
-  export_path: str | None = None
-
   try:
     # Blue-green: read DuckDB from source graph if specified, otherwise from target
     duckdb_graph_id = request.source_graph_id or graph_id
@@ -322,10 +343,9 @@ async def _materialize_table_impl(
           exclude_cols.add("file_id")
 
         # Build the export SELECT. When the LadybugDB target schema is known,
-        # reconcile to it — target column order, NULLs for missing columns,
-        # and casts to the target types. The casts double as parquet type
-        # normalization: LadybugDB's parquet reader rejects DECIMAL converted
-        # types, and postgres_scan-staged NUMERIC columns arrive as DECIMAL.
+        # reconcile to it — target column order, NULLs for missing columns, and
+        # casts to the target types (which also normalize postgres_scan-staged
+        # NUMERIC to DOUBLE, since LadybugDB has no DECIMAL type).
         if target_columns:
           select_expr = _build_reconciled_select(
             target_columns,
@@ -341,149 +361,102 @@ async def _materialize_table_impl(
             null_cols=null_cols,
           )
 
-        export_dir = f"{env.DUCKDB_STAGING_PATH}/materialize-exports"
-        os.makedirs(export_dir, exist_ok=True)
-        # Filename is a bare UUID — never interpolate the request-supplied
-        # graph_id / table_name into a filesystem path (path traversal). The
-        # graph/table identity is carried in the surrounding log lines.
-        export_path = f"{export_dir}/{uuid4().hex}.parquet"
-
-        export_sql = (
-          f"COPY (SELECT {select_expr} FROM {table_name}{where}) "
-          f"TO '{export_path}' (FORMAT parquet)"
-        )
+        # Stream DuckDB → Arrow record batches → LadybugDB COPY. No intermediate
+        # file: DuckDB emits Arrow batches straight from its result vectors and
+        # LadybugDB scans each batch's buffers directly (the zero-copy handoff).
+        # Batching bounds peak memory regardless of table size; DECIMAL columns
+        # (postgres_scan-staged NUMERIC) ride through the Arrow types natively.
+        select_sql = f"SELECT {select_expr} FROM {table_name}{where}"
         if query_params:
-          duck_conn.execute(export_sql, query_params)
-        else:
-          duck_conn.execute(export_sql)
-
-        if request.file_ids:
-          logger.info(
-            f"Exported {table_name} to parquet with {len(request.file_ids)} file(s)"
-          )
-        elif has_hash_batching:
-          assert request.batch_num is not None and request.num_batches is not None
-          logger.info(
-            f"Exported {table_name} to parquet "
-            f"(batch {request.batch_num + 1}/{request.num_batches})"
+          arrow_reader = duck_conn.execute(select_sql, query_params).fetch_record_batch(
+            ARROW_STREAM_BATCH_ROWS
           )
         else:
-          logger.debug(f"Exported {table_name} to parquet for full materialization")
+          arrow_reader = duck_conn.execute(select_sql).fetch_record_batch(
+            ARROW_STREAM_BATCH_ROWS
+          )
 
-    except Exception as err:
-      logger.error(f"Could not export DuckDB table for materialization: {err}")
-      raise
-
-    try:
-      with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
         if request.file_ids:
           logger.info(
             f"COPY {table_name} → {graph_id} ({len(request.file_ids)} file(s))"
           )
+        elif has_hash_batching:
+          assert request.batch_num is not None and request.num_batches is not None
+          logger.info(
+            f"COPY {table_name} → {graph_id} "
+            f"(batch {request.batch_num + 1}/{request.num_batches})"
+          )
         else:
           logger.info(f"COPY {table_name} → {graph_id}")
 
-        if request.ignore_errors:
-          copy_query = f"COPY {table_name} FROM '{export_path}' (ignore_errors=true)"
-        else:
-          copy_query = f"COPY {table_name} FROM '{export_path}'"
-
-        # Set extended timeout for COPY operations (30 minutes)
-        # Default connection timeout is 120s, but large tables like Fact
-        # can take 2-3 minutes with millions of rows
-        try:
-          conn.execute("CALL timeout=3600000")  # 60 minutes
-          logger.debug(f"Executing: {copy_query}")
-          result = conn.execute(copy_query)
-        finally:
-          # Always reset timeout to default after COPY
-          conn.execute("CALL timeout=120000")  # 2 minutes
-
-      rows_ingested = 0
-      if result and hasattr(result, "get_as_arrow"):
-        arrow_table = result.get_as_arrow()
-        if arrow_table.num_rows > 0 and arrow_table.num_columns > 0:
-          result_msg = str(arrow_table.column(0)[0].as_py())
-          import re
-
-          match = re.search(r"(\d+)\s+tuples?", result_msg)
-          if match:
-            rows_ingested = int(match.group(1))
-
-      execution_time_ms = (time.time() - start_time) * 1000
-
-      logger.info(
-        f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms / 1000:.1f}s"
-      )
-
-      # Checkpoint and release LadybugDB memory
-      # This prevents memory accumulation during multi-table materialization
-      try:
+        copy_suffix = " (ignore_errors=true)" if request.ignore_errors else ""
+        rows_ingested = 0
         with ladybug_service.db_manager.connection_pool.get_connection(
           graph_id
         ) as conn:
+          # Extended timeout: large tables (Fact) can take minutes per batch.
+          try:
+            conn.execute("CALL timeout=3600000")  # 60 minutes
+            for arrow_batch in arrow_reader:
+              # `copy_batch` is resolved BY NAME from this frame — LadybugDB
+              # scans the Arrow object via a Python replacement scan, so the
+              # local's name MUST match the identifier in the COPY statement.
+              # The F841 suppression is real: the engine reads it, the linter can't see that.
+              copy_batch = pa.Table.from_batches([arrow_batch])  # noqa: F841
+              result = conn.execute(f"COPY {table_name} FROM copy_batch{copy_suffix}")
+              rows_ingested += _copy_result_rows(result, arrow_batch.num_rows)
+          finally:
+            conn.execute("CALL timeout=120000")  # reset to 2 minutes
+
+    except Exception as err:
+      logger.error(f"Could not materialize DuckDB table {table_name}: {err}")
+      raise
+
+    execution_time_ms = (time.time() - start_time) * 1000
+    logger.info(
+      f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms / 1000:.1f}s"
+    )
+
+    # Checkpoint and release LadybugDB memory (prevents accumulation across a
+    # multi-table materialization run).
+    try:
+      with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+        conn.execute("CHECKPOINT")
+        logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
+
+        # Build vector index when embeddings are materialized (single-pass only).
+        # For batched requests, the caller rebuilds the index after all batches
+        # complete — creating it on batch 1 would only index partial data.
+        is_batched = request.batch_num is not None
+        if request.materialize_embeddings and not is_batched:
+          ladybug_service.db_manager.create_vector_index(conn, table_name)
           conn.execute("CHECKPOINT")
-          logger.debug(f"Checkpointed LadybugDB after {table_name} materialization")
 
-          # Build vector index when embeddings are materialized (single-pass only).
-          # For batched requests, the caller rebuilds the index after all batches
-          # complete — creating it on batch 1 would only index partial data.
-          is_batched = request.batch_num is not None
-          if request.materialize_embeddings and not is_batched:
-            ladybug_service.db_manager.create_vector_index(conn, table_name)
-            conn.execute("CHECKPOINT")
-
-        # Release buffer pool memory - data is safe on disk now
-        ladybug_service.db_manager.connection_pool.force_database_cleanup(
-          graph_id, aggressive=True
-        )
-        logger.debug(f"Released LadybugDB memory after {table_name} materialization")
-      except Exception as cleanup_err:
-        # Log but don't fail - materialization succeeded
-        logger.warning(f"Could not release LadybugDB memory: {cleanup_err}")
-
-      return TableMaterializationResponse(
-        status="success",
-        graph_id=graph_id,
-        table_name=table_name,
-        rows_ingested=rows_ingested,
-        execution_time_ms=execution_time_ms,
+      ladybug_service.db_manager.connection_pool.force_database_cleanup(
+        graph_id, aggressive=True
       )
+      logger.debug(f"Released LadybugDB memory after {table_name} materialization")
+    except Exception as cleanup_err:
+      # Log but don't fail — materialization already succeeded.
+      logger.warning(f"Could not release LadybugDB memory: {cleanup_err}")
 
-    except Exception as e:
-      logger.error(f"Failed to materialize table {table_name}: {e}")
-      raise HTTPException(
-        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to materialize table: {e!s}",
-      )
+    # Release DuckDB staging connections.
+    try:
+      duckdb_pool.close_database_connections(duckdb_graph_id)
+      logger.debug(f"Released DuckDB connections for {duckdb_graph_id}")
+    except Exception as release_err:
+      logger.warning(f"Failed to release DuckDB connections: {release_err}")
 
-    finally:
-      # Clean up the parquet export and release DuckDB memory
-      if export_path:
-        try:
-          os.remove(export_path)
-          logger.debug(f"Cleaned up parquet export: {export_path}")
-        except FileNotFoundError:
-          pass  # already gone (export never created, or removed on a retry) — nothing to clean
-        except Exception as rm_err:
-          logger.warning(f"Failed to remove parquet export {export_path}: {rm_err}")
-
-      try:
-        with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
-          duck_conn.execute("CHECKPOINT")
-        duckdb_pool.close_database_connections(duckdb_graph_id)
-        logger.debug(f"Released DuckDB connections for {duckdb_graph_id}")
-      except Exception as release_err:
-        logger.warning(f"Failed to release DuckDB connections: {release_err}")
+    return TableMaterializationResponse(
+      status="success",
+      graph_id=graph_id,
+      table_name=table_name,
+      rows_ingested=rows_ingested,
+      execution_time_ms=execution_time_ms,
+    )
 
   except Exception as outer_err:
-    logger.error(f"Failed during table export or materialization: {outer_err}")
-    # An export-stage failure skips the inner finally — remove the file here too
-    if export_path:
-      try:
-        os.remove(export_path)
-      except OSError:
-        pass  # best-effort cleanup on the export-stage failure path; original error is re-raised below
+    logger.error(f"Failed during table materialization: {outer_err}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to materialize table: {outer_err!s}",
@@ -598,15 +571,17 @@ async def _fork_from_parent_duckdb_impl(
         detail="No tables to copy",
       )
 
-    # Export each table (excluding file_id) to parquet, then COPY into the
-    # subgraph. Parquet handoff replaces the previous DuckDB-ATTACH path —
-    # LadybugDB 0.14+ creates persistent shadow catalog entries on ATTACH
-    # that collide with installed schema.
-    export_dir = f"{env.DUCKDB_STAGING_PATH}/materialize-exports"
-    exports: list[tuple[str, str]] = []
+    # Stream each parent table (excluding file_id) DuckDB → Arrow → subgraph
+    # LadybugDB, no intermediate file. Replaces the previous DuckDB-ATTACH path:
+    # LadybugDB 0.14+ creates persistent shadow catalog entries on ATTACH that
+    # collide with installed schema.
+    total_rows = 0
+    tables_copied: list[str] = []
     try:
-      os.makedirs(export_dir, exist_ok=True)
-      with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
+      with (
+        duckdb_pool.get_connection(parent_graph_id) as duck_conn,
+        ladybug_service.db_manager.connection_pool.get_connection(subgraph_id) as conn,
+      ):
         for table_name in tables_to_copy:
           source_columns = duck_conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
@@ -620,63 +595,32 @@ async def _fork_from_parent_duckdb_impl(
             [(col[0], col[1]) for col in source_columns],
             exclude_cols=exclude_cols,
           )
-          # Bare-UUID filename — never interpolate the request-supplied
-          # parent_graph_id / table_name into a filesystem path (path traversal).
-          export_path = f"{export_dir}/{uuid4().hex}.parquet"
-          duck_conn.execute(
-            f"COPY (SELECT {select_expr} FROM {table_name}) "
-            f"TO '{export_path}' (FORMAT parquet)"
-          )
-          exports.append((table_name, export_path))
-        logger.info(f"Exported {len(exports)} parent DuckDB tables to parquet for fork")
+          arrow_reader = duck_conn.execute(
+            f"SELECT {select_expr} FROM {table_name}"
+          ).fetch_record_batch(ARROW_STREAM_BATCH_ROWS)
 
-      total_rows = 0
-      tables_copied = []
-
-      with ladybug_service.db_manager.connection_pool.get_connection(
-        subgraph_id
-      ) as conn:
-        # Copy each table from its parquet export
-        for table_name, export_path in exports:
+          copy_suffix = " (ignore_errors=true)" if request.ignore_errors else ""
+          table_rows = 0
+          logger.info(f"Copying {table_name} from parent to subgraph")
           try:
-            if request.ignore_errors:
-              copy_query = (
-                f"COPY {table_name} FROM '{export_path}' (ignore_errors=true)"
-              )
-            else:
-              copy_query = f"COPY {table_name} FROM '{export_path}'"
-
-            logger.info(f"Copying {table_name} from parent export to subgraph")
-            # Set extended timeout for COPY operations (30 minutes)
-            try:
-              conn.execute("CALL timeout=3600000")  # 60 minutes
-              result = conn.execute(copy_query)
-            finally:
-              # Always reset timeout to default after COPY
-              conn.execute("CALL timeout=120000")  # 2 minutes
-
-            rows_ingested = 0
-            if result and hasattr(result, "get_as_arrow"):
-              arrow_table = result.get_as_arrow()
-              if arrow_table.num_rows > 0 and arrow_table.num_columns > 0:
-                result_msg = str(arrow_table.column(0)[0].as_py())
-                import re
-
-                match = re.search(r"(\d+)\s+tuples?", result_msg)
-                if match:
-                  rows_ingested = int(match.group(1))
-
-            total_rows += rows_ingested
-            tables_copied.append(table_name)
-            logger.info(f"[OK] Copied {table_name}: {rows_ingested} rows")
-
+            conn.execute("CALL timeout=3600000")  # 60 minutes
+            for arrow_batch in arrow_reader:
+              # `copy_batch` is resolved by name from this frame (replacement scan).
+              copy_batch = pa.Table.from_batches([arrow_batch])  # noqa: F841
+              result = conn.execute(f"COPY {table_name} FROM copy_batch{copy_suffix}")
+              table_rows += _copy_result_rows(result, arrow_batch.num_rows)
           except Exception as table_err:
             logger.error(f"Failed to copy {table_name}: {table_err}")
             if not request.ignore_errors:
               raise
+          finally:
+            conn.execute("CALL timeout=120000")  # reset to 2 minutes
+
+          total_rows += table_rows
+          tables_copied.append(table_name)
+          logger.info(f"[OK] Copied {table_name}: {table_rows} rows")
 
       execution_time_ms = (time.time() - start_time) * 1000
-
       logger.info(
         f"Fork completed: {len(tables_copied)} tables, {total_rows:,} rows in {execution_time_ms / 1000:.1f}s"
       )
@@ -698,16 +642,6 @@ async def _fork_from_parent_duckdb_impl(
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Failed to fork data: {e!s}",
       )
-
-    finally:
-      # Clean up parquet exports
-      for _, export_path in exports:
-        try:
-          os.remove(export_path)
-        except OSError:
-          pass  # best-effort cleanup; a leftover export is harmless staging cruft
-      if exports:
-        logger.info(f"Cleaned up {len(exports)} parquet exports")
 
   except Exception as outer_err:
     logger.error(f"Failed during fork preparation: {outer_err}")
