@@ -2075,7 +2075,7 @@ class GraphClient(BaseGraphClient):
   # Migration endpoints
 
   async def migration_export(
-    self, source_version: str, target_version: str
+    self, source_version: str, target_version: str, bucket: str
   ) -> dict[str, Any]:
     """
     Start migration export on this instance.
@@ -2083,6 +2083,8 @@ class GraphClient(BaseGraphClient):
     Args:
         source_version: Current LadybugDB version
         target_version: Target LadybugDB version
+        bucket: S3 bucket for the system backup. The writer container does not
+            resolve USER_DATA_BUCKET itself, so the caller passes it in.
 
     Returns:
         Task ID and monitor URL
@@ -2090,7 +2092,11 @@ class GraphClient(BaseGraphClient):
     response = await self._request(
       "POST",
       "/migration/export",
-      params={"source_version": source_version, "target_version": target_version},
+      params={
+        "source_version": source_version,
+        "target_version": target_version,
+        "bucket": bucket,
+      },
       timeout=30.0,
       retries=0,
     )
