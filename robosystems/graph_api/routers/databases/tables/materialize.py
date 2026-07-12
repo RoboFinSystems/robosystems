@@ -21,16 +21,19 @@ from robosystems.middleware.graph.instance_busy import (
 )
 
 # Max rows per Arrow record batch streamed from DuckDB into a single LadybugDB
-# COPY. This is an inner memory-safety cap, NOT the primary batch size -- callers
-# already bound each materialize request via their own OUTER batching:
-#   - SEC pipeline: hash-batching at MATERIALIZATION_BATCH_SIZE (20M rows/call)
-#   - tenant/direct: chunked_materialization at the tier's chunk_size_rows
-# Keeping this cap >= those outer sizes means each call materializes in ONE COPY.
-# Each COPY is its own transaction + WAL commit + auto-checkpoint check, so
-# per-table cost is dominated by COPY COUNT, not row throughput: at the old 100k a
-# 19M SEC hash-batch fanned out into ~190 COPYs (~8s each) and `Element` took 644s
-# vs ~60s for the pre-0.18 single-COPY path. At 25M each hash-batch is one COPY
-# again; the shared master's 50 GB buffer pool + spill-to-disk absorbs it.
+# COPY. Sized at/above the outer batchers (SEC hash-batching at
+# MATERIALIZATION_BATCH_SIZE = 20M/call; tenant/direct chunked_materialization at
+# the tier chunk_size_rows) so each already-bounded call materializes in ONE COPY.
+# Per-table cost is dominated by COPY COUNT -- each COPY is its own transaction +
+# WAL commit + checkpoint check -- not row throughput: at the old 100k a 19M SEC
+# hash-batch fanned into ~190 COPYs (~8s each) and Element took 644s vs ~60s for
+# the pre-0.18 single-COPY path.
+# Safe at this size only because the materialize connections SET
+# arrow_large_buffer_size=true (in the get_connection blocks below): DuckDB then
+# emits 64-bit LargeString offsets, lifting Arrow's 2 GiB (2^31) regular-string-
+# buffer cap that a wide column like Fact.uri (~128 B/row XBRL concept URIs, not
+# externalizable) otherwise overflows at ~19M rows, ABORTING the process. Verified
+# locally that ladybug's COPY reader accepts Arrow LargeString.
 ARROW_STREAM_BATCH_ROWS = 25_000_000
 
 
@@ -268,6 +271,10 @@ async def _materialize_table_impl(
 
     try:
       with duckdb_pool.get_connection(duckdb_graph_id) as duck_conn:
+        # 64-bit Arrow string offsets: wide columns (e.g. Fact.uri ~128 B/row)
+        # otherwise overflow Arrow's 2 GiB regular-string-buffer cap when a large
+        # batch streams as one record batch, aborting the process.
+        duck_conn.execute("SET arrow_large_buffer_size=true")
         # Flush WAL so the parquet export sees all committed staging data
         checkpoint_with_retry(duck_conn, duckdb_graph_id, context="DuckDB")
 
@@ -592,6 +599,8 @@ async def _fork_from_parent_duckdb_impl(
         duckdb_pool.get_connection(parent_graph_id) as duck_conn,
         ladybug_service.db_manager.connection_pool.get_connection(subgraph_id) as conn,
       ):
+        # See main path: 64-bit Arrow string offsets to avoid the 2 GiB cap.
+        duck_conn.execute("SET arrow_large_buffer_size=true")
         for table_name in tables_to_copy:
           source_columns = duck_conn.execute(
             "SELECT column_name, data_type FROM information_schema.columns "
