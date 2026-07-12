@@ -172,7 +172,7 @@ GRAPH_API_TAGS = [
   },
   {
     "name": "Vector Index",
-    "description": "🔮 Vector index - Build and search vector indexes (LadybugDB HNSW + LanceDB IVF-PQ)",
+    "description": "🔮 Vector index - Build LadybugDB HNSW indexes (searched in Cypher via QUERY_VECTOR_INDEX)",
   },
   {
     "name": "Semantic Memory",

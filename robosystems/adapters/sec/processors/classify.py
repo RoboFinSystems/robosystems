@@ -10,7 +10,7 @@ Two classification layers:
    elements against the Seattle Method disclosure mechanics taxonomy (143 mappings).
 
 Results are returned as DataFrames for the existing parquet pipeline to pick up.
-This module uses real_ladybug directly — no Graph API, no HTTP.
+This module uses ladybug directly — no Graph API, no HTTP.
 """
 
 from __future__ import annotations
@@ -290,7 +290,7 @@ class TempLadybugContext:
   """Temporary embedded LadybugDB for per-filing Cypher-based analysis.
 
   Creates a LadybugDB database in a temp directory, installs schema DDL,
-  and cleans up on exit. Uses real_ladybug directly — no Graph API.
+  and cleans up on exit. Uses ladybug directly — no Graph API.
   """
 
   def __init__(self, ddl_statements: list[str] | None = None):
@@ -300,7 +300,7 @@ class TempLadybugContext:
     self._ddl = ddl_statements or _generate_ddl()
 
   def __enter__(self) -> TempLadybugContext:
-    import real_ladybug as lbug
+    import ladybug as lbug
 
     self._tmpdir = tempfile.mkdtemp(prefix="lbug_classify_")
     db_path = str(Path(self._tmpdir) / "classify.lbug")

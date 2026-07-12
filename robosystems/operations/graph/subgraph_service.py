@@ -249,17 +249,26 @@ class SubgraphService:
         is_subgraph=True,  # Bypass max_databases check for Enterprise/Premium
       )
 
-      # Install schema with extensions using the same pattern as entity graph creation
-      logger.info(
-        f"Installing schema with extensions: {schema_extensions} (include_base={include_base})"
-      )
-      ddl = await self._generate_schema_ddl(
-        schema_extensions or [], include_base=include_base
-      )
-
-      result = await client.install_schema(graph_id=database_name, custom_ddl=ddl)
-      logger.info(f"Schema installation completed: {result}")
-      logger.info(f"Installed schema with {len(schema_extensions or [])} extensions")
+      # Install schema with extensions using the same pattern as entity graph creation.
+      # An empty subgraph (no base, no extensions) generates no DDL — skip the
+      # install entirely and leave a bare database for the caller to define.
+      if not include_base and not schema_extensions:
+        logger.info("Empty subgraph — no schema installed (bare database)")
+      else:
+        logger.info(
+          f"Installing schema with extensions: {schema_extensions} (include_base={include_base})"
+        )
+        ddl = await self._generate_schema_ddl(
+          schema_extensions or [], include_base=include_base
+        )
+        if ddl.strip():
+          result = await client.install_schema(graph_id=database_name, custom_ddl=ddl)
+          logger.info(f"Schema installation completed: {result}")
+          logger.info(
+            f"Installed schema with {len(schema_extensions or [])} extensions"
+          )
+        else:
+          logger.info("Generated schema was empty — no DDL to install")
 
       logger.info(f"Successfully created subgraph database {subgraph_id}")
 
@@ -327,14 +336,19 @@ class SubgraphService:
     try:
       # Build schema extensions list
       include_base = True
-      # Legacy "memory" alias accepted for backward compat; canonical is "knowledge".
-      if subgraph_type in ("knowledge", "memory"):
+      if subgraph_type == "knowledge":
         # Knowledge subgraphs get only the knowledge extension (no base Entity/Period/etc.)
         extensions = ["knowledge"]
         include_base = False
         logger.info(
           "Using knowledge-only schema (no base schema) for knowledge subgraph"
         )
+      elif subgraph_type == "empty":
+        # Empty subgraphs get a bare database — no base schema, no extensions.
+        # The caller defines their own schema afterward via DDL.
+        extensions = []
+        include_base = False
+        logger.info("Creating empty subgraph (bare database, no schema)")
       else:
         extensions = list(parent_graph.schema_extensions or [])
 

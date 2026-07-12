@@ -97,8 +97,8 @@ class TestLadybugConnectionPool:
     assert pool.health_check_interval == timedelta(minutes=5)
     assert pool.cleanup_interval == timedelta(minutes=10)
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_get_connection_context_manager(self, mock_conn_class, mock_db_class):
     """Test connection retrieval using context manager."""
     # Mock LadybugDB classes
@@ -164,8 +164,8 @@ class TestLadybugConnectionPool:
 
     mock_result.close.assert_called_once()
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_connection_reuse(self, mock_conn_class, mock_db_class):
     """Test connection reuse from pool."""
     # Mock LadybugDB classes
@@ -200,8 +200,8 @@ class TestLadybugConnectionPool:
     assert pool._stats["connections_created"] == 1
     assert pool._stats["connections_reused"] == 1
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_max_connections_per_database(self, mock_conn_class, mock_db_class):
     """Test connection limit enforcement per database."""
     # Mock LadybugDB classes to return different instances
@@ -246,8 +246,8 @@ class TestLadybugConnectionPool:
     close_calls = sum(1 for mock_conn in mock_conns if mock_conn.close.called)
     assert close_calls >= 1
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_connection_ttl_expiry(self, mock_conn_class, mock_db_class):
     """Test connection TTL expiry and cleanup."""
     # Mock LadybugDB classes
@@ -292,8 +292,8 @@ class TestLadybugConnectionPool:
     mock_conn.close.assert_called()
     # Database is not closed until all connections are closed or invalidated
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_connection_health_check_failure(self, mock_conn_class, mock_db_class):
     """Test connection health check failure and recovery."""
     # Mock LadybugDB classes
@@ -339,8 +339,8 @@ class TestLadybugConnectionPool:
     assert "db1" in pool._locks
     assert "db2" in pool._locks
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_connection_validity_check(self, mock_conn_class, mock_db_class):
     """Test connection validity checking."""
     pool = LadybugConnectionPool(
@@ -389,8 +389,8 @@ class TestLadybugConnectionPool:
     assert pool._is_connection_valid(expired_conn_info) is False
     assert pool._is_connection_valid(unhealthy_conn_info) is False
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_cleanup_expired_connections(self, mock_conn_class, mock_db_class):
     """Test cleanup of expired connections."""
     # Mock LadybugDB classes
@@ -425,8 +425,8 @@ class TestLadybugConnectionPool:
     # Database is not closed until all connections are closed or invalidated
     assert len(pool._pools.get("test_db", {})) == 0
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_maintenance_task_scheduling(self, mock_conn_class, mock_db_class):
     """Test automatic maintenance task scheduling."""
     pool = LadybugConnectionPool(
@@ -450,8 +450,8 @@ class TestLadybugConnectionPool:
     pool._cleanup_expired_connections.assert_called_once()
     pool._check_connection_health.assert_called_once()
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_get_stats(self, mock_conn_class, mock_db_class):
     """Test connection pool statistics retrieval."""
     # Mock LadybugDB classes
@@ -489,8 +489,8 @@ class TestLadybugConnectionPool:
     assert stats["configuration"]["max_connections_per_db"] == 5
     assert stats["configuration"]["connection_ttl_minutes"] == 30
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_close_database_connections(self, mock_conn_class, mock_db_class):
     """Test closing all connections for a specific database."""
     # Mock LadybugDB classes
@@ -524,8 +524,8 @@ class TestLadybugConnectionPool:
     assert "db2" in pool._pools
     assert len(pool._pools.get("db1", {})) == 0
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_close_all_connections(self, mock_conn_class, mock_db_class):
     """Test closing all connections in the pool."""
     # Mock LadybugDB classes
@@ -561,7 +561,7 @@ class TestLadybugConnectionPool:
     assert len(pool._pools) == 0
     assert len(pool._locks) == 0
 
-  @patch("real_ladybug.Database")
+  @patch("ladybug.Database")
   def test_connection_creation_error_handling(self, mock_db_class):
     """Test error handling during connection creation."""
     # Mock LadybugDB database creation failure
@@ -600,8 +600,8 @@ class TestLadybugConnectionPool:
     # Verify locks were created correctly
     assert len(pool._locks) == 3  # db_0, db_1, db_2
 
-  @patch("real_ladybug.Database")
-  @patch("real_ladybug.Connection")
+  @patch("ladybug.Database")
+  @patch("ladybug.Connection")
   def test_lru_connection_selection(self, mock_conn_class, mock_db_class):
     """Test least recently used connection selection."""
     # Mock LadybugDB classes
@@ -710,8 +710,8 @@ class TestConnectionPoolIntegration:
     try:
       # Mock LadybugDB to avoid segmentation faults
       with (
-        patch("real_ladybug.Database") as mock_db_class,
-        patch("real_ladybug.Connection") as mock_conn_class,
+        patch("ladybug.Database") as mock_db_class,
+        patch("ladybug.Connection") as mock_conn_class,
       ):
         # Setup mocks
         mock_db = MagicMock()
@@ -803,8 +803,8 @@ class TestConnectionPoolIntegration:
     try:
       # Mock LadybugDB to avoid segmentation faults
       with (
-        patch("real_ladybug.Database") as mock_db_class,
-        patch("real_ladybug.Connection") as mock_conn_class,
+        patch("ladybug.Database") as mock_db_class,
+        patch("ladybug.Connection") as mock_conn_class,
       ):
         # Setup mocks
         mock_db = MagicMock()

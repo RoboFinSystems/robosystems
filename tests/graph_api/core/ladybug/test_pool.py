@@ -362,7 +362,7 @@ class TestLadybugConnectionPoolForceDatabaseCleanup:
     pool._pools["sec"] = {}
 
     with (
-      patch("real_ladybug.Connection") as mock_conn_cls,
+      patch("ladybug.Connection") as mock_conn_cls,
       patch("gc.collect"),
     ):
       mock_temp_conn = MagicMock()

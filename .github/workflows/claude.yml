@@ -65,10 +65,10 @@ jobs:
       pull-requests: read
       issues: read
       actions: read # Required for Claude to read CI results on PRs
-      # id-token: write intentionally omitted — Claude authenticates with
-      # CLAUDE_CODE_OAUTH_TOKEN and assumes no cloud (OIDC) role in this workflow,
-      # so GitHub OIDC token-minting is not needed. Restore it only if a step
-      # here ever assumes an AWS role via configure-aws-credentials.
+      id-token: write # Required: claude-code-action mints a GitHub OIDC token to
+        # authenticate to GitHub (setupGitHubToken → getOidcToken), independent of
+        # any cloud role. Without it the action fails: "Could not fetch an OIDC
+        # token." (This is GitHub auth, not AWS — do not drop it as "unused".)
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7

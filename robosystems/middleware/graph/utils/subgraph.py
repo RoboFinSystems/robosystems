@@ -14,10 +14,14 @@ from ..types import SUBGRAPH_NAME_PATTERN as SUBGRAPH_NAME_PATTERN_STR
 
 
 class SubgraphType(Enum):
-  """Types of subgraphs (for future expansion)."""
+  """Types of subgraphs.
+
+  NOTE: this enum is currently unused — the API-layer SubgraphType in
+  models/api/graphs/subgraphs.py is the live one. Kept minimal; candidate
+  for removal.
+  """
 
   STATIC = "static"  # Traditional environment-based subgraphs
-  VERSIONED = "versioned"  # Git-like version control (future)
 
 
 class SubgraphInfo(NamedTuple):

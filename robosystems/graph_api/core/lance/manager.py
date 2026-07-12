@@ -1,6 +1,17 @@
 """
 LanceDB Vector Index Manager for Graph API.
 
+DORMANT — NOT DEAD CODE. This is the batch IVF-PQ index builder (build from a
+DuckDB staging query → export as tar.gz). Its only consumer (SEC element-vector
+search) was retired in the 2026-07 embedding cut, so nothing calls build/search/
+export today. It is kept deliberately as the queued IVF-PQ foundation for the
+future `lance` vector-store subgraph (multimodal-knowledge-graph spec §58/§118);
+that subgraph pairs this batch-index side with the incremental-CRUD side of
+`LanceMemoryStore`. The LIVE vector path is instead LadybugDB-native in-graph
+HNSW (`CALL QUERY_VECTOR_INDEX`). Do not remove without retiring the lance
+subgraph plan. (`delete` is the one method still live — called on database drop
+to tear down the whole graph lance dir, including memory.)
+
 Manages per-graph, per-table LanceDB IVF-PQ vector indexes on graph instances.
 Follows the same lifecycle pattern as DuckDB staging:
 

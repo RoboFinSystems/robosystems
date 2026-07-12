@@ -1,14 +1,20 @@
 """
 Vector index management endpoints for Graph API.
 
-Supports two backends via explicit `backend` field:
+Two backends via the `backend` field:
 
-  - **lance** (default): LanceDB IVF-PQ indexes built from DuckDB staging queries.
-    Used for shared repositories (SEC) where replicas need exported indexes.
+  - **hnsw** — the LIVE path. LadybugDB-native HNSW index on a materialized
+    table. Built here (the materialize path calls build with backend='hnsw');
+    *searched in Cypher* via CALL QUERY_VECTOR_INDEX, NOT the /search route.
+    This is what supplyflow-backend uses.
 
-  - **hnsw**: LadybugDB native HNSW indexes on materialized graph data.
-    Used for user/custom graphs where vector search runs via Cypher
-    (CALL QUERY_VECTOR_INDEX).
+  - **lance** — DORMANT (not dead). LanceDB IVF-PQ built from a DuckDB staging
+    query + tar.gz export. Its original consumer (SEC element-vector search) was
+    retired in the 2026-07 embedding cut; it is kept as the queued IVF-PQ
+    foundation for the future `lance` vector-store subgraph — which, unlike
+    LadybugDB, exposes vector search over THESE routes rather than Cypher
+    (multimodal-knowledge-graph spec §58/§118). Distinct from Semantic Memory
+    (the incremental-CRUD specialization of the same modality).
 
 Endpoints:
 

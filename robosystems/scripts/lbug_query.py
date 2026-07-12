@@ -16,7 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-import real_ladybug as lbug
+import ladybug as lbug
 
 from robosystems.utils.query_output import (
   print_csv,

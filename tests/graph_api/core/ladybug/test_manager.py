@@ -145,8 +145,8 @@ class TestLadybugDatabaseManagerCreateDatabase:
     request = DatabaseCreateRequest(graph_id="newdb", schema_type="entity")
 
     with (
-      patch("real_ladybug.Database"),
-      patch("real_ladybug.Connection") as mock_conn_cls,
+      patch("ladybug.Database"),
+      patch("ladybug.Connection") as mock_conn_cls,
     ):
       mock_conn = MagicMock()
       mock_conn_cls.return_value = mock_conn
@@ -171,8 +171,8 @@ class TestLadybugDatabaseManagerCreateDatabase:
     request = DatabaseCreateRequest(graph_id="sec", schema_type="shared")
 
     with (
-      patch("real_ladybug.Database") as mock_db_cls,
-      patch("real_ladybug.Connection") as mock_conn_cls,
+      patch("ladybug.Database") as mock_db_cls,
+      patch("ladybug.Connection") as mock_conn_cls,
     ):
       mock_conn = MagicMock()
       mock_conn_cls.return_value = mock_conn
@@ -199,7 +199,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
     request = DatabaseCreateRequest(graph_id="faildb", schema_type="entity")
 
     with (
-      patch("real_ladybug.Database", side_effect=RuntimeError("DB create failed")),
+      patch("ladybug.Database", side_effect=RuntimeError("DB create failed")),
       patch(
         "robosystems.graph_api.core.ladybug.config.get_database_memory_config",
         return_value=256,
@@ -219,8 +219,8 @@ class TestLadybugDatabaseManagerCreateDatabase:
     )
 
     with (
-      patch("real_ladybug.Database"),
-      patch("real_ladybug.Connection") as mock_conn_cls,
+      patch("ladybug.Database"),
+      patch("ladybug.Connection") as mock_conn_cls,
     ):
       mock_conn = MagicMock()
       mock_conn_cls.return_value = mock_conn

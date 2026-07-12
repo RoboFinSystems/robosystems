@@ -148,7 +148,9 @@ def create_app() -> FastAPI:
     import shutil
 
     cache_paths_to_clear = [
-      # Current path (after fix): home_dir=base_path, cache at base_path/.lbug/extension
+      # LadybugDB 0.15+ convention: cache at base_path/.lbdb/extension
+      Path(env.LBUG_DATABASE_PATH) / ".lbdb" / "extension",
+      # Pre-0.15 path: home_dir=base_path, cache at base_path/.lbug/extension
       Path(env.LBUG_DATABASE_PATH) / ".lbug" / "extension",
       # Legacy double-nested path: home_dir=base_path/.lbug, cache at base_path/.lbug/.lbug/extension
       Path(env.LBUG_DATABASE_PATH) / ".lbug" / ".lbug" / "extension",

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import real_ladybug as lbug
+import ladybug as lbug
 
 from robosystems.config import env
 from robosystems.graph_api.interfaces import GraphEngineInterface, GraphOperation
