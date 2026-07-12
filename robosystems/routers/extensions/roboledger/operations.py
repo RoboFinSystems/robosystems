@@ -678,7 +678,7 @@ class RemovePublishListMemberOperation(BaseModel):
 @router.post(
   "/initialize",
   response_model=OperationEnvelope[InitializeLedgerResponse],
-  operation_id="opInitializeLedger",
+  operation_id="initializeLedger",
   summary="Initialize Ledger",
   description="One-time setup: creates the fiscal calendar and seeds periods. Returns 409 if already initialized.",
   tags=[_OP_TAG],
@@ -734,7 +734,7 @@ async def initialize_op(
 @router.post(
   "/update-entity",
   response_model=OperationEnvelope[LedgerEntityResponse],
-  operation_id="opUpdateEntity",
+  operation_id="updateEntity",
   summary="Update Entity",
   description=(
     "Update the graph's primary entity. Only provided (non-null) fields "
@@ -991,7 +991,7 @@ class AutoMapElementsOperation(BaseModel):
   "/auto-map-elements",
   response_model=OperationEnvelope,
   status_code=202,
-  operation_id="opAutoMapElements",
+  operation_id="autoMapElements",
   summary="Auto-Map Elements via AI (async)",
   description="Dispatches to the background worker — returns a `pending` envelope immediately. Monitor via SSE at `/v1/operations/{operation_id}/stream`. Confidence thresholds: ≥0.90 auto-approved, 0.70–0.89 flagged for review, <0.70 skipped.",
   tags=[_OP_TAG],
@@ -1506,7 +1506,7 @@ rebuild_schedule_op = _registrar.register(
 @router.post(
   "/set-close-target",
   response_model=OperationEnvelope[FiscalCalendarResponse],
-  operation_id="opSetCloseTarget",
+  operation_id="setCloseTarget",
   summary="Set Close Target",
   description=(
     "Set the user-controlled goal period for closing (`close_target`). "
@@ -1580,7 +1580,7 @@ async def set_close_target_op(
 @router.post(
   "/close-period",
   response_model=OperationEnvelope[ClosePeriodResponse],
-  operation_id="opClosePeriod",
+  operation_id="closePeriod",
   summary="Close Fiscal Period",
   description=(
     "Lock a single fiscal period. Posts draft entries, runs the "
@@ -1705,7 +1705,7 @@ async def close_period_op(
 @router.post(
   "/reopen-period",
   response_model=OperationEnvelope[FiscalCalendarResponse],
-  operation_id="opReopenPeriod",
+  operation_id="reopenPeriod",
   summary="Reopen Fiscal Period",
   description=(
     "Decrement `closed_through` by one. Only the most recently closed "
@@ -1782,7 +1782,7 @@ async def reopen_period_op(
 @router.post(
   "/create-report",
   response_model=OperationEnvelope[ReportResponse],
-  operation_id="opCreateReport",
+  operation_id="createReport",
   summary="Create Report",
   description="Generates report facts from the ledger and marks the report as published.",
   tags=[_OP_TAG],
@@ -1844,7 +1844,7 @@ async def create_report_op(
 @router.post(
   "/regenerate-report",
   response_model=OperationEnvelope[ReportResponse],
-  operation_id="opRegenerateReport",
+  operation_id="regenerateReport",
   summary="Regenerate Report",
   description=(
     "Re-runs fact generation for an existing Report against the latest "
@@ -1914,7 +1914,7 @@ async def regenerate_report_op(
 @router.post(
   "/delete-report",
   response_model=OperationEnvelope[DeleteResult],
-  operation_id="opDeleteReport",
+  operation_id="deleteReport",
   summary="Delete Report",
   description="Deletes the report definition and all generated facts.",
   tags=[_OP_TAG],
@@ -1967,7 +1967,7 @@ async def delete_report_op(
 @router.post(
   "/share-report",
   response_model=OperationEnvelope[ShareReportResponse],
-  operation_id="opShareReport",
+  operation_id="shareReport",
   summary="Share Report",
   description=(
     "Pushes a published report to every member of the target publish "
@@ -2032,7 +2032,7 @@ async def share_report_op(
 @router.post(
   "/file-report",
   response_model=OperationEnvelope[ReportResponse],
-  operation_id="opFileReport",
+  operation_id="fileReport",
   summary="File Report",
   description=(
     "Transitions the Report's filing_status to 'filed' — locks the package. "
@@ -2083,7 +2083,7 @@ async def file_report_op(
 @router.post(
   "/transition-filing-status",
   response_model=OperationEnvelope[ReportResponse],
-  operation_id="opTransitionFilingStatus",
+  operation_id="transitionFilingStatus",
   summary="Transition Filing Status",
   description=(
     "Move a Report along the non-file legs of the filing lifecycle "
@@ -2142,7 +2142,7 @@ async def transition_filing_status_op(
 @router.post(
   "/create-publish-list",
   response_model=OperationEnvelope[PublishListResponse],
-  operation_id="opCreatePublishList",
+  operation_id="createPublishList",
   summary="Create Publish List",
   description=(
     "Create a publish list (a saved set of recipient graphs). Members "
@@ -2189,7 +2189,7 @@ async def create_publish_list_op(
 @router.post(
   "/update-publish-list",
   response_model=OperationEnvelope[PublishListResponse],
-  operation_id="opUpdatePublishList",
+  operation_id="updatePublishList",
   summary="Update Publish List",
   description="Updates the publish list's `name` and/or `description`. Membership is managed via add/remove-member operations.",
   tags=[_OP_TAG],
@@ -2239,7 +2239,7 @@ async def update_publish_list_op(
 @router.post(
   "/delete-publish-list",
   response_model=OperationEnvelope[DeleteResult],
-  operation_id="opDeletePublishList",
+  operation_id="deletePublishList",
   summary="Delete Publish List",
   description=(
     "Delete a publish list and its membership rows. Reports previously "
@@ -2290,7 +2290,7 @@ async def delete_publish_list_op(
 @router.post(
   "/add-publish-list-members",
   response_model=OperationEnvelope[list[PublishListMemberResponse]],
-  operation_id="opAddPublishListMembers",
+  operation_id="addPublishListMembers",
   summary="Add Members to Publish List",
   description=(
     "Add one or more recipient graphs to a publish list. Targets must "
@@ -2354,7 +2354,7 @@ async def add_publish_list_members_op(
 @router.post(
   "/remove-publish-list-member",
   response_model=OperationEnvelope[DeleteResult],
-  operation_id="opRemovePublishListMember",
+  operation_id="removePublishListMember",
   summary="Remove Member from Publish List",
   description="Remove a single recipient from a publish list.",
   tags=[_OP_TAG],

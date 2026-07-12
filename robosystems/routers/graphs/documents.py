@@ -94,7 +94,7 @@ def _document_to_detail(doc: Document) -> DocumentDetailResponse:
 @router.get(
   "",
   summary="List Documents",
-  operation_id="list_documents",
+  operation_id="listDocuments",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def list_documents(
@@ -120,7 +120,7 @@ async def list_documents(
 @router.get(
   "/{document_id}",
   summary="Get Document",
-  operation_id="get_document",
+  operation_id="getDocument",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_document(
