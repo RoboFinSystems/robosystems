@@ -28,6 +28,11 @@ async def export_for_migration(
   background_tasks: BackgroundTasks,
   source_version: str = Query(..., description="Current LadybugDB version"),
   target_version: str = Query(..., description="Target LadybugDB version"),
+  bucket: str = Query(
+    ...,
+    description="S3 bucket for the system backup; the caller resolves "
+    "USER_DATA_BUCKET (this writer container does not set it)",
+  ),
 ) -> MigrationExportResponse:
   """
   Export all databases on this instance for version migration.
@@ -46,7 +51,11 @@ async def export_for_migration(
     },
   )
   background_tasks.add_task(
-    migration_service.export_all_databases, task_id, source_version, target_version
+    migration_service.export_all_databases,
+    task_id,
+    source_version,
+    target_version,
+    bucket,
   )
   return MigrationExportResponse(
     task_id=task_id, monitor_url=f"/tasks/{task_id}/monitor"

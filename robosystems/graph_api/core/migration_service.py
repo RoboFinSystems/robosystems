@@ -101,7 +101,12 @@ class MigrationService:
     return boto3.client("s3", **kwargs)
 
   def _upload_system_backup(
-    self, db_file: Path, graph_id: str, source_version: str, target_version: str
+    self,
+    db_file: Path,
+    graph_id: str,
+    source_version: str,
+    target_version: str,
+    bucket: str,
   ) -> str:
     """Upload .lbug file to S3 as a system backup before migration.
 
@@ -110,10 +115,11 @@ class MigrationService:
     """
     timestamp = datetime.now(UTC)
     s3_key = get_backup_key(graph_id, "system", timestamp, extension=".lbug")
-    # All graph storage (backups included) lives in USER_DATA_BUCKET — see
-    # config/storage/graph.py. env.S3_GRAPH_BUCKET never existed, so this
-    # upload raised AttributeError and aborted every migration export.
-    bucket = env.USER_DATA_BUCKET
+    # The bucket is passed in by the caller. The migration op resolves
+    # USER_DATA_BUCKET in the worker (where it is set) and forwards it, matching
+    # the backup/restore endpoints, which also take the bucket from the request.
+    # The graph-api writer container does not set USER_DATA_BUCKET, so reading it
+    # here would resolve to the bogus default and 404 on upload.
 
     s3_client = self._get_s3_client()
     transfer_config = TransferConfig(
@@ -208,7 +214,7 @@ class MigrationService:
       )
 
   async def export_all_databases(
-    self, task_id: str, source_version: str, target_version: str
+    self, task_id: str, source_version: str, target_version: str, bucket: str
   ) -> None:
     """
     Background task: export all databases to Parquet for version migration.
@@ -279,7 +285,7 @@ class MigrationService:
         # Upload system backup to S3 (safety net)
         db_size = db_file.stat().st_size
         system_backup_key = self._upload_system_backup(
-          db_file, db_name, source_version, target_version
+          db_file, db_name, source_version, target_version, bucket
         )
 
         manifest_databases.append(

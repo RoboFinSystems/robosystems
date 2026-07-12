@@ -152,7 +152,9 @@ async def _export_instance(
   start = time.time()
   client = await _get_client(ip)
 
-  export_response = await client.migration_export(source_version, target_version)
+  export_response = await client.migration_export(
+    source_version, target_version, env.USER_DATA_BUCKET
+  )
   task_id = export_response["task_id"]
 
   task_result = await _poll_task(client, task_id)
