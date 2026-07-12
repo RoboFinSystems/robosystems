@@ -50,6 +50,11 @@ on:
         required: true
         type: string
         description: ECR image tag
+      shared_replica_image_tag:
+        required: false
+        type: string
+        default: ""
+        description: "ECR image tag for the SEC shared replicas only. Callers pass the specific build git tag (like the ECS services) so replicas are pinned to an exact version and don't drift to the moving tag on scale/spot/health boots — keeping the replica engine matched to the S3 sec.lbug it downloads. Empty falls back to ecr_image_tag (writers/master keep the moving tag)."
       # Infrastructure inputs (from graph infrastructure deployment)
       secret_arn:
         required: true
@@ -509,7 +514,9 @@ jobs:
       spot_enabled: ${{ inputs.shared_replicas_spot_enabled }}
       od_base: ${{ inputs.shared_replicas_od_base }}
       spot_weight: ${{ inputs.shared_replicas_spot_weight }}
-      ecr_image_tag: ${{ inputs.ecr_image_tag }}
+      # Replicas can be pinned to a specific engine version independently of the
+      # writers/master (empty falls back to the moving ecr_image_tag).
+      ecr_image_tag: ${{ inputs.shared_replica_image_tag || inputs.ecr_image_tag }}
       # Cache Configuration
       valkey_sg_id: ${{ inputs.valkey_sg_id }}
       valkey_url: ${{ inputs.valkey_url }}
