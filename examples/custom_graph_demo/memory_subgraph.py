@@ -29,13 +29,12 @@ import json
 import os
 import sys
 import time
-from enum import Enum
 from pathlib import Path
 
-from robosystems_client.api.content_operations.op_remember import (
+from robosystems_client.api.content_operations.remember import (
   sync_detailed as api_remember,
 )
-from robosystems_client.api.graph_operations.op_create_subgraph import (
+from robosystems_client.api.graph_operations.create_subgraph import (
   sync_detailed as api_create_subgraph,
 )
 from robosystems_client.api.memory.list_memories import (
@@ -47,6 +46,9 @@ from robosystems_client.api.memory.recall_memory import (
 from robosystems_client.api.query.execute_cypher import (
   sync_detailed as api_execute_query,
 )
+from robosystems_client.api.subgraphs.list_subgraphs import (
+  sync_detailed as api_list_subgraphs,
+)
 from robosystems_client.client import AuthenticatedClient
 from robosystems_client.models.create_subgraph_request import CreateSubgraphRequest
 from robosystems_client.models.cypher_statement_request import CypherStatementRequest
@@ -55,6 +57,7 @@ from robosystems_client.models.cypher_statement_request_parameters_type_0 import
 )
 from robosystems_client.models.memory_recall_request import MemoryRecallRequest
 from robosystems_client.models.remember_op import RememberOp
+from robosystems_client.models.subgraph_type import SubgraphType
 from robosystems_client.types import UNSET
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -65,19 +68,6 @@ from examples._common.config import get_graph_id  # noqa: E402
 
 CREDENTIALS_FILE = PROJECT_ROOT / ".local" / "config.json"
 DEMO_NAME = "custom_graph_demo"
-
-
-class SubgraphType(str, Enum):
-  """Subgraph types the server accepts.
-
-  The installed generated client predates the "memory" -> "knowledge" rename,
-  so its own SubgraphType enum still exposes the retired "memory" value and
-  lacks "knowledge". Declare the value the server expects locally until the
-  client is regenerated. attrs does not type-validate the request field, and
-  the client's to_dict() only reads ``.value``, so this drops in cleanly.
-  """
-
-  KNOWLEDGE = "knowledge"
 
 
 def make_params(params: dict) -> CypherStatementRequestParametersType0:
@@ -155,30 +145,23 @@ def create_memory_subgraph(
 
 
 def list_subgraphs(client: AuthenticatedClient, graph_id: str) -> None:
-  """List all subgraphs for the parent graph.
-
-  Uses a raw GET rather than the generated ``list_subgraphs`` op: the installed
-  client's SubgraphType enum predates ``knowledge`` and its response parser
-  raises ValueError when it deserializes a knowledge subgraph. Parsing the JSON
-  ourselves keeps the demo working until the client is regenerated.
-  """
+  """List all subgraphs for the parent graph."""
   print(f"\n📋 Listing subgraphs for {graph_id}...")
 
-  httpx_client = client.get_httpx_client()
-  response = httpx_client.get(f"/v1/graphs/{graph_id}/subgraphs")
+  response = api_list_subgraphs(graph_id=graph_id, client=client)
 
   if response.status_code != 200:
     print(f"   ⚠️  Failed to list subgraphs: {response.status_code}")
     return
 
-  payload = response.json()
-  subgraphs = payload.get("subgraphs", [])
+  parsed = response.parsed
+  subgraphs = getattr(parsed, "subgraphs", None) or []
   print(f"   Total: {len(subgraphs)} subgraph(s)")
   for sg in subgraphs:
-    sg_name = sg.get("subgraph_name", "?")
-    sg_type = sg.get("subgraph_type", "?")
-    sg_status = sg.get("status", "?")
-    sg_id = sg.get("graph_id", "?")
+    sg_name = getattr(sg, "subgraph_name", "?")
+    sg_type = getattr(sg, "subgraph_type", "?")
+    sg_status = getattr(sg, "status", "?")
+    sg_id = getattr(sg, "graph_id", "?")
     print(f"   • {sg_name} ({sg_type}) — {sg_status} — {sg_id}")
 
 
