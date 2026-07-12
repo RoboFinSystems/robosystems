@@ -100,6 +100,25 @@ class MigrationService:
       kwargs["aws_secret_access_key"] = s3_config.get("aws_secret_access_key")
     return boto3.client("s3", **kwargs)
 
+  def _checkpoint_database(self, graph_id: str) -> None:
+    """Drain the WAL into the .lbug file via the connection pool (single-writer path).
+
+    Run before EXPORT so the on-disk file rolls cleanly to the new engine
+    version. An un-checkpointed v40 WAL tail cannot be replayed by the new engine
+    after an upgrade ("Corrupted wal file. Read out invalid WAL record type."),
+    which 500s every read until the import rebuilds the db; it also leaves the raw
+    .lbug S3 system backup (which excludes the .wal) incomplete. The pool's
+    auto_checkpoint only fires past a size threshold (512 MB for regular graphs),
+    so small graphs never auto-drain — hence the explicit CHECKPOINT. Mirrors
+    OnInstanceBackupService._checkpoint. Best-effort: the caller logs and
+    continues on failure (the parquet export still captures committed WAL data).
+    """
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
+
+    service = get_ladybug_service()
+    with service.db_manager.get_connection(graph_id, read_only=False) as conn:
+      conn.execute("CHECKPOINT")
+
   def _upload_system_backup(
     self,
     db_file: Path,
@@ -260,6 +279,15 @@ class MigrationService:
         export_dir = self.exports_path / db_name
 
         logger.info(f"Exporting {db_name} ({i + 1}/{len(databases)})")
+
+        # Drain the WAL on the OLD engine so the file rolls cleanly to the new
+        # engine version (see _checkpoint_database). Best-effort — never block
+        # the export on it; the parquet export captures committed WAL data
+        # regardless, and the read-only export handle below opens the file next.
+        try:
+          self._checkpoint_database(db_name)
+        except Exception as e:
+          logger.warning(f"CHECKPOINT before export failed for {db_name}: {e}")
 
         db = None
         conn = None
