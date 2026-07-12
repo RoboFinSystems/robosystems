@@ -495,6 +495,12 @@ jobs:
       ami_id: ${{ needs.stack-config.outputs.graph_ami_id }}
       # Container Configuration - use staging tag for EC2/ASG (container refresh handles updates)
       ecr_image_tag: staging
+      # SEC shared replicas: pin to this build's exact git tag (like the ECS
+      # services), not the moving staging tag, so a scale/spot/health boot pulls
+      # a fixed version instead of drifting ahead of the S3 sec.lbug it reads. For
+      # an engine upgrade, hold the replicas by not redeploying them until the
+      # new sec.lbug is published, then deploy them forward.
+      shared_replica_image_tag: ${{ needs.build.outputs.image_tag }}
       # Infrastructure inputs from graph infrastructure jobs
       secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
