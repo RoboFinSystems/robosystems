@@ -20,10 +20,18 @@ from robosystems.middleware.graph.instance_busy import (
   instance_busy,
 )
 
-# Rows per Arrow record batch streamed from DuckDB into LadybugDB. Bounds peak
-# memory — the table streams through in batches rather than materializing fully
-# in RAM regardless of its size.
-ARROW_STREAM_BATCH_ROWS = 100_000
+# Max rows per Arrow record batch streamed from DuckDB into a single LadybugDB
+# COPY. This is an inner memory-safety cap, NOT the primary batch size -- callers
+# already bound each materialize request via their own OUTER batching:
+#   - SEC pipeline: hash-batching at MATERIALIZATION_BATCH_SIZE (20M rows/call)
+#   - tenant/direct: chunked_materialization at the tier's chunk_size_rows
+# Keeping this cap >= those outer sizes means each call materializes in ONE COPY.
+# Each COPY is its own transaction + WAL commit + auto-checkpoint check, so
+# per-table cost is dominated by COPY COUNT, not row throughput: at the old 100k a
+# 19M SEC hash-batch fanned out into ~190 COPYs (~8s each) and `Element` took 644s
+# vs ~60s for the pre-0.18 single-COPY path. At 25M each hash-batch is one COPY
+# again; the shared master's 50 GB buffer pool + spill-to-disk absorbs it.
+ARROW_STREAM_BATCH_ROWS = 25_000_000
 
 
 def _copy_result_rows(result, fallback: int) -> int:
