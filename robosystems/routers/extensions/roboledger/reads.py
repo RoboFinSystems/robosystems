@@ -58,7 +58,7 @@ _require_roboledger = require_graph_extension("roboledger")
 @router.post(
   "/live-financial-statement",
   response_model=OperationEnvelope,
-  operation_id="opLiveFinancialStatement",
+  operation_id="liveFinancialStatement",
   summary="Live Financial Statement",
   description=(
     "Generate an ad-hoc financial statement directly from the tenant's "

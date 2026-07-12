@@ -81,7 +81,7 @@ def _require_service(client):
 @router.get(
   "",
   summary="List Memories",
-  operation_id="list_memories",
+  operation_id="listMemories",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def list_memories(
@@ -113,7 +113,7 @@ async def list_memories(
 @router.get(
   "/{memory_id}",
   summary="Get Memory",
-  operation_id="get_memory",
+  operation_id="getMemory",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def get_memory(
@@ -141,7 +141,7 @@ async def get_memory(
   summary="Recall Semantic Memory",
   description="Ranked semantic recall over the graph's per-graph memory store. "
   "Returns scored hits in the same shape as document search.",
-  operation_id="recall_memory",
+  operation_id="recallMemory",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     503: {"description": "Semantic memory not available"},

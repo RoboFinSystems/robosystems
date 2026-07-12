@@ -118,7 +118,7 @@ async def _check_search_rate_limit(
   "",
   summary="Search Graph Documents",
   description="Shared repositories require a subscription; subscription plan determines search rate limits.",
-  operation_id="search_documents",
+  operation_id="searchDocuments",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     503: {"description": "Text search not available"},
@@ -145,7 +145,7 @@ async def search_documents(
 @router.get(
   "/{document_id}",
   summary="Get Document Section",
-  operation_id="get_document_section",
+  operation_id="getDocumentSection",
   responses={
     **RESOURCE_ERROR_RESPONSES,
     503: {"description": "Text search not available"},

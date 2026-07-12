@@ -18,15 +18,15 @@ import sys
 from pathlib import Path
 
 from robosystems_client.clients import (
-  RoboSystemsClients,
   RoboSystemsClientConfig,
+  RoboSystemsClients,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
   sys.path.insert(0, str(PROJECT_ROOT))
 
-from examples._common.config import get_graph_id
+from examples._common.config import get_graph_id  # noqa: E402
 
 CREDENTIALS_FILE = PROJECT_ROOT / ".local" / "config.json"
 DEMO_NAME = "custom_graph_demo"
@@ -47,6 +47,21 @@ def load_credentials() -> dict:
     return json.load(f)
 
 
+def _envelope_result(envelope) -> dict:
+  """Pull the result payload out of an OperationEnvelope.
+
+  ``index-document`` returns the CQRS ``OperationEnvelope`` now; the section
+  counts live in its ``result`` payload rather than as attributes on the
+  envelope itself. ``result`` is typed ``Any``, so it arrives as a plain dict.
+  """
+  result = getattr(envelope, "result", None)
+  if hasattr(result, "to_dict"):
+    return result.to_dict()
+  if hasattr(result, "additional_properties"):
+    return dict(result.additional_properties)
+  return result if isinstance(result, dict) else {}
+
+
 def upload_documents(clients, graph_id: str) -> None:
   """Upload all markdown documents from the documents/ directory."""
   if not DOCUMENTS_DIR.exists():
@@ -63,19 +78,24 @@ def upload_documents(clients, graph_id: str) -> None:
   total_sections = 0
   for md_file in md_files:
     try:
-      result = clients.documents.upload_file(graph_id=graph_id, file_path=md_file)
-      total_sections += result.sections_indexed
-      print(f"   ✅ {md_file.name}: {result.sections_indexed} sections indexed")
+      envelope = clients.documents.upload_file(graph_id=graph_id, file_path=md_file)
+      sections = _envelope_result(envelope).get("sections_indexed", 0)
+      total_sections += sections
+      print(f"   ✅ {md_file.name}: {sections} sections indexed")
     except Exception as e:
       print(f"   ❌ {md_file.name}: {e}")
 
-  print(f"\n📊 Total: {total_sections} sections indexed across {len(md_files)} documents")
+  print(
+    f"\n📊 Total: {total_sections} sections indexed across {len(md_files)} documents"
+  )
 
   # Verify via list endpoint
   doc_list = clients.documents.list(graph_id)
   print(f"📋 Documents in index: {doc_list.total}")
   for doc in doc_list.documents:
-    print(f"   • {doc.document_title} ({doc.section_count} sections, {doc.source_type})")
+    print(
+      f"   • {doc.document_title} ({doc.section_count} sections, {doc.source_type})"
+    )
 
 
 def run_sample_searches(clients, graph_id: str) -> None:
@@ -96,9 +116,7 @@ def run_sample_searches(clients, graph_id: str) -> None:
 
 
 def main():
-  parser = argparse.ArgumentParser(
-    description="Upload project management documents"
-  )
+  parser = argparse.ArgumentParser(description="Upload project management documents")
   parser.add_argument(
     "--base-url",
     default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),

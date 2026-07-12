@@ -159,9 +159,9 @@ class OperationSpec:
 
   @property
   def openapi_operation_id(self) -> str:
-    """OpenAPI operationId in camelCase — `op` + CamelCase(name)."""
+    """OpenAPI operationId in camelCase verbNoun (e.g. create-agent -> createAgent)."""
     parts = self.name.split("-")
-    return "op" + "".join(p.capitalize() for p in parts)
+    return parts[0] + "".join(p.capitalize() for p in parts[1:])
 
 
 # ── Extension feature gate ───────────────────────────────────────────────

@@ -143,7 +143,7 @@ def _resolve_graph_tier(graph_id: str, session) -> str:
 @router.post(
   "/remember",
   response_model=OperationEnvelope,
-  operation_id="opRemember",
+  operation_id="remember",
   summary="Store a Semantic Memory",
   description="Store a semantic memory in the graph's per-graph memory store. "
   "The text is embedded locally; recall it later via `POST /memory/recall`.",
@@ -207,7 +207,7 @@ async def remember_op(
 @router.post(
   "/forget",
   response_model=OperationEnvelope,
-  operation_id="opForget",
+  operation_id="forget",
   summary="Delete a Semantic Memory",
   description="Delete a semantic memory by its server-generated id.",
   tags=[_CONTENT_OP_TAG],
@@ -265,7 +265,7 @@ async def forget_op(
 @router.post(
   "/update-memory",
   response_model=OperationEnvelope,
-  operation_id="opUpdateMemory",
+  operation_id="updateMemory",
   summary="Update a Semantic Memory",
   description="Partially update a stored memory by its server-generated id. "
   "Only supplied fields change; the memory is re-embedded when `text` changes.",
@@ -337,7 +337,7 @@ async def update_memory_op(
 @router.post(
   "/index-document",
   response_model=OperationEnvelope,
-  operation_id="opIndexDocument",
+  operation_id="indexDocument",
   summary="Index a Document",
   description="Create a document (omit `document_id`) or update one (provide it). "
   "Stored in PostgreSQL, synced to OpenSearch for search.",
@@ -426,7 +426,7 @@ async def index_document_op(
 @router.post(
   "/delete-document",
   response_model=OperationEnvelope,
-  operation_id="opDeleteDocument",
+  operation_id="deleteDocument",
   summary="Delete a Document",
   description="Delete a document from PostgreSQL and OpenSearch by id.",
   tags=[_CONTENT_OP_TAG],
@@ -484,7 +484,7 @@ async def delete_document_op(
 @router.post(
   "/create-file-upload",
   response_model=OperationEnvelope,
-  operation_id="opCreateFileUpload",
+  operation_id="createFileUpload",
   summary="Presign a File Upload",
   description="Presign an S3 URL for direct upload and register the file. After "
   "uploading to the returned URL, call `POST /operations/ingest-file` to stage it "
@@ -541,7 +541,7 @@ async def create_file_upload_op(
 @router.post(
   "/ingest-file",
   response_model=OperationEnvelope,
-  operation_id="opIngestFile",
+  operation_id="ingestFile",
   summary="Stage an Uploaded File",
   description="Mark an uploaded file ready and stage it into DuckDB. Small files "
   "stage directly (sync); large files stage via a background job (returns a "
@@ -625,7 +625,7 @@ async def ingest_file_op(
 @router.post(
   "/delete-file",
   response_model=OperationEnvelope,
-  operation_id="opDeleteFile",
+  operation_id="deleteFile",
   summary="Delete a File",
   description="Delete a file from S3 and PostgreSQL. `cascade=true` also removes "
   "its rows from DuckDB staging tables and marks the graph stale.",
