@@ -33,14 +33,14 @@ Parameters:
     Description: Amazon Linux 2023 ARM64 AMI ID
   InstanceType:
     Type: String
-    Default: m7g.large
-    Description: EC2 instance type for replicas (smaller than writers)
+    Default: r7g.large
+    Description: EC2 instance type for replicas (16GB+ memory-optimized; must hold the sec buffer pool + working set under the 85% admission guard)
     AllowedValues:
-      - m7g.large
-      - m7g.xlarge
-      - r7g.medium
-      - r7g.large
-      - r7g.xlarge
+      - m7g.large # 8GB — staging/legacy only; under-provisioned for prod sec reads
+      - m7g.xlarge # 16GB
+      - r7g.large # 16GB — prod default
+      - r7g.xlarge # 32GB
+      - r7g.2xlarge # 64GB
 
   # S3 Database Configuration (Updated by Dagster job)
   SharedDatabaseS3Prefix:
@@ -512,14 +512,17 @@ Resources:
           LaunchTemplateSpecification:
             LaunchTemplateId: !Ref ReplicaLaunchTemplate
             Version: !GetAtt ReplicaLaunchTemplate.LatestVersionNumber
-          # Spot pool diversification: 8 GB ARM64 alternatives to primary InstanceType
+          # Spot pool diversification: 16 GB ARM64 memory-optimized alternatives to
+          # the primary (r7g.large). Every alternative MUST match the primary's
+          # 16 GB — 8 GB types (and burstable t4g) trip the admission-control memory
+          # guard on the ~110 GB sec graph under full-report reads, latching into
+          # 503s. Spread across Graviton2/3/4 + m/r families for capacity depth.
           Overrides:
             - InstanceType: !Ref InstanceType
-            - InstanceType: m6g.large
-            - InstanceType: t4g.large
-            - InstanceType: r6g.medium
-            - InstanceType: r7g.medium
-            - InstanceType: r8g.medium
+            - InstanceType: r6g.large
+            - InstanceType: r8g.large
+            - InstanceType: m7g.xlarge
+            - InstanceType: m6g.xlarge
         InstancesDistribution:
           OnDemandBaseCapacity:
             !If [IsSpotEnabled, !Ref SpotOnDemandBaseCapacity, 0]
