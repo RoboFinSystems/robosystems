@@ -25,11 +25,15 @@ Parameters:
   # FORK NOTE: Pin version via DATABASE_POSTGRES_VERSION_<ENV> GitHub variable
   PostgresEngineVersion:
     Type: String
-    Description: PostgreSQL engine version
-    Default: "16.11"
+    Description: >-
+      PostgreSQL major version floor. RDS provisions the preferred minor for
+      this major and AutoMinorVersionUpgrade keeps it current. Bump to the next
+      major (e.g. "17") only for a deliberate, staging-first major upgrade.
+    Default: "16"
     AllowedValues:
-      - "16.11"
-    ConstraintDescription: Must be a supported PostgreSQL version
+      - "16"
+      - "17"
+    ConstraintDescription: Must be a supported PostgreSQL major version
 
   # Instance & Database Configuration
   DBInstanceClass:
@@ -525,7 +529,12 @@ Resources:
       BackupRetentionPeriod: 30
       PreferredBackupWindow: 03:00-04:00
       PreferredMaintenanceWindow: sun:04:30-sun:05:30
-      AutoMinorVersionUpgrade: false
+      # Auto-apply RDS-vetted minor version upgrades during the maintenance
+      # window. The PostgresEngineVersion pin acts as a provisioning floor;
+      # AWS keeps the running minor current (security/bug fixes) without a
+      # per-minor template/GHA-var bump. Major upgrades stay deliberate
+      # (AllowMajorVersionUpgrade below + an explicit version change).
+      AutoMinorVersionUpgrade: true
       AllowMajorVersionUpgrade: true
       StorageEncrypted: true
       CopyTagsToSnapshot: true

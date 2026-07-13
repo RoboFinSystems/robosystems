@@ -51,10 +51,16 @@ Parameters:
   # FORK NOTE: Pin version via VALKEY_VERSION_<ENV> GitHub variable
   ValkeyEngineVersion:
     Type: String
-    Description: Valkey engine version
+    Description: >-
+      Valkey engine version floor (major.minor; ElastiCache does not accept a
+      bare major). AutoMinorVersionUpgrade advances the minor automatically;
+      bump only for a deliberate major upgrade (e.g. "8.1" -> "9.0").
     Default: "8.1"
     AllowedValues:
       - "8.1"
+      - "8.2"
+      - "9.0"
+      - "9.1"
     ConstraintDescription: Must be a supported Valkey version
 
   # Security Configuration
@@ -116,6 +122,12 @@ Mappings:
   ValkeyVersionToFamily:
     "8.1":
       Family: "valkey8"
+    "8.2":
+      Family: "valkey8"
+    "9.0":
+      Family: "valkey9"
+    "9.1":
+      Family: "valkey9"
 
 Conditions:
   IsProduction: !Equals [!Ref Environment, prod]
@@ -491,7 +503,10 @@ Resources:
       CacheNodeType: !Ref NodeType
       Engine: valkey
       EngineVersion: !Ref ValkeyEngineVersion
-      AutoMinorVersionUpgrade: false
+      # Opt into ElastiCache's minor version upgrade campaign (Valkey 7.2+),
+      # applied during the maintenance window. Keeps the running minor current
+      # without a per-minor template bump; major upgrades stay deliberate.
+      AutoMinorVersionUpgrade: true
       Port: 6379
       # Cluster Configuration
       NumCacheClusters: !Ref NumCacheNodes
