@@ -525,7 +525,12 @@ Resources:
       BackupRetentionPeriod: 30
       PreferredBackupWindow: 03:00-04:00
       PreferredMaintenanceWindow: sun:04:30-sun:05:30
-      AutoMinorVersionUpgrade: false
+      # Auto-apply RDS-vetted minor version upgrades during the maintenance
+      # window. The PostgresEngineVersion pin acts as a provisioning floor;
+      # AWS keeps the running minor current (security/bug fixes) without a
+      # per-minor template/GHA-var bump. Major upgrades stay deliberate
+      # (AllowMajorVersionUpgrade below + an explicit version change).
+      AutoMinorVersionUpgrade: true
       AllowMajorVersionUpgrade: true
       StorageEncrypted: true
       CopyTagsToSnapshot: true

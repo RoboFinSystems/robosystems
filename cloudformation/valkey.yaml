@@ -491,7 +491,10 @@ Resources:
       CacheNodeType: !Ref NodeType
       Engine: valkey
       EngineVersion: !Ref ValkeyEngineVersion
-      AutoMinorVersionUpgrade: false
+      # Opt into ElastiCache's minor version upgrade campaign (Valkey 7.2+),
+      # applied during the maintenance window. Keeps the running minor current
+      # without a per-minor template bump; major upgrades stay deliberate.
+      AutoMinorVersionUpgrade: true
       Port: 6379
       # Cluster Configuration
       NumCacheClusters: !Ref NumCacheNodes
