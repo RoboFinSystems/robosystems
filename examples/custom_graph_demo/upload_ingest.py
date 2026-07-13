@@ -185,7 +185,7 @@ def materialize_graph_data(clients: RoboSystemsClients, graph_id: str) -> None:
   try:
     result = clients.graphs.materialize(
       graph_id,
-      MaterializationOptions(ignore_errors=True, rebuild=False),
+      MaterializationOptions(rebuild=False),
     )
     if result.success:
       print(f"\n✅ Materialization complete: {result.message}")
