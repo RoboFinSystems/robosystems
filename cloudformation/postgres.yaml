@@ -25,11 +25,15 @@ Parameters:
   # FORK NOTE: Pin version via DATABASE_POSTGRES_VERSION_<ENV> GitHub variable
   PostgresEngineVersion:
     Type: String
-    Description: PostgreSQL engine version
-    Default: "16.11"
+    Description: >-
+      PostgreSQL major version floor. RDS provisions the preferred minor for
+      this major and AutoMinorVersionUpgrade keeps it current. Bump to the next
+      major (e.g. "17") only for a deliberate, staging-first major upgrade.
+    Default: "16"
     AllowedValues:
-      - "16.11"
-    ConstraintDescription: Must be a supported PostgreSQL version
+      - "16"
+      - "17"
+    ConstraintDescription: Must be a supported PostgreSQL major version
 
   # Instance & Database Configuration
   DBInstanceClass:

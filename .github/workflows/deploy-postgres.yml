@@ -36,10 +36,10 @@ on:
 
       # Database Version Configuration
       postgres_version:
-        description: "PostgreSQL engine version (e.g., 16.11)"
+        description: "PostgreSQL major version floor (e.g., 16). Minors auto-upgrade; bump only for a deliberate major upgrade."
         required: false
         type: string
-        default: "16.11"
+        default: "16"
 
       # Instance Configuration
       instance_size:

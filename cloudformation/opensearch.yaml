@@ -94,12 +94,16 @@ Parameters:
   # Engine Configuration
   EngineVersion:
     Type: String
-    Description: OpenSearch engine version
+    Description: >-
+      OpenSearch engine version. Service-software patches auto-apply
+      (AutoSoftwareUpdateEnabled); bump only for a deliberate major upgrade
+      (e.g. 2.19 -> 3.x, staging-first).
     Default: "OpenSearch_2.19"
     AllowedValues:
       - "OpenSearch_2.19"
-      - "OpenSearch_2.17"
-      - "OpenSearch_2.15"
+      - "OpenSearch_3.1"
+      - "OpenSearch_3.3"
+      - "OpenSearch_3.5"
 
   # Bastion Access (optional)
   BastionSecurityGroupId:
