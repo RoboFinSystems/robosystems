@@ -116,9 +116,6 @@ class TableQueryResponse(BaseModel):
 class TableMaterializationRequest(BaseModel):
   """Request to materialize DuckDB table data into LadybugDB."""
 
-  ignore_errors: bool = Field(
-    default=True, description="Continue materialization on row errors"
-  )
   file_ids: list[str] | None = Field(
     default=None,
     description="Optional list of file IDs to materialize. If None, materializes all files (full materialization).",

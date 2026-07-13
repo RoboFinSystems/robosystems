@@ -200,7 +200,6 @@ async def _load_tables(
         mat_result = await client.materialize_table(
           graph_id=config.graph_id,
           table_name=table_name,
-          ignore_errors=True,
         )
         rows = mat_result.get("rows_ingested", 0) if mat_result else 0
         total_rows += rows

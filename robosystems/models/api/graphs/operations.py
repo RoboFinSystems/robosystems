@@ -95,9 +95,6 @@ class MaterializeOp(BaseModel):
   rebuild: bool = Field(
     default=False, description="Rebuild the graph from scratch, dropping existing data"
   )
-  ignore_errors: bool = Field(
-    default=True, description="Continue past non-fatal row errors"
-  )
   dry_run: bool = Field(
     default=False, description="Validate tables without writing to the graph"
   )

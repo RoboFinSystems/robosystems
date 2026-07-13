@@ -14,9 +14,6 @@ class ForkFromParentRequest(BaseModel):
     default_factory=list,
     description="List of table names to copy from parent, or empty for all tables",
   )
-  ignore_errors: bool = Field(
-    default=True, description="Continue materialization on row errors"
-  )
 
   class Config:
     extra = "forbid"

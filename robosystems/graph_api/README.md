@@ -782,7 +782,7 @@ aws autoscaling start-instance-refresh \
 
 #### Ingestion Optimization
 
-- Use `ignore_errors=true` for duplicate handling
+- Duplicates are deduplicated in DuckDB staging; materialization uses a plain COPY (ignore_errors is intentionally unused — LadybugDB 0.18 silently drops valid rows with it)
 - Batch multiple files in single request
 - Higher priority (1-10) for urgent data
 - Monitor queue depth metrics

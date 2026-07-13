@@ -35,7 +35,6 @@ class TestMaterializeTableChunked:
     client.materialize_table.assert_called_once_with(
       graph_id="kg123",
       table_name="Entity",
-      ignore_errors=True,
       materialize_embeddings=False,
       file_ids=None,
       timeout=CHUNK_TIMEOUT,
@@ -97,37 +96,8 @@ class TestMaterializeTableChunked:
     assert "batch_num" not in client.materialize_table.call_args.kwargs
 
   @pytest.mark.asyncio
-  async def test_chunk_failure_with_ignore_errors_continues(self):
-    """With ignore_errors=True, batch failures are logged and skipped."""
-    client = AsyncMock()
-    client.query_table.return_value = {"rows": [[2_000_000]]}
-    client.materialize_table.side_effect = [
-      {"rows_ingested": 900_000},
-      Exception("OOM on batch 2"),
-      {"rows_ingested": 100_000},  # never reached for 2 batches
-    ]
-
-    with patch(
-      "robosystems.operations.graph.engine.chunked_materialization.GraphTierConfig"
-    ) as mock_config:
-      mock_config.get_graph_limits.return_value = {"chunk_size_rows": 1_000_000}
-
-      result = await materialize_table_chunked(
-        client=client,
-        graph_id="kg123",
-        table_name="Entity",
-        tier="ladybug-standard",
-        ignore_errors=True,
-      )
-
-    # Only first batch's rows counted; second failed
-    assert result["rows_ingested"] == 900_000
-    assert result["chunked"] is True
-    assert result["batches"] == 2
-
-  @pytest.mark.asyncio
-  async def test_chunk_failure_with_ignore_errors_false_raises(self):
-    """With ignore_errors=False, batch failures propagate immediately."""
+  async def test_chunk_failure_raises(self):
+    """Batch failures propagate immediately (fail-fast — no silent skip)."""
     client = AsyncMock()
     client.query_table.return_value = {"rows": [[2_000_000]]}
     client.materialize_table.side_effect = [
@@ -148,7 +118,6 @@ class TestMaterializeTableChunked:
         graph_id="kg123",
         table_name="Entity",
         tier="ladybug-standard",
-        ignore_errors=False,
       )
 
   @pytest.mark.asyncio

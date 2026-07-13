@@ -77,7 +77,6 @@ async def test_fork_parent_data():
       assert call_args[1]["parent_graph_id"] == "kg1234567890abcdef"
       assert call_args[1]["subgraph_id"] == "kg1234567890abcdef_dev"
       assert call_args[1]["tables"] == ["Element", "Transaction"]
-      assert call_args[1]["ignore_errors"] is True
     finally:
       # Restore original env
       env.GRAPH_API_URL = original_url

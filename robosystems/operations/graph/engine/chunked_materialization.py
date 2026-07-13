@@ -28,7 +28,6 @@ async def materialize_table_chunked(
   graph_id: str,
   table_name: str,
   tier: str,
-  ignore_errors: bool = True,
   materialize_embeddings: bool = False,
   file_ids: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -43,7 +42,6 @@ async def materialize_table_chunked(
       graph_id: Graph database identifier.
       table_name: DuckDB staging table to materialize.
       tier: Graph tier name (e.g. "ladybug-standard").
-      ignore_errors: Continue on row errors (passed through to each chunk).
       materialize_embeddings: Include embedding columns and build HNSW vector indexes.
       file_ids: Optional file ID filter (passed through; chunking still applies).
 
@@ -62,7 +60,6 @@ async def materialize_table_chunked(
       table_name=table_name,
       row_count=row_count,
       chunk_size=chunk_size,
-      ignore_errors=ignore_errors,
       materialize_embeddings=materialize_embeddings,
       file_ids=file_ids,
     )
@@ -71,7 +68,6 @@ async def materialize_table_chunked(
   result = await client.materialize_table(
     graph_id=graph_id,
     table_name=table_name,
-    ignore_errors=ignore_errors,
     materialize_embeddings=materialize_embeddings,
     file_ids=file_ids,
     timeout=CHUNK_TIMEOUT,
@@ -123,7 +119,6 @@ async def _materialize_batched(
   table_name: str,
   row_count: int,
   chunk_size: int,
-  ignore_errors: bool,
   materialize_embeddings: bool,
   file_ids: list[str] | None,
 ) -> dict[str, Any]:
@@ -142,7 +137,6 @@ async def _materialize_batched(
       response = await client.materialize_table(
         graph_id=graph_id,
         table_name=table_name,
-        ignore_errors=ignore_errors,
         materialize_embeddings=materialize_embeddings,
         file_ids=file_ids,
         batch_num=batch_num,
@@ -157,12 +151,11 @@ async def _materialize_batched(
       )
 
     except Exception as exc:
+      # Fail fast: a failed batch means missing data, not something to skip.
       logger.error(
         f"  [{table_name}] Batch {batch_num + 1}/{num_batches} failed: {exc}"
       )
-      if not ignore_errors:
-        raise
-      # With ignore_errors, log and continue to next batch
+      raise
 
   logger.info(
     f"Chunked materialization complete for {table_name}: "

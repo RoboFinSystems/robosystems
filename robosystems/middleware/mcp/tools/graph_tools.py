@@ -459,7 +459,6 @@ class MaterializeTool:
         "  graph_type if omitted.\n"
         "- dry_run: Validate without writing (returns a preview synchronously).\n"
         "- rebuild: Drop existing data and rebuild from scratch.\n"
-        "- ignore_errors: Continue past non-fatal row errors (default true).\n"
         "- force: Materialize even if the graph is already up-to-date.\n"
         "- materialize_embeddings: Generate vector embeddings during rebuild.\n\n"
         "**RETURNS:** `operation_id` — subscribe to "
@@ -472,7 +471,6 @@ class MaterializeTool:
           "source": {"type": "string", "enum": ["staged", "extensions"]},
           "dry_run": {"type": "boolean", "default": False},
           "rebuild": {"type": "boolean", "default": False},
-          "ignore_errors": {"type": "boolean", "default": True},
           "force": {"type": "boolean", "default": False},
           "materialize_embeddings": {"type": "boolean", "default": False},
         },
