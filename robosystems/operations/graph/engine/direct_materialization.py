@@ -34,7 +34,6 @@ async def materialize_graph_directly(
   graph_id: str,
   force: bool = False,
   rebuild: bool = False,
-  ignore_errors: bool = True,
   materialize_embeddings: bool = False,
   operation_id: str | None = None,
 ) -> dict[str, Any]:
@@ -48,7 +47,6 @@ async def materialize_graph_directly(
       graph_id: Graph database identifier
       force: Force materialization even if graph is not stale
       rebuild: Delete and recreate graph database before materialization
-      ignore_errors: Continue ingestion on row errors
       materialize_embeddings: Include embedding columns and build HNSW vector indexes
       operation_id: Optional SSE operation ID for progress tracking
 
@@ -65,8 +63,7 @@ async def materialize_graph_directly(
   manager = get_operation_manager()
 
   logger.info(
-    f"Direct materialization starting for {graph_id} "
-    f"(force={force}, rebuild={rebuild}, ignore_errors={ignore_errors})"
+    f"Direct materialization starting for {graph_id} (force={force}, rebuild={rebuild})"
   )
 
   if operation_id:
@@ -271,7 +268,6 @@ async def materialize_graph_directly(
             graph_id=graph_id,
             table_name=table_name,
             tier=graph_record.graph_tier or "ladybug-standard",
-            ignore_errors=ignore_errors,
             materialize_embeddings=materialize_embeddings,
             file_ids=None,
           )
@@ -283,9 +279,9 @@ async def materialize_graph_directly(
           logger.info(f"Materialized {table_name}: {rows_ingested:,} rows")
 
         except Exception as e:
+          # Fail fast: a failed table means missing data.
           logger.error(f"Failed to materialize table {table_name}: {e}")
-          if not ignore_errors:
-            raise
+          raise
 
       # Mark graph as fresh
       logger.info("[95%] Marking graph as fresh")

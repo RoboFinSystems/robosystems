@@ -141,7 +141,6 @@ async def materialize_cmd(
         "source": source,
         "force": body.force,
         "rebuild": body.rebuild,
-        "ignore_errors": body.ignore_errors,
       },
     )
 
@@ -179,7 +178,6 @@ async def materialize_cmd(
         params={
           "force": body.force,
           "rebuild": body.rebuild,
-          "ignore_errors": body.ignore_errors,
           "materialize_embeddings": body.materialize_embeddings,
           "lock_key": lock_key,
         },
@@ -201,7 +199,6 @@ async def materialize_cmd(
         user_id=str(current_user.id),
         force=body.force,
         rebuild=body.rebuild,
-        ignore_errors=body.ignore_errors,
         materialize_embeddings=body.materialize_embeddings,
       )
       response = await enqueue_task(

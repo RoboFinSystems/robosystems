@@ -1647,7 +1647,6 @@ class ExtensionsMaterializer:
         response = await client.materialize_table(
           graph_id=graph_id,
           table_name=table_name,
-          ignore_errors=True,
           timeout=300.0,
           source_graph_id=source_graph_id,
         )

@@ -73,7 +73,6 @@ class TestMaterializeGraphDirectly:
         graph_id=graph_id,
         force=False,
         rebuild=False,
-        ignore_errors=True,
         operation_id="op123",
       )
 
@@ -325,69 +324,8 @@ class TestMaterializeGraphDirectly:
       assert calls[1].kwargs["table_name"] == "EntityRelationship"
 
   @pytest.mark.asyncio
-  async def test_error_handling_continues_on_ignore_errors(self, mock_db_session):
-    """Test that errors are ignored when ignore_errors=True."""
-    graph_id = "kg1234567890abcdef"
-
-    with (
-      patch("robosystems.graph_api.client.factory.GraphClientFactory") as mock_factory,
-      patch(
-        "robosystems.middleware.sse.operation_manager.get_operation_manager"
-      ) as mock_get_manager,
-      patch("robosystems.models.core.Graph") as mock_graph_class,
-      patch("robosystems.models.core.GraphFile") as mock_file_class,
-      patch("robosystems.models.core.GraphTable"),
-      patch("robosystems.dagster.reporting.report_asset_materialization"),
-    ):
-      mock_graph = Mock()
-      mock_graph.graph_stale = True
-      mock_graph.graph_stale_reason = "new_data"
-      mock_graph.graph_metadata = {}
-      mock_graph_class.get_by_id.return_value = mock_graph
-
-      mock_file_class.recover_stale_files.return_value = []
-
-      # Two tables
-      table1 = Mock()
-      table1.table_name = "Entity1"
-      table1.table_type = "node"
-
-      table2 = Mock()
-      table2.table_name = "Entity2"
-      table2.table_type = "node"
-
-      mock_db_session.query.return_value.join.return_value.filter.return_value.filter.return_value.distinct.return_value.all.return_value = [
-        table1,
-        table2,
-      ]
-      mock_db_session.query.return_value.join.return_value.filter.return_value.filter.return_value.distinct.return_value.count.return_value = 0
-
-      # First table fails, second succeeds
-      mock_client = AsyncMock()
-      mock_client.materialize_table.side_effect = [
-        Exception("Failed"),
-        {"rows_ingested": 50},
-      ]
-      mock_factory.create_client = AsyncMock(return_value=mock_client)
-
-      mock_manager = Mock()
-      mock_manager.emit_progress = AsyncMock()
-      mock_manager.complete_operation = AsyncMock()
-      mock_get_manager.return_value = mock_manager
-
-      result = await materialize_graph_directly(
-        db=mock_db_session,
-        graph_id=graph_id,
-        ignore_errors=True,
-      )
-
-      assert result["status"] == "success"
-      assert result["total_rows"] == 50
-      assert "Entity2" in result["tables_materialized"]
-
-  @pytest.mark.asyncio
-  async def test_error_raised_when_ignore_errors_false(self, mock_db_session):
-    """Test that errors are raised when ignore_errors=False."""
+  async def test_error_raised_on_table_failure(self, mock_db_session):
+    """A table materialization failure fails the operation (fail-fast)."""
     graph_id = "kg1234567890abcdef"
 
     with (
@@ -428,7 +366,6 @@ class TestMaterializeGraphDirectly:
       result = await materialize_graph_directly(
         db=mock_db_session,
         graph_id=graph_id,
-        ignore_errors=False,
         operation_id="op123",
       )
 

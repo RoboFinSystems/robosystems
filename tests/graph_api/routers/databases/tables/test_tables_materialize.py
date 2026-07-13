@@ -31,7 +31,7 @@ def test_materialize_rejects_read_only(monkeypatch, app_client):
 
   response = client.post(
     "/databases/graph-123/tables/Entity/materialize",
-    json={"ignore_errors": True},
+    json={},
   )
 
   assert response.status_code == 403
@@ -69,7 +69,7 @@ def test_materialize_endpoint_publishes_busy_counter(monkeypatch, app_client):
     client = TestClient(app_client)
     response = client.post(
       "/databases/graph-123/tables/Entity/materialize",
-      json={"ignore_errors": True},
+      json={},
     )
 
   assert response.status_code == 200, response.text
@@ -121,7 +121,7 @@ def test_fork_endpoint_publishes_busy_counter(monkeypatch, app_client):
     client = TestClient(app_client)
     response = client.post(
       "/databases/sub-1/tables/sub-1/fork-from/parent-1",
-      json={"ignore_errors": True},
+      json={},
     )
 
   assert response.status_code == 200, response.text
@@ -157,7 +157,7 @@ def test_materialize_endpoint_decrements_counter_on_failure(monkeypatch, app_cli
     with pytest.raises(RuntimeError, match="simulated COPY failure"):
       client.post(
         "/databases/graph-123/tables/Entity/materialize",
-        json={"ignore_errors": True},
+        json={},
       )
 
   assert counter_mock.await_count == 2

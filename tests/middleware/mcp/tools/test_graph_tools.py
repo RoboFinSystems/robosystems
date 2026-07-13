@@ -302,9 +302,7 @@ class TestMaterializeExecute:
       new=AsyncMock(),
     ) as mock_cmd:
       mock_cmd.return_value = {"status": "pending", "operation_id": "op_abc"}
-      result = await MaterializeTool(_client()).execute(
-        {"rebuild": True, "ignore_errors": True}
-      )
+      result = await MaterializeTool(_client()).execute({"rebuild": True})
     assert result["status"] == "pending"
     assert result["operation_id"] == "op_abc"
     mock_cmd.assert_awaited_once()

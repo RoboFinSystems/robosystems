@@ -1948,7 +1948,6 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     table_name: str,
-    ignore_errors: bool = True,
     file_ids: list[str] | None = None,
     batch_num: int | None = None,
     num_batches: int | None = None,
@@ -1966,7 +1965,6 @@ class GraphClient(BaseGraphClient):
     Args:
         graph_id: Graph database identifier
         table_name: Table name to materialize
-        ignore_errors: Continue on row errors
         file_ids: Optional list of file IDs to materialize. If None, materializes all rows.
         batch_num: Current batch number (0-indexed) for hash-based batching.
         num_batches: Total number of batches. Each row goes to one batch based on hash(key) % num_batches.
@@ -1978,7 +1976,7 @@ class GraphClient(BaseGraphClient):
     Returns:
         Materialization response with rows materialized and timing
     """
-    json_data: dict[str, Any] = {"ignore_errors": ignore_errors}
+    json_data: dict[str, Any] = {}
 
     if file_ids is not None:
       json_data["file_ids"] = file_ids
@@ -2043,7 +2041,6 @@ class GraphClient(BaseGraphClient):
     parent_graph_id: str,
     subgraph_id: str,
     tables: list[str] | None = None,
-    ignore_errors: bool = True,
   ) -> dict[str, Any]:
     """
     Fork data from parent graph's DuckDB directly into subgraph's LadybugDB.
@@ -2057,7 +2054,6 @@ class GraphClient(BaseGraphClient):
         parent_graph_id: Parent graph to copy data from
         subgraph_id: Subgraph to copy data to
         tables: List of table names to copy (empty list = all tables)
-        ignore_errors: Continue ingestion on row errors
 
     Returns:
         Fork response with tables copied, row counts, and timing
@@ -2067,7 +2063,6 @@ class GraphClient(BaseGraphClient):
       f"/databases/{subgraph_id}/tables/{subgraph_id}/fork-from/{parent_graph_id}",
       json_data={
         "tables": tables or [],
-        "ignore_errors": ignore_errors,
       },
     )
     return response.json()

@@ -358,7 +358,6 @@ class LadybugMaterializer:
             response = await graph_client.materialize_table(
               graph_id=self.graph_id,
               table_name=table_name,
-              ignore_errors=True,
               batch_num=batch_num,
               num_batches=num_batches,
               timeout=CHUNKED_MATERIALIZATION_TIMEOUT,
@@ -399,7 +398,6 @@ class LadybugMaterializer:
           response = await graph_client.materialize_table(
             graph_id=self.graph_id,
             table_name=table_name,
-            ignore_errors=True,
             timeout=timeout,
           )
 

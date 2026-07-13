@@ -163,7 +163,6 @@ class MaterializeGraphConfig(Config):
   user_id: str
   force: bool = False
   rebuild: bool = False
-  ignore_errors: bool = True
   materialize_embeddings: bool = False
   operation_id: str | None = None  # For SSE result updates
 
@@ -605,7 +604,6 @@ def materialize_file_to_graph(
       client.materialize_table(
         graph_id=graph_id,
         table_name=table_name,
-        ignore_errors=True,
         file_ids=[file_id],
       )
     )
@@ -689,7 +687,6 @@ def materialize_staged_file(
       client.materialize_table(
         graph_id=config.graph_id,
         table_name=config.table_name,
-        ignore_errors=True,
         file_ids=[config.file_id],
       )
     )
@@ -808,7 +805,7 @@ def materialize_graph_tables(
   graph_id = config.graph_id
   context.log.info(
     f"Starting graph materialization for {graph_id} "
-    f"(force={config.force}, rebuild={config.rebuild}, ignore_errors={config.ignore_errors})"
+    f"(force={config.force}, rebuild={config.rebuild})"
   )
 
   with db.get_session() as session:
@@ -1005,7 +1002,6 @@ def materialize_graph_tables(
               graph_id=graph_id,
               table_name=table_name,
               tier=graph_record.graph_tier or "ladybug-standard",
-              ignore_errors=config.ignore_errors,
               materialize_embeddings=config.materialize_embeddings,
               file_ids=None,
             )
@@ -1018,16 +1014,16 @@ def materialize_graph_tables(
           context.log.info(f"Materialized {table_name}: {rows_ingested:,} rows")
 
         except Exception as e:
+          # Fail fast: a failed table means missing data.
           context.log.error(f"Failed to materialize table {table_name}: {e}")
-          if not config.ignore_errors:
-            raise Failure(
-              description=f"Materialization failed on table {table_name}: {e!s}",
-              metadata={
-                "graph_id": graph_id,
-                "table_name": table_name,
-                "error": str(e),
-              },
-            )
+          raise Failure(
+            description=f"Materialization failed on table {table_name}: {e!s}",
+            metadata={
+              "graph_id": graph_id,
+              "table_name": table_name,
+              "error": str(e),
+            },
+          )
 
       # Mark graph as fresh
       context.log.info("[95%] Marking graph as fresh")

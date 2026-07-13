@@ -209,8 +209,12 @@ class DuckDBTableManager:
     via DuckDB's external aggregation, unlike ROW_NUMBER which can OOM on large datasets.
     See: https://duckdb.org/2024/03/29/external-aggregation
 
-    NOTE: Deduplication is required here because LadybugDB's ignore_errors=true
-    only works for COPY FROM files, NOT for COPY FROM attached DuckDB tables.
+    NOTE: Deduplication is required here because materialization uses a plain
+    COPY (no ignore_errors — LadybugDB 0.18's ignore_errors path silently drops
+    valid rows in proportion to batch size). LadybugDB enforces unique node
+    primary keys and unique relationship (from,to) pairs, so any duplicate that
+    reached it would hard-fail the COPY. Dedup in staging is what keeps the
+    clean COPY both safe and complete.
 
     Args:
         quoted_table: Quoted table name (e.g., '"table_name"')

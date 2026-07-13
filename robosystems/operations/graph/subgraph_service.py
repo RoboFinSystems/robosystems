@@ -932,7 +932,6 @@ class SubgraphService:
         parent_graph_id=parent_graph_id,
         subgraph_id=subgraph_id,
         tables=tables_to_copy if tables_to_copy else None,
-        ignore_errors=True,
       )
 
       tables_copied = result.get("tables_copied", [])

@@ -406,7 +406,6 @@ async def _materialize_table_impl(
         else:
           logger.info(f"COPY {table_name} → {graph_id}")
 
-        copy_suffix = " (ignore_errors=true)" if request.ignore_errors else ""
         rows_ingested = 0
         with ladybug_service.db_manager.connection_pool.get_connection(
           graph_id
@@ -420,7 +419,11 @@ async def _materialize_table_impl(
               # local's name MUST match the identifier in the COPY statement.
               # The F841 suppression is real: the engine reads it, the linter can't see that.
               copy_batch = pa.Table.from_batches([arrow_batch])  # noqa: F841
-              result = conn.execute(f"COPY {table_name} FROM copy_batch{copy_suffix}")
+              # No ignore_errors: LadybugDB 0.18's COPY (ignore_errors=true)
+              # silently drops VALID rows in proportion to batch size (~37% at
+              # 20M). Staging dedupes and all nodes load before any relationship,
+              # so a plain COPY is both correct and complete. Do NOT re-add it.
+              result = conn.execute(f"COPY {table_name} FROM copy_batch")
               rows_ingested += _copy_result_rows(result, arrow_batch.num_rows)
           finally:
             conn.execute("CALL timeout=120000")  # reset to 2 minutes
@@ -618,7 +621,6 @@ async def _fork_from_parent_duckdb_impl(
             f"SELECT {select_expr} FROM {table_name}"
           ).fetch_record_batch(ARROW_STREAM_BATCH_ROWS)
 
-          copy_suffix = " (ignore_errors=true)" if request.ignore_errors else ""
           table_rows = 0
           logger.info(f"Copying {table_name} from parent to subgraph")
           try:
@@ -626,12 +628,15 @@ async def _fork_from_parent_duckdb_impl(
             for arrow_batch in arrow_reader:
               # `copy_batch` is resolved by name from this frame (replacement scan).
               copy_batch = pa.Table.from_batches([arrow_batch])  # noqa: F841
-              result = conn.execute(f"COPY {table_name} FROM copy_batch{copy_suffix}")
+              # Plain COPY — see the note in materialize_table: ladybug 0.18's
+              # ignore_errors path silently drops valid rows.
+              result = conn.execute(f"COPY {table_name} FROM copy_batch")
               table_rows += _copy_result_rows(result, arrow_batch.num_rows)
           except Exception as table_err:
+            # Fail fast: a copy error on clean, ordered staging is a real problem,
+            # not something to swallow (that would silently lose a whole table).
             logger.error(f"Failed to copy {table_name}: {table_err}")
-            if not request.ignore_errors:
-              raise
+            raise
           finally:
             conn.execute("CALL timeout=120000")  # reset to 2 minutes
 
