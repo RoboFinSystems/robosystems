@@ -532,17 +532,19 @@ def sec_wake_to_stage_sensor(context: RunStatusSensorContext):
   request_job=sec_materialize_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
-  description="Trigger full graph rebuild after incremental DuckDB staging completes",
+  description="Trigger incremental graph materialization after DuckDB staging completes",
 )
 def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
-  """Trigger full LadybugDB rebuild after incremental DuckDB staging completes.
+  """Trigger incremental LadybugDB materialization after DuckDB staging completes.
 
   Part of the nightly pipeline chain:
-    process → stage (DuckDB INSERT) → materialize (full rebuild) → S3 publish
+    process → stage (DuckDB INSERT) → materialize (incremental) → S3 publish
 
-  After new data is added to DuckDB, the LadybugDB graph is fully rebuilt.
-  The sec graph (2024+ only, ~75GB) is small enough for nightly rebuilds.
-  S3 publishes are handled by sec_post_materialize_publish_sensor.
+  After new data is added to DuckDB, only the new rows are COPYed into the
+  existing LadybugDB graph (per-table keyset anti-join) — no full rebuild. A
+  periodic full-rebuild reconciliation (sec_materialize_reconcile_schedule)
+  erases any incremental drift. S3 publishes are handled by
+  sec_post_materialize_publish_sensor.
   """
   if env.ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
@@ -572,7 +574,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
 
   context.log.info(
     f"DuckDB staging completed (run_id={dagster_run.run_id}), "
-    "triggering full LadybugDB rebuild from DuckDB"
+    "triggering incremental LadybugDB materialization from DuckDB"
   )
 
   yield RunRequest(
@@ -582,7 +584,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
         "sec_graph_materialized": {
           "config": {
             "graph_id": "sec",
-            "rebuild_graph": True,
+            "materialize_mode": "incremental",
           }
         },
       }
@@ -591,6 +593,67 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
       "pipeline": "sec",
       "phase": "materialize",
       "mode": "incremental",
+      "materialize_mode": "incremental",
+    },
+  )
+
+
+@schedule(
+  job=sec_materialize_job,
+  cron_schedule="0 6 * * 0",  # 6am ET Sunday — outside the weekday incremental window
+  default_status=DefaultScheduleStatus.STOPPED,  # Enable in Dagster UI when ready
+  execution_timezone="America/New_York",
+)
+def sec_materialize_reconcile_schedule(context):
+  """Weekly full-rebuild reconciliation of the sec graph.
+
+  The nightly chain materializes incrementally (append-only). A periodic full
+  rebuild from the same DuckDB staging (the source of truth) erases any
+  incremental drift — partial batch failures, un-refreshed mutable Entity
+  attributes, hash-batch edge cases. Runs Sunday morning ET, clear of the
+  weekday incremental window.
+
+  Skips if a materialize is already in flight (e.g. an incremental chain mid-run)
+  to avoid two writers on the same graph. Enable in the Dagster UI when ready.
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping reconcile schedule in dev environment")
+    return
+
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="sec_materialize",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Materialize job already running (run_id={active_runs[0].run_id}), "
+      "skipping weekly reconcile"
+    )
+    return
+
+  ts = context.scheduled_execution_time.strftime("%Y%m%d")
+  context.log.info("Triggering weekly full-rebuild reconciliation of sec graph")
+
+  yield RunRequest(
+    run_key=f"sec-materialize-reconcile-{ts}",
+    run_config={
+      "ops": {
+        "sec_graph_materialized": {
+          "config": {
+            "graph_id": "sec",
+            "materialize_mode": "full",
+            "rebuild_graph": True,
+          }
+        },
+      }
+    },
+    tags={
+      "pipeline": "sec",
+      "phase": "reconcile",
+      "materialize_mode": "full",
     },
   )
 

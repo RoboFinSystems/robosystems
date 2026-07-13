@@ -114,6 +114,7 @@ from robosystems.adapters.sec.pipeline.sensors import (
   sec_incremental_pipeline_sensor,
   sec_index_retry_sensor,
   sec_master_sleep_on_failure_sensor,
+  sec_materialize_reconcile_schedule,
   sec_post_materialize_publish_sensor,
   sec_post_stage_index_sensor,
   sec_processing_sensor,
@@ -194,6 +195,7 @@ def get_dagster_components():
     ],
     "schedules": [
       sec_incremental_download_schedule,
+      sec_materialize_reconcile_schedule,
     ],
   }
 
@@ -246,6 +248,7 @@ __all__ = [
   "sec_master_sleep_on_failure_sensor",
   "sec_master_wake_job",
   "sec_materialize_job",
+  "sec_materialize_reconcile_schedule",
   "sec_narratives_index_job",
   "sec_narratives_indexed",
   "sec_post_materialize_publish_sensor",

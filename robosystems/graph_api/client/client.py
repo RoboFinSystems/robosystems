@@ -1954,6 +1954,7 @@ class GraphClient(BaseGraphClient):
     materialize_embeddings: bool = False,
     timeout: float = 600.0,
     source_graph_id: str | None = None,
+    incremental: bool = False,
   ) -> dict[str, Any]:
     """
     Materialize a DuckDB staging table into the graph database.
@@ -1972,6 +1973,9 @@ class GraphClient(BaseGraphClient):
         timeout: Request timeout in seconds. Default 600s (10 min) for large bulk operations.
         source_graph_id: Read DuckDB staging from this graph instead of graph_id.
             Used by blue-green materialization.
+        incremental: COPY only rows not already in the target graph (anti-join
+            against a keyset snapshot) instead of assuming an empty target. Use
+            when materializing into a POPULATED graph (skips the full rebuild).
 
     Returns:
         Materialization response with rows materialized and timing
@@ -1990,6 +1994,9 @@ class GraphClient(BaseGraphClient):
 
     if source_graph_id is not None:
       json_data["source_graph_id"] = source_graph_id
+
+    if incremental:
+      json_data["incremental"] = True
 
     response = await self._request(
       "POST",

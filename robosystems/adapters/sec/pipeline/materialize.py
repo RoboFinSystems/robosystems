@@ -51,8 +51,15 @@ def sec_graph_materialized(
 
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
 
-  context.log.info(f"Materializing graph from DuckDB staging: {config.graph_id}")
-  if config.rebuild_graph:
+  context.log.info(
+    f"Materializing graph from DuckDB staging: {config.graph_id} "
+    f"(mode={config.materialize_mode})"
+  )
+  if config.materialize_mode == "incremental":
+    context.log.info(
+      "Incremental mode - COPYing only new rows into the existing graph (no rebuild)"
+    )
+  elif config.rebuild_graph:
     context.log.info("Rebuild requested - will delete and recreate LadybugDB database")
 
   # Boost LadybugDB memory before materialization (only applies to ladybug-shared tier)
@@ -90,6 +97,7 @@ def sec_graph_materialized(
         batch_materialization=config.batch_materialization,
         batch_size=config.materialization_batch_size,
         progress_callback=dagster_progress,
+        materialize_mode=config.materialize_mode,
       )
       return result
     finally:
@@ -147,7 +155,8 @@ def sec_graph_materialized(
   return MaterializeResult(
     metadata={
       "graph_id": config.graph_id,
-      "rebuild_graph": config.rebuild_graph,
+      "materialize_mode": config.materialize_mode,
+      "rebuild_graph": config.rebuild_graph and config.materialize_mode == "full",
       "status": result.status,
       "total_rows_ingested": result.total_rows_ingested,
       "duration_ms": result.duration_ms,
@@ -243,6 +252,7 @@ def sec_historical_materialized(
         batch_materialization=config.batch_materialization,
         batch_size=config.materialization_batch_size,
         progress_callback=dagster_progress,
+        materialize_mode=config.materialize_mode,
       )
       return result
     finally:
@@ -298,7 +308,8 @@ def sec_historical_materialized(
   return MaterializeResult(
     metadata={
       "graph_id": graph_id,
-      "rebuild_graph": config.rebuild_graph,
+      "materialize_mode": config.materialize_mode,
+      "rebuild_graph": config.rebuild_graph and config.materialize_mode == "full",
       "status": result.status,
       "total_rows_ingested": result.total_rows_ingested,
       "duration_ms": result.duration_ms,

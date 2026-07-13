@@ -5,6 +5,7 @@ for maintainability and reuse.
 """
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from dagster import Config, StaticPartitionsDefinition
 from pydantic import Field
@@ -209,10 +210,17 @@ class SECMaterializeConfig(Config):
 
   Options:
     graph_id: Target graph ID (default: "sec")
+    materialize_mode: "full" (default) rebuilds the LadybugDB database then COPYs
+                   every table (assumes an empty target — the reconciliation
+                   path). "incremental" skips the rebuild and COPYs only rows not
+                   already in the populated graph (per-table keyset anti-join),
+                   safe to run repeatedly against the live graph. Takes precedence
+                   over rebuild_graph — incremental never rebuilds.
     rebuild_graph: If True (default), delete and recreate the LadybugDB database
                    with the roboledger SEC schema before materializing.
                    DuckDB staging is preserved. Set to False only for retry scenarios
                    where you want to resume without losing existing graph data.
+                   Ignored when materialize_mode == "incremental".
     batch_materialization: If True (default), use hash-based batching for tables
                            with more rows than materialization_batch_size.
     materialization_batch_size: Rows per batch when batch_materialization is enabled
@@ -220,7 +228,8 @@ class SECMaterializeConfig(Config):
   """
 
   graph_id: str = "sec"  # Target graph ID
-  rebuild_graph: bool = True  # Rebuild LadybugDB before materialization
+  materialize_mode: Literal["full", "incremental"] = "full"
+  rebuild_graph: bool = True  # Rebuild LadybugDB before materialization (full mode)
   batch_materialization: bool = True  # Hash-based batching for large tables
   materialization_batch_size: int = Field(
     default=20_000_000, ge=1_000_000

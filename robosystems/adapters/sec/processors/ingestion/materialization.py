@@ -66,6 +66,7 @@ class LadybugMaterializer:
     batch_materialization: bool = True,
     batch_size: int = MATERIALIZATION_BATCH_SIZE,
     progress_callback: ProgressCallback | None = None,
+    materialize_mode: str = "full",
   ) -> MaterializeResult:
     """
     Materialize LadybugDB graph from existing DuckDB staging.
@@ -88,6 +89,10 @@ class LadybugMaterializer:
                      for large tables to prevent OOM.
         batch_size: Rows per batch (default: 20M).
         progress_callback: Optional callback for progress logging.
+        materialize_mode: "full" (default) rebuilds the graph then COPYs every
+                     table (assumes an empty target). "incremental" skips the
+                     rebuild and COPYs only rows not already in the populated
+                     graph (per-table keyset anti-join in the Graph API).
 
     Returns:
         MaterializeResult with rows ingested per table
@@ -95,7 +100,14 @@ class LadybugMaterializer:
     start_time = time.time()
     log_progress = make_progress_logger(progress_callback)
 
-    log_progress(f"Starting materialization from DuckDB for graph {self.graph_id}")
+    incremental = materialize_mode == "incremental"
+    # Incremental never rebuilds — it appends into the existing populated graph.
+    do_rebuild = rebuild and not incremental
+
+    log_progress(
+      f"Starting materialization from DuckDB for graph {self.graph_id} "
+      f"(mode={materialize_mode})"
+    )
 
     try:
       # Step 1: Determine which tables to materialize (schema-driven)
@@ -130,7 +142,7 @@ class LadybugMaterializer:
         )
 
       # Step 3: Rebuild or ensure LadybugDB database exists
-      if rebuild:
+      if do_rebuild:
         logger.info(
           "Step 3: Rebuilding LadybugDB database (DuckDB staging preserved)..."
         )
@@ -159,6 +171,7 @@ class LadybugMaterializer:
         batch_materialization=batch_materialization,
         batch_size=batch_size,
         progress_callback=log_progress,
+        incremental=incremental,
       )
 
       duration = time.time() - start_time
@@ -297,6 +310,7 @@ class LadybugMaterializer:
     batch_materialization: bool = True,
     batch_size: int = MATERIALIZATION_BATCH_SIZE,
     progress_callback: ProgressCallback | None = None,
+    incremental: bool = False,
   ) -> dict[str, Any]:
     """
     Trigger ingestion for all tables into LadybugDB graph via Graph API.
@@ -309,6 +323,9 @@ class LadybugMaterializer:
         batch_materialization: If True (default), use batching for large tables.
         batch_size: Rows per batch (default: 20M).
         progress_callback: Optional callback for progress logging
+        incremental: If True, each table's COPY anti-joins against the existing
+            graph so only new rows are ingested (populated-graph append). If
+            False (default), COPY assumes an empty target (full rebuild path).
 
     Returns:
         Ingestion results with statistics
@@ -361,6 +378,7 @@ class LadybugMaterializer:
               batch_num=batch_num,
               num_batches=num_batches,
               timeout=CHUNKED_MATERIALIZATION_TIMEOUT,
+              incremental=incremental,
             )
 
             batch_rows = response.get("rows_ingested", 0)
@@ -399,6 +417,7 @@ class LadybugMaterializer:
             graph_id=self.graph_id,
             table_name=table_name,
             timeout=timeout,
+            incremental=incremental,
           )
 
           rows_ingested = response.get("rows_ingested", 0)

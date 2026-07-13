@@ -1,4 +1,5 @@
 import re
+from pathlib import Path as FilePath
 
 import pyarrow as pa
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
@@ -51,6 +52,51 @@ def _copy_result_rows(result, fallback: int) -> int:
   except Exception:
     return fallback
   return fallback
+
+
+def _incr_keyset_path(graph_id: str, table_name: str) -> FilePath:
+  """Local path for a table's incremental keyset snapshot.
+
+  Under DUCKDB_STAGING_PATH (instance-local EBS, colocated with staging) but NOT
+  a ``.duckdb``/``.lbug`` file, so it is never published to S3. Transient —
+  deleted after the table's incremental run.
+  """
+  return (
+    FilePath(env.DUCKDB_STAGING_PATH) / "incr_keys" / graph_id / f"{table_name}.parquet"
+  )
+
+
+def _export_incremental_keyset(
+  ladybug_service,
+  graph_id: str,
+  table_name: str,
+  is_rel: bool,
+  snapshot_path: FilePath,
+) -> None:
+  """Stream the target graph's existing keys for ``table_name`` into a parquet
+  snapshot the DuckDB export SELECT can anti-join against, so only new rows are
+  COPYed.
+
+  Node keyset = ``identifier``; relationship keyset = ``(src, dst)`` via a
+  traversal. Uses LadybugDB's server-side ``COPY (query) TO parquet`` so the
+  whole keyset never materializes in Python — a 200M-edge keyset would be ~15 GB.
+  An empty graph writes a 0-row parquet, so the anti-join passes every staged row
+  and the first run degrades cleanly to a full load.
+  """
+  snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+  esc_path = str(snapshot_path).replace("'", "''")
+  if is_rel:
+    query = (
+      f"MATCH (a)-[:{table_name}]->(b) RETURN a.identifier AS src, b.identifier AS dst"
+    )
+  else:
+    query = f"MATCH (n:{table_name}) RETURN n.identifier AS identifier"
+  with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+    conn.execute("CALL timeout=3600000")  # 60 min: large rel traversals
+    try:
+      conn.execute(f"COPY ({query}) TO '{esc_path}'")
+    finally:
+      conn.execute("CALL timeout=120000")  # reset to 2 minutes
 
 
 # Type mapping from LadybugDB types to DuckDB-compatible cast types
@@ -255,6 +301,11 @@ async def _materialize_table_impl(
 ) -> TableMaterializationResponse:
   import time
 
+  # Incremental keyset snapshot (assigned only in incremental mode); referenced
+  # again in the cleanup section, so bind it up front.
+  incremental = False
+  snapshot_path: FilePath | None = None
+
   try:
     # Blue-green: read DuckDB from source graph if specified, otherwise from target
     duckdb_graph_id = request.source_graph_id or graph_id
@@ -303,6 +354,9 @@ async def _materialize_table_impl(
         ).fetchall()
         column_names = [col[0] for col in source_columns]
         has_file_id = "file_id" in column_names
+        is_node = "identifier" in column_names
+        is_rel = "src" in column_names and "dst" in column_names
+        incremental = request.incremental and (is_node or is_rel)
 
         # Columns to NULL out (keep column for schema match, but skip data).
         # Embeddings stay in DuckDB staging for LanceDB vector search; materializing
@@ -323,9 +377,9 @@ async def _materialize_table_impl(
         if has_hash_batching:
           assert request.batch_num is not None and request.num_batches is not None
 
-          if "identifier" in column_names:
+          if is_node:
             hash_col = "identifier"
-          elif "src" in column_names and "dst" in column_names:
+          elif is_rel:
             hash_col = "src || '|' || dst"
           else:
             hash_col = column_names[0] if column_names else "rowid"
@@ -343,14 +397,61 @@ async def _materialize_table_impl(
           file_filter = f"file_id IN ({file_ids_placeholders})"
           query_params.extend(request.file_ids)
 
-        # Build WHERE clause combining file filter and batch clause
-        where = ""
-        if file_filter and batch_clause:
-          where = f" WHERE {file_filter} AND ({batch_clause.replace(' WHERE ', '')})"
-        elif file_filter:
-          where = f" WHERE {file_filter}"
-        elif batch_clause:
-          where = batch_clause
+        # Incremental: export the target graph's existing keys to a parquet
+        # snapshot (once per table, reused across hash batches) and anti-join the
+        # export SELECT against it so ONLY new rows are COPYed. Mandatory for
+        # correctness against a POPULATED graph — a duplicate node PK COPY
+        # hard-fails, and a duplicate (src,dst) edge COPY silently duplicates
+        # (both verified on the 0.18 fork). An empty graph yields an empty
+        # snapshot, so the anti-join passes everything (first run == full load).
+        #
+        # Mutable-attribute tables (SEC: only Entity) ride the same anti-join —
+        # NEW rows are added, but a CHANGED attribute of an ALREADY-materialized
+        # node is NOT refreshed here. A node-level DELETE+re-COPY can't fix that:
+        # DETACH DELETE drops the node's edges (verified), orphaning e.g.
+        # FACT_HAS_ENTITY. Attribute refresh is therefore a responsibility of the
+        # periodic full reconciliation rebuild; a bulk UNWIND+SET/MERGE upsert
+        # (edge-preserving) is the future path if sub-reconciliation freshness is
+        # needed.
+        incr_clause = ""
+        if incremental:
+          snapshot_path = _incr_keyset_path(graph_id, table_name)
+          # Export once per table: on batch 0 / single-pass, or self-heal if a
+          # later batch finds the snapshot missing (crash between batches).
+          need_export = (
+            not has_hash_batching
+            or request.batch_num == 0
+            or not snapshot_path.exists()
+          )
+          if need_export:
+            _export_incremental_keyset(
+              ladybug_service, graph_id, table_name, is_rel, snapshot_path
+            )
+          esc_snapshot = str(snapshot_path).replace("'", "''")
+          if is_rel:
+            incr_clause = (
+              f"NOT EXISTS (SELECT 1 FROM read_parquet('{esc_snapshot}') k "
+              "WHERE k.src = t.src AND k.dst = t.dst)"
+            )
+          else:
+            incr_clause = (
+              f"NOT EXISTS (SELECT 1 FROM read_parquet('{esc_snapshot}') k "
+              "WHERE k.identifier = t.identifier)"
+            )
+
+        # Combine file-filter, hash-batch, and incremental anti-join predicates.
+        where_fragments: list[str] = []
+        if file_filter:
+          where_fragments.append(file_filter)
+        if batch_clause:
+          where_fragments.append(batch_clause.replace(" WHERE ", "", 1))
+        if incr_clause:
+          where_fragments.append(incr_clause)
+        where = (
+          " WHERE " + " AND ".join(f"({frag})" for frag in where_fragments)
+          if where_fragments
+          else ""
+        )
 
         # Columns to exclude from materialization
         exclude_cols: set[str] = set()
@@ -383,7 +484,11 @@ async def _materialize_table_impl(
         # the write into LadybugDB's CSR storage is still a copy, unavoidable for
         # a persistent, traversable graph. Batching bounds peak memory; DECIMAL
         # (postgres_scan-staged NUMERIC) rides through the Arrow types natively.
-        select_sql = f"SELECT {select_expr} FROM {table_name}{where}"
+        # Alias the source as `t` so the incremental anti-join subquery can
+        # qualify outer columns (t.identifier / t.src / t.dst). Single-table FROM,
+        # so the unqualified columns in select_expr / file_filter / batch predicate
+        # still resolve to `t`.
+        select_sql = f"SELECT {select_expr} FROM {table_name} AS t{where}"
         if query_params:
           arrow_reader = duck_conn.execute(select_sql, query_params).fetch_record_batch(
             ARROW_STREAM_BATCH_ROWS
@@ -466,6 +571,19 @@ async def _materialize_table_impl(
       logger.debug(f"Released DuckDB connections for {duckdb_graph_id}")
     except Exception as release_err:
       logger.warning(f"Failed to release DuckDB connections: {release_err}")
+
+    # Incremental: drop the keyset snapshot after the last (or only) batch. On a
+    # mid-run failure it lingers and is self-healed by the next batch-0 overwrite.
+    if incremental and snapshot_path is not None:
+      is_last_batch = (
+        request.num_batches is None or request.batch_num == request.num_batches - 1
+      )
+      if is_last_batch:
+        try:
+          snapshot_path.unlink(missing_ok=True)
+          logger.debug(f"Removed incremental keyset snapshot for {table_name}")
+        except Exception as snap_err:
+          logger.warning(f"Could not remove incremental keyset snapshot: {snap_err}")
 
     return TableMaterializationResponse(
       status="success",
