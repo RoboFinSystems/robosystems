@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Skip in CI: dedicated jobs run these checks and branch protection is enforced
+# server-side. These hooks are a local-only safety net.
+if [ -n "${CI:-}" ]; then exit 0; fi
+
 uv run ruff check .
 uv run ruff format --check .
 uv run basedpyright
