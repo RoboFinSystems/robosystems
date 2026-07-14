@@ -1,13 +1,14 @@
 """Dagster jobs for LadybugDB version migration.
 
-Two jobs orchestrate migration across the fleet:
+Three jobs orchestrate migration across the fleet:
 1. Export job (pre-deploy): exports all databases on each instance
 2. Import job (post-deploy): imports exported databases on each instance
+3. Cleanup job (post-verify): deletes the .pre-migration rollback backups
 
-Both jobs discover instances from DynamoDB, skipping shared replicas
+All jobs discover instances from DynamoDB, skipping shared replicas
 (replicas re-attach from S3 and don't need export/import).
 
-Instances are processed in parallel — each instance exports/imports
+Instances are processed in parallel — each instance exports/imports/cleans
 its own local databases independently.
 """
 
@@ -38,6 +39,13 @@ class MigrationImportConfig(Config):
   skip_instances: list[str] = []
   include_shared_master: bool = False
   cleanup: bool = False
+
+
+class MigrationCleanupConfig(Config):
+  """Configuration for migration cleanup job."""
+
+  skip_instances: list[str] = []
+  include_shared_master: bool = False
 
 
 def _get_writer_instances(
@@ -178,7 +186,14 @@ async def _import_instance(
   # Check if migration is pending
   status = await client.migration_status()
   if not status.get("migration_pending"):
-    return {"instance_id": instance_id, "status": "no_migration_pending"}
+    # Nothing to import. Still honor cleanup so a rerun with cleanup=True removes
+    # leftover .pre-migration backups on instances whose migration already
+    # completed (the whole point of the standalone cleanup path). The endpoint
+    # self-guards and no-ops when there is nothing to clean.
+    result = {"instance_id": instance_id, "status": "no_migration_pending"}
+    if cleanup:
+      result["cleanup"] = await client.migration_cleanup()
+    return result
 
   start = time.time()
   import_response = await client.migration_import()
@@ -197,6 +212,27 @@ async def _import_instance(
     "status": "success",
     "duration_seconds": round(duration, 1),
     **result_data,
+  }
+
+
+async def _cleanup_instance(instance_id: str, ip: str) -> dict[str, Any]:
+  """Delete .pre-migration backup files on a single instance. Returns result dict.
+
+  Idempotent: the /migration/cleanup endpoint refuses while a migration is in
+  progress or migration.json still exists, and no-ops when there are no
+  .pre-migration files to remove.
+  """
+  start = time.time()
+  client = await _get_client(ip)
+
+  cleanup_result = await client.migration_cleanup()
+  duration = time.time() - start
+
+  return {
+    "instance_id": instance_id,
+    "status": "success",
+    "duration_seconds": round(duration, 1),
+    "cleanup": cleanup_result,
   }
 
 
@@ -363,6 +399,77 @@ def import_all_instances(
   }
 
 
+@op
+def cleanup_all_instances(
+  context: OpExecutionContext, config: MigrationCleanupConfig
+) -> dict:
+  """Delete .pre-migration rollback backups on each writer instance.
+
+  Standalone teardown to run AFTER a migration is verified good. The import
+  job's cleanup only fires on instances that still had a pending migration, so
+  once migration.json is gone the backups linger; this reclaims them fleet-wide.
+  All instances are cleaned in parallel; each is idempotent (no-op when there is
+  nothing to clean).
+
+  Set include_shared_master=true to also clean a shared master (it must be awake
+  for its volume to be attached — e.g. run this inside a wake window).
+  """
+  instances = _get_writer_instances(context, config.include_shared_master)
+
+  # Separate skipped from active
+  active = []
+  results = []
+  for inst in instances:
+    instance_id = inst.get("instance_id", "unknown")
+    if instance_id in config.skip_instances:
+      context.log.info(f"Skipping instance {instance_id}")
+      results.append({"instance_id": instance_id, "status": "skipped"})
+    else:
+      active.append(inst)
+
+  if active:
+    context.log.info(f"Cleaning up {len(active)} instances in parallel")
+
+    coros = [
+      _cleanup_instance(
+        inst.get("instance_id", "unknown"),
+        inst.get("private_ip", "localhost"),
+      )
+      for inst in active
+    ]
+    instance_ids = [inst.get("instance_id", "unknown") for inst in active]
+
+    parallel_results = asyncio.run(_run_parallel(coros, instance_ids))
+    results.extend(parallel_results)
+
+  # Log results
+  for r in results:
+    if r["status"] == "success":
+      context.log.info(
+        f"  {r['instance_id']}: cleanup {r.get('cleanup', {})} "
+        f"in {r.get('duration_seconds', '?')}s"
+      )
+    elif r["status"] == "failed":
+      context.log.error(f"  {r['instance_id']}: {r.get('error', 'unknown error')}")
+
+  succeeded = sum(1 for r in results if r["status"] == "success")
+  failed = sum(1 for r in results if r["status"] == "failed")
+  skipped = sum(1 for r in results if r["status"] == "skipped")
+
+  context.log.info(
+    f"Cleanup complete: {succeeded} succeeded, {failed} failed, {skipped} skipped"
+  )
+
+  if failed > 0:
+    errors = [r["error"] for r in results if r["status"] == "failed"]
+    raise RuntimeError(f"Cleanup failed on {failed} instance(s): {'; '.join(errors)}")
+
+  return {
+    "instances": results,
+    "summary": {"succeeded": succeeded, "failed": failed, "skipped": skipped},
+  }
+
+
 @job(tags={"dagster/priority": "1"})
 def ladybug_migration_export_job():
   """Export all databases on writer instances for version migration.
@@ -379,3 +486,15 @@ def ladybug_migration_import_job():
   Run AFTER deploying the new LadybugDB version.
   """
   import_all_instances()
+
+
+@job(tags={"dagster/priority": "1"})
+def ladybug_migration_cleanup_job():
+  """Delete .pre-migration rollback backups on writer instances.
+
+  Run AFTER a migration is verified good, to reclaim the backup space. Safe to
+  run anytime — idempotent and a no-op where there is nothing to clean. This is
+  the standalone teardown; the import job only cleans instances that still had a
+  pending migration.
+  """
+  cleanup_all_instances()
