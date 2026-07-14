@@ -72,6 +72,7 @@ from robosystems.dagster.jobs.invoice_billing import (
   invoice_subscription_renewal_job,
 )
 from robosystems.dagster.jobs.migration import (
+  ladybug_migration_cleanup_job,
   ladybug_migration_export_job,
   ladybug_migration_import_job,
 )
@@ -219,6 +220,7 @@ all_jobs = [
   # Platform: Version migration (manually triggered)
   ladybug_migration_export_job,
   ladybug_migration_import_job,
+  ladybug_migration_cleanup_job,
   # Platform: Notifications
   send_email_job,
   # Adapter: SEC pipeline
