@@ -28,6 +28,7 @@ default:
 start profile="robosystems" build="":
     @test -f {{_env}} || cp .env.example {{_env}}
     @test -f {{_local_env}} || cp .env.local.example {{_local_env}}
+    @just install-hooks
     docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
         {{ if build != "" { "--build" } else { "" } }} --detach
 
@@ -78,8 +79,12 @@ init:
     uv python install $(cat .python-version)
     @test -f {{_env}} || cp .env.example {{_env}}
     @test -f {{_local_env}} || cp .env.local.example {{_local_env}}
-    git config core.hooksPath .githooks
+    @just install-hooks
     @just venv
+
+# Install git hooks (points core.hooksPath at .githooks; idempotent, safe to re-run)
+install-hooks:
+    git config core.hooksPath .githooks
 
 # Create virtual environment (assumes uv is installed)
 venv:
