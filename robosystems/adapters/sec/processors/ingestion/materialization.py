@@ -242,29 +242,20 @@ class LadybugMaterializer:
         else:
           raise
 
-      # For shared repos, always use the contextual schema loader (codebase source of truth).
+      # For shared repos, always use the contextual schema compile (codebase
+      # source of truth — same helper as SharedRepositoryService creation).
       # Stored GraphSchema records can become stale when the schema evolves.
-      from robosystems.schemas.loader import get_contextual_schema_loader
-      from robosystems.schemas.models import Schema
+      from robosystems.schemas.loader import compile_repository_schema
 
       subgraph_info = parse_subgraph_id(self.graph_id)
       repo_name = subgraph_info.parent_graph_id if subgraph_info else self.graph_id
 
-      loader = get_contextual_schema_loader("repository", repo_name)
-      if not loader.nodes:
-        raise ValueError(f"No schema found for graph {self.graph_id}")
-
-      compiled = Schema(
-        name=f"{repo_name.upper()} Repository Schema",
-        description=f"Contextual schema for {repo_name} repository",
-        nodes=list(loader.nodes.values()),
-        relationships=list(loader.relationships.values()),
-      )
+      compiled = compile_repository_schema(repo_name)
       schema_ddl = compiled.to_cypher()
       schema_type = "shared"
       logger.info(
         f"Rebuild: loaded schema from codebase for {self.graph_id} "
-        f"({len(loader.nodes)} nodes, {len(loader.relationships)} relationships)"
+        f"({len(compiled.nodes)} nodes, {len(compiled.relationships)} relationships)"
       )
 
       # Update the stored GraphSchema record so it stays in sync

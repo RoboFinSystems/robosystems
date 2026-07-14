@@ -753,12 +753,13 @@ class TestGlobalDetection:
 
   def test_global_relationships(self):
     """Relationships in BASE_RELATIONSHIPS are detected as global."""
-    assert _is_global_relationship_schema_driven("ENTITY_EVOLVED_FROM") is True
-    assert _is_global_relationship_schema_driven("ENTITY_OWNS_ENTITY") is True
+    assert _is_global_relationship_schema_driven("ENTITY_HAS_TAXONOMY") is True
+    assert _is_global_relationship_schema_driven("TAXONOMY_EXTENDS_TAXONOMY") is True
     assert _is_global_relationship_schema_driven("ELEMENT_HAS_LABEL") is True
 
   def test_non_global_relationships(self):
     """Relationships not in BASE_RELATIONSHIPS are not global."""
+    assert _is_global_relationship_schema_driven("ENTITY_EVOLVED_FROM") is False
     assert _is_global_relationship_schema_driven("EMPLOYS") is False
     assert _is_global_relationship_schema_driven("custom_rel") is False
 
@@ -960,7 +961,7 @@ class TestCopyRelationshipDataSchemaDrivern:
     _setup_parquet_mock(mock_pq_cls, [("from", "string"), ("to", "string")])
 
     result = _copy_relationship_data_schema_driven(
-      engine, "/f.parquet", "ENTITY_EVOLVED_FROM", ingest_info, adapter
+      engine, "/f.parquet", "ENTITY_HAS_TAXONOMY", ingest_info, adapter
     )
 
     assert result is True

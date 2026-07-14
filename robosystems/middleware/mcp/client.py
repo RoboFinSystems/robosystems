@@ -539,11 +539,8 @@ class GraphMCPClient:
     """Get description for common relationship types (base + roboledger extension only)."""
     descriptions = {
       # Base relationships
-      "ENTITY_EVOLVED_FROM": "Tracks entity changes over time (mergers, acquisitions)",
-      "ENTITY_OWNS_ENTITY": "Parent-subsidiary ownership relationships",
       "ELEMENT_HAS_LABEL": "Links XBRL elements to their human-readable labels",
       "ELEMENT_HAS_REFERENCE": "Links elements to authoritative references",
-      "ELEMENT_IN_TAXONOMY": "Places elements within taxonomy structure",
       "TAXONOMY_HAS_LABEL": "Links taxonomies to their labels",
       "TAXONOMY_HAS_REFERENCE": "Links taxonomies to references",
       # RoboLedger extension relationships - Reporting section
@@ -580,11 +577,8 @@ class GraphMCPClient:
     # Complete relationship mappings for base + roboledger extension
     known_relationships = {
       # Base relationships
-      "ENTITY_EVOLVED_FROM": ("Entity", "Entity"),
-      "ENTITY_OWNS_ENTITY": ("Entity", "Entity"),
       "ELEMENT_HAS_LABEL": ("Element", "Label"),
       "ELEMENT_HAS_REFERENCE": ("Element", "Reference"),
-      "ELEMENT_IN_TAXONOMY": ("Element", "Taxonomy"),
       "TAXONOMY_HAS_LABEL": ("Taxonomy", "Label"),
       "TAXONOMY_HAS_REFERENCE": ("Taxonomy", "Reference"),
       # RoboLedger extension - Reporting section
