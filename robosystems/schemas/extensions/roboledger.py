@@ -454,9 +454,10 @@ class RoboLedgerContext:
     ext_nodes = cls.get_nodes_for_context(context)
     ext_relationships = cls.get_relationships_for_context(context)
 
-    # Reporting-only contexts (SEC) skip the REA/trait base tables so this
-    # materialization list matches the schema the loader builds — neither
-    # creates nor materializes the empty Event/Agent/Trait tables.
+    # Reporting-only contexts (SEC) skip the REA/trait base tables and the
+    # tenant-OLTP-only taxonomy link edges so this materialization list
+    # matches the schema ContextAwareSchemaLoader builds — tables with no SEC
+    # writer are neither created nor materialized.
     reporting_only = context in (cls.SEC_REPOSITORY, cls.REPORTING_ONLY)
     excluded_nodes = REPORTING_ONLY_EXCLUDED_NODES if reporting_only else frozenset()
     excluded_rels = (

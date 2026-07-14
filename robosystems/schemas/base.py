@@ -346,32 +346,11 @@ BASE_NODES = [
 # NOTE: Platform relationships (user access, connections) are managed in PostgreSQL.
 # This schema contains only business domain relationships.
 BASE_RELATIONSHIPS = [
-  # Evolution and lineage tracking
-  Relationship(
-    name="ENTITY_EVOLVED_FROM",
-    from_node="Entity",
-    to_node="Entity",
-    description="Entity evolution and transformation tracking",
-    properties=[
-      Property(name="evolution_type", type="STRING"),  # merger, acquisition, spin-off
-      Property(name="evolution_date", type="STRING"),
-      Property(name="notes", type="STRING"),
-      Property(name="created_at", type="STRING"),
-    ],
-  ),
-  # Hierarchical entity relationships
-  Relationship(
-    name="ENTITY_OWNS_ENTITY",
-    from_node="Entity",
-    to_node="Entity",
-    description="Parent-subsidiary entity ownership relationships",
-    properties=[
-      Property(name="ownership_type", type="STRING"),  # subsidiary, division, branch
-      Property(name="ownership_percentage", type="DOUBLE"),
-      Property(name="effective_date", type="STRING"),
-      Property(name="created_at", type="STRING"),
-    ],
-  ),
+  # NOTE: ENTITY_EVOLVED_FROM (M&A lineage) and ENTITY_OWNS_ENTITY
+  # (parent-subsidiary ownership) were removed 2026-07 — no writer existed on
+  # any path (SEC or OLTP materialization). Re-add ENTITY_OWNS_ENTITY when
+  # multi-entity consolidation ships (OLTP entities.parent_entity_id is the
+  # designated source).
   # XBRL Core Relationships - Global relationships for shared XBRL concepts
   Relationship(
     name="ELEMENT_HAS_LABEL",
@@ -388,13 +367,9 @@ BASE_RELATIONSHIPS = [
     properties=[],
   ),
   # Global Taxonomy Structure Relationships
-  Relationship(
-    name="ELEMENT_IN_TAXONOMY",
-    from_node="Element",
-    to_node="Taxonomy",
-    description="Element belongs to a global taxonomy (us-gaap, ifrs-full, etc.)",
-    properties=[],
-  ),
+  # NOTE: ELEMENT_IN_TAXONOMY was removed 2026-07 — no writer existed, and
+  # element↔taxonomy membership is derivable via Structure associations
+  # (STRUCTURE_HAS_TAXONOMY + STRUCTURE_HAS_ASSOCIATION).
   Relationship(
     name="TAXONOMY_HAS_LABEL",
     from_node="Taxonomy",
@@ -598,9 +573,11 @@ BASE_RELATIONSHIPS = [
 # The REA event/agent substrate (Event, Agent) and the advisory element Trait
 # node live in the base schema because accounting (roboledger) graphs populate
 # them. Reporting-only repositories — the SEC shared repo today — never create
-# economic events, counterparties, or element traits, so these tables stay
-# empty there. They are excluded from a reporting-only graph's schema so the
-# empty node/relationship tables are neither created nor materialized.
+# economic events, counterparties, or element traits. The entity↔taxonomy link
+# edges are likewise tenant-only: they materialize from the extensions OLTP
+# database (taxonomy adoption rows, extension chains) and have no SEC XBRL
+# source. All are excluded from a reporting-only graph's schema so the empty
+# node/relationship tables are neither created nor materialized.
 #
 # Consumed by ContextAwareSchemaLoader (schema DDL) and
 # RoboLedgerContext.get_all_table_names_for_context (materialization list);
@@ -616,5 +593,8 @@ REPORTING_ONLY_EXCLUDED_RELATIONSHIPS: frozenset[str] = frozenset(
     "EVENT_DISCHARGES_EVENT",
     "EVENT_OBLIGATED_BY_EVENT",
     "EVENT_REPLACES_EVENT",
+    # Tenant-OLTP-only taxonomy links (no SEC writer)
+    "ENTITY_HAS_TAXONOMY",
+    "TAXONOMY_EXTENDS_TAXONOMY",
   }
 )

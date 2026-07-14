@@ -289,11 +289,12 @@ class TestUtilityFunctions:
   def test_is_global_relationship_schema_driven(self):
     """Test global relationship detection."""
     # Global relationships (defined in BASE_RELATIONSHIPS)
-    assert _is_global_relationship_schema_driven("ENTITY_EVOLVED_FROM") is True
-    assert _is_global_relationship_schema_driven("ENTITY_OWNS_ENTITY") is True
+    assert _is_global_relationship_schema_driven("ENTITY_HAS_TAXONOMY") is True
+    assert _is_global_relationship_schema_driven("TAXONOMY_EXTENDS_TAXONOMY") is True
     assert _is_global_relationship_schema_driven("ELEMENT_HAS_LABEL") is True
 
-    # Non-global relationships
+    # Non-global relationships (including edges removed from BASE_RELATIONSHIPS)
+    assert _is_global_relationship_schema_driven("ENTITY_EVOLVED_FROM") is False
     assert _is_global_relationship_schema_driven("EMPLOYS") is False
     assert _is_global_relationship_schema_driven("entity_facts") is False
     assert _is_global_relationship_schema_driven("custom_relationship") is False

@@ -20,7 +20,7 @@ from robosystems.schemas.base import (
   REPORTING_ONLY_EXCLUDED_NODES,
   REPORTING_ONLY_EXCLUDED_RELATIONSHIPS,
 )
-from robosystems.schemas.models import Node, Relationship
+from robosystems.schemas.models import Node, Relationship, Schema
 
 logger = logging.getLogger(__name__)
 
@@ -416,6 +416,32 @@ def get_contextual_schema_loader(
     return get_schema_loader(extensions=extensions if extensions else None)
 
 
+def compile_repository_schema(repository_name: str) -> Schema:
+  """Compile the full Schema object for a shared repository's graph DDL.
+
+  Single source of truth for shared-repository schema compilation — used by
+  both the initial creation path (SharedRepositoryService) and the
+  rebuild-on-materialize path (SEC ingestion), so a repository always gets
+  the same contextual schema no matter which path created its database.
+
+  For SEC this applies the reporting-only context: REA/trait tables and
+  tenant-OLTP-only edges are excluded (see base.py exclusion sets).
+
+  Raises:
+      ValueError: If no schema nodes resolve for the repository.
+  """
+  loader = get_contextual_schema_loader("repository", repository_name)
+  if not loader.nodes:
+    raise ValueError(f"No schema found for repository {repository_name}")
+
+  return Schema(
+    name=f"{repository_name.upper()} Repository Schema",
+    description=f"Contextual schema for {repository_name} repository",
+    nodes=list(loader.nodes.values()),
+    relationships=list(loader.relationships.values()),
+  )
+
+
 class ContextAwareSchemaLoader(LadybugSchemaLoader):
   """
   Schema loader that supports context-aware loading for unified schemas.
@@ -435,22 +461,18 @@ class ContextAwareSchemaLoader(LadybugSchemaLoader):
     """
     # For SEC repository, filter out base nodes and relationships that aren't populated
     if context == "sec_repository":
-      # Reporting-only repos never populate the REA event/agent substrate or
-      # element traits, so those base tables are excluded (see base.py).
-      excluded_base_nodes = set(REPORTING_ONLY_EXCLUDED_NODES)
-      all_nodes = [node for node in BASE_NODES if node.name not in excluded_base_nodes]
-
-      # Base relationships not populated by SEC data: the REA/trait edges plus
-      # legacy lineage/hierarchy edges that carry no SEC rows.
-      excluded_base_rels = REPORTING_ONLY_EXCLUDED_RELATIONSHIPS | {
-        "ENTITY_EVOLVED_FROM",
-        "ENTITY_OWNS_ENTITY",
-        "ELEMENT_IN_TAXONOMY",
-        "STRUCTURE_HAS_CHILD",
-        "STRUCTURE_HAS_PARENT",
-      }
+      # Reporting-only repos never populate the REA event/agent substrate,
+      # element traits, or the tenant-OLTP taxonomy link edges. The exclusion
+      # sets in base.py are the single source of truth — shared with
+      # RoboLedgerContext.get_all_table_names_for_context so the schema DDL
+      # and the materialization list stay in lockstep.
+      all_nodes = [
+        node for node in BASE_NODES if node.name not in REPORTING_ONLY_EXCLUDED_NODES
+      ]
       all_relationships = [
-        rel for rel in BASE_RELATIONSHIPS if rel.name not in excluded_base_rels
+        rel
+        for rel in BASE_RELATIONSHIPS
+        if rel.name not in REPORTING_ONLY_EXCLUDED_RELATIONSHIPS
       ]
     else:
       # For other contexts, use all base schemas

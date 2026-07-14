@@ -101,15 +101,11 @@ class SharedRepositoryService:
       extensions = list(manifest.schema_extensions)
       if extensions:
         logger.info(f"Installing schema with extensions: {extensions}")
-        from ...schemas.runtime.manager import SchemaManager
+        # Contextual compile (same path as the rebuild-on-materialize flow) —
+        # for SEC this is the reporting-only view, not the full extension.
+        from ...schemas.loader import compile_repository_schema
 
-        manager = SchemaManager()
-        schema_config = manager.create_schema_configuration(
-          name=f"{repository_name.upper()} Repository Schema",
-          description=f"Schema for {manifest.name}",
-          extensions=extensions,
-        )
-        schema = manager.load_and_compile_schema(schema_config)
+        schema = compile_repository_schema(repository_name)
         schema_ddl = schema.to_cypher()
 
         result = await graph_client.install_schema(
