@@ -152,6 +152,13 @@ class TableMaterializationRequest(BaseModel):
     default=False,
     description="Whether to materialize embedding columns to LadybugDB. Default false — embeddings stay in DuckDB staging only.",
   )
+  incremental: bool = Field(
+    default=False,
+    description="Incremental mode: COPY only rows not already in the target graph "
+    "(anti-join the export against a keyset snapshot of existing node identifiers / "
+    "relationship (src,dst) pairs) instead of assuming an empty target. Default false "
+    "= full materialization (assumes a freshly rebuilt, empty graph).",
+  )
 
   class Config:
     extra = "forbid"
