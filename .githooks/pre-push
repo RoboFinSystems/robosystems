@@ -7,6 +7,10 @@
 # GitHub branch protection is the server-side backstop; this is the local guard.
 set -euo pipefail
 
+# Skip in CI: dedicated jobs run these checks and branch protection is enforced
+# server-side. These hooks are a local-only safety net.
+if [ -n "${CI:-}" ]; then exit 0; fi
+
 protected='^refs/heads/(main|master|release/.*)$'
 
 while read -r _local_ref _local_sha remote_ref _remote_sha; do
