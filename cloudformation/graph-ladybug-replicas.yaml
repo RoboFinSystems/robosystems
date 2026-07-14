@@ -657,6 +657,14 @@ Resources:
       HealthCheckTimeoutSeconds: 10
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        # Prefer the least-busy replica over round-robin. Round-robin spreads
+        # requests evenly regardless of how loaded each replica already is, so a
+        # replica handling a heavier workload keeps getting its full share;
+        # least_outstanding_requests biases new requests toward replicas with
+        # fewer in-flight requests. Applied in place - no instance cycling.
+        - Key: load_balancing.algorithm.type
+          Value: least_outstanding_requests
       Tags:
         - Key: Environment
           Value: !Ref Environment
