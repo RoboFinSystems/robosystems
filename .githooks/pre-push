@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#
+# Block direct pushes to protected branches (main / master / release/*).
+# Feature branches pass through untouched. Git feeds each ref being pushed on
+# stdin as "<local ref> <local sha> <remote ref> <remote sha>", so this checks
+# the resolved destination and catches bare `git push` as well as explicit ones.
+# GitHub branch protection is the server-side backstop; this is the local guard.
+set -euo pipefail
+
+protected='^refs/heads/(main|master|release/.*)$'
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [[ "$remote_ref" =~ $protected ]]; then
+    echo "pre-push: direct pushes to '${remote_ref#refs/heads/}' are blocked - open a PR instead." >&2
+    exit 1
+  fi
+done
+
+exit 0
