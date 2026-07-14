@@ -7,7 +7,7 @@ RoboSystems is an open-source, AI-native financial intelligence platform for acc
 - **Multi-Tenant Architecture**: Isolated database instances with tier-based resource allocation
 - **AI Operator System**: Autonomous financial Operators (Claude/MCP executors) with automatic credit tracking and SSE progress streaming
 - **DuckDB Staging**: High-performance data validation and bulk ingestion pipeline with Parquet optimization
-- **Data Integration**: Connect QuickBooks and SEC XBRL filings in a unified graph
+- **Data Integration**: Connect [QuickBooks](https://quickbooks.intuit.com/partners/affiliates?cid=par_pim_4TcakSEFQs73) and SEC XBRL filings in a unified graph
 - **Document Search**: Upload, index, and search documents with full-text and semantic search via OpenSearch
 - **Shared Repositories**: Access to curated SEC filing data and other shared knowledge graphs
 - **Credit-Based Billing**: AI operations consume token-based credits; database and MCP operations are free
