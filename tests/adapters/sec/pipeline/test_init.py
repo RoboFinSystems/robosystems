@@ -61,7 +61,10 @@ class TestGetDagsterComponents:
   def test_expected_number_of_schedules(self):
     """Test that the expected number of schedules are registered."""
     components = get_dagster_components()
-    assert len(components["schedules"]) == 1
+    # incremental download + weekly full-rebuild reconciliation
+    assert len(components["schedules"]) == 2
+    schedule_names = {s.name for s in components["schedules"]}
+    assert "sec_materialize_reconcile_schedule" in schedule_names
 
   def test_asset_names_include_core_pipeline(self):
     """Test that core pipeline assets are included."""

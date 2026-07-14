@@ -54,6 +54,12 @@ def _copy_result_rows(result, fallback: int) -> int:
   return fallback
 
 
+# graph_id and table_name reach the path builder from URL path params; both are
+# registry/schema identifiers (alphanumeric + _ / -). Validate before using them
+# to construct a filesystem path so a crafted value cannot escape the staging dir.
+_SAFE_PATH_COMPONENT = re.compile(r"[A-Za-z0-9_-]+")
+
+
 def _incr_keyset_path(graph_id: str, table_name: str) -> FilePath:
   """Local path for a table's incremental keyset snapshot.
 
@@ -61,6 +67,10 @@ def _incr_keyset_path(graph_id: str, table_name: str) -> FilePath:
   a ``.duckdb``/``.lbug`` file, so it is never published to S3. Transient —
   deleted after the table's incremental run.
   """
+  if not _SAFE_PATH_COMPONENT.fullmatch(graph_id):
+    raise ValueError(f"Unsafe graph_id for keyset snapshot path: {graph_id!r}")
+  if not _SAFE_PATH_COMPONENT.fullmatch(table_name):
+    raise ValueError(f"Unsafe table_name for keyset snapshot path: {table_name!r}")
   return (
     FilePath(env.DUCKDB_STAGING_PATH) / "incr_keys" / graph_id / f"{table_name}.parquet"
   )

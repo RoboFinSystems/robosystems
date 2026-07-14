@@ -10,13 +10,16 @@ the incremental mode rests on:
 
 so the anti-join must produce a graph identical to a from-empty full load, add
 no duplicate edges, and be idempotent (a re-run with no new staging adds 0 rows).
+
+COPY is done via parquet files here (dedup/anti-join semantics are transport-
+independent — the production handler streams the same rows over Arrow instead).
 """
 
 from types import SimpleNamespace
 
 import duckdb
 import ladybug as lbug
-import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from robosystems.graph_api.routers.databases.tables.materialize import (
@@ -40,20 +43,16 @@ def _ladybug_service(conn):
   return SimpleNamespace(db_manager=SimpleNamespace(connection_pool=pool))
 
 
-def _copy_arrow(conn, table_name, arrow_tbl):
-  """COPY an Arrow table into ladybug via the by-name replacement scan (same
-  pattern as the production materialize handler)."""
-  copy_batch = arrow_tbl  # noqa: F841 - resolved by name via replacement scan
-  conn.execute(f"COPY {table_name} FROM copy_batch")
+def _load(conn, duck, table_name, select_sql, out_path):
+  """DuckDB SELECT -> parquet -> ladybug COPY. Returns rows COPYed."""
+  duck.execute(f"COPY ({select_sql}) TO '{out_path}' (FORMAT parquet)")
+  rows = pq.read_metadata(str(out_path)).num_rows
+  if rows:
+    conn.execute(f"COPY {table_name} FROM '{out_path}'")
+  return rows
 
 
-def _arrow(duck, sql):
-  return pa.Table.from_batches(list(duck.execute(sql).fetch_record_batch(1000)))
-
-
-def _antijoin_select(
-  table_name: str, select_expr: str, snapshot_path, is_rel: bool
-) -> str:
+def _antijoin_select(table_name, select_expr, snapshot_path, is_rel):
   """Mirror the handler's incremental anti-join SELECT (materialize.py)."""
   esc = str(snapshot_path).replace("'", "''")
   if is_rel:
@@ -69,21 +68,15 @@ def _antijoin_select(
   return f"SELECT {select_expr} FROM {table_name} AS t WHERE ({incr})"
 
 
-def _incremental_copy(gc, duck, table_name, select_expr, is_rel, snapshot_path):
+def _incremental_copy(gc, duck, table_name, select_expr, is_rel, tmp_path, tag):
   """Reproduce the server incremental path for one table: export keyset ->
-  anti-join SELECT -> replacement-scan COPY. Returns rows COPYed."""
+  anti-join SELECT -> COPY only the delta. Returns rows COPYed."""
+  snapshot_path = tmp_path / f"{tag}_keys.parquet"
   _export_incremental_keyset(
     _ladybug_service(gc), "sec", table_name, is_rel, snapshot_path
   )
-  reader = duck.execute(
-    _antijoin_select(table_name, select_expr, snapshot_path, is_rel)
-  ).fetch_record_batch(1_000_000)
-  copied = 0
-  for batch in reader:
-    copy_batch = pa.Table.from_batches([batch])  # noqa: F841 - resolved by name
-    gc.execute(f"COPY {table_name} FROM copy_batch")
-    copied += batch.num_rows
-  return copied
+  select_sql = _antijoin_select(table_name, select_expr, snapshot_path, is_rel)
+  return _load(gc, duck, table_name, select_sql, tmp_path / f"{tag}_delta.parquet")
 
 
 def _new_graph(path):
@@ -119,6 +112,19 @@ def test_incr_keyset_path_is_transient_local(monkeypatch):
   assert ".lbug" not in p.as_posix() and ".duckdb" not in p.as_posix()
 
 
+@pytest.mark.parametrize("bad", ["../etc", "a/b", "sec/../sec", "."])
+def test_incr_keyset_path_rejects_traversal(bad, monkeypatch):
+  """graph_id / table_name are URL path params — a traversal attempt must raise,
+  not build a path outside the staging dir."""
+  from robosystems.config import env
+
+  monkeypatch.setattr(env, "DUCKDB_STAGING_PATH", "/data/staging", raising=False)
+  with pytest.raises(ValueError):
+    _incr_keyset_path(bad, "Fact")
+  with pytest.raises(ValueError):
+    _incr_keyset_path("sec", bad)
+
+
 @pytest.mark.integration
 def test_incremental_equals_full_load(tmp_path):
   """Incremental COPY into a populated graph == a full load of the same staging,
@@ -132,23 +138,25 @@ def test_incremental_equals_full_load(tmp_path):
 
   # ---- Path A: full load into a fresh graph ------------------------------
   _, full = _new_graph(tmp_path / "full.lbug")
-  _copy_arrow(full, "N", _arrow(duck, "SELECT identifier, name FROM N"))
-  _copy_arrow(full, "R", _arrow(duck, "SELECT src, dst FROM R"))
+  _load(full, duck, "N", "SELECT identifier, name FROM N", tmp_path / "fa_n.parquet")
+  _load(full, duck, "R", "SELECT src, dst FROM R", tmp_path / "fa_r.parquet")
   full_counts = _counts(full)
 
   # ---- Path B: pre-populate a graph, then incremental-COPY the same staging
   _, incr = _new_graph(tmp_path / "incr.lbug")
-  _copy_arrow(
-    incr, "N", pa.table({"identifier": ["a", "b", "c"], "name": ["A", "B", "C"]})
+  duck.execute(
+    "CREATE TABLE seed_n AS SELECT * FROM N WHERE identifier IN ('a','b','c')"
   )
-  _copy_arrow(incr, "R", pa.table({"src": ["a"], "dst": ["b"]}))
+  duck.execute("CREATE TABLE seed_r AS SELECT * FROM R WHERE src='a' AND dst='b'")
+  _load(
+    incr, duck, "N", "SELECT identifier, name FROM seed_n", tmp_path / "seed_n.parquet"
+  )
+  _load(incr, duck, "R", "SELECT src, dst FROM seed_r", tmp_path / "seed_r.parquet")
 
   added_n = _incremental_copy(
-    incr, duck, "N", "identifier, name", False, tmp_path / "N.parquet"
+    incr, duck, "N", "identifier, name", False, tmp_path, "n1"
   )
-  added_r = _incremental_copy(
-    incr, duck, "R", '"src", "dst"', True, tmp_path / "R.parquet"
-  )
+  added_r = _incremental_copy(incr, duck, "R", '"src", "dst"', True, tmp_path, "r1")
   incr_counts = _counts(incr)
 
   # only new rows added this run
@@ -164,11 +172,9 @@ def test_incremental_equals_full_load(tmp_path):
 
   # ---- idempotency: re-run with no new staging adds nothing, does not crash
   again_n = _incremental_copy(
-    incr, duck, "N", "identifier, name", False, tmp_path / "N2.parquet"
+    incr, duck, "N", "identifier, name", False, tmp_path, "n2"
   )
-  again_r = _incremental_copy(
-    incr, duck, "R", '"src", "dst"', True, tmp_path / "R2.parquet"
-  )
+  again_r = _incremental_copy(incr, duck, "R", '"src", "dst"', True, tmp_path, "r2")
   assert again_n == 0 and again_r == 0
   assert _counts(incr) == (5, 3)
 
@@ -182,9 +188,7 @@ def test_incremental_empty_graph_degrades_to_full_load(tmp_path):
   duck.execute("INSERT INTO N VALUES ('a','A'),('b','B')")
 
   _, c = _new_graph(tmp_path / "empty.lbug")  # N exists but is empty
-  added = _incremental_copy(
-    c, duck, "N", "identifier, name", False, tmp_path / "N.parquet"
-  )
+  added = _incremental_copy(c, duck, "N", "identifier, name", False, tmp_path, "n")
   assert added == 2
   assert (
     c.execute("MATCH (n:N) RETURN count(*)").get_as_arrow().column(0)[0].as_py() == 2
