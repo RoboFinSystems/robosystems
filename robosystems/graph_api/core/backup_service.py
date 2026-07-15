@@ -317,8 +317,13 @@ class OnInstanceBackupService:
     multithreading for maximum throughput on ARM64 (r7g) instances.
     Temp file is written to EBS-backed directory, not /tmp (RAM-backed).
 
-    Compression level 12 with --long (128MB window) is chosen because
-    CPU time is cheap relative to data transfer costs ($0.135/GB through NAT).
+    Level 15 with --long (128MB window) balances egress savings against
+    compress wall-time. The export instance is spun up per-publish and
+    billed for the compression, so higher levels (19+) roughly break even
+    at this file's low (~2.2x) compressibility -- the extra instance-time
+    cancels the egress they save. The window stays at 128MB so subscribers
+    decompress with a plain `zstd -d`; a larger --long window would force a
+    matching `--long` flag on their side for an unmeasured ratio gain.
     """
     logger.info(f"[Task {task_id}] Compressing {db_path.name} with zstd before upload")
 
@@ -334,11 +339,11 @@ class OnInstanceBackupService:
       temp_path = Path(temp_dir)
       compressed_file = temp_path / f"{db_path.stem}.lbug.zst"
 
-      # zstd -T0 (all cores), --long (128MB window), -12 (high compression)
+      # zstd -T0 (all cores), --long (128MB window), -15 (see docstring for level rationale)
       compress_start = datetime.now(UTC)
       try:
         subprocess.run(
-          ["zstd", "-T0", "--long", "-12", str(db_path), "-o", str(compressed_file)],
+          ["zstd", "-T0", "--long", "-15", str(db_path), "-o", str(compressed_file)],
           check=True,
           capture_output=True,
           text=True,
