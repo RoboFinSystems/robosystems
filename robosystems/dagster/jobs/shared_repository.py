@@ -1,13 +1,20 @@
-"""Dagster jobs for shared repository replica management.
+"""Dagster jobs for shared repository fleet management.
 
-Two jobs for refreshing the shared replica fleet:
+Shared-infrastructure lifecycle jobs — the shared master (single writer) and its
+read-replica fleet. Adapter pipelines (SEC today) contribute the deps and drive
+these via their sensor chains; the jobs themselves are platform-generic.
 
-1. shared_replicas_refresh_job (asset job):
+1. shared_master_wake_job / shared_master_sleep_job (asset jobs):
+   Bookend the master-dependent portion of a pipeline run — wake scales the
+   shared master to 1 and blocks until healthy; sleep clears scale-in protection
+   and scales it back to 0 once artifacts are published.
+
+2. shared_replicas_refresh_job (asset job):
    Materializes the shared_replicas_refreshed asset. Used by the automated
    pipeline sensor chain (materialize → publish → refresh) so Dagster
    tracks the materialization in asset lineage.
 
-2. shared_repository_refresh_replicas_job (standalone op job):
+3. shared_repository_refresh_replicas_job (standalone op job):
    Fire-and-forget refresh for ad-hoc operations:
    - Forcing a refresh after a failed previous refresh
    - Rolling out non-database changes (e.g., new AMI, code updates)
@@ -26,6 +33,42 @@ from dagster import (
 )
 
 from robosystems.config import env
+
+# ============================================================================
+# Shared-master parking (wake before staging, sleep after publish)
+# ============================================================================
+# Bookend asset jobs that scale the shared master to 1 before the
+# master-dependent staging step and back to 0 once artifacts are published to
+# S3. Light on-demand profile — the work is a few AWS API calls plus a health
+# poll. Adapter sensors (SEC today) trigger these and tag the runs with their
+# own pipeline/mode for chain lineage; the jobs themselves are platform-generic.
+_MASTER_PARKING_TAGS = {
+  "pipeline": "shared",
+  # phase is set per-run by the triggering sensor (master_wake / master_sleep)
+  "ecs/cpu": "512",
+  "ecs/memory": "2048",
+  "ecs/ephemeral_storage": "21",
+  "ecs/run_task_kwargs": {
+    "capacityProviderStrategy": [
+      {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+    ],
+  },
+}
+
+shared_master_wake_job = define_asset_job(
+  name="shared_master_wake",
+  description="Scale the shared master to 1 and wait until healthy.",
+  selection=AssetSelection.keys("shared_master_awake"),
+  tags=_MASTER_PARKING_TAGS,
+)
+
+shared_master_sleep_job = define_asset_job(
+  name="shared_master_sleep",
+  description="Clear scale-in protection and scale the shared master to 0.",
+  selection=AssetSelection.keys("shared_master_asleep"),
+  tags=_MASTER_PARKING_TAGS,
+)
+
 
 # Asset job: materializes shared_replicas_refreshed asset.
 # Uses AssetSelection.key() because the asset is built dynamically by

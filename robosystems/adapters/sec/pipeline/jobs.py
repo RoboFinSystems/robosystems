@@ -49,8 +49,6 @@ from .duckdb_s3_publish import (
   sec_duckdb_s3_published,
   sec_historical_duckdb_s3_published,
 )
-from .master_sleep import sec_master_asleep
-from .master_wake import sec_master_awake
 from .materialize import (
   sec_graph_materialized,
   sec_historical_materialized,
@@ -241,41 +239,6 @@ sec_incremental_stage_job = define_asset_job(
       ],
     },
   },
-)
-
-
-# ============================================================================
-# Shared-master parking (wake before staging, sleep after publish)
-# ============================================================================
-# Bookend ops that scale the SEC shared master to 1 before the master-dependent
-# staging step and back to 0 once artifacts are published to S3. Light
-# on-demand profile — the work is a few AWS API calls plus a health poll.
-
-_MASTER_PARKING_TAGS = {
-  "pipeline": "sec",
-  # phase is set per-run by the triggering sensor (master_wake / master_sleep)
-  "ecs/cpu": "512",
-  "ecs/memory": "2048",
-  "ecs/ephemeral_storage": "21",
-  "ecs/run_task_kwargs": {
-    "capacityProviderStrategy": [
-      {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-    ],
-  },
-}
-
-sec_master_wake_job = define_asset_job(
-  name="sec_master_wake",
-  description="Scale the SEC shared master to 1 and wait until healthy.",
-  selection=AssetSelection.assets(sec_master_awake),
-  tags=_MASTER_PARKING_TAGS,
-)
-
-sec_master_sleep_job = define_asset_job(
-  name="sec_master_sleep",
-  description="Clear scale-in protection and scale the SEC shared master to 0.",
-  selection=AssetSelection.assets(sec_master_asleep),
-  tags=_MASTER_PARKING_TAGS,
 )
 
 

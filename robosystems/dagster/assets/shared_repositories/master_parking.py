@@ -1,18 +1,23 @@
-"""Wake/sleep ("parking") of the SEC shared-master EC2 instance.
+"""Wake/sleep ("parking") of the shared-master EC2 instance.
 
 Pure boto3 + DynamoDB-registry logic with no Dagster imports, so it stays
 unit-testable and reusable. Drives the same scale-to-1 / scale-to-0 lifecycle
-validated by hand in the 2026-06-30 dry-run, wired into the nightly SEC pipeline
-as bookend ops.
+validated by hand in the 2026-06-30 dry-run, wired into adapter pipelines (SEC
+today) as bookend ops around the master-dependent staging + publish steps.
+
+The shared master is a single writer instance that hosts the platform's shared
+repositories. It is SEC-only today (``sec`` + ``sec_historical``), so the health
+gate defaults to the ``sec`` volume; ``database`` is a parameter so a second
+shared repository can gate on its own volume without a code change.
 
 Load-bearing invariant (confirmed in prod): the master ASG runs
 ``NewInstancesProtectedFromScaleIn=true``, so a scale-in is *cancelled* unless
 per-instance scale-in protection is cleared first. ``sleep_master`` therefore
 always clears protection before setting desired capacity to 0.
 
-The dev/test skip lives in the Dagster asset layer (``master_wake`` /
-``master_sleep``), not here — these functions always execute their logic so
-they can be unit-tested against mocked boto3.
+The dev/test skip lives in the Dagster asset layer (``master`` module), not
+here — these functions always execute their logic so they can be unit-tested
+against mocked boto3.
 """
 
 import asyncio
@@ -25,7 +30,9 @@ from robosystems.config import env
 from robosystems.graph_api.client.factory import get_graph_client_for_instance
 from robosystems.logger import logger
 
-SEC_DATABASE = "sec"
+# Default shared repository whose data volume gates the wake health check.
+# The shared master is SEC-only today; a second shared repo passes its own name.
+DEFAULT_SHARED_DATABASE = "sec"
 
 
 class MasterWakeTimeout(Exception):
@@ -92,17 +99,17 @@ def _instance_is_running(instance_id: str) -> bool:
   return False
 
 
-def _sec_volume_attached_to(instance_id: str) -> bool:
-  """True if the SEC data volume is ``attached`` to ``instance_id`` per registry.
+def _volume_attached_to(instance_id: str, database: str) -> bool:
+  """True if ``database``'s data volume is ``attached`` to ``instance_id``.
 
-  Scans all ``sec``-tagged rows and matches only an actually-attached one — a
-  transient stale row (e.g. an old row mid-reattach) must not shadow the real
-  match, since that reattach race is exactly what this gate guards against.
+  Scans all rows tagged with ``database`` and matches only an actually-attached
+  one — a transient stale row (e.g. an old row mid-reattach) must not shadow the
+  real match, since that reattach race is exactly what this gate guards against.
   """
   table = _dynamodb_resource().Table(env.VOLUME_REGISTRY_TABLE)
   for item in table.scan().get("Items", []):
     if (
-      SEC_DATABASE in (item.get("databases") or [])
+      database in (item.get("databases") or [])
       and item.get("status") == "attached"
       and item.get("instance_id") == instance_id
     ):
@@ -135,13 +142,14 @@ async def _graph_api_healthy(private_ip: str) -> bool:
 async def wait_for_master_healthy(
   asg_name: str,
   *,
+  database: str = DEFAULT_SHARED_DATABASE,
   timeout_s: int = 900,
   poll_interval_s: int = 15,
 ) -> dict[str, Any]:
   """Poll until the shared master is fully ready, else raise ``MasterWakeTimeout``.
 
-  Four independent signals must all hold: EC2 ``running``, the SEC volume
-  reattached (registry ``status=attached``), the instance registered as a
+  Four independent signals must all hold: EC2 ``running``, the ``database``
+  volume reattached (registry ``status=attached``), the instance registered as a
   healthy ``shared_master``, and a live graph-api ``/health``. The health check
   hits the instance directly by private IP rather than the 5-minute
   Redis-cached discovery, so a stale or not-yet-ready master can never
@@ -154,8 +162,8 @@ async def wait_for_master_healthy(
     if instance_id:
       if not _instance_is_running(instance_id):
         last_state = f"{instance_id}: not running"
-      elif not _sec_volume_attached_to(instance_id):
-        last_state = f"{instance_id}: sec volume not attached"
+      elif not _volume_attached_to(instance_id, database):
+        last_state = f"{instance_id}: {database} volume not attached"
       else:
         private_ip = _master_registered_healthy(instance_id)
         if not private_ip:
@@ -173,12 +181,16 @@ async def wait_for_master_healthy(
     await asyncio.sleep(poll_interval_s)
 
 
-async def wake_master(*, timeout_s: int | None = None) -> dict[str, Any]:
+async def wake_master(
+  *, database: str = DEFAULT_SHARED_DATABASE, timeout_s: int | None = None
+) -> dict[str, Any]:
   """Scale the shared master to 1 and wait until it is healthy."""
   asg_name = get_shared_master_asg_name()
   set_desired_capacity(asg_name, 1)
   result = await wait_for_master_healthy(
-    asg_name, timeout_s=timeout_s or env.SHARED_MASTER_WAKE_TIMEOUT_S
+    asg_name,
+    database=database,
+    timeout_s=timeout_s or env.SHARED_MASTER_WAKE_TIMEOUT_S,
   )
   return {"status": "awake", **result}
 

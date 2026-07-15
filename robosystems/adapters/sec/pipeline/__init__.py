@@ -89,16 +89,12 @@ from robosystems.adapters.sec.pipeline.jobs import (
   sec_ixbrl_index_job,
   sec_lbug_r2_publish_job,
   sec_lbug_s3_publish_job,
-  sec_master_sleep_job,
-  sec_master_wake_job,
   sec_materialize_job,
   sec_narratives_index_job,
   sec_process_job,
   sec_stage_job,
   sec_staged_materialize_job,
 )
-from robosystems.adapters.sec.pipeline.master_sleep import sec_master_asleep
-from robosystems.adapters.sec.pipeline.master_wake import sec_master_awake
 from robosystems.adapters.sec.pipeline.materialize import (
   sec_graph_materialized,
   sec_historical_materialized,
@@ -158,8 +154,6 @@ def get_dagster_components():
       sec_knowledge_artifacts,
       sec_narratives_indexed,
       sec_ixbrl_disclosures_indexed,
-      sec_master_awake,
-      sec_master_asleep,
     ],
     "jobs": [
       sec_download_job,
@@ -179,8 +173,6 @@ def get_dagster_components():
       sec_historical_lbug_s3_publish_job,
       sec_narratives_index_job,
       sec_ixbrl_index_job,
-      sec_master_wake_job,
-      sec_master_sleep_job,
     ],
     "sensors": [
       sec_processing_sensor,
@@ -240,11 +232,7 @@ __all__ = [
   "sec_lbug_r2_published",
   "sec_lbug_s3_publish_job",
   "sec_lbug_s3_published",
-  "sec_master_asleep",
-  "sec_master_awake",
-  "sec_master_sleep_job",
   "sec_master_sleep_on_failure_sensor",
-  "sec_master_wake_job",
   "sec_materialize_job",
   "sec_narratives_index_job",
   "sec_narratives_indexed",

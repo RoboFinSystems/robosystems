@@ -1,4 +1,4 @@
-"""Unit tests for SEC shared-master parking (wake/sleep).
+"""Unit tests for shared-master parking (wake/sleep).
 
 Boto3 clients, the DynamoDB registries, and the health client are all mocked;
 these lock in the two load-bearing invariants — the four-signal wake gate and
@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from robosystems.adapters.sec.pipeline import master_parking
-from robosystems.adapters.sec.pipeline.master_parking import (
+from robosystems.dagster.assets.shared_repositories import master_parking
+from robosystems.dagster.assets.shared_repositories.master_parking import (
   MasterWakeTimeout,
   get_shared_master_asg_name,
   sleep_master,
@@ -163,9 +163,9 @@ class TestSleepMaster:
 @pytest.mark.unit
 class TestVolumeGate:
   @patch.object(master_parking, "_dynamodb_resource")
-  def test_ignores_stale_sec_row_and_matches_real_one(self, m_ddb):
-    from robosystems.adapters.sec.pipeline.master_parking import (
-      _sec_volume_attached_to,
+  def test_ignores_stale_row_and_matches_real_one(self, m_ddb):
+    from robosystems.dagster.assets.shared_repositories.master_parking import (
+      _volume_attached_to,
     )
 
     volume_table = MagicMock()
@@ -180,7 +180,7 @@ class TestVolumeGate:
     resource.Table.return_value = volume_table
     m_ddb.return_value = resource
 
-    assert _sec_volume_attached_to("i-123") is True
+    assert _volume_attached_to("i-123", "sec") is True
 
 
 @pytest.mark.unit
@@ -199,34 +199,38 @@ class TestSleepAssetParkingGate:
   sensors respect it via a single check.
   """
 
-  @patch("robosystems.adapters.sec.pipeline.master_sleep.sleep_master")
-  @patch("robosystems.adapters.sec.pipeline.master_sleep.env")
+  @patch("robosystems.dagster.assets.shared_repositories.master.sleep_master")
+  @patch("robosystems.dagster.assets.shared_repositories.master.env")
   def test_parking_disabled_skips_scale_down(self, mock_env, m_sleep):
     from dagster import build_asset_context
 
-    from robosystems.adapters.sec.pipeline.master_sleep import sec_master_asleep
+    from robosystems.dagster.assets.shared_repositories.master import (
+      shared_master_asleep,
+    )
 
     mock_env.ENVIRONMENT = "prod"
     mock_env.SHARED_MASTER_PARKING_ENABLED = False
 
-    result = sec_master_asleep(build_asset_context())
+    result = shared_master_asleep(build_asset_context())
 
     m_sleep.assert_not_called()
     assert result.metadata["status"] == "skipped"
     assert result.metadata["reason"] == "parking_disabled"
 
-  @patch("robosystems.adapters.sec.pipeline.master_sleep.sleep_master")
-  @patch("robosystems.adapters.sec.pipeline.master_sleep.env")
+  @patch("robosystems.dagster.assets.shared_repositories.master.sleep_master")
+  @patch("robosystems.dagster.assets.shared_repositories.master.env")
   def test_parking_enabled_scales_down(self, mock_env, m_sleep):
     from dagster import build_asset_context
 
-    from robosystems.adapters.sec.pipeline.master_sleep import sec_master_asleep
+    from robosystems.dagster.assets.shared_repositories.master import (
+      shared_master_asleep,
+    )
 
     mock_env.ENVIRONMENT = "prod"
     mock_env.SHARED_MASTER_PARKING_ENABLED = True
     m_sleep.return_value = {"status": "asleep", "instance_id": "i-xyz"}
 
-    result = sec_master_asleep(build_asset_context())
+    result = shared_master_asleep(build_asset_context())
 
     m_sleep.assert_called_once()
     assert result.metadata["instance_id"] == "i-xyz"

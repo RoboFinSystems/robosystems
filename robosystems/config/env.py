@@ -807,8 +807,9 @@ class EnvConfig:
     "VOLUME_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-volume-registry"
   )
 
-  # SEC shared-master ASG (off-hours parking / wake). The nightly SEC pipeline
-  # scales this to 1 before staging and back to 0 after publish.
+  # Shared-master ASG (off-hours parking / wake). The single writer that hosts
+  # the platform's shared repositories (SEC today). Adapter pipelines scale this
+  # to 1 before staging and back to 0 after publish.
   SHARED_MASTER_ASG_NAME = get_str_env(
     "SHARED_MASTER_ASG_NAME",
     f"robosystems-ladybug-shared-writers-{ENVIRONMENT}-asg",
