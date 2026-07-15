@@ -30,6 +30,8 @@ from robosystems.dagster.assets.graphs import (
 )
 from robosystems.dagster.assets.shared_repositories import (
   build_shared_replicas_refreshed,
+  shared_master_asleep,
+  shared_master_awake,
 )
 from robosystems.dagster.jobs.backup_cleanup import (
   daily_backup_cleanup_job,
@@ -80,6 +82,8 @@ from robosystems.dagster.jobs.notifications import (
   send_email_job,
 )
 from robosystems.dagster.jobs.shared_repository import (
+  shared_master_sleep_job,
+  shared_master_wake_job,
   shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
 )
@@ -184,6 +188,8 @@ all_assets = [
   user_repository_provisioning_source,
   user_graph_backup_source,
   # Platform: Shared repository infrastructure
+  shared_master_awake,
+  shared_master_asleep,
   shared_replicas_refreshed,
   # Adapter: SEC pipeline (includes sec_lbug_s3_published)
   *sec["assets"],
@@ -215,6 +221,8 @@ all_jobs = [
   suspend_expired_graphs_job,
   deprovision_suspended_graphs_job,
   # Platform: Shared repository
+  shared_master_wake_job,
+  shared_master_sleep_job,
   shared_replicas_refresh_job,
   shared_repository_refresh_replicas_job,
   # Platform: Version migration (manually triggered)

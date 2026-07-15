@@ -44,6 +44,8 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.jobs.shared_repository import (
+  shared_master_sleep_job,
+  shared_master_wake_job,
   shared_replicas_refresh_job,
 )
 
@@ -54,8 +56,6 @@ from .jobs import (
   sec_incremental_stage_job,
   sec_ixbrl_index_job,
   sec_lbug_s3_publish_job,
-  sec_master_sleep_job,
-  sec_master_wake_job,
   sec_materialize_job,
   sec_narratives_index_job,
   sec_process_job,
@@ -297,7 +297,7 @@ def sec_incremental_download_schedule(context):
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
   monitored_jobs=[sec_download_job, sec_process_job],
-  request_jobs=[sec_process_job, sec_master_wake_job],
+  request_jobs=[sec_process_job, shared_master_wake_job],
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
   description="Chain: download → process (batched) → stage. Self-contained incremental pipeline.",
@@ -403,7 +403,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
       # Check if a wake is already running (avoids double-wake on races)
       active_wake_runs = context.instance.get_runs(
         filters=RunsFilter(
-          job_name="sec_master_wake",
+          job_name="shared_master_wake",
           statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
         ),
         limit=1,
@@ -416,7 +416,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
 
       yield RunRequest(
         run_key=f"sec-wake-chain-{batch_id or partition_key}-{dagster_run.run_id[:8]}",
-        job_name="sec_master_wake",
+        job_name="shared_master_wake",
         tags={
           "pipeline": "sec",
           "phase": "master_wake",
@@ -463,7 +463,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
 
 @run_status_sensor(
   run_status=DagsterRunStatus.SUCCESS,
-  monitored_jobs=[sec_master_wake_job],
+  monitored_jobs=[shared_master_wake_job],
   request_job=sec_incremental_stage_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
@@ -660,7 +660,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
     sec_lbug_s3_publish_job,
     sec_duckdb_s3_publish_job,
     shared_replicas_refresh_job,
-    sec_master_sleep_job,
+    shared_master_sleep_job,
   ],
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
@@ -709,7 +709,7 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
     )
     for job_name, phase in (
       ("shared_replicas_refresh", "replica_refresh"),
-      ("sec_master_sleep", "master_sleep"),
+      ("shared_master_sleep", "master_sleep"),
     ):
       active = context.instance.get_runs(
         filters=RunsFilter(
@@ -768,13 +768,13 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
 @run_status_sensor(
   run_status=DagsterRunStatus.FAILURE,
   monitored_jobs=[
-    sec_master_wake_job,
+    shared_master_wake_job,
     sec_incremental_stage_job,
     sec_materialize_job,
     sec_lbug_s3_publish_job,
     sec_duckdb_s3_publish_job,
   ],
-  request_job=sec_master_sleep_job,
+  request_job=shared_master_sleep_job,
   default_status=DefaultSensorStatus.STOPPED,  # Enable in Dagster UI when ready
   minimum_interval_seconds=60,
   description="Sleep the shared master if any incremental master-dependent job fails",
@@ -794,7 +794,7 @@ def sec_master_sleep_on_failure_sensor(context: RunStatusSensorContext):
 
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
-      job_name="sec_master_sleep",
+      job_name="shared_master_sleep",
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
     ),
     limit=1,

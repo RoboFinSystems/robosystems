@@ -46,12 +46,14 @@ class TestGetDagsterComponents:
     # 2 lbug s3 publish, 2 duckdb s3 publish,
     # 1 lbug r2 publish, knowledge artifact,
     # 2 text index (narratives + ixbrl disclosures)
-    assert len(components["assets"]) == 17
+    # (shared_master wake/sleep now live in the shared_repositories layer)
+    assert len(components["assets"]) == 15
 
   def test_expected_number_of_jobs(self):
     """Test that the expected number of jobs are registered."""
     components = get_dagster_components()
-    assert len(components["jobs"]) == 19
+    # (shared_master wake/sleep jobs now live in the shared_repositories layer)
+    assert len(components["jobs"]) == 17
 
   def test_expected_number_of_sensors(self):
     """Test that the expected number of sensors are registered."""

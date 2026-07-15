@@ -1,11 +1,16 @@
 """Shared Repository Dagster Assets.
 
-This package contains:
+This package contains shared-infrastructure assets for the platform's shared
+repositories (SEC today):
 
 1. PUBLISH HELPER (shared logic):
    - publish_to_s3() - Core S3 publish logic called by per-repository assets
 
-2. REPLICA REFRESH (shared infrastructure):
+2. MASTER PARKING (shared writer lifecycle):
+   - shared_master_awake / shared_master_asleep - Scale the shared master ASG
+     to 1 (and wait until healthy) / back to 0 around a pipeline run
+
+3. REPLICA REFRESH (shared read fleet):
    - build_shared_replicas_refreshed() - Factory that builds the replica refresh
      asset with dynamic upstream deps from enabled adapter pipelines
 
@@ -17,6 +22,10 @@ own materialization asset. This creates clean lineage:
   (future) industry_graph_materialized -> industry_s3_published -> shared_replicas_refreshed
 """
 
+from robosystems.dagster.assets.shared_repositories.master import (
+  shared_master_asleep,
+  shared_master_awake,
+)
 from robosystems.dagster.assets.shared_repositories.publish import publish_to_s3
 from robosystems.dagster.assets.shared_repositories.replicas import (
   SharedReplicaRefreshConfig,
@@ -27,4 +36,6 @@ __all__ = [
   "SharedReplicaRefreshConfig",
   "build_shared_replicas_refreshed",
   "publish_to_s3",
+  "shared_master_asleep",
+  "shared_master_awake",
 ]
