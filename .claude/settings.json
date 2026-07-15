@@ -112,7 +112,8 @@
       "mcp__robosystems__financial-statement-analysis",
       "mcp__robosystems__live-financial-statement",
       "mcp__robosystems__list-workspaces",
-      "mcp__robosystems__switch-workspace"
+      "mcp__robosystems__switch-workspace",
+      "Bash(just create-release:*)"
     ],
     "ask": [
       "Bash(git branch --show-current:*)",
@@ -135,7 +136,7 @@
       "Bash(aws s3 cp:*)",
       "Bash(aws s3 mv:*)",
       "Bash(aws s3 sync:*)",
-      "Bash(just create-*)"
+      "Bash(just create-release:*)"
     ],
     "deny": [
       "Bash(just admin * migrations:*)",
