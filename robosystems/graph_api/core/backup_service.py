@@ -313,7 +313,7 @@ class OnInstanceBackupService:
   ) -> dict[str, Any]:
     """Compress database with zstd and upload to R2.
 
-    Uses the system zstd binary (pre-installed on Amazon Linux 2023) with
+    Uses the zstd binary bundled in the graph_api container image with
     multithreading for maximum throughput on ARM64 (r7g) instances.
     Temp file is written to EBS-backed directory, not /tmp (RAM-backed).
 
