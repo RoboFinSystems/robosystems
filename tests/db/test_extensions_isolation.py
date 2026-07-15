@@ -28,6 +28,7 @@ is the #1 isolation risk, so the contract must not silently regress.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -191,4 +192,97 @@ def test_no_bypass_of_the_scoped_session_factory():
     "inheriting a leaked tenant scope from a pooled connection:\n  "
     + "\n  ".join(offenders)
     + "\nRoute tenant DB access through `extensions_session(graph_id)`."
+  )
+
+
+# ---------------------------------------------------------------------------
+# The "spatial" half of graph_id-keying: no cache key may be scoped on org_id.
+# ---------------------------------------------------------------------------
+#
+# The DB-half guard above pins the *connection* boundary (search_path). This
+# one pins the *cache* boundary. Per-graph tenant DATA must never be keyed on
+# org_id: one org holds N client-company graphs (the multi-company accountant),
+# so an org_id-keyed cache would serve one client's data for another — a
+# cross-tenant bleed *inside* an org. Every idempotency / rate-limit / billing /
+# auth key in the tree namespaces on `graph_id` or `user_id`; org_id appears
+# only in route params, log lines, and error details (verified: 0 cache uses).
+#
+# Like `tests/migrations/test_extensions_tenant_fanout.py`, this is a line-level
+# heuristic, not a proof. It flags an f-string that interpolates `org_id` *in
+# key position* — the interpolation is bounded by key separators (`:` `_` `{`
+# `}`) rather than prose whitespace — which cleanly separates a key
+# (`f"reports:{org_id}"`) from prose (`f"org {org_id} not found"`). A genuinely
+# org-LEVEL cache (org metadata / billing, correctly keyed on the org and *not*
+# per-graph tenant data) opts out with a trailing `# org-cache: intentional`
+# marker — a conscious declaration, mirroring the fan-out guard's opt-out.
+
+_FSTRING = re.compile(r"""f(["'])(?P<body>(?:\\.|(?!\1).)*)\1""")
+_ORG_INTERP = re.compile(r"\{[^{}]*org_id[^{}]*\}")
+_KEY_SEP_BEFORE = set(":_{}")  # separator / prefix-interp close / start-of-key
+_KEY_SEP_AFTER = set(":_\"'")  # separator / end-of-string
+_ORG_CACHE_OPT_OUT = "org-cache: intentional"
+# Contexts where an org_id-bearing f-string is a route/log/error, never a key.
+_NON_CACHE_CONTEXT = (
+  "logger",
+  "logging.",
+  ".log(",
+  "raise ",
+  "detail=",
+  "HTTPException",
+  "@router",
+  "_make_request",
+)
+
+
+def _line_keys_org_id(line: str) -> bool:
+  """True iff `line` builds an f-string that interpolates org_id in key position."""
+  if "org_id" not in line or _ORG_CACHE_OPT_OUT in line:
+    return False
+  if any(tok in line for tok in _NON_CACHE_CONTEXT):
+    return False
+  for fm in _FSTRING.finditer(line):
+    body = fm.group("body")
+    if "org_id" not in body:
+      continue
+    for m in _ORG_INTERP.finditer(body):
+      before = (
+        body[m.start() - 1] if m.start() > 0 else "{"
+      )  # start-of-body == key start
+      after = body[m.end()] if m.end() < len(body) else '"'  # end-of-body == end-of-key
+      if before in _KEY_SEP_BEFORE and after in _KEY_SEP_AFTER:
+        return True
+  return False
+
+
+def test_no_org_keyed_cache_state():
+  """Structural guard: no cache / idempotency / rate-limit / billing key may be
+  namespaced on org_id. Two graphs under one org would collide → cross-tenant
+  data bleed within an org (the multi-company-accountant failure mode). A new
+  org-keyed cache fails here in CI, not in a customer's books.
+  """
+  # Self-test: the heuristic must still DISCRIMINATE. A regex that silently
+  # stopped matching would turn this guard into a no-op that passes forever.
+  assert _line_keys_org_id('return f"reports:{org_id}:{name}"')
+  assert _line_keys_org_id('key = f"{ORG_PREFIX}{org_id}"')
+  assert _line_keys_org_id('return f"{org_id}:settings"')
+  assert not _line_keys_org_id('detail=f"Organization {org_id} not found"')
+  assert not _line_keys_org_id('logger.error(f"org {org_id}: {e!s}")')
+  assert not _line_keys_org_id('return f"idem:{graph_id}:{op}:{digest}"')
+
+  pkg_root = Path(ext.__file__).resolve().parents[1]  # …/robosystems
+  offenders: list[str] = []
+  for path in pkg_root.rglob("*.py"):
+    for lineno, line in enumerate(path.read_text().splitlines(), 1):
+      if line.lstrip().startswith("#"):
+        continue
+      if _line_keys_org_id(line):
+        rel = path.relative_to(pkg_root.parent).as_posix()
+        offenders.append(f"{rel}:{lineno}: {line.strip()}")
+  assert not offenders, (
+    "A cache/idempotency/rate-limit key is namespaced on org_id — two graphs "
+    "under one org would collide (cross-tenant data bleed *inside* an org):\n  "
+    + "\n  ".join(offenders)
+    + "\nKey tenant data on graph_id (or user_id), never org_id. If this is a "
+    "legitimate org-LEVEL cache (org metadata, not per-graph data), mark the "
+    "line `# org-cache: intentional`."
   )
