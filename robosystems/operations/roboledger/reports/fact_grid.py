@@ -20,6 +20,11 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.api.extensions import cents_to_dollars
+from robosystems.operations.roboledger.reports.calc_dag import (
+  load_rs_gaap_calculations,
+  resolve_calc_dag,
+  topo_sort_calculations,
+)
 
 # ── Data classes ──────────────────────────────────────────────────────────
 
@@ -996,23 +1001,9 @@ def _emit_subtotal_facts(
   Must run LAST in ``generate_report_facts`` so every leaf + derived fact
   (NetIncomeLoss, PP&E net, CF flows) is in place. Mutates ``facts``.
   """
-  rows = session.execute(
-    text("""
-      SELECT a.from_element_id AS parent, a.to_element_id AS child, a.weight
-      FROM associations a
-      JOIN structures s ON s.id = a.structure_id
-      JOIN taxonomies t ON t.id = s.taxonomy_id
-      WHERE a.association_type = 'calculation'
-        AND t.standard = 'rs-gaap-calculations'
-      ORDER BY a.order_value
-    """)
-  ).fetchall()
-  if not rows:
+  calculations = load_rs_gaap_calculations(session)
+  if not calculations:
     return
-  calculations: dict[str, list[tuple[str, float]]] = {}
-  for r in rows:
-    weight = float(r.weight) if r.weight is not None else 1.0
-    calculations.setdefault(r.parent, []).append((r.child, weight))
 
   target_ids = list(calculations.keys())
   meta = {
@@ -1026,7 +1017,7 @@ def _emit_subtotal_facts(
     ).fetchall()
   }
 
-  order = _topo_sort_calculations(calculations)
+  order = topo_sort_calculations(calculations)
 
   for period in periods:
     balances: dict[str, float] = {}
@@ -1036,18 +1027,9 @@ def _emit_subtotal_facts(
         balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
         present.add(f.element_id)
 
-    # Topological resolution — a direct fact wins over the calc result
-    # (calc is the fallback for un-reported subtotals, never an override
-    # of an authoritative direct fact). The "direct wins" test keys off
-    # PRESENCE (``elem_id in present``), not a non-zero value: a
-    # legitimately-zero direct fact (e.g. a seeded equity component, or a
-    # subtotal reported as 0) must not be overwritten by the calc sum, or
-    # a downstream subtotal that depends on it inherits the wrong summand.
-    computed: dict[str, float] = dict(balances)
-    for elem_id in order:
-      direct = computed.get(elem_id, 0.0)
-      summed = sum(computed.get(src, 0.0) * w for src, w in calculations[elem_id])
-      computed[elem_id] = direct if elem_id in present else summed
+    # Resolve subtotals bottom-up (direct fact wins over Σ child·weight,
+    # keyed on presence) — shared with the rollup validator via calc_dag.
+    computed = resolve_calc_dag(balances, present, calculations, order)
 
     for elem_id in target_ids:
       # Already a fact (leaf-mapped or a prior derived emit like
@@ -1644,24 +1626,10 @@ def _reconcile_operating_to_cash(
 
   # rs-gaap-calculations DAG — same source/resolution as _emit_subtotal_facts,
   # so the net-change we compute here matches what the renderer will show.
-  rows = session.execute(
-    text("""
-      SELECT a.from_element_id AS parent, a.to_element_id AS child, a.weight
-      FROM associations a
-      JOIN structures s ON s.id = a.structure_id
-      JOIN taxonomies t ON t.id = s.taxonomy_id
-      WHERE a.association_type = 'calculation'
-        AND t.standard = 'rs-gaap-calculations'
-      ORDER BY a.order_value
-    """)
-  ).fetchall()
-  if not rows:
+  calculations = load_rs_gaap_calculations(session)
+  if not calculations:
     return
-  calculations: dict[str, list[tuple[str, float]]] = {}
-  for r in rows:
-    weight = float(r.weight) if r.weight is not None else 1.0
-    calculations.setdefault(r.parent, []).append((r.child, weight))
-  order = _topo_sort_calculations(calculations)
+  order = topo_sort_calculations(calculations)
 
   # Cash-balance (instant) anchors by period boundary — a period's end is the
   # next period's opening, same prior-period-end delta basis as the tie-out.
@@ -1686,11 +1654,7 @@ def _reconcile_operating_to_cash(
       if f.period_start == current.start and f.period_end == current.end:
         balances[f.element_id] = balances.get(f.element_id, 0.0) + f.value
         present.add(f.element_id)
-    computed: dict[str, float] = dict(balances)
-    for elem_id in order:
-      direct = computed.get(elem_id, 0.0)
-      summed = sum(computed.get(src, 0.0) * w for src, w in calculations[elem_id])
-      computed[elem_id] = direct if elem_id in present else summed
+    computed = resolve_calc_dag(balances, present, calculations, order)
     derived_net_change = computed.get(net_change_id, 0.0)
 
     residual = cash_delta - derived_net_change
@@ -2502,48 +2466,6 @@ def _load_calculations(
   return calculations
 
 
-def _topo_sort_calculations(
-  calculations: dict[str, list[tuple[str, float]]],
-) -> list[str]:
-  """Return calc subtotal targets in topological dependency order.
-
-  When calcs chain (e.g., GrossProfit = Rev - COGS, then OperatingIncome =
-  GrossProfit - OpEx, then NetIncome = OperatingIncome - Tax), the renderer
-  must compute them in order so each depends on the resolved values of the
-  prior ones. Returns target ids in the order they should be computed.
-  Targets with no internal dependencies come first.
-  """
-  targets = set(calculations.keys())
-  # Edge: target → target it depends on (when its summand is itself a
-  # calc target). Inputs that are leaves (not calc targets) don't create
-  # edges.
-  deps: dict[str, set[str]] = {t: set() for t in targets}
-  for target, sources in calculations.items():
-    for src_id, _ in sources:
-      if src_id in targets:
-        deps[target].add(src_id)
-
-  # Kahn's algorithm: emit nodes with no remaining deps; remove from graph.
-  ready = [t for t, d in deps.items() if not d]
-  ordered: list[str] = []
-  while ready:
-    n = ready.pop(0)
-    ordered.append(n)
-    for other, other_deps in deps.items():
-      if n in other_deps:
-        other_deps.discard(n)
-        if not other_deps and other not in ordered and other not in ready:
-          ready.append(other)
-  # Any remaining targets indicate a cycle in the calc DAG — emit them
-  # last in arbitrary order. The renderer's existing behavior is to use
-  # whatever values are present, so a cycle just means one iteration of
-  # stale values rather than a crash.
-  for t in targets:
-    if t not in ordered:
-      ordered.append(t)
-  return ordered
-
-
 def _balance_value(
   balances: dict[str, _Balance],
   element_id: str,
@@ -2668,7 +2590,7 @@ def _build_rows(
   # in pass 1 (mapping arc landed at this anchor), prefer it over the
   # calc result — calc is the fallback path for subtotals not directly
   # reported, not an override of authoritative direct facts.
-  for elem_id in _topo_sort_calculations(calculations):
+  for elem_id in topo_sort_calculations(calculations):
     sources = calculations[elem_id]
     for i in range(n_periods):
       # Keep an authoritative pass-1 value (direct fact or reported-leaf

@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from robosystems.operations.roboledger.reports.calc_dag import (
+  topo_sort_calculations as _topo_sort_calculations,
+)
 from robosystems.operations.roboledger.reports.fact_grid import (
   _load_calculations,
-  _topo_sort_calculations,
 )
 
 
