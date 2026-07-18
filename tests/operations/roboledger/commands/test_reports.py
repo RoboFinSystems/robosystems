@@ -14,6 +14,7 @@ from robosystems.operations.roboledger.commands.reports import (
   ReportNotFoundError,
   _build_structure_mapping,
   _persist_report_facts,
+  _pick_disclosure_structures,
   _pre_create_report_fact_sets,
   _share_to_target,
   regenerate_report,
@@ -140,6 +141,99 @@ def test_build_structure_mapping_returns_empty_when_no_compositions() -> None:
   assert fs_map == {}
   # No associations query should fire when no Networks were picked.
   session.execute.assert_not_called()
+
+
+def test_pick_disclosure_structures_short_circuits_on_empty_fact_ids() -> None:
+  """No generated facts → no disclosure query at all."""
+  session = MagicMock()
+  assert _pick_disclosure_structures(session, set()) == []
+  session.execute.assert_not_called()
+
+
+def test_pick_disclosure_structures_queries_by_fact_elements() -> None:
+  """The picker matches active regulatory_disclosure structures whose
+  presentation-arc endpoints intersect the generated facts' elements."""
+  session = MagicMock()
+  session.execute.return_value.fetchall.return_value = [
+    MagicMock(structure_id="struct_note"),
+  ]
+
+  picked = _pick_disclosure_structures(session, {"elem_raw", "elem_fg"})
+
+  assert picked == ["struct_note"]
+  sql = str(session.execute.call_args.args[0])
+  assert "regulatory_disclosure" in sql
+  assert "presentation" in sql
+  params = session.execute.call_args.args[1]
+  assert set(params["element_ids"]) == {"elem_raw", "elem_fg"}
+
+
+def test_build_structure_mapping_merges_fact_picked_disclosures() -> None:
+  """Disclosures are fact-driven, not style-composed: a disclosure
+  structure whose concepts received facts joins the picked set alongside
+  the style's statement Networks, gets its own FactSet ULID, and its
+  elements land in the element→structure map."""
+  session = MagicMock()
+
+  picked = {
+    "balance_sheet": RenderNetwork("struct_bs", "BS", "roll_up"),
+    "income_statement": RenderNetwork("struct_is", "IS", "arithmetic"),
+    "cash_flow_statement": RenderNetwork("struct_cf", "CF", "arithmetic"),
+    "equity_statement": RenderNetwork("struct_se", "SE", "roll_forward"),
+  }
+
+  def fake_picker(_session, _style_id, stmt_type):
+    return picked[stmt_type]
+
+  disclosure_rows = MagicMock()
+  disclosure_rows.fetchall.return_value = [MagicMock(structure_id="struct_note")]
+  association_rows = MagicMock()
+  association_rows.fetchall.return_value = [
+    MagicMock(structure_id="struct_bs", element_id="elem_inventory"),
+    MagicMock(structure_id="struct_note", element_id="elem_inventory"),
+    MagicMock(structure_id="struct_note", element_id="elem_raw"),
+  ]
+  # Execute order: disclosure picker query, then the association-endpoint
+  # mapping query over all picked structures.
+  session.execute.side_effect = [disclosure_rows, association_rows]
+
+  with patch(_PICKER_PATH, side_effect=fake_picker):
+    elem_map, fs_map = _build_structure_mapping(
+      session, "025f5d48-style", fact_element_ids={"elem_inventory", "elem_raw"}
+    )
+
+  assert "struct_note" in fs_map
+  # The shared BS-leaf element is stamped into BOTH the statement and the
+  # note — the definitional cross-block tie-out.
+  assert sorted(elem_map["elem_inventory"]) == ["struct_bs", "struct_note"]
+  assert elem_map["elem_raw"] == ["struct_note"]
+  assert len(set(fs_map.values())) == 5
+
+
+def test_build_structure_mapping_without_fact_ids_skips_disclosure_query() -> None:
+  """Callers that don't pass fact_element_ids get the pre-disclosure
+  behaviour: statement Networks only, one associations query."""
+  session = MagicMock()
+
+  picked = {
+    "balance_sheet": RenderNetwork("struct_bs", "BS", "roll_up"),
+    "income_statement": RenderNetwork("struct_is", "IS", "arithmetic"),
+    "cash_flow_statement": RenderNetwork("struct_cf", "CF", "arithmetic"),
+    "equity_statement": RenderNetwork("struct_se", "SE", "roll_forward"),
+  }
+
+  def fake_picker(_session, _style_id, stmt_type):
+    return picked[stmt_type]
+
+  session.execute.return_value.fetchall.return_value = [
+    MagicMock(structure_id="struct_bs", element_id="elem_cash"),
+  ]
+
+  with patch(_PICKER_PATH, side_effect=fake_picker):
+    _elem_map, fs_map = _build_structure_mapping(session, "025f5d48-style")
+
+  assert set(fs_map.keys()) == {"struct_bs", "struct_is", "struct_cf", "struct_se"}
+  assert session.execute.call_count == 1
 
 
 def test_persist_report_facts_stamps_structure_and_fact_set() -> None:

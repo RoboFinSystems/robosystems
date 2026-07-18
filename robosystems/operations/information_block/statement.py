@@ -158,7 +158,13 @@ def _build_statement_envelope(
     block_type=block_type,
   )
 
-  display_name, _display_plural = STATEMENT_DISPLAY[block_type]
+  # Statement-family types carry fixed display strings; block types that
+  # share this builder without an entry (regulatory_disclosure) display
+  # as the structure's own name — a disclosure note is named by its
+  # author/taxonomy, not by its type.
+  display_name, _display_plural = STATEMENT_DISPLAY.get(
+    block_type, (structure.name, structure.name)
+  )
   disclosure_id = load_disclosure_id_for_structure(session, structure.id)
   _elements_by_id = {e.id: e for e in atoms.elements}
   return InformationBlockEnvelope(

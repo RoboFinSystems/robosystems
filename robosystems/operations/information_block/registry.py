@@ -33,6 +33,7 @@ from robosystems.models.api.information_block import (
   ScheduleMechanics,
   StatementMechanics,
 )
+from robosystems.operations.information_block import disclosure as disclosure_handlers
 from robosystems.operations.information_block import metric as metric_handlers
 from robosystems.operations.information_block import rollforward as rollforward_handlers
 from robosystems.operations.information_block import schedule as schedule_handlers
@@ -220,6 +221,59 @@ EQUITY_STATEMENT_BLOCK = _make_statement_entry("equity_statement", "pie-chart")
 COMPREHENSIVE_INCOME_BLOCK = _make_statement_entry("comprehensive_income", "activity")
 
 
+# ── Disclosure notes (compositional) ───────────────────────────────────────
+
+DISCLOSURE_BLOCK = BlockTypeRegistryEntry(
+  id=disclosure_handlers.DISCLOSURE_BLOCK_TYPE,
+  display_name=disclosure_handlers.DISCLOSURE_DISPLAY_NAME,
+  display_plural="Disclosures",
+  category=disclosure_handlers.DISCLOSURE_CATEGORY,
+  icon="file-text",
+  description=(
+    "Disclosure note — a reporting structure beyond the statement "
+    "family (inventory by category, PP&E by class, debt maturities). "
+    "Renders when its concepts receive mapped facts from a Report run; "
+    "disclosures are fact-driven, not composed by the Reporting Style. "
+    "The structure itself is vocabulary, authored via "
+    "create-taxonomy-block, not create-information-block."
+  ),
+  concept_arrangement_default="roll_up",
+  member_arrangement_default=None,
+  mechanics_schema=StatementMechanics,
+  create_request_model=_EmptyPayload,
+  update_request_model=_EmptyPayload,
+  delete_request_model=_EmptyPayload,
+  construction_mode="compositional",
+  dispatch_create=make_not_implemented_handler(
+    "create-regulatory-disclosure-block",
+    "Disclosure blocks are not created through "
+    "create-information-block — the disclosure structure is vocabulary "
+    "(elements + presentation/calculation arcs), authored via "
+    "`create-taxonomy-block`. Its facts materialize when "
+    "`create-report` runs and the mapped ledger reaches the "
+    "disclosure's concepts.",
+  ),
+  dispatch_update=make_not_implemented_handler(
+    "update-regulatory-disclosure-block",
+    "Disclosure blocks are not updated through "
+    "update-information-block — edit the underlying structure via "
+    "`update-taxonomy-block`, then `regenerate-report` to refresh "
+    "facts.",
+  ),
+  dispatch_delete=make_not_implemented_handler(
+    "delete-regulatory-disclosure-block",
+    "Disclosure blocks are not deleted through "
+    "delete-information-block — remove the underlying structure via "
+    "`delete-taxonomy-block`.",
+  ),
+  dispatch_build_envelope=disclosure_handlers.build_envelope,
+  # Library-seeded disclosure rows are arc-less identity envelopes —
+  # build_envelope returns None for them, and the sentinel shouldn't
+  # list them either.
+  surfaces_in_library=False,
+)
+
+
 # ── Metric (derivative) ────────────────────────────────────────────────────
 
 METRIC_BLOCK = BlockTypeRegistryEntry(
@@ -275,6 +329,7 @@ REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   CASH_FLOW_STATEMENT_BLOCK.id: CASH_FLOW_STATEMENT_BLOCK,
   EQUITY_STATEMENT_BLOCK.id: EQUITY_STATEMENT_BLOCK,
   COMPREHENSIVE_INCOME_BLOCK.id: COMPREHENSIVE_INCOME_BLOCK,
+  DISCLOSURE_BLOCK.id: DISCLOSURE_BLOCK,
   METRIC_BLOCK.id: METRIC_BLOCK,
 }
 
@@ -301,6 +356,7 @@ __all__ = [
   "BALANCE_SHEET_BLOCK",
   "CASH_FLOW_STATEMENT_BLOCK",
   "COMPREHENSIVE_INCOME_BLOCK",
+  "DISCLOSURE_BLOCK",
   "EQUITY_STATEMENT_BLOCK",
   "INCOME_STATEMENT_BLOCK",
   "METRIC_BLOCK",

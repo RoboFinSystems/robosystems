@@ -526,7 +526,17 @@ def _disclosure_qname_for_type(session: Session, block_type: str) -> str | None:
 
   Uses ``metadata->>'role_uri'`` JSONB access and the matching expression
   index (``idx_structures_role_uri``) for a single fast lookup.
+
+  Only meaningful for the statement family, where block_type →
+  disclosure is 1:1. ``regulatory_disclosure`` is many-to-many (every
+  Note shares the type), so a type-level lookup would return an
+  arbitrary library note — those structures resolve their identity from
+  their own role_uri (case 1 in
+  :func:`load_disclosure_id_for_structure`) or not at all.
   """
+  if block_type == "regulatory_disclosure":
+    return None
+
   cached = _DISCLOSURE_QNAME_BY_TYPE.get(block_type, _MISSING)
   if cached is not _MISSING:
     return cached  # type: ignore[return-value]
