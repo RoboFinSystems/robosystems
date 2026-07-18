@@ -18,6 +18,8 @@ mode.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -145,6 +147,22 @@ def _load_schedule_mechanics(
   )
 
 
+def _latest_instant_per_element(facts: Sequence[Fact]) -> list[Fact]:
+  """Keep only the most recent instant fact per element (max ``period_end``).
+
+  Used to pick a roll-forward's carry-in opening balances: among the prior
+  closed periods' ending running-balance instants, only the latest per
+  element is the current window's beginning balance — earlier ones are
+  superseded interior balances and would double up the series.
+  """
+  latest: dict[str, Fact] = {}
+  for fact in facts:
+    current = latest.get(fact.element_id)
+    if current is None or fact.period_end > current.period_end:
+      latest[fact.element_id] = fact
+  return list(latest.values())
+
+
 def build_envelope(
   session: Session, structure_id: str, fact_set_id: str | None = None
 ) -> InformationBlockEnvelope | None:
@@ -201,7 +219,34 @@ def build_envelope(
   ]
   if fact_set_id is not None:
     fact_filters.append(Fact.fact_set_id == fact_set_id)
-  facts = session.execute(select(Fact).where(*fact_filters)).scalars().all()
+  facts = list(session.execute(select(Fact).where(*fact_filters)).scalars().all())
+
+  # Roll-forward carry-in opening balance. A roll_forward series must open
+  # with a valid Beginning Balance, but the first in-scope period's opening
+  # balance *is* the immediately prior (now-closed) period's ending running
+  # balance — an `instant` fact tagged `historical` and thus dropped by the
+  # in_scope filter above. Without it the series arrives as movements + an
+  # ending balance with no beginning. Re-include just the latest historical
+  # `instant` per in-scope balance element (the carry-in balance); historical
+  # `duration` movements stay excluded, so agents still can't re-draft closed
+  # work. Skipped on the FactSet-pinned path (the frozen snapshot is already
+  # self-contained) and when there are no in-scope facts to open.
+  if facts and fact_set_id is None:
+    balance_element_ids = {f.element_id for f in facts if f.period_type == "instant"}
+    if balance_element_ids:
+      historical_instants = (
+        session.execute(
+          select(Fact).where(
+            Fact.structure_id == structure_id,
+            Fact.fact_scope == "historical",
+            Fact.period_type == "instant",
+            Fact.element_id.in_(balance_element_ids),
+          )
+        )
+        .scalars()
+        .all()
+      )
+      facts.extend(_latest_instant_per_element(historical_instants))
 
   # Schedules are tenant-authored; they never have a disclosure mapping.
   # Short-circuit the DB roundtrip — saves a query per envelope on a

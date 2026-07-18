@@ -8,6 +8,7 @@ with a mocked SQLAlchemy session.
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -32,6 +33,30 @@ def _exec_result(
     result.scalars.return_value.all.return_value = scalars_all
   result.scalar.return_value = scalar
   return result
+
+
+def _fact(
+  fact_id: str,
+  element_id: str,
+  value: float,
+  *,
+  period_type: str,
+  period_end: date,
+  period_start: date | None = None,
+  fact_scope: str = "in_scope",
+) -> SimpleNamespace:
+  """A minimal Fact-like stub with the attributes ``fact_to_lite`` reads."""
+  return SimpleNamespace(
+    id=fact_id,
+    element_id=element_id,
+    value=value,
+    period_start=period_start,
+    period_end=period_end,
+    period_type=period_type,
+    unit="USD",
+    fact_scope=fact_scope,
+    fact_set_id="fs_01",
+  )
 
 
 def _body() -> CreateScheduleRequest:
@@ -327,3 +352,138 @@ class TestBuildEnvelope:
     # Sanity check: BinaryExpression import is exercised so we don't
     # silently lose the type if the SQLAlchemy WHERE shape changes.
     del BinaryExpression
+
+    # The pin path is self-contained — no carry-in query is issued (only
+    # the 7 base + facts calls; no 8th historical-instant lookup).
+    assert len(session.execute.call_args_list) == 7
+
+  def test_carry_in_reincludes_prior_period_ending_balance(self) -> None:
+    """The first open period's beginning balance = the prior closed
+    period's ending running-balance instant, which the in_scope filter
+    drops as historical. build_envelope must re-include the latest
+    historical instant per in-scope balance element so the roll-forward
+    opens with a valid Beginning Balance — and only the latest one, not
+    every superseded interior balance."""
+    session = MagicMock()
+    structure = MagicMock()
+    structure.id = "struct_dep"
+    structure.block_type = "schedule"
+    structure.name = "Prepaid Amortization"
+    structure.description = None
+    structure.taxonomy_id = "tax_01"
+    structure.concept_arrangement = "roll_forward"
+    structure.member_arrangement = None
+    structure.renderer_note = None
+    structure.artifact_mechanics = {
+      "kind": "closing_entry_generator",
+      "entry_template": {
+        "debit_element_id": "elem_exp",
+        "credit_element_id": "elem_prepaid",
+      },
+    }
+    structure.metadata_ = {}
+    session.get.return_value = structure
+
+    # In-scope window: one movement (duration) + one ending balance (instant)
+    # on the running-balance element.
+    in_scope_instant = _fact(
+      "f_jun_bal",
+      "elem_prepaid",
+      33.96,
+      period_type="instant",
+      period_end=date(2026, 6, 30),
+    )
+    in_scope_movement = _fact(
+      "f_jun_mov",
+      "elem_exp",
+      2.83,
+      period_type="duration",
+      period_start=date(2026, 6, 1),
+      period_end=date(2026, 6, 30),
+    )
+    # Historical instants on the same balance element: an old interior
+    # balance and the immediately-prior (May) ending balance = carry-in.
+    hist_old = _fact(
+      "f_apr_bal",
+      "elem_prepaid",
+      39.62,
+      period_type="instant",
+      period_end=date(2026, 4, 30),
+      fact_scope="historical",
+    )
+    hist_boundary = _fact(
+      "f_may_bal",
+      "elem_prepaid",
+      36.79,
+      period_type="instant",
+      period_end=date(2026, 5, 31),
+      fact_scope="historical",
+    )
+
+    session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # associations
+      _exec_result(scalars_all=[]),  # rules
+      _exec_result(scalars_all=[]),  # verification results
+      _exec_result(scalar=0),  # periods_with_entries
+      _exec_result(scalars_all=[in_scope_instant, in_scope_movement]),  # in-scope
+      _exec_result(scalars_all=[hist_old, hist_boundary]),  # carry-in candidates
+    ]
+
+    envelope = schedule_handlers.build_envelope(session, "struct_dep")
+    assert envelope is not None
+
+    # The carry-in query targets historical instants on the in-scope
+    # balance element(s).
+    carry_in_query = session.execute.call_args_list[7].args[0]
+    where_clause = str(carry_in_query.compile(compile_kwargs={"literal_binds": True}))
+    assert "fact_scope = 'historical'" in where_clause
+    assert "period_type = 'instant'" in where_clause
+    assert "elem_prepaid" in where_clause
+
+    # Envelope carries the 2 in-scope facts + the boundary carry-in only —
+    # the superseded April balance is dropped.
+    fact_ids = {f.id for f in envelope.facts}
+    assert fact_ids == {"f_jun_bal", "f_jun_mov", "f_may_bal"}
+    carry_in = next(f for f in envelope.facts if f.id == "f_may_bal")
+    assert carry_in.fact_scope == "historical"
+    assert carry_in.value == 36.79
+
+  def test_no_carry_in_when_schedule_has_no_in_scope_facts(self) -> None:
+    """A fully-closed schedule (no in-scope facts) issues no carry-in
+    query — there's no open window to give a beginning balance to."""
+    session = MagicMock()
+    structure = MagicMock()
+    structure.id = "struct_closed"
+    structure.block_type = "schedule"
+    structure.name = "Closed Schedule"
+    structure.description = None
+    structure.taxonomy_id = "tax_01"
+    structure.concept_arrangement = "roll_forward"
+    structure.member_arrangement = None
+    structure.renderer_note = None
+    structure.artifact_mechanics = {
+      "kind": "closing_entry_generator",
+      "entry_template": {
+        "debit_element_id": "elem_exp",
+        "credit_element_id": "elem_prepaid",
+      },
+    }
+    structure.metadata_ = {}
+    session.get.return_value = structure
+    session.execute.side_effect = [
+      _exec_result(scalar=None),  # latest fact set → None
+      _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[]),  # associations
+      _exec_result(scalars_all=[]),  # rules
+      _exec_result(scalars_all=[]),  # verification results
+      _exec_result(scalar=0),  # periods_with_entries
+      _exec_result(scalars_all=[]),  # facts (empty — fully closed)
+    ]
+
+    envelope = schedule_handlers.build_envelope(session, "struct_closed")
+    assert envelope is not None
+    assert envelope.facts == []
+    # No 8th (carry-in) query.
+    assert len(session.execute.call_args_list) == 7
