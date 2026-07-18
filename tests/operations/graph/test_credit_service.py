@@ -171,6 +171,7 @@ class TestCreditService:
           session=mock_session,
           request_id=None,
           user_id=None,
+          metadata={"test": "data"},
         )
 
         # Verify cache invalidation was called

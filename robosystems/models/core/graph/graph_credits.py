@@ -199,6 +199,7 @@ class GraphCredits(Base):
     session: Session,
     request_id: str | None = None,
     user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
   ) -> dict[str, Any]:
     """
     Atomically consume credits for AI operations.
@@ -213,6 +214,8 @@ class GraphCredits(Base):
         session: Database session
         request_id: HTTP request ID for tracing
         user_id: User performing the operation
+        metadata: Caller metadata (e.g. token counts) merged into the
+            transaction record; built-in keys win on collision
 
     Returns:
         Dict with consumption results
@@ -269,6 +272,7 @@ class GraphCredits(Base):
         amount=-actual_cost,
         description=operation_description,
         metadata={
+          **(metadata or {}),
           "operation_type": operation_type,
           "base_cost": str(amount),
           "transaction_id": transaction_id,

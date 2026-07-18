@@ -220,6 +220,7 @@ class CreditService:
       session=self.session,
       request_id=request_id,
       user_id=user_id,
+      metadata=metadata,
     )
 
     if consumption_result["success"]:
@@ -1143,7 +1144,7 @@ class CreditService:
     output_cost = (Decimal(output_tokens) / 1000) * pricing["output"]
     raw_cost = input_cost + output_cost
 
-    # Apply minimum charge (rounds up to at least 0.01)
+    # Apply minimum charge (rounds up to at least MINIMUM_CHARGE)
     total_cost = AIBillingConfig.apply_minimum_charge(raw_cost)
 
     # Build metadata
