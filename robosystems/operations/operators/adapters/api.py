@@ -61,6 +61,11 @@ async def run_operator_api(
   tools = HttpToolAccess(graph_id)
   ai_client = AIClient()
 
+  if db_session is None:
+    logger.warning(
+      f"Operator running WITHOUT credit tracking (no db_session): "
+      f"graph={graph_id} user={user.id} — Bedrock cost will not be attributed"
+    )
   credit_consumer = SessionCreditConsumer(db_session) if db_session else None
 
   tracked_ai = TrackedAIClient(
