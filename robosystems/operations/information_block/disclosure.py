@@ -35,8 +35,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from robosystems.models.extensions.structure import TEXT_BLOCK_CAPS, Structure
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.information_block.statement import make_statement_handlers
+from robosystems.operations.information_block.text_block import (
+  build_text_block_envelope,
+)
 
 if TYPE_CHECKING:
   from sqlalchemy.orm import Session
@@ -58,10 +62,19 @@ def build_envelope(
 ) -> InformationBlockEnvelope | None:
   """Pack the envelope for a disclosure-note structure.
 
+  Dispatches by CAP: text-block CAPs render narrative rows through
+  :func:`build_text_block_envelope`; every other CAP (roll_up, ...)
+  renders the numeric grid through the statement family's builder.
+
   Returns ``None`` when the structure doesn't exist, isn't a
-  ``regulatory_disclosure``, or carries no arcs (the library's
-  disclosure-identity envelopes — not renderable blocks).
+  ``regulatory_disclosure``, or carries neither arcs nor content (the
+  library's disclosure-identity envelopes — not renderable blocks).
   """
+  structure = session.get(Structure, structure_id)
+  if structure is None or structure.block_type != DISCLOSURE_BLOCK_TYPE:
+    return None
+  if (structure.concept_arrangement or "") in TEXT_BLOCK_CAPS:
+    return build_text_block_envelope(session, structure_id, fact_set_id)
   envelope = _build_disclosure_envelope(session, structure_id, fact_set_id)
   if envelope is None or not envelope.connections:
     return None
