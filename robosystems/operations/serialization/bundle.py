@@ -260,9 +260,14 @@ class BundleFact(BaseModel):
   id: str
   element_id: str
   element_qname: str
-  value: float
+  value: float | None = None
+  text_value: str | None = None
+  fact_type: str = "Numeric"
+  content_type: str | None = None
   period_ref: str
-  unit_ref: str
+  # None for Nonnumeric (text-block) facts — XBRL nonNumeric facts carry
+  # no unitRef, so no unit is minted for them.
+  unit_ref: str | None = None
   entity_ref: str
   decimals: str = "INF"
   fact_set_id: str | None = None
@@ -417,6 +422,9 @@ def build_report_bundle(
   from robosystems.models.extensions.roboledger.fact_set import FactSet
   from robosystems.models.extensions.roboledger.report import Report
   from robosystems.models.extensions.structure import Structure
+  from robosystems.operations.information_block.envelope import (
+    DISCLOSURE_BLOCK_TYPE,
+  )
   from robosystems.operations.information_block.statement import (
     _build_statement_envelope,
   )
@@ -539,6 +547,21 @@ def build_report_bundle(
     if envelope is not None:
       ib_envelopes.append(envelope)
 
+  # Disclosure envelopes — every picked disclosure structure (fact-driven
+  # numeric notes AND snapshotted text-block notes) rides in the bundle,
+  # pinned to this report's FactSet. Deferred import mirrors
+  # ``_build_statement_envelope``'s cycle-avoidance.
+  from robosystems.operations.information_block.disclosure import (
+    build_envelope as _build_disclosure_envelope,
+  )
+
+  for sid, s in structures_by_id.items():
+    if s.block_type != DISCLOSURE_BLOCK_TYPE:
+      continue
+    envelope = _build_disclosure_envelope(session, sid, structure_to_fact_set.get(sid))
+    if envelope is not None:
+      ib_envelopes.append(envelope)
+
   # Entity header — single-entity assumption matches ``_get_entity_id``
   # used by ``create_report``. Multi-entity graphs lock in once
   # consolidation lands (see ``architecture_multientity_consolidation``).
@@ -586,7 +609,7 @@ def build_report_bundle(
       f,
       elements_by_id.get(str(f.element_id)),
       period_ref_for_fact[str(f.id)],
-      unit_ref_for_fact[str(f.id)],
+      unit_ref_for_fact.get(str(f.id)),
       entity_meta.id,
     )
     for f in facts
@@ -992,6 +1015,10 @@ def _mint_units(facts: list[Any]) -> tuple[list[BundleUnit], dict[str, str]]:
   units: list[BundleUnit] = []
   fact_to_ref: dict[str, str] = {}
   for f in facts:
+    if getattr(f, "fact_type", "Numeric") == "Nonnumeric":
+      # Text-block facts carry no unit; mint nothing and leave the fact
+      # without a unit ref.
+      continue
     raw_unit = str(f.unit or "USD")
     # Currency codes get the iso4217: prefix; anything else passes
     # through unchanged for the encoder to handle.
@@ -1010,20 +1037,31 @@ def _fact_to_bundle(
   f: Any,
   element: Any | None,
   period_ref: str,
-  unit_ref: str,
+  unit_ref: str | None,
   entity_ref: str,
 ) -> BundleFact:
+  qname = str(element.qname) if element and element.qname else str(f.element_id)
+  common = {
+    "id": str(f.id),
+    "element_id": str(f.element_id),
+    "element_qname": qname,
+    "period_ref": period_ref,
+    "entity_ref": entity_ref,
+    "fact_set_id": str(f.fact_set_id) if f.fact_set_id else None,
+    "structure_id": str(f.structure_id) if f.structure_id else None,
+  }
+  if getattr(f, "fact_type", "Numeric") == "Nonnumeric":
+    return BundleFact(
+      **common,
+      value=None,
+      text_value=str(f.string_value),
+      fact_type="Nonnumeric",
+      content_type=getattr(f, "content_type", None),
+      unit_ref=None,
+    )
   return BundleFact(
-    id=str(f.id),
-    element_id=str(f.element_id),
-    element_qname=(
-      str(element.qname) if element and element.qname else str(f.element_id)
-    ),
+    **common,
     value=float(f.value),
-    period_ref=period_ref,
     unit_ref=unit_ref,
-    entity_ref=entity_ref,
     decimals="INF",
-    fact_set_id=str(f.fact_set_id) if f.fact_set_id else None,
-    structure_id=str(f.structure_id) if f.structure_id else None,
   )

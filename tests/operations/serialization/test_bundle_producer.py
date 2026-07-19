@@ -755,3 +755,80 @@ class TestFlavorEnums:
 
     assert str(RdfFlavor.JSONLD) == "jsonld"
     assert str(XbrlFlavor.XBRL_2_1) == "xbrl-2.1"
+
+
+class TestNonnumericFactToBundle:
+  def _text_row(self):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+      id="fact_txt",
+      element_id="elem_tb",
+      value=None,
+      string_value="# Policy\n\nNarrative.",
+      fact_type="Nonnumeric",
+      content_type="text/markdown",
+      unit="USD",
+      fact_set_id="fs_1",
+      structure_id="struct_note",
+    )
+
+  def test_nonnumeric_branch_carries_text_no_unit(self) -> None:
+    from robosystems.operations.serialization.bundle import _fact_to_bundle
+
+    bf = _fact_to_bundle(self._text_row(), None, "p_1", None, "ent_1")
+    assert bf.fact_type == "Nonnumeric"
+    assert bf.value is None
+    assert bf.text_value is not None and "Narrative" in bf.text_value
+    assert bf.content_type == "text/markdown"
+    assert bf.unit_ref is None
+
+  def test_numeric_branch_unchanged(self) -> None:
+    from types import SimpleNamespace
+
+    from robosystems.operations.serialization.bundle import _fact_to_bundle
+
+    row = SimpleNamespace(
+      id="fact_num",
+      element_id="elem_a",
+      value=100.0,
+      string_value=None,
+      fact_type="Numeric",
+      content_type=None,
+      unit="USD",
+      fact_set_id="fs_1",
+      structure_id="struct_bs",
+    )
+    bf = _fact_to_bundle(row, None, "p_1", "u_USD", "ent_1")
+    assert bf.fact_type == "Numeric"
+    assert bf.value == 100.0
+    assert bf.text_value is None
+    assert bf.unit_ref == "u_USD"
+    assert bf.decimals == "INF"
+
+  def test_mint_units_skips_nonnumeric_facts(self) -> None:
+    from types import SimpleNamespace
+
+    from robosystems.operations.serialization.bundle import _mint_units
+
+    numeric = SimpleNamespace(id="f1", unit="USD", fact_type="Numeric")
+    text = SimpleNamespace(id="f2", unit="USD", fact_type="Nonnumeric")
+    units, fact_to_ref = _mint_units([numeric, text])
+    assert len(units) == 1
+    assert "f1" in fact_to_ref
+    assert "f2" not in fact_to_ref
+
+
+class TestBundleIncludesDisclosureEnvelopes:
+  def test_disclosure_envelope_loop_present(self) -> None:
+    """``build_report_bundle`` appends a disclosure envelope for every
+    picked disclosure structure (numeric roll_up notes AND text-block
+    notes) so notes ride the downloadable flavors. Source-shape guard;
+    the demo e2e proves the rendered content."""
+    import inspect
+
+    from robosystems.operations.serialization import bundle as bundle_mod
+
+    src = inspect.getsource(bundle_mod.build_report_bundle)
+    assert "build_disclosure_envelope" in src
+    assert "DISCLOSURE_BLOCK_TYPE" in src
