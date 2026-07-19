@@ -35,18 +35,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from robosystems.operations.information_block.statement import (
-  _build_statement_envelope,  # type: ignore[reportPrivateUsage]
-)
+from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
+from robosystems.operations.information_block.statement import make_statement_handlers
 
 if TYPE_CHECKING:
   from sqlalchemy.orm import Session
 
   from robosystems.models.api.information_block import InformationBlockEnvelope
 
-DISCLOSURE_BLOCK_TYPE = "regulatory_disclosure"
 DISCLOSURE_DISPLAY_NAME = "Disclosure"
 DISCLOSURE_CATEGORY = "Reporting"
+
+# The statement family's envelope builder, bound to this block_type — the
+# public factory, so disclosure.py doesn't reach for statement internals.
+_build_disclosure_envelope = make_statement_handlers(DISCLOSURE_BLOCK_TYPE)
 
 
 def build_envelope(
@@ -60,12 +62,7 @@ def build_envelope(
   ``regulatory_disclosure``, or carries no arcs (the library's
   disclosure-identity envelopes — not renderable blocks).
   """
-  envelope = _build_statement_envelope(
-    session,
-    structure_id,
-    fact_set_id,
-    block_type=DISCLOSURE_BLOCK_TYPE,
-  )
+  envelope = _build_disclosure_envelope(session, structure_id, fact_set_id)
   if envelope is None or not envelope.connections:
     return None
   return envelope

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import pytest
 
+from robosystems.models.extensions.structure import CONCEPT_ARRANGEMENT_VALUES
 from robosystems.taxonomy import load_taxonomy_package
 from robosystems.taxonomy.discovery import framework_root
 from robosystems.taxonomy.model import TaxonomyPackage
@@ -96,24 +97,8 @@ class TestDisclosuresPackage:
     cap_values = {s.concept_arrangement for s in disclosures.structures}
     assert "set" in cap_values
     assert "level1_textblock" in cap_values
-    # All values must be in the canonical 15-value CAP enumeration.
-    canonical = {
-      "set",
-      "roll_up",
-      "roll_forward",
-      "roll_forward_info",
-      "adjustment",
-      "variance",
-      "arithmetic",
-      "text_block",
-      "level1_textblock",
-      "level2_textblock",
-      "level3_textblock",
-      "level4_detail",
-      "table_equivalent_textblock",
-      "grid",
-      "compound_fact",
-    }
+    # All values must be in the canonical CAP enumeration (single source).
+    canonical = set(CONCEPT_ARRANGEMENT_VALUES)
     assert cap_values - {None} <= canonical, (
       f"Non-canonical CAP values in seed: {cap_values - canonical - {None}}"
     )

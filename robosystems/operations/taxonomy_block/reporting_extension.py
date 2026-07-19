@@ -42,7 +42,10 @@ from robosystems.models.extensions import (
   Taxonomy,
   Trait,
 )
-from robosystems.operations.taxonomy_block._helpers import qname_for
+from robosystems.operations.taxonomy_block._helpers import (
+  qname_for,
+  structure_from_request,
+)
 from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
 from robosystems.operations.taxonomy_block.cascade import (
   cascade_delete_taxonomy,
@@ -206,20 +209,8 @@ def create(
 
   structures_by_name: dict[str, Structure] = {}
   for req in payload.structures:
-    # role_uri rides in metadata_ — the column-less convention the
-    # envelope readers already use (metadata_['role_uri']).
-    structure_metadata = dict(req.metadata)
-    if req.role_uri:
-      structure_metadata["role_uri"] = req.role_uri
-    structure = Structure(
-      name=req.name,
-      description=req.description,
-      block_type=req.block_type,
-      concept_arrangement=req.concept_arrangement,
-      taxonomy_id=taxonomy.id,
-      is_active=True,
-      metadata_=structure_metadata,
-      created_by=created_by,
+    structure = structure_from_request(
+      req, taxonomy_id=taxonomy.id, created_by=created_by
     )
     session.add(structure)
     structures_by_name[req.name] = structure

@@ -28,6 +28,7 @@ from robosystems.models.extensions import (
   Structure,
   Taxonomy,
 )
+from robosystems.operations.taxonomy_block._helpers import structure_from_request
 from robosystems.operations.taxonomy_block.rule_persistence import (
   persist_tenant_rules,
 )
@@ -129,20 +130,8 @@ def apply_structures_to_add(
   """Insert new structures; return name→Structure lookup of just the new ones."""
   new_structures_by_name: dict[str, Structure] = {}
   for req in payload.structures_to_add:
-    # role_uri rides in metadata_ — the column-less convention the
-    # envelope readers already use (metadata_['role_uri']).
-    structure_metadata = dict(req.metadata)
-    if req.role_uri:
-      structure_metadata["role_uri"] = req.role_uri
-    structure = Structure(
-      name=req.name,
-      description=req.description,
-      block_type=req.block_type,
-      concept_arrangement=req.concept_arrangement,
-      taxonomy_id=taxonomy.id,
-      is_active=True,
-      metadata_=structure_metadata,
-      created_by=updated_by,
+    structure = structure_from_request(
+      req, taxonomy_id=taxonomy.id, created_by=updated_by
     )
     session.add(structure)
     new_structures_by_name[req.name] = structure
