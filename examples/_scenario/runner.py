@@ -777,6 +777,144 @@ def create_disclosure_notes(
   return notes_created, member_mappings
 
 
+def create_text_block_notes(
+  graph_id: str,
+  text_blocks: list[dict],
+  doc_ids: dict[str, str],
+  scenario: Scenario,
+) -> int:
+  """Author text-block disclosure notes and bind policy documents to them.
+
+  Each note becomes a ``reporting_extension`` TaxonomyBlock: an abstract
+  heading plus one non-monetary text-block concept per bound document,
+  arced abstract→concept, on a ``regulatory_disclosure`` structure with
+  ``concept_arrangement='text_block'``. Then ``bind-text-block`` attaches
+  each uploaded policy document to its concept as a ``Nonnumeric`` fact
+  over the scenario's report period — the Document→fact bridge. Reports
+  generated afterward snapshot the standing bindings, so the narrative
+  rides the report package, the JSON-LD bundle, and the graph.
+
+  Posted over raw HTTP like ``create_disclosure_notes`` (the published
+  SDK predates both operations' request shapes).
+
+  Returns the number of documents bound.
+  """
+  import httpx
+
+  config = _client_config()
+  headers = {"X-API-Key": config["token"], "Content-Type": "application/json"}
+  client = _get_ledger_client()
+
+  if scenario.report_period is None:
+    print("  (skipped — scenario has no report_period)")
+    return 0
+  period_start, period_end = scenario.report_period
+
+  taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
+  rs_gaap = next(
+    (t for t in taxonomies if (t.get("standard") or "").startswith("rs-gaap")), None
+  )
+  if rs_gaap is None:
+    print("  ERROR: rs-gaap reporting standard not found in graph")
+    return 0
+
+  bound = 0
+  for note in text_blocks:
+    struct_name = note["name"]
+    abstract_qname = note["abstract_qname"]
+    concepts = note["concepts"]
+    payload = {
+      "name": note.get("taxonomy_name", f"{struct_name} Extension"),
+      "taxonomy_type": "reporting_extension",
+      "parent_taxonomy_id": rs_gaap["id"],
+      "description": note.get("description"),
+      "elements": [
+        {
+          "qname": abstract_qname,
+          "name": note.get("abstract_name", struct_name),
+          "element_type": "abstract",
+          "period_type": "duration",
+        },
+        *(
+          {
+            "qname": c["qname"],
+            "name": c["name"],
+            "parent_ref": abstract_qname,
+            "period_type": "duration",
+            "is_monetary": False,
+          }
+          for c in concepts
+        ),
+      ],
+      "structures": [
+        {
+          "name": struct_name,
+          "description": note.get("description"),
+          "block_type": "regulatory_disclosure",
+          "concept_arrangement": "text_block",
+          "role_uri": note.get("role_uri"),
+        }
+      ],
+      "associations": [
+        {
+          "structure_ref": struct_name,
+          "from_ref": abstract_qname,
+          "to_ref": c["qname"],
+          "association_type": "presentation",
+          "order_value": float(i + 1),
+        }
+        for i, c in enumerate(concepts)
+      ],
+      "rules": [],
+    }
+    resp = httpx.post(
+      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/create-taxonomy-block",
+      json=payload,
+      headers=headers,
+      timeout=120.0,
+    )
+    if resp.status_code >= 400:
+      print(
+        f"  ERROR: create-taxonomy-block failed ({resp.status_code}): {resp.text[:300]}"
+      )
+      continue
+    envelope = (resp.json() or {}).get("result") or {}
+    structure_id = next(
+      (s.get("id") for s in envelope.get("structures", []) if s.get("id")), None
+    )
+    if structure_id is None:
+      print(f"  ERROR: no structure id returned for '{struct_name}'")
+      continue
+
+    for c in concepts:
+      doc_id = doc_ids.get(c["document_title"])
+      if doc_id is None:
+        print(f"  WARNING: no uploaded document titled '{c['document_title']}'")
+        continue
+      bind_payload = {
+        "document_id": doc_id,
+        "structure_id": structure_id,
+        "element_qname": c["qname"],
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+      }
+      bind_resp = httpx.post(
+        f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/bind-text-block",
+        json=bind_payload,
+        headers=headers,
+        timeout=60.0,
+      )
+      if bind_resp.status_code >= 400:
+        print(
+          f"  ERROR: bind-text-block failed ({bind_resp.status_code}): "
+          f"{bind_resp.text[:300]}"
+        )
+        continue
+      bound += 1
+
+  return bound
+
+
 def verify_disclosure_notes(graph_id: str) -> None:
   """Print the rendered disclosure notes after the report ran.
 
@@ -798,6 +936,12 @@ def verify_disclosure_notes(graph_id: str) -> None:
     rows = rendering.get("rows") or []
     print(f"  {name}: {len(facts)} facts, {len(rows)} rendered rows")
     for row in rows:
+      text_value = row.get("text_value")
+      if text_value:
+        # Text-block row — show the narrative head, not a numeric column.
+        head = " ".join(str(text_value).split())[:100]
+        print(f"      {row.get('element_name')}: “{head}…”")
+        continue
       values = row.get("values") or []
       latest = values[-1] if values else None
       marker = "Σ" if row.get("is_subtotal") else " "
@@ -1039,24 +1183,36 @@ def create_schedules(
 # ---------------------------------------------------------------------------
 
 
-def upload_policies(graph_id: str, documents: list[dict]) -> int:
-  """Upload accounting policy documents via ``DocumentClient.upload()``."""
+def upload_policies(graph_id: str, documents: list[dict]) -> dict[str, str]:
+  """Upload accounting policy documents via ``DocumentClient.upload()``.
+
+  Returns ``{title: document_id}`` so downstream steps (the text-block
+  binds) can reference the uploaded documents by title.
+  """
   client = _get_document_client()
-  uploaded = 0
+  doc_ids: dict[str, str] = {}
   for doc in documents:
     try:
-      client.upload(
+      envelope = client.upload(
         graph_id,
         title=doc["title"],
         content=doc["content"],
         folder=doc["folder"],
         tags=doc["tags"],
       )
-      uploaded += 1
+      # The upload result carries TWO ids: `id` is the PostgreSQL document
+      # id (what bind-text-block and get-document take); `document_id` is
+      # the OpenSearch-side key (`udoc_`-prefixed). We want the PG id.
+      result = getattr(envelope, "result", None)
+      doc_id = getattr(result, "id", None)
+      if doc_id is None and isinstance(result, dict):
+        doc_id = result.get("id")
+      if doc_id:
+        doc_ids[doc["title"]] = str(doc_id)
     except Exception as e:
       print(f"  WARNING: Failed to upload '{doc['title']}': {e}")
 
-  return uploaded
+  return doc_ids
 
 
 # ---------------------------------------------------------------------------
@@ -1219,6 +1375,7 @@ def run_demo(
   output_dir: Path,
   reveal_prompts: list[str],
   disclosures: list[dict] | None = None,
+  text_blocks: list[dict] | None = None,
   argv: list[str] | None = None,
 ) -> None:
   """Provision a graph and load the full company for one showcase episode.
@@ -1333,8 +1490,16 @@ def run_demo(
 
   # Upload policies
   print("\nUploading accounting policies...")
-  doc_count = upload_policies(graph_id, documents)
-  print(f"  Documents:    {doc_count}")
+  doc_ids = upload_policies(graph_id, documents)
+  print(f"  Documents:    {len(doc_ids)}")
+
+  # Bind policy documents as text-block disclosure facts — after upload
+  # (needs document ids) and before materialize, so the standing
+  # Nonnumeric facts reach the graph in this run.
+  if text_blocks:
+    print("\nBinding text-block notes...")
+    bound_count = create_text_block_notes(graph_id, text_blocks, doc_ids, scenario)
+    print(f"  Bound:        {bound_count}")
 
   # Materialize to graph
   print("\nMaterializing to graph...")

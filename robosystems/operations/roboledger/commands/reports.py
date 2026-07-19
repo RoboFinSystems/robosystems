@@ -38,6 +38,7 @@ from robosystems.models.extensions import (
   Report,
   ReportShare,
 )
+from robosystems.models.extensions.structure import TEXT_BLOCK_CAPS
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.information_block.rules.engine import (
@@ -166,18 +167,40 @@ _RENDER_TARGET_STATEMENT_TYPES: tuple[str, ...] = (
 )
 
 
+# Downward-recursive taxonomy closure: the report's taxonomy plus every
+# extension descending from it (extension taxonomies point at their parent
+# via ``parent_taxonomy_id``). Scopes disclosure picking so one report
+# never pulls in another framework's (or an abandoned extension's) notes.
+_TAXONOMY_SCOPE_CTE = """
+      WITH RECURSIVE scoped AS (
+        SELECT id FROM taxonomies WHERE id = :taxonomy_id
+        UNION ALL
+        SELECT t.id FROM taxonomies t JOIN scoped sc
+          ON t.parent_taxonomy_id = sc.id
+      )
+"""
+
+
 def _pick_disclosure_structures(
   session: Session,
   fact_element_ids: set[str],
+  taxonomy_id: str,
 ) -> list[str]:
-  """Disclosure structures whose concepts actually received facts.
+  """Disclosure structures whose MEMBER concepts actually received facts.
 
   Disclosures are not composed by the Reporting Style — styles pin
   statement layouts only. A disclosure renders because the mapped
   ledger produced values for its concepts (the forward/Reportability
   direction): pick every active ``regulatory_disclosure`` structure
-  owning at least one presentation arc whose endpoint elements
-  intersect the generated facts' elements.
+  owning at least one presentation arc whose MEMBER (``to``) endpoint
+  is among the generated facts' elements. The member-only condition is
+  deliberate: a note's total is typically a common library leaf that
+  almost always has a fact, so an endpoint-OR would pick the note with
+  an empty (structurally unfailable) member breakdown.
+
+  Scoped to the report's taxonomy closure (the resolved taxonomy plus
+  its descendant extensions) so a foreign framework's notes — or an
+  abandoned extension taxonomy's — never join this report's render set.
 
   The library's disclosure-identity envelopes (``disclosures:*`` rows
   with no arcs) never match the presentation-arc requirement, and a
@@ -188,20 +211,22 @@ def _pick_disclosure_structures(
     return []
   rows = session.execute(
     text(
-      """
+      _TAXONOMY_SCOPE_CTE
+      + """
       SELECT DISTINCT a.structure_id AS structure_id
       FROM associations a
       JOIN structures s ON s.id = a.structure_id
       WHERE s.block_type = :disclosure_block_type
         AND s.is_active IS TRUE
+        AND s.taxonomy_id IN (SELECT id FROM scoped)
         AND a.association_type = 'presentation'
-        AND (a.to_element_id = ANY(:element_ids)
-             OR a.from_element_id = ANY(:element_ids))
+        AND a.to_element_id = ANY(:element_ids)
       """
     ),
     {
       "disclosure_block_type": DISCLOSURE_BLOCK_TYPE,
       "element_ids": list(fact_element_ids),
+      "taxonomy_id": taxonomy_id,
     },
   ).fetchall()
   return [row.structure_id for row in rows]
@@ -211,6 +236,7 @@ def _build_structure_mapping(
   session: Session,
   reporting_style_id: str,
   fact_element_ids: set[str] | None = None,
+  taxonomy_id: str | None = None,
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
   """Return (element_id→[structure_ids], structure_id→fact_set_id) for the
   Reporting Style composed for this graph, plus fact-picked disclosures.
@@ -255,9 +281,12 @@ def _build_structure_mapping(
       continue
     picked_structure_ids.append(network.structure_id)
 
-  for disclosure_id in _pick_disclosure_structures(session, fact_element_ids or set()):
-    if disclosure_id not in picked_structure_ids:
-      picked_structure_ids.append(disclosure_id)
+  if taxonomy_id is not None:
+    for disclosure_id in _pick_disclosure_structures(
+      session, fact_element_ids or set(), taxonomy_id
+    ):
+      if disclosure_id not in picked_structure_ids:
+        picked_structure_ids.append(disclosure_id)
 
   if not picked_structure_ids:
     return {}, {}
@@ -349,6 +378,113 @@ def _persist_report_facts(
   # spuriously ``skip`` every rule (the terminal flush inside the first
   # ``evaluate_rules_for_structure`` would only rescue the later ones).
   session.flush()
+
+
+def _snapshot_text_block_facts(
+  session: Session,
+  report_id: str,
+  entity_id: str,
+  created_by: str,
+  taxonomy_id: str,
+  periods,
+) -> int:
+  """Snapshot standing text-block bindings into this report's FactSets.
+
+  Text-block disclosure structures carry no pivot facts, so the
+  fact-driven picker never sees them. Their render membership comes from
+  the standing ``factset_type='disclosure'`` FactSets that
+  ``bind-text-block`` maintains: for every text-block-CAP disclosure
+  structure in the report's taxonomy closure whose standing binding
+  falls inside the report window, copy the latest standing set's facts
+  into a fresh ``factset_type='report'`` FactSet stamped with this
+  ``report_id`` — carrying the standing set's document provenance
+  verbatim (NOT ``PivotProvenance``; the narrative was asserted from a
+  document, not pivoted from the ledger).
+
+  The copy is the immutability seam: a filed report keeps the text as
+  bound at generation time even if the document — or the standing
+  binding — changes later. Regeneration's DELETE-by-``report_id``
+  clears prior snapshots; the standing sets (``report_id`` NULL)
+  survive. Containment window semantics (binding period inside the
+  report envelope) mirror the rule engine's fact binds.
+
+  Returns the number of structures snapshotted.
+  """
+  if not periods:
+    return 0
+  starts = [p.start for p in periods if getattr(p, "start", None) is not None]
+  envelope_start = min(starts) if starts else None
+  envelope_end = max(p.end for p in periods)
+
+  rows = session.execute(
+    text(
+      _TAXONOMY_SCOPE_CTE
+      + """
+      SELECT DISTINCT ON (fs.structure_id) fs.id AS fact_set_id,
+             fs.structure_id, fs.period_start, fs.period_end, fs.provenance
+      FROM fact_sets fs
+      JOIN structures s ON s.id = fs.structure_id
+      WHERE fs.factset_type = 'disclosure'
+        AND fs.entity_id = :entity_id
+        AND s.block_type = :disclosure_block_type
+        AND s.is_active IS TRUE
+        AND s.taxonomy_id IN (SELECT id FROM scoped)
+        AND s.concept_arrangement = ANY(:text_caps)
+        AND fs.period_end <= :envelope_end
+        AND (CAST(:envelope_start AS DATE) IS NULL
+             OR fs.period_start >= :envelope_start)
+      ORDER BY fs.structure_id, fs.created_at DESC, fs.id DESC
+      """
+    ),
+    {
+      "taxonomy_id": taxonomy_id,
+      "entity_id": entity_id,
+      "disclosure_block_type": DISCLOSURE_BLOCK_TYPE,
+      "text_caps": sorted(TEXT_BLOCK_CAPS),
+      "envelope_start": envelope_start,
+      "envelope_end": envelope_end,
+    },
+  ).fetchall()
+
+  for row in rows:
+    snapshot = create_fact_set(
+      session,
+      structure_id=row.structure_id,
+      period_start=row.period_start,
+      period_end=row.period_end,
+      factset_type="report",
+      entity_id=entity_id,
+      report_id=report_id,
+      created_by=created_by,
+      provenance=row.provenance,
+    )
+    session.flush()
+    source_facts = (
+      session.execute(select(Fact).where(Fact.fact_set_id == row.fact_set_id))
+      .scalars()
+      .all()
+    )
+    for f in source_facts:
+      session.add(
+        Fact(
+          element_id=f.element_id,
+          value=f.value,
+          string_value=f.string_value,
+          fact_type=f.fact_type,
+          value_type=f.value_type,
+          content_type=f.content_type,
+          decimals=f.decimals,
+          period_start=f.period_start,
+          period_end=f.period_end,
+          period_type=f.period_type,
+          unit=f.unit,
+          entity_id=f.entity_id,
+          structure_id=f.structure_id,
+          fact_set_id=snapshot.id,
+        )
+      )
+  session.flush()
+  return len(rows)
 
 
 def _pre_create_report_fact_sets(
@@ -588,6 +724,7 @@ def create_report(
     session,
     reporting_style_id,
     fact_element_ids={f.element_id for f in facts.facts},
+    taxonomy_id=resolved_taxonomy_id,
   )
   # Create fact_sets rows first so the facts we stamp reference a row
   # that already exists, letting the DB enforce facts.fact_set_id →
@@ -608,6 +745,14 @@ def create_report(
     entity_id,
     element_to_structures,
     structure_to_factset,
+  )
+  _snapshot_text_block_facts(
+    session,
+    report_def.id,
+    entity_id,
+    created_by,
+    resolved_taxonomy_id,
+    periods,
   )
   summary = _evaluate_report_structures(
     session,
@@ -713,6 +858,7 @@ def regenerate_report(
     session,
     reporting_style_id,
     fact_element_ids={f.element_id for f in facts.facts},
+    taxonomy_id=report_def.taxonomy_id,
   )
   # Stale rows from the prior generation must clear before fresh ULIDs
   # land. The FK `facts.fact_set_id → fact_sets.id` is ON DELETE CASCADE,
@@ -738,6 +884,14 @@ def regenerate_report(
     entity_id,
     element_to_structures,
     structure_to_factset,
+  )
+  _snapshot_text_block_facts(
+    session,
+    report_def.id,
+    entity_id,
+    acting_user_id,
+    report_def.taxonomy_id,
+    periods,
   )
   summary = _evaluate_report_structures(
     session,
@@ -964,8 +1118,9 @@ def share_report(
 
     fact_rows = source_session.execute(
       text("""
-        SELECT f.id, f.element_id, f.value, f.period_start, f.period_end,
-               f.period_type, f.unit, f.entity_id, f.created_at
+        SELECT f.id, f.element_id, f.value, f.string_value, f.fact_type,
+               f.value_type, f.content_type, f.decimals, f.period_start,
+               f.period_end, f.period_type, f.unit, f.entity_id, f.created_at
         FROM facts f
         JOIN fact_sets fs ON fs.id = f.fact_set_id
         WHERE fs.report_id = :report_id
@@ -1099,6 +1254,11 @@ def _share_to_target(
         rf = Fact(
           element_id=fact_data["element_id"],
           value=fact_data["value"],
+          string_value=fact_data["string_value"],
+          fact_type=fact_data["fact_type"],
+          value_type=fact_data["value_type"],
+          content_type=fact_data["content_type"],
+          decimals=fact_data["decimals"],
           period_start=fact_data["period_start"],
           period_end=fact_data["period_end"],
           period_type=fact_data["period_type"],

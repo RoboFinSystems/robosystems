@@ -353,3 +353,54 @@ class TestHolon:
       if str(c.identifier) != "urn:x-rdflib:default" and len(list(c))
     }
     assert rt == {k: len(v) for k, v in src.items()}
+
+
+# ── Non-numeric (text-block) fact arm ────────────────────────────────────
+
+
+def _text_fact() -> BundleFact:
+  return BundleFact(
+    id="fact_txt",
+    element_id="PolicyTB",
+    element_qname="driftline:InventoryPolicyTextBlock",
+    value=None,
+    text_value="# Inventory Policy\n\nFIFO, lower of cost or NRV.",
+    fact_type="Nonnumeric",
+    content_type="text/markdown",
+    period_ref="p_1",
+    unit_ref=None,
+    entity_ref="ent_01",
+    structure_id="struct_note",
+    fact_set_id="fs_note",
+  )
+
+
+class TestNonnumericFacts:
+  def test_text_fact_emits_string_value_no_numeric_no_unit(self) -> None:
+    bundle = _bundle()
+    bundle.facts.append(_text_fact())
+    g = build_graph(bundle)
+    uri = URIRef(f"{_root(g)}/fact/fact_txt")
+    assert (uri, RS.value, None) in g
+    text_literal = next(g.objects(uri, RS.value))
+    assert "FIFO" in str(text_literal)
+    assert (uri, RS.factType, Literal("Nonnumeric")) in g
+    assert (uri, RS.contentType, Literal("text/markdown")) in g
+    assert (uri, RS.numericValue, None) not in g
+    assert (uri, RS.unit, None) not in g
+    assert (uri, RS.decimals, None) not in g
+
+  def test_numeric_fact_arm_unchanged(self) -> None:
+    bundle = _bundle()
+    bundle.facts.append(_text_fact())
+    g = build_graph(bundle)
+    uri = URIRef(f"{_root(g)}/fact/fact_01")
+    assert (uri, RS.numericValue, None) in g
+    assert (uri, RS.unit, None) in g
+    assert (uri, RS.factType, Literal("Numeric")) in g
+
+  def test_text_fact_bundle_keeps_shacl_conformance(self) -> None:
+    bundle = _bundle()
+    bundle.facts.append(_text_fact())
+    # Raises BundleValidationError on non-conformance.
+    validate_graph(build_graph(bundle), bundle)

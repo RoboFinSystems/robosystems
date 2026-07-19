@@ -68,6 +68,7 @@ from .reports import (
   ValidationCheckResponse,
 )
 from .summary import LedgerSummaryResponse
+from .text_blocks import BindTextBlockRequest, BindTextBlockResponse
 from .transactions import (
   LedgerEntryResponse,
   LedgerLineItemResponse,
@@ -86,6 +87,8 @@ __all__ = [
   "AccountTreeNode",
   "AccountTreeResponse",
   "AnalyticalStatementFactRow",
+  "BindTextBlockRequest",
+  "BindTextBlockResponse",
   "ClosingBookCategory",
   "ClosingBookItem",
   "ClosingBookStructuresResponse",

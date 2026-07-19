@@ -141,6 +141,10 @@ CANONICAL_CONTEXT: dict = {
   "structure": {"@id": f"{RS_VOCAB}structure", "@type": "@id"},
   "numericValue": {"@id": f"{RS_VOCAB}numericValue", "@type": "xsd:decimal"},
   "decimals": {"@id": f"{RS_VOCAB}decimals"},
+  # Non-numeric (text-block) fact arm — string value, no unit/decimals.
+  "factType": {"@id": f"{RS_VOCAB}factType"},
+  "value": {"@id": f"{RS_VOCAB}value", "@type": "xsd:string"},
+  "contentType": {"@id": f"{RS_VOCAB}contentType"},
   # Period node — period kind uses XBRL's instant/duration vocabulary
   "instant": {"@id": "xbrli:instant", "@type": "xsd:date"},
   "startDate": {"@id": "xbrli:startDate", "@type": "xsd:date"},

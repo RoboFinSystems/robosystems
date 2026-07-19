@@ -20,6 +20,9 @@ discipline as ``ArtifactMechanics``, which discriminates on ``kind``):
                  now; wired when Metrics un-parks.
 * ``asserted`` — provided/manual/external/cross-graph-share; the value is
                  the assertion, with no ledger lineage in this graph.
+* ``document`` — text-block fact bound from a platform Document; the
+                 document is the editable source of truth and
+                 ``content_hash`` is the drift signal.
 * ``filed``    — as-filed public disclosure filed with a regulator/authority
                  (SEC EDGAR XBRL); the filing itself is the source of record,
                  citable by accession + filing date. No posted-ledger lineage
@@ -134,6 +137,36 @@ class AssertedProvenance(BaseModel):
   )
 
 
+class DocumentProvenance(BaseModel):
+  """Text-block fact bound from a platform Document (markdown).
+
+  The document is the editable source of truth; the fact snapshots its
+  text (or one section's) at bind time. ``content_hash`` is the drift
+  signal: if the document moved underneath a bound or filed fact,
+  re-binding surfaces the mismatch — the same staleness signal a
+  backdated ledger edit gives a ``pivot`` fact. A document-specialized
+  sibling of ``asserted``: a human or Operator originated the intent,
+  with no posted-ledger lineage.
+  """
+
+  origin: Literal["document"] = "document"
+  document_id: str = Field(
+    ..., description="Platform Document the text was bound from."
+  )
+  section_id: str | None = Field(
+    None,
+    description=(
+      "Slugified heading id of the bound section (markdown_parser "
+      "convention); None when the whole document was bound."
+    ),
+  )
+  content_hash: str = Field(
+    ...,
+    description="Full sha256 hex digest of the bound text at bind time.",
+  )
+  asserted_by: str | None = Field(None, description="Actor that bound the text.")
+
+
 class FiledProvenance(BaseModel):
   """As-filed public disclosure filed with a regulator/authority.
 
@@ -167,6 +200,7 @@ FactProvenance = Annotated[
   | ScheduleProvenance
   | DerivedProvenance
   | AssertedProvenance
+  | DocumentProvenance
   | FiledProvenance,
   Field(discriminator="origin"),
 ]

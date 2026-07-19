@@ -168,6 +168,10 @@ from robosystems.models.api.extensions.taxonomies import (
   EntityTaxonomyResponse,
   LinkEntityTaxonomyRequest,
 )
+from robosystems.models.api.extensions.text_blocks import (
+  BindTextBlockRequest,
+  BindTextBlockResponse,
+)
 from robosystems.models.api.information_block import (
   CreateInformationBlockRequest,
   DeleteInformationBlockRequest,
@@ -375,6 +379,12 @@ from robosystems.operations.roboledger.commands.taxonomies import (
 )
 from robosystems.operations.roboledger.commands.taxonomies import (
   link_entity_taxonomy as cmd_link_entity_taxonomy,
+)
+from robosystems.operations.roboledger.commands.text_blocks import (
+  DocumentNotFoundError as TextBlockDocumentNotFoundError,
+)
+from robosystems.operations.roboledger.commands.text_blocks import (
+  bind_text_block as cmd_bind_text_block,
 )
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
@@ -1161,6 +1171,78 @@ evaluate_rules_op = _registrar.register(
     requires_created_by=True,
   )
 )
+
+
+# Hand-written (not registrar): needs the platform DB session for the
+# Document lookup plus the trusted-path graph_id — the OperationSpec
+# runner passes neither.
+@router.post(
+  "/bind-text-block",
+  response_model=OperationEnvelope[BindTextBlockResponse],
+  operation_id="bindTextBlock",
+  summary="Bind Text Block",
+  description=(
+    "Bind a platform Document (markdown) — or one of its sections — to a "
+    "disclosure element as a Nonnumeric text-block fact. The document "
+    "stays the editable source of truth; the fact snapshots its text into "
+    "a standing 'disclosure' FactSet with document provenance "
+    "(document_id + section + content_hash). Re-binding the same element "
+    "and period replaces the fact and refreshes the hash. Reports "
+    "generated afterward snapshot the standing set, so filed reports are "
+    "immutable against later document edits."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/bind-text-block",
+  method="POST",
+  business_event_type="ledger_bind_text_block",
+)
+async def bind_text_block_op(
+  body: BindTextBlockRequest,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  platform_db: Session = Depends(get_db_session),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="bind-text-block",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        return cmd_bind_text_block(
+          session,
+          platform_db,
+          graph_id,
+          body,
+          created_by=str(user.id),
+        )
+    except TextBlockDocumentNotFoundError as e:
+      raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+      # SectionNotFound / TextBlockStructure / TextBlockElement / size cap
+      raise HTTPException(status_code=422, detail=str(e))
+    except ProgrammingError as e:
+      if _is_schema_missing(e):
+        raise _ledger_404()
+      raise
+
+  return await _dispatch(
+    ctx,
+    _runner,
+    cache,
+    on_fresh_success=lambda _env: mark_graph_stale(graph_id, "text_block_bound"),
+  )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

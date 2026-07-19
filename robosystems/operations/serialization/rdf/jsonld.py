@@ -439,11 +439,21 @@ def _add_facts(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     g.add((uri, RS.element, _concept_uri(fact.element_qname)))
     g.add((uri, RS.entity, _scoped(root, "entity", fact.entity_ref)))
     g.add((uri, RS.period, _scoped(root, "period", fact.period_ref)))
-    g.add((uri, RS.unit, _scoped(root, "unit", fact.unit_ref)))
-    g.add(
-      (uri, RS.numericValue, Literal(Decimal(str(fact.value)), datatype=XSD.decimal))
-    )
-    g.add((uri, RS.decimals, Literal(fact.decimals)))
+    g.add((uri, RS.factType, Literal(fact.fact_type)))
+    if fact.value is not None:
+      # Numeric arm — value + unit + decimals, unchanged shape.
+      if fact.unit_ref is not None:
+        g.add((uri, RS.unit, _scoped(root, "unit", fact.unit_ref)))
+      g.add(
+        (uri, RS.numericValue, Literal(Decimal(str(fact.value)), datatype=XSD.decimal))
+      )
+      g.add((uri, RS.decimals, Literal(fact.decimals)))
+    if fact.text_value is not None:
+      # Nonnumeric (text-block) arm — string value, no unit/decimals
+      # (XBRL nonNumeric facts carry neither).
+      g.add((uri, RS.value, Literal(fact.text_value, datatype=XSD.string)))
+      if fact.content_type:
+        g.add((uri, RS.contentType, Literal(fact.content_type)))
     g.add((uri, RS.internalId, Literal(fact.id)))
     if fact.fact_set_id:
       g.add(

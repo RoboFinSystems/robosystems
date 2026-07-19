@@ -82,9 +82,17 @@ def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
 
   Tenant-authored disclosure notes are excluded from this flavor for
   now (:func:`_strip_disclosure_content`) — they ride in the JSON-LD /
-  holon flavors, whose SHACL validation covers them.
+  holon flavors, whose SHACL validation covers them. Belt-and-braces on
+  top of the strip: drop any remaining Nonnumeric fact — the numeric
+  emitter (``_format_value`` + mandatory unitRef/decimals) cannot
+  represent one, and today Nonnumeric facts only exist on disclosure
+  structures the strip already removed.
   """
   bundle = _strip_disclosure_content(bundle)
+  if any(f.value is None for f in bundle.facts):
+    bundle = bundle.model_copy(
+      update={"facts": [f for f in bundle.facts if f.value is not None]}
+    )
   buf = io.BytesIO()
   with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("instance.xml", _serialize_xml(_build_instance(bundle)))
@@ -248,7 +256,7 @@ def _build_instance(bundle: StatementBundle) -> etree._Element:
     key = (
       fact.element_qname,
       context_ref,
-      fact.unit_ref,
+      fact.unit_ref or "",
       _format_value(fact.value),
       fact.decimals,
     )
@@ -370,18 +378,22 @@ def _append_fact(parent: etree._Element, fact: BundleFact, context_ref: str) -> 
     parent,
     tag,
     contextRef=context_ref,
-    unitRef=fact.unit_ref,
+    unitRef=fact.unit_ref or "",
     decimals=fact.decimals,
   )
   fact_el.text = _format_value(fact.value)
 
 
-def _format_value(value: float) -> str:
+def _format_value(value: float | None) -> str:
   """Format a numeric fact value the XBRL way.
 
   Integer-valued floats render without a decimal point (XBRL convention
   for whole-currency amounts). Non-integers preserve full precision.
   """
+  if value is None:
+    # Unreachable by construction: serialize_to_xbrl_21 filters
+    # Nonnumeric facts after the disclosure strip.
+    raise ValueError("Nonnumeric fact reached the XBRL numeric emitter")
   decimal_value = Decimal(str(value))
   if decimal_value == decimal_value.to_integral_value():
     return str(int(decimal_value))

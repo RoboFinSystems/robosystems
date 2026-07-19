@@ -751,3 +751,28 @@ def test_format_value(value: float, expected: str) -> None:
   from robosystems.operations.serialization.xbrl.xbrl_21 import _format_value
 
   assert _format_value(value) == expected
+
+
+class TestNonnumericFactsNeverEmit:
+  def test_nonnumeric_fact_dropped_from_instance(self) -> None:
+    """Belt-and-braces: a Nonnumeric fact that somehow survives the
+    disclosure strip (e.g. one landing outside a disclosure structure)
+    must be filtered before the numeric emitter — never crash it."""
+    bundle = _bundle()
+    bundle.facts.append(
+      BundleFact(
+        id="fact_txt",
+        element_id="PolicyTB",
+        element_qname="rs-gaap:Assets",  # declared concept: survives strip
+        value=None,
+        text_value="Narrative text",
+        fact_type="Nonnumeric",
+        period_ref=bundle.facts[0].period_ref,
+        unit_ref=None,
+        entity_ref="ent_01",
+      )
+    )
+    payload = serialize_to_xbrl_21(bundle)
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+      instance = zf.read("instance.xml").decode()
+    assert "Narrative text" not in instance

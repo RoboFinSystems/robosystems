@@ -17,6 +17,7 @@ from robosystems.operations.roboledger.commands.reports import (
   _pick_disclosure_structures,
   _pre_create_report_fact_sets,
   _share_to_target,
+  _snapshot_text_block_facts,
   regenerate_report,
 )
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -146,19 +147,20 @@ def test_build_structure_mapping_returns_empty_when_no_compositions() -> None:
 def test_pick_disclosure_structures_short_circuits_on_empty_fact_ids() -> None:
   """No generated facts → no disclosure query at all."""
   session = MagicMock()
-  assert _pick_disclosure_structures(session, set()) == []
+  assert _pick_disclosure_structures(session, set(), "tax_rs_gaap") == []
   session.execute.assert_not_called()
 
 
 def test_pick_disclosure_structures_queries_by_fact_elements() -> None:
   """The picker matches active regulatory_disclosure structures whose
-  presentation-arc endpoints intersect the generated facts' elements."""
+  presentation-arc MEMBER (to) endpoint is among the generated facts'
+  elements, scoped to the report's taxonomy closure."""
   session = MagicMock()
   session.execute.return_value.fetchall.return_value = [
     MagicMock(structure_id="struct_note"),
   ]
 
-  picked = _pick_disclosure_structures(session, {"elem_raw", "elem_fg"})
+  picked = _pick_disclosure_structures(session, {"elem_raw", "elem_fg"}, "tax_rs_gaap")
 
   assert picked == ["struct_note"]
   sql = str(session.execute.call_args.args[0])
@@ -167,6 +169,36 @@ def test_pick_disclosure_structures_queries_by_fact_elements() -> None:
   params = session.execute.call_args.args[1]
   assert params["disclosure_block_type"] == "regulatory_disclosure"
   assert set(params["element_ids"]) == {"elem_raw", "elem_fg"}
+
+
+def test_pick_disclosure_structures_scopes_to_taxonomy_chain() -> None:
+  """The SQL carries the downward-recursive taxonomy closure so a foreign
+  framework's (or an abandoned extension's) notes never join the report."""
+  session = MagicMock()
+  session.execute.return_value.fetchall.return_value = []
+
+  _pick_disclosure_structures(session, {"elem_x"}, "tax_rs_gaap")
+
+  sql = str(session.execute.call_args.args[0])
+  assert "WITH RECURSIVE scoped" in sql
+  assert "parent_taxonomy_id" in sql
+  assert "s.taxonomy_id IN (SELECT id FROM scoped)" in sql
+  params = session.execute.call_args.args[1]
+  assert params["taxonomy_id"] == "tax_rs_gaap"
+
+
+def test_pick_disclosure_structures_requires_member_hit() -> None:
+  """Member-only matching: the from (total) endpoint no longer picks —
+  a total-only fact must not render a note with an empty, structurally
+  unfailable member breakdown."""
+  session = MagicMock()
+  session.execute.return_value.fetchall.return_value = []
+
+  _pick_disclosure_structures(session, {"elem_total"}, "tax_rs_gaap")
+
+  sql = str(session.execute.call_args.args[0])
+  assert "a.to_element_id = ANY(:element_ids)" in sql
+  assert "from_element_id = ANY" not in sql
 
 
 def test_build_structure_mapping_merges_fact_picked_disclosures() -> None:
@@ -200,7 +232,10 @@ def test_build_structure_mapping_merges_fact_picked_disclosures() -> None:
 
   with patch(_PICKER_PATH, side_effect=fake_picker):
     elem_map, fs_map = _build_structure_mapping(
-      session, "025f5d48-style", fact_element_ids={"elem_inventory", "elem_raw"}
+      session,
+      "025f5d48-style",
+      fact_element_ids={"elem_inventory", "elem_raw"},
+      taxonomy_id="tax_rs_gaap",
     )
 
   assert "struct_note" in fs_map
@@ -415,6 +450,11 @@ def test_share_to_target_stamps_asserted_provenance() -> None:
     {
       "element_id": "e1",
       "value": 1.0,
+      "string_value": None,
+      "fact_type": "Numeric",
+      "value_type": "inline",
+      "content_type": None,
+      "decimals": None,
       "period_start": date(2026, 1, 1),
       "period_end": date(2026, 3, 31),
       "period_type": "duration",
@@ -453,6 +493,81 @@ def test_share_to_target_stamps_asserted_provenance() -> None:
   assert prov.source_system == "cross_graph_share"
   assert "source_graph=kg_src" in prov.basis_note
   assert "source_report=rpt_src" in prov.basis_note
+
+
+def test_share_to_target_carries_nonnumeric_columns() -> None:
+  """A shared report containing a text-block fact copies the non-numeric
+  columns through — without them the target insert violates the
+  numeric-XOR-nonnumeric CHECK."""
+  from robosystems.models.extensions import Fact as FactModel
+
+  graph = MagicMock()
+  graph.schema_extensions = ["roboledger"]
+  platform_session = MagicMock()
+  platform_session.execute.return_value.scalar_one_or_none.return_value = graph
+  platform_cm = MagicMock()
+  platform_cm.__enter__.return_value = platform_session
+
+  target_session = MagicMock()
+  ext_cm = MagicMock()
+  ext_cm.__enter__.return_value = target_session
+
+  source_facts = [
+    {
+      "element_id": "e_policy",
+      "value": None,
+      "string_value": "# Inventory Policy\n\nFIFO, lower of cost or NRV.",
+      "fact_type": "Nonnumeric",
+      "value_type": "inline",
+      "content_type": "text/markdown",
+      "decimals": None,
+      "period_start": date(2026, 1, 1),
+      "period_end": date(2026, 12, 31),
+      "period_type": "duration",
+      "unit": "USD",
+      "entity_id": "ent_src",
+    }
+  ]
+  report_snapshot = {
+    "id": "rpt_src",
+    "name": "FY Report",
+    "taxonomy_id": "tax_1",
+    "period_type": "annual",
+    "comparative": False,
+  }
+
+  from robosystems.operations.roboledger.commands import reports as reports_mod
+
+  def _fs(_session, **kwargs):
+    fs = MagicMock()
+    fs.id = "fs_shared"
+    return fs
+
+  with (
+    patch("robosystems.db.platform.SessionFactory", return_value=platform_cm),
+    patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
+    patch.object(reports_mod, "create_fact_set", side_effect=_fs),
+    patch.object(reports_mod, "_ensure_linked_entity"),
+  ):
+    result = _share_to_target(
+      source_graph_id="kg_src",
+      report_snapshot=report_snapshot,
+      source_facts=source_facts,
+      target_graph_id="kg_tgt",
+      shared_by="usr_share",
+    )
+
+  assert result.status == "shared"
+  copied = [
+    call.args[0]
+    for call in target_session.add.call_args_list
+    if isinstance(call.args[0], FactModel)
+  ]
+  assert len(copied) == 1
+  assert copied[0].fact_type == "Nonnumeric"
+  assert copied[0].string_value.startswith("# Inventory Policy")
+  assert copied[0].value is None
+  assert copied[0].content_type == "text/markdown"
 
 
 # ── regenerate_report filing-status gate ──────────────────────────────────
@@ -534,3 +649,111 @@ def test_regenerate_report_allows_draft() -> None:
   assert not isinstance(exc.value, InvalidFilingTransitionError)
   assert not isinstance(exc.value, ReportNotFoundError)
   assert not isinstance(exc.value, NotAuthorizedError)
+
+
+# ── text-block snapshot at report build ───────────────────────────────────
+
+
+def test_snapshot_text_block_facts_noop_without_periods() -> None:
+  session = MagicMock()
+  assert _snapshot_text_block_facts(session, "rpt_1", "ent_1", "usr", "tax_1", []) == 0
+  session.execute.assert_not_called()
+
+
+def test_snapshot_text_block_facts_copies_standing_facts() -> None:
+  """The latest standing 'disclosure' FactSet per text-block structure is
+  snapshotted into a report FactSet carrying the DOCUMENT provenance
+  verbatim, and its facts are copied with every non-numeric column."""
+  from types import SimpleNamespace
+
+  from robosystems.models.extensions import Fact as FactModel
+  from robosystems.operations.roboledger.commands import reports as reports_mod
+
+  session = MagicMock()
+
+  standing_rows = MagicMock()
+  standing_rows.fetchall.return_value = [
+    SimpleNamespace(
+      fact_set_id="fs_standing",
+      structure_id="struct_policy",
+      period_start=date(2026, 1, 1),
+      period_end=date(2026, 12, 31),
+      provenance={
+        "origin": "document",
+        "document_id": "doc_1",
+        "section_id": None,
+        "content_hash": "ab" * 32,
+        "asserted_by": "usr_bind",
+      },
+    )
+  ]
+  source_fact = SimpleNamespace(
+    element_id="e_policy",
+    value=None,
+    string_value="# Policy\n\nFIFO.",
+    fact_type="Nonnumeric",
+    value_type="inline",
+    content_type="text/markdown",
+    decimals=None,
+    period_start=date(2026, 1, 1),
+    period_end=date(2026, 12, 31),
+    period_type="duration",
+    unit="USD",
+    entity_id="ent_1",
+    structure_id="struct_policy",
+  )
+  facts_result = MagicMock()
+  facts_result.scalars.return_value.all.return_value = [source_fact]
+  session.execute.side_effect = [standing_rows, facts_result]
+
+  captured: dict = {}
+
+  def _fs(_session, **kwargs):
+    captured.update(kwargs)
+    fs = MagicMock()
+    fs.id = "fs_snapshot"
+    return fs
+
+  periods = [SimpleNamespace(start=date(2026, 1, 1), end=date(2026, 12, 31))]
+  with patch.object(reports_mod, "create_fact_set", side_effect=_fs):
+    count = _snapshot_text_block_facts(
+      session, "rpt_1", "ent_1", "usr_gen", "tax_1", periods
+    )
+
+  assert count == 1
+  # Query shape: standing 'disclosure' sets, text CAPs, taxonomy closure.
+  sql = str(session.execute.call_args_list[0].args[0])
+  assert "factset_type = 'disclosure'" in sql
+  assert "concept_arrangement = ANY(:text_caps)" in sql
+  assert "WITH RECURSIVE scoped" in sql
+  # Snapshot FactSet: report-typed, stamped to this report, provenance
+  # passed through verbatim (NOT PivotProvenance).
+  assert captured["factset_type"] == "report"
+  assert captured["report_id"] == "rpt_1"
+  assert captured["provenance"]["origin"] == "document"
+  assert captured["provenance"]["document_id"] == "doc_1"
+  # Fact copy carries the non-numeric columns onto the snapshot set.
+  copied = [
+    call.args[0]
+    for call in session.add.call_args_list
+    if isinstance(call.args[0], FactModel)
+  ]
+  assert len(copied) == 1
+  assert copied[0].fact_set_id == "fs_snapshot"
+  assert copied[0].fact_type == "Nonnumeric"
+  assert copied[0].string_value == "# Policy\n\nFIFO."
+  assert copied[0].value is None
+
+
+def test_snapshot_text_block_facts_empty_when_no_bindings() -> None:
+  session = MagicMock()
+  rows = MagicMock()
+  rows.fetchall.return_value = []
+  session.execute.return_value = rows
+
+  from types import SimpleNamespace
+
+  periods = [SimpleNamespace(start=date(2026, 1, 1), end=date(2026, 12, 31))]
+  assert (
+    _snapshot_text_block_facts(session, "rpt_1", "ent_1", "usr", "tax_1", periods) == 0
+  )

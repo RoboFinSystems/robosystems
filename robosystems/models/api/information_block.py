@@ -159,7 +159,16 @@ class FactLite(BaseModel):
   # legacy paths that haven't been migrated yet.
   element_name: str | None = None
   element_qname: str | None = None
-  value: float
+  value: float | None = Field(
+    None, description="Numeric value; null for Nonnumeric (text-block) facts."
+  )
+  text_value: str | None = Field(
+    None, description="Text payload for Nonnumeric facts; null for numeric."
+  )
+  fact_type: str = Field("Numeric", description="Numeric | Nonnumeric")
+  content_type: str | None = Field(
+    None, description="MIME type of text_value (e.g. 'text/markdown')."
+  )
   period_start: date | None = None
   period_end: date
   period_type: str
@@ -679,6 +688,13 @@ class RenderingRowLite(BaseModel):
   )
   balance_type: str | None = None
   values: list[float | None] = Field(default_factory=list)
+  text_value: str | None = Field(
+    None,
+    description=(
+      "Narrative payload for text-block disclosure rows (markdown); "
+      "numeric rows carry values instead."
+    ),
+  )
   is_subtotal: bool = False
   depth: int = 0
 
