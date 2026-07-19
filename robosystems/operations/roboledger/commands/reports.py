@@ -39,6 +39,7 @@ from robosystems.models.extensions import (
   ReportShare,
 )
 from robosystems.operations.aws.s3 import S3Client
+from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.information_block.rules.engine import (
   evaluate_rules_for_structure,
 )
@@ -52,6 +53,9 @@ from robosystems.operations.roboledger.reads.reports import (
   periods_to_json,
   report_to_response,
   resolve_entity_name,
+)
+from robosystems.operations.roboledger.reports.calc_dag import (
+  load_rs_gaap_calculations,
 )
 from robosystems.operations.roboledger.reports.fact_grid import generate_report_facts
 from robosystems.operations.roboledger.reports.network_picker import (
@@ -135,6 +139,10 @@ def _evaluate_report_structures(
   for f in facts.facts:
     for sid in element_to_structures.get(f.element_id, ()):
       structures_with_facts.add(sid)
+  # The rs-gaap-calculations DAG is invariant across structures within this
+  # report run — load it once and share it (each structure still gets its own
+  # local-arc overlay from a copy) rather than re-querying per structure.
+  global_calculations = load_rs_gaap_calculations(session)
   all_results = []
   for structure_id in structures_with_facts:
     results = evaluate_rules_for_structure(
@@ -144,6 +152,7 @@ def _evaluate_report_structures(
       period_start=period_start,
       period_end=period_end,
       created_by=created_by,
+      global_calculations=global_calculations,
     )
     all_results.extend(results)
   return _rule_summary(all_results)
@@ -183,14 +192,17 @@ def _pick_disclosure_structures(
       SELECT DISTINCT a.structure_id AS structure_id
       FROM associations a
       JOIN structures s ON s.id = a.structure_id
-      WHERE s.block_type = 'regulatory_disclosure'
+      WHERE s.block_type = :disclosure_block_type
         AND s.is_active IS TRUE
         AND a.association_type = 'presentation'
         AND (a.to_element_id = ANY(:element_ids)
              OR a.from_element_id = ANY(:element_ids))
       """
     ),
-    {"element_ids": list(fact_element_ids)},
+    {
+      "disclosure_block_type": DISCLOSURE_BLOCK_TYPE,
+      "element_ids": list(fact_element_ids),
+    },
   ).fetchall()
   return [row.structure_id for row in rows]
 
