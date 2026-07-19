@@ -186,8 +186,8 @@ class FactSetLite(BaseModel):
   factset_type: str = Field(
     ...,
     description=(
-      "'report' | 'schedule' | 'custom'. Enum closure enforced by the "
-      "``public.fact_sets`` CHECK constraint."
+      "'report' | 'schedule' | 'custom' | 'disclosure'. Enum closure "
+      "enforced by the ``public.fact_sets`` CHECK constraint."
     ),
   )
   entity_id: str

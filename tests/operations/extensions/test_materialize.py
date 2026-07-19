@@ -126,6 +126,54 @@ class TestStagingSql:
     assert "ChartOfAccounts" in tables["Structure"]
 
 
+class TestNonnumericFactStaging:
+  """Migration 0021 closed the OLTP/graph fact asymmetry — the staging SQL
+  must pass the non-numeric slots through instead of hardcoding them."""
+
+  def test_fact_value_coalesces_string_value(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Fact"]
+    assert "COALESCE(string_value, CAST(value AS VARCHAR))" in sql
+
+  def test_fact_type_and_value_type_pass_through(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Fact"]
+    # Passed through from the OLTP columns, not hardcoded literals.
+    assert "'Numeric'" not in sql.replace("fact_type = 'Numeric'", "")
+    assert "'inline'" not in sql
+    assert "fact_type" in sql
+    assert "value_type" in sql
+    assert "content_type" in sql
+
+  def test_fact_decimals_fallback_only_for_numeric(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Fact"]
+    # Legacy '-2' preserved for numeric rows with unspecified decimals;
+    # Nonnumeric rows pass NULL through (no @decimals in XBRL).
+    assert "CASE WHEN fact_type = 'Numeric'" in sql
+    assert "COALESCE(decimals, '-2')" in sql
+
+  def test_unit_table_derives_from_fact_units(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Unit"]
+    assert "'unit_' || lower(unit)" in sql
+    assert "'iso4217:' || unit" in sql
+    assert "WHERE fact_type = 'Numeric'" in sql
+    # Static USD fallback keeps the legacy node for fact-less graphs.
+    assert "'unit_usd'" in sql
+
+  def test_fact_has_unit_excludes_nonnumeric(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["FACT_HAS_UNIT"]
+    assert "'unit_' || lower(unit)" in sql
+    assert "WHERE fact_type = 'Numeric'" in sql
+
+  def test_element_item_type_passes_through_with_derived_flags(self):
+    sql = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)["Element"]
+    assert "e.item_type" in sql
+    assert "COALESCE(e.item_type = 'text_block', false)" in sql
+    # NULL item_type keeps the legacy numeric default via COALESCE(..., true).
+    assert (
+      "COALESCE(e.item_type IN ('monetary', 'shares', 'decimal', 'integer'), true)"
+      in sql
+    )
+
+
 class TestEdgeForeignKeyGuards:
   """#757 — coa_mapping structures are materialized so curated 'mapping'
   associations have a valid parent Structure, and edge tables semi-join their

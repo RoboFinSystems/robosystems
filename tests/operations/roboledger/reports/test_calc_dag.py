@@ -15,6 +15,7 @@ import pytest
 
 from robosystems.operations.roboledger.reports.calc_dag import (
   load_rs_gaap_calculations,
+  merge_calculations,
   resolve_calc_dag,
   topo_sort_calculations,
 )
@@ -114,3 +115,28 @@ class TestTopoSort:
 
   def test_empty(self) -> None:
     assert topo_sort_calculations({}) == []
+
+
+class TestMergeCalculations:
+  def test_local_wins_per_parent(self) -> None:
+    """A structure's own arcs ARE its footing spec — a note decomposing a
+    global calc parent foots against its own members, not the statement
+    children absent from its FactSet."""
+    global_calcs = {"Revenues": [("StmtChildA", 1.0), ("StmtChildB", 1.0)]}
+    local_calcs = {"Revenues": [("MemProduct", 1.0), ("MemService", 1.0)]}
+    merged = merge_calculations(global_calcs, local_calcs)
+    assert merged["Revenues"] == [("MemProduct", 1.0), ("MemService", 1.0)]
+
+  def test_global_fallback_for_unarced_parents(self) -> None:
+    global_calcs = {"Assets": [("AC", 1.0), ("ANC", 1.0)]}
+    local_calcs = {"InventoryNet": [("Raw", 1.0), ("Finished", 1.0)]}
+    merged = merge_calculations(global_calcs, local_calcs)
+    assert merged["Assets"] == [("AC", 1.0), ("ANC", 1.0)]
+    assert merged["InventoryNet"] == [("Raw", 1.0), ("Finished", 1.0)]
+
+  def test_pure_does_not_mutate_inputs(self) -> None:
+    global_calcs = {"Assets": [("AC", 1.0)]}
+    local_calcs = {"Assets": [("Local", 1.0)]}
+    merge_calculations(global_calcs, local_calcs)
+    assert global_calcs == {"Assets": [("AC", 1.0)]}
+    assert local_calcs == {"Assets": [("Local", 1.0)]}

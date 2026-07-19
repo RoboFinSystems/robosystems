@@ -453,17 +453,20 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       END                             AS qname,
       e.name,
       e.description,
-      NULL::VARCHAR                   AS item_type,
+      e.item_type                     AS item_type,
       e.balance_type                  AS balance,
       CASE WHEN e.is_placeholder THEN true ELSE false END AS is_abstract,
       false                           AS is_dimension_item,
       false                           AS is_domain_member,
       false                           AS is_hypercube_item,
-      false                           AS is_integer,
-      true                            AS is_numeric,
-      false                           AS is_shares,
+      COALESCE(e.item_type = 'integer', false)  AS is_integer,
+      -- NULL item_type (untyped) keeps the legacy numeric default:
+      -- NULL IN (...) is NULL, COALESCE'd to true.
+      COALESCE(e.item_type IN ('monetary', 'shares', 'decimal', 'integer'), true)
+                                      AS is_numeric,
+      COALESCE(e.item_type = 'shares', false)   AS is_shares,
       false                           AS is_fraction,
-      false                           AS is_textblock,
+      COALESCE(e.item_type = 'text_block', false) AS is_textblock,
       NULL::VARCHAR                   AS uri,
       e.substitution_group            AS substitution_group,
       e.period_type                   AS period_type,
@@ -981,28 +984,42 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'facts')
   """
 
-  tables["Unit"] = """
+  # Units come from the facts actually present (numeric facts only — XBRL
+  # nonNumeric facts carry no unit). The UNION'd static USD row keeps the
+  # legacy ``unit_usd`` node present even for fact-less graphs.
+  tables["Unit"] = f"""
     CREATE OR REPLACE TABLE Unit AS
-    SELECT
-      'unit_usd'                      AS identifier,
-      'iso4217:USD'                   AS uri,
-      'iso4217:USD'                   AS measure,
-      'USD'                           AS value,
+    SELECT DISTINCT
+      'unit_' || lower(unit)          AS identifier,
+      'iso4217:' || unit              AS uri,
+      'iso4217:' || unit              AS measure,
+      unit                            AS value,
       NULL::VARCHAR                   AS numerator_uri,
       NULL::VARCHAR                   AS denominator_uri
+    FROM postgres_scan('{c}', '{s}', 'facts')
+    WHERE fact_type = 'Numeric'
+    UNION
+    SELECT
+      'unit_usd', 'iso4217:USD', 'iso4217:USD', 'USD',
+      NULL::VARCHAR, NULL::VARCHAR
   """
 
+  # decimals: numeric rows fall back to the legacy '-2' when unspecified so
+  # existing graph output is unchanged; Nonnumeric rows pass NULL through
+  # (XBRL nonNumeric facts carry no @decimals).
   tables["Fact"] = f"""
     CREATE OR REPLACE TABLE Fact AS
     SELECT
       id                              AS identifier,
       NULL::VARCHAR                   AS uri,
-      CAST(value AS VARCHAR)          AS value,
+      COALESCE(string_value, CAST(value AS VARCHAR)) AS value,
       value                           AS numeric_value,
-      'Numeric'                       AS fact_type,
-      '-2'                            AS decimals,
-      'inline'                        AS value_type,
-      NULL::VARCHAR                   AS content_type,
+      fact_type                       AS fact_type,
+      CASE WHEN fact_type = 'Numeric'
+           THEN COALESCE(decimals, '-2')
+           ELSE decimals END          AS decimals,
+      value_type                      AS value_type,
+      content_type                    AS content_type,
       false                           AS has_dimensions,
       0::BIGINT                       AS dimension_count
     FROM postgres_scan('{c}', '{s}', 'facts')
@@ -1116,12 +1133,14 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
     FROM postgres_scan('{c}', '{s}', 'facts')
   """
 
+  # XBRL nonNumeric facts carry no unitRef — numeric facts only.
   tables["FACT_HAS_UNIT"] = f"""
     CREATE OR REPLACE TABLE FACT_HAS_UNIT AS
     SELECT
       id                              AS src,
-      'unit_usd'                      AS dst
+      'unit_' || lower(unit)          AS dst
     FROM postgres_scan('{c}', '{s}', 'facts')
+    WHERE fact_type = 'Numeric'
   """
 
   tables["FACT_HAS_ENTITY"] = f"""

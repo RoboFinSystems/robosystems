@@ -91,6 +91,7 @@ def _bind_variables(
       .where(
         Fact.element_id == element_id,
         Fact.fact_scope == "in_scope",
+        Fact.value.is_not(None),
       )
       .order_by(Fact.period_end.desc(), Fact.created_at.desc())
       .limit(1)
@@ -146,7 +147,7 @@ def _bind_sum_variables(
         "SELECT ROUND(SUM(value)::numeric, 2) AS total "
         "FROM facts "
         "WHERE element_id = :eid AND structure_id = :sid "
-        "AND period_type = 'duration'"
+        "AND period_type = 'duration' AND fact_type = 'Numeric'"
       ),
       {"eid": element_id, "sid": structure_id},
     ).fetchone()
@@ -179,8 +180,12 @@ def _load_period_balances(
       .limit(1)
     ).scalar()
 
+  # Numeric facts only — a Nonnumeric (text-block) fact must neither
+  # contribute a 0.0 balance nor mark its element "present" for the
+  # rollup skip guard.
   stmt = select(Fact.element_id, Fact.value, Fact.period_start, Fact.period_end).where(
-    Fact.fact_scope == "in_scope"
+    Fact.fact_scope == "in_scope",
+    Fact.fact_type == "Numeric",
   )
   if fact_set_id is not None:
     stmt = stmt.where(Fact.fact_set_id == fact_set_id)
@@ -389,23 +394,24 @@ def evaluate_rules_for_structure(
   ] = {}
   parent_id_cache: dict[str, str | None] = {}
   if any(r.rule_pattern == "RollUp" for r in rules):
-    if global_calculations is None:
-      from robosystems.operations.roboledger.reports.calc_dag import (
-        load_rs_gaap_calculations,
-      )
+    from robosystems.operations.roboledger.reports.calc_dag import (
+      load_rs_gaap_calculations,
+      merge_calculations,
+    )
 
+    if global_calculations is None:
       calculations = load_rs_gaap_calculations(session)
     else:
-      # Copy the caller-provided global DAG so the per-structure local overlay
-      # below can't leak arcs back into the shared dict across structures.
       calculations = dict(global_calculations)
     # Tenant-authored roll_up structures (disclosure notes) foot against
-    # their OWN calculation arcs — their parents aren't rs-gaap subtotals,
-    # so the global DAG carries no entry for them. Overlay the structure's
-    # local calc arcs, letting the global DAG win where both define a
-    # parent (statement structures mirror it anyway). Same live-arc
-    # doctrine as the global path: children come from arcs, never from a
-    # frozen enumeration.
+    # their OWN calculation arcs. Merge with LOCAL-WINS precedence: a note
+    # that decomposes a global calc parent (Revenues, OperatingExpenses,
+    # ...) foots against its own members, not the statement-level children
+    # absent from its FactSet; the global DAG is the fallback for every
+    # parent the structure doesn't re-arc. Same live-arc doctrine as the
+    # global path: children come from arcs, never from a frozen
+    # enumeration. merge_calculations is pure, so the caller's shared
+    # global dict can't be polluted across structures.
     local_calcs: dict[str, list[tuple[str, float]]] = {}
     for assoc in sorted(
       associations,
@@ -418,8 +424,7 @@ def evaluate_rules_for_structure(
       local_calcs.setdefault(assoc.from_element_id, []).append(
         (assoc.to_element_id, assoc.weight if assoc.weight is not None else 1.0)
       )
-    for parent_id, children in local_calcs.items():
-      calculations.setdefault(parent_id, children)
+    calculations = merge_calculations(calculations, local_calcs)
     by_period = _load_period_balances(
       session, structure_id, fact_set_id, period_start, period_end
     )

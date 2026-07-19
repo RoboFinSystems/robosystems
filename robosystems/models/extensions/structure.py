@@ -53,6 +53,19 @@ CONCEPT_ARRANGEMENT_VALUES: tuple[str, ...] = (
   "compound_fact",
 )
 
+# CAPs whose facts are narrative text blocks (Nonnumeric facts bound from a
+# platform Document) rather than numeric grids. ``level4_detail`` is excluded:
+# cm.xsd level 4 is the numeric detail table, not narrative.
+TEXT_BLOCK_CAPS: frozenset[str] = frozenset(
+  {
+    "text_block",
+    "level1_textblock",
+    "level2_textblock",
+    "level3_textblock",
+    "table_equivalent_textblock",
+  }
+)
+
 
 class Structure(ExtensionsBase):
   __tablename__ = "structures"

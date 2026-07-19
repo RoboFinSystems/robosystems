@@ -351,3 +351,14 @@ class TestGetStatementValidBlockTypes:
         report_id="rpt_01",
         block_type="not_a_real_block_type",
       )
+
+
+class TestGetStatementNumericFilter:
+  def test_fact_query_filters_to_numeric(self) -> None:
+    """``get_statement`` renders the numeric grid for a report's block —
+    once FactSets can carry Nonnumeric (text-block) facts, the fact query
+    must exclude them at the SQL level."""
+    import inspect
+
+    src = inspect.getsource(get_statement)
+    assert "rf.fact_type = 'Numeric'" in src

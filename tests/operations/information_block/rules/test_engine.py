@@ -357,3 +357,63 @@ class TestEvaluateRulesForStructure:
         created_by="test_user",
       )
     assert results == []
+
+
+class TestNumericGuards:
+  """Nonnumeric (text-block) facts are invisible to the numeric rule
+  machinery — every fact-reading query filters to the numeric arm."""
+
+  def test_bind_variables_excludes_null_values(self) -> None:
+    from robosystems.operations.information_block.rules.engine import _bind_variables
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      variables=[{"variable_name": "Assets", "variable_qname": "fac:Assets"}]
+    )
+    captured: list[str] = []
+
+    elem_result = MagicMock()
+    elem_result.scalar.return_value = "elem_assets"
+    fact_result = MagicMock()
+    fact_result.scalar.return_value = 1000.0
+
+    def _execute(stmt, *args, **kwargs):
+      captured.append(str(stmt))
+      return elem_result if len(captured) == 1 else fact_result
+
+    session.execute.side_effect = _execute
+
+    _bind_variables(session, rule, "struct_bs", None, None)
+
+    assert "value IS NOT NULL" in captured[1]
+
+  def test_bind_sum_variables_filters_to_numeric(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _bind_sum_variables,
+    )
+
+    session = MagicMock()
+    rule = _make_rule_orm(
+      pattern="SumEquals",
+      variables=[
+        {"variable_name": "periodic_amount", "variable_qname": "fac:DeprExpense"}
+      ],
+    )
+    captured: list[str] = []
+
+    elem_result = MagicMock()
+    elem_result.scalar.return_value = "elem_depr"
+    sum_row = MagicMock()
+    sum_row.total = 1200.0
+    agg_result = MagicMock()
+    agg_result.fetchone.return_value = sum_row
+
+    def _execute(stmt, *args, **kwargs):
+      captured.append(str(stmt))
+      return elem_result if len(captured) == 1 else agg_result
+
+    session.execute.side_effect = _execute
+
+    _bind_sum_variables(session, rule, "struct_sched")
+
+    assert "fact_type = 'Numeric'" in captured[1]

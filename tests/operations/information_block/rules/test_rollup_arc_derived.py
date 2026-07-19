@@ -251,6 +251,25 @@ class TestLoadPeriodBalances:
     assert len(captured) == 1
     assert "fact_set_id" in captured[0]
 
+  def test_filters_to_numeric_facts(self) -> None:
+    """Nonnumeric (text-block) facts must neither contribute a balance nor
+    mark their element present for the rollup skip guard."""
+    session = MagicMock()
+    captured: list[str] = []
+
+    facts_result = MagicMock()
+    facts_result.all.return_value = []
+
+    def _execute(stmt, *args, **kwargs):
+      captured.append(str(stmt))
+      return facts_result
+
+    session.execute.side_effect = _execute
+
+    _load_period_balances(session, "struct_note", "fs_pinned", None, None)
+
+    assert "fact_type" in captured[0]
+
 
 class TestRollupRoutingInEngine:
   def test_rollup_rule_routes_to_arc_derived_path(self) -> None:
@@ -363,34 +382,51 @@ class TestRollupRoutingInEngine:
     assert added.status == "pass"
     assert added.detail.get("source") == "calc-dag"
 
-  def test_global_dag_wins_over_local_arcs_for_shared_parent(self) -> None:
+  def test_local_arcs_win_over_global_dag_for_shared_parent(self) -> None:
     """When a parent exists in BOTH the global DAG and the structure's
-    local arcs, the global definition wins (statement structures mirror
-    it; overlay must not shadow #883's semantics)."""
+    local arcs, the LOCAL definition wins — the structure's own arcs are
+    its footing spec. The canonical shape: a disclosure note decomposes a
+    global calc parent (Revenues, OperatingExpenses, ...) into its own
+    members; the global DAG's statement-level children are absent from
+    the note's FactSet, so global-wins reported the rollup skipped (or a
+    false fail) instead of footing against the note's members."""
     session = MagicMock()
-    session.get.return_value = MagicMock(id="struct_bs", block_type="balance_sheet")
+    session.get.return_value = MagicMock(
+      id="struct_note", block_type="regulatory_disclosure"
+    )
 
     rule_lite = MagicMock()
-    rule_lite.id = "rule_bs"
-    rule_orm = _rule("ANC", "rs-gaap:AssetsNoncurrent")
-    rule_orm.id = "rule_bs"
+    rule_lite.id = "rule_note"
+    rule_orm = _rule("elem_rev", "rs-gaap:Revenues")
+    rule_orm.id = "rule_note"
 
-    local = MagicMock()
-    local.id = "assoc_local"
-    local.association_type = "calculation"
-    local.from_element_id = "ANC"
-    local.to_element_id = "WrongChild"
-    local.weight = 1.0
-    local.order_value = 1.0
+    def _calc_assoc(child_id: str, order: float) -> MagicMock:
+      a = MagicMock()
+      a.id = f"assoc_{child_id}"
+      a.association_type = "calculation"
+      a.from_element_id = "elem_rev"
+      a.to_element_id = child_id
+      a.weight = 1.0
+      a.order_value = order
+      return a
 
     assoc = MagicMock()
-    assoc.scalars.return_value.all.return_value = [local]
+    assoc.scalars.return_value.all.return_value = [
+      _calc_assoc("mem_product", 1.0),
+      _calc_assoc("mem_service", 2.0),
+    ]
     rules_res = MagicMock()
     rules_res.scalars.return_value.all.return_value = [rule_orm]
     session.execute.side_effect = [assoc, rules_res]
 
-    # Global children foot; the local WrongChild (0 balance) would fail.
-    by_period = {_P1: ({"PPE": 100.0, "ANC": 100.0}, {"PPE", "ANC"})}
+    # The note's members foot to its total; the global DAG's statement
+    # child ("stmt_child") is absent from the note's FactSet entirely.
+    by_period = {
+      _P1: (
+        {"mem_product": 3000.0, "mem_service": 2000.0, "elem_rev": 5000.0},
+        {"mem_product", "mem_service", "elem_rev"},
+      )
+    }
 
     with (
       patch(
@@ -399,7 +435,7 @@ class TestRollupRoutingInEngine:
       ),
       patch(
         "robosystems.operations.roboledger.reports.calc_dag.load_rs_gaap_calculations",
-        return_value={"ANC": [("PPE", 1.0)]},
+        return_value={"elem_rev": [("stmt_child", 1.0)]},
       ),
       patch(
         "robosystems.operations.information_block.rules.engine._load_period_balances",
@@ -407,9 +443,10 @@ class TestRollupRoutingInEngine:
       ),
     ):
       results = evaluate_rules_for_structure(
-        session, "struct_bs", period_start=_P1[0], period_end=_P1[1]
+        session, "struct_note", period_start=_P1[0], period_end=_P1[1]
       )
 
     assert len(results) == 1
     added = session.add.call_args_list[0][0][0]
     assert added.status == "pass"
+    assert added.detail.get("source") == "calc-dag"

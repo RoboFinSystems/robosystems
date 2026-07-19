@@ -773,6 +773,7 @@ def get_statement(
       ) trait_info ON trait_info.element_id = e.id
       WHERE fs.report_id = :report_id
         AND s.block_type = :block_type
+        AND rf.fact_type = 'Numeric'
     """),
     {"report_id": report_id, "block_type": block_type},
   )
