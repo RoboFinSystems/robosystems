@@ -59,11 +59,12 @@ class TestRegistry:
 
   def test_list_registered_returns_all_entries(self) -> None:
     entries = list_registered()
-    # Schedule + rollforward + 5 statement block types + metric.
+    # Schedule + rollforward + 5 statement block types + disclosure + metric.
     assert [e.id for e in entries] == [
       "schedule",
       "rollforward",
       *STATEMENT_BLOCK_IDS,
+      "regulatory_disclosure",
       "metric",
     ]
 

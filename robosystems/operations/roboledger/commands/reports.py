@@ -157,12 +157,51 @@ _RENDER_TARGET_STATEMENT_TYPES: tuple[str, ...] = (
 )
 
 
+def _pick_disclosure_structures(
+  session: Session,
+  fact_element_ids: set[str],
+) -> list[str]:
+  """Disclosure structures whose concepts actually received facts.
+
+  Disclosures are not composed by the Reporting Style — styles pin
+  statement layouts only. A disclosure renders because the mapped
+  ledger produced values for its concepts (the forward/Reportability
+  direction): pick every active ``regulatory_disclosure`` structure
+  owning at least one presentation arc whose endpoint elements
+  intersect the generated facts' elements.
+
+  The library's disclosure-identity envelopes (``disclosures:*`` rows
+  with no arcs) never match the presentation-arc requirement, and a
+  tenant with no arc-bearing disclosure structures gets an empty list —
+  the picker is inert until a disclosure structure with content exists.
+  """
+  if not fact_element_ids:
+    return []
+  rows = session.execute(
+    text(
+      """
+      SELECT DISTINCT a.structure_id AS structure_id
+      FROM associations a
+      JOIN structures s ON s.id = a.structure_id
+      WHERE s.block_type = 'regulatory_disclosure'
+        AND s.is_active IS TRUE
+        AND a.association_type = 'presentation'
+        AND (a.to_element_id = ANY(:element_ids)
+             OR a.from_element_id = ANY(:element_ids))
+      """
+    ),
+    {"element_ids": list(fact_element_ids)},
+  ).fetchall()
+  return [row.structure_id for row in rows]
+
+
 def _build_structure_mapping(
   session: Session,
   reporting_style_id: str,
+  fact_element_ids: set[str] | None = None,
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
   """Return (element_id→[structure_ids], structure_id→fact_set_id) for the
-  Reporting Style composed for this graph.
+  Reporting Style composed for this graph, plus fact-picked disclosures.
 
   Walks ``reporting_style_networks`` to pick one Network per statement
   type, then enumerates each Network's association rows to map elements →
@@ -172,6 +211,11 @@ def _build_structure_mapping(
   be stamped onto every owning structure's FactSet so each block's
   renderer can resolve its calc rollups locally. Pre-generates a
   fact_set_id ULID per picked structure.
+
+  ``fact_element_ids`` (the elements the just-generated report facts
+  touch) drives the disclosure half: disclosure structures are NOT
+  style-composed — they join the render set when their concepts
+  received facts (:func:`_pick_disclosure_structures`).
 
   Networks for statement types the Style doesn't compose are skipped
   silently — a Style is free to omit, say, the comprehensive_income
@@ -198,6 +242,10 @@ def _build_structure_mapping(
       # ``comprehensive_income``).
       continue
     picked_structure_ids.append(network.structure_id)
+
+  for disclosure_id in _pick_disclosure_structures(session, fact_element_ids or set()):
+    if disclosure_id not in picked_structure_ids:
+      picked_structure_ids.append(disclosure_id)
 
   if not picked_structure_ids:
     return {}, {}
@@ -525,7 +573,9 @@ def create_report(
   )
 
   element_to_structures, structure_to_factset = _build_structure_mapping(
-    session, reporting_style_id
+    session,
+    reporting_style_id,
+    fact_element_ids={f.element_id for f in facts.facts},
   )
   # Create fact_sets rows first so the facts we stamp reference a row
   # that already exists, letting the DB enforce facts.fact_set_id →
@@ -648,7 +698,9 @@ def regenerate_report(
   )
 
   element_to_structures, structure_to_factset = _build_structure_mapping(
-    session, reporting_style_id
+    session,
+    reporting_style_id,
+    fact_element_ids={f.element_id for f in facts.facts},
   )
   # Stale rows from the prior generation must clear before fresh ULIDs
   # land. The FK `facts.fact_set_id → fact_sets.id` is ON DELETE CASCADE,
