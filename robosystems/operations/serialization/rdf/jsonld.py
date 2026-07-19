@@ -443,7 +443,11 @@ def _add_facts(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     g.add((uri, RS.element, _concept_uri(fact.element_qname)))
     g.add((uri, RS.entity, _scoped(root, "entity", fact.entity_ref)))
     g.add((uri, RS.period, _scoped(root, "period", fact.period_ref)))
-    g.add((uri, RS.factType, Literal(fact.fact_type)))
+    # Wire casing is lowercase ('numeric' / 'nonnumeric') — matching the
+    # xbrl-holon converter, the other producer of this vocabulary. The
+    # OLTP/graph columns keep their capitalized values; this is a
+    # boundary translation like item_type's snake->camel.
+    g.add((uri, RS.factType, Literal(fact.fact_type.lower())))
     if fact.value is not None:
       # Numeric arm — value + unit + decimals, unchanged shape.
       if fact.unit_ref is not None:

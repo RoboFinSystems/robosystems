@@ -385,7 +385,8 @@ class TestNonnumericFacts:
     assert (uri, RS.stringValue, None) in g
     text_literal = next(g.objects(uri, RS.stringValue))
     assert "FIFO" in str(text_literal)
-    assert (uri, RS.factType, Literal("Nonnumeric")) in g
+    # Wire casing is lowercase, matching the xbrl-holon converter.
+    assert (uri, RS.factType, Literal("nonnumeric")) in g
     assert (uri, RS.contentType, Literal("text/markdown")) in g
     assert (uri, RS.numericValue, None) not in g
     assert (uri, RS.unit, None) not in g
@@ -415,7 +416,7 @@ class TestNonnumericFacts:
     uri = URIRef(f"{_root(g)}/fact/fact_01")
     assert (uri, RS.numericValue, None) in g
     assert (uri, RS.unit, None) in g
-    assert (uri, RS.factType, Literal("Numeric")) in g
+    assert (uri, RS.factType, Literal("numeric")) in g
 
   def test_text_fact_bundle_keeps_shacl_conformance(self) -> None:
     bundle = _bundle()
