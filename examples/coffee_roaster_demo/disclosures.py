@@ -55,3 +55,47 @@ INVENTORY_NOTE: dict = {
 }
 
 DISCLOSURE_NOTES: list[dict] = [INVENTORY_NOTE]
+
+# ── Text-block notes — the narrative half of the disclosure surface ────────
+#
+# "Significant Accounting Policies" is the canonical first note of every
+# report: pure narrative, no numeric grid. Each concept binds one of the
+# uploaded policy documents (policies.py DOCUMENTS, matched by title) as a
+# ``Nonnumeric`` text-block fact via bind-text-block — the Document→fact
+# bridge. The document stays the editable source of truth; the report
+# snapshots the bound text at generation time.
+
+POLICIES_NOTE: dict = {
+  "taxonomy_name": "Driftline Policy Notes",
+  "name": "Significant Accounting Policies",
+  "description": (
+    "Significant accounting policies — inventory and COGS, revenue "
+    "recognition, and depreciation — bound from the company's policy "
+    "documents."
+  ),
+  "role_uri": (
+    "https://driftlinecoffee.example.com/roles/disclosures/AccountingPolicies"
+  ),
+  "abstract_qname": "driftline:SignificantAccountingPoliciesAbstract",
+  "abstract_name": "Significant Accounting Policies",
+  # (concept qname, display name, uploaded document title to bind)
+  "concepts": [
+    {
+      "qname": "driftline:InventoryPolicyTextBlock",
+      "name": "Inventory and Cost of Goods Sold Policy",
+      "document_title": "Inventory and COGS Policy",
+    },
+    {
+      "qname": "driftline:RevenueRecognitionPolicyTextBlock",
+      "name": "Revenue Recognition Policy",
+      "document_title": "Revenue Recognition Policy",
+    },
+    {
+      "qname": "driftline:DepreciationPolicyTextBlock",
+      "name": "Depreciation and Prepaid Policy",
+      "document_title": "Depreciation and Prepaid Policy",
+    },
+  ],
+}
+
+TEXT_BLOCK_NOTES: list[dict] = [POLICIES_NOTE]

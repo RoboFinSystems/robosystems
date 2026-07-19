@@ -24,7 +24,7 @@ from examples._scenario.runner import run_demo
 
 from .agents import AGENTS
 from .data import SCENARIO
-from .disclosures import DISCLOSURE_NOTES
+from .disclosures import DISCLOSURE_NOTES, TEXT_BLOCK_NOTES
 from .mappings import mappings_for
 from .policies import DOCUMENTS
 
@@ -46,6 +46,7 @@ def main() -> None:
     output_dir=Path(__file__).resolve().parent / "output",
     reveal_prompts=REVEAL_PROMPTS,
     disclosures=DISCLOSURE_NOTES,
+    text_blocks=TEXT_BLOCK_NOTES,
   )
 
 
