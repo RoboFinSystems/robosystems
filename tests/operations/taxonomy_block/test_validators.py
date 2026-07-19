@@ -282,6 +282,73 @@ class TestRuleExpressionParse:
     issues = validate_create_envelope(payload, _session_empty())
     assert any(i.code == "unparseable_expression" for i in issues)
 
+  def test_duplicate_variable_name_rejected(self) -> None:
+    """Same-named variables silently merge in the engine's name-keyed
+    fact bindings — the gate rejects them outright."""
+    payload = _basic_coa(
+      rules=[
+        TaxonomyBlockRuleRequest(
+          name="colliding",
+          rule_category="FundamentalAccountingConceptRelation",
+          rule_pattern="EqualTo",
+          expression="$Total = $InventoryNet + $InventoryNet",
+          variables=[
+            {"variable_name": "Total", "variable_qname": "ext:Total"},
+            {"variable_name": "InventoryNet", "variable_qname": "ext:InventoryNet"},
+            {
+              "variable_name": "InventoryNet",
+              "variable_qname": "rs-gaap:InventoryNet",
+            },
+          ],
+          target_taxonomy_self=True,
+        )
+      ]
+    )
+    issues = validate_create_envelope(payload, _session_empty())
+    assert any(i.code == "duplicate_variable_name" for i in issues)
+
+  def test_rollup_parent_not_first_rejected(self) -> None:
+    """RollUp rules must list the LHS parent subtotal at variables[0] —
+    the arc-derived evaluator's legacy fallback trusts that position."""
+    payload = _basic_coa(
+      rules=[
+        TaxonomyBlockRuleRequest(
+          name="children-first",
+          rule_category="FundamentalAccountingConceptRelation",
+          rule_pattern="RollUp",
+          expression="$Total = $Raw + $Finished",
+          variables=[
+            {"variable_name": "Raw", "variable_qname": "ext:Raw"},
+            {"variable_name": "Finished", "variable_qname": "ext:Finished"},
+            {"variable_name": "Total", "variable_qname": "ext:Total"},
+          ],
+          target_taxonomy_self=True,
+        )
+      ]
+    )
+    issues = validate_create_envelope(payload, _session_empty())
+    assert any(i.code == "rollup_parent_not_first" for i in issues)
+
+  def test_rollup_parent_first_accepted(self) -> None:
+    payload = _basic_coa(
+      rules=[
+        TaxonomyBlockRuleRequest(
+          name="parent-first",
+          rule_category="FundamentalAccountingConceptRelation",
+          rule_pattern="RollUp",
+          expression="$Total = $Raw + $Finished",
+          variables=[
+            {"variable_name": "Total", "variable_qname": "ext:Total"},
+            {"variable_name": "Raw", "variable_qname": "ext:Raw"},
+            {"variable_name": "Finished", "variable_qname": "ext:Finished"},
+          ],
+          target_taxonomy_self=True,
+        )
+      ]
+    )
+    issues = validate_create_envelope(payload, _session_empty())
+    assert not any(i.phase == "rule_expression_parse" for i in issues)
+
 
 class TestErrorAggregation:
   def test_all_issues_raised_together(self) -> None:

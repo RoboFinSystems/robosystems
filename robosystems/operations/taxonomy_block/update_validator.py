@@ -74,6 +74,10 @@ def validate_update_envelope(
   qname_by_element_id = {e.id: e.qname for e in current_elements}
   element_id_by_qname = {e.qname: e.id for e in current_elements if e.qname}
 
+  _resolve_foreign_element_qnames(
+    session, qname_by_element_id, current_elements, current_associations
+  )
+
   structures_to_remove = set(payload.structures_to_remove or [])
   elements_to_remove_qnames = set(payload.elements_to_remove or [])
   associations_to_remove_ids = set(payload.associations_to_remove or [])
@@ -232,6 +236,40 @@ def validate_update_envelope(
   )
 
   return issues
+
+
+def _resolve_foreign_element_qnames(
+  session: Session,
+  qname_by_element_id: dict,
+  current_elements: list[Element],
+  current_associations: list[Association],
+) -> None:
+  """Fold library-element qnames into the projection's id→qname map.
+
+  Extend-mode taxonomies arc from / parent under LIBRARY concepts, whose
+  Element rows live in the parent taxonomy — without resolving those
+  foreign ids the projection stringifies them to ``""`` and every update
+  fails reference resolution (``phantom_from_ref``), even though the
+  create validator resolves the same refs via ``_load_library_qnames``.
+  Mutates ``qname_by_element_id`` in place.
+  """
+  foreign_ids = {
+    eid
+    for a in current_associations
+    for eid in (a.from_element_id, a.to_element_id)
+    if eid and eid not in qname_by_element_id
+  } | {
+    e.parent_id
+    for e in current_elements
+    if e.parent_id and e.parent_id not in qname_by_element_id
+  }
+  if not foreign_ids:
+    return
+  for eid, qname in session.execute(
+    select(Element.id, Element.qname).where(Element.id.in_(foreign_ids))
+  ).all():
+    if qname:
+      qname_by_element_id[eid] = qname
 
 
 def _element_classification_hint(element: Element) -> str | None:

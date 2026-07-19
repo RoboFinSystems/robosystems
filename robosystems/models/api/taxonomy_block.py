@@ -85,6 +85,28 @@ class TaxonomyBlockElementRequest(BaseModel):
   metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+ConceptArrangement = Literal[
+  "set",
+  "roll_up",
+  "roll_forward",
+  "roll_forward_info",
+  "adjustment",
+  "variance",
+  "arithmetic",
+  "text_block",
+  "level1_textblock",
+  "level2_textblock",
+  "level3_textblock",
+  "level4_detail",
+  "table_equivalent_textblock",
+  "grid",
+  "compound_fact",
+]
+"""Concept Arrangement Pattern (CAP) value domain — mirrors the
+``structures.concept_arrangement`` CHECK constraint
+(``CONCEPT_ARRANGEMENT_VALUES`` in ``models/extensions/structure.py``)."""
+
+
 class TaxonomyBlockStructureRequest(BaseModel):
   """Structure definition inside a Taxonomy Block envelope."""
 
@@ -114,26 +136,7 @@ class TaxonomyBlockStructureRequest(BaseModel):
       "``custom``; custom ontology uses ``custom``."
     ),
   )
-  concept_arrangement: (
-    Literal[
-      "set",
-      "roll_up",
-      "roll_forward",
-      "roll_forward_info",
-      "adjustment",
-      "variance",
-      "arithmetic",
-      "text_block",
-      "level1_textblock",
-      "level2_textblock",
-      "level3_textblock",
-      "level4_detail",
-      "table_equivalent_textblock",
-      "grid",
-      "compound_fact",
-    ]
-    | None
-  ) = Field(
+  concept_arrangement: ConceptArrangement | None = Field(
     None,
     description=(
       "Concept Arrangement Pattern (CAP) — how the structure's concepts "
@@ -416,12 +419,19 @@ class ElementUpdatePatch(BaseModel):
 
 
 class StructureUpdatePatch(BaseModel):
-  """Partial-update patch for a single structure, keyed by structure_id."""
+  """Partial-update patch for a single structure, keyed by structure_id.
+
+  ``concept_arrangement`` makes a mis-CAP'd structure repairable in
+  place (e.g. promoting a ``set`` note to ``roll_up`` so it gains a
+  footing rule); ``block_type`` stays immutable — it drives block-type
+  routing, so changing it is a re-create, not an edit.
+  """
 
   structure_id: str = Field(..., description="Structure id to update.")
   name: str | None = None
   description: str | None = None
   role_uri: str | None = None
+  concept_arrangement: ConceptArrangement | None = None
   metadata: dict[str, Any] | None = None
 
 

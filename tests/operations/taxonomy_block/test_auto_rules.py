@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
+from robosystems.models.api.taxonomy_block import (
+  TaxonomyBlockElementRequest,
+  UpdateTaxonomyBlockRequest,
+)
+from robosystems.operations.taxonomy_block.auto_rules import (
+  emit_auto_rules,
+  refresh_auto_rules,
+)
 
 
 def _fake_taxonomy(
@@ -239,7 +246,7 @@ class TestRollupEmission:
     child_ids = {v["variable_element_id"] for v in rule.rule_variables[1:]}
     assert child_ids == {"elem_raw", "elem_fg"}
     assert rule.rule_expression == (
-      "$InventoryNet = $InventoryRawMaterials + $InventoryFinishedGoods"
+      "$InventoryNet = ($InventoryRawMaterials + $InventoryFinishedGoods)"
     )
 
   def test_negative_weight_renders_minus_term(self) -> None:
@@ -268,7 +275,7 @@ class TestRollupEmission:
 
     added = [c.args[0] for c in session.add.call_args_list]
     rule = next(r for r in added if r.rule_pattern == "RollUp")
-    assert rule.rule_expression == "$Net = $Gross - $Allowance"
+    assert rule.rule_expression == "$Net = ($Gross - $Allowance)"
 
   def test_roll_up_without_calc_arcs_emits_no_rollup(self) -> None:
     """Presentation-only roll_up renders but has nothing to foot."""
@@ -290,3 +297,205 @@ class TestRollupEmission:
     emit_auto_rules(session, taxonomy, [plain], created_by="usr_1")
 
     session.execute.assert_not_called()
+
+
+class TestVariableNaming:
+  """Weight fidelity, cross-namespace dedupe, and parser round-trips."""
+
+  def _emit_one_rollup(self, rows: list[MagicMock]) -> MagicMock:
+    session = MagicMock()
+    taxonomy = _fake_taxonomy("reporting_extension", parent_taxonomy_id="lib_1")
+    note = _fake_structure("struct_note", concept_arrangement="roll_up")
+    session.execute.return_value.fetchall.return_value = rows
+    emit_auto_rules(session, taxonomy, [note], created_by="usr_1")
+    added = [c.args[0] for c in session.add.call_args_list]
+    return next(r for r in added if r.rule_pattern == "RollUp")
+
+  def test_non_unit_weights_survive_into_expression(self) -> None:
+    rule = self._emit_one_rollup(
+      [
+        _calc_row(
+          "elem_total",
+          "elem_half",
+          parent_qname="ext:Total",
+          child_qname="ext:Half",
+          weight=0.5,
+          order_value=1.0,
+        ),
+        _calc_row(
+          "elem_total",
+          "elem_double",
+          parent_qname="ext:Total",
+          child_qname="ext:Double",
+          weight=2.0,
+          order_value=2.0,
+        ),
+      ]
+    )
+    assert rule.rule_expression == "$Total = (($Half * 0.5) + ($Double * 2.0))"
+
+  def test_emitted_expression_round_trips_through_parser(self) -> None:
+    from robosystems.operations.information_block.rules.expressions import (
+      parse_arithmetic_expression,
+    )
+
+    rule = self._emit_one_rollup(
+      [
+        _calc_row(
+          "elem_total",
+          "elem_half",
+          parent_qname="ext:Total",
+          child_qname="ext:Half",
+          weight=0.5,
+          order_value=1.0,
+        ),
+        _calc_row(
+          "elem_total",
+          "elem_neg",
+          parent_qname="ext:Total",
+          child_qname="ext:Contra",
+          weight=-1.0,
+          order_value=2.0,
+        ),
+      ]
+    )
+    names = [v["variable_name"] for v in rule.rule_variables]
+    parsed = parse_arithmetic_expression(rule.rule_expression, names)
+    assert parsed is not None
+
+  def test_cross_namespace_local_name_collision_qualifies_names(self) -> None:
+    rule = self._emit_one_rollup(
+      [
+        _calc_row(
+          "elem_tenant_inv",
+          "elem_lib_inv",
+          parent_qname="driftline:InventoryNet",
+          child_qname="rs-gaap:InventoryNet",
+          order_value=1.0,
+        ),
+        _calc_row(
+          "elem_tenant_inv",
+          "elem_reserve",
+          parent_qname="driftline:InventoryNet",
+          child_qname="ext:Reserve",
+          weight=-1.0,
+          order_value=2.0,
+        ),
+      ]
+    )
+    names = [v["variable_name"] for v in rule.rule_variables]
+    assert names == ["driftline_InventoryNet", "rs_gaap_InventoryNet", "Reserve"]
+    assert len(set(names)) == len(names)
+    assert rule.rule_expression == (
+      "$driftline_InventoryNet = ($rs_gaap_InventoryNet - $Reserve)"
+    )
+    # Parent stays index 0 with its explicit element id intact.
+    assert rule.rule_variables[0]["variable_element_id"] == "elem_tenant_inv"
+
+  def test_no_collision_keeps_bare_local_names(self) -> None:
+    rule = self._emit_one_rollup(
+      [
+        _calc_row(
+          "elem_total",
+          "elem_raw",
+          parent_qname="rs-gaap:InventoryNet",
+          child_qname="driftline:RawMaterials",
+          order_value=1.0,
+        ),
+      ]
+    )
+    names = [v["variable_name"] for v in rule.rule_variables]
+    assert names == ["InventoryNet", "RawMaterials"]
+
+  def test_null_qname_spaced_name_sanitizes_to_identifier(self) -> None:
+    from robosystems.operations.information_block.rules.expressions import (
+      parse_arithmetic_expression,
+    )
+
+    row = _calc_row(
+      "elem_total",
+      "elem_cogs",
+      parent_qname="ext:Total",
+      child_qname="ignored",
+      order_value=1.0,
+    )
+    row.child_qname = None
+    row.child_name = "Cost of Goods"
+    rule = self._emit_one_rollup([row])
+    names = [v["variable_name"] for v in rule.rule_variables]
+    assert names == ["Total", "Cost_of_Goods"]
+    parse_arithmetic_expression(rule.rule_expression, names)
+
+
+class TestRefreshAutoRules:
+  def _payload(self, **kwargs) -> UpdateTaxonomyBlockRequest:
+    return UpdateTaxonomyBlockRequest(taxonomy_id="tax_1", **kwargs)
+
+  def test_metadata_only_update_skips_refresh(self) -> None:
+    session = MagicMock()
+    refresh_auto_rules(
+      session,
+      _fake_taxonomy(),
+      self._payload(name="Renamed", description="new"),
+      updated_by="usr_1",
+    )
+    session.execute.assert_not_called()
+
+  def test_element_add_only_update_skips_refresh(self) -> None:
+    session = MagicMock()
+    payload = self._payload(
+      elements_to_add=[
+        TaxonomyBlockElementRequest(qname="ext:NewThing", name="New Thing")
+      ]
+    )
+    refresh_auto_rules(session, _fake_taxonomy(), payload, updated_by="usr_1")
+    session.execute.assert_not_called()
+
+  def test_structural_update_deletes_vrs_before_rules_then_reemits(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    taxonomy = _fake_taxonomy()
+    payload = self._payload(structures_to_remove=["s_gone"])
+
+    with patch(
+      "robosystems.operations.taxonomy_block.auto_rules.emit_auto_rules"
+    ) as emit:
+      refresh_auto_rules(session, taxonomy, payload, updated_by="usr_1")
+
+    deleted_tables = [
+      c.args[0].table.name
+      for c in session.execute.call_args_list
+      if hasattr(c.args[0], "table")
+    ]
+    assert deleted_tables == ["verification_results", "rules"]
+    emit.assert_called_once()
+    assert emit.call_args.args[1] is taxonomy
+    assert emit.call_args.kwargs == {"created_by": "usr_1"}
+
+  def test_flushes_pending_deltas_before_rederiving(self) -> None:
+    """The extensions session runs autoflush=False, so a just-added calc
+    arc is invisible to the refresh SELECTs unless refresh flushes first
+    — caught live by the Driftline update probe (rule kept 3 children)."""
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    payload = self._payload(associations_to_remove=["a_gone"])
+
+    with patch("robosystems.operations.taxonomy_block.auto_rules.emit_auto_rules"):
+      refresh_auto_rules(session, _fake_taxonomy(), payload, updated_by="usr_1")
+
+    flush_order = [
+      name for name, *_ in session.method_calls if name in ("flush", "execute")
+    ]
+    assert flush_order[0] == "flush"
+
+  def test_association_delta_triggers_refresh(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    payload = self._payload(associations_to_remove=["a_1"])
+
+    with patch(
+      "robosystems.operations.taxonomy_block.auto_rules.emit_auto_rules"
+    ) as emit:
+      refresh_auto_rules(session, _fake_taxonomy(), payload, updated_by="usr_1")
+
+    emit.assert_called_once()

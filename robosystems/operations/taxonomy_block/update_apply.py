@@ -27,6 +27,7 @@ from robosystems.models.extensions import (
   Rule,
   Structure,
   Taxonomy,
+  VerificationResult,
 )
 from robosystems.operations.taxonomy_block._helpers import structure_from_request
 from robosystems.operations.taxonomy_block.rule_persistence import (
@@ -377,7 +378,8 @@ def apply_structures_to_update(
   payload: UpdateTaxonomyBlockRequest,
   updated_by: str,
 ) -> None:
-  """Mutate existing structures — name / description / role_uri / metadata."""
+  """Mutate existing structures — name / description / role_uri /
+  concept_arrangement / metadata."""
   if not payload.structures_to_update:
     return
 
@@ -393,6 +395,8 @@ def apply_structures_to_update(
       structure.name = patch.name
     if patch.description is not None:
       structure.description = patch.description
+    if patch.concept_arrangement is not None:
+      structure.concept_arrangement = patch.concept_arrangement
     if patch.metadata is not None:
       structure.metadata_ = dict(patch.metadata)
     if patch.role_uri is not None:
@@ -408,11 +412,27 @@ def apply_structures_to_remove(
   taxonomy: Taxonomy,
   payload: UpdateTaxonomyBlockRequest,
 ) -> None:
-  """Delete structures + their rules + cascading associations."""
+  """Delete structures + their rules + cascading associations.
+
+  Verification results FK both the structures and their rules with no
+  ON DELETE, so they go first — by ``structure_id`` and by ``rule_id``
+  of the structures' rules.
+  """
   if not payload.structures_to_remove:
     return
 
   ids = list(payload.structures_to_remove)
+  structure_rule_ids = select(Rule.id).where(
+    Rule.target_kind == "structure", Rule.target_structure_id.in_(ids)
+  )
+  session.execute(
+    delete(VerificationResult).where(
+      or_(
+        VerificationResult.structure_id.in_(ids),
+        VerificationResult.rule_id.in_(structure_rule_ids),
+      )
+    )
+  )
   session.execute(
     delete(Rule).where(
       Rule.target_kind == "structure", Rule.target_structure_id.in_(ids)

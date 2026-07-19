@@ -206,10 +206,39 @@ def evaluate_arithmetic(parsed: ParsedExpression, values: dict[str, float]) -> f
   return _eval_arith(parsed.tree.body, mapped)
 
 
+def build_rollup_expression(parent_name: str, children: list[tuple[str, float]]) -> str:
+  """``$Parent = ($childA + $childB - $childC ...)``.
+
+  Weight +1 -> ``+``, -1 -> ``-``, otherwise an explicit ``* weight``
+  term (``($child * 0.5)``) so non-unit calc weights survive into the
+  frozen expression. Shared by the seed rollup-rule generator
+  (``taxonomy/scripts/generate_rollup_rules.py``) and tenant auto-rule
+  emission (``operations/taxonomy_block/auto_rules.py``); callers pass
+  final variable names — any qname-to-name mapping happens upstream.
+  """
+  parts: list[str] = []
+  for idx, (child_name, weight) in enumerate(children):
+    var = f"${child_name}"
+    if weight == 1.0:
+      sign, term = "+", var
+    elif weight == -1.0:
+      sign, term = "-", var
+    else:
+      # Render -0.0 cleanly and keep weight literal for non-unit weights.
+      sign, term = "+", f"({var} * {weight})"
+    if idx == 0:
+      parts.append(term if sign == "+" else f"-{term}")
+    else:
+      parts.append(f"{sign} {term}")
+  rhs = " ".join(parts)
+  return f"${parent_name} = ({rhs})"
+
+
 __all__ = [
   "EQUALITY_TOLERANCE",
   "InvalidRuleExpression",
   "ParsedExpression",
+  "build_rollup_expression",
   "evaluate_arithmetic",
   "evaluate_equality",
   "lhs_variable_names",

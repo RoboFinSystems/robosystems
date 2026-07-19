@@ -54,6 +54,11 @@ from robosystems.operations.information_block.rules.evaluators import (
   evaluate_rule,
   rule_tolerance,
 )
+from robosystems.operations.information_block.rules.expressions import (
+  InvalidRuleExpression,
+  lhs_variable_names,
+  parse_arithmetic_expression,
+)
 
 
 def _bind_variables(
@@ -71,6 +76,11 @@ def _bind_variables(
     qname = var.get("variable_qname", "")
     if not name:
       continue
+    if name in bindings:
+      # Bindings are name-keyed: a repeated name would silently merge two
+      # elements (one double-counted, one dropped). Raise so the per-rule
+      # handler records status='error' instead of a wrong verdict.
+      raise ValueError(f"duplicate variable_name {name!r} in rule variables")
 
     # Prefer an explicit element id when the rule carries one. Tenant CoA
     # elements have a null qname (they key on `code`), so qname resolution
@@ -122,6 +132,9 @@ def _bind_sum_variables(
     qname = var.get("variable_qname", "")
     if not name:
       continue
+    if name in bindings:
+      # Same guard as _bind_variables — name-keyed bindings must be unique.
+      raise ValueError(f"duplicate variable_name {name!r} in rule variables")
     # Prefer an explicit element id (CoA elements have null qname — see
     # _bind_variables); schedule SumEquals rules carry variable_element_id.
     element_id: str | None = (
@@ -209,20 +222,44 @@ def _load_period_balances(
   return by_period
 
 
+def _rollup_parent_variable(rule: Rule) -> dict | None:
+  """Pick the ``rule_variables`` entry naming the RollUp's parent subtotal.
+
+  The parent is whichever variable the expression's LHS names — the same
+  derivation the frozen evaluator uses (``lhs_variable_names``), so both
+  paths agree even when a tenant-authored rule lists children first.
+  Falls back to ``variables[0]`` (both machine producers' parent-first
+  convention) when the expression can't be parsed, has no single-LHS
+  shape, or names a variable that isn't declared.
+  """
+  variables = rule.rule_variables or []
+  if not variables:
+    return None
+  names = [v.get("variable_name", "") for v in variables]
+  expression = rule.rule_expression if isinstance(rule.rule_expression, str) else ""
+  try:
+    parsed = parse_arithmetic_expression(expression, [n for n in names if n])
+    lhs = lhs_variable_names(parsed)
+  except InvalidRuleExpression:
+    lhs = []
+  if len(lhs) == 1 and lhs[0] in names:
+    return variables[names.index(lhs[0])]
+  return variables[0]
+
+
 def _rollup_parent_element_id(
   session: Session, rule: Rule, cache: dict[str, str | None]
 ) -> tuple[str | None, str]:
-  """Resolve a RollUp rule's parent (the LHS = first variable) to an element_id.
+  """Resolve a RollUp rule's parent (the expression LHS) to an element_id.
 
   Prefers an explicit ``variable_element_id`` (tenant CoA elements have a null
   qname); otherwise resolves the qname, cached across rules in one run.
   """
-  variables = rule.rule_variables or []
-  if not variables:
+  parent = _rollup_parent_variable(rule)
+  if parent is None:
     return None, ""
-  v0 = variables[0]
-  qname = v0.get("variable_qname", "") or ""
-  explicit = v0.get("variable_element_id")
+  qname = parent.get("variable_qname", "") or ""
+  explicit = parent.get("variable_element_id")
   if explicit:
     return explicit, qname
   if qname in cache:
