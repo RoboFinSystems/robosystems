@@ -142,6 +142,10 @@ class BundleElement(BaseModel):
   )
   substitution_group: str | None = None
   source: str
+  # Value domain in the wire vocabulary (camelCase: 'textBlock', 'monetary',
+  # ...). Translated from the OLTP snake_case item_type at projection time;
+  # 'textBlock' gates the narrative rendering arm in report-components.
+  item_type: str | None = None
 
 
 # ── Linkbases (XBRL linkbase content) ──────────────────────────────────────
@@ -701,6 +705,14 @@ def _period_metas_for_report(report: Any, fact_sets: list[Any]) -> list[PeriodMe
   return []
 
 
+def _wire_item_type(item_type: str | None) -> str | None:
+  """OLTP snake_case value domain → wire camelCase ('text_block' → 'textBlock')."""
+  if not item_type:
+    return None
+  head, *rest = str(item_type).split("_")
+  return head + "".join(part.capitalize() for part in rest)
+
+
 def _element_to_bundle(e: Any, standard_label: str | None = None) -> BundleElement:
   return BundleElement(
     id=str(e.id),
@@ -718,6 +730,7 @@ def _element_to_bundle(e: Any, standard_label: str | None = None) -> BundleEleme
     element_type=str(e.element_type),
     substitution_group=e.substitution_group,
     source=str(e.source),
+    item_type=_wire_item_type(getattr(e, "item_type", None)),
   )
 
 
