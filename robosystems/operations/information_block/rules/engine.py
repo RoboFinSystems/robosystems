@@ -47,14 +47,12 @@ from robosystems.models.extensions import (
   Structure,
   VerificationResult,
 )
-from robosystems.models.extensions.roboledger import Fact
+from robosystems.models.extensions.roboledger import Fact, FactSet
 from robosystems.operations.information_block.envelope import load_rules_for_structure
 from robosystems.operations.information_block.rules.evaluators import (
   EvaluationOutcome,
   evaluate_rule,
-)
-from robosystems.operations.information_block.rules.expressions import (
-  EQUALITY_TOLERANCE,
+  rule_tolerance,
 )
 
 
@@ -166,15 +164,28 @@ def _load_period_balances(
   """Group in-scope facts into per-period ``(balances, present)`` — SUMMING
   every fact for an element+period, the way the fact producer does (a single
   element can carry multiple facts in one period, e.g. a derived flow plus a
-  reconciling plug). Scoped by ``fact_set_id`` when pinned, else
-  ``structure_id``, within the period window.
+  reconciling plug), within the period window.
+
+  Scoped to a single FactSet: pinned when ``fact_set_id`` is given, else the
+  LATEST FactSet for the structure. The FactSet is the summing unit on purpose
+  — two coexisting reports over the same period both stamp this structure, so a
+  bare ``structure_id`` scope would sum across reports and double every balance.
   """
+  if fact_set_id is None:
+    fact_set_id = session.execute(
+      select(FactSet.id)
+      .where(FactSet.structure_id == structure_id)
+      .order_by(FactSet.created_at.desc(), FactSet.id.desc())
+      .limit(1)
+    ).scalar()
+
   stmt = select(Fact.element_id, Fact.value, Fact.period_start, Fact.period_end).where(
     Fact.fact_scope == "in_scope"
   )
   if fact_set_id is not None:
     stmt = stmt.where(Fact.fact_set_id == fact_set_id)
   else:
+    # No FactSet exists for this structure (never reported) — no balances.
     stmt = stmt.where(Fact.structure_id == structure_id)
   if period_end is not None:
     stmt = stmt.where(Fact.period_end <= period_end)
@@ -262,9 +273,7 @@ def _evaluate_rollup_arc_derived(
       detail={"parent": parent_qname, "source": "calc-dag"},
     )
 
-  tolerance = EQUALITY_TOLERANCE
-  if rule.metadata_ and isinstance(rule.metadata_, dict):
-    tolerance = float(rule.metadata_.get("tolerance", EQUALITY_TOLERANCE))
+  tolerance = rule_tolerance(rule)
 
   per_period: list[dict[str, Any]] = []
   for key in sorted(periods, key=lambda k: (k[1] is None, k[1] or date.min)):
@@ -320,6 +329,7 @@ def evaluate_rules_for_structure(
   period_start: date | None = None,
   period_end: date | None = None,
   created_by: str = "engine",
+  global_calculations: dict[str, list[tuple[str, float]]] | None = None,
 ) -> list[VerificationResult]:
   """Evaluate every rule scoped to ``structure_id`` and persist results.
 
@@ -370,18 +380,25 @@ def evaluate_rules_for_structure(
   # rs-gaap-calculations DAG (mirroring the fact producer) rather than the
   # rule's frozen child enumeration bound one-fact-per-qname, which reported
   # false failures when a subtotal foots over a sibling concept or over two
-  # facts in one period. Loaded once per structure, only when a RollUp exists.
+  # facts in one period. The global DAG is reused from ``global_calculations``
+  # when the caller precomputed it (a report run evaluates many structures),
+  # else loaded here — only when a RollUp rule exists.
   calculations: dict[str, list[tuple[str, float]]] = {}
   by_period: dict[
     tuple[date | None, date | None], tuple[dict[str, float], set[str]]
   ] = {}
   parent_id_cache: dict[str, str | None] = {}
   if any(r.rule_pattern == "RollUp" for r in rules):
-    from robosystems.operations.roboledger.reports.calc_dag import (
-      load_rs_gaap_calculations,
-    )
+    if global_calculations is None:
+      from robosystems.operations.roboledger.reports.calc_dag import (
+        load_rs_gaap_calculations,
+      )
 
-    calculations = load_rs_gaap_calculations(session)
+      calculations = load_rs_gaap_calculations(session)
+    else:
+      # Copy the caller-provided global DAG so the per-structure local overlay
+      # below can't leak arcs back into the shared dict across structures.
+      calculations = dict(global_calculations)
     # Tenant-authored roll_up structures (disclosure notes) foot against
     # their OWN calculation arcs — their parents aren't rs-gaap subtotals,
     # so the global DAG carries no entry for them. Overlay the structure's

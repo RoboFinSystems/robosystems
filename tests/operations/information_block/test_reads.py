@@ -132,6 +132,28 @@ class TestListInformationBlocks:
     assert len(result) == 1
     assert result[0] is expected
 
+  def test_listing_query_guards_arcless_disclosure_rows(self) -> None:
+    """The listing query excludes regulatory_disclosure structures with no
+    presentation arc (the arc-less `disclosures:*` identity rows) so they
+    don't consume LIMIT/OFFSET slots and return short pages."""
+    session = MagicMock()
+    captured: list[str] = []
+
+    def _execute(stmt, *args, **kwargs):
+      captured.append(str(stmt))
+      result = MagicMock()
+      result.scalars.return_value.all.return_value = []
+      return result
+
+    session.execute.side_effect = _execute
+    list_information_blocks(session, library_sentinel=False)
+
+    sql = captured[0]
+    # A block_type guard plus a correlated presentation-arc EXISTS.
+    assert "block_type !=" in sql
+    assert "EXISTS" in sql
+    assert "association_type" in sql
+
   def test_category_filter_narrows_to_matching_block_types(self) -> None:
     """Category 'Nonexistent' matches no registered block type — empty
     result without a DB query. Phase b categories in use are 'Close'

@@ -201,6 +201,56 @@ class TestLoadPeriodBalances:
     assert balances["OtherOpCap"] == pytest.approx(3181.40)
     assert "NetIncome" in present
 
+  def test_unpinned_scopes_to_latest_fact_set_not_structure(self) -> None:
+    """Unpinned evaluation resolves the latest FactSet and scopes facts to it,
+    rather than a bare structure_id scope that would sum facts across every
+    coexisting report that stamped the structure (doubling every balance)."""
+    session = MagicMock()
+    captured: list[str] = []
+
+    fs_result = MagicMock()
+    fs_result.scalar.return_value = "fs_latest"
+    facts_result = MagicMock()
+    facts_result.all.return_value = [
+      SimpleNamespace(
+        element_id="Cash", value=100.0, period_start=_P1[0], period_end=_P1[1]
+      ),
+    ]
+
+    def _execute(stmt, *args, **kwargs):
+      captured.append(str(stmt))
+      return fs_result if len(captured) == 1 else facts_result
+
+    session.execute.side_effect = _execute
+
+    by_period = _load_period_balances(session, "struct_bs", None, None, None)
+
+    # First query resolves the latest FactSet for the structure.
+    assert "fact_sets" in captured[0]
+    # Facts query is scoped to the resolved fact_set_id, not the structure.
+    assert "fact_set_id" in captured[1]
+    assert "structure_id" not in captured[1]
+    assert by_period[_P1][0]["Cash"] == pytest.approx(100.0)
+
+  def test_pinned_skips_fact_set_resolution(self) -> None:
+    """A pinned ``fact_set_id`` scopes directly — no latest-FactSet lookup."""
+    session = MagicMock()
+    captured: list[str] = []
+
+    facts_result = MagicMock()
+    facts_result.all.return_value = []
+
+    def _execute(stmt, *args, **kwargs):
+      captured.append(str(stmt))
+      return facts_result
+
+    session.execute.side_effect = _execute
+
+    _load_period_balances(session, "struct_bs", "fs_pinned", None, None)
+
+    assert len(captured) == 1
+    assert "fact_set_id" in captured[0]
+
 
 class TestRollupRoutingInEngine:
   def test_rollup_rule_routes_to_arc_derived_path(self) -> None:

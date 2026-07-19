@@ -162,9 +162,10 @@ def test_pick_disclosure_structures_queries_by_fact_elements() -> None:
 
   assert picked == ["struct_note"]
   sql = str(session.execute.call_args.args[0])
-  assert "regulatory_disclosure" in sql
+  assert "block_type = :disclosure_block_type" in sql
   assert "presentation" in sql
   params = session.execute.call_args.args[1]
+  assert params["disclosure_block_type"] == "regulatory_disclosure"
   assert set(params["element_ids"]) == {"elem_raw", "elem_fg"}
 
 

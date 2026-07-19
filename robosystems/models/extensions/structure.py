@@ -26,6 +26,33 @@ from sqlalchemy.dialects.postgresql import JSONB
 from robosystems.db.extensions import ExtensionsBase
 from robosystems.utils.ulid import generate_prefixed_ulid
 
+# Concept Arrangement Pattern (CAP) vocabulary — the single source of truth for
+# the ``structures.concept_arrangement`` CHECK below, the API request Literal in
+# ``models/api/taxonomy_block.py`` (tied here by a drift test), and seed
+# validation. 8 canonical + 5 cm.xsd text-block/detail specializations + 2
+# pseudo (15 total).
+CONCEPT_ARRANGEMENT_VALUES: tuple[str, ...] = (
+  # 8 canonical CAPs
+  "set",
+  "roll_up",
+  "roll_forward",
+  "roll_forward_info",
+  "adjustment",
+  "variance",
+  "arithmetic",
+  "text_block",
+  # 5 cm.xsd text-block / detail specializations (Charlie encodes
+  # text-block level as the CAP itself).
+  "level1_textblock",
+  "level2_textblock",
+  "level3_textblock",
+  "level4_detail",
+  "table_equivalent_textblock",
+  # 2 pseudo-patterns
+  "grid",
+  "compound_fact",
+)
+
 
 class Structure(ExtensionsBase):
   __tablename__ = "structures"
@@ -68,21 +95,13 @@ class Structure(ExtensionsBase):
       ")",
       name="check_block_type",
     ),
-    # Concept Arrangement Pattern (CAP). 8 canonical + 5 cm.xsd
-    # text-block/detail specializations + 2 pseudo (15 total). NULL
-    # allowed for block types that don't declare a default.
+    # Concept Arrangement Pattern (CAP). Vocabulary from
+    # ``CONCEPT_ARRANGEMENT_VALUES`` (single source of truth). NULL allowed
+    # for block types that don't declare a default.
     CheckConstraint(
       "concept_arrangement IS NULL OR concept_arrangement IN ("
-      # 8 canonical CAPs
-      "'set', 'roll_up', 'roll_forward', 'roll_forward_info', "
-      "'adjustment', 'variance', 'arithmetic', 'text_block', "
-      # 5 cm.xsd text-block / detail specializations (Charlie encodes
-      # text-block level as the CAP itself).
-      "'level1_textblock', 'level2_textblock', 'level3_textblock', "
-      "'level4_detail', 'table_equivalent_textblock', "
-      # 2 pseudo-patterns
-      "'grid', 'compound_fact'"
-      ")",
+      + ", ".join(f"'{v}'" for v in CONCEPT_ARRANGEMENT_VALUES)
+      + ")",
       name="check_concept_arrangement",
     ),
     # Member Arrangement Pattern (MAP). 5 canonical, from non-aggregating

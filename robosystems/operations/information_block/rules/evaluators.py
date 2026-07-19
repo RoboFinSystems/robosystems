@@ -44,6 +44,19 @@ class EvaluationOutcome:
 _EQUALITY_PATTERNS = frozenset({"EqualTo", "RollForward"})
 
 
+def rule_tolerance(rule: Any) -> float:
+  """Resolve the equality tolerance for a rule.
+
+  Uses the per-rule ``metadata_['tolerance']`` override when present, else the
+  default ``EQUALITY_TOLERANCE``. Single source for every evaluator + the
+  engine's arc-derived RollUp path.
+  """
+  metadata = rule.metadata_
+  if isinstance(metadata, dict):
+    return float(metadata.get("tolerance", EQUALITY_TOLERANCE))
+  return EQUALITY_TOLERANCE
+
+
 def evaluate_rule(rule: Any, bindings: dict[str, float | None]) -> EvaluationOutcome:
   """Dispatch rule evaluation based on ``rule.rule_pattern``.
 
@@ -80,9 +93,7 @@ def _evaluate_equality_pattern(
       message=f"no fact bound for variables: {', '.join(missing)}",
       detail={"bindings": _serializable(bindings), "missing": missing},
     )
-  tolerance = EQUALITY_TOLERANCE
-  if rule.metadata_ and isinstance(rule.metadata_, dict):
-    tolerance = float(rule.metadata_.get("tolerance", EQUALITY_TOLERANCE))
+  tolerance = rule_tolerance(rule)
 
   bound: dict[str, float] = {n: float(bindings[n]) for n in variable_names}  # type: ignore[arg-type]
   try:
@@ -139,9 +150,7 @@ def _evaluate_rollup(rule: Any, bindings: dict[str, float | None]) -> Evaluation
       },
     )
 
-  tolerance = EQUALITY_TOLERANCE
-  if rule.metadata_ and isinstance(rule.metadata_, dict):
-    tolerance = float(rule.metadata_.get("tolerance", EQUALITY_TOLERANCE))
+  tolerance = rule_tolerance(rule)
 
   # RHS children with no fact default to 0 (sum-of-present-children).
   rhs_names = [n for n in variable_names if n not in required]
@@ -224,7 +233,7 @@ def _evaluate_sum_equals(
       detail={},
     )
   expected = float((rule.metadata_ or {}).get("expected_total", 0))
-  tolerance = float((rule.metadata_ or {}).get("tolerance", EQUALITY_TOLERANCE))
+  tolerance = rule_tolerance(rule)
   passed = abs(actual - expected) <= tolerance
   return EvaluationOutcome(
     status="pass" if passed else "fail",

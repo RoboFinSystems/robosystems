@@ -8,6 +8,7 @@ isn't of type ``reporting_standard``.
 
 from __future__ import annotations
 
+from typing import get_args
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +20,7 @@ from robosystems.models.api.taxonomy_block import (
   TaxonomyBlockStructureRequest,
   UpdateTaxonomyBlockRequest,
 )
+from robosystems.models.extensions.structure import CONCEPT_ARRANGEMENT_VALUES
 from robosystems.operations.taxonomy_block import reporting_extension
 
 
@@ -43,6 +45,19 @@ def test_structure_request_rejects_unknown_concept_arrangement() -> None:
       block_type="regulatory_disclosure",
       concept_arrangement="not_a_cap",  # type: ignore[arg-type]
     )
+
+
+def test_concept_arrangement_literal_matches_canonical_vocabulary() -> None:
+  """Drift guard: the API request ``concept_arrangement`` Literal must stay in
+  lockstep with ``CONCEPT_ARRANGEMENT_VALUES`` — the single source that also
+  builds the ``structures.concept_arrangement`` DB CHECK constraint."""
+  annotation = TaxonomyBlockStructureRequest.model_fields[
+    "concept_arrangement"
+  ].annotation
+  literal_values: set[str] = set()
+  for arg in get_args(annotation):
+    literal_values.update(get_args(arg))
+  assert literal_values == set(CONCEPT_ARRANGEMENT_VALUES)
 
 
 def test_create_request_rejects_missing_parent() -> None:

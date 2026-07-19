@@ -38,6 +38,11 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger import Fact, FactSet
 
+# The disclosure-note block_type string. Defined here — the lowest module in
+# the statement/disclosure import cluster — so envelope.py, disclosure.py
+# (re-export), and the serialization/report paths share one canonical value.
+DISCLOSURE_BLOCK_TYPE = "regulatory_disclosure"
+
 
 def element_to_lite(element: Element) -> ElementLite:
   """Project an :class:`Element` ORM row onto :class:`ElementLite`."""
@@ -534,7 +539,7 @@ def _disclosure_qname_for_type(session: Session, block_type: str) -> str | None:
   their own role_uri (case 1 in
   :func:`load_disclosure_id_for_structure`) or not at all.
   """
-  if block_type == "regulatory_disclosure":
+  if block_type == DISCLOSURE_BLOCK_TYPE:
     return None
 
   cached = _DISCLOSURE_QNAME_BY_TYPE.get(block_type, _MISSING)

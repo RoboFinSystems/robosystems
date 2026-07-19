@@ -26,6 +26,7 @@ from decimal import Decimal
 
 from lxml import etree
 
+from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 from robosystems.operations.serialization.bundle import (
   BundleArc,
   BundleContext,
@@ -139,7 +140,7 @@ def _strip_disclosure_content(bundle: StatementBundle) -> StatementBundle:
       bundle.linkbases.definition_links,
     )
     for link in group
-    if link.block_type == "regulatory_disclosure"
+    if link.block_type == DISCLOSURE_BLOCK_TYPE
   }
   if not disclosure_structure_ids:
     return bundle
@@ -190,12 +191,18 @@ def _strip_disclosure_content(bundle: StatementBundle) -> StatementBundle:
   referenced_periods = {f.period_ref for f in facts}
   period_nodes = [p for p in bundle.period_nodes if p.id in referenced_periods]
 
+  # Drop units no surviving fact references (a unit used only by a stripped
+  # note's facts would leave an unreferenced <xbrli:unit> in the instance).
+  referenced_units = {f.unit_ref for f in facts}
+  units = [u for u in bundle.units if u.id in referenced_units]
+
   return bundle.model_copy(
     update={
       "linkbases": linkbases,
       "facts": facts,
       "schema_concepts": schema_concepts,
       "period_nodes": period_nodes,
+      "units": units,
     }
   )
 
