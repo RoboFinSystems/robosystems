@@ -658,18 +658,8 @@ def create_disclosure_notes(
   line and the note foot over the same facts. Rendering is fact-driven:
   ``create-report`` picks the note because its concepts receive facts.
 
-  The create-taxonomy-block operation is posted directly over HTTP for
-  now: the published robosystems-client (0.5.1) predates the
-  ``regulatory_disclosure`` block_type + ``concept_arrangement`` request
-  fields and its generated enum rejects them client-side. Swap to
-  ``LedgerClient.create_taxonomy_block`` once the SDK is regenerated.
-
   Returns (notes_created, member_mappings_created).
   """
-  import httpx
-
-  config = _client_config()
-  headers = {"X-API-Key": config["token"], "Content-Type": "application/json"}
   client = _get_ledger_client()
 
   taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
@@ -741,23 +731,14 @@ def create_disclosure_notes(
       ],
       "rules": [],
     }
-    resp = httpx.post(
-      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/create-taxonomy-block",
-      json=payload,
-      headers=headers,
-      timeout=120.0,
-    )
-    if resp.status_code >= 400:
-      print(
-        f"  ERROR: create-taxonomy-block failed ({resp.status_code}): {resp.text[:300]}"
-      )
+    try:
+      envelope = client.create_taxonomy_block(graph_id, payload)
+    except Exception as e:
+      print(f"  ERROR: create-taxonomy-block failed: {e}")
       continue
-    envelope = (resp.json() or {}).get("result") or {}
     notes_created += 1
 
-    member_ids_by_qname = {
-      e.get("qname"): e.get("id") for e in envelope.get("elements", [])
-    }
+    member_ids_by_qname = {e.qname: e.id for e in (envelope.elements or [])}
     if mapping_id is None:
       continue
     for m in members:
@@ -794,15 +775,8 @@ def create_text_block_notes(
   generated afterward snapshot the standing bindings, so the narrative
   rides the report package, the JSON-LD bundle, and the graph.
 
-  Posted over raw HTTP like ``create_disclosure_notes`` (the published
-  SDK predates both operations' request shapes).
-
   Returns the number of documents bound.
   """
-  import httpx
-
-  config = _client_config()
-  headers = {"X-API-Key": config["token"], "Content-Type": "application/json"}
   client = _get_ledger_client()
 
   if scenario.report_period is None:
@@ -867,21 +841,12 @@ def create_text_block_notes(
       ],
       "rules": [],
     }
-    resp = httpx.post(
-      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/create-taxonomy-block",
-      json=payload,
-      headers=headers,
-      timeout=120.0,
-    )
-    if resp.status_code >= 400:
-      print(
-        f"  ERROR: create-taxonomy-block failed ({resp.status_code}): {resp.text[:300]}"
-      )
+    try:
+      envelope = client.create_taxonomy_block(graph_id, payload)
+    except Exception as e:
+      print(f"  ERROR: create-taxonomy-block failed: {e}")
       continue
-    envelope = (resp.json() or {}).get("result") or {}
-    structure_id = next(
-      (s.get("id") for s in envelope.get("structures", []) if s.get("id")), None
-    )
+    structure_id = next((s.id for s in (envelope.structures or []) if s.id), None)
     if structure_id is None:
       print(f"  ERROR: no structure id returned for '{struct_name}'")
       continue
@@ -898,17 +863,10 @@ def create_text_block_notes(
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
       }
-      bind_resp = httpx.post(
-        f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/bind-text-block",
-        json=bind_payload,
-        headers=headers,
-        timeout=60.0,
-      )
-      if bind_resp.status_code >= 400:
-        print(
-          f"  ERROR: bind-text-block failed ({bind_resp.status_code}): "
-          f"{bind_resp.text[:300]}"
-        )
+      try:
+        client.bind_text_block(graph_id, bind_payload)
+      except Exception as e:
+        print(f"  ERROR: bind-text-block failed: {e}")
         continue
       bound += 1
 
