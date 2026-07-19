@@ -34,7 +34,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.taxonomy_block import (
@@ -86,6 +86,7 @@ def validate_create_envelope(
   issues.extend(_phase_structural_integrity(payload))
   issues.extend(_phase_type_specific(payload))
   issues.extend(_phase_library_origin_respect(payload))
+  issues.extend(_phase_library_namespace_protection(payload, session))
   issues.extend(_phase_rule_expression_parse(payload))
   return issues
 
@@ -503,6 +504,59 @@ def _namespace_prefix(namespace_uri: str) -> str | None:
   if not stripped:
     return None
   return stripped.rsplit("/", 1)[-1] or None
+
+
+_LIBRARY_SEEDER = "library-seeder"
+
+
+def _phase_library_namespace_protection(
+  payload: CreateTaxonomyBlockRequest, session: Session
+) -> list[ValidationIssue]:
+  """Library namespaces are platform-owned — tenants must not declare in them.
+
+  The library evolves wholesale (rs-gaap reseeds, new packages), so a
+  tenant-minted ``rs-gaap:*`` element would fork the namespace and shadow
+  the real concept in schema-wide qname lookups. Tenants author in their
+  OWN extension namespace and *anchor* to library concepts — arcs and
+  ``parent_ref`` referencing library qnames stay legal (resolved via
+  :func:`_load_library_qnames`); only *declarations* under a
+  library-owned prefix are refused. Prefixes are derived from the seeded
+  rows themselves, so future library packages are protected automatically.
+  """
+  reserved = _load_library_prefixes(session)
+  if not reserved:
+    return []
+  issues: list[ValidationIssue] = []
+  for element in payload.elements:
+    qname = _element_qname(element, payload)
+    prefix = qname.split(":", 1)[0] if ":" in qname else ""
+    if prefix in reserved:
+      issues.append(
+        ValidationIssue(
+          phase="namespace_protection",
+          code="library_namespace_reserved",
+          message=(
+            f"element {qname!r} declares under the library-owned prefix "
+            f"{prefix!r}; author elements in your own extension namespace "
+            f"and anchor to library concepts via arcs or parent_ref."
+          ),
+          context={"element_qname": qname, "prefix": prefix},
+        )
+      )
+  return issues
+
+
+def _load_library_prefixes(session: Session) -> set[str]:
+  """Distinct qname prefixes of library-seeded elements in this schema."""
+  rows = session.execute(
+    select(func.split_part(Element.qname, ":", 1))
+    .where(
+      Element.created_by == _LIBRARY_SEEDER,
+      Element.qname.like("%:%"),
+    )
+    .distinct()
+  ).all()
+  return {row[0] for row in rows if row[0]}
 
 
 def _load_library_qnames(
