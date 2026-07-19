@@ -16,9 +16,33 @@ from pydantic import ValidationError
 from robosystems.models.api.taxonomy_block import (
   CreateTaxonomyBlockRequest,
   DeleteTaxonomyBlockRequest,
+  TaxonomyBlockStructureRequest,
   UpdateTaxonomyBlockRequest,
 )
 from robosystems.operations.taxonomy_block import reporting_extension
+
+
+def test_structure_request_accepts_disclosure_note_shape() -> None:
+  """A disclosure note is authorable through the envelope: the
+  ``regulatory_disclosure`` block_type plus a CAP from the closed
+  ``concept_arrangement`` vocabulary."""
+  req = TaxonomyBlockStructureRequest(
+    name="Inventory Components",
+    block_type="regulatory_disclosure",
+    concept_arrangement="roll_up",
+    role_uri="https://example.com/roles/disclosures/InventoryComponents",
+  )
+  assert req.block_type == "regulatory_disclosure"
+  assert req.concept_arrangement == "roll_up"
+
+
+def test_structure_request_rejects_unknown_concept_arrangement() -> None:
+  with pytest.raises(ValidationError):
+    TaxonomyBlockStructureRequest(
+      name="Bad CAP",
+      block_type="regulatory_disclosure",
+      concept_arrangement="not_a_cap",  # type: ignore[arg-type]
+    )
 
 
 def test_create_request_rejects_missing_parent() -> None:

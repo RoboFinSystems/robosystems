@@ -638,6 +638,179 @@ def create_mappings(
 
 
 # ---------------------------------------------------------------------------
+# Step 3c: Author disclosure notes (TaxonomyBlock reporting_extension)
+# ---------------------------------------------------------------------------
+
+
+def create_disclosure_notes(
+  graph_id: str,
+  notes: list[dict],
+  element_lookup: dict[str, str],
+) -> tuple[int, int]:
+  """Author per-tenant disclosure note structures and multi-map their members.
+
+  Each note becomes a ``reporting_extension`` TaxonomyBlock: member
+  concepts parented under a library total, one ``regulatory_disclosure``
+  structure with ``concept_arrangement='roll_up'``, and presentation +
+  calculation arcs whose total endpoint IS the library concept. The
+  member CoA accounts are then multi-mapped (member + the library total
+  the episode's ``mappings.py`` already maps), so the face-statement
+  line and the note foot over the same facts. Rendering is fact-driven:
+  ``create-report`` picks the note because its concepts receive facts.
+
+  The create-taxonomy-block operation is posted directly over HTTP for
+  now: the published robosystems-client (0.5.1) predates the
+  ``regulatory_disclosure`` block_type + ``concept_arrangement`` request
+  fields and its generated enum rejects them client-side. Swap to
+  ``LedgerClient.create_taxonomy_block`` once the SDK is regenerated.
+
+  Returns (notes_created, member_mappings_created).
+  """
+  import httpx
+
+  config = _client_config()
+  headers = {"X-API-Key": config["token"], "Content-Type": "application/json"}
+  client = _get_ledger_client()
+
+  taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
+  rs_gaap = next(
+    (t for t in taxonomies if (t.get("standard") or "").startswith("rs-gaap")), None
+  )
+  if rs_gaap is None:
+    print("  ERROR: rs-gaap reporting standard not found in graph")
+    return 0, 0
+
+  structures = client.list_structures(graph_id, block_type="coa_mapping")
+  mapping_id = structures[0]["id"] if structures else None
+  if mapping_id is None:
+    print("  ERROR: no coa_mapping structure — member multi-mapping skipped")
+
+  notes_created = 0
+  member_mappings = 0
+  for note in notes:
+    struct_name = note["name"]
+    total_qname = note["total_qname"]
+    members = note["members"]
+    payload = {
+      "name": note.get("taxonomy_name", f"{struct_name} Extension"),
+      "taxonomy_type": "reporting_extension",
+      "parent_taxonomy_id": rs_gaap["id"],
+      "description": note.get("description"),
+      "elements": [
+        {
+          "qname": m["qname"],
+          "name": m["name"],
+          "parent_ref": total_qname,
+          "balance_type": "debit",
+          "period_type": "instant",
+          "is_monetary": True,
+        }
+        for m in members
+      ],
+      "structures": [
+        {
+          "name": struct_name,
+          "description": note.get("description"),
+          "block_type": "regulatory_disclosure",
+          "concept_arrangement": "roll_up",
+          "role_uri": note.get("role_uri"),
+        }
+      ],
+      "associations": [
+        *(
+          {
+            "structure_ref": struct_name,
+            "from_ref": total_qname,
+            "to_ref": m["qname"],
+            "association_type": "presentation",
+            "order_value": float(i + 1),
+          }
+          for i, m in enumerate(members)
+        ),
+        *(
+          {
+            "structure_ref": struct_name,
+            "from_ref": total_qname,
+            "to_ref": m["qname"],
+            "association_type": "calculation",
+            "order_value": float(i + 1),
+            "weight": 1.0,
+          }
+          for i, m in enumerate(members)
+        ),
+      ],
+      "rules": [],
+    }
+    resp = httpx.post(
+      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/create-taxonomy-block",
+      json=payload,
+      headers=headers,
+      timeout=120.0,
+    )
+    if resp.status_code >= 400:
+      print(
+        f"  ERROR: create-taxonomy-block failed ({resp.status_code}): {resp.text[:300]}"
+      )
+      continue
+    envelope = (resp.json() or {}).get("result") or {}
+    notes_created += 1
+
+    member_ids_by_qname = {
+      e.get("qname"): e.get("id") for e in envelope.get("elements", [])
+    }
+    if mapping_id is None:
+      continue
+    for m in members:
+      coa_id = element_lookup.get(m["coa_code"])
+      member_id = member_ids_by_qname.get(m["qname"])
+      if not coa_id or not member_id:
+        print(f"  WARNING: could not multi-map {m['coa_code']} → {m['qname']}")
+        continue
+      client.create_mapping_association(
+        graph_id,
+        mapping_id=mapping_id,
+        from_element_id=coa_id,
+        to_element_id=member_id,
+      )
+      member_mappings += 1
+
+  return notes_created, member_mappings
+
+
+def verify_disclosure_notes(graph_id: str) -> None:
+  """Print the rendered disclosure notes after the report ran.
+
+  Fact-driven proof: the notes only exist in the render output because
+  the report's facts reached their concepts. Prints each note's rows
+  (with the footed total) and its verification summary.
+  """
+  client = _get_ledger_client()
+  blocks = client.list_information_blocks(graph_id, block_type="regulatory_disclosure")
+  if not blocks:
+    print("  WARNING: no disclosure notes rendered")
+    return
+  for block in blocks:
+    # parse_information_blocks snake_cases every key.
+    name = block.get("name") or block.get("display_name") or block.get("id")
+    facts = block.get("facts") or []
+    summary = block.get("verification_summary") or {}
+    rendering = (block.get("view") or {}).get("rendering") or {}
+    rows = rendering.get("rows") or []
+    print(f"  {name}: {len(facts)} facts, {len(rows)} rendered rows")
+    for row in rows:
+      values = row.get("values") or []
+      latest = values[-1] if values else None
+      marker = "Σ" if row.get("is_subtotal") else " "
+      # Report fact values are natural-signed dollars (not cents).
+      amount = f"${latest:,.2f}" if isinstance(latest, (int, float)) else "—"
+      print(f"    {marker} {row.get('element_name')}: {amount}")
+    passed = summary.get("passed", 0)
+    total = summary.get("total", 0)
+    if total:
+      print(f"    Verification: {passed}/{total} rules passed")
+
+
+# ---------------------------------------------------------------------------
 # Step 3b: AI mapping path — requires Bedrock (optional)
 # ---------------------------------------------------------------------------
 
@@ -1045,6 +1218,7 @@ def run_demo(
   documents: list[dict],
   output_dir: Path,
   reveal_prompts: list[str],
+  disclosures: list[dict] | None = None,
   argv: list[str] | None = None,
 ) -> None:
   """Provision a graph and load the full company for one showcase episode.
@@ -1053,6 +1227,9 @@ def run_demo(
   are the episode's counterparties, CoA→rs-gaap mapping callable, and policy
   docs; ``output_dir`` is where the report bundles land; ``reveal_prompts``
   are the episode-specific Beat-4 analysis questions printed at the end.
+  ``disclosures`` (optional) are per-tenant authored disclosure notes (see
+  ``create_disclosure_notes``) — authored after mapping, verified after the
+  report renders them fact-driven.
   """
   argv = sys.argv if argv is None else argv
   dry_run = "--dry-run" in argv
@@ -1134,6 +1311,17 @@ def run_demo(
     )
     print(f"  Mappings:     {mapping_count}")
 
+  # Author disclosure notes (TaxonomyBlock reporting_extension) + member
+  # multi-mapping — after CoA mapping so the note's members and the face
+  # statements share leaves.
+  if disclosures:
+    print("\nAuthoring disclosure notes...")
+    note_count, member_map_count = create_disclosure_notes(
+      graph_id, disclosures, element_lookup
+    )
+    print(f"  Notes:        {note_count}")
+    print(f"  Member maps:  {member_map_count}")
+
   # Initialize fiscal calendar (via HTTP API — exercises initialize op)
   print("\nInitializing fiscal calendar...")
   close_target = initialize_fiscal_calendar(graph_id, scenario)
@@ -1155,6 +1343,12 @@ def run_demo(
   # Generate + file the annual report
   print("\nGenerating annual report...")
   report_id = generate_annual_report(graph_id, scenario, output_dir)
+
+  # Fact-driven disclosure proof — the notes render because the report's
+  # facts reached their concepts (no style composition involved).
+  if disclosures and report_id:
+    print("\nRendered disclosure notes:")
+    verify_disclosure_notes(graph_id)
 
   # Summary
   print("\n" + "=" * 60)

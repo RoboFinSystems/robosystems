@@ -104,12 +104,42 @@ class TaxonomyBlockStructureRequest(BaseModel):
     "reconciliation",
     "policy",
     "metric",
+    "regulatory_disclosure",
   ] = Field(
     ...,
     description=(
       "DB ``structures.block_type`` enum. CoA blocks use "
       "``chart_of_accounts``; reporting extensions use the statement "
-      "family or ``custom``; custom ontology uses ``custom``."
+      "family, ``regulatory_disclosure`` (disclosure notes), or "
+      "``custom``; custom ontology uses ``custom``."
+    ),
+  )
+  concept_arrangement: (
+    Literal[
+      "set",
+      "roll_up",
+      "roll_forward",
+      "roll_forward_info",
+      "adjustment",
+      "variance",
+      "arithmetic",
+      "text_block",
+      "level1_textblock",
+      "level2_textblock",
+      "level3_textblock",
+      "level4_detail",
+      "table_equivalent_textblock",
+      "grid",
+      "compound_fact",
+    ]
+    | None
+  ) = Field(
+    None,
+    description=(
+      "Concept Arrangement Pattern (CAP) — how the structure's concepts "
+      "relate (mirrors the ``structures.concept_arrangement`` CHECK "
+      "vocabulary). A disclosure note footing members to a total is "
+      "``roll_up``. Null leaves the pattern unset."
     ),
   )
   description: str | None = None

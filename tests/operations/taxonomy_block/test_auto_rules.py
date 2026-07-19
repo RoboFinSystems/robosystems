@@ -19,10 +19,32 @@ def _fake_taxonomy(
   return t
 
 
-def _fake_structure(sid: str) -> MagicMock:
+def _fake_structure(sid: str, concept_arrangement: str | None = None) -> MagicMock:
   s = MagicMock()
   s.id = sid
+  s.concept_arrangement = concept_arrangement
   return s
+
+
+def _calc_row(
+  parent_id: str,
+  child_id: str,
+  *,
+  parent_qname: str,
+  child_qname: str,
+  weight: float = 1.0,
+  order_value: float | None = None,
+) -> MagicMock:
+  row = MagicMock()
+  row.from_element_id = parent_id
+  row.to_element_id = child_id
+  row.weight = weight
+  row.order_value = order_value
+  row.parent_qname = parent_qname
+  row.parent_name = parent_qname.split(":")[-1]
+  row.child_qname = child_qname
+  row.child_name = child_qname.split(":")[-1]
+  return row
 
 
 class TestEmitAutoRules:
@@ -175,3 +197,96 @@ class TestEmitAutoRules:
 
     added = [c.args[0] for c in session.add.call_args_list]
     assert all(r.created_by == "seeder_bot" for r in added)
+
+
+class TestRollupEmission:
+  """Auto-emitted RollUp footing rules for authored roll_up structures."""
+
+  def test_roll_up_structure_with_calc_arcs_emits_rollup_rule(self) -> None:
+    session = MagicMock()
+    taxonomy = _fake_taxonomy("reporting_extension", parent_taxonomy_id="lib_1")
+    note = _fake_structure("struct_note", concept_arrangement="roll_up")
+    session.execute.return_value.fetchall.return_value = [
+      _calc_row(
+        "elem_total",
+        "elem_raw",
+        parent_qname="rs-gaap:InventoryNet",
+        child_qname="driftline:InventoryRawMaterials",
+        order_value=1.0,
+      ),
+      _calc_row(
+        "elem_total",
+        "elem_fg",
+        parent_qname="rs-gaap:InventoryNet",
+        child_qname="driftline:InventoryFinishedGoods",
+        order_value=2.0,
+      ),
+    ]
+
+    emit_auto_rules(session, taxonomy, [note], created_by="usr_1")
+
+    added = [c.args[0] for c in session.add.call_args_list]
+    rollups = [r for r in added if r.rule_pattern == "RollUp"]
+    assert len(rollups) == 1
+    rule = rollups[0]
+    assert rule.rule_origin == "auto"
+    assert rule.target_kind == "structure"
+    assert rule.target_structure_id == "struct_note"
+    # Parent-first variables with explicit element ids — qname resolution
+    # must not be load-bearing for tenant-authored concepts.
+    assert rule.rule_variables[0]["variable_element_id"] == "elem_total"
+    assert rule.rule_variables[0]["variable_qname"] == "rs-gaap:InventoryNet"
+    child_ids = {v["variable_element_id"] for v in rule.rule_variables[1:]}
+    assert child_ids == {"elem_raw", "elem_fg"}
+    assert rule.rule_expression == (
+      "$InventoryNet = $InventoryRawMaterials + $InventoryFinishedGoods"
+    )
+
+  def test_negative_weight_renders_minus_term(self) -> None:
+    session = MagicMock()
+    taxonomy = _fake_taxonomy("reporting_extension", parent_taxonomy_id="lib_1")
+    note = _fake_structure("struct_note", concept_arrangement="roll_up")
+    session.execute.return_value.fetchall.return_value = [
+      _calc_row(
+        "elem_net",
+        "elem_gross",
+        parent_qname="ext:Net",
+        child_qname="ext:Gross",
+        order_value=1.0,
+      ),
+      _calc_row(
+        "elem_net",
+        "elem_allowance",
+        parent_qname="ext:Net",
+        child_qname="ext:Allowance",
+        weight=-1.0,
+        order_value=2.0,
+      ),
+    ]
+
+    emit_auto_rules(session, taxonomy, [note], created_by="usr_1")
+
+    added = [c.args[0] for c in session.add.call_args_list]
+    rule = next(r for r in added if r.rule_pattern == "RollUp")
+    assert rule.rule_expression == "$Net = $Gross - $Allowance"
+
+  def test_roll_up_without_calc_arcs_emits_no_rollup(self) -> None:
+    """Presentation-only roll_up renders but has nothing to foot."""
+    session = MagicMock()
+    taxonomy = _fake_taxonomy("reporting_extension", parent_taxonomy_id="lib_1")
+    note = _fake_structure("struct_note", concept_arrangement="roll_up")
+    session.execute.return_value.fetchall.return_value = []
+
+    emit_auto_rules(session, taxonomy, [note], created_by="usr_1")
+
+    added = [c.args[0] for c in session.add.call_args_list]
+    assert not [r for r in added if r.rule_pattern == "RollUp"]
+
+  def test_non_roll_up_structure_skips_rollup_query(self) -> None:
+    session = MagicMock()
+    taxonomy = _fake_taxonomy("reporting_extension", parent_taxonomy_id="lib_1")
+    plain = _fake_structure("struct_plain", concept_arrangement=None)
+
+    emit_auto_rules(session, taxonomy, [plain], created_by="usr_1")
+
+    session.execute.assert_not_called()
