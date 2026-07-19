@@ -275,6 +275,10 @@ def _add_schema_concepts(g: Graph, bundle: StatementBundle, root: URIRef) -> Non
     g.add((uri, RS.monetary, Literal(concept.is_monetary, datatype=XSD.boolean)))
     g.add((uri, RS.abstract, Literal(concept.is_abstract, datatype=XSD.boolean)))
     g.add((uri, RS.elementType, Literal(concept.element_type)))
+    if concept.item_type:
+      # Wire value domain ('textBlock', 'monetary', ...) — 'textBlock'
+      # gates the narrative rendering arm in report-components.
+      g.add((uri, RS.itemType, Literal(concept.item_type)))
     if concept.label:
       g.add((uri, SKOS.prefLabel, Literal(concept.label)))
     if concept.substitution_group:
@@ -450,8 +454,9 @@ def _add_facts(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
       g.add((uri, RS.decimals, Literal(fact.decimals)))
     if fact.text_value is not None:
       # Nonnumeric (text-block) arm — string value, no unit/decimals
-      # (XBRL nonNumeric facts carry neither).
-      g.add((uri, RS.value, Literal(fact.text_value, datatype=XSD.string)))
+      # (XBRL nonNumeric facts carry neither). rs:stringValue is the
+      # predicate @robosystems/report-components reads for narrative.
+      g.add((uri, RS.stringValue, Literal(fact.text_value, datatype=XSD.string)))
       if fact.content_type:
         g.add((uri, RS.contentType, Literal(fact.content_type)))
     g.add((uri, RS.internalId, Literal(fact.id)))

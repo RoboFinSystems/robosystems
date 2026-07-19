@@ -832,3 +832,37 @@ class TestBundleIncludesDisclosureEnvelopes:
     src = inspect.getsource(bundle_mod.build_report_bundle)
     assert "build_disclosure_envelope" in src
     assert "DISCLOSURE_BLOCK_TYPE" in src
+
+
+class TestWireItemType:
+  def test_snake_to_camel(self) -> None:
+    from robosystems.operations.serialization.bundle import _wire_item_type
+
+    assert _wire_item_type("text_block") == "textBlock"
+    assert _wire_item_type("monetary") == "monetary"
+    assert _wire_item_type("per_share") == "perShare"
+    assert _wire_item_type(None) is None
+    assert _wire_item_type("") is None
+
+  def test_element_projection_carries_item_type(self) -> None:
+    from types import SimpleNamespace
+
+    from robosystems.operations.serialization.bundle import _element_to_bundle
+
+    row = SimpleNamespace(
+      id="elem_tb",
+      qname="driftline:InventoryPolicyTextBlock",
+      namespace=None,
+      name="InventoryPolicyTextBlock",
+      description=None,
+      balance_type="debit",
+      period_type="duration",
+      is_abstract=False,
+      is_monetary=False,
+      element_type="concept",
+      substitution_group=None,
+      source="native",
+      item_type="text_block",
+    )
+    be = _element_to_bundle(row)
+    assert be.item_type == "textBlock"

@@ -381,14 +381,32 @@ class TestNonnumericFacts:
     bundle.facts.append(_text_fact())
     g = build_graph(bundle)
     uri = URIRef(f"{_root(g)}/fact/fact_txt")
-    assert (uri, RS.value, None) in g
-    text_literal = next(g.objects(uri, RS.value))
+    # rs:stringValue is the predicate report-components reads — NOT rs:value.
+    assert (uri, RS.stringValue, None) in g
+    text_literal = next(g.objects(uri, RS.stringValue))
     assert "FIFO" in str(text_literal)
     assert (uri, RS.factType, Literal("Nonnumeric")) in g
     assert (uri, RS.contentType, Literal("text/markdown")) in g
     assert (uri, RS.numericValue, None) not in g
     assert (uri, RS.unit, None) not in g
     assert (uri, RS.decimals, None) not in g
+
+  def test_text_block_concept_declares_item_type(self) -> None:
+    bundle = _bundle()
+    bundle.schema_concepts.append(
+      BundleElement(
+        id="PolicyTB",
+        qname="driftline:InventoryPolicyTextBlock",
+        name="InventoryPolicyTextBlock",
+        period_type="duration",
+        is_monetary=False,
+        source="native",
+        item_type="textBlock",
+      )
+    )
+    g = build_graph(bundle)
+    uri = next(g.subjects(RS.itemType, Literal("textBlock")))
+    assert "InventoryPolicyTextBlock" in str(uri)
 
   def test_numeric_fact_arm_unchanged(self) -> None:
     bundle = _bundle()
