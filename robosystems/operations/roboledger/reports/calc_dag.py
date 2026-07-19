@@ -60,6 +60,26 @@ def load_rs_gaap_calculations(
   return calculations
 
 
+def merge_calculations(
+  global_calcs: dict[str, list[tuple[str, float]]],
+  local_calcs: dict[str, list[tuple[str, float]]],
+) -> dict[str, list[tuple[str, float]]]:
+  """Merged DAG for evaluating one structure: LOCAL arcs win per parent.
+
+  A structure's own calculation arcs are its footing spec — a disclosure
+  note that decomposes ``rs-gaap:Revenues`` into its own members must foot
+  against THOSE members, not the global DAG's statement-level children
+  (which are absent from the note's FactSet, so global-wins reported the
+  rollup as skipped or failed). The global DAG remains the fallback for
+  every parent the structure doesn't re-arc — statement subtotals resolve
+  exactly as the fact producer resolved them. Pure: neither input is
+  mutated.
+  """
+  merged = dict(global_calcs)
+  merged.update(local_calcs)
+  return merged
+
+
 def topo_sort_calculations(
   calculations: dict[str, list[tuple[str, float]]],
 ) -> list[str]:

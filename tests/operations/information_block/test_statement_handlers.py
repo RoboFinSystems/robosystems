@@ -460,3 +460,39 @@ class TestBuildHierarchyFromAtoms:
       "struct_balance_sheet", {}, {}, []
     )
     assert hierarchy == []
+
+
+class TestRenderingSkipsNonnumericFacts:
+  def test_null_value_fact_does_not_crash_or_render(self) -> None:
+    """A Nonnumeric fact (value=None) in the FactSet must be skipped by
+    the numeric rendering path — before the guard, ``float(f.value)``
+    raised TypeError."""
+    from types import SimpleNamespace
+
+    session = MagicMock()
+    session.execute.return_value = _exec_result(all_rows=[])
+
+    element = SimpleNamespace(
+      id="elem_policy",
+      qname="driftline:SignificantAccountingPoliciesTextBlock",
+      name="Significant Accounting Policies",
+      balance_type="debit",
+    )
+    text_fact = SimpleNamespace(
+      element_id="elem_policy",
+      value=None,
+      period_start=date(2026, 1, 1),
+      period_end=date(2026, 12, 31),
+      period_type="duration",
+    )
+
+    rendering = statement_handlers._build_statement_rendering(
+      session,
+      elements=[element],  # type: ignore[list-item]
+      associations=[],
+      facts=[text_fact],  # type: ignore[list-item]
+      structure_id="struct_note",
+      block_type="regulatory_disclosure",
+    )
+
+    assert rendering.rows == []

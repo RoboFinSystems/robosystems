@@ -261,6 +261,9 @@ def _build_statement_rendering(
     elem = elements_by_id.get(f.element_id)
     if elem is None:
       continue
+    if f.value is None:
+      # Nonnumeric (text-block) facts have no place in the numeric grid.
+      continue
     pe = f.period_end
     ps = f.period_start if f.period_start is not None else pe
     report_facts.append(
