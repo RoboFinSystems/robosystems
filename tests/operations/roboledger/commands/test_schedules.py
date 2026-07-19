@@ -733,3 +733,50 @@ def test_reconstruct_schedule_definition_legacy_fallback() -> None:
   assert period_end == date(2026, 3, 31)
   assert monthly_amount == 1_000_000  # 10_000.00 * 100 cents
   assert source_transaction_id is None
+
+
+def test_reinstate_reopened_schedule_scopes_promotes_now_open_facts() -> None:
+  """After the close boundary retreats, schedule facts beyond it flip
+  ``historical`` → ``in_scope`` so the reopened month's movement is visible."""
+  from datetime import date
+  from unittest.mock import patch
+
+  from robosystems.operations.roboledger.commands import schedules as sched_cmds
+
+  session = MagicMock()
+  exec_result = MagicMock()
+  exec_result.rowcount = 3
+  session.execute.return_value = exec_result
+
+  with patch.object(
+    sched_cmds, "_calendar_closed_through_date", return_value=date(2026, 2, 28)
+  ):
+    n = sched_cmds.reinstate_reopened_schedule_scopes(session)
+
+  assert n == 3
+  stmt_arg, params = session.execute.call_args[0]
+  sql = str(stmt_arg)
+  assert "UPDATE facts" in sql
+  assert "fact_scope = 'in_scope'" in sql
+  assert "block_type = 'schedule'" in sql
+  assert params == {"closed_through": date(2026, 2, 28)}
+
+
+def test_reinstate_reopened_schedule_scopes_handles_null_boundary() -> None:
+  """When no period remains closed (boundary → None), all historical schedule
+  facts reopen — the SQL guards NULL so every period is now in scope."""
+  from unittest.mock import patch
+
+  from robosystems.operations.roboledger.commands import schedules as sched_cmds
+
+  session = MagicMock()
+  exec_result = MagicMock()
+  exec_result.rowcount = 5
+  session.execute.return_value = exec_result
+
+  with patch.object(sched_cmds, "_calendar_closed_through_date", return_value=None):
+    n = sched_cmds.reinstate_reopened_schedule_scopes(session)
+
+  assert n == 5
+  _stmt, params = session.execute.call_args[0]
+  assert params == {"closed_through": None}

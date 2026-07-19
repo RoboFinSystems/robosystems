@@ -80,6 +80,39 @@ def _calendar_closed_through_date(session: Session):
   return period_end
 
 
+def reinstate_reopened_schedule_scopes(session: Session) -> int:
+  """Promote schedule facts the retreated close boundary has re-opened.
+
+  Schedule fact scope (``historical`` vs ``in_scope``) is stamped at
+  generation from ``closed_through`` (``period_end <= closed_through`` →
+  historical). ``reopen-period`` moves ``closed_through`` backward but does not
+  re-stamp existing facts, so a reopened month's facts stay ``historical``: its
+  movement drops out of the roll-forward (the carry-in then renders that
+  month's ending balance as the opening balance) and the re-close skips it.
+  Flip the now-open window back to ``in_scope`` so every reader agrees with the
+  calendar. Returns the number of facts re-stamped. Idempotent — a no-op when
+  the boundary didn't move (e.g. reopening an older period).
+  """
+  from sqlalchemy import text
+
+  closed_through = _calendar_closed_through_date(session)
+  result = session.execute(
+    text(
+      """
+      UPDATE facts
+      SET fact_scope = 'in_scope'
+      WHERE fact_scope = 'historical'
+        AND structure_id IN (
+          SELECT id FROM structures WHERE block_type = 'schedule'
+        )
+        AND (:closed_through IS NULL OR period_end > :closed_through)
+      """
+    ),
+    {"closed_through": closed_through},
+  )
+  return result.rowcount or 0
+
+
 def _build_closing_entry_response(result) -> ClosingEntryResponse:
   """Map a ScheduleService ClosingEntryResult to the wire response."""
   reversal_resp = None

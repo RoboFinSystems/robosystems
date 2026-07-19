@@ -235,6 +235,16 @@ def reopen_period(
     actor_type=actor_type,
     note=note,
   )
+  # Re-stamp schedule facts the retreated boundary has re-opened: the reopened
+  # window's facts were tagged 'historical' at generation and must return to
+  # 'in_scope' so the roll-forward carry-in and the re-close see the movement.
+  # Function-level import — commands.schedules ↔ information_block.schedule form
+  # a module-load cycle that a top-level import here would trip.
+  from robosystems.operations.roboledger.commands.schedules import (
+    reinstate_reopened_schedule_scopes,
+  )
+
+  reinstate_reopened_schedule_scopes(session)
   session.commit()
 
   has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
