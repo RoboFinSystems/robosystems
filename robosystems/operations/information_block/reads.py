@@ -13,13 +13,14 @@ changes to this module.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.information_block import InformationBlockEnvelope
-from robosystems.models.extensions import Structure
+from robosystems.models.extensions import Association, Structure
 from robosystems.models.extensions.roboledger import FactSet
 from robosystems.operations.information_block import registry as registry_module
+from robosystems.operations.information_block.envelope import DISCLOSURE_BLOCK_TYPE
 
 
 def get_information_block(
@@ -116,10 +117,21 @@ def list_information_blocks(
   # Without this, library-seeded statements (dozens per tenant graph)
   # swamp the default `limit=50` and a user browsing without filters
   # never sees their schedules.
+  # A disclosure structure renders only when it owns a presentation arc; the
+  # rs-gaap-disclosures package seeds ~17 arc-less `disclosures:*` identity rows
+  # per tenant whose envelopes build to None. Excluding them at the SQL level
+  # keeps them out of the LIMIT/OFFSET window so pages don't come back short.
+  has_presentation_arc = (
+    select(Association.id)
+    .where(Association.structure_id == Structure.id)
+    .where(Association.association_type == "presentation")
+    .exists()
+  )
   query = (
     select(Structure)
     .where(Structure.block_type.in_(candidate_ids))
     .where(Structure.is_active.is_(True))
+    .where(or_(Structure.block_type != DISCLOSURE_BLOCK_TYPE, has_presentation_arc))
     .order_by(
       (Structure.created_by == "library-seeder").asc(),
       Structure.block_type,
