@@ -450,3 +450,135 @@ class TestRollupRoutingInEngine:
     added = session.add.call_args_list[0][0][0]
     assert added.status == "pass"
     assert added.detail.get("source") == "calc-dag"
+
+
+class TestRollupParentResolution:
+  """The parent is the expression LHS, not blindly variables[0]."""
+
+  def _rule_with_expression(self, expression) -> MagicMock:
+    rule = MagicMock()
+    rule.rule_pattern = "RollUp"
+    rule.rule_expression = expression
+    rule.rule_variables = [
+      {
+        "variable_name": "Raw",
+        "variable_qname": "ext:Raw",
+        "variable_element_id": "elem_raw",
+      },
+      {
+        "variable_name": "Finished",
+        "variable_qname": "ext:Finished",
+        "variable_element_id": "elem_fg",
+      },
+      {
+        "variable_name": "Total",
+        "variable_qname": "ext:Total",
+        "variable_element_id": "elem_total",
+      },
+    ]
+    return rule
+
+  def test_lhs_resolves_parent_when_children_listed_first(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _rollup_parent_element_id,
+    )
+
+    rule = self._rule_with_expression("$Total = $Raw + $Finished")
+    parent_id, parent_qname = _rollup_parent_element_id(MagicMock(), rule, {})
+    assert parent_id == "elem_total"
+    assert parent_qname == "ext:Total"
+
+  def test_unparseable_expression_falls_back_to_first_variable(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _rollup_parent_element_id,
+    )
+
+    rule = self._rule_with_expression("$$$ not an expression")
+    parent_id, parent_qname = _rollup_parent_element_id(MagicMock(), rule, {})
+    assert parent_id == "elem_raw"
+    assert parent_qname == "ext:Raw"
+
+  def test_undeclared_lhs_variable_falls_back_to_first_variable(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _rollup_parent_element_id,
+    )
+
+    # $Ghost is not a declared variable → parse rejects the unbound token
+    # → legacy variables[0] fallback.
+    rule = self._rule_with_expression("$Ghost = $Raw + $Finished")
+    parent_id, _ = _rollup_parent_element_id(MagicMock(), rule, {})
+    assert parent_id == "elem_raw"
+
+  def test_non_string_expression_falls_back_to_first_variable(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _rollup_parent_element_id,
+    )
+
+    rule = self._rule_with_expression(None)
+    parent_id, _ = _rollup_parent_element_id(MagicMock(), rule, {})
+    assert parent_id == "elem_raw"
+
+
+class TestBinderDuplicateGuard:
+  """Name-keyed bindings must reject repeated variable names loudly."""
+
+  def _dup_rule(self) -> MagicMock:
+    rule = MagicMock()
+    rule.rule_pattern = "EqualTo"
+    rule.rule_variables = [
+      {
+        "variable_name": "InventoryNet",
+        "variable_qname": "driftline:InventoryNet",
+        "variable_element_id": "elem_a",
+      },
+      {
+        "variable_name": "InventoryNet",
+        "variable_qname": "rs-gaap:InventoryNet",
+        "variable_element_id": "elem_b",
+      },
+    ]
+    rule.metadata_ = {}
+    return rule
+
+  def test_bind_variables_raises_on_duplicate_name(self) -> None:
+    from robosystems.operations.information_block.rules.engine import _bind_variables
+
+    with pytest.raises(ValueError, match="duplicate variable_name"):
+      _bind_variables(MagicMock(), self._dup_rule(), "struct_1", None, None)
+
+  def test_bind_sum_variables_raises_on_duplicate_name(self) -> None:
+    from robosystems.operations.information_block.rules.engine import (
+      _bind_sum_variables,
+    )
+
+    with pytest.raises(ValueError, match="duplicate variable_name"):
+      _bind_sum_variables(MagicMock(), self._dup_rule(), "struct_1")
+
+  def test_engine_records_error_status_for_duplicate_name_rule(self) -> None:
+    """The per-rule handler converts the guard into status='error' —
+    visible in Verification Results instead of a silently wrong verdict."""
+    session = MagicMock()
+    session.get.return_value = MagicMock(id="struct_1", block_type="schedule")
+
+    rule_lite = MagicMock()
+    rule_lite.id = "rule_dup"
+    rule_orm = self._dup_rule()
+    rule_orm.id = "rule_dup"
+
+    assoc = MagicMock()
+    assoc.scalars.return_value.all.return_value = []
+    rules_res = MagicMock()
+    rules_res.scalars.return_value.all.return_value = [rule_orm]
+    fact_res = MagicMock()
+    session.execute.side_effect = [assoc, rules_res, fact_res]
+
+    with patch(
+      "robosystems.operations.information_block.rules.engine.load_rules_for_structure",
+      return_value=[rule_lite],
+    ):
+      results = evaluate_rules_for_structure(session, "struct_1")
+
+    assert len(results) == 1
+    added = session.add.call_args_list[0][0][0]
+    assert added.status == "error"
+    assert "duplicate variable_name" in added.message

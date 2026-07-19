@@ -758,6 +758,101 @@ def create_disclosure_notes(
   return notes_created, member_mappings
 
 
+def update_disclosure_notes(graph_id: str, notes: list[dict]) -> int:
+  """Grow authored notes via ``update-taxonomy-block`` — the update-path probe.
+
+  For each note carrying an ``update_member``, adds that member element
+  plus presentation + calculation arcs to the existing note structure
+  through the update operation, then asserts the note's auto RollUp
+  footing rule was re-derived to include it (the rule is derived state —
+  the update path must refresh it, not leave the creation-time freeze).
+
+  Returns the number of members added.
+  """
+  client = _get_ledger_client()
+
+  updates = [n for n in notes if n.get("update_member")]
+  if not updates:
+    return 0
+
+  taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_extension")
+  by_name = {t.get("name"): t for t in taxonomies}
+  structures = client.list_structures(graph_id, block_type="regulatory_disclosure")
+  structure_by_name = {s.get("name"): s for s in structures}
+
+  added = 0
+  for note in updates:
+    member = note["update_member"]
+    taxonomy = by_name.get(note.get("taxonomy_name", f"{note['name']} Extension"))
+    structure = structure_by_name.get(note["name"])
+    if taxonomy is None or structure is None:
+      print(f"  ERROR: could not locate taxonomy/structure for {note['name']!r}")
+      continue
+
+    order = float(len(note["members"]) + 1)
+    payload = {
+      "taxonomy_id": taxonomy["id"],
+      "elements_to_add": [
+        {
+          "qname": member["qname"],
+          "name": member["name"],
+          "parent_ref": note["total_qname"],
+          "balance_type": "debit",
+          "period_type": "instant",
+          "is_monetary": True,
+        }
+      ],
+      "associations_to_add": [
+        {
+          "structure_ref": note["name"],
+          "from_ref": note["total_qname"],
+          "to_ref": member["qname"],
+          "association_type": "presentation",
+          "order_value": order,
+        },
+        {
+          "structure_ref": note["name"],
+          "from_ref": note["total_qname"],
+          "to_ref": member["qname"],
+          "association_type": "calculation",
+          "order_value": order,
+          "weight": 1.0,
+        },
+      ],
+    }
+    try:
+      client.update_taxonomy_block(graph_id, payload)
+    except Exception as e:
+      print(f"  ERROR: update-taxonomy-block failed: {e}")
+      continue
+
+    block = client.get_information_block(graph_id, structure["id"]) or {}
+    rollups = [
+      r for r in (block.get("rules") or []) if r.get("rule_pattern") == "RollUp"
+    ]
+    refreshed = any(
+      member["qname"]
+      in {v.get("variable_qname") for v in (r.get("rule_variables") or [])}
+      for r in rollups
+    )
+    child_count = max(
+      (len(r.get("rule_variables") or []) - 1 for r in rollups), default=0
+    )
+    if not refreshed:
+      print(
+        f"  ERROR: footing rule for {note['name']!r} was NOT refreshed "
+        f"with {member['qname']} — update-path auto-rule refresh failed"
+      )
+      continue
+    print(
+      f"  {note['name']}: +{member['qname']} "
+      f"(footing rule refreshed, {child_count} children)"
+    )
+    added += 1
+
+  return added
+
+
 def create_text_block_notes(
   graph_id: str,
   text_blocks: list[dict],
@@ -1436,6 +1531,12 @@ def run_demo(
     )
     print(f"  Notes:        {note_count}")
     print(f"  Member maps:  {member_map_count}")
+
+    # Grow a note through update-taxonomy-block — proves the update path
+    # re-derives the auto footing rule (not just creation-time emission).
+    updated_members = update_disclosure_notes(graph_id, disclosures)
+    if updated_members:
+      print(f"  Updated:      +{updated_members} member (via update-taxonomy-block)")
 
   # Initialize fiscal calendar (via HTTP API — exercises initialize op)
   print("\nInitializing fiscal calendar...")

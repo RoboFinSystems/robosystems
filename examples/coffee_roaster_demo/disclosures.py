@@ -52,6 +52,14 @@ INVENTORY_NOTE: dict = {
       "coa_code": "1420",
     },
   ],
+  # Added AFTER creation via update-taxonomy-block — exercises the
+  # update-path auto-rule refresh (the footing rule must re-derive to
+  # include this member). Unmapped on purpose: no facts, so the note
+  # still foots (a missing child sums as 0) while proving the refresh.
+  "update_member": {
+    "qname": "driftline:InventoryPackagingSupplies",
+    "name": "Packaging Supplies — Bags & Labels",
+  },
 }
 
 DISCLOSURE_NOTES: list[dict] = [INVENTORY_NOTE]

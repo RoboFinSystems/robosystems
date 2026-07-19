@@ -60,6 +60,18 @@ def test_concept_arrangement_literal_matches_canonical_vocabulary() -> None:
   assert literal_values == set(CONCEPT_ARRANGEMENT_VALUES)
 
 
+def test_structure_update_patch_cap_matches_canonical_vocabulary() -> None:
+  """Same drift guard for the update patch — it shares the
+  ``ConceptArrangement`` alias with the create request."""
+  from robosystems.models.api.taxonomy_block import StructureUpdatePatch
+
+  annotation = StructureUpdatePatch.model_fields["concept_arrangement"].annotation
+  literal_values: set[str] = set()
+  for arg in get_args(annotation):
+    literal_values.update(get_args(arg))
+  assert literal_values == set(CONCEPT_ARRANGEMENT_VALUES)
+
+
 def test_create_request_rejects_missing_parent() -> None:
   """Pydantic-level validator enforces parent_taxonomy_id for extensions."""
   with pytest.raises(ValidationError) as exc:

@@ -44,6 +44,7 @@ from robosystems.models.api.taxonomy_block import (
 from robosystems.models.extensions import Element
 from robosystems.operations.information_block.rules.expressions import (
   InvalidRuleExpression,
+  lhs_variable_names,
   parse_arithmetic_expression,
 )
 
@@ -410,8 +411,29 @@ def _phase_rule_expression_parse(
     variable_names = [
       v.get("variable_name", "") for v in rule.variables if v.get("variable_name")
     ]
+
+    duplicates = sorted(
+      {name for name in variable_names if variable_names.count(name) > 1}
+    )
+    if duplicates:
+      # The engine binds facts in dicts keyed by variable_name, so two
+      # same-named variables silently merge — one element double-counted,
+      # the other dropped.
+      issues.append(
+        ValidationIssue(
+          phase="rule_expression_parse",
+          code="duplicate_variable_name",
+          message=(
+            f"rule {rule.name!r} declares duplicate variable name(s) "
+            f"{duplicates}; every variable must be unique within a rule."
+          ),
+          context={"rule_name": rule.name, "duplicates": duplicates},
+        )
+      )
+      continue
+
     try:
-      parse_arithmetic_expression(rule.expression, variable_names)
+      parsed = parse_arithmetic_expression(rule.expression, variable_names)
     except InvalidRuleExpression as exc:
       issues.append(
         ValidationIssue(
@@ -421,6 +443,29 @@ def _phase_rule_expression_parse(
           context={"rule_name": rule.name, "expression": rule.expression},
         )
       )
+      continue
+
+    if rule.rule_pattern == "RollUp":
+      # The arc-derived evaluator resolves the parent subtotal from the
+      # expression LHS with variables[0] as the legacy fallback — keep
+      # both producers' parent-first invariant enforced at the gate.
+      try:
+        lhs = lhs_variable_names(parsed)
+      except InvalidRuleExpression:
+        lhs = []
+      if len(lhs) == 1 and variable_names and lhs[0] != variable_names[0]:
+        issues.append(
+          ValidationIssue(
+            phase="rule_expression_parse",
+            code="rollup_parent_not_first",
+            message=(
+              f"rule {rule.name!r} is a RollUp whose expression LHS "
+              f"({lhs[0]!r}) is not variables[0] ({variable_names[0]!r}); "
+              f"list the parent subtotal first."
+            ),
+            context={"rule_name": rule.name, "lhs": lhs[0]},
+          )
+        )
   return issues
 
 

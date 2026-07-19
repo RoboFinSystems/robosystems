@@ -37,21 +37,75 @@ Rules emitted:
 
 from __future__ import annotations
 
-from sqlalchemy import select
+import re
+from collections import Counter
+
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, aliased
 
+from robosystems.models.api.taxonomy_block import UpdateTaxonomyBlockRequest
 from robosystems.models.extensions import (
   Association,
   Element,
   Rule,
   Structure,
   Taxonomy,
+  VerificationResult,
+)
+from robosystems.operations.information_block.rules.expressions import (
+  build_rollup_expression,
 )
 
 _AUTO = "auto"
 _STRUCTURE_RULES = "ReportLevelModelStructureRule"
 _XBRL_RULES = "XBRLTechnicalSyntaxRule"
 _FAC_RULES = "FundamentalAccountingConceptRelation"
+
+
+def _identifier(token: str) -> str:
+  """Sanitize a token into a parser-safe ``$Variable`` identifier.
+
+  The expression parser rewrites ``$Name`` to ``_var_Name``, which must
+  be a valid Python identifier — so ``:``, ``-``, spaces, and any other
+  non-word characters become ``_``, and a leading digit gets a ``_``
+  prefix.
+  """
+  cleaned = re.sub(r"\W", "_", token)
+  if not cleaned or cleaned[0].isdigit():
+    cleaned = f"_{cleaned}"
+  return cleaned
+
+
+def _resolve_variable_names(
+  entries: list[tuple[str | None, str | None, str]],
+) -> list[str]:
+  """Collision-free variable names for one rule's participants.
+
+  ``entries`` is ``(qname, name, element_id)`` per participant, parent
+  first. The base name is the sanitized local part of the first non-null
+  source — stable for the common case. When two participants share a
+  local name across namespaces (``driftline:InventoryNet`` vs
+  ``rs-gaap:InventoryNet``), the full qname is qualified in; a numeric
+  suffix is the final tiebreaker for qname-less duplicates. Collided
+  names would otherwise merge in the engine's name-keyed fact bindings
+  (one child double-counted, the other dropped).
+  """
+  sources = [qname or name or element_id for qname, name, element_id in entries]
+  base_names = [_identifier(source.split(":")[-1]) for source in sources]
+  counts = Counter(base_names)
+
+  resolved: list[str] = []
+  used: set[str] = set()
+  for source, base in zip(sources, base_names, strict=False):
+    candidate = _identifier(source) if counts[base] > 1 else base
+    if candidate in used:
+      suffix = 2
+      while f"{candidate}_{suffix}" in used:
+        suffix += 1
+      candidate = f"{candidate}_{suffix}"
+    used.add(candidate)
+    resolved.append(candidate)
+  return resolved
 
 
 def emit_auto_rules(
@@ -134,6 +188,79 @@ def emit_auto_rules(
   session.flush()
 
 
+def _has_structural_deltas(payload: UpdateTaxonomyBlockRequest) -> bool:
+  """True when the update touches inputs auto-rule emission depends on.
+
+  Emission reads the structure set, each structure's
+  ``concept_arrangement``, and the calculation arcs — so structure
+  add/update/remove, association add/remove, and element removal (which
+  cascades arc deletes) all invalidate the emitted set. Element
+  add/update can't change emission output (qnames are immutable via
+  patch), and tenant ``rules_to_*`` / top-level fields are disjoint from
+  ``rule_origin='auto'`` rows.
+  """
+  return bool(
+    payload.structures_to_add
+    or payload.structures_to_update
+    or payload.structures_to_remove
+    or payload.associations_to_add
+    or payload.associations_to_remove
+    or payload.elements_to_remove
+  )
+
+
+def refresh_auto_rules(
+  session: Session,
+  taxonomy: Taxonomy,
+  payload: UpdateTaxonomyBlockRequest,
+  *,
+  updated_by: str,
+) -> None:
+  """Re-derive the taxonomy's auto rules after a structural update.
+
+  Auto rules are derived state with no natural upsert key (parentage
+  lives inside ``rule_variables`` JSON), so refresh is wholesale
+  delete-then-recreate: drop every ``rule_origin='auto'`` row the
+  taxonomy owns and re-run :func:`emit_auto_rules` over its live
+  structures. Verification results FK the deleted rules NOT NULL with
+  no cascade, so they go first — they're re-derivable diagnostics the
+  next ``evaluate-rules`` run rewrites.
+
+  Skipped entirely for updates with no structural delta (element edits,
+  tenant rule changes, metadata) to avoid rule-id churn and needless
+  verification-history loss.
+  """
+  if not _has_structural_deltas(payload):
+    return
+
+  # The extensions session runs with autoflush=False and the apply_*
+  # helpers don't all flush — push every pending delta to the DB first
+  # so re-derivation reads the fully-applied post-update state (a
+  # just-added calc arc must appear in the refreshed footing rule).
+  session.flush()
+
+  auto_rule_ids = select(Rule.id).where(
+    Rule.taxonomy_id == taxonomy.id,
+    Rule.rule_origin == _AUTO,
+  )
+  session.execute(
+    delete(VerificationResult).where(VerificationResult.rule_id.in_(auto_rule_ids))
+  )
+  session.execute(
+    delete(Rule).where(
+      Rule.taxonomy_id == taxonomy.id,
+      Rule.rule_origin == _AUTO,
+    )
+  )
+
+  structures = list(
+    session.execute(select(Structure).where(Structure.taxonomy_id == taxonomy.id))
+    .scalars()
+    .all()
+  )
+  emit_auto_rules(session, taxonomy, structures, created_by=updated_by)
+
+
 def _add_rollup_rules(
   session: Session,
   *,
@@ -183,30 +310,32 @@ def _add_rollup_rules(
 
   for parent_id, children in by_parent.items():
     first = children[0]
-    parent_label = (first.parent_qname or first.parent_name or parent_id).split(":")[-1]
+    names = _resolve_variable_names(
+      [(first.parent_qname, first.parent_name, parent_id)]
+      + [(c.child_qname, c.child_name, c.to_element_id) for c in children]
+    )
     variables: list[dict[str, str]] = [
       {
-        "variable_name": parent_label,
+        "variable_name": names[0],
         "variable_qname": first.parent_qname or "",
         "variable_element_id": parent_id,
       }
     ]
-    terms: list[str] = []
-    for child in children:
-      child_label = (
-        child.child_qname or child.child_name or child.to_element_id
-      ).split(":")[-1]
+    for i, child in enumerate(children):
       variables.append(
         {
-          "variable_name": child_label,
+          "variable_name": names[i + 1],
           "variable_qname": child.child_qname or "",
           "variable_element_id": child.to_element_id,
         }
       )
-      weight = child.weight if child.weight is not None else 1.0
-      sign = "-" if weight < 0 else "+"
-      terms.append(f"{sign} ${child_label}")
-    expression = f"${parent_label} = {' '.join(terms).lstrip('+ ')}"
+    expression = build_rollup_expression(
+      names[0],
+      [
+        (names[i + 1], c.weight if c.weight is not None else 1.0)
+        for i, c in enumerate(children)
+      ],
+    )
 
     session.add(
       Rule(
@@ -216,7 +345,7 @@ def _add_rollup_rules(
         rule_check_kind=None,
         rule_expression=expression,
         rule_message=(
-          f"Calculation rollup: {parent_label} must equal the calculation "
+          f"Calculation rollup: {names[0]} must equal the calculation "
           f"sum of its children."
         ),
         rule_severity="error",

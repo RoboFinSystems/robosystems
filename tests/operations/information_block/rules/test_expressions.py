@@ -120,3 +120,53 @@ class TestEvaluateEquality:
     passed, residual = evaluate_equality(parsed, {"A": -5.0, "B": 5.0})
     assert passed is True
     assert residual == pytest.approx(0.0)
+
+
+class TestBuildRollupExpression:
+  """Shared builder used by both the seed generator and tenant auto rules."""
+
+  def test_unit_weights(self) -> None:
+    from robosystems.operations.information_block.rules.expressions import (
+      build_rollup_expression,
+    )
+
+    expr = build_rollup_expression("Assets", [("Current", 1.0), ("Noncurrent", 1.0)])
+    assert expr == "$Assets = ($Current + $Noncurrent)"
+
+  def test_first_term_negative_weight(self) -> None:
+    from robosystems.operations.information_block.rules.expressions import (
+      build_rollup_expression,
+    )
+
+    expr = build_rollup_expression("Net", [("Contra", -1.0), ("Gross", 1.0)])
+    assert expr == "$Net = (-$Contra + $Gross)"
+
+  def test_non_unit_weight_keeps_coefficient(self) -> None:
+    from robosystems.operations.information_block.rules.expressions import (
+      build_rollup_expression,
+    )
+
+    expr = build_rollup_expression("Total", [("Half", 0.5), ("Double", 2.0)])
+    assert expr == "$Total = (($Half * 0.5) + ($Double * 2.0))"
+
+  def test_single_child(self) -> None:
+    from robosystems.operations.information_block.rules.expressions import (
+      build_rollup_expression,
+    )
+
+    expr = build_rollup_expression("Total", [("Only", 1.0)])
+    assert expr == "$Total = ($Only)"
+
+  def test_output_round_trips_through_parser(self) -> None:
+    from robosystems.operations.information_block.rules.expressions import (
+      build_rollup_expression,
+      lhs_variable_names,
+      parse_arithmetic_expression,
+    )
+
+    names = ["Total", "Half", "Contra", "Plain"]
+    expr = build_rollup_expression(
+      "Total", [("Half", 0.5), ("Contra", -1.0), ("Plain", 1.0)]
+    )
+    parsed = parse_arithmetic_expression(expr, names)
+    assert lhs_variable_names(parsed) == ["Total"]

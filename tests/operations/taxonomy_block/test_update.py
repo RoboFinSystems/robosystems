@@ -460,8 +460,16 @@ class TestApplyStructuresToRemove:
     )
     apply_structures_to_remove(session, taxonomy, payload)
 
-    # 3 DELETEs: rules, associations, structures
-    assert session.execute.call_count == 3
+    # 4 DELETEs: verification results FIRST (they FK rules and
+    # structures with no ON DELETE), then rules, associations, structures
+    assert session.execute.call_count == 4
+    deleted_tables = [c.args[0].table.name for c in session.execute.call_args_list]
+    assert deleted_tables == [
+      "verification_results",
+      "rules",
+      "associations",
+      "structures",
+    ]
     session.flush.assert_called_once()
 
   def test_noop_when_nothing_to_remove(self) -> None:
@@ -537,3 +545,149 @@ class TestApplyStructuresToUpdate:
     assert structure.description == "new desc"
     assert structure.metadata_["role_uri"] == "http://role/x"
     assert structure.metadata_["existing"] == "kept"
+
+
+class TestApplyStructuresToUpdateConceptArrangement:
+  def test_sets_concept_arrangement_when_patched(self) -> None:
+    from robosystems.operations.taxonomy_block.update_apply import (
+      apply_structures_to_update,
+    )
+
+    session = MagicMock()
+    structure = MagicMock()
+    structure.id = "s_1"
+    structure.concept_arrangement = "set"
+    session.execute.return_value = _mock_execute_result([structure])
+
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id="tax_42",
+      structures_to_update=[
+        StructureUpdatePatch(structure_id="s_1", concept_arrangement="roll_up")
+      ],
+    )
+    apply_structures_to_update(
+      session, _fake_taxonomy("reporting_extension"), payload, "usr_1"
+    )
+    assert structure.concept_arrangement == "roll_up"
+
+  def test_leaves_concept_arrangement_when_not_patched(self) -> None:
+    from robosystems.operations.taxonomy_block.update_apply import (
+      apply_structures_to_update,
+    )
+
+    session = MagicMock()
+    structure = MagicMock()
+    structure.id = "s_1"
+    structure.concept_arrangement = "set"
+    session.execute.return_value = _mock_execute_result([structure])
+
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id="tax_42",
+      structures_to_update=[StructureUpdatePatch(structure_id="s_1", name="Renamed")],
+    )
+    apply_structures_to_update(
+      session, _fake_taxonomy("reporting_extension"), payload, "usr_1"
+    )
+    assert structure.concept_arrangement == "set"
+
+  def test_patch_rejects_unknown_concept_arrangement(self) -> None:
+    with pytest.raises(Exception):
+      StructureUpdatePatch(structure_id="s_1", concept_arrangement="not_a_cap")
+
+  def test_patch_accepts_text_block(self) -> None:
+    patch_model = StructureUpdatePatch(
+      structure_id="s_1", concept_arrangement="text_block"
+    )
+    assert patch_model.concept_arrangement == "text_block"
+
+
+class TestUpdateRefreshesAutoRules:
+  """Every handler's update() re-derives auto rules after applying deltas."""
+
+  def _run_update(self, module_name: str, taxonomy_type: str) -> MagicMock:
+    import importlib
+
+    module = importlib.import_module(
+      f"robosystems.operations.taxonomy_block.{module_name}"
+    )
+    session = MagicMock()
+    tax = _fake_taxonomy(taxonomy_type)
+    session.get.return_value = tax
+    session.execute.return_value = _mock_execute_result([])
+    payload = UpdateTaxonomyBlockRequest(
+      taxonomy_id="tax_42", structures_to_remove=["s_gone"]
+    )
+    with (
+      patch(
+        f"robosystems.operations.taxonomy_block.{module_name}.validate_update_envelope",
+        return_value=[],
+      ),
+      patch(
+        f"robosystems.operations.taxonomy_block.{module_name}.refresh_auto_rules"
+      ) as refresh,
+    ):
+      module.update(session, payload, "usr_1")
+    return refresh
+
+  def test_custom_ontology_update_calls_refresh(self) -> None:
+    refresh = self._run_update("custom_ontology", "custom_ontology")
+    refresh.assert_called_once()
+    assert refresh.call_args.kwargs == {"updated_by": "usr_1"}
+
+  def test_chart_of_accounts_update_calls_refresh(self) -> None:
+    refresh = self._run_update("chart_of_accounts", "chart_of_accounts")
+    refresh.assert_called_once()
+
+  def test_reporting_extension_update_calls_refresh(self) -> None:
+    refresh = self._run_update("reporting_extension", "reporting_extension")
+    refresh.assert_called_once()
+
+
+class TestResolveForeignElementQnames:
+  """Library-element endpoints must project to their real qnames — an
+  extend-mode note arcs FROM a library concept, and before this fix every
+  update to such a taxonomy 422'd with phantom_from_ref."""
+
+  def _assoc(self, from_id: str, to_id: str) -> MagicMock:
+    a = MagicMock()
+    a.from_element_id = from_id
+    a.to_element_id = to_id
+    return a
+
+  def _element(self, eid: str, parent_id: str | None = None) -> MagicMock:
+    e = MagicMock()
+    e.id = eid
+    e.parent_id = parent_id
+    return e
+
+  def test_resolves_library_arc_endpoints_and_parents(self) -> None:
+    from robosystems.operations.taxonomy_block.update_validator import (
+      _resolve_foreign_element_qnames,
+    )
+
+    session = MagicMock()
+    session.execute.return_value.all.return_value = [
+      ("elem_lib_total", "rs-gaap:InventoryNet"),
+    ]
+    qname_by_id = {"elem_member": "driftline:RawMaterials"}
+    elements = [self._element("elem_member", parent_id="elem_lib_total")]
+    associations = [self._assoc("elem_lib_total", "elem_member")]
+
+    _resolve_foreign_element_qnames(session, qname_by_id, elements, associations)
+
+    assert qname_by_id["elem_lib_total"] == "rs-gaap:InventoryNet"
+    session.execute.assert_called_once()
+
+  def test_no_foreign_ids_skips_query(self) -> None:
+    from robosystems.operations.taxonomy_block.update_validator import (
+      _resolve_foreign_element_qnames,
+    )
+
+    session = MagicMock()
+    qname_by_id = {"elem_a": "x:A", "elem_b": "x:B"}
+    elements = [self._element("elem_a"), self._element("elem_b", parent_id="elem_a")]
+    associations = [self._assoc("elem_a", "elem_b")]
+
+    _resolve_foreign_element_qnames(session, qname_by_id, elements, associations)
+
+    session.execute.assert_not_called()

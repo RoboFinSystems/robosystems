@@ -168,3 +168,33 @@ class TestBuilder:
     ]
     with pytest.raises(ValueError, match="multiple parents"):
       build_rollup_rules(graph)
+
+
+class TestBuilderNonUnitWeights:
+  def test_non_unit_weight_renders_explicit_coefficient(self) -> None:
+    """Locks the shared-builder delegation: a 0.5-weighted arc keeps its
+    coefficient as ``($var * 0.5)`` (byte-identical to the historical
+    inline builder)."""
+    graph = [
+      {
+        "@id": "_:a1",
+        "arcFrom": {"@id": "rs-gaap:Total"},
+        "arcTo": {"@id": "rs-gaap:HalfShare"},
+        "arcAssociationType": "calculation",
+        "arcRoleUri": "https://x/roles/calc/BS-Total",
+        "arcWeight": 0.5,
+        "arcOrder": 100.0,
+      },
+      {
+        "@id": "_:a2",
+        "arcFrom": {"@id": "rs-gaap:Total"},
+        "arcTo": {"@id": "rs-gaap:Plain"},
+        "arcAssociationType": "calculation",
+        "arcRoleUri": "https://x/roles/calc/BS-Total",
+        "arcWeight": 1.0,
+        "arcOrder": 200.0,
+      },
+    ]
+    rules = build_rollup_rules(graph)
+    assert len(rules) == 1
+    assert rules[0]["ruleExpression"] == "$Total = (($HalfShare * 0.5) + $Plain)"

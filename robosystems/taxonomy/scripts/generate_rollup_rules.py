@@ -29,6 +29,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from robosystems.operations.information_block.rules.expressions import (
+  build_rollup_expression,
+)
+
 _FRAMEWORKS = Path(__file__).resolve().parents[3] / "frameworks"
 _CALC_SOURCE = (
   _FRAMEWORKS
@@ -83,24 +87,14 @@ def _role_slug(role_uri: str) -> str:
 def _build_expression(parent: str, children: list[tuple[str, float]]) -> str:
   """``$Parent = ($childA + $childB - $childC ...)``.
 
-  Weight +1 -> ``+``, -1 -> ``-``, otherwise an explicit ``* weight`` term.
+  Thin qname-to-local-name wrapper over the shared
+  :func:`build_rollup_expression` (also used by tenant auto-rule
+  emission) — output is byte-identical to the historical inline
+  builder, so the committed seed artifact never needs regeneration.
   """
-  parts: list[str] = []
-  for idx, (child_qname, weight) in enumerate(children):
-    var = f"${_local(child_qname)}"
-    if weight == 1.0:
-      sign, term = "+", var
-    elif weight == -1.0:
-      sign, term = "-", var
-    else:
-      # Render -0.0 cleanly and keep weight literal for non-unit weights.
-      sign, term = "+", f"({var} * {weight})"
-    if idx == 0:
-      parts.append(term if sign == "+" else f"-{term}")
-    else:
-      parts.append(f"{sign} {term}")
-  rhs = " ".join(parts)
-  return f"${_local(parent)} = ({rhs})"
+  return build_rollup_expression(
+    _local(parent), [(_local(child_qname), weight) for child_qname, weight in children]
+  )
 
 
 def build_rollup_rules(graph: list[dict]) -> list[dict]:

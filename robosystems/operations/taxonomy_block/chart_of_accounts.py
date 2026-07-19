@@ -31,7 +31,10 @@ from robosystems.models.extensions import (
   Trait,
 )
 from robosystems.operations.taxonomy_block._helpers import qname_for
-from robosystems.operations.taxonomy_block.auto_rules import emit_auto_rules
+from robosystems.operations.taxonomy_block.auto_rules import (
+  emit_auto_rules,
+  refresh_auto_rules,
+)
 from robosystems.operations.taxonomy_block.cascade import (
   cascade_delete_taxonomy,
   preflight_delete,
@@ -405,6 +408,7 @@ def update(
   apply_rules_to_add(
     session, taxonomy, payload, new_elements, new_structures, updated_by
   )
+  refresh_auto_rules(session, taxonomy, payload, updated_by=updated_by)
   session.flush()
   return taxonomy.id
 
