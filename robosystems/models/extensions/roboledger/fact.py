@@ -2,7 +2,14 @@
 
 Bridge between fact generation (Python computation) and graph materialization
 (postgres_scanner reads this table). Each row represents one discrete financial
-data point: an element's aggregated balance for a specific period.
+data point: an element's aggregated balance for a specific period, or a
+non-numeric (string / text-block) value such as a bound disclosure narrative.
+
+A fact is numeric XOR non-numeric: ``fact_type`` discriminates, and the
+``ck_facts_value_shape`` CHECK enforces exactly one of ``value`` /
+``string_value`` populated. This mirrors the graph ``Fact`` node
+(``schemas/extensions/roboledger.py``), which has carried the non-numeric
+shape since inception — the OLTP side caught up in migration 0021.
 
 Every Fact belongs to exactly one FactSet (the parent envelope that pins the
 period bounds and back-references the Report or Schedule that created it).
@@ -25,6 +32,7 @@ from sqlalchemy import (
   ForeignKey,
   Index,
   String,
+  Text,
   text,
 )
 
@@ -49,14 +57,38 @@ class Fact(ExtensionsBase):
       "fact_scope IN ('historical', 'in_scope')",
       name="ck_facts_scope",
     ),
+    CheckConstraint(
+      "fact_type IN ('Numeric', 'Nonnumeric')",
+      name="ck_facts_fact_type",
+    ),
+    CheckConstraint(
+      "value_type IN ('inline', 'external_resource')",
+      name="ck_facts_value_type",
+    ),
+    CheckConstraint(
+      "(fact_type = 'Numeric' AND value IS NOT NULL AND string_value IS NULL) OR "
+      "(fact_type = 'Nonnumeric' AND string_value IS NOT NULL AND value IS NULL)",
+      name="ck_facts_value_shape",
+    ),
   )
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("fact"))
   element_id = Column(String, nullable=False)
-  value = Column(Float, nullable=False)  # natural-sign dollars
+  value = Column(Float, nullable=True)  # natural-sign dollars; NULL for Nonnumeric
+  string_value = Column(Text, nullable=True)  # inline text payload for Nonnumeric
+  fact_type = Column(String, nullable=False, default="Numeric")
+  # value_type is always 'inline' today; 'external_resource' is reserved for
+  # blocks externalized to S3/OpenSearch (the SEC pipeline pattern).
+  value_type = Column(String, nullable=False, default="inline")
+  content_type = Column(String, nullable=True)  # MIME, e.g. 'text/markdown'
+  # XBRL @decimals for numeric facts. NULL means unspecified; materialize
+  # falls back to the legacy '-2' for numeric rows so graph output is stable.
+  decimals = Column(String, nullable=True)
   period_start = Column(Date, nullable=True)
   period_end = Column(Date, nullable=False)
   period_type = Column(String, nullable=False)  # duration or instant
+  # Units apply to numeric facts only; the column keeps its USD default for
+  # all rows, and materialize skips the FACT_HAS_UNIT edge for Nonnumeric.
   unit = Column(String, nullable=False, default="USD")
   entity_id = Column(String, nullable=False)
   structure_id = Column(String, nullable=True)  # structure this fact belongs to
@@ -75,4 +107,5 @@ class Fact(ExtensionsBase):
   created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
 
   def __repr__(self) -> str:
-    return f"<Fact {self.element_id} = {self.value}>"
+    shown = self.value if self.value is not None else self.string_value
+    return f"<Fact {self.element_id} = {shown}>"

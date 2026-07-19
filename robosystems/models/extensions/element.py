@@ -129,6 +129,11 @@ class Element(ExtensionsBase):
   is_abstract = Column(Boolean, nullable=False, default=False)
   is_monetary = Column(Boolean, nullable=False, default=True)
   element_type = Column(String, nullable=False, default="concept")
+  # Value domain (orthogonal to element_type, which is the structural role).
+  # Open XBRL item-type vocabulary — intended values: monetary | string |
+  # date | boolean | shares | decimal | integer | text_block. NULL means
+  # untyped; consumers fall back to is_monetary.
+  item_type = Column(String, nullable=True)
 
   # Hierarchy (parent element — separate from class-subclass classification
   # hierarchy, which lives in associations)

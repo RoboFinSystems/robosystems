@@ -52,7 +52,9 @@ class FactSet(ExtensionsBase):
     Index("idx_fact_sets_entity", "entity_id"),
     Index("idx_fact_sets_report", "report_id"),
     CheckConstraint(
-      "factset_type IN ('report', 'schedule', 'custom')",
+      # 'disclosure' = a standing text-block binding set: the durable
+      # Document->fact bind that report builds snapshot from.
+      "factset_type IN ('report', 'schedule', 'custom', 'disclosure')",
       name="check_fact_set_type",
     ),
   )
