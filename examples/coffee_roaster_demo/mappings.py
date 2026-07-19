@@ -29,7 +29,14 @@ MAPPINGS: list[tuple[str, str]] = [
   ("1200", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid insurance
   ("1210", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid software
   ("1220", "rs-gaap:PrepaidExpenseCurrent"),  # Prepaid fulfillment
+  # All three inventory stages map to the same Classified-BS leaf — and
+  # each ALSO multi-maps to its disclosure member concept (authored in
+  # disclosures.py; the member arcs are created by the disclosure-note
+  # runner step), so the BS line and the inventory-components note foot
+  # over the same facts.
   ("1400", "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"),
+  ("1410", "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"),
+  ("1420", "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"),
   ("1500", "rs-gaap:PropertyPlantAndEquipmentGross"),  # Roasting & packaging equipment
   (
     "1550",

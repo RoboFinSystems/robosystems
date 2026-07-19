@@ -147,13 +147,19 @@ def create(
 
   structures_by_name: dict[str, Structure] = {}
   for req in payload.structures:
+    # role_uri rides in metadata_ — the column-less convention the
+    # envelope readers already use (metadata_['role_uri']).
+    structure_metadata = dict(req.metadata)
+    if req.role_uri:
+      structure_metadata["role_uri"] = req.role_uri
     structure = Structure(
       name=req.name,
       description=req.description,
       block_type=req.block_type,
+      concept_arrangement=req.concept_arrangement,
       taxonomy_id=taxonomy.id,
       is_active=True,
-      metadata_=dict(req.metadata),
+      metadata_=structure_metadata,
       created_by=created_by,
     )
     session.add(structure)

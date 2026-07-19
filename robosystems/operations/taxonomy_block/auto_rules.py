@@ -26,13 +26,27 @@ Rules emitted:
     NoCycles         — ReportLevelModelStructureRule
     NoOrphanArcs     — ReportLevelModelStructureRule
     ParentBeforeChild — ReportLevelModelStructureRule
+
+  Per-structure (``concept_arrangement='roll_up'`` with calculation arcs):
+    RollUp (rule_pattern) — FundamentalAccountingConceptRelation, one per
+    calc parent. The engine's arc-derived evaluator foots the parent
+    against its live calc children (structure-local arcs overlaid onto
+    the global DAG), so an authored disclosure note gets footing
+    validation the moment its facts land — no hand-authored rule needed.
 """
 
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, aliased
 
-from robosystems.models.extensions import Rule, Structure, Taxonomy
+from robosystems.models.extensions import (
+  Association,
+  Element,
+  Rule,
+  Structure,
+  Taxonomy,
+)
 
 _AUTO = "auto"
 _STRUCTURE_RULES = "ReportLevelModelStructureRule"
@@ -109,8 +123,111 @@ def emit_auto_rules(
         target_structure_id=structure_id,
         created_by=created_by,
       )
+    if structure.concept_arrangement == "roll_up":
+      _add_rollup_rules(
+        session,
+        taxonomy_id=taxonomy_id,
+        structure=structure,
+        created_by=created_by,
+      )
 
   session.flush()
+
+
+def _add_rollup_rules(
+  session: Session,
+  *,
+  taxonomy_id: str,
+  structure: Structure,
+  created_by: str,
+) -> None:
+  """Emit one structure-scoped RollUp rule per calculation parent.
+
+  Mirrors the seeded ``rs-gaap-rollup-rules`` shape
+  (``generate_rollup_rules.py``: parent-first variables,
+  FundamentalAccountingConceptRelation, pattern ``RollUp``) so the
+  engine's arc-derived evaluator picks it up unchanged. Variables carry
+  ``variable_element_id`` explicitly — authored structures may reference
+  tenant elements whose qname resolution shouldn't be load-bearing.
+
+  No calculation arcs → no rules (a presentation-only roll_up renders
+  but has nothing to foot).
+  """
+  parent_el = aliased(Element)
+  child_el = aliased(Element)
+  rows = session.execute(
+    select(
+      Association.from_element_id,
+      Association.to_element_id,
+      Association.weight,
+      Association.order_value,
+      parent_el.qname.label("parent_qname"),
+      parent_el.name.label("parent_name"),
+      child_el.qname.label("child_qname"),
+      child_el.name.label("child_name"),
+    )
+    .join(parent_el, parent_el.id == Association.from_element_id)
+    .join(child_el, child_el.id == Association.to_element_id)
+    .where(
+      Association.structure_id == str(structure.id),
+      Association.association_type == "calculation",
+    )
+    .order_by(Association.from_element_id, Association.order_value.asc().nulls_last())
+  ).fetchall()
+  if not rows:
+    return
+
+  by_parent: dict[str, list] = {}
+  for row in rows:
+    by_parent.setdefault(row.from_element_id, []).append(row)
+
+  for parent_id, children in by_parent.items():
+    first = children[0]
+    parent_label = (first.parent_qname or first.parent_name or parent_id).split(":")[-1]
+    variables: list[dict[str, str]] = [
+      {
+        "variable_name": parent_label,
+        "variable_qname": first.parent_qname or "",
+        "variable_element_id": parent_id,
+      }
+    ]
+    terms: list[str] = []
+    for child in children:
+      child_label = (
+        child.child_qname or child.child_name or child.to_element_id
+      ).split(":")[-1]
+      variables.append(
+        {
+          "variable_name": child_label,
+          "variable_qname": child.child_qname or "",
+          "variable_element_id": child.to_element_id,
+        }
+      )
+      weight = child.weight if child.weight is not None else 1.0
+      sign = "-" if weight < 0 else "+"
+      terms.append(f"{sign} ${child_label}")
+    expression = f"${parent_label} = {' '.join(terms).lstrip('+ ')}"
+
+    session.add(
+      Rule(
+        taxonomy_id=taxonomy_id,
+        rule_category=_FAC_RULES,
+        rule_pattern="RollUp",
+        rule_check_kind=None,
+        rule_expression=expression,
+        rule_message=(
+          f"Calculation rollup: {parent_label} must equal the calculation "
+          f"sum of its children."
+        ),
+        rule_severity="error",
+        rule_origin=_AUTO,
+        target_kind="structure",
+        target_structure_id=str(structure.id),
+        rule_variables=variables,
+        metadata_={},
+        created_by=created_by,
+      )
+    )
 
 
 def _add(

@@ -243,8 +243,10 @@ def _evaluate_rollup_arc_derived(
   reported on this structure (e.g. an IS decomposition rule landing on the CF)
   is skipped, matching the prior evaluator.
 
-  Returns ``None`` when the parent isn't an rs-gaap calc subtotal, so the caller
-  falls back to the frozen-expression evaluator (custom / fac rollups).
+  Returns ``None`` when the parent has no calc children in the merged DAG
+  (global rs-gaap-calculations overlaid with the structure's own calc arcs),
+  so the caller falls back to the frozen-expression evaluator (custom / fac
+  rollups).
   """
   parent_id, parent_qname = _rollup_parent_element_id(session, rule, cache)
   if parent_id is None or parent_id not in calculations:
@@ -380,6 +382,27 @@ def evaluate_rules_for_structure(
     )
 
     calculations = load_rs_gaap_calculations(session)
+    # Tenant-authored roll_up structures (disclosure notes) foot against
+    # their OWN calculation arcs — their parents aren't rs-gaap subtotals,
+    # so the global DAG carries no entry for them. Overlay the structure's
+    # local calc arcs, letting the global DAG win where both define a
+    # parent (statement structures mirror it anyway). Same live-arc
+    # doctrine as the global path: children come from arcs, never from a
+    # frozen enumeration.
+    local_calcs: dict[str, list[tuple[str, float]]] = {}
+    for assoc in sorted(
+      associations,
+      key=lambda x: x.order_value if x.order_value is not None else float("inf"),
+    ):
+      if assoc.association_type != "calculation":
+        continue
+      if assoc.from_element_id is None or assoc.to_element_id is None:
+        continue
+      local_calcs.setdefault(assoc.from_element_id, []).append(
+        (assoc.to_element_id, assoc.weight if assoc.weight is not None else 1.0)
+      )
+    for parent_id, children in local_calcs.items():
+      calculations.setdefault(parent_id, children)
     by_period = _load_period_balances(
       session, structure_id, fact_set_id, period_start, period_end
     )

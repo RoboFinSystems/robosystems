@@ -243,3 +243,123 @@ class TestRollupRoutingInEngine:
     added = session.add.call_args_list[0][0][0]
     assert added.status == "pass"
     assert added.detail.get("source") == "calc-dag"
+
+  def test_structure_local_calc_arcs_overlay_the_global_dag(self) -> None:
+    """A tenant-authored roll_up note foots against its OWN calc arcs.
+
+    The note's parent (a BS leaf, e.g. the inventory total) has no
+    children in the global rs-gaap-calculations DAG — before the overlay
+    the arc-derived evaluator returned None and the auto RollUp rule fell
+    to the frozen evaluator with nothing to bind. The engine overlays the
+    structure's local calculation associations, so footing derives from
+    live arcs."""
+    session = MagicMock()
+    session.get.return_value = MagicMock(
+      id="struct_note", block_type="regulatory_disclosure"
+    )
+
+    rule_lite = MagicMock()
+    rule_lite.id = "rule_note_rollup"
+    rule_orm = _rule("elem_total", "rs-gaap:InventoryNet")
+    rule_orm.id = "rule_note_rollup"
+
+    def _calc_assoc(child_id: str, order: float) -> MagicMock:
+      a = MagicMock()
+      a.id = f"assoc_{child_id}"
+      a.association_type = "calculation"
+      a.from_element_id = "elem_total"
+      a.to_element_id = child_id
+      a.weight = 1.0
+      a.order_value = order
+      return a
+
+    assoc = MagicMock()
+    assoc.scalars.return_value.all.return_value = [
+      _calc_assoc("elem_raw", 1.0),
+      _calc_assoc("elem_fg", 2.0),
+    ]
+    rules_res = MagicMock()
+    rules_res.scalars.return_value.all.return_value = [rule_orm]
+    session.execute.side_effect = [assoc, rules_res]
+
+    by_period = {
+      _P1: (
+        {"elem_raw": 8000.0, "elem_fg": 5000.0, "elem_total": 13000.0},
+        {"elem_raw", "elem_fg", "elem_total"},
+      )
+    }
+
+    with (
+      patch(
+        "robosystems.operations.information_block.rules.engine.load_rules_for_structure",
+        return_value=[rule_lite],
+      ),
+      patch(
+        # Global DAG has NO entry for the note's parent.
+        "robosystems.operations.roboledger.reports.calc_dag.load_rs_gaap_calculations",
+        return_value={"rs-gaap:Assets": [("rs-gaap:AssetsCurrent", 1.0)]},
+      ),
+      patch(
+        "robosystems.operations.information_block.rules.engine._load_period_balances",
+        return_value=by_period,
+      ),
+    ):
+      results = evaluate_rules_for_structure(
+        session, "struct_note", period_start=_P1[0], period_end=_P1[1]
+      )
+
+    assert len(results) == 1
+    added = session.add.call_args_list[0][0][0]
+    assert added.status == "pass"
+    assert added.detail.get("source") == "calc-dag"
+
+  def test_global_dag_wins_over_local_arcs_for_shared_parent(self) -> None:
+    """When a parent exists in BOTH the global DAG and the structure's
+    local arcs, the global definition wins (statement structures mirror
+    it; overlay must not shadow #883's semantics)."""
+    session = MagicMock()
+    session.get.return_value = MagicMock(id="struct_bs", block_type="balance_sheet")
+
+    rule_lite = MagicMock()
+    rule_lite.id = "rule_bs"
+    rule_orm = _rule("ANC", "rs-gaap:AssetsNoncurrent")
+    rule_orm.id = "rule_bs"
+
+    local = MagicMock()
+    local.id = "assoc_local"
+    local.association_type = "calculation"
+    local.from_element_id = "ANC"
+    local.to_element_id = "WrongChild"
+    local.weight = 1.0
+    local.order_value = 1.0
+
+    assoc = MagicMock()
+    assoc.scalars.return_value.all.return_value = [local]
+    rules_res = MagicMock()
+    rules_res.scalars.return_value.all.return_value = [rule_orm]
+    session.execute.side_effect = [assoc, rules_res]
+
+    # Global children foot; the local WrongChild (0 balance) would fail.
+    by_period = {_P1: ({"PPE": 100.0, "ANC": 100.0}, {"PPE", "ANC"})}
+
+    with (
+      patch(
+        "robosystems.operations.information_block.rules.engine.load_rules_for_structure",
+        return_value=[rule_lite],
+      ),
+      patch(
+        "robosystems.operations.roboledger.reports.calc_dag.load_rs_gaap_calculations",
+        return_value={"ANC": [("PPE", 1.0)]},
+      ),
+      patch(
+        "robosystems.operations.information_block.rules.engine._load_period_balances",
+        return_value=by_period,
+      ),
+    ):
+      results = evaluate_rules_for_structure(
+        session, "struct_bs", period_start=_P1[0], period_end=_P1[1]
+      )
+
+    assert len(results) == 1
+    added = session.add.call_args_list[0][0][0]
+    assert added.status == "pass"

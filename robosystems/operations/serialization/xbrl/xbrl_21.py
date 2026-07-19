@@ -78,7 +78,12 @@ def serialize_to_xbrl_21(bundle: StatementBundle) -> bytes:
   Returns the zip bytes ready to stream as a download or write to
   storage. The shape is a flat zip containing standalone files; the
   full Report Package META-INF directory is not yet wrapped around them.
+
+  Tenant-authored disclosure notes are excluded from this flavor for
+  now (:func:`_strip_disclosure_content`) — they ride in the JSON-LD /
+  holon flavors, whose SHACL validation covers them.
   """
+  bundle = _strip_disclosure_content(bundle)
   buf = io.BytesIO()
   with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("instance.xml", _serialize_xml(_build_instance(bundle)))
@@ -108,6 +113,90 @@ def _serialize_xml(root: etree._Element) -> bytes:
     encoding="UTF-8",
     pretty_print=True,
     standalone=True,
+  )
+
+
+def _strip_disclosure_content(bundle: StatementBundle) -> StatementBundle:
+  """Return a bundle without ``regulatory_disclosure`` structures' content.
+
+  Tenant-authored disclosure notes are carried by the JSON-LD / holon
+  flavors (SHACL-validated), but this emitter's conventions are
+  statement-shaped: fixed framework prefixes (an extension concept like
+  ``driftline:X`` has no namespace here), one arc type per Network ELR
+  (a note carries presentation AND calculation arcs on one structure —
+  Arelle flags the duplicate), and no per-fact context typing for
+  non-statement structures. Until the emitter learns those, notes are
+  excluded here rather than shipping an instance Arelle rejects.
+
+  No-op (returns the same object) when the bundle has no disclosure
+  links, i.e. every pre-existing statement bundle.
+  """
+  disclosure_structure_ids = {
+    link.structure_id
+    for group in (
+      bundle.linkbases.presentation_links,
+      bundle.linkbases.calculation_links,
+      bundle.linkbases.definition_links,
+    )
+    for link in group
+    if link.block_type == "regulatory_disclosure"
+  }
+  if not disclosure_structure_ids:
+    return bundle
+
+  linkbases = bundle.linkbases.model_copy(
+    update={
+      "presentation_links": [
+        li
+        for li in bundle.linkbases.presentation_links
+        if li.structure_id not in disclosure_structure_ids
+      ],
+      "calculation_links": [
+        li
+        for li in bundle.linkbases.calculation_links
+        if li.structure_id not in disclosure_structure_ids
+      ],
+      "definition_links": [
+        li
+        for li in bundle.linkbases.definition_links
+        if li.structure_id not in disclosure_structure_ids
+      ],
+    }
+  )
+  facts = [
+    f
+    for f in bundle.facts
+    if f.structure_id is None or f.structure_id not in disclosure_structure_ids
+  ]
+
+  # Keep only concepts still referenced by a surviving fact or arc —
+  # extension concepts referenced solely by the stripped note would
+  # otherwise be declared under a framework namespace they don't belong
+  # to (the fixed-prefix mangle).
+  referenced_qnames = {f.element_qname for f in facts}
+  for group in (
+    linkbases.presentation_links,
+    linkbases.calculation_links,
+    linkbases.definition_links,
+  ):
+    for link in group:
+      for arc in link.arcs:
+        referenced_qnames.add(arc.from_qname)
+        referenced_qnames.add(arc.to_qname)
+  schema_concepts = [c for c in bundle.schema_concepts if c.qname in referenced_qnames]
+
+  # Drop period nodes no surviving fact references so the derived
+  # context set stays minimal.
+  referenced_periods = {f.period_ref for f in facts}
+  period_nodes = [p for p in bundle.period_nodes if p.id in referenced_periods]
+
+  return bundle.model_copy(
+    update={
+      "linkbases": linkbases,
+      "facts": facts,
+      "schema_concepts": schema_concepts,
+      "period_nodes": period_nodes,
+    }
   )
 
 

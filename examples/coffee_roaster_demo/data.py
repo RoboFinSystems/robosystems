@@ -62,6 +62,8 @@ ACCOUNTS: list[tuple[str, str, str, str, str, str | None]] = [
   ("1210", "Prepaid Software", "asset", "other_current_assets", "debit", None),
   ("1220", "Prepaid Fulfillment", "asset", "other_current_assets", "debit", None),
   ("1400", "Inventory — Green Coffee", "asset", "inventory", "debit", None),
+  ("1410", "Inventory — Roasting WIP", "asset", "inventory", "debit", None),
+  ("1420", "Inventory — Finished Goods", "asset", "inventory", "debit", None),
   ("1500", "Roasting & Packaging Equipment", "asset", "fixed_assets", "debit", None),
   ("1550", "Accumulated Depreciation", "asset", "fixed_assets", "credit", None),
   # Liabilities
@@ -292,8 +294,10 @@ PREPAIDS = [
 
 
 def _opening(start: date) -> list:
-  """Founding balance sheet: cash, on-hand green coffee, the roasting line (net
-  of accumulated depreciation), and paid-in capital + retained earnings."""
+  """Founding balance sheet: cash, on-hand inventory across the three stages
+  (green coffee, roasting WIP, bagged finished goods — the breakdown the
+  inventory-components disclosure note foots), the roasting line (net of
+  accumulated depreciation), and paid-in capital + retained earnings."""
   return [
     (
       start,
@@ -303,10 +307,12 @@ def _opening(start: date) -> list:
       [
         ("1000", 60_000_00, 0),  # Operating cash
         ("1400", 8_000_00, 0),  # Green-coffee inventory on hand
+        ("1410", 3_000_00, 0),  # Roasting WIP on the floor
+        ("1420", 5_000_00, 0),  # Bagged finished goods
         ("1500", 90_000_00, 0),  # Roasting & packaging equipment (gross)
         ("1550", 0, 30_000_00),  # Accumulated depreciation
         ("3000", 0, 100_000_00),  # Paid-in capital
-        ("3100", 0, 28_000_00),  # Retained earnings
+        ("3100", 0, 36_000_00),  # Retained earnings
       ],
     ),
   ]
