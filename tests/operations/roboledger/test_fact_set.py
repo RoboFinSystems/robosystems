@@ -109,3 +109,47 @@ class TestCreateFactSetHelper:
         created_by="user_1",
       )
     session.add.assert_not_called()
+
+
+class TestDocumentProvenanceArm:
+  def test_validates_through_the_union(self) -> None:
+    from robosystems.models.api.fact_provenance import DocumentProvenance
+
+    fs = create_fact_set(
+      MagicMock(),
+      structure_id="st_note",
+      period_start=date(2026, 1, 1),
+      period_end=date(2026, 12, 31),
+      factset_type="disclosure",
+      entity_id="ent_1",
+      created_by="usr_bind",
+      provenance=DocumentProvenance(
+        document_id="doc_1",
+        section_id="costing-method",
+        content_hash="ab" * 32,
+        asserted_by="usr_bind",
+      ),
+    )
+    assert fs.provenance["origin"] == "document"
+    assert fs.provenance["document_id"] == "doc_1"
+    assert fs.provenance["content_hash"] == "ab" * 32
+
+  def test_round_trips_as_raw_dict(self) -> None:
+    """The snapshot path passes the standing set's provenance dict
+    verbatim — it must re-validate through the discriminated union."""
+    fs = create_fact_set(
+      MagicMock(),
+      structure_id="st_note",
+      period_end=date(2026, 12, 31),
+      factset_type="report",
+      entity_id="ent_1",
+      created_by="usr_gen",
+      provenance={
+        "origin": "document",
+        "document_id": "doc_1",
+        "section_id": None,
+        "content_hash": "cd" * 32,
+        "asserted_by": "usr_bind",
+      },
+    )
+    assert fs.provenance["origin"] == "document"

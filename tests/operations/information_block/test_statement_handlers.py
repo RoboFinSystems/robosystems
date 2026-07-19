@@ -314,6 +314,9 @@ class TestBuildEnvelope:
     fact.id = "fact_1"
     fact.element_id = "elem_cash"
     fact.value = 100_000.0
+    fact.string_value = None
+    fact.fact_type = "Numeric"
+    fact.content_type = None
     fact.period_start = None
     fact.period_end = date(2026, 3, 31)
     fact.period_type = "instant"
