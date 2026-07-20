@@ -77,8 +77,10 @@ class Rule(ExtensionsBase):
     # over fact values. Exactly one of rule_pattern / rule_check_kind is
     # populated (see check_rule_pattern_kind_xor below).
     CheckConstraint(
+      # 'Derive' rules compute a value (compute-metrics) rather than
+      # verify one — same $Var expression grammar, evaluated for the LHS.
       "rule_pattern IS NULL OR rule_pattern IN ("
-      "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
+      "'Adjustment', 'CoExists', 'Derive', 'EqualTo', 'Exists', 'GreaterThan', "
       "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
       "'SumEquals', 'Variance'"
       ")",

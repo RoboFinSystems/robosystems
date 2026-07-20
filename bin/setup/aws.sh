@@ -221,6 +221,7 @@ function create_ssm_feature_flags() {
         "SEMANTIC_SEARCH_ENABLED=false"
         "SSE_ENABLED=true"
         "SUBGRAPH_CREATION_ENABLED=true"
+        "TAXONOMY_AUTHORING_ENABLED=false"
         "USER_REGISTRATION_ENABLED=${user_reg}"
     )
 

@@ -10,13 +10,20 @@ sub-phases add reporting_extension / custom_ontology / reporting_standard).
 These are mounted as the ``create-taxonomy-block`` /
 ``update-taxonomy-block`` / ``delete-taxonomy-block`` CQRS operations
 in ``routers/extensions/roboledger/operations.py``. The REST registrar's
-error_map routes ``ValueError → 422`` and ``NotImplementedError → 501``.
+error_map routes ``ValueError → 422``, ``NotImplementedError → 501``,
+and ``TaxonomyAuthoringDisabledError → 403``.
+
+The one policy check that lives here (rather than in a handler) is the
+``TAXONOMY_AUTHORING_ENABLED`` environment gate: it must sit at the
+dispatch chokepoint so a single check covers both the REST operations
+and the auto-generated MCP tools, which call these same functions.
 """
 
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from robosystems.config import env
 from robosystems.models.api.taxonomy_block import (
   CreateTaxonomyBlockRequest,
   DeleteTaxonomyBlockRequest,
@@ -25,6 +32,29 @@ from robosystems.models.api.taxonomy_block import (
   UpdateTaxonomyBlockRequest,
 )
 from robosystems.operations.taxonomy_block import registry as registry_module
+
+# Framework-shaped block types: authoring these creates tenant-owned taxonomy
+# content that anchors into the library and must survive future library
+# evolution. chart_of_accounts is the core product path and is never gated;
+# schedule is closing-book machinery; reporting_standard is read-only.
+GATED_TAXONOMY_TYPES = frozenset({"reporting_extension", "custom_ontology"})
+
+
+class TaxonomyAuthoringDisabledError(PermissionError):
+  """Framework authoring is disabled in this environment.
+
+  Raised on create/update of a gated taxonomy type when
+  ``TAXONOMY_AUTHORING_ENABLED`` is off. Delete is deliberately not
+  gated — removing gated content must always be possible.
+  """
+
+
+def _check_authoring_enabled(taxonomy_type: str) -> None:
+  if taxonomy_type in GATED_TAXONOMY_TYPES and not env.TAXONOMY_AUTHORING_ENABLED:
+    raise TaxonomyAuthoringDisabledError(
+      f"authoring {taxonomy_type!r} taxonomy blocks is disabled in this "
+      f"environment (TAXONOMY_AUTHORING_ENABLED is off)"
+    )
 
 
 def _get_entry_or_422(taxonomy_type: str):
@@ -48,6 +78,7 @@ def create_taxonomy_block(
   for reporting_extension) has already run by the time we get here.
   """
   entry = _get_entry_or_422(body.taxonomy_type)
+  _check_authoring_enabled(body.taxonomy_type)
   taxonomy_id = entry.dispatch_create(session, body, created_by)
 
   envelope = entry.dispatch_build_envelope(session, taxonomy_id)
@@ -78,6 +109,7 @@ def update_taxonomy_block(
     raise ValueError(f"taxonomy_id {body.taxonomy_id!r} not found")
 
   entry = _get_entry_or_422(taxonomy.taxonomy_type)
+  _check_authoring_enabled(taxonomy.taxonomy_type)
   taxonomy_id = entry.dispatch_update(session, body, created_by)
 
   envelope = entry.dispatch_build_envelope(session, taxonomy_id)
@@ -115,6 +147,8 @@ def delete_taxonomy_block(
 
 
 __all__ = [
+  "GATED_TAXONOMY_TYPES",
+  "TaxonomyAuthoringDisabledError",
   "create_taxonomy_block",
   "delete_taxonomy_block",
   "update_taxonomy_block",

@@ -71,6 +71,10 @@ CANONICAL_CONTEXT: dict = {
   # rs-gaap-reporting-styles — declares Style entities that compose specific
   # Disclosures for a vertical / filer profile.
   "styles": "https://robosystems.ai/taxonomy/rs-gaap/reporting-styles/v1/",
+  # rs-metric — the library metric catalog (Key Financial Metrics).
+  # Each metric is a qname-addressable concept plus a Derive rule that
+  # computes it from rs-gaap anchor facts.
+  "rs-metric": "https://robosystems.ai/taxonomy/rs-gaap/metrics/v1/",
   "ifrs": "http://xbrl.ifrs.org/taxonomy/",
   "dei": "http://xbrl.sec.gov/dei/",
   # Seattle Method conceptual-model role URIs (Charlie's CM namespace)

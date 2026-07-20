@@ -22,7 +22,8 @@
     {"standard": "rs-gaap-reporting-checklist",  "version": "v1", "ordinal": 10, "is_required": true, "tenant_copy": false},
     {"standard": "rs-gaap-reporting-styles",     "version": "v1", "ordinal": 11, "is_required": true},
     {"standard": "rs-gaap-rollup-rules",         "version": "v1", "ordinal": 12, "is_required": true},
-    {"standard": "rs-gaap-rules",                "version": "v1", "ordinal": 13, "is_required": true}
+    {"standard": "rs-gaap-rules",                "version": "v1", "ordinal": 13, "is_required": true},
+    {"standard": "rs-metric",                    "version": "v1", "ordinal": 14, "is_required": true}
   ],
   "bridges": [
     {"bridge": "fac-to-rs-gaap",                            "version": "v1", "ordinal": 0, "is_required": true, "tenant_copy": false},

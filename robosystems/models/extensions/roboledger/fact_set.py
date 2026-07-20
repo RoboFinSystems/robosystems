@@ -54,7 +54,9 @@ class FactSet(ExtensionsBase):
     CheckConstraint(
       # 'disclosure' = a standing text-block binding set: the durable
       # Document->fact bind that report builds snapshot from.
-      "factset_type IN ('report', 'schedule', 'custom', 'disclosure')",
+      # 'metric' = a standing computed-metric set: one per
+      # (structure, entity, period_end), filled by compute-metrics.
+      "factset_type IN ('report', 'schedule', 'custom', 'disclosure', 'metric')",
       name="check_fact_set_type",
     ),
   )
@@ -74,7 +76,9 @@ class FactSet(ExtensionsBase):
 
   # Kind of FactSet — 'report' for statement renderers, 'schedule' for
   # closing-entry generators, 'custom' for agent-authored derivative
-  # blocks. Enum closure enforced by the CHECK constraint above.
+  # blocks, 'disclosure' for standing text-block binds, 'metric' for
+  # standing computed-metric time series. Enum closure enforced by the
+  # CHECK constraint above.
   factset_type = Column(String, nullable=False, default="report")
 
   # Multi-tenant + cross-link fields. ``entity_id`` matches

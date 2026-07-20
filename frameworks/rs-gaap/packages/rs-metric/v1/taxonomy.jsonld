@@ -1,0 +1,377 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "link": "http://www.xbrl.org/2003/linkbase#",
+    "xlink": "http://www.w3.org/1999/xlink#",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "rs-metric": "https://robosystems.ai/taxonomy/rs-gaap/metrics/v1/",
+    "rs": "https://robosystems.ai/vocab/",
+    "balance": {
+      "@id": "xbrli:balance"
+    },
+    "periodType": {
+      "@id": "xbrli:periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "from": {
+      "@id": "xlink:from",
+      "@type": "@id"
+    },
+    "to": {
+      "@id": "xlink:to",
+      "@type": "@id"
+    },
+    "arcrole": {
+      "@id": "xlink:arcrole",
+      "@type": "@id"
+    },
+    "role": {
+      "@id": "xlink:role",
+      "@type": "@id"
+    },
+    "order": {
+      "@id": "link:order",
+      "@type": "xsd:decimal"
+    },
+    "associationType": {
+      "@id": "https://robosystems.ai/vocab/associationType"
+    },
+    "label": "rdfs:label",
+    "documentation": "rdfs:comment",
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    },
+    "conceptArrangementPattern": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
+    },
+    "ruleCategory": {
+      "@id": "https://robosystems.ai/vocab/ruleCategory"
+    },
+    "rulePattern": {
+      "@id": "https://robosystems.ai/vocab/rulePattern"
+    },
+    "ruleExpression": {
+      "@id": "https://robosystems.ai/vocab/ruleExpression"
+    },
+    "ruleTarget": {
+      "@id": "https://robosystems.ai/vocab/ruleTarget"
+    },
+    "targetKind": {
+      "@id": "https://robosystems.ai/vocab/targetKind"
+    },
+    "targetRef": {
+      "@id": "https://robosystems.ai/vocab/targetRef"
+    },
+    "ruleVariables": {
+      "@id": "https://robosystems.ai/vocab/ruleVariables",
+      "@container": "@list"
+    },
+    "variableName": {
+      "@id": "https://robosystems.ai/vocab/variableName"
+    },
+    "variableQname": {
+      "@id": "https://robosystems.ai/vocab/variableQname"
+    },
+    "ruleMessage": {
+      "@id": "https://robosystems.ai/vocab/ruleMessage"
+    },
+    "ruleSeverity": {
+      "@id": "https://robosystems.ai/vocab/ruleSeverity"
+    },
+    "ruleOrigin": {
+      "@id": "https://robosystems.ai/vocab/ruleOrigin"
+    }
+  },
+  "standard": "rs-metric",
+  "version": "v1",
+  "taxonomy_type": "reporting_extension",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/metrics/v1/",
+  "default_block_type": "metric",
+  "origin": "native",
+  "description": "rs-metric — the library metric catalog (Metrics M-1). Each metric is a qname-addressable concept in the rs-metric namespace plus one Derive rule whose ruleExpression computes it from rs-gaap anchor facts ($Metric = f(rs-gaap operands)). The Key Financial Metrics node is both an abstract element and a Structure (block_type='metric', CAP arithmetic) whose presentation arcs enumerate the catalog — the standing metric block every tenant receives. Operand qnames are the canonical calc-DAG anchors the report pivot persists (e.g. InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings, not InventoryNet). compute-metrics binds operands to persisted report facts per period and upserts a standing factset_type='metric' FactSet. Metrics with missing operands or undefined ratios are skipped with a reason, never errored. Hand-authored; avg()/composition metrics land in M-2.",
+  "@graph": [
+    {
+      "@id": "rs-metric:KeyFinancialMetrics",
+      "label": "Key Financial Metrics",
+      "documentation": "Container for the seeded metric catalog — an abstract element and the standing metric Structure. compute-metrics fills its FactSets; the metric envelope renders the time series.",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "monetary": false,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "structureName": "Key Financial Metrics",
+      "blockType": "metric",
+      "conceptArrangementPattern": "arithmetic"
+    },
+    {
+      "@id": "rs-metric:WorkingCapital",
+      "label": "Working Capital",
+      "documentation": "Current assets minus current liabilities — the short-term liquidity cushion.",
+      "elementType": "concept",
+      "periodType": "instant",
+      "balance": "debit",
+      "monetary": true
+    },
+    {
+      "@id": "rs-metric:CurrentRatio",
+      "label": "Current Ratio",
+      "documentation": "Current assets over current liabilities.",
+      "elementType": "concept",
+      "periodType": "instant",
+      "monetary": false
+    },
+    {
+      "@id": "rs-metric:QuickRatio",
+      "label": "Quick Ratio",
+      "documentation": "Current assets excluding inventory, over current liabilities (acid test).",
+      "elementType": "concept",
+      "periodType": "instant",
+      "monetary": false
+    },
+    {
+      "@id": "rs-metric:DebtToEquity",
+      "label": "Debt to Equity",
+      "documentation": "Total liabilities over stockholders' equity.",
+      "elementType": "concept",
+      "periodType": "instant",
+      "monetary": false
+    },
+    {
+      "@id": "rs-metric:InterestCoverage",
+      "label": "Interest Coverage",
+      "documentation": "Operating income over interest expense. Skips (rather than errors) for debt-free entities with no interest expense fact.",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-1",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:WorkingCapital"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 1.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-2",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:CurrentRatio"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 2.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-3",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:QuickRatio"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 3.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-4",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:DebtToEquity"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 4.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-5",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:InterestCoverage"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 5.0
+    },
+    {
+      "@id": "_:rs-metric-derive-working-capital",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$WorkingCapital = ($AssetsCurrent - $LiabilitiesCurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:WorkingCapital"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "WorkingCapital",
+          "variableQname": "rs-metric:WorkingCapital"
+        },
+        {
+          "variableName": "AssetsCurrent",
+          "variableQname": "rs-gaap:AssetsCurrent"
+        },
+        {
+          "variableName": "LiabilitiesCurrent",
+          "variableQname": "rs-gaap:LiabilitiesCurrent"
+        }
+      ],
+      "ruleMessage": "Working Capital = Current Assets - Current Liabilities",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-current-ratio",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$CurrentRatio = ($AssetsCurrent / $LiabilitiesCurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:CurrentRatio"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "CurrentRatio",
+          "variableQname": "rs-metric:CurrentRatio"
+        },
+        {
+          "variableName": "AssetsCurrent",
+          "variableQname": "rs-gaap:AssetsCurrent"
+        },
+        {
+          "variableName": "LiabilitiesCurrent",
+          "variableQname": "rs-gaap:LiabilitiesCurrent"
+        }
+      ],
+      "ruleMessage": "Current Ratio = Current Assets / Current Liabilities",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-quick-ratio",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$QuickRatio = (($AssetsCurrent - $InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings) / $LiabilitiesCurrent)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:QuickRatio"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "QuickRatio",
+          "variableQname": "rs-metric:QuickRatio"
+        },
+        {
+          "variableName": "AssetsCurrent",
+          "variableQname": "rs-gaap:AssetsCurrent"
+        },
+        {
+          "variableName": "InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings",
+          "variableQname": "rs-gaap:InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings"
+        },
+        {
+          "variableName": "LiabilitiesCurrent",
+          "variableQname": "rs-gaap:LiabilitiesCurrent"
+        }
+      ],
+      "ruleMessage": "Quick Ratio = (Current Assets - Inventory) / Current Liabilities",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-debt-to-equity",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$DebtToEquity = ($Liabilities / $StockholdersEquity)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:DebtToEquity"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "DebtToEquity",
+          "variableQname": "rs-metric:DebtToEquity"
+        },
+        {
+          "variableName": "Liabilities",
+          "variableQname": "rs-gaap:Liabilities"
+        },
+        {
+          "variableName": "StockholdersEquity",
+          "variableQname": "rs-gaap:StockholdersEquity"
+        }
+      ],
+      "ruleMessage": "Debt to Equity = Total Liabilities / Stockholders' Equity",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-interest-coverage",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$InterestCoverage = ($OperatingIncomeLoss / $InterestExpense)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:InterestCoverage"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "InterestCoverage",
+          "variableQname": "rs-metric:InterestCoverage"
+        },
+        {
+          "variableName": "OperatingIncomeLoss",
+          "variableQname": "rs-gaap:OperatingIncomeLoss"
+        },
+        {
+          "variableName": "InterestExpense",
+          "variableQname": "rs-gaap:InterestExpense"
+        }
+      ],
+      "ruleMessage": "Interest Coverage = Operating Income / Interest Expense",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    }
+  ]
+}
