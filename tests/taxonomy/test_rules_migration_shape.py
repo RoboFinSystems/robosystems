@@ -43,6 +43,15 @@ assert _spec is not None and _spec.loader is not None
 mig_0002 = _util.module_from_spec(_spec)
 _spec.loader.exec_module(mig_0002)
 
+# Later widenings layer on top of 0002 for fresh AND deployed DBs alike
+# (0022 re-adds the constraint after 0002 in the migration sequence), so
+# the loader-enum ⊆ DB-CHECK invariant holds over the union.
+_MIGRATION_0022_PATH = _MIGRATION_PATH.parent / "0022_metrics.py"
+_spec_0022 = _util.spec_from_file_location("mig_0022", _MIGRATION_0022_PATH)
+assert _spec_0022 is not None and _spec_0022.loader is not None
+mig_0022 = _util.module_from_spec(_spec_0022)
+_spec_0022.loader.exec_module(mig_0022)
+
 
 class TestImmutableTables:
   def test_rules_is_immutable_in_tenant_schemas(self) -> None:
@@ -145,10 +154,16 @@ class TestRuleCheckConstraints:
       )
 
   def test_pattern_check_lists_every_enum_value(self) -> None:
+    """The effective CHECK for any DB is 0002's re-added by 0022's
+    widening ('Derive'), so the loader enum asserts against 0022's
+    final constant."""
     for pattern in RULE_PATTERN_VALUES:
-      assert f"'{pattern}'" in mig_0002._RULE_PATTERN_CHECK, (
-        f"pattern {pattern!r} missing from _RULE_PATTERN_CHECK"
+      assert f"'{pattern}'" in mig_0022._RULE_PATTERN_WIDENED, (
+        f"pattern {pattern!r} missing from 0022 _RULE_PATTERN_WIDENED"
       )
+    # 0022's widening must be a strict superset of 0002's original.
+    assert "'Derive'" in mig_0022._RULE_PATTERN_WIDENED
+    assert "'Derive'" not in mig_0002._RULE_PATTERN_CHECK
 
   def test_severity_check_enumerates_info_warning_error(self) -> None:
     for severity in ("info", "warning", "error"):

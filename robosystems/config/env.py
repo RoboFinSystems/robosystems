@@ -607,6 +607,21 @@ class EnvConfig:
     "SEMANTIC_MEMORY_ENABLED",
     get_parameter_value("SEMANTIC_MEMORY_ENABLED", "false").lower() == "true",
   )
+  # Gates tenant authoring of framework-shaped taxonomy blocks
+  # (reporting_extension / custom_ontology) on create + update; delete stays
+  # open so gated content can always be removed. chart_of_accounts is never
+  # gated — it is the core product path. Fail-closed in prod/staging: the
+  # default is "false" there, so a missing SSM parameter cannot open the
+  # surface. Dev/test default on (the scenario demos author
+  # reporting_extension disclosure notes).
+  TAXONOMY_AUTHORING_ENABLED = get_bool_env(
+    "TAXONOMY_AUTHORING_ENABLED",
+    get_parameter_value(
+      "TAXONOMY_AUTHORING_ENABLED",
+      "false" if ENVIRONMENT in ("prod", "staging") else "true",
+    ).lower()
+    == "true",
+  )
 
   # --- OpenSearch ---
   OPENSEARCH_URL = get_str_env("OPENSEARCH_URL", "http://localhost:9200")

@@ -7,6 +7,7 @@ import pytest
 from robosystems.operations.information_block.rules.expressions import (
   EQUALITY_TOLERANCE,
   InvalidRuleExpression,
+  evaluate_derivation,
   evaluate_equality,
   lhs_variable_names,
   parse_arithmetic_expression,
@@ -170,3 +171,43 @@ class TestBuildRollupExpression:
     )
     parsed = parse_arithmetic_expression(expr, names)
     assert lhs_variable_names(parsed) == ["Total"]
+
+
+class TestEvaluateDerivation:
+  """The compute path for Derive rules — RHS evaluated to a value."""
+
+  def test_evaluates_rhs_with_operand_values_only(self) -> None:
+    parsed = parse_arithmetic_expression(
+      "$CurrentRatio = ($AssetsCurrent / $LiabilitiesCurrent)",
+      ["CurrentRatio", "AssetsCurrent", "LiabilitiesCurrent"],
+    )
+    value = evaluate_derivation(
+      parsed, {"AssetsCurrent": 100.0, "LiabilitiesCurrent": 40.0}
+    )
+    assert value == pytest.approx(2.5)
+
+  def test_nested_subtraction_and_division(self) -> None:
+    parsed = parse_arithmetic_expression(
+      "$QuickRatio = (($AssetsCurrent - $Inventory) / $LiabilitiesCurrent)",
+      ["QuickRatio", "AssetsCurrent", "Inventory", "LiabilitiesCurrent"],
+    )
+    value = evaluate_derivation(
+      parsed,
+      {"AssetsCurrent": 100.0, "Inventory": 20.0, "LiabilitiesCurrent": 40.0},
+    )
+    assert value == pytest.approx(2.0)
+
+  def test_division_by_zero_raises(self) -> None:
+    parsed = parse_arithmetic_expression("$Ratio = ($A / $B)", ["Ratio", "A", "B"])
+    with pytest.raises(InvalidRuleExpression, match="division by zero"):
+      evaluate_derivation(parsed, {"A": 1.0, "B": 0.0})
+
+  def test_missing_operand_raises(self) -> None:
+    parsed = parse_arithmetic_expression("$Ratio = ($A / $B)", ["Ratio", "A", "B"])
+    with pytest.raises(InvalidRuleExpression, match="unbound name"):
+      evaluate_derivation(parsed, {"A": 1.0})
+
+  def test_non_equality_expression_raises(self) -> None:
+    parsed = parse_arithmetic_expression("$A + $B", ["A", "B"])
+    with pytest.raises(InvalidRuleExpression, match="derivation expects"):
+      evaluate_derivation(parsed, {"A": 1.0, "B": 2.0})

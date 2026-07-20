@@ -1007,6 +1007,80 @@ def verify_disclosure_notes(graph_id: str) -> None:
       print(f"    Verification: {passed}/{total} rules passed")
 
 
+def verify_metrics(graph_id: str, scenario) -> None:
+  """Compute + render the Key Financial Metrics standing time series.
+
+  The Metrics M-1 probe: the library-seeded rs-metric catalog computes
+  from the filed report's persisted facts. Two period ends (current +
+  prior comparative — ``comparative=True`` persists both windows) make
+  an honest 2-period series for the instant metrics; InterestCoverage
+  skips with a reason for a debt-free scenario, exercising the
+  soft-fail path on purpose.
+  """
+  import httpx
+
+  client = _get_ledger_client()
+  blocks = client.list_information_blocks(graph_id, block_type="metric")
+  if not blocks:
+    print("  ERROR: no metric block found — was the rs-metric package seeded?")
+    return
+  block = blocks[0]
+  structure_id = block.get("id")
+  print(f"  Metric block: {block.get('name')} ({structure_id})")
+
+  if scenario.report_period is None:
+    print("  (skipped — scenario has no report_period)")
+    return
+  period_start, period_end = scenario.report_period
+  # Mirrors the report's comparative window (_compute_prior_period):
+  # the prior period ends the day before the current window starts.
+  prior_end = period_start - timedelta(days=1)
+
+  api_key = _client_config()["token"]
+  for pe in (prior_end, period_end):
+    resp = httpx.post(
+      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-metrics",
+      json={"structure_id": structure_id, "period_end": pe.isoformat()},
+      headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+      timeout=60.0,
+    )
+    if resp.status_code >= 400:
+      print(f"  ERROR: compute-metrics {pe} -> HTTP {resp.status_code}: {resp.text[:200]}")
+      continue
+    result = (resp.json() or {}).get("result") or {}
+    computed = result.get("computed") or []
+    skipped = result.get("skipped") or []
+    print(f"  {pe}: {len(computed)} computed, {len(skipped)} skipped")
+    for m in computed:
+      value = m.get("value")
+      if not isinstance(value, (int, float)):
+        continue
+      shown = f"${value:,.2f}" if m.get("unit") == "USD" else f"{value:,.2f}"
+      print(f"    {m.get('name')}: {shown}")
+    for s in skipped:
+      print(f"    (skipped) {s.get('element_qname')}: {s.get('reason')}")
+
+  # Re-read the block — the standing sets are now the rendered series.
+  blocks = client.list_information_blocks(graph_id, block_type="metric")
+  rendering = ((blocks[0].get("view") or {}).get("rendering") or {}) if blocks else {}
+  periods = rendering.get("periods") or []
+  rows = rendering.get("rows") or []
+  print(f"  Time series: {len(periods)} period(s), {len(rows)} metric row(s)")
+  current_ratio = next(
+    (r for r in rows if r.get("element_qname") == "rs-metric:CurrentRatio"), None
+  )
+  if current_ratio is None:
+    print("  WARNING: Current Ratio row missing from the rendering")
+    return
+  values = current_ratio.get("values") or []
+  print(f"    Current Ratio series: {values}")
+  numeric = [v for v in values if isinstance(v, (int, float))]
+  if len(periods) >= 2 and len(numeric) >= 2:
+    print("  Two-period metric series verified")
+  elif not numeric:
+    print("  WARNING: Current Ratio has no computed values")
+
+
 # ---------------------------------------------------------------------------
 # Step 3b: AI mapping path — requires Bedrock (optional)
 # ---------------------------------------------------------------------------
@@ -1573,6 +1647,13 @@ def run_demo(
   if disclosures and report_id:
     print("\nRendered disclosure notes:")
     verify_disclosure_notes(graph_id)
+
+  # Metrics probe — compute the seeded Key Financial Metrics catalog
+  # against the report's persisted facts for both comparative period
+  # ends, then render the standing time series.
+  if report_id:
+    print("\nComputing key financial metrics...")
+    verify_metrics(graph_id, scenario)
 
   # Summary
   print("\n" + "=" * 60)

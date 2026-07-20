@@ -173,6 +173,8 @@ from robosystems.models.api.extensions.text_blocks import (
   BindTextBlockResponse,
 )
 from robosystems.models.api.information_block import (
+  ComputeMetricsRequest,
+  ComputeMetricsResponse,
   CreateInformationBlockRequest,
   DeleteInformationBlockRequest,
   DeleteInformationBlockResponse,
@@ -233,6 +235,9 @@ from robosystems.operations.information_block.commands import (
 )
 from robosystems.operations.information_block.commands import (
   update_information_block as cmd_update_information_block,
+)
+from robosystems.operations.information_block.metrics import (
+  cmd_compute_metrics,
 )
 from robosystems.operations.information_block.rules.commands import (
   cmd_evaluate_rules,
@@ -401,6 +406,9 @@ from robosystems.operations.roboledger.fiscal_calendar.close_service import (
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   InvalidCloseTargetError,
+)
+from robosystems.operations.taxonomy_block.commands import (
+  TaxonomyAuthoringDisabledError,
 )
 from robosystems.operations.taxonomy_block.commands import (
   create_taxonomy_block as cmd_create_taxonomy_block,
@@ -836,8 +844,11 @@ create_taxonomy_block_op = _registrar.register(
       "Create a taxonomy block atomically: one envelope carrying the "
       "taxonomy row plus its structures, elements, associations, and "
       "rules. Dispatches by `taxonomy_type` — `chart_of_accounts` "
-      "(declarative tenant CoA) is supported; `reporting_extension` / "
-      "`custom_ontology` / `reporting_standard` are not yet implemented. "
+      "(declarative tenant CoA), `reporting_extension`, and "
+      "`custom_ontology` are supported; `reporting_standard` is "
+      "library-origin (501). `reporting_extension` / `custom_ontology` "
+      "authoring may be disabled per environment "
+      "(TAXONOMY_AUTHORING_ENABLED) — disabled surfaces 403. "
       "NOT the path for a functional close schedule: a structure with "
       "block_type='schedule' here is a bare ontology row with none of the "
       "schedule machinery (per-period facts, schedule_entry_due "
@@ -848,6 +859,7 @@ create_taxonomy_block_op = _registrar.register(
     request_model=CreateTaxonomyBlockRequest,
     result_type=TaxonomyBlockEnvelope,
     error_map={
+      TaxonomyAuthoringDisabledError: 403,
       ValueError: 422,
       NotImplementedError: 501,
     },
@@ -863,12 +875,16 @@ update_taxonomy_block_op = _registrar.register(
       "Incrementally mutate a taxonomy block via typed delta lists "
       "(elements/structures/associations/rules to add, update, remove). "
       "Dispatches by the target taxonomy's stored `taxonomy_type`. "
-      "Library-origin block types (`reporting_standard`) surface 501."
+      "Library-origin block types (`reporting_standard`) surface 501. "
+      "`reporting_extension` / `custom_ontology` authoring may be "
+      "disabled per environment (TAXONOMY_AUTHORING_ENABLED) — "
+      "disabled surfaces 403."
     ),
     command=cmd_update_taxonomy_block,
     request_model=UpdateTaxonomyBlockRequest,
     result_type=TaxonomyBlockEnvelope,
     error_map={
+      TaxonomyAuthoringDisabledError: 403,
       ValueError: 422,
       NotImplementedError: 501,
     },
@@ -1168,6 +1184,29 @@ evaluate_rules_op = _registrar.register(
     request_model=EvaluateRulesRequest,
     result_type=EvaluateRulesResponse,
     error_map={ValueError: 422},
+    requires_created_by=True,
+  )
+)
+
+compute_metrics_op = _registrar.register(
+  OperationSpec(
+    name="compute-metrics",
+    summary="Compute Metrics for a Metric Block",
+    description=(
+      "Resolves the Derive rules scoped to a metric block "
+      "(block_type='metric'), binds each rule's operands to the entity's "
+      "most recent persisted report facts at period_end, evaluates, and "
+      "upserts the period's standing factset_type='metric' FactSet — one "
+      "per (structure, entity, period_end), so successive runs accumulate "
+      "the time series and re-running a period replaces its values. "
+      "Metrics with missing operands or undefined ratios are skipped "
+      "with a reason, never errored."
+    ),
+    command=cmd_compute_metrics,
+    request_model=ComputeMetricsRequest,
+    result_type=ComputeMetricsResponse,
+    error_map={ValueError: 422},
+    mark_stale_reason="metrics_computed",
     requires_created_by=True,
   )
 )

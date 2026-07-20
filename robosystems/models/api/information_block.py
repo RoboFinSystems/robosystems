@@ -1370,10 +1370,115 @@ class EvaluateRulesResponse(BaseModel):
   )
 
 
+class ComputedMetricLite(BaseModel):
+  """One metric computed by a ``compute-metrics`` run."""
+
+  rule_id: str = Field(..., description="Derive rule that produced the value.")
+  element_id: str = Field(..., description="Metric element the fact was written for.")
+  element_qname: str | None = Field(
+    None, description="Metric element qname (e.g. rs-metric:CurrentRatio)."
+  )
+  name: str = Field(..., description="Metric display name.")
+  value: float = Field(..., description="Computed value.")
+  unit: str = Field(..., description="Fact unit — 'USD' for monetary, else 'pure'.")
+  period_type: str = Field(..., description="'instant' or 'duration'.")
+
+
+class SkippedMetricLite(BaseModel):
+  """One metric a ``compute-metrics`` run could not compute.
+
+  Soft-fail by design: a missing operand fact (e.g. InterestExpense for a
+  debt-free entity) or an undefined ratio (division by zero) skips the
+  metric with a reason — it never errors the run.
+  """
+
+  rule_id: str = Field(..., description="Derive rule that was skipped.")
+  element_qname: str | None = Field(
+    None, description="Metric element qname the rule targets."
+  )
+  reason: str = Field(..., description="Why the metric was skipped.")
+  missing: list[str] = Field(
+    default_factory=list,
+    description="Operand qnames with no bound fact at the period, when applicable.",
+  )
+
+
+class ComputeMetricsRequest(BaseModel):
+  """Request body for the ``compute-metrics`` operation.
+
+  Resolves the ``Derive`` rules scoped to the metric block, binds each
+  rule's operands to the entity's most recent persisted report facts at
+  ``period_end``, evaluates, and upserts the period's standing
+  ``factset_type='metric'`` FactSet (re-running a period replaces its
+  facts). One standing FactSet per (structure, entity, period_end) — the
+  accumulating time series.
+  """
+
+  structure_id: str = Field(
+    ...,
+    description="Metric block structure (block_type='metric') to compute.",
+  )
+  period_end: date = Field(
+    ...,
+    description=(
+      "Period end to compute at. Operands bind to report facts whose "
+      "period_end matches exactly (instant balances as of this date; "
+      "durations ending on it)."
+    ),
+  )
+  period_start: date | None = Field(
+    None,
+    description=(
+      "Optional lower bound for duration-operand binding and the "
+      "standing FactSet's period_start."
+    ),
+  )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "Entity to compute for. Defaults to the graph's earliest-created "
+      "entity (the primary entity for single-entity graphs)."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"structure_id": "str_key_financial_metrics", "period_end": "2026-03-31"},
+        {
+          "structure_id": "str_key_financial_metrics",
+          "period_end": "2026-03-31",
+          "period_start": "2025-04-01",
+        },
+      ]
+    }
+  )
+
+
+class ComputeMetricsResponse(BaseModel):
+  """Response for the ``compute-metrics`` operation."""
+
+  structure_id: str
+  entity_id: str
+  period_end: date
+  fact_set_id: str | None = Field(
+    None,
+    description=(
+      "Standing metric FactSet for the period — None when every metric "
+      "was skipped and no prior set existed."
+    ),
+  )
+  computed: list[ComputedMetricLite] = Field(default_factory=list)
+  skipped: list[SkippedMetricLite] = Field(default_factory=list)
+
+
 __all__ = [
   "ArtifactMechanics",
   "ArtifactResponse",
   "ClassificationLite",
+  "ComputeMetricsRequest",
+  "ComputeMetricsResponse",
+  "ComputedMetricLite",
   "ConnectionLite",
   "CreateInformationBlockRequest",
   "DeleteInformationBlockRequest",
@@ -1393,6 +1498,7 @@ __all__ = [
   "RuleTargetLite",
   "RuleVariableLite",
   "ScheduleMechanics",
+  "SkippedMetricLite",
   "StatementMechanics",
   "UpdateInformationBlockRequest",
   "ValidationLite",

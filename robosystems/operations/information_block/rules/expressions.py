@@ -206,6 +206,28 @@ def evaluate_arithmetic(parsed: ParsedExpression, values: dict[str, float]) -> f
   return _eval_arith(parsed.tree.body, mapped)
 
 
+def evaluate_derivation(parsed: ParsedExpression, values: dict[str, float]) -> float:
+  """Evaluate the RHS of a ``$Target = (expression)`` rule to a float.
+
+  The compute path for ``Derive`` rules (compute-metrics): the LHS names
+  the element being computed, so only the RHS operands need bound values
+  — pass ``values`` keyed by RHS variable name. Raises
+  :class:`InvalidRuleExpression` for a non-equality expression, a missing
+  or null operand, or division by zero.
+  """
+  compare = parsed.tree.body
+  if (
+    not isinstance(compare, ast.Compare)
+    or len(compare.ops) != 1
+    or not isinstance(compare.ops[0], ast.Eq)
+  ):
+    raise InvalidRuleExpression(
+      f"derivation expects a single LHS = RHS expression, got: {ast.dump(compare)}"
+    )
+  mapped = {f"_var_{name}": value for name, value in values.items()}
+  return _eval_arith(compare.comparators[0], mapped)
+
+
 def build_rollup_expression(parent_name: str, children: list[tuple[str, float]]) -> str:
   """``$Parent = ($childA + $childB - $childC ...)``.
 
@@ -240,6 +262,7 @@ __all__ = [
   "ParsedExpression",
   "build_rollup_expression",
   "evaluate_arithmetic",
+  "evaluate_derivation",
   "evaluate_equality",
   "lhs_variable_names",
   "parse_arithmetic_expression",

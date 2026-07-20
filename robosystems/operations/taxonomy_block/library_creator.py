@@ -73,6 +73,7 @@ _ALLOWED_SOURCES = frozenset(
     "disclosures",
     "checklist",
     "styles",
+    "rs-metric",
     # cm — Conceptual Model framework (cm:Debit/cm:Credit posting roles).
     "cm",
   }

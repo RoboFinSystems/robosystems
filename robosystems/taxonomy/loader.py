@@ -65,6 +65,7 @@ RULE_PATTERN_VALUES: frozenset[str] = frozenset(
   {
     "Adjustment",
     "CoExists",
+    "Derive",
     "EqualTo",
     "Exists",
     "GreaterThan",

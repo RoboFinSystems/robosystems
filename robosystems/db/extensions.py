@@ -259,7 +259,7 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
     # rs-gaap framework extension packages anchored to
     # sibling namespaces of rs-gaap.
-    "'disclosures', 'checklist', 'styles', "
+    "'disclosures', 'checklist', 'styles', 'rs-metric', "
     # cm — Conceptual Model framework (cm:Debit/cm:Credit posting roles),
     # tenant-copied with the default pin.
     "'cm'"
