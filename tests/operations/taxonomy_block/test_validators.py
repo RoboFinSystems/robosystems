@@ -415,3 +415,96 @@ def test_pytest_is_wired() -> None:
   """Smoke — confirms pytest markers and module paths resolve."""
   with pytest.raises(TaxonomyBlockValidationError):
     raise TaxonomyBlockValidationError([])
+
+
+class TestLibraryNamespaceProtection:
+  """Tenants anchor to library concepts; they never declare in library
+  namespaces — rs-gaap is platform-owned and evolves wholesale."""
+
+  def _session_with_library_prefixes(self, rows_per_call: list) -> MagicMock:
+    session = MagicMock()
+    results = []
+    for rows in rows_per_call:
+      result = MagicMock()
+      result.all.return_value = rows
+      results.append(result)
+    session.execute.side_effect = results
+    return session
+
+  def test_declaring_under_library_prefix_rejected(self) -> None:
+    payload = _basic_coa(
+      elements=[
+        TaxonomyBlockElementRequest(
+          qname="rs-gaap:SneakyAssets",
+          name="Sneaky Assets",
+          trait="asset",
+          balance_type="debit",
+          period_type="instant",
+        )
+      ]
+    )
+    session = self._session_with_library_prefixes([[("rs-gaap",), ("disclosures",)]])
+    issues = validate_create_envelope(payload, session)
+    codes = {i.code for i in issues}
+    assert "library_namespace_reserved" in codes
+
+  def test_own_namespace_declaration_accepted(self) -> None:
+    payload = _basic_coa(
+      elements=[
+        TaxonomyBlockElementRequest(
+          qname="acme:Widgets",
+          name="Widgets",
+          trait="asset",
+          balance_type="debit",
+          period_type="instant",
+        )
+      ]
+    )
+    session = self._session_with_library_prefixes([[("rs-gaap",), ("disclosures",)]])
+    issues = validate_create_envelope(payload, session)
+    assert not any(i.phase == "namespace_protection" for i in issues)
+
+  def test_referencing_library_concepts_stays_legal(self) -> None:
+    """The extend-and-map shape: own-namespace member parented under and
+    arced from a library total. References resolve; only declarations
+    are namespace-guarded."""
+    payload = CreateTaxonomyBlockRequest(
+      name="Acme Extension",
+      taxonomy_type="reporting_extension",
+      parent_taxonomy_id="tax_lib",
+      elements=[
+        TaxonomyBlockElementRequest(
+          qname="acme:InventoryPackaging",
+          name="Packaging",
+          parent_ref="rs-gaap:InventoryNet",
+          balance_type="debit",
+          period_type="instant",
+        )
+      ],
+      structures=[],
+      associations=[],
+      rules=[],
+    )
+    # 1st execute: _load_library_qnames resolves the referenced parent;
+    # 2nd execute: the reserved-prefix load.
+    session = self._session_with_library_prefixes(
+      [[("rs-gaap:InventoryNet",)], [("rs-gaap",)]]
+    )
+    issues = validate_create_envelope(payload, session)
+    assert not any(i.phase == "namespace_protection" for i in issues)
+    assert not any(i.code == "phantom_parent_ref" for i in issues)
+
+  def test_no_library_rows_disables_protection(self) -> None:
+    payload = _basic_coa(
+      elements=[
+        TaxonomyBlockElementRequest(
+          qname="rs-gaap:Whatever",
+          name="Whatever",
+          trait="asset",
+          balance_type="debit",
+          period_type="instant",
+        )
+      ]
+    )
+    issues = validate_create_envelope(payload, _session_empty())
+    assert not any(i.phase == "namespace_protection" for i in issues)
