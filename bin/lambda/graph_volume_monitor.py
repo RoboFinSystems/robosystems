@@ -277,6 +277,10 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
       result["filesystem_grown"] = grow_result.get("success", False)
       result["reason"] = f"EBS ({ebs_size_gb}GB) > filesystem ({current_size}GB)"
       result["ebs_size_gb"] = ebs_size_gb
+      # EBS > filesystem means the resize already completed; clear any stale
+      # 'expanding' status left by an expansion whose grow didn't finalize.
+      if grow_result.get("success") and volume_id:
+        mark_volume_attached(volume_id)
       # Use the EBS size as the current size for expansion check since
       # filesystem growth should now match the EBS volume
       current_size = ebs_size_gb
@@ -322,6 +326,9 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
         result["action"] = "filesystem_growth_only"
         result["filesystem_grown"] = grow_result.get("success", False)
         result["reason"] = "Volume stuck in optimizing state"
+        # Optimizing volumes are attached and usable; don't leave them 'expanding'.
+        if grow_result.get("success"):
+          mark_volume_attached(volume_id)
         return result
       elif modification_state == "modifying":
         logger.info(f"Volume {volume_id} is already being modified, skipping")
@@ -381,6 +388,9 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
                   if cmd_status["Status"] == "Success":
                     logger.info("Filesystem growth completed successfully")
                     result["expansion_details"]["filesystem_status"] = "grown"
+                    # Resize + grow done: clear the 'expanding' status the
+                    # expansion stamped, so it doesn't strand a still-awake master.
+                    mark_volume_attached(volume_id)
                   else:
                     logger.warning(f"Filesystem growth status: {cmd_status['Status']}")
                     result["expansion_details"]["filesystem_status"] = cmd_status[
@@ -673,6 +683,41 @@ def get_volume_metrics_from_cloudwatch(instance: dict) -> dict | None:
   except Exception as e:
     logger.error(f"CloudWatch fallback failed for {instance_id}: {e}")
     return None
+
+
+def mark_volume_attached(volume_id: str) -> None:
+  """Reset a volume's registry status from ``expanding`` back to ``attached``.
+
+  ``perform_volume_expansion`` stamps ``expanding`` while the online EBS resize
+  runs, but nothing else clears it until the next detach/reattach cycle. Callers
+  invoke this once a filesystem grow has succeeded so ``expanding`` stays a
+  transient state — otherwise a master kept awake across an auto-expansion is
+  left with a stale ``expanding`` row, which stalls the wake health-gate and
+  can misfire status-filtered volume lookups.
+
+  The conditional write only flips ``expanding`` → ``attached``; if a detach has
+  already moved the row to ``available`` the condition fails and we leave it be.
+  """
+  if not VOLUME_REGISTRY_TABLE:
+    return
+  try:
+    table = dynamodb.Table(VOLUME_REGISTRY_TABLE)
+    table.update_item(
+      Key={"volume_id": volume_id},
+      UpdateExpression="SET #status = :attached, last_modified = :timestamp",
+      ConditionExpression="#status = :expanding",
+      ExpressionAttributeNames={"#status": "status"},
+      ExpressionAttributeValues={
+        ":attached": "attached",
+        ":expanding": "expanding",
+        ":timestamp": datetime.now(UTC).isoformat(),
+      },
+    )
+    logger.info(f"Volume {volume_id} status reset to attached after expansion")
+  except Exception as e:
+    # ConditionalCheckFailed (status wasn't 'expanding' — e.g. already detached
+    # to 'available') is expected and harmless; other errors are non-fatal.
+    logger.info(f"Volume {volume_id} status not reset to attached: {e}")
 
 
 def perform_volume_expansion(

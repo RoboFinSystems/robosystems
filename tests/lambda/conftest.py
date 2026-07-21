@@ -88,3 +88,9 @@ def gvm(aws):
 def gvd(aws):
   """graph_volume_detachment module under mock_aws."""
   yield _import_lambda("graph_volume_detachment")
+
+
+@pytest.fixture
+def gvmon(aws):
+  """graph_volume_monitor module under mock_aws."""
+  yield _import_lambda("graph_volume_monitor")
