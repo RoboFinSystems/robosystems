@@ -26,13 +26,23 @@ from dagster import (
   MaterializeResult,
   asset,
 )
+from pydantic import Field
 
 
 class SECArtifactConfig(Config):
   """Configuration for SEC artifact generation."""
 
   duckdb_source: str = "sec"
-  memory_limit: str = "8GB"
+  # DuckDB memory budget per builder connection. MUST stay well under the ECS
+  # task memory (16GB) — the extractions spill to disk beyond this, but the
+  # extracted result set is still materialized in Python on top of DuckDB's
+  # buffer, so setting this near the container size starves Python and the
+  # kernel OOM-kills the task (SIGKILL). Raising it does NOT help a corpus that
+  # outgrew memory; the spill-to-disk path (see extractors._connect) does.
+  memory_limit: str = Field(
+    default="8GB",
+    description="DuckDB memory budget per builder; keep well below task memory.",
+  )
   publish_r2: bool = False
 
 

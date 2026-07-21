@@ -191,9 +191,14 @@ class TestSECArtifactJob:
     assert sec_artifact_generation_job.tags.get("phase") == "artifact"
 
   def test_job_has_enhanced_ecs_profile(self):
-    """Test artifact generation job has enhanced ECS profile for compute."""
-    assert sec_artifact_generation_job.tags.get("ecs/cpu") == "2048"
-    assert sec_artifact_generation_job.tags.get("ecs/memory") == "16384"
+    """Test artifact generation job has enhanced ECS profile for compute.
+
+    4 vCPU is required to unlock the >16GB Fargate memory tier; 24GB gives the
+    Python-side result materialization headroom while DuckDB stays capped and
+    spills to disk (the 16GB profile OOM-killed as the corpus grew).
+    """
+    assert sec_artifact_generation_job.tags.get("ecs/cpu") == "4096"
+    assert sec_artifact_generation_job.tags.get("ecs/memory") == "24576"
 
 
 @pytest.mark.unit

@@ -69,6 +69,19 @@ class TestArcExtractorConnect:
     finally:
       conn.close()
 
+  def test_connect_disables_insertion_order(self, sec_duckdb):
+    """preserve_insertion_order is off so large hash aggregations spill to disk
+    (temp_directory) instead of dying with an internal OutOfMemoryException."""
+    extractor = ArcExtractor(sec_duckdb, memory_limit="256MB")
+    conn = extractor._connect()
+    try:
+      value = conn.execute(
+        "SELECT current_setting('preserve_insertion_order')"
+      ).fetchone()[0]
+      assert value in (False, "false")
+    finally:
+      conn.close()
+
 
 class TestExtractDeduplicatedEdges:
   """Tests for extract_deduplicated_edges."""
