@@ -556,14 +556,18 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Count: !If [HasMinInstances, !Ref MinInstances, 0]
-        # S3 download (~7 min) + system setup (~2 min) + container warmup (~1 min)
-        Timeout: PT20M
+        # Measured cold boot is ~15-20 min: ~8 min S3 download (sec.lbug is
+        # ~120GB and growing) + OS/container setup + read-only DB open + warmup.
+        # PT30M keeps a fleet cycle from racing the signal deadline (PT20M was
+        # marginal and lost the race once the deploy stopped pinning the tag).
+        Timeout: PT30M
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: !If [HasMinInstances, 1, 0]
         MaxBatchSize: 1
-        # Rolling updates also need time for download + warmup
-        PauseTime: PT20M
+        # Rolling updates re-download + warm up per instance; match the
+        # CreationPolicy signal budget above (was PT20M — too tight).
+        PauseTime: PT30M
         WaitOnResourceSignals: !If [HasMinInstances, true, false]
 
   # CPU-based Auto Scaling

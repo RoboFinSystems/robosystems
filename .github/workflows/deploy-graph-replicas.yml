@@ -183,7 +183,10 @@ on:
 jobs:
   deploy:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
-    timeout-minutes: 30
+    # Rolling update replaces replicas one at a time (MaxBatchSize 1), each with
+    # a PT30M signal budget; two instances back-to-back can run ~60 min. Cover
+    # that plus the monitor action's own 3600s window and setup overhead.
+    timeout-minutes: 70
     permissions:
       id-token: write
       contents: read
@@ -405,7 +408,9 @@ jobs:
         uses: ./.github/actions/monitor-stack-deployment
         with:
           stack-name: ${{ inputs.stack_name }}
-          timeout: "1800"
+          # Cover a full rolling replica cycle (~120GB download + warmup per
+          # instance, two instances sequential). PT30M x2 → 60 min.
+          timeout: "3600"
           interval: "10"
 
       - name: Get Stack Outputs
