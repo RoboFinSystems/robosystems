@@ -100,17 +100,25 @@ def _instance_is_running(instance_id: str) -> bool:
 
 
 def _volume_attached_to(instance_id: str, database: str) -> bool:
-  """True if ``database``'s data volume is ``attached`` to ``instance_id``.
+  """True if ``database``'s data volume is attached to ``instance_id``.
 
-  Scans all rows tagged with ``database`` and matches only an actually-attached
-  one — a transient stale row (e.g. an old row mid-reattach) must not shadow the
-  real match, since that reattach race is exactly what this gate guards against.
+  Scans all rows tagged with ``database`` and matches only a row bound to THIS
+  instance — a transient stale row (e.g. an old row mid-reattach) must not shadow
+  the real match, since that reattach race is exactly what this gate guards
+  against.
+
+  ``expanding`` counts as attached: the volume monitor stamps that status while
+  an online EBS resize runs, and the volume stays attached and usable throughout
+  (the resize never takes it offline). The monitor does not reset the status
+  until the next detach/reattach, so if the master is kept awake across an
+  auto-expansion, requiring exactly ``attached`` here would hang the wake on a
+  volume that is in fact ready.
   """
   table = _dynamodb_resource().Table(env.VOLUME_REGISTRY_TABLE)
   for item in table.scan().get("Items", []):
     if (
       database in (item.get("databases") or [])
-      and item.get("status") == "attached"
+      and item.get("status") in ("attached", "expanding")
       and item.get("instance_id") == instance_id
     ):
       return True

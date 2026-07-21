@@ -182,6 +182,47 @@ class TestVolumeGate:
 
     assert _volume_attached_to("i-123", "sec") is True
 
+  @patch.object(master_parking, "_dynamodb_resource")
+  def test_expanding_status_counts_as_attached(self, m_ddb):
+    # A volume mid online-resize is stamped 'expanding' but stays attached and
+    # usable; the gate must not hang the wake on it (the monitor doesn't reset
+    # the status until the next detach/reattach).
+    from robosystems.dagster.assets.shared_repositories.master_parking import (
+      _volume_attached_to,
+    )
+
+    volume_table = MagicMock()
+    volume_table.scan.return_value = {
+      "Items": [
+        {"databases": ["sec"], "status": "expanding", "instance_id": "i-123"},
+      ]
+    }
+    resource = MagicMock()
+    resource.Table.return_value = volume_table
+    m_ddb.return_value = resource
+
+    assert _volume_attached_to("i-123", "sec") is True
+
+  @patch.object(master_parking, "_dynamodb_resource")
+  def test_expanding_row_for_other_instance_is_ignored(self, m_ddb):
+    # 'expanding' still only matches THIS instance — a row bound to a different
+    # instance must not green-light the wake.
+    from robosystems.dagster.assets.shared_repositories.master_parking import (
+      _volume_attached_to,
+    )
+
+    volume_table = MagicMock()
+    volume_table.scan.return_value = {
+      "Items": [
+        {"databases": ["sec"], "status": "expanding", "instance_id": "i-other"},
+      ]
+    }
+    resource = MagicMock()
+    resource.Table.return_value = volume_table
+    m_ddb.return_value = resource
+
+    assert _volume_attached_to("i-123", "sec") is False
+
 
 @pytest.mark.unit
 def test_asg_name_from_config():
