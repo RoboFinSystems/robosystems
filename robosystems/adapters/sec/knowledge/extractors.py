@@ -52,6 +52,12 @@ class ArcExtractor:
     # Ensure spill-to-disk uses the same directory as the database file
     temp_dir = str(self._db_path.parent)
     conn.execute(f"SET temp_directory = '{temp_dir}'")
+    # Let the hash aggregations (LIST(DISTINCT ...) over the large STRUCTURE/
+    # ASSOCIATION joins) spill to temp_directory instead of holding the whole
+    # grouping in RAM. Without this the aggregate cannot spill and dies with an
+    # internal OutOfMemoryException on the full corpus; the extractions here are
+    # all grouped/deduplicated downstream, so result row order is irrelevant.
+    conn.execute("SET preserve_insertion_order = false")
     return conn
 
   def extract_deduplicated_edges(self) -> list[tuple[str, str, float, str]]:
