@@ -1,7 +1,7 @@
 """Generate L2 calc-arc RollUp rules from ``rs-gaap-calculations/v1``.
 
 Each calculation Network in ``rs-gaap-calculations`` declares a subtotal
-parent (``arcFrom``) and its weighted children (``arcTo`` + ``arcWeight``).
+parent (``from``) and its weighted children (``to`` + ``weight``).
 This script walks those Networks and emits one ``RollUp`` verification
 rule per parent — ``$Parent = Σ child_i * weight_i`` — into the
 ``rs-gaap-rollup-rules/v1`` package, making calc-DAG consistency explicit
@@ -20,7 +20,20 @@ The ``RollUp`` evaluator treats a missing RHS child as 0 (matching the
 renderer, which sums only the children that have facts); a missing parent
 subtotal skips. See ``operations/information_block/rules/evaluators.py``.
 
-Run: ``uv run python -m robosystems.taxonomy.scripts.generate_rollup_rules``
+.. warning::
+
+   **Do not run this script as-is.** Its arc readers below (``arcFrom`` /
+   ``arcTo`` / ``arcAssociationType`` / ``arcRoleUri`` / ``arcWeight`` /
+   ``arcOrder``) are stale relative to the current ``rs-gaap-calculations/v1``
+   source, which now uses ``from`` / ``to`` / ``associationType`` / ``role`` /
+   ``weight`` / ``order``. Against the live source ``build_rollup_rules``
+   matches nothing and emits an **empty** package — which would overwrite the
+   committed 15-rule ``rs-gaap-rollup-rules/v1`` artifact and disable every L2
+   calc-arc RollUp verification at the next seed/reset. Fix the key mapping
+   (and add a regen-vs-committed diff test) before running. See issue #898.
+
+Run (only after the key mapping is fixed):
+``uv run python -m robosystems.taxonomy.scripts.generate_rollup_rules``
 The committed artifact is the JSON-LD output, not this script.
 """
 
@@ -89,8 +102,10 @@ def _build_expression(parent: str, children: list[tuple[str, float]]) -> str:
 
   Thin qname-to-local-name wrapper over the shared
   :func:`build_rollup_expression` (also used by tenant auto-rule
-  emission) — output is byte-identical to the historical inline
-  builder, so the committed seed artifact never needs regeneration.
+  emission) — the expression string it produces is byte-identical to
+  the historical inline builder. (This concerns only the expression
+  text; the surrounding script's arc readers are stale — see the
+  module-level warning.)
   """
   return build_rollup_expression(
     _local(parent), [(_local(child_qname), weight) for child_qname, weight in children]
