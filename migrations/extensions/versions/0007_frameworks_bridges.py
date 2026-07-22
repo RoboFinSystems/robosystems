@@ -259,7 +259,9 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   # 'cm' — Conceptual Model framework (cm:Debit/cm:Credit posting roles).
   # Re-applied here so the DROP+ADD over already-seeded public + tenant
   # schemas (which now contain cm rows) doesn't fail constraint validation.
-  "'disclosures', 'checklist', 'styles', 'cm'"
+  # 'rs-metric' — same reason: fresh databases seed the metric catalog at
+  # 0002, so the rows exist when this DROP+ADD re-validates them.
+  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric'"
   ")"
 )
 _PRIOR_ELEMENT_SOURCE_CHECK = (
