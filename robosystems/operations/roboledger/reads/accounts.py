@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.common import create_pagination_info
@@ -18,10 +18,32 @@ from robosystems.models.api.extensions.accounts import (
 from robosystems.models.extensions import (
   Element,
   ElementTrait,
+  Taxonomy,
   Trait,
 )
 from robosystems.models.extensions.roboledger import COA_SOURCES
 from robosystems.operations.library.reads import efs_trait_by_element
+
+
+def coa_element_clause():
+  """Predicate for "this elements row is a Chart-of-Accounts account".
+
+  ``source`` alone cannot discriminate: envelope-authored framework
+  concepts (``reporting_extension`` / ``custom_ontology`` / ``schedule``
+  taxonomies) share ``source='native'`` with natively-authored CoA
+  accounts, and would otherwise leak into every CoA-scoped read.
+  Adapter-imported accounts (QuickBooks, …) carry no ``taxonomy_id``,
+  so NULL-taxonomy rows stay in.
+  """
+  return and_(
+    Element.source.in_(COA_SOURCES),
+    or_(
+      Element.taxonomy_id.is_(None),
+      Element.taxonomy_id.in_(
+        select(Taxonomy.id).where(Taxonomy.taxonomy_type == "chart_of_accounts")
+      ),
+    ),
+  )
 
 
 def _parse_meta(raw: Any) -> dict[str, Any]:
@@ -78,10 +100,8 @@ def list_accounts(
   ``trait`` filters on the FASB elementsOfFinancialStatements
   trait via the element_traits junction table.
   """
-  query = select(Element).where(Element.source.in_(COA_SOURCES))
-  count_query = (
-    select(func.count()).select_from(Element).where(Element.source.in_(COA_SOURCES))
-  )
+  query = select(Element).where(coa_element_clause())
+  count_query = select(func.count()).select_from(Element).where(coa_element_clause())
 
   if trait is not None:
     subquery = (
@@ -124,7 +144,7 @@ def get_account_tree(
   every CoA-facing view. Pass ``include_inactive=True`` to surface them
   (admin / cleanup contexts only).
   """
-  query = select(Element).where(Element.source.in_(COA_SOURCES))
+  query = select(Element).where(coa_element_clause())
   if not include_inactive:
     query = query.where(Element.is_active.is_(True))
   rows = session.execute(query.order_by(Element.code)).scalars().all()

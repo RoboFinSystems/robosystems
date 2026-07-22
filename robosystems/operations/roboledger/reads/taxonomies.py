@@ -35,8 +35,7 @@ from robosystems.operations.library.reads import (
   efs_trait_by_element,
   liquidity_by_element,
 )
-
-_COA_SOURCES = ("quickbooks", "xero", "plaid", "native", "import")
+from robosystems.operations.roboledger.reads.accounts import coa_element_clause
 
 
 class MappingNotFoundError(LookupError):
@@ -192,7 +191,7 @@ def count_coa_elements(session: Session) -> int:
       select(func.count())
       .select_from(Element)
       .where(
-        Element.source.in_(_COA_SOURCES),
+        coa_element_clause(),
         Element.is_active.is_(True),
         Element.is_abstract.is_(False),
       )
@@ -328,7 +327,7 @@ def list_unmapped_elements(
 ) -> list[UnmappedElementResponse]:
   """List CoA elements not yet mapped to the reporting taxonomy."""
   coa_query = select(Element).where(
-    Element.source.in_(_COA_SOURCES),
+    coa_element_clause(),
     Element.is_active.is_(True),
     Element.is_abstract.is_(False),
   )
@@ -878,7 +877,7 @@ def get_mapping_coverage(session: Session, mapping_id: str) -> MappingCoverageRe
       select(func.count())
       .select_from(Element)
       .where(
-        Element.source.in_(_COA_SOURCES),
+        coa_element_clause(),
         Element.is_active.is_(True),
         Element.is_abstract.is_(False),
       )

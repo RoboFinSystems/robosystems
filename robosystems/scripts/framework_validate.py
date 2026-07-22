@@ -59,7 +59,7 @@ from robosystems.config.constants import ReportingStyleConstants
 
 # NOTE — accepted coupling: this validator deliberately reuses several
 # underscore-prefixed internals from the operations/reporting layer
-# (_load_calc_parents, _resolve_root_ids, _COA_SOURCES, _load_reporting_structure,
+# (_load_calc_parents, _resolve_root_ids, _load_reporting_structure,
 # _HierarchyNode, _get_engine, _sanitize_schema). It has to, to see the framework
 # *exactly* as the renderer does. The cost is that a refactor of those modules can
 # break this script with no import-time signal — so the pure-logic helpers are
@@ -71,11 +71,11 @@ from robosystems.db.extensions import (
   extensions_session,
   provision_tenant_schema,
 )
+from robosystems.models.extensions.roboledger import COA_SOURCES as _COA_SOURCES
 from robosystems.operations.operators.implementations.mapping.constants import (
   FAC_TO_RS_GAAP_FALLBACK,
 )
 from robosystems.operations.roboledger.reads.taxonomies import (
-  _COA_SOURCES,
   _load_calc_parents,
   _resolve_root_ids,
   is_target_reachable,
