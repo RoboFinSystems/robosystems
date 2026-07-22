@@ -203,6 +203,7 @@ jobs:
             --cache-from type=gha,scope=main \
             --cache-to type=gha,scope=main,mode=max \
             --build-arg UV_CACHE_DIR=/tmp/uv-cache \
+            --build-arg CACHE_DATE=$(date -u +%Y%m%d) \
             $TAGS \
             -f Dockerfile .
 

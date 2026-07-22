@@ -125,8 +125,11 @@ ENV PYTHONUNBUFFERED=1 \
     DAGSTER_HOME="/app/dagster_home" \
     FASTEMBED_CACHE_PATH="/app/fastembed_cache"
 
-# Install runtime dependencies, apply security patches, and install uv
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+# Install runtime dependencies, apply security patches, and install uv.
+# CACHE_DATE (set per-build in build.yml) busts this layer so the upgrade
+# re-runs despite GHA layer caching — a cached layer keeps stale OS packages.
+ARG CACHE_DATE
+RUN echo "os-refresh ${CACHE_DATE}" && apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
     libatomic1 \
     postgresql-client \
