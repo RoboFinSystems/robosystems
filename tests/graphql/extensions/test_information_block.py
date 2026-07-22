@@ -162,6 +162,35 @@ class TestInformationBlocksQuery:
     assert items[0]["id"] == "struct_ib_01"
     assert items[1]["id"] == "struct_ib_02"
 
+  def test_explicit_null_pagination_variables_are_accepted(self) -> None:
+    """Regression: generated SDK clients (graphql-codegen) send explicit
+    ``null`` for every omitted variable. GraphQL rejects explicit null
+    for ``Int!`` args even with a server default, which broke the
+    roboledger-app Analytics list ("Argument 'offset' of non-null type
+    'Int!' must not be null"). Pagination args must be nullable and
+    defaulted server-side."""
+    with (
+      _patch_session(),
+      patch(LIST_PATH, return_value=[]) as mock_list,
+    ):
+      result = schema.execute_sync(
+        "query List($blockType: String, $category: String, $limit: Int, $offset: Int) {"
+        " informationBlocks(blockType: $blockType, category: $category,"
+        " limit: $limit, offset: $offset) { id } }",
+        variable_values={
+          "blockType": None,
+          "category": None,
+          "limit": 200,
+          "offset": None,
+        },
+        context_value=_ctx(),
+      )
+    assert result.errors is None
+    assert result.data["informationBlocks"] == []
+    _, kwargs = mock_list.call_args
+    assert kwargs["limit"] == 200
+    assert kwargs["offset"] == 0
+
   def test_returns_empty_list_on_library_sentinel(self) -> None:
     """Schedule has surfaces_in_library=False, so the sentinel returns []."""
     with (

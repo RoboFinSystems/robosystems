@@ -23,7 +23,7 @@ from robosystems.graphql.resolvers._common import (
   open_library_session as _open_session,
 )
 from robosystems.graphql.resolvers._common import (
-  validate_pagination as _validate_pagination,
+  resolve_pagination as _resolve_pagination,
 )
 from robosystems.graphql.types.information_block import InformationBlock
 from robosystems.operations.information_block import (
@@ -61,8 +61,8 @@ class InformationBlockQuery:
     info: Info[GraphQLContext, None],
     block_type: str | None = None,
     category: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> list[InformationBlock]:
     """List Information Blocks with optional block_type + category filters.
 
@@ -70,7 +70,7 @@ class InformationBlockQuery:
     ``'schedule'``). ``category`` filters on the registry entry's
     category label ('Close', 'Reporting', …). Both combine as AND.
     """
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     graph_id = require_graph_id(info)
     with _open_session(info) as session:
       rows = list_information_blocks(

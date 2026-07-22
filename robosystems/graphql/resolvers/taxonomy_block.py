@@ -23,7 +23,7 @@ from robosystems.graphql.resolvers._common import (
   open_library_session as _open_session,
 )
 from robosystems.graphql.resolvers._common import (
-  validate_pagination as _validate_pagination,
+  resolve_pagination as _resolve_pagination,
 )
 from robosystems.graphql.types.taxonomy_block import TaxonomyBlock
 from robosystems.operations.taxonomy_block.reads import (
@@ -62,8 +62,8 @@ class TaxonomyBlockQuery:
     taxonomy_type: str | None = None,
     parent_taxonomy_id: strawberry.ID | None = None,
     category: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> list[TaxonomyBlock]:
     """List Taxonomy Blocks with optional filters.
 
@@ -73,7 +73,7 @@ class TaxonomyBlockQuery:
     entry's category label (``'Chart'``, ``'Reporting'``, ``'Library'``,
     ``'Custom'``, ``'Close'``). Filters combine as AND.
     """
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     graph_id = require_graph_id(info)
     with _open_session(info) as session:
       rows = list_taxonomy_blocks(

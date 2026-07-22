@@ -18,7 +18,7 @@ from robosystems.graphql.resolvers._common import (
   open_extensions_session as _open_session,
 )
 from robosystems.graphql.resolvers._common import (
-  validate_pagination as _validate_pagination,
+  resolve_pagination as _resolve_pagination,
 )
 from robosystems.graphql.types.investor import (
   HoldingsList,
@@ -79,11 +79,11 @@ class InvestorQuery:
   def portfolios(
     self,
     info: Info[GraphQLContext, None],
-    limit: int = 100,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> PortfolioList | None:
     """Paginated list of portfolios."""
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_portfolios.list_portfolios(session, limit=limit, offset=offset)
@@ -100,11 +100,11 @@ class InvestorQuery:
     entity_id: str | None = None,
     security_type: str | None = None,
     is_active: bool | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> SecurityList | None:
     """Paginated list of securities."""
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_securities.list_securities(
@@ -144,11 +144,11 @@ class InvestorQuery:
     portfolio_id: str | None = None,
     security_id: str | None = None,
     status: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> PositionList | None:
     """Paginated list of positions."""
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboinvestor") as session:
         response = reads_positions.list_positions(

@@ -41,7 +41,7 @@ from robosystems.graphql.resolvers._common import (
   open_library_session as _open_session,
 )
 from robosystems.graphql.resolvers._common import (
-  validate_pagination as _validate_pagination,
+  resolve_pagination as _resolve_pagination,
 )
 from robosystems.graphql.types.library import (
   LibraryAssociation,
@@ -87,7 +87,7 @@ class LibraryQuery:
     self,
     info: Info[GraphQLContext, None],
     standard: str | None = None,
-    include_element_count: bool = False,
+    include_element_count: bool | None = None,
   ) -> list[LibraryTaxonomy]:
     """List taxonomies visible to this graph.
 
@@ -99,7 +99,7 @@ class LibraryQuery:
       rows = list_taxonomies(
         session,
         standard=standard,
-        include_element_count=include_element_count,
+        include_element_count=bool(include_element_count),
         shared_only=is_sentinel,
       )
       return [LibraryTaxonomy.from_pydantic(r) for r in rows]
@@ -111,7 +111,7 @@ class LibraryQuery:
     id: strawberry.ID | None = None,
     standard: str | None = None,
     version: str | None = None,
-    include_element_count: bool = False,
+    include_element_count: bool | None = None,
   ) -> LibraryTaxonomy | None:
     """Get a taxonomy by id or (standard, version)."""
     with _open_session(info) as session:
@@ -120,7 +120,7 @@ class LibraryQuery:
         taxonomy_id=str(id) if id else None,
         standard=standard,
         version=version,
-        include_element_count=include_element_count,
+        include_element_count=bool(include_element_count),
       )
       return LibraryTaxonomy.from_pydantic(row) if row else None
 
@@ -131,8 +131,8 @@ class LibraryQuery:
     taxonomy_id: strawberry.ID,
     association_type: str | None = None,
     structure_id: strawberry.ID | None = None,
-    limit: int = 200,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> list[LibraryAssociation]:
     """List every arc contributed by a taxonomy (via its structures).
 
@@ -144,7 +144,7 @@ class LibraryQuery:
     Pass ``structure_id`` to scope to a single structure (one
     presentation/calculation hierarchy).
     """
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=200)
     with _open_session(info) as session:
       rows = list_taxonomy_arcs(
         session,
@@ -185,10 +185,10 @@ class LibraryQuery:
     activity_type: str | None = None,
     element_type: str | None = None,
     is_abstract: bool | None = None,
-    limit: int = 50,
-    offset: int = 0,
-    include_labels: bool = False,
-    include_references: bool = False,
+    limit: int | None = None,
+    offset: int | None = None,
+    include_labels: bool | None = None,
+    include_references: bool | None = None,
   ) -> list[LibraryElement]:
     """List library elements with filters + pagination.
 
@@ -198,7 +198,7 @@ class LibraryQuery:
     be combined.
     `isAbstract=true` → abstract only; `false` → concrete only; omit for both.
     """
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     with _open_session(info) as session:
       rows = list_elements(
         session,
@@ -210,8 +210,8 @@ class LibraryQuery:
         is_abstract=is_abstract,
         limit=limit,
         offset=offset,
-        include_labels=include_labels,
-        include_references=include_references,
+        include_labels=bool(include_labels),
+        include_references=bool(include_references),
       )
       return [LibraryElement.from_pydantic(r) for r in rows]
 
@@ -238,10 +238,10 @@ class LibraryQuery:
     info: Info[GraphQLContext, None],
     query: str,
     source: str | None = None,
-    limit: int = 50,
+    limit: int | None = None,
   ) -> list[LibraryElement]:
     """Substring search across qname, name, and standard label text."""
-    _validate_pagination(limit, 0)
+    limit, _ = _resolve_pagination(limit, None, default_limit=50)
     with _open_session(info) as session:
       rows = search_elements(session, query_text=query, limit=limit, source=source)
       return [LibraryElement.from_pydantic(r) for r in rows]
@@ -251,7 +251,7 @@ class LibraryQuery:
     self,
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
-    max_depth: int = 5,
+    max_depth: int | None = None,
     structure_id: strawberry.ID | None = None,
   ) -> LibraryElementTreeNode | None:
     """Walk presentation arcs down from an element.
@@ -261,6 +261,7 @@ class LibraryQuery:
     statement variants (e.g. classified vs unclassified balance sheet)
     and a blended tree would misrepresent any single layout.
     """
+    max_depth = 5 if max_depth is None else max_depth
     if max_depth < 1 or max_depth > 10:
       raise strawberry.exceptions.StrawberryGraphQLError(
         message="max_depth must be between 1 and 10",
