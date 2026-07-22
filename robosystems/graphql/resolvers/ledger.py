@@ -26,7 +26,7 @@ from robosystems.graphql.resolvers._common import (
   open_extensions_session as _open_session,
 )
 from robosystems.graphql.resolvers._common import (
-  validate_pagination as _validate_pagination,
+  resolve_pagination as _resolve_pagination,
 )
 from robosystems.graphql.types.ledger import (
   AccountList,
@@ -209,11 +209,11 @@ class LedgerQuery:
     agent_type: str | None = None,
     source: str | None = None,
     is_active: bool | None = True,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> list[Agent]:
     """List counterparty agents with optional filters."""
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     try:
       with _open_session(info, "roboledger") as session:
         responses = reads_agent.list_agents(
@@ -306,8 +306,8 @@ class LedgerQuery:
     status: str | None = None,
     agent_id: str | None = None,
     source: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> list[EventBlock]:
     """List event blocks with optional filters.
 
@@ -316,7 +316,7 @@ class LedgerQuery:
     inbox queue, ``committed`` for the audit-trail view), ``source``
     (``quickbooks`` / ``schedule`` / ``manual``), and ``event_type``.
     """
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     try:
       with _open_session(info, "roboledger") as session:
         responses = reads_event_block.list_event_blocks(
@@ -401,11 +401,11 @@ class LedgerQuery:
     info: Info[GraphQLContext, None],
     classification: str | None = None,
     is_active: bool | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> AccountList | None:
     """Paginated Chart of Accounts listing."""
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_accounts.list_accounts(
@@ -423,7 +423,7 @@ class LedgerQuery:
   def account_tree(
     self,
     info: Info[GraphQLContext, None],
-    include_inactive: bool = False,
+    include_inactive: bool | None = None,
   ) -> AccountTree | None:
     """Chart of Accounts as a recursive tree.
 
@@ -435,7 +435,7 @@ class LedgerQuery:
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_accounts.get_account_tree(
-          session, include_inactive=include_inactive
+          session, include_inactive=bool(include_inactive)
         )
     except (ValueError, ProgrammingError):
       _raise_ledger_not_initialized()
@@ -495,11 +495,11 @@ class LedgerQuery:
     type: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> LedgerTransactionList | None:
     """Paginated list of transactions."""
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_transactions.list_transactions(
@@ -570,11 +570,11 @@ class LedgerQuery:
     source: str | None = None,
     classification: str | None = None,
     is_abstract: bool | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> ElementList | None:
     """Paginated list of taxonomy elements."""
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_taxonomies.list_elements(
@@ -865,8 +865,8 @@ class LedgerQuery:
     self,
     info: Info[GraphQLContext, None],
     report_id: str,
-    format: ReportDownloadFormat = ReportDownloadFormat.JSONLD,
-    expires_in: int = reads_reports.PRESIGN_DEFAULT_SECONDS,
+    format: ReportDownloadFormat | None = None,
+    expires_in: int | None = None,
   ) -> ReportBundleDownload | None:
     """Presigned download URL for a published Report's serialization bundle.
 
@@ -878,6 +878,10 @@ class LedgerQuery:
     doesn't exist; raises a typed error when it exists but has no
     published bundle yet.
     """
+    if format is None:
+      format = ReportDownloadFormat.JSONLD
+    if expires_in is None:
+      expires_in = reads_reports.PRESIGN_DEFAULT_SECONDS
     if not (60 <= expires_in <= reads_reports.PRESIGN_MAX_SECONDS):
       raise strawberry.exceptions.StrawberryGraphQLError(
         message=(
@@ -945,11 +949,11 @@ class LedgerQuery:
   def publish_lists(
     self,
     info: Info[GraphQLContext, None],
-    limit: int = 100,
-    offset: int = 0,
+    limit: int | None = None,
+    offset: int | None = None,
   ) -> PublishListList | None:
     """Paginated list of publish lists for this graph."""
-    _validate_pagination(limit, offset)
+    limit, offset = _resolve_pagination(limit, offset, default_limit=100)
     try:
       with _open_session(info, "roboledger") as session:
         response = reads_publish_lists.list_publish_lists(

@@ -36,6 +36,23 @@ _MAX_LIMIT = 1000
 _MIN_OFFSET = 0
 
 
+def resolve_pagination(
+  limit: int | None, offset: int | None, *, default_limit: int
+) -> tuple[int, int]:
+  """Default null pagination args, then bounds-check.
+
+  Generated SDK clients (graphql-codegen) pass explicit ``null`` for
+  every omitted variable, and GraphQL rejects explicit null for a
+  non-null argument even when it declares a default — so pagination
+  args are declared nullable in the schema (``Int`` rather than
+  ``Int! = N``) and defaulted here instead.
+  """
+  resolved_limit = default_limit if limit is None else limit
+  resolved_offset = 0 if offset is None else offset
+  validate_pagination(resolved_limit, resolved_offset)
+  return resolved_limit, resolved_offset
+
+
 def validate_pagination(limit: int, offset: int) -> None:
   """Reject out-of-range pagination args at the resolver boundary.
 
