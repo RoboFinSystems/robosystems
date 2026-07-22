@@ -220,6 +220,7 @@ class TaxonomyBlockRuleRequest(BaseModel):
   rule_pattern: Literal[
     "Adjustment",
     "CoExists",
+    "Derive",
     "EqualTo",
     "Exists",
     "GreaterThan",
@@ -229,7 +230,14 @@ class TaxonomyBlockRuleRequest(BaseModel):
     "RollUp",
     "SumEquals",
     "Variance",
-  ] = Field(..., description="One of 11 cm:BusinessRulePattern mechanisms.")
+  ] = Field(
+    ...,
+    description=(
+      "One of the cm:BusinessRulePattern mechanisms. 'Derive' rules "
+      "COMPUTE a value from bound operand facts (compute-metrics) "
+      "rather than verify one — the tenant-authored-metric pattern."
+    ),
+  )
   expression: str = Field(
     ..., description="XPath-flavored predicate body (the rule expression)."
   )

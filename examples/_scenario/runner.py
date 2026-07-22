@@ -691,8 +691,10 @@ def create_disclosure_notes(
           "qname": m["qname"],
           "name": m["name"],
           "parent_ref": total_qname,
-          "balance_type": "debit",
-          "period_type": "instant",
+          # Balance-sheet notes (inventory) default to debit/instant;
+          # flow notes (revenue disaggregation) pass credit/duration.
+          "balance_type": m.get("balance_type", "debit"),
+          "period_type": m.get("period_type", "instant"),
           "is_monetary": True,
         }
         for m in members
@@ -802,8 +804,8 @@ def update_disclosure_notes(graph_id: str, notes: list[dict]) -> int:
           "qname": member["qname"],
           "name": member["name"],
           "parent_ref": note["total_qname"],
-          "balance_type": "debit",
-          "period_type": "instant",
+          "balance_type": member.get("balance_type", "debit"),
+          "period_type": member.get("period_type", "instant"),
           "is_monetary": True,
         }
       ],
@@ -1032,7 +1034,11 @@ def verify_metrics(graph_id: str, scenario) -> None:
   if not blocks:
     print("  ERROR: no metric block found — was the rs-metric package seeded?")
     return
-  block = blocks[0]
+  # Pick the library-seeded catalog by name — tenant-authored metric
+  # blocks (create_custom_metrics) share the block_type.
+  block = next(
+    (b for b in blocks if b.get("name") == "Key Financial Metrics"), blocks[0]
+  )
   structure_id = block.get("id")
   print(f"  Metric block: {block.get('name')} ({structure_id})")
 
@@ -1070,7 +1076,11 @@ def verify_metrics(graph_id: str, scenario) -> None:
 
   # Re-read the block — the standing sets are now the rendered series.
   blocks = client.list_information_blocks(graph_id, block_type="metric")
-  rendering = ((blocks[0].get("view") or {}).get("rendering") or {}) if blocks else {}
+  block = next(
+    (b for b in blocks if b.get("name") == "Key Financial Metrics"),
+    blocks[0] if blocks else None,
+  )
+  rendering = ((block.get("view") or {}).get("rendering") or {}) if block else {}
   periods = rendering.get("periods") or []
   rows = rendering.get("rows") or []
   print(f"  Time series: {len(periods)} period(s), {len(rows)} metric row(s)")
@@ -1087,6 +1097,221 @@ def verify_metrics(graph_id: str, scenario) -> None:
     print("  Two-period metric series verified")
   elif not numeric:
     print("  WARNING: Current Ratio has no computed values")
+
+
+# ---------------------------------------------------------------------------
+# Step 3e: Tenant-authored custom metrics (TaxonomyBlock reporting_extension)
+# ---------------------------------------------------------------------------
+
+
+def create_custom_metrics(graph_id: str, catalogs: list[dict]) -> list[dict]:
+  """Author tenant metric catalogs via ``create-taxonomy-block``.
+
+  Each catalog becomes a ``reporting_extension`` under rs-gaap carrying a
+  ``block_type='metric'`` structure: an abstract catalog root, one concept
+  per metric, presentation arcs enumerating them, and one ``Derive`` rule
+  per metric whose ``$Variable`` bindings reference rs-gaap anchors by
+  qname. This is the open-edges half of the metric surface — the library's
+  ``Key Financial Metrics`` (rs-metric) is the curated-core half; judgment
+  metrics (working capital views, margin definitions) live here,
+  tenant-local, computed by the same structure-agnostic ``compute-metrics``.
+
+  Returns ``[{"structure_id", "name"}]`` for the series probe after the
+  report is filed (operands bind to persisted report facts).
+  """
+  client = _get_ledger_client()
+
+  taxonomies = client.list_taxonomies(graph_id, taxonomy_type="reporting_standard")
+  rs_gaap = next(
+    (t for t in taxonomies if (t.get("standard") or "").startswith("rs-gaap")), None
+  )
+  if rs_gaap is None:
+    print("  ERROR: rs-gaap reporting standard not found in graph")
+    return []
+
+  created: list[dict] = []
+  for catalog in catalogs:
+    struct_name = catalog["name"]
+    abstract_qname = catalog["abstract_qname"]
+    metrics = catalog["metrics"]
+    payload = {
+      "name": catalog.get("taxonomy_name", f"{struct_name} Extension"),
+      "taxonomy_type": "reporting_extension",
+      "parent_taxonomy_id": rs_gaap["id"],
+      "description": catalog.get("description"),
+      "elements": [
+        {
+          "qname": abstract_qname,
+          "name": struct_name,
+          "element_type": "abstract",
+          "period_type": "duration",
+          "is_monetary": False,
+        },
+        *(
+          {
+            "qname": m["qname"],
+            "name": m["name"],
+            "element_type": "concept",
+            "period_type": m.get("period_type", "instant"),
+            "is_monetary": m.get("is_monetary", False),
+            "balance_type": m.get("balance_type", "debit"),
+          }
+          for m in metrics
+        ),
+      ],
+      "structures": [
+        {
+          "name": struct_name,
+          "description": catalog.get("description"),
+          "block_type": "metric",
+          "concept_arrangement": "arithmetic",
+        }
+      ],
+      "associations": [
+        {
+          "structure_ref": struct_name,
+          "from_ref": abstract_qname,
+          "to_ref": m["qname"],
+          "association_type": "presentation",
+          "order_value": float(i + 1),
+        }
+        for i, m in enumerate(metrics)
+      ],
+      "rules": [
+        {
+          "name": f"derive-{m['qname'].split(':', 1)[-1]}",
+          "description": m.get("description"),
+          "rule_category": "ReportingSystemSpecificRule",
+          "rule_pattern": "Derive",
+          "expression": m["expression"],
+          "message": m.get("description"),
+          "severity": "info",
+          "target_element_qname": m["qname"],
+          "variables": m["variables"],
+        }
+        for m in metrics
+      ],
+    }
+    # Direct POST rather than the SDK: the generated client's rule_pattern
+    # enum predates 'Derive' — regenerating the SDKs picks it up, but the
+    # demo shouldn't depend on a client release to author Derive rules.
+    import httpx
+
+    resp = httpx.post(
+      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/create-taxonomy-block",
+      json=payload,
+      headers={
+        "X-API-Key": _client_config()["token"],
+        "Content-Type": "application/json",
+      },
+      timeout=60.0,
+    )
+    if resp.status_code >= 400:
+      print(
+        f"  ERROR: create-taxonomy-block (metric catalog) -> "
+        f"HTTP {resp.status_code}: {resp.text[:200]}"
+      )
+      continue
+    envelope_body = resp.json() or {}
+    if envelope_body.get("error"):
+      print(f"  ERROR: create-taxonomy-block: {envelope_body['error']}")
+      continue
+
+    structures = client.list_structures(graph_id, block_type="metric")
+    structure = next((s for s in structures if s.get("name") == struct_name), None)
+    if structure is None:
+      print(f"  ERROR: metric structure {struct_name!r} not found after create")
+      continue
+    created.append({"structure_id": structure["id"], "name": struct_name})
+    print(f"  {struct_name}: {len(metrics)} metric(s) authored")
+
+  return created
+
+
+def compute_custom_metrics(graph_id: str, scenario, catalogs: list[dict]) -> None:
+  """Compute each tenant metric catalog for both comparative period ends.
+
+  Same two-window probe as :func:`verify_metrics`, against the
+  tenant-authored structures — proving compute-metrics is
+  structure-agnostic (library catalog and tenant catalog run the same op).
+  """
+  import httpx
+
+  if scenario.report_period is None:
+    print("  (skipped — scenario has no report_period)")
+    return
+  period_start, period_end = scenario.report_period
+  prior_end = period_start - timedelta(days=1)
+
+  api_key = _client_config()["token"]
+  for catalog in catalogs:
+    print(f"  {catalog['name']}:")
+    for pe in (prior_end, period_end):
+      resp = httpx.post(
+        f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-metrics",
+        json={"structure_id": catalog["structure_id"], "period_end": pe.isoformat()},
+        headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+        timeout=60.0,
+      )
+      if resp.status_code >= 400:
+        print(
+          f"    ERROR: compute-metrics {pe} -> "
+          f"HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+        continue
+      result = (resp.json() or {}).get("result") or {}
+      for m in result.get("computed") or []:
+        value = m.get("value")
+        if not isinstance(value, (int, float)):
+          continue
+        shown = f"${value:,.2f}" if m.get("unit") == "USD" else f"{value:,.4f}"
+        print(f"    {pe}  {m.get('name')}: {shown}")
+      for s in result.get("skipped") or []:
+        print(f"    {pe}  (skipped) {s.get('element_qname')}: {s.get('reason')}")
+
+
+# ---------------------------------------------------------------------------
+# Step 4b: Seed semantic memories (MCP `remember` via call-tool)
+# ---------------------------------------------------------------------------
+
+
+def seed_memories(graph_id: str, memories: list[dict]) -> int:
+  """Seed the graph's semantic memory through the MCP tool surface.
+
+  Memory writes are deliberately MCP-only (``remember``; REST is
+  read/governance — list/get/recall), so seeding goes through
+  ``POST /v1/graphs/{g}/mcp/call-tool`` — still the public HTTP API, and
+  it exercises the same tool an AI Operator uses during the close.
+  Degrades gracefully when semantic memory is disabled on the deployment.
+  """
+  import httpx
+
+  api_key = _client_config()["token"]
+  seeded = 0
+  for memory in memories:
+    resp = httpx.post(
+      f"{BASE_URL}/v1/graphs/{graph_id}/mcp/call-tool",
+      json={
+        "name": "remember",
+        "arguments": {
+          "text": memory["text"],
+          "memory_type": memory.get("memory_type", "fact"),
+          "tags": memory.get("tags", []),
+        },
+      },
+      headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+      timeout=60.0,
+    )
+    if resp.status_code >= 400:
+      print(f"  WARNING: remember -> HTTP {resp.status_code}: {resp.text[:160]}")
+      continue
+    body = resp.json() or {}
+    payload = body.get("result") or body
+    if isinstance(payload, dict) and payload.get("error"):
+      print(f"  (skipped) {payload.get('message', payload['error'])}")
+      return seeded
+    seeded += 1
+  return seeded
 
 
 # ---------------------------------------------------------------------------
@@ -1511,6 +1736,8 @@ def run_demo(
   reveal_prompts: list[str],
   disclosures: list[dict] | None = None,
   text_blocks: list[dict] | None = None,
+  custom_metrics: list[dict] | None = None,
+  memories: list[dict] | None = None,
   argv: list[str] | None = None,
 ) -> None:
   """Provision a graph and load the full company for one showcase episode.
@@ -1521,7 +1748,11 @@ def run_demo(
   are the episode-specific Beat-4 analysis questions printed at the end.
   ``disclosures`` (optional) are per-tenant authored disclosure notes (see
   ``create_disclosure_notes``) — authored after mapping, verified after the
-  report renders them fact-driven.
+  report renders them fact-driven. ``custom_metrics`` (optional) are
+  tenant-authored metric catalogs (see ``create_custom_metrics``) —
+  authored with the disclosures, computed after the report files.
+  ``memories`` (optional) seed the graph's semantic memory through the
+  MCP ``remember`` tool (see ``seed_memories``).
   """
   argv = sys.argv if argv is None else argv
   dry_run = "--dry-run" in argv
@@ -1620,6 +1851,13 @@ def run_demo(
     if updated_members:
       print(f"  Updated:      +{updated_members} member (via update-taxonomy-block)")
 
+  # Author tenant metric catalogs (same reporting_extension surface);
+  # the series computes after the report files (operands = report facts).
+  authored_metric_catalogs: list[dict] = []
+  if custom_metrics:
+    print("\nAuthoring custom metrics...")
+    authored_metric_catalogs = create_custom_metrics(graph_id, custom_metrics)
+
   # Initialize fiscal calendar (via HTTP API — exercises initialize op)
   print("\nInitializing fiscal calendar...")
   close_target = initialize_fiscal_calendar(graph_id, scenario)
@@ -1633,6 +1871,13 @@ def run_demo(
   print("\nUploading accounting policies...")
   doc_ids = upload_policies(graph_id, documents)
   print(f"  Documents:    {len(doc_ids)}")
+
+  # Seed semantic memories — the institutional knowledge an AI Operator
+  # recalls during the close (via the same MCP `remember` tool it uses).
+  if memories:
+    print("\nSeeding semantic memories...")
+    seeded = seed_memories(graph_id, memories)
+    print(f"  Memories:     {seeded}")
 
   # Bind policy documents as text-block disclosure facts — after upload
   # (needs document ids) and before materialize, so the standing
@@ -1662,6 +1907,11 @@ def run_demo(
   if report_id:
     print("\nComputing key financial metrics...")
     verify_metrics(graph_id, scenario)
+
+  # Tenant metric catalogs compute through the same structure-agnostic op.
+  if report_id and authored_metric_catalogs:
+    print("\nComputing custom metrics...")
+    compute_custom_metrics(graph_id, scenario, authored_metric_catalogs)
 
   # Summary
   print("\n" + "=" * 60)

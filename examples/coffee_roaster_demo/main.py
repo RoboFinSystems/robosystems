@@ -26,6 +26,8 @@ from .agents import AGENTS
 from .data import SCENARIO
 from .disclosures import DISCLOSURE_NOTES, TEXT_BLOCK_NOTES
 from .mappings import mappings_for
+from .memories import MEMORIES
+from .metrics import CUSTOM_METRICS
 from .policies import DOCUMENTS
 
 # Beat 4 — the unscripted reveal: profit up, cash down, traced to working capital.
@@ -47,6 +49,8 @@ def main() -> None:
     reveal_prompts=REVEAL_PROMPTS,
     disclosures=DISCLOSURE_NOTES,
     text_blocks=TEXT_BLOCK_NOTES,
+    custom_metrics=CUSTOM_METRICS,
+    memories=MEMORIES,
   )
 
 

@@ -93,6 +93,17 @@ def reset_demo_state(graph_id: str) -> None:
       {"seeder": _LIBRARY_SEEDER},
     )
 
+    # 6a.ii. Tenant rules targeting tenant elements (Derive metric rules
+    # bind ``rules.target_element_id`` → ``elements.id``) — must clear
+    # before the elements delete or the FK blocks it.
+    session.execute(
+      text(
+        "DELETE FROM rules WHERE target_element_id IN "
+        "(SELECT id FROM elements WHERE created_by != :seeder)"
+      ),
+      {"seeder": _LIBRARY_SEEDER},
+    )
+
     # 6b. Tenant-origin elements. Library elements (fac, rs-gaap,
     # rs-gaap-type-subtype, plus the native mapping/presentation overlays all
     # carrying 'library-seeder') stay put.

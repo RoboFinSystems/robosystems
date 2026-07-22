@@ -148,3 +148,39 @@ def test_rule_origin_native_for_tenant_authored() -> None:
   )
   rules = persist_tenant_rules(session, taxonomy, [req], {}, {}, "usr_1")
   assert rules[0].rule_origin == "native"
+
+
+def test_derive_pattern_accepted_and_persisted() -> None:
+  """'Derive' is an envelope-authorable pattern — the tenant-metric path.
+
+  A Derive rule targets the metric concept (compute-metrics requires an
+  element target) and carries $Variable→qname bindings that resolve at
+  compute time, so the envelope must accept it end to end.
+  """
+  session = MagicMock()
+  taxonomy = _fake_taxonomy("tax_7")
+  metric = _fake_element("elem_wc", "driftline:WorkingCapital")
+  req = TaxonomyBlockRuleRequest(
+    name="derive-working-capital",
+    rule_category="ReportingSystemSpecificRule",
+    rule_pattern="Derive",
+    expression="$WorkingCapital = ($AssetsCurrent - $LiabilitiesCurrent)",
+    variables=[
+      {"variable_name": "WorkingCapital", "variable_qname": "driftline:WorkingCapital"},
+      {"variable_name": "AssetsCurrent", "variable_qname": "rs-gaap:AssetsCurrent"},
+      {
+        "variable_name": "LiabilitiesCurrent",
+        "variable_qname": "rs-gaap:LiabilitiesCurrent",
+      },
+    ],
+    target_element_qname="driftline:WorkingCapital",
+  )
+  rules = persist_tenant_rules(
+    session, taxonomy, [req], {"driftline:WorkingCapital": metric}, {}, "usr_1"
+  )
+  assert len(rules) == 1
+  rule = rules[0]
+  assert rule.rule_pattern == "Derive"
+  assert rule.target_kind == "element"
+  assert rule.target_element_id == "elem_wc"
+  assert len(rule.rule_variables) == 3
