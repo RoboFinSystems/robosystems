@@ -387,11 +387,14 @@ class TestBalanceSheetValidation:
 
 
 class TestTotalsFoot:
+  # ``_build_rows`` emits post-order (children BEFORE their parent
+  # subtotal), so fixtures list leaves first.
+
   def test_matching_subtotals(self):
     rows = [
-      _row("Total", 300.0, is_subtotal=True, depth=0),
       _row("A", 100.0, depth=1),
       _row("B", 200.0, depth=1),
+      _row("Total", 300.0, is_subtotal=True, depth=0),
     ]
     result = validate_report("income_statement", rows)
     # totals_foot check should pass
@@ -402,13 +405,63 @@ class TestTotalsFoot:
 
   def test_mismatched_subtotals(self):
     rows = [
-      _row("Total", 999.0, is_subtotal=True, depth=0),
       _row("A", 100.0, depth=1),
       _row("B", 200.0, depth=1),
+      _row("Total", 999.0, is_subtotal=True, depth=0),
     ]
     result = validate_report("income_statement", rows)
     foot_warnings = [w for w in result.warnings if "does not match" in w]
     assert len(foot_warnings) == 1
+
+  def test_subtotal_not_footed_against_next_sections_children(self):
+    """Post-order regression: 'Revenues' must foot against its OWN leaf,
+    not the Cost of Revenue leaves that FOLLOW it in row order (the old
+    forward scan warned 'Revenues (189599.96) ≠ children (84000.00)')."""
+    rows = [
+      _row("Contract Revenue", 189599.96, depth=2),
+      _row("Revenues", 189599.96, is_subtotal=True, depth=1),
+      _row("COGS", 84000.0, classification="expense", depth=2),
+      _row(
+        "Cost of Revenue", 84000.0, classification="expense", is_subtotal=True, depth=1
+      ),
+    ]
+    result = validate_report("income_statement", rows)
+    foot_warnings = [w for w in result.warnings if "does not match" in w]
+    assert foot_warnings == []
+
+  def test_calc_target_subtotal_without_children_is_skipped(self):
+    """A calc-DAG subtotal (Gross Profit) has no presentation children —
+    no preceding deeper rows — and must not be footed against siblings."""
+    rows = [
+      _row("Revenues", 300.0, depth=1),
+      _row("Cost of Revenue", 100.0, classification="expense", depth=1),
+      _row(
+        "Gross Profit",
+        200.0,
+        classification="",
+        is_subtotal=True,
+        depth=1,
+        balance_type="credit",
+      ),
+    ]
+    result = validate_report("income_statement", rows)
+    foot_warnings = [w for w in result.warnings if "does not match" in w]
+    assert foot_warnings == []
+
+  def test_valueless_abstract_header_is_skipped(self):
+    """A multi-subtotal abstract header renders value-less (all None) and
+    must not warn when the backward scan reaches its depth-1 children."""
+    abstract = _row("Income Statement Abstract", 0.0, is_subtotal=True, depth=0)
+    abstract.values = [None]
+    abstract.is_abstract = True
+    rows = [
+      _row("A", 100.0, depth=1),
+      _row("B", 200.0, depth=1),
+      abstract,
+    ]
+    result = validate_report("income_statement", rows)
+    foot_warnings = [w for w in result.warnings if "does not match" in w]
+    assert foot_warnings == []
 
 
 class TestSemanticChecks:

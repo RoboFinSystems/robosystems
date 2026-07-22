@@ -25,8 +25,9 @@ client-side rollup or hierarchy walk needed. The pure in-memory rollup
 helpers (``_build_rows``, ``_facts_to_balance_dict``, ``_natural_sign``)
 are imported from
 :mod:`robosystems.operations.roboledger.reports.fact_grid`; the
-hierarchy + calculations + classifications are derived from the
-already-loaded envelope atoms (no redundant SQL).
+hierarchy + classifications are derived from the already-loaded
+envelope atoms, and calculations compose cross-structure for
+``arithmetic`` blocks (see ``_build_statement_rendering``).
 """
 
 from __future__ import annotations
@@ -64,7 +65,9 @@ from robosystems.operations.roboledger.reports.fact_grid import (
   ReportFact,
   _Balance,  # type: ignore[reportPrivateUsage]
   _build_rows,  # type: ignore[reportPrivateUsage]
+  _collect_hierarchy_element_ids,  # type: ignore[reportPrivateUsage]
   _HierarchyNode,  # type: ignore[reportPrivateUsage]
+  _load_calculations,  # type: ignore[reportPrivateUsage]
 )
 from robosystems.operations.roboledger.reports.guard_rails import validate_report
 
@@ -156,6 +159,7 @@ def _build_statement_envelope(
     facts=facts,
     structure_id=structure.id,
     block_type=block_type,
+    concept_arrangement=structure.concept_arrangement,
   )
 
   # Statement-family types carry fixed display strings; block types that
@@ -211,6 +215,7 @@ def _build_statement_rendering(
   facts: list[Fact],
   structure_id: str,
   block_type: str,
+  concept_arrangement: str | None = None,
 ) -> RenderingLite:
   """Compute the Rendering view projection for a statement-family block.
 
@@ -218,9 +223,13 @@ def _build_statement_rendering(
   :mod:`robosystems.operations.roboledger.reports.fact_grid` (``_build_rows``)
   and the guard-rail checks from
   :mod:`robosystems.operations.roboledger.reports.guard_rails`
-  (``validate_report``). Hierarchy and calculations are derived from the
-  already-loaded ``associations`` (no redundant SQL); classifications are
-  fetched in a single trait-axis query.
+  (``validate_report``). The hierarchy is derived from the already-loaded
+  ``associations``; classifications are fetched in a single trait-axis
+  query. Calculations follow the block's concept arrangement:
+  ``arithmetic`` composes the calc DAG cross-structure in one query
+  (calc arcs live in sibling calculation structures, not in the
+  presentation block's own associations); other CAPs derive them from
+  the in-envelope associations with no extra SQL.
 
   Empty-fact case: returns ``RenderingLite`` with an empty ``rows`` list
   and an empty ``periods`` list — the envelope still validates and the
@@ -280,14 +289,27 @@ def _build_statement_rendering(
       )
     )
 
-  # 4) Build hierarchy + calculations from already-loaded associations.
+  # 4) Build hierarchy from already-loaded associations.
   hierarchy = _build_hierarchy_from_atoms(
     structure_id, elements_by_id, classification_by_id, associations
   )
   if not hierarchy:
     return RenderingLite(rows=[], periods=[], validation=None, unmapped_count=0)
 
-  calculations = _calculations_from_associations(associations)
+  # Calculation arcs — mirrors ``render_structure_view``. ``arithmetic``
+  # Disclosures keep presentation and calculation in SEPARATE structures
+  # (e.g. the rs-gaap Multi-step presentation block carries only
+  # presentation arcs; its calc DAG lives in the sibling "… calculation"
+  # structure), so the block's own associations can't identify Gross
+  # Profit / Operating Income as calc-target subtotals. Compose the calc
+  # DAG cross-structure in that case; other CAPs keep the in-envelope
+  # associations (single-structure convention, no extra SQL).
+  if concept_arrangement == "arithmetic":
+    calculations = _load_calculations(
+      session, element_ids=_collect_hierarchy_element_ids(hierarchy)
+    )
+  else:
+    calculations = _calculations_from_associations(associations)
 
   # 5) Per-period balance dicts (one per column).
   period_balances = [

@@ -499,3 +499,127 @@ class TestRenderingSkipsNonnumericFacts:
     )
 
     assert rendering.rows == []
+
+
+class TestRenderingComposesCalcsCrossStructure:
+  """Regression: rs-gaap ``arithmetic`` statement blocks carry only
+  presentation arcs — their calc DAG lives in a sibling calculation
+  structure. The rendering must compose calcs cross-structure so
+  calc-target lines (Gross Profit, Net Income) are flagged
+  ``is_subtotal`` and the guard-rail Net Income reconciliation doesn't
+  double-count them as credit-nature leaves (Driftline FY2026:
+  reported 8,785.70 vs implied 131,957.06)."""
+
+  @staticmethod
+  def _elem(element_id: str, qname: str, balance_type: str) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+      id=element_id,
+      qname=qname,
+      name=element_id,
+      balance_type=balance_type,
+      is_abstract=False,
+    )
+
+  @staticmethod
+  def _fact(element_id: str, value: float) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+      element_id=element_id,
+      value=value,
+      period_start=date(2025, 7, 1),
+      period_end=date(2026, 6, 30),
+      period_type="duration",
+    )
+
+  @staticmethod
+  def _presentation_arc(from_id: str, to_id: str, order: float) -> MagicMock:
+    a = MagicMock()
+    a.association_type = "presentation"
+    a.from_element_id = from_id
+    a.to_element_id = to_id
+    a.order_value = order
+    return a
+
+  def _rendering(self, concept_arrangement: str | None) -> Any:
+    from types import SimpleNamespace
+
+    structure_id = "struct_is_multistep"
+    elements = [
+      self._elem("e_rev", "rs-gaap:Revenues", "credit"),
+      self._elem("e_cogs", "rs-gaap:CostOfRevenue", "debit"),
+      self._elem("e_gp", "rs-gaap:GrossProfit", "credit"),
+      self._elem("e_ni", "rs-gaap:NetIncomeLoss", "credit"),
+    ]
+    # Presentation-only block: flat lines anchored at the structure_id,
+    # no calculation associations in the envelope atoms.
+    associations = [
+      self._presentation_arc(structure_id, "e_rev", 0.0),
+      self._presentation_arc(structure_id, "e_cogs", 1.0),
+      self._presentation_arc(structure_id, "e_gp", 2.0),
+      self._presentation_arc(structure_id, "e_ni", 3.0),
+    ]
+    # The report FactSet stamps a fact on EVERY line, subtotals included.
+    facts = [
+      self._fact("e_rev", 300.0),
+      self._fact("e_cogs", 100.0),
+      self._fact("e_gp", 200.0),
+      self._fact("e_ni", 200.0),
+    ]
+
+    # session.execute #1: classification lookup (none mapped);
+    # session.execute #2 (arithmetic only): cross-structure calc arcs —
+    # GP = Revenues - CostOfRevenue; NI = GP.
+    calc_rows = [
+      SimpleNamespace(
+        structure_id="struct_is_calc",
+        from_element_id="e_gp",
+        to_element_id="e_rev",
+        weight=1.0,
+      ),
+      SimpleNamespace(
+        structure_id="struct_is_calc",
+        from_element_id="e_gp",
+        to_element_id="e_cogs",
+        weight=-1.0,
+      ),
+      SimpleNamespace(
+        structure_id="struct_is_calc",
+        from_element_id="e_ni",
+        to_element_id="e_gp",
+        weight=1.0,
+      ),
+    ]
+    session = MagicMock()
+    session.execute.side_effect = [_exec_result(all_rows=[]), calc_rows]
+
+    return statement_handlers._build_statement_rendering(
+      session,
+      elements=elements,  # type: ignore[arg-type]
+      associations=associations,  # type: ignore[arg-type]
+      facts=facts,  # type: ignore[arg-type]
+      structure_id=structure_id,
+      block_type="income_statement",
+      concept_arrangement=concept_arrangement,
+    )
+
+  def test_arithmetic_block_flags_calc_targets_and_validates(self) -> None:
+    rendering = self._rendering("arithmetic")
+
+    flags = {r.element_qname: r.is_subtotal for r in rendering.rows}
+    assert flags["rs-gaap:GrossProfit"] is True
+    assert flags["rs-gaap:NetIncomeLoss"] is True
+
+    assert rendering.validation is not None
+    assert rendering.validation.passed is True
+    assert not any("Net Income mismatch" in f for f in rendering.validation.failures)
+
+  def test_non_arithmetic_block_keeps_envelope_associations(self) -> None:
+    """roll_up blocks keep the single-structure convention: calcs come
+    from the envelope's own associations (none here), no calc SQL."""
+    rendering = self._rendering("roll_up")
+
+    flags = {r.element_qname: r.is_subtotal for r in rendering.rows}
+    assert flags["rs-gaap:GrossProfit"] is False
