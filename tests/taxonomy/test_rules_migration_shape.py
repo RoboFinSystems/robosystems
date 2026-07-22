@@ -135,7 +135,10 @@ class TestPhaseCCheckWidens:
   most common authoring footgun when adding a new package."""
 
   def test_element_source_check_admits_phase_c_namespaces(self) -> None:
-    for prefix in ("disclosures", "checklist", "styles"):
+    # 'rs-metric' rides the same rule: 0002's dynamic seed picks the
+    # package up from the current manifest, so fresh DBs insert its
+    # elements before 0022's backfill widening ever runs.
+    for prefix in ("disclosures", "checklist", "styles", "rs-metric"):
       assert f"'{prefix}'" in mig_0002._WIDENED_ELEMENT_SOURCE_CHECK, (
         f"namespace prefix {prefix!r} missing from element source CHECK"
       )
@@ -154,16 +157,20 @@ class TestRuleCheckConstraints:
       )
 
   def test_pattern_check_lists_every_enum_value(self) -> None:
-    """The effective CHECK for any DB is 0002's re-added by 0022's
-    widening ('Derive'), so the loader enum asserts against 0022's
-    final constant."""
+    """0002's seed is dynamic (it reads the current frameworks/ manifest,
+    which lists rs-metric), so a fresh DB inserts Derive rules AT 0002 —
+    its CHECK must admit every loader-enum pattern, same as 0022's final
+    constant for already-deployed DBs. Drift here is exactly the
+    fresh-database CheckViolation this test exists to prevent."""
     for pattern in RULE_PATTERN_VALUES:
       assert f"'{pattern}'" in mig_0022._RULE_PATTERN_WIDENED, (
         f"pattern {pattern!r} missing from 0022 _RULE_PATTERN_WIDENED"
       )
-    # 0022's widening must be a strict superset of 0002's original.
+      assert f"'{pattern}'" in mig_0002._RULE_PATTERN_CHECK, (
+        f"pattern {pattern!r} missing from 0002 _RULE_PATTERN_CHECK"
+      )
     assert "'Derive'" in mig_0022._RULE_PATTERN_WIDENED
-    assert "'Derive'" not in mig_0002._RULE_PATTERN_CHECK
+    assert "'Derive'" in mig_0002._RULE_PATTERN_CHECK
 
   def test_severity_check_enumerates_info_warning_error(self) -> None:
     for severity in ("info", "warning", "error"):
