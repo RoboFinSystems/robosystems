@@ -1788,6 +1788,9 @@ def _count_unmapped(
       SELECT COUNT(*) AS cnt
       FROM elements e
       WHERE e.source = ANY(:sources)
+        AND (e.taxonomy_id IS NULL OR e.taxonomy_id IN (
+          SELECT id FROM taxonomies WHERE taxonomy_type = 'chart_of_accounts'
+        ))
         AND e.is_active = true
         AND NOT EXISTS (
           SELECT 1 FROM associations ea
