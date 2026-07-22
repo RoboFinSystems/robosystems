@@ -331,25 +331,36 @@ def _validate_cash_flow(rows: list[FactRow]) -> ValidationResult:
 def _check_totals_foot(rows: list[FactRow], result: ValidationResult) -> None:
   """Verify that subtotal rows equal the sum of their children.
 
-  Uses the row ordering: a subtotal row is followed by its children
-  (which have depth = subtotal.depth + 1) until the next row at the
-  same or lower depth.
+  ``_build_rows`` emits post-order — children first, then their parent
+  subtotal — so a subtotal's children are the rows immediately BEFORE it
+  with depth = subtotal.depth + 1, scanning back until a row at the same
+  or lower depth. (An earlier version scanned forward, which footed each
+  subtotal against the NEXT section's children — e.g. 'Revenues' against
+  Cost of Revenue's leaves — producing spurious warnings and silently
+  skipping the real check.)
+
+  Calc-target subtotals with no presentation children (Gross Profit,
+  Operating Income) have no preceding deeper rows and fall out via the
+  zero child_sum guard; their arithmetic is covered by the calc DAG and
+  the net-income equation. Value-less structural headers (abstract rows
+  rendered with all-None values) are skipped outright.
   """
   result.checks.append("totals_foot")
 
-  subtotal_indices = [i for i, r in enumerate(rows) if r.is_subtotal]
-
-  for idx in subtotal_indices:
-    subtotal = rows[idx]
+  for idx, subtotal in enumerate(rows):
+    if not subtotal.is_subtotal:
+      continue
+    if not any(v is not None for v in subtotal.values):
+      continue
     child_sum = 0.0
 
-    # Children follow the subtotal and have depth = subtotal.depth + 1
-    for j in range(idx + 1, len(rows)):
+    # Children precede the subtotal (post-order) at depth = subtotal.depth + 1.
+    # Only sum direct children, not grandchildren — grandchildren are
+    # already rolled into their parent subtotals.
+    for j in range(idx - 1, -1, -1):
       child = rows[j]
       if child.depth <= subtotal.depth:
         break
-      # Only sum direct children (depth = subtotal.depth + 1),
-      # not grandchildren — grandchildren are already rolled into their parent subtotals
       if child.depth == subtotal.depth + 1:
         child_sum += (child.values[0] or 0.0) if child.values else 0.0
 
