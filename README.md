@@ -24,14 +24,15 @@ The extensions API surface is **graph-scoped at the URL level** — `graph_id` i
 
 - **Reads** → `POST /extensions/{graph_id}/graphql` — Strawberry GraphQL, GraphiQL in dev, schema composed dynamically from enabled domains
 - **Writes** → `POST /extensions/{roboledger|roboinvestor}/{graph_id}/operations/{operation_name}` — named REST commands
+- **Analytical views** → `POST /extensions/{domain}/{graph_id}/operations/{view_name}` — read-only analytical operations (e.g. `build-fact-grid`, `live-financial-statement`), same envelope as writes
 
-Behind the API is a CQRS operations kernel (`reads/` + `commands/` per domain) that's the single source of truth for business logic — GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
+Behind the API is a CQRS operations kernel (`reads/` + `commands/` per domain, plus graph-backed `views/`) that's the single source of truth for business logic — GraphQL resolvers, REST operation routes, and MCP tools all delegate to the same functions. Per-domain feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`) gate both the routers and the GraphQL schema composition.
 
 ### [RoboLedger](https://roboledger.ai)
 
 Accounting and financial reporting extension — a ledger-grade system of record that AI and analysts can both query and operate. It broadly implements the [Seattle Method](http://xbrlsite.com/seattlemethod/), a declarative methodology for digital financial reporting. Writes land as self-describing **molecules**: atomic facts bundled with their structural wiring, rules, and verification in one typed envelope, never bare rows. Three block molecules are the authoring substrate:
 
-- **Information Blocks** — the envelope for reportable content: schedules, statements, and metrics bundled with their period-versioned fact sets, typed mechanics, and rules. `evaluate-rules` runs arithmetic checks (EqualTo, RollUp, RollForward, Exists, CoExists) over materialized facts; pinning a fact set separates a live closing book from a frozen report.
+- **Information Blocks** — the envelope for reportable content: schedules, statements, metrics, and text-block disclosures bundled with their period-versioned fact sets, typed mechanics, and rules. `evaluate-rules` runs arithmetic checks (EqualTo, RollUp, RollForward, SumEquals, Exists, CoExists) over materialized facts; pinning a fact set separates a live closing book from a frozen report.
 - **Event Blocks** — REA event capture: callers record what happened in the world (a sale, a payment, an asset disposal) through a structured action-verb vocabulary, and a handler registry derives the debits and credits across the three-level ledger (Transaction → Entry → LineItem). Preview handler resolution, execute to post GL atomically, and promote matured obligations (AR/AP, schedule entries) on demand.
 - **Taxonomy Blocks** — accounting frameworks as data, not code: Elements, linkbase Associations (presentation / calculation / mapping), Structures, and auto-generated structural rules in one atomic write. Ships `fac` (fundamentals) and `rs-gaap` (~2,000 curated US-GAAP concepts) behind a two-tier public→tenant library, with CoA→GAAP mapping anchored to calc-DAG leaves.
 
@@ -219,8 +220,8 @@ Built end-to-end on open-source engines — PostgreSQL, LadybugDB, DuckDB, Lance
 
 A curated knowledge graph of US public company financial data from SEC EDGAR XBRL filings. Runs on the shared LadybugDB tier, accessible via MCP tools, Cypher queries, and the AI Operator.
 
-- **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
-- **Graph**: 14 node types and 24 relationship types modeling the full XBRL reporting hierarchy
+- **Pipeline**: EDGAR → Download → Process (Parquet) → Stage (DuckDB) → Enrich (Icebug+fastembed) → Materialize (LadybugDB) → Index + Embed (OpenSearch)
+- **Graph**: 14 node types and 22 relationship types modeling the full XBRL reporting hierarchy
 - **Search**: Hybrid BM25 + KNN vector search across XBRL text blocks, narrative sections, and iXBRL disclosures
 - **Enrichment**: Semantic element mapping, statement classification, and disclosure tagging — applying aspects of the Seattle Method to the shared repository's disclosures (the methodology RoboLedger implements more broadly)
 

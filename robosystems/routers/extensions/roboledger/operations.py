@@ -1095,7 +1095,7 @@ async def auto_map_elements_op(
 #
 # Generic construction envelope for schedules, statement blocks, metrics,
 # and future block types. `evaluate-rules` runs the rule engine against a
-# block's materialized facts (decoding mode, 5 patterns).
+# block's materialized facts (decoding mode, 6 patterns).
 # ═══════════════════════════════════════════════════════════════════════════
 
 create_information_block_op = _registrar.register(
@@ -1177,8 +1177,8 @@ evaluate_rules_op = _registrar.register(
       "association-scoped rules for the structure's atoms), binds "
       "$Variable references to in-scope facts via qname lookup, writes "
       "one VerificationResult row per rule, and returns the results plus "
-      "a status-keyed summary. Decoding mode, 5 patterns "
-      "(EqualTo, RollUp, RollForward, Exists, CoExists)."
+      "a status-keyed summary. Decoding mode, 6 patterns "
+      "(EqualTo, RollUp, RollForward, SumEquals, Exists, CoExists)."
     ),
     command=cmd_evaluate_rules,
     request_model=EvaluateRulesRequest,
