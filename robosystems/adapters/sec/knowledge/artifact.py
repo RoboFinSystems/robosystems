@@ -79,7 +79,7 @@ class ElementKnowledgeBuilder:
     filing_count (INT32), disclosure_type (STRING)
   """
 
-  def __init__(self, memory_limit: str = "8GB") -> None:
+  def __init__(self, memory_limit: str = "16GB") -> None:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> Path:
@@ -398,7 +398,7 @@ class StructureKnowledgeBuilder:
   2. structure_consensus.parquet — cross-filing majority-vote for identical structures
   """
 
-  def __init__(self, memory_limit: str = "8GB") -> None:
+  def __init__(self, memory_limit: str = "16GB") -> None:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> tuple[Path, Path]:
@@ -556,7 +556,7 @@ class DisclosureProfileBuilder:
   2. disclosure_consensus.parquet — cross-filing majority-vote using disclosure type
   """
 
-  def __init__(self, memory_limit: str = "8GB") -> None:
+  def __init__(self, memory_limit: str = "16GB") -> None:
     self._memory_limit = memory_limit
 
   def build(self, db_path: str | Path) -> tuple[Path, Path]:

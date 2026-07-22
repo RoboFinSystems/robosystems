@@ -33,14 +33,16 @@ class SECArtifactConfig(Config):
   """Configuration for SEC artifact generation."""
 
   duckdb_source: str = "sec"
-  # DuckDB memory budget per builder connection. MUST stay well under the ECS
-  # task memory (16GB) — the extractions spill to disk beyond this, but the
-  # extracted result set is still materialized in Python on top of DuckDB's
-  # buffer, so setting this near the container size starves Python and the
-  # kernel OOM-kills the task (SIGKILL). Raising it does NOT help a corpus that
-  # outgrew memory; the spill-to-disk path (see extractors._connect) does.
+  # DuckDB memory budget per builder connection, bounded on both sides. Too
+  # low and DuckDB itself OOMs on un-spillable block pins during the
+  # structure-composition extraction (an 8GB budget died this way on the
+  # Jul 2026 ~55GB corpus, regardless of task size). Too close to the ECS
+  # task memory (24GB, see jobs.py) and the result set materialized in
+  # Python on top of DuckDB's buffer starves the kernel into OOM-killing
+  # the task (SIGKILL — a 14GB budget on the older 16GB task). 16GB leaves
+  # ~8GB of Python headroom and cleared the Jul 2026 corpus.
   memory_limit: str = Field(
-    default="8GB",
+    default="16GB",
     description="DuckDB memory budget per builder; keep well below task memory.",
   )
   publish_r2: bool = False

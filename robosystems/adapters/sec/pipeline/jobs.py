@@ -490,12 +490,13 @@ sec_artifact_generation_job = define_asset_job(
     "phase": "artifact",
     # Downloads full DuckDB staging file from S3 then runs graph algorithms.
     # DuckDB uses threads=1 + spill-to-disk (preserve_insertion_order=false) so
-    # its buffer stays bounded (~memory_limit, 8GB) and overflows to ephemeral.
-    # Peak is DuckDB budget + the Python result materialized on top: ~14.4 GB on
-    # the Mar 2026 104 GB corpus, which outgrew the 16 GB lower-bound and started
-    # OOM-killing (SIGKILL) as the corpus grew. 4 vCPU unlocks the >16 GB Fargate
-    # memory tier; 24 GB gives the Python side headroom (DuckDB stays capped +
-    # spills, so raising DuckDB's own memory_limit is the wrong lever here).
+    # its buffer stays bounded (~memory_limit, 16GB default) and overflows to
+    # ephemeral. Spill only bounds spillable operators: the Jul 2026 corpus
+    # OOM'd inside DuckDB at an 8GB budget on un-spillable block pins, which is
+    # why the default budget is 16GB (see SECArtifactConfig). Peak task usage
+    # is the DuckDB budget + the Python result materialized on top, so 24 GB
+    # keeps ~8 GB of Python headroom (a 14GB budget on the older 16 GB task
+    # SIGKILL'd). 4 vCPU unlocks the >16 GB Fargate memory tier.
     # Ephemeral: 200GB covers the DuckDB file + spill + artifacts.
     "ecs/cpu": "4096",
     "ecs/memory": "24576",

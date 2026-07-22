@@ -20,13 +20,13 @@ class TestSECArtifactConfig:
     """Test default configuration values."""
     config = SECArtifactConfig()
     assert config.duckdb_source == "sec"
-    assert config.memory_limit == "8GB"
+    assert config.memory_limit == "16GB"
 
   def test_custom_values(self):
     """Test custom configuration values."""
-    config = SECArtifactConfig(duckdb_source="sec_historical", memory_limit="16GB")
+    config = SECArtifactConfig(duckdb_source="sec_historical", memory_limit="12GB")
     assert config.duckdb_source == "sec_historical"
-    assert config.memory_limit == "16GB"
+    assert config.memory_limit == "12GB"
 
 
 @pytest.mark.unit
@@ -178,15 +178,15 @@ class TestSecKnowledgeArtifacts:
     )
     mock_disclosure_builder_cls.return_value = mock_disclosure_builder
 
-    config = SECArtifactConfig(memory_limit="16GB")
+    config = SECArtifactConfig(memory_limit="12GB")
     context = build_asset_context()
 
     sec_knowledge_artifacts(context, config)
 
     # Verify memory limit passed to builders
-    mock_element_builder_cls.assert_called_once_with(memory_limit="16GB")
-    mock_structure_builder_cls.assert_called_once_with(memory_limit="16GB")
-    mock_disclosure_builder_cls.assert_called_once_with(memory_limit="16GB")
+    mock_element_builder_cls.assert_called_once_with(memory_limit="12GB")
+    mock_structure_builder_cls.assert_called_once_with(memory_limit="12GB")
+    mock_disclosure_builder_cls.assert_called_once_with(memory_limit="12GB")
 
   @patch("robosystems.adapters.sec.knowledge.framework.DuckDBAnalyticsContext")
   @patch("robosystems.adapters.sec.knowledge.artifact.ElementKnowledgeBuilder")
