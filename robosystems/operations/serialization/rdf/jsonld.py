@@ -331,6 +331,12 @@ def _add_structures(g: Graph, bundle: StatementBundle, root: URIRef) -> None:
     # Promote the legible name to the predicate consumers render; the UUID
     # stays on rs:internalId. (§ logical-naming pass.)
     g.add((s_uri, SKOS.prefLabel, Literal(link.structure_name)))
+    # Published section order (disclosure notes) — the holon viewer sorts
+    # sections by rs:structureOrder when present, so the bundle's note
+    # ordering survives serialization round-trips.
+    display_order = bundle.structure_display_order.get(link.structure_id)
+    if display_order is not None:
+      g.add((s_uri, RS.structureOrder, Literal(display_order, datatype=XSD.integer)))
     if link.role_uri:
       g.add((s_uri, RS.roleUri, Literal(link.role_uri)))
     if link.block_type:
@@ -485,6 +491,14 @@ def _add_information_blocks(g: Graph, bundle: StatementBundle, root: URIRef) -> 
     g.add((ib_uri, RS.internalId, Literal(ib_id)))
     if "block_type" in body:
       g.add((ib_uri, RS.blockType, Literal(body["block_type"])))
+    # Bind disclosure IBs to their Structure by identity — the envelope id IS
+    # the structure id — so the viewer resolves each note's own presentation
+    # tree and its rs:structureOrder. Deliberately NOT emitted for statement
+    # IBs: with a structure identity the viewer titles a section by
+    # structureName ("rs-gaap — Balance Sheet — Classified"), and statements
+    # should keep their friendly block-type titles ("Balance Sheet").
+    if ib_id in bundle.structure_display_order:
+      g.add((ib_uri, RS.structure, _scoped(root, "structure", ib_id)))
     if "name" in body:
       g.add((ib_uri, SKOS.prefLabel, Literal(body["name"])))
     if body.get("taxonomy_id"):

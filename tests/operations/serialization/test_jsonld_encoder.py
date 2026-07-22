@@ -224,6 +224,69 @@ class TestStructureArrangement:
     validate_graph(build_graph(_bundle(with_arc=True)), _bundle(with_arc=True))
 
 
+# ── Section ordering (rs:structureOrder + IB→Structure identity) ──────────
+
+
+class TestSectionOrdering:
+  def _ordered_bundle(self) -> StatementBundle:
+    b = _bundle(with_arc=True)
+    b.linkbases.presentation_links.append(
+      BundleLinkbaseLink(
+        link_type="presentationLink",
+        role_uri="http://robosystems.ai/role/Policies",
+        structure_id="struct_policies",
+        structure_name="Significant Accounting Policies",
+        block_type="regulatory_disclosure",
+        arcs=[],
+      )
+    )
+    b.ib_envelopes = [
+      {"id": "struct_01", "block_type": "balance_sheet", "name": "Balance Sheet"},
+      {
+        "id": "struct_policies",
+        "block_type": "regulatory_disclosure",
+        "name": "Significant Accounting Policies",
+      },
+    ]
+    b.structure_display_order = {"struct_policies": 100}
+    return b
+
+  @staticmethod
+  def _node_by_internal_id(g: Graph, rdf_type: URIRef, internal_id: str) -> URIRef:
+    # internalId is carried by both the Structure and its IB — filter by type.
+    return next(
+      s
+      for s in g.subjects(RS.internalId, Literal(internal_id))
+      if (s, RDF.type, rdf_type) in g
+    )
+
+  def test_structure_order_emitted_for_ordered_structures(self) -> None:
+    g = build_graph(self._ordered_bundle())
+    s_uri = self._node_by_internal_id(g, RS.Structure, "struct_policies")
+    assert (
+      s_uri,
+      RS.structureOrder,
+      Literal(100, datatype=rdflib.XSD.integer),
+    ) in g
+
+  def test_statement_structure_carries_no_order(self) -> None:
+    g = build_graph(self._ordered_bundle())
+    s_uri = self._node_by_internal_id(g, RS.Structure, "struct_01")
+    assert next(g.objects(s_uri, RS.structureOrder), None) is None
+
+  def test_disclosure_ib_links_its_structure_statement_ib_does_not(self) -> None:
+    # Disclosure IBs bind their Structure by identity (drives viewer
+    # ordering + per-note presentation trees); statement IBs stay unbound
+    # so the viewer keeps friendly block-type titles.
+    g = build_graph(self._ordered_bundle())
+    disclosure_ib = self._node_by_internal_id(g, RS.InformationBlock, "struct_policies")
+    statement_ib = self._node_by_internal_id(g, RS.InformationBlock, "struct_01")
+    linked = next(g.objects(disclosure_ib, RS.structure), None)
+    assert linked is not None
+    assert (linked, RDF.type, RS.Structure) in g
+    assert next(g.objects(statement_ib, RS.structure), None) is None
+
+
 # ── Periods / units (aspect nodes) ───────────────────────────────────────
 
 

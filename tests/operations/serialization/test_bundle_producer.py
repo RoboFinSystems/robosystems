@@ -27,6 +27,7 @@ from robosystems.operations.serialization.bundle import (
   ReportMeta,
   StatementBundle,
   _associations_to_linkbases,
+  _disclosure_sort_key,
   _element_to_bundle,
   _fact_to_bundle,
   _mint_periods,
@@ -71,6 +72,7 @@ class _FakeStructure:
   name: str
   block_type: str | None = "balance_sheet"
   metadata_: dict | None = None
+  created_at: date | None = None
 
 
 @dataclass
@@ -166,6 +168,56 @@ class TestElementToBundle:
 
 
 # ── _associations_to_linkbases ────────────────────────────────────────
+
+
+class TestDisclosureSortKey:
+  """Disclosure notes order by note_order metadata, then creation order."""
+
+  def test_note_order_beats_creation_order(self) -> None:
+    # Policies authored AFTER the inventory note, but note_order pins it first.
+    inventory = _FakeStructure(
+      id="struct_a",
+      name="Inventory Components",
+      block_type="regulatory_disclosure",
+      metadata_={"note_order": 2},
+      created_at=date(2026, 7, 1),
+    )
+    policies = _FakeStructure(
+      id="struct_b",
+      name="Significant Accounting Policies",
+      block_type="regulatory_disclosure",
+      metadata_={"note_order": 1},
+      created_at=date(2026, 7, 2),
+    )
+    ordered = sorted([inventory, policies], key=_disclosure_sort_key)
+    assert [s.name for s in ordered] == [
+      "Significant Accounting Policies",
+      "Inventory Components",
+    ]
+
+  def test_unordered_notes_follow_ordered_in_creation_order(self) -> None:
+    ordered_note = _FakeStructure(
+      id="struct_c",
+      name="Ordered",
+      metadata_={"note_order": 5},
+      created_at=date(2026, 7, 3),
+    )
+    old = _FakeStructure(id="struct_a", name="Old", created_at=date(2026, 7, 1))
+    new = _FakeStructure(id="struct_b", name="New", created_at=date(2026, 7, 2))
+    result = sorted([new, old, ordered_note], key=_disclosure_sort_key)
+    assert [s.name for s in result] == ["Ordered", "Old", "New"]
+
+  def test_non_numeric_note_order_treated_as_unordered(self) -> None:
+    # Booleans and strings don't count as an explicit position.
+    bool_order = _FakeStructure(
+      id="struct_a", name="Bool", metadata_={"note_order": True}
+    )
+    str_order = _FakeStructure(
+      id="struct_b", name="Str", metadata_={"note_order": "first"}
+    )
+    real = _FakeStructure(id="struct_c", name="Real", metadata_={"note_order": 9})
+    result = sorted([str_order, bool_order, real], key=_disclosure_sort_key)
+    assert result[0].name == "Real"
 
 
 class TestAssociationsToLinkbases:

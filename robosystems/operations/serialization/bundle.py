@@ -326,6 +326,13 @@ class StatementBundle(BaseModel):
     ),
   )
 
+  # Display order for disclosure structures (structure_id → sort code).
+  # Statements order by block type in every consumer; disclosures have no
+  # inherent order, so the bundle pins one (note_order metadata, then
+  # creation order) and the JSON-LD encoder publishes it as
+  # ``rs:structureOrder`` for the holon viewer's section ordering.
+  structure_display_order: dict[str, int] = Field(default_factory=dict)
+
   # Mode discriminator + arm
   mode: Literal["report", "live"]
   report_meta: ReportMeta | None = None
@@ -559,9 +566,18 @@ def build_report_bundle(
     build_envelope as _build_disclosure_envelope,
   )
 
-  for sid, s in structures_by_id.items():
-    if s.block_type != DISCLOSURE_BLOCK_TYPE:
-      continue
+  # Notes render after the statements, in a deterministic order: explicit
+  # ``note_order`` structure metadata first (Significant Accounting Policies
+  # is canonically Note 1), then creation order. The 100 offset keeps the
+  # published sort codes clear of the statements' block-type slots.
+  disclosure_rows = sorted(
+    (s for s in structures_by_id.values() if s.block_type == DISCLOSURE_BLOCK_TYPE),
+    key=_disclosure_sort_key,
+  )
+  structure_display_order: dict[str, int] = {}
+  for i, s in enumerate(disclosure_rows):
+    sid = str(s.id)
+    structure_display_order[sid] = 100 + i
     envelope = _build_disclosure_envelope(session, sid, structure_to_fact_set.get(sid))
     if envelope is not None:
       ib_envelopes.append(envelope)
@@ -630,6 +646,7 @@ def build_report_bundle(
     units=units,
     facts=bundle_facts,
     ib_envelopes=ib_envelopes,
+    structure_display_order=structure_display_order,
     mode="report",
     report_meta=ReportMeta(
       report_id=str(report.id),
@@ -645,6 +662,25 @@ def build_report_bundle(
 
 
 # ── Internal projection helpers ────────────────────────────────────────────
+
+
+def _disclosure_sort_key(structure: Any) -> tuple[int, float, str, str]:
+  """Sort key for disclosure notes: explicit order, then creation order.
+
+  A structure opts into an explicit position via ``note_order`` in its
+  metadata (authored through the Taxonomy Block envelope's structure
+  ``metadata``). Notes without one keep creation order, after the
+  ordered ones; the id tiebreak keeps the sort total.
+  """
+  meta = structure.metadata_ if isinstance(structure.metadata_, dict) else {}
+  note_order = meta.get("note_order")
+  has_order = isinstance(note_order, (int, float)) and not isinstance(note_order, bool)
+  return (
+    0 if has_order else 1,
+    float(note_order) if has_order else 0.0,
+    str(structure.created_at or ""),
+    str(structure.id),
+  )
 
 
 def _period_metas_for_report(report: Any, fact_sets: list[Any]) -> list[PeriodMeta]:

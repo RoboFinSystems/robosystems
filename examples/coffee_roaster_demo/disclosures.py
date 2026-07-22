@@ -25,6 +25,8 @@ INVENTORY_TOTAL_QNAME = (
 INVENTORY_NOTE: dict = {
   "taxonomy_name": "Driftline Reporting Extension",
   "name": "Inventory Components",
+  # Note 2 — after Significant Accounting Policies (canonically Note 1).
+  "note_order": 2,
   "description": (
     "Inventory by stage — green coffee (raw materials), roasting WIP, "
     "and bagged finished goods — footing to the balance-sheet "
@@ -76,6 +78,8 @@ DISCLOSURE_NOTES: list[dict] = [INVENTORY_NOTE]
 POLICIES_NOTE: dict = {
   "taxonomy_name": "Driftline Policy Notes",
   "name": "Significant Accounting Policies",
+  # Note 1 — the canonical first note of every report.
+  "note_order": 1,
   "description": (
     "Significant accounting policies — inventory and COGS, revenue "
     "recognition, and depreciation — bound from the company's policy "
