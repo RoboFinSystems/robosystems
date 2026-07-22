@@ -106,7 +106,9 @@ class Element(ExtensionsBase):
       "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
       # 'cm' — Conceptual Model posting-role concepts (cm:Debit/cm:Credit),
       # tenant-copied with the default pin so schedule has-part arcs resolve.
-      "'cm')",
+      # 'rs-metric' — the metric catalog package (seeded at 0002 on fresh
+      # databases, backfilled by 0022 on existing ones).
+      "'cm', 'rs-metric')",
       name="check_element_source",
     ),
   )

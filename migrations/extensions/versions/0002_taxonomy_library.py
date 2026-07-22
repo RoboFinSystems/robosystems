@@ -129,7 +129,10 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   # for the same widen applied to already-deployed tenant schemas.
   # 'cm' — Conceptual Model framework (cm:Debit/cm:Credit posting roles),
   # seeded here via rs-gaap depends_on cm and tenant-copied with the pin.
-  "'disclosures', 'checklist', 'styles', 'cm'"
+  # 'rs-metric' — the metric catalog package (0022's backfill for existing
+  # databases; fresh seeds pick it up here because this seed reads the
+  # current frameworks/ manifest, which lists rs-metric).
+  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric'"
   ")"
 )
 _WIDENED_TAXONOMY_TYPE_CHECK = (
@@ -210,7 +213,9 @@ _RULE_CATEGORY_CHECK = (
 )
 _RULE_PATTERN_CHECK = (
   "rule_pattern IS NULL OR rule_pattern IN ("
-  "'Adjustment', 'CoExists', 'EqualTo', 'Exists', 'GreaterThan', "
+  # 'Derive' — compute-a-value rules (the rs-metric catalog seeds them;
+  # 0022 widens already-deployed databases the same way).
+  "'Adjustment', 'CoExists', 'Derive', 'EqualTo', 'Exists', 'GreaterThan', "
   "'GreaterThanOrEqualToZero', 'LessThan', 'RollForward', 'RollUp', "
   "'SumEquals', 'Variance'"
   ")"
