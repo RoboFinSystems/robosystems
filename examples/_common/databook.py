@@ -236,7 +236,10 @@ def _structure_for_block(g: Graph, block_type: str) -> URIRef | None:
 def _render_ib_table(g: Graph, ib: URIRef, columns: list[dict]) -> str:
   fact_set = g.value(ib, RS.factSet)
   block_type = str(g.value(ib, RS.blockType) or "")
-  structure = _structure_for_block(g, block_type)
+  # Prefer the IB's own rs:structure link (disclosure notes carry it — two
+  # notes share a block_type, so type-matching would pick the wrong tree);
+  # statements fall back to the block-type match.
+  structure = g.value(ib, RS.structure) or _structure_for_block(g, block_type)
   order = _presentation_order(g, structure) if structure is not None else {}
   subtotals = _calc_subtotals(g)
 
@@ -595,13 +598,21 @@ def write_databook(
   if derive_holon:
     write_holon_jsonld(jsonld_path, out_holon)
 
-  ibs = sorted(
-    g.subjects(RDF.type, RS.InformationBlock),
-    key=lambda ib: (
+  def _ib_sort_key(ib: URIRef) -> tuple[int, float, str, str]:
+    struct = g.value(ib, RS.structure)
+    struct_order = (
+      g.value(struct, RS.structureOrder) if struct is not None else None
+    )
+    return (
       _BLOCK_ORDER.get(str(g.value(ib, RS.blockType)), 99),
+      # Disclosure notes tie on block order; rs:structureOrder (published
+      # by the bundle from note_order metadata) breaks the tie.
+      float(struct_order) if struct_order is not None else 999.0,
       str(g.value(ib, RS.blockType)),
-    ),
-  )
+      str(g.value(ib, SKOS.prefLabel) or ""),
+    )
+
+  ibs = sorted(g.subjects(RDF.type, RS.InformationBlock), key=_ib_sort_key)
 
   entity = g.value(root, RS.entity)
   entity_name = str(g.value(entity, SKOS.prefLabel) or "") if entity else ""

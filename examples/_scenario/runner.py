@@ -704,6 +704,11 @@ def create_disclosure_notes(
           "block_type": "regulatory_disclosure",
           "concept_arrangement": "roll_up",
           "role_uri": note.get("role_uri"),
+          # note_order pins the note's position in the rendered report
+          # (the bundle sorts disclosures by it; see _disclosure_sort_key).
+          "metadata": (
+            {"note_order": note["note_order"]} if note.get("note_order") else {}
+          ),
         }
       ],
       "associations": [
@@ -922,6 +927,9 @@ def create_text_block_notes(
           "block_type": "regulatory_disclosure",
           "concept_arrangement": "text_block",
           "role_uri": note.get("role_uri"),
+          "metadata": (
+            {"note_order": note["note_order"]} if note.get("note_order") else {}
+          ),
         }
       ],
       "associations": [
