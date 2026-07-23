@@ -38,6 +38,17 @@ REVEAL_PROMPTS = [
   "How much cash is tied up in inventory vs. receivables?",
 ]
 
+# Operating-budget scenario (FP&A F-1) — Driftline's working-capital arc as
+# lever assertions: modest growth, roaster margins, the slow-paying wholesale
+# account baked into DSO. Values follow the rs-driver catalog conventions
+# (percent levers as decimals per month, days levers as day counts).
+FORECAST_LEVERS = {
+  "rs-driver:RevenueGrowthRate": 0.03,
+  "rs-driver:CostOfRevenueRate": 0.62,
+  "rs-driver:DaysSalesOutstanding": 45,
+  "rs-driver:DaysPayableOutstanding": 30,
+}
+
 
 def main() -> None:
   run_demo(
@@ -51,6 +62,7 @@ def main() -> None:
     text_blocks=TEXT_BLOCK_NOTES,
     custom_metrics=CUSTOM_METRICS,
     memories=MEMORIES,
+    forecast_levers=FORECAST_LEVERS,
   )
 
 

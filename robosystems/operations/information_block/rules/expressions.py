@@ -16,10 +16,14 @@ Aggregates are desugared, never evaluated: ``avg($X)`` rewrites to a
 synthesized ``$__avg_X`` operand *before* parsing
 (:func:`desugar_aggregates`), so the whitelist keeps rejecting every
 ``ast.Call`` and the evaluator stays pure arithmetic — averaging happens
-at bind time in the caller, where the begin + end facts live. A future
-``$X[t-1]`` prior-period operand rides the same mechanism (rewrite to a
-synthesized operand, bind at a resolved prior period) — see
-``compute-metrics``.
+at bind time in the caller, where the begin + end facts live. The
+``$X[t-1]`` prior-period reference (the forecast grammar's compounding
+form) rides the same mechanism: :func:`desugar_priors` rewrites it to a
+synthesized ``$__prior_X`` operand pre-parse, and the caller binds it at
+the resolved prior period — ``compute-forecast`` binds the previous
+forward month's value in its walk. ``ast.Subscript`` stays outside the
+whitelist, so any other bracket form (``$X[t-2]``, ``$X[0]``) is
+structurally rejected — the grammar ceiling is ``[t-1]`` + ``avg()``.
 """
 
 from __future__ import annotations
@@ -79,6 +83,38 @@ def desugar_aggregates(expr: str) -> tuple[str, dict[str, str]]:
     return f"${name}"
 
   return _AVG_CALL_RE.sub(_sub, expr), synthesized
+
+
+PRIOR_OPERAND_PREFIX = "__prior_"
+
+_PRIOR_REF_RE = re.compile(r"\$([A-Za-z_]\w*)\[t-1\]")
+
+
+def desugar_priors(expr: str) -> tuple[str, dict[str, str]]:
+  """Rewrite ``$X[t-1]`` references to synthesized ``$__prior_X`` operands.
+
+  The prior-period half of the forecast grammar (``avg()``'s documented
+  sibling seam). Returns the rewritten expression plus a map of
+  synthesized variable name → base variable name; callers append the
+  synthesized names to the parse variable list and bind each one at the
+  resolved prior period — the forecast walk binds the previous forward
+  month's value (seeded from actuals at the base period).
+
+  Only the exact ``[t-1]`` form matches. Any other bracket construct —
+  ``$X[t-2]``, ``$X[0]``, ``$X[t]`` — survives as a genuine
+  :class:`ast.Subscript`, which is outside the whitelist and rejected:
+  the grammar ceiling stays enforced structurally, same as the
+  no-function-calls posture for aggregates.
+  """
+  synthesized: dict[str, str] = {}
+
+  def _sub(match: re.Match[str]) -> str:
+    base = match.group(1)
+    name = f"{PRIOR_OPERAND_PREFIX}{base}"
+    synthesized[name] = base
+    return f"${name}"
+
+  return _PRIOR_REF_RE.sub(_sub, expr), synthesized
 
 
 @dataclass
@@ -302,10 +338,12 @@ def build_rollup_expression(parent_name: str, children: list[tuple[str, float]])
 __all__ = [
   "AVG_OPERAND_PREFIX",
   "EQUALITY_TOLERANCE",
+  "PRIOR_OPERAND_PREFIX",
   "InvalidRuleExpression",
   "ParsedExpression",
   "build_rollup_expression",
   "desugar_aggregates",
+  "desugar_priors",
   "evaluate_arithmetic",
   "evaluate_derivation",
   "evaluate_equality",

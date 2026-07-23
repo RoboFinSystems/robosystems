@@ -27,6 +27,7 @@ def get_information_block(
   session: Session,
   structure_id: str,
   fact_set_id: str | None = None,
+  scenario_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Fetch one block by id, dispatching via the structure's block_type.
 
@@ -34,7 +35,15 @@ def get_information_block(
   registered — callers map that to a GraphQL null / REST 404. When
   ``fact_set_id`` is provided the envelope is rehydrated from that
   specific FactSet instead of the latest one (used by Report Block
-  rehydration to surface a frozen snapshot).
+  rehydration to surface a frozen snapshot) and ``scenario_id`` is
+  ignored — an explicit pin bypasses scenario selection.
+
+  ``scenario_id`` selects the FactSet slice the envelope binds:
+  ``None`` = actuals; a forecast block's structure id = that scenario
+  (statement envelopes bind its latest computed month, metric envelopes
+  extend the series with its forward columns). Block types without
+  scenario slices (schedule, rollforward, disclosure) accept and
+  ignore it.
   """
   structure = session.get(Structure, structure_id)
   if structure is None:
@@ -46,7 +55,9 @@ def get_information_block(
     # surface as ``None`` rather than raising — the envelope just can't
     # be built.
     return None
-  return entry.dispatch_build_envelope(session, structure_id, fact_set_id)
+  return entry.dispatch_build_envelope(
+    session, structure_id, fact_set_id, scenario_id=scenario_id
+  )
 
 
 def get_information_block_for_fact_set(
@@ -77,6 +88,7 @@ def list_information_blocks(
   limit: int = 50,
   offset: int = 0,
   library_sentinel: bool = False,
+  scenario_id: str | None = None,
 ) -> list[InformationBlockEnvelope]:
   """List blocks with optional block_type + category filters.
 
@@ -88,6 +100,10 @@ def list_information_blocks(
 
   On a tenant graph_id (``library_sentinel=False``), no such filter
   applies.
+
+  ``scenario_id`` threads into each envelope's FactSet binding (see
+  :func:`get_information_block`) — the Structure selection itself is
+  scenario-independent.
   """
   # Resolve the candidate block_type id set based on the sentinel flag
   # and any explicit caller-supplied filter.
@@ -148,7 +164,9 @@ def list_information_blocks(
       entry = registry_module.get(structure.block_type)
     except KeyError:
       continue
-    envelope = entry.dispatch_build_envelope(session, structure.id)
+    envelope = entry.dispatch_build_envelope(
+      session, structure.id, None, scenario_id=scenario_id
+    )
     if envelope is not None:
       envelopes.append(envelope)
   return envelopes

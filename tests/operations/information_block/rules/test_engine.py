@@ -358,6 +358,43 @@ class TestEvaluateRulesForStructure:
       )
     assert results == []
 
+  def test_derive_rules_emit_no_verification_results(self) -> None:
+    """Derive rules COMPUTE values (compute-metrics / compute-forecast) —
+    they are not checks. Without the exclusion, the rs-driver catalog's
+    rules (whose targets are rs-gaap statement elements) would add a
+    'skipped' VerificationResult to every statement rule run."""
+    from robosystems.operations.information_block.rules.engine import (
+      evaluate_rules_for_structure,
+    )
+
+    session = MagicMock()
+    session.get.return_value = MagicMock(id="struct_is", block_type="income_statement")
+
+    rule_lite = MagicMock()
+    rule_lite.id = "rule_driver_growth"
+    derive_rule = _make_rule_orm(
+      rule_id="rule_driver_growth",
+      pattern="Derive",
+      expression="$Revenues = ($Revenues[t-1] * (1 + $RevenueGrowthRate))",
+      variables=[
+        {"variable_name": "Revenues", "variable_qname": "rs-gaap:Revenues"},
+        {
+          "variable_name": "RevenueGrowthRate",
+          "variable_qname": "rs-driver:RevenueGrowthRate",
+        },
+      ],
+    )
+
+    with patch(
+      "robosystems.operations.information_block.rules.engine.load_rules_for_structure",
+      return_value=[rule_lite],
+    ):
+      session.execute.side_effect = [_scalars(), _scalars(derive_rule)]
+      results = evaluate_rules_for_structure(session, "struct_is")
+
+    assert results == []
+    session.add.assert_not_called()
+
 
 class TestNumericGuards:
   """Nonnumeric (text-block) facts are invisible to the numeric rule

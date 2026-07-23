@@ -108,7 +108,8 @@ class Element(ExtensionsBase):
       # tenant-copied with the default pin so schedule has-part arcs resolve.
       # 'rs-metric' — the metric catalog package (seeded at 0002 on fresh
       # databases, backfilled by 0022 on existing ones).
-      "'cm', 'rs-metric')",
+      # 'rs-driver' — the forecast lever catalog package (seeded at 0024).
+      "'cm', 'rs-metric', 'rs-driver')",
       name="check_element_source",
     ),
   )

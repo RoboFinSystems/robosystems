@@ -39,6 +39,20 @@ REVEAL_PROMPTS = [
   "Net out deferred revenue — at this burn, what's our real runway?",
 ]
 
+# Operating-budget scenario (FP&A F-1) — Cadence's growth/burn arc as lever
+# assertions: SaaS growth continuing the historical ramp (~5%/month), the
+# ~22% hosting + support cost-of-revenue rate, a month of hosting bills in
+# payables. DSO is deliberately NOT asserted — an annual-prepay book has no
+# receivables story, so the DSO rule stays inactive and the working-capital
+# projection is the payables side only (the partial-lever path, on purpose:
+# each episode's scenario asserts the levers its business model actually
+# turns). Values follow the rs-driver catalog conventions.
+FORECAST_LEVERS = {
+  "rs-driver:RevenueGrowthRate": 0.05,
+  "rs-driver:CostOfRevenueRate": 0.22,
+  "rs-driver:DaysPayableOutstanding": 30,
+}
+
 
 def main() -> None:
   run_demo(
@@ -52,6 +66,7 @@ def main() -> None:
     text_blocks=TEXT_BLOCK_NOTES,
     custom_metrics=CUSTOM_METRICS,
     memories=MEMORIES,
+    forecast_levers=FORECAST_LEVERS,
   )
 
 

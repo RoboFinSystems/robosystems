@@ -327,6 +327,7 @@ class TestBuildEnvelope:
     fact_set.factset_type = "schedule"
     fact_set.entity_id = "ent_demo"
     fact_set.report_id = None
+    fact_set.scenario_id = None
     fact_set.provenance = {
       "origin": "schedule",
       "structure_id": "struct_dep",

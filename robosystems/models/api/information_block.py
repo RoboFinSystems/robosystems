@@ -16,6 +16,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, RootModel
 
+from robosystems.models.api.extensions.forecasts import (
+  CreateForecastRequest,
+  DeleteForecastRequest,
+  UpdateForecastRequest,
+)
 from robosystems.models.api.extensions.rollforward import (
   AttributionFilter,
   CreateRollforwardRequest,
@@ -202,8 +207,8 @@ class FactSetLite(BaseModel):
   factset_type: str = Field(
     ...,
     description=(
-      "'report' | 'schedule' | 'custom' | 'disclosure'. Enum closure "
-      "enforced by the ``public.fact_sets`` CHECK constraint."
+      "'report' | 'schedule' | 'custom' | 'disclosure' | 'metric'. Enum "
+      "closure enforced by the ``public.fact_sets`` CHECK constraint."
     ),
   )
   entity_id: str
@@ -212,6 +217,14 @@ class FactSetLite(BaseModel):
     description=(
       "Back-pointer to the ``reports`` table while ``report_id`` still "
       "lives on facts. Drops out once the retirement migration lands."
+    ),
+  )
+  scenario_id: str | None = Field(
+    None,
+    description=(
+      "Scenario axis (the forecast engine). NULL = actuals; non-NULL "
+      "names the owning forecast block whose parallel universe this "
+      "set belongs to."
     ),
   )
   provenance: dict | None = Field(
@@ -572,6 +585,78 @@ class RollforwardMechanics(BaseModel):
   )
 
 
+class LeverAssertionLite(BaseModel):
+  """One lever's persisted assertion inside ``ForecastMechanics``.
+
+  The create handler expands the wire-level assertion (uniform ``value``
+  + per-month overrides) into the explicit ``values_by_period`` map so
+  compute never interpolates — every asserted month is stated. The
+  values are duplicated as authored facts in the scenario's lever
+  FactSet (rules for mechanics, **facts for values** — the facts are
+  what ``compute-forecast`` binds); this mechanics copy is the
+  operator-legible round-trip shape.
+  """
+
+  qname: str = Field(..., description="rs-driver lever element qname.")
+  element_id: str = Field(..., description="Resolved tenant element id.")
+  item_type: str | None = Field(
+    None,
+    description="Format family from the catalog (percent | days | ...).",
+  )
+  values_by_period: dict[str, float] = Field(
+    ...,
+    description="Expanded per-month assertions keyed by ``YYYY-MM``.",
+  )
+
+
+class ForecastMechanics(BaseModel):
+  """Authored scenario container for ``block_type='forecast'`` (FP&A F-1).
+
+  The block IS the scenario: its structure id is the ``scenario_id``
+  every derived forward FactSet carries (NULL = actuals). The authored
+  surface is exactly this — scenario identity, horizon, base period,
+  lever assertions; everything downstream is derived by
+  ``compute-forecast`` (levers → driven rs-gaap anchors via the
+  rs-driver Derive rules → carry-forward for unmodeled IS lines →
+  calc-DAG subtotals), landing in the EXISTING statement/metric block
+  types stamped with the scenario. Reads directly from the typed
+  ``structures.artifact_mechanics`` JSONB column.
+  """
+
+  kind: Literal["forecast"] = "forecast"
+  scenario_kind: Literal["budget", "forecast", "projection"] = Field(
+    "forecast",
+    description="Scenario kind — display/filter metadata, not machinery.",
+  )
+  horizon_months: int = Field(
+    ...,
+    ge=1,
+    le=36,
+    description="Forward months projected past the base period.",
+  )
+  base_period: str = Field(
+    ...,
+    description=(
+      "Seed month (``YYYY-MM``) the walk projects forward from — "
+      "resolved at create time (request → fiscal calendar "
+      "closed-through → newest actual report month) and stored so "
+      "recompute is deterministic."
+    ),
+  )
+  levers: list[LeverAssertionLite] = Field(
+    ...,
+    description="Expanded lever assertions (authoring order).",
+  )
+  computed_months: int = Field(
+    default=0,
+    description=(
+      "Number of forward months with computed scenario FactSets. "
+      "Runtime state filled at envelope-build time — 0 until the first "
+      "compute-forecast run."
+    ),
+  )
+
+
 class StatementMechanics(BaseModel):
   """Renderer mechanics for the statement family of block types.
 
@@ -617,7 +702,11 @@ class StatementMechanics(BaseModel):
 # New block-type mechanics models add a `kind` literal and extend this
 # union. Pydantic dispatches on `kind` via the discriminator tag.
 ArtifactMechanics = Annotated[
-  ScheduleMechanics | StatementMechanics | MetricMechanics | RollforwardMechanics,
+  ScheduleMechanics
+  | StatementMechanics
+  | MetricMechanics
+  | RollforwardMechanics
+  | ForecastMechanics,
   Field(discriminator="kind"),
 ]
 
@@ -1090,8 +1179,57 @@ class _CreateRollforwardArm(BaseModel):
   )
 
 
+class _CreateForecastArm(BaseModel):
+  """Create-information-block body for ``block_type="forecast"``.
+
+  Carries a typed forecast payload — the authored scenario container:
+  scenario identity, horizon, base period, lever assertions on
+  ``rs-driver:*`` catalog elements. Run ``compute-forecast`` after
+  creating to derive the forward months.
+  """
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "12-month operating budget scenario",
+          "description": (
+            "Budget scenario: 3%/month revenue growth compounding, 62% "
+            "cost-of-revenue rate, 45-day DSO, 30-day DPO. Lever values "
+            "follow the rs-driver catalog conventions (percent levers "
+            "as decimals per month, days levers as day counts)."
+          ),
+          "value": {
+            "block_type": "forecast",
+            "payload": {
+              "name": "FY26 Operating Budget",
+              "scenario_kind": "budget",
+              "horizon_months": 12,
+              "levers": [
+                {"qname": "rs-driver:RevenueGrowthRate", "value": 0.03},
+                {"qname": "rs-driver:CostOfRevenueRate", "value": 0.62},
+                {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
+                {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
+              ],
+            },
+          },
+        }
+      ]
+    }
+  )
+
+  block_type: Literal["forecast"] = Field(
+    ...,
+    description="Discriminator value selecting this arm.",
+  )
+  payload: CreateForecastRequest = Field(
+    ...,
+    description="Forecast creation payload.",
+  )
+
+
 _CreateInformationBlockArms = Annotated[
-  _CreateScheduleArm | _CreateRollforwardArm | _CreateLegacyArm,
+  _CreateScheduleArm | _CreateRollforwardArm | _CreateForecastArm | _CreateLegacyArm,
   Discriminator("block_type"),
 ]
 
@@ -1112,9 +1250,14 @@ class CreateInformationBlockRequest(RootModel[_CreateInformationBlockArms]):
   @property
   def payload(
     self,
-  ) -> CreateScheduleRequest | CreateRollforwardRequest | dict[str, Any]:
-    """Payload of the resolved arm. Typed for the schedule and
-    rollforward arms; a raw dict for the legacy arms (the dispatch
+  ) -> (
+    CreateScheduleRequest
+    | CreateRollforwardRequest
+    | CreateForecastRequest
+    | dict[str, Any]
+  ):
+    """Payload of the resolved arm. Typed for the schedule, rollforward,
+    and forecast arms; a raw dict for the legacy arms (the dispatch
     handler validates it at runtime against the registry entry's
     request model)."""
     return self.root.payload
@@ -1214,8 +1357,48 @@ class _UpdateRollforwardArm(BaseModel):
   )
 
 
+class _UpdateForecastArm(BaseModel):
+  """Update-information-block body for ``block_type="forecast"``.
+
+  Mutable: name, scenario_kind, horizon_months, base_period, levers
+  (full replace). Updating does not recompute — run ``compute-forecast``
+  to refresh the scenario's derived months.
+  """
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "Raise the growth assumption",
+          "value": {
+            "block_type": "forecast",
+            "payload": {
+              "structure_id": "struct_fy26_budget",
+              "levers": [
+                {"qname": "rs-driver:RevenueGrowthRate", "value": 0.04},
+                {"qname": "rs-driver:CostOfRevenueRate", "value": 0.62},
+                {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
+                {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
+              ],
+            },
+          },
+        }
+      ]
+    }
+  )
+
+  block_type: Literal["forecast"] = Field(
+    ...,
+    description="Discriminator value selecting this arm.",
+  )
+  payload: UpdateForecastRequest = Field(
+    ...,
+    description="Forecast update payload.",
+  )
+
+
 _UpdateInformationBlockArms = Annotated[
-  _UpdateScheduleArm | _UpdateRollforwardArm | _UpdateLegacyArm,
+  _UpdateScheduleArm | _UpdateRollforwardArm | _UpdateForecastArm | _UpdateLegacyArm,
   Discriminator("block_type"),
 ]
 
@@ -1234,7 +1417,12 @@ class UpdateInformationBlockRequest(RootModel[_UpdateInformationBlockArms]):
   @property
   def payload(
     self,
-  ) -> UpdateScheduleRequest | UpdateRollforwardRequest | dict[str, Any]:
+  ) -> (
+    UpdateScheduleRequest
+    | UpdateRollforwardRequest
+    | UpdateForecastRequest
+    | dict[str, Any]
+  ):
     return self.root.payload
 
 
@@ -1330,8 +1518,39 @@ class _DeleteRollforwardArm(BaseModel):
   )
 
 
+class _DeleteForecastArm(BaseModel):
+  """Delete-information-block body for ``block_type="forecast"``.
+
+  Removes the scenario's entire parallel universe — the lever FactSet
+  and every computed scenario FactSet. Actuals are never touched.
+  """
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "Delete a forecast scenario",
+          "value": {
+            "block_type": "forecast",
+            "payload": {"structure_id": "struct_fy26_budget"},
+          },
+        }
+      ]
+    }
+  )
+
+  block_type: Literal["forecast"] = Field(
+    ...,
+    description="Discriminator value selecting this arm.",
+  )
+  payload: DeleteForecastRequest = Field(
+    ...,
+    description="Forecast delete payload.",
+  )
+
+
 _DeleteInformationBlockArms = Annotated[
-  _DeleteScheduleArm | _DeleteRollforwardArm | _DeleteLegacyArm,
+  _DeleteScheduleArm | _DeleteRollforwardArm | _DeleteForecastArm | _DeleteLegacyArm,
   Discriminator("block_type"),
 ]
 
@@ -1349,7 +1568,12 @@ class DeleteInformationBlockRequest(RootModel[_DeleteInformationBlockArms]):
   @property
   def payload(
     self,
-  ) -> DeleteScheduleRequest | DeleteRollforwardRequest | dict[str, Any]:
+  ) -> (
+    DeleteScheduleRequest
+    | DeleteRollforwardRequest
+    | DeleteForecastRequest
+    | dict[str, Any]
+  ):
     return self.root.payload
 
 
@@ -1523,6 +1747,17 @@ class ComputeMetricsRequest(BaseModel):
       "entity (the primary entity for single-entity graphs)."
     ),
   )
+  scenario_id: str | None = Field(
+    None,
+    description=(
+      "Compute on a scenario slice: operands bind that scenario's facts "
+      "(actuals as the fallback across the seam) and the standing metric "
+      "set is stamped with the scenario. None (the default) computes "
+      "actuals only. Pass a forecast block's structure id after "
+      "compute-forecast to extend the metric series into its forward "
+      "months."
+    ),
+  )
 
   model_config = ConfigDict(
     json_schema_extra={
@@ -1555,6 +1790,104 @@ class ComputeMetricsResponse(BaseModel):
   skipped: list[SkippedMetricLite] = Field(default_factory=list)
 
 
+class ForecastMonthLite(BaseModel):
+  """One computed forward month in a ``compute-forecast`` response."""
+
+  period: str = Field(..., description="Month key (``YYYY-MM``).")
+  period_start: date
+  period_end: date
+  income_statement_fact_set_id: str | None = Field(
+    None,
+    description="Scenario IS FactSet upserted for the month.",
+  )
+  balance_sheet_fact_set_id: str | None = Field(
+    None,
+    description=(
+      "Scenario BS FactSet upserted for the month (working-capital "
+      "instants only in F-1 — the full BS roll is a later phase)."
+    ),
+  )
+  computed_count: int = Field(
+    0, description="Number of facts emitted for the month across both sets."
+  )
+
+
+class SkippedForecastLite(BaseModel):
+  """One rule/month soft-skip in a ``compute-forecast`` response.
+
+  A skipped rule never aborts the walk — its target falls back to the
+  carry-forward value for that month (when a prior value exists).
+  """
+
+  rule_id: str | None = None
+  element_qname: str | None = None
+  period: str = Field(..., description="Month key (``YYYY-MM``) of the skip.")
+  reason: str
+  missing: list[str] = Field(default_factory=list)
+
+
+class ComputeForecastRequest(BaseModel):
+  """Request body for the ``compute-forecast`` operation.
+
+  Walks the scenario's driver cascade month-by-month forward from the
+  forecast block's ``base_period``: lever-driven Derive rules in
+  dependency order, carry-forward for unmodeled IS lines, calc-DAG
+  subtotals — upserting one scenario IS FactSet (+ a working-capital BS
+  set) per forward month, all keyed by the forecast block's
+  ``scenario_id``. Re-running replaces each month's values (the
+  compute-metrics drift semantics). Deterministic and non-AI — no
+  credits consumed.
+  """
+
+  structure_id: str = Field(
+    ...,
+    description="Forecast block structure (block_type='forecast') to compute.",
+  )
+  months: int | None = Field(
+    None,
+    ge=1,
+    description=(
+      "Forward months to compute — defaults to the block's full "
+      "horizon_months; must not exceed it (lever assertions don't "
+      "extend past the horizon)."
+    ),
+  )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "Entity to compute for. Defaults to the lever FactSet's entity "
+      "(the entity the scenario was authored against)."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"structure_id": "struct_fy26_budget"},
+        {"structure_id": "struct_fy26_budget", "months": 6},
+      ]
+    }
+  )
+
+
+class ComputeForecastResponse(BaseModel):
+  """Response for the ``compute-forecast`` operation."""
+
+  structure_id: str
+  scenario_id: str = Field(
+    ...,
+    description=(
+      "The scenario key every emitted FactSet carries — the forecast "
+      "block's own structure id."
+    ),
+  )
+  entity_id: str
+  base_period: str = Field(..., description="Seed month the walk projected from.")
+  months: int = Field(..., description="Forward months requested.")
+  months_computed: list[ForecastMonthLite] = Field(default_factory=list)
+  skipped: list[SkippedForecastLite] = Field(default_factory=list)
+
+
 __all__ = [
   "ArtifactMechanics",
   "ArtifactResponse",
@@ -1562,6 +1895,8 @@ __all__ = [
   "ChartPanelLite",
   "ChartSeriesLite",
   "ClassificationLite",
+  "ComputeForecastRequest",
+  "ComputeForecastResponse",
   "ComputeMetricsRequest",
   "ComputeMetricsResponse",
   "ComputedMetricLite",
@@ -1574,8 +1909,11 @@ __all__ = [
   "EvaluateRulesResponse",
   "FactLite",
   "FactSetLite",
+  "ForecastMechanics",
+  "ForecastMonthLite",
   "InformationBlockEnvelope",
   "InformationModelResponse",
+  "LeverAssertionLite",
   "MetricMechanics",
   "RenderingLite",
   "RenderingPeriodLite",
@@ -1584,6 +1922,7 @@ __all__ = [
   "RuleTargetLite",
   "RuleVariableLite",
   "ScheduleMechanics",
+  "SkippedForecastLite",
   "SkippedMetricLite",
   "StatementMechanics",
   "UpdateInformationBlockRequest",

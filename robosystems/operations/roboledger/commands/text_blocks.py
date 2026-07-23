@@ -167,6 +167,9 @@ def bind_text_block(
     .where(
       FactSet.structure_id == body.structure_id,
       FactSet.factset_type == "disclosure",
+      # Actuals pin — disclosures have no scenario slices; defensive so a
+      # future scenario producer can never alias the standing bind.
+      FactSet.scenario_id.is_(None),
       FactSet.entity_id == entity_id,
       FactSet.period_start == body.period_start,
       FactSet.period_end == body.period_end,

@@ -307,6 +307,7 @@ class TestBuildEnvelope:
     fact_set.factset_type = "report"
     fact_set.entity_id = "ent_demo"
     fact_set.report_id = "rep_latest"
+    fact_set.scenario_id = None
     fact_set.provenance = {
       "origin": "pivot",
       "mapping_id": "map_1",

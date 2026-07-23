@@ -259,7 +259,7 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
     # rs-gaap framework extension packages anchored to
     # sibling namespaces of rs-gaap.
-    "'disclosures', 'checklist', 'styles', 'rs-metric', "
+    "'disclosures', 'checklist', 'styles', 'rs-metric', 'rs-driver', "
     # cm — Conceptual Model framework (cm:Debit/cm:Credit posting roles),
     # tenant-copied with the default pin.
     "'cm'"
@@ -290,6 +290,8 @@ def _widen_library_checks(conn, schema: str) -> None:
     "'comprehensive_income', "
     # Domain-specific working-paper / schedule patterns
     "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
+    # Forecast — authored scenario container (FP&A engine, 0024).
+    "'forecast', "
     # CoA + CoA→GAAP mapping
     "'chart_of_accounts', 'coa_mapping', "
     # Reference-taxonomy structure kinds (XBRL network roles distinct

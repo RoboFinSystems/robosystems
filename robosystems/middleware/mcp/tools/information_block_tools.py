@@ -52,6 +52,10 @@ class GetInformationBlockTool:
 
 **PARAMETERS:**
 - id (required): The Information Block's structure id
+- scenario_id (optional): A forecast block's structure id — binds that
+  scenario's FactSet slice instead of actuals (statement envelopes show
+  the latest computed forecast month; metric envelopes extend the series
+  with the scenario's forward columns, labeled "(forecast)")
 
 **RETURNS:**
 A typed envelope with:
@@ -76,6 +80,13 @@ were retired in favor of this pair.""",
             "type": "string",
             "description": "Information Block (structure) id",
           },
+          "scenario_id": {
+            "type": "string",
+            "description": (
+              "Forecast block structure id — bind that scenario's "
+              "FactSet slice instead of actuals."
+            ),
+          },
         },
         "required": ["id"],
       },
@@ -84,10 +95,11 @@ were retired in favor of this pair.""",
   async def execute(self, arguments: dict[str, Any]) -> Any:
     graph_id = self.client.graph_id
     block_id = arguments["id"]
+    scenario_id = arguments.get("scenario_id")
 
     try:
       with extensions_session(graph_id) as session:
-        envelope = ops_get_information_block(session, block_id)
+        envelope = ops_get_information_block(session, block_id, scenario_id=scenario_id)
         if envelope is None:
           return {
             "error": "not_found",
@@ -125,6 +137,9 @@ class ListInformationBlocksTool:
 - category (optional): Filter by registry category (e.g., 'Close')
 - limit (optional, default 50): Max results to return (1-1000)
 - offset (optional, default 0): Pagination offset
+- scenario_id (optional): A forecast block's structure id — each
+  envelope binds that scenario's FactSet slice instead of actuals
+  (list blocks with block_type='forecast' to discover scenarios)
 - include_atoms (optional, default false): When false, returns a lean
   summary per block (id, type, name, display_name, category, taxonomy_id,
   taxonomy_name, disclosure_id, element_count, fact_count, rule_count).
@@ -175,6 +190,13 @@ class ListInformationBlocksTool:
               "keep list calls compact."
             ),
           },
+          "scenario_id": {
+            "type": "string",
+            "description": (
+              "Forecast block structure id — bind each envelope to that "
+              "scenario's FactSet slice instead of actuals."
+            ),
+          },
         },
         "required": [],
       },
@@ -187,6 +209,7 @@ class ListInformationBlocksTool:
     limit = int(arguments.get("limit", 50))
     offset = int(arguments.get("offset", 0))
     include_atoms = bool(arguments.get("include_atoms", False))
+    scenario_id = arguments.get("scenario_id")
 
     # MCP inputSchema declares minimum/maximum bounds for limit + offset,
     # but the stdio server doesn't enforce them — some clients (and
@@ -213,6 +236,7 @@ class ListInformationBlocksTool:
           limit=limit,
           offset=offset,
           library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
+          scenario_id=scenario_id,
         )
         if include_atoms:
           blocks = [e.model_dump(mode="json") for e in envelopes]

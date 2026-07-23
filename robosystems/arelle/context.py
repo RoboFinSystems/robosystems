@@ -75,6 +75,11 @@ CANONICAL_CONTEXT: dict = {
   # Each metric is a qname-addressable concept plus a Derive rule that
   # computes it from rs-gaap anchor facts.
   "rs-metric": "https://robosystems.ai/taxonomy/rs-gaap/metrics/v1/",
+  # rs-driver — the forecast lever catalog (Driver Catalog). Each lever
+  # is a qname-addressable concept plus a Derive rule stating the driven
+  # mechanics against rs-gaap anchor targets; values are asserted per
+  # scenario as authored facts.
+  "rs-driver": "https://robosystems.ai/taxonomy/rs-gaap/drivers/v1/",
   "ifrs": "http://xbrl.ifrs.org/taxonomy/",
   "dei": "http://xbrl.sec.gov/dei/",
   # Seattle Method conceptual-model role URIs (Charlie's CM namespace)

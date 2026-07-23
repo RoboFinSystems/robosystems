@@ -77,7 +77,7 @@ class TestGetInformationBlock:
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
       result = get_information_block(session, "struct_1")
     assert result is expected
-    mock_build.assert_called_once_with(session, "struct_1", None)
+    mock_build.assert_called_once_with(session, "struct_1", None, scenario_id=None)
 
 
 # ── list_information_blocks ────────────────────────────────────────────────
@@ -303,4 +303,4 @@ class TestGetInformationBlockForFactSet:
       result = get_information_block_for_fact_set(session, "fs_01")
 
     assert result is expected
-    mock_build.assert_called_once_with(session, "struct_1", "fs_01")
+    mock_build.assert_called_once_with(session, "struct_1", "fs_01", scenario_id=None)

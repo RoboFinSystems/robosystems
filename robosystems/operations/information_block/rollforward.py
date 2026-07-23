@@ -233,14 +233,18 @@ def delete(
 
 
 def build_envelope(
-  session: Session, structure_id: str, fact_set_id: str | None = None
+  session: Session,
+  structure_id: str,
+  fact_set_id: str | None = None,
+  scenario_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Reload a rollforward Structure and pack its envelope.
 
   ``fact_set_id`` is accepted for signature parity but unused —
   rollforward facts are not persisted (the filter engine is called
   directly from the reconciliation harness; the renderer wiring is not
-  yet in place). The envelope's ``facts`` list is empty.
+  yet in place). The envelope's ``facts`` list is empty. ``scenario_id``
+  is likewise parity-only — rollforwards attribute posted ledger lines.
 
   Returns ``None`` when the structure doesn't exist or isn't a
   rollforward.

@@ -1303,9 +1303,7 @@ def compute_custom_metrics(
     print(f"  {catalog['name']}:")
     computed_windows = 0
     for window in windows:
-      result = _post_compute_metrics(
-        graph_id, catalog["structure_id"], window, api_key
-      )
+      result = _post_compute_metrics(graph_id, catalog["structure_id"], window, api_key)
       if result is None:
         continue
       if result.get("computed"):
@@ -1322,6 +1320,237 @@ def compute_custom_metrics(
             f"    {window[1]}  (skipped) {s.get('element_qname')}: {s.get('reason')}"
           )
     print(f"    Series: {computed_windows}/{len(windows)} window(s) computed")
+
+
+# ---------------------------------------------------------------------------
+# Step 3f: Forecast scenario — author levers, walk the cascade (FP&A F-1)
+# ---------------------------------------------------------------------------
+
+
+def _graphql_rendering(
+  graph_id: str, block_id: str, headers: dict, scenario_id: str | None = None
+) -> dict:
+  """One block's ``view.rendering`` via GraphQL (scenario-aware read)."""
+  import httpx
+
+  scenario_arg = f', scenarioId: "{scenario_id}"' if scenario_id else ""
+  query = (
+    f'{{ informationBlock(id: "{block_id}"{scenario_arg}) '
+    "{ view { rendering { rows { elementQname values } "
+    "periods { end label } } } } }"
+  )
+  resp = httpx.post(
+    f"{BASE_URL}/extensions/{graph_id}/graphql",
+    json={"query": query},
+    headers=headers,
+    timeout=60.0,
+  )
+  if resp.status_code >= 400:
+    print(f"  ERROR: graphql read -> HTTP {resp.status_code}: {resp.text[:160]}")
+    return {}
+  block = ((resp.json() or {}).get("data") or {}).get("informationBlock") or {}
+  return (block.get("view") or {}).get("rendering") or {}
+
+
+def _rendering_value(rendering: dict, qname: str) -> float | None:
+  """Last-column value of one row in a rendering grid."""
+  for row in rendering.get("rows") or []:
+    if row.get("elementQname") == qname:
+      values = [v for v in (row.get("values") or []) if isinstance(v, (int, float))]
+      return float(values[-1]) if values else None
+  return None
+
+
+def _statement_block_id(graph_id: str, block_type: str) -> str | None:
+  """The tenant's reporting structure for a statement family (the one
+  whose envelope carries facts — data-driven, never by name)."""
+  client = _get_ledger_client()
+  blocks = client.list_information_blocks(graph_id, block_type=block_type)
+  for block in blocks:
+    if block.get("facts"):
+      return block.get("id")
+  return blocks[0].get("id") if blocks else None
+
+
+def run_forecast_scenario(
+  graph_id: str,
+  scenario,
+  forecast_levers: dict[str, float],
+) -> str | None:
+  """Author + compute the operating-budget scenario (the FP&A F-1 walk).
+
+  The full forecast-engine loop through the public surface: the forecast
+  block is authored via the generic ``create-information-block`` op
+  (lever values on rs-driver catalog concepts), ``compute-forecast``
+  walks the driver cascade 12 months past the close boundary, and the
+  scenario's metric series extends through ``compute-metrics`` with the
+  scenario filter. Verifications are e2e claims, not spot prints:
+
+  - month-over-month revenue growth equals the asserted lever exactly
+    (compounding through [t-1] binding),
+  - AR / (Revenues / 30) equals the asserted DSO (days-based balance),
+  - the ACTUALS metric envelope is byte-for-byte unchanged in period
+    count (the scenario never leaks into default reads — the hijack
+    check, live),
+  - the scenario metric envelope extends by the horizon with
+    "(forecast)"-labeled columns.
+  """
+  import httpx
+
+  api_key = _client_config()["token"]
+  headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+  horizon = 12
+
+  # 1. Author the scenario — lever VALUES on rs-driver concepts; the
+  #    mechanics (what each lever drives) are the library's Derive rules.
+  levers = [
+    {"qname": qname, "value": value} for qname, value in forecast_levers.items()
+  ]
+  resp = httpx.post(
+    f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/create-information-block",
+    json={
+      "block_type": "forecast",
+      "payload": {
+        "name": f"FY{(scenario.report_period[1].year + 1) % 100} Operating Budget"
+        if scenario.report_period
+        else "Operating Budget",
+        "scenario_kind": "budget",
+        "horizon_months": horizon,
+        "levers": levers,
+      },
+    },
+    headers=headers,
+    timeout=60.0,
+  )
+  if resp.status_code >= 400:
+    print(f"  ERROR: create forecast -> HTTP {resp.status_code}: {resp.text[:200]}")
+    return None
+  envelope = (resp.json() or {}).get("result") or {}
+  scenario_id = envelope.get("id")
+  mechanics = ((envelope.get("artifact") or {}).get("mechanics")) or {}
+  print(f"  Scenario:     {envelope.get('name')} ({scenario_id})")
+  print(f"  Base period:  {mechanics.get('base_period')} (+{horizon} months)")
+  for qname, value in forecast_levers.items():
+    print(f"    {qname.split(':')[-1]}: {value}")
+
+  # 2. Walk the cascade — first to horizon-1 (the compounding probe's
+  #    baseline), then the full horizon (rerun replaces cleanly).
+  is_block_id = _statement_block_id(graph_id, "income_statement")
+  rev_prev = None
+  if is_block_id:
+    probe = httpx.post(
+      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-forecast",
+      json={"structure_id": scenario_id, "months": horizon - 1},
+      headers=headers,
+      timeout=120.0,
+    )
+    if probe.status_code < 400:
+      rendering = _graphql_rendering(graph_id, is_block_id, headers, scenario_id)
+      rev_prev = _rendering_value(rendering, "rs-gaap:Revenues")
+
+  resp = httpx.post(
+    f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-forecast",
+    json={"structure_id": scenario_id},
+    headers=headers,
+    timeout=120.0,
+  )
+  if resp.status_code >= 400:
+    print(f"  ERROR: compute-forecast -> HTTP {resp.status_code}: {resp.text[:200]}")
+    return scenario_id
+  result = (resp.json() or {}).get("result") or {}
+  months_computed = result.get("months_computed") or []
+  skipped = result.get("skipped") or []
+  print(f"  Cascade:      {len(months_computed)}/{horizon} months computed")
+  for skip in skipped[:3]:
+    print(f"    (skipped) {skip.get('element_qname')}: {skip.get('reason')}")
+
+  # 3. Compounding — the last month's revenue over the prior month's
+  #    must equal (1 + growth) exactly; [t-1] binding e2e.
+  growth = forecast_levers.get("rs-driver:RevenueGrowthRate")
+  rendering = (
+    _graphql_rendering(graph_id, is_block_id, headers, scenario_id)
+    if is_block_id
+    else {}
+  )
+  rev_last = _rendering_value(rendering, "rs-gaap:Revenues")
+  if growth and rev_prev and rev_last:
+    ratio = rev_last / rev_prev
+    if abs(ratio - (1 + growth)) < 1e-6:
+      print(f"  Compounding:  {ratio:.4f} == 1 + {growth} (month {horizon})")
+    else:
+      print(f"  WARNING: growth ratio {ratio:.6f} != {1 + growth}")
+  labels = [p.get("label") for p in rendering.get("periods") or []]
+  if labels and all(label and "(forecast)" in label for label in labels):
+    print(f"  Labels:       {labels[-1]}")
+
+  # 4. Working capital — AR against the same month's revenue must
+  #    reproduce the asserted DSO (days-based balance mechanics).
+  dso = forecast_levers.get("rs-driver:DaysSalesOutstanding")
+  bs_block_id = _statement_block_id(graph_id, "balance_sheet")
+  if dso and rev_last and bs_block_id:
+    bs_rendering = _graphql_rendering(graph_id, bs_block_id, headers, scenario_id)
+    ar = _rendering_value(bs_rendering, "rs-gaap:ReceivablesNetCurrent")
+    if ar is not None:
+      implied = ar / (rev_last / 30)
+      if abs(implied - dso) < 1e-6:
+        print(f"  DSO:          AR / (Revenues/30) == {implied:.1f} days")
+      else:
+        print(f"  WARNING: implied DSO {implied:.4f} != asserted {dso}")
+
+  # 5. Extend the metric series into the scenario's forward months, then
+  #    prove the seam: actuals envelope unchanged, scenario envelope
+  #    longer by the horizon with labeled columns.
+  client = _get_ledger_client()
+  blocks = client.list_information_blocks(graph_id, block_type="metric")
+  metric_block = next(
+    (b for b in blocks if b.get("name") == "Key Financial Metrics"),
+    blocks[0] if blocks else None,
+  )
+  if metric_block is None:
+    return scenario_id
+  metric_id = metric_block.get("id")
+  actual_rendering = _graphql_rendering(graph_id, metric_id, headers)
+  actual_periods = len(actual_rendering.get("periods") or [])
+
+  computed_months = 0
+  for month in months_computed:
+    payload = {
+      "structure_id": metric_id,
+      "period_end": month["period_end"],
+      "period_start": month["period_start"],
+      "scenario_id": scenario_id,
+    }
+    resp = httpx.post(
+      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-metrics",
+      json=payload,
+      headers=headers,
+      timeout=60.0,
+    )
+    if resp.status_code < 400 and (
+      ((resp.json() or {}).get("result") or {}).get("computed")
+    ):
+      computed_months += 1
+  print(f"  Metrics:      {computed_months}/{len(months_computed)} scenario months")
+
+  after_actual = _graphql_rendering(graph_id, metric_id, headers)
+  after_scenario = _graphql_rendering(graph_id, metric_id, headers, scenario_id)
+  actual_after = len(after_actual.get("periods") or [])
+  scenario_periods = after_scenario.get("periods") or []
+  forecast_cols = [
+    p for p in scenario_periods if p.get("label") and "(forecast)" in p["label"]
+  ]
+  if actual_after == actual_periods:
+    print(f"  Actuals:      unchanged ({actual_after} periods — no scenario leak)")
+  else:
+    print(
+      f"  WARNING: actuals envelope changed "
+      f"({actual_periods} -> {actual_after} periods)"
+    )
+  print(
+    f"  Series:       {len(scenario_periods)} periods with scenario "
+    f"({len(forecast_cols)} forecast columns)"
+  )
+  return scenario_id
 
 
 # ---------------------------------------------------------------------------
@@ -1703,9 +1932,7 @@ def generate_monthly_reports(
   # Recover the rolling window's start from the annual period: the annual
   # window ends at the close target, offset ``months - 2`` from the start.
   annual_end = scenario.report_period[1]
-  start = add_months(
-    date(annual_end.year, annual_end.month, 1), -(scenario.months - 2)
-  )
+  start = add_months(date(annual_end.year, annual_end.month, 1), -(scenario.months - 2))
 
   windows = month_windows(start, scenario.months)
   created = 0
@@ -1853,6 +2080,7 @@ def run_demo(
   text_blocks: list[dict] | None = None,
   custom_metrics: list[dict] | None = None,
   memories: list[dict] | None = None,
+  forecast_levers: dict[str, float] | None = None,
   argv: list[str] | None = None,
 ) -> None:
   """Provision a graph and load the full company for one showcase episode.
@@ -1868,6 +2096,9 @@ def run_demo(
   authored with the disclosures, computed after the report files.
   ``memories`` (optional) seed the graph's semantic memory through the
   MCP ``remember`` tool (see ``seed_memories``).
+  ``forecast_levers`` (optional) authors + computes an operating-budget
+  forecast scenario after the metric series lands (see
+  ``run_forecast_scenario``) — a ``{rs-driver qname: value}`` map.
   """
   argv = sys.argv if argv is None else argv
   dry_run = "--dry-run" in argv
@@ -2033,6 +2264,13 @@ def run_demo(
     print("\nComputing custom metrics...")
     compute_custom_metrics(graph_id, scenario, authored_metric_catalogs, period_windows)
 
+  # Forecast scenario — the FP&A F-1 walk: authored levers, driver
+  # cascade 12 months past the close boundary, scenario metric series.
+  forecast_scenario_id = None
+  if report_id and forecast_levers:
+    print("\nRunning forecast scenario...")
+    forecast_scenario_id = run_forecast_scenario(graph_id, scenario, forecast_levers)
+
   # Summary
   print("\n" + "=" * 60)
   print(f"  Graph ID: {graph_id}")
@@ -2049,6 +2287,8 @@ def run_demo(
   if report_id:
     print(f"  Annual report: filed ({report_id})")
     print(f"  Viewer URL:    /reports/{report_id}?graph={graph_id}")
+  if forecast_scenario_id:
+    print(f"  Forecast:      /explorer?scenario={forecast_scenario_id}")
   print("\n  Run the close (Claude Desktop / MCP):")
   print(f"    1. Switch to workspace: {graph_id}")
   print("    2. Ask: 'Search for month-end close procedures'")

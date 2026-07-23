@@ -173,6 +173,8 @@ from robosystems.models.api.extensions.text_blocks import (
   BindTextBlockResponse,
 )
 from robosystems.models.api.information_block import (
+  ComputeForecastRequest,
+  ComputeForecastResponse,
   ComputeMetricsRequest,
   ComputeMetricsResponse,
   CreateInformationBlockRequest,
@@ -235,6 +237,9 @@ from robosystems.operations.information_block.commands import (
 )
 from robosystems.operations.information_block.commands import (
   update_information_block as cmd_update_information_block,
+)
+from robosystems.operations.information_block.forecast_compute import (
+  cmd_compute_forecast,
 )
 from robosystems.operations.information_block.metrics import (
   cmd_compute_metrics,
@@ -1207,6 +1212,32 @@ compute_metrics_op = _registrar.register(
     result_type=ComputeMetricsResponse,
     error_map={ValueError: 422},
     mark_stale_reason="metrics_computed",
+    requires_created_by=True,
+  )
+)
+
+compute_forecast_op = _registrar.register(
+  OperationSpec(
+    name="compute-forecast",
+    summary="Compute Forecast for a Forecast Block",
+    description=(
+      "Walks a forecast block's driver cascade month-by-month forward "
+      "from its base period: lever-driven rs-driver Derive rules in "
+      "dependency order, carry-forward for unmodeled income-statement "
+      "lines, calc-DAG subtotals — upserting one scenario "
+      "income-statement FactSet (plus a working-capital balance-sheet "
+      "set) per forward month, all keyed by the block's scenario_id "
+      "(NULL = actuals; scenario reads pass it as a filter). Re-running "
+      "replaces each month's values. Rules with missing lever months or "
+      "unbound operands are skipped with a reason (their targets fall "
+      "back to carry-forward), never errored. Deterministic and non-AI "
+      "— no credits consumed."
+    ),
+    command=cmd_compute_forecast,
+    request_model=ComputeForecastRequest,
+    result_type=ComputeForecastResponse,
+    error_map={ValueError: 422},
+    mark_stale_reason="forecast_computed",
     requires_created_by=True,
   )
 )

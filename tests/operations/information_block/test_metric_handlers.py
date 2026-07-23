@@ -65,7 +65,9 @@ def _arc(to_element_id: str, order: float) -> SimpleNamespace:
   )
 
 
-def _fact_set(fs_id: str, period_end: date) -> SimpleNamespace:
+def _fact_set(
+  fs_id: str, period_end: date, scenario_id: str | None = None
+) -> SimpleNamespace:
   return SimpleNamespace(
     id=fs_id,
     structure_id="str_metrics",
@@ -74,6 +76,7 @@ def _fact_set(fs_id: str, period_end: date) -> SimpleNamespace:
     factset_type="metric",
     entity_id="ent_1",
     report_id=None,
+    scenario_id=scenario_id,
     provenance={"origin": "derived", "computation": "compute-metrics"},
   )
 
@@ -281,3 +284,44 @@ class TestBuildEnvelope:
     assert mechanics.source_block_ids == []
     assert mechanics.derivation_type is None
     assert mechanics.expression is None
+
+
+class TestScenarioSeriesMerge:
+  """The moving seam: scenario mode merges actual + scenario standing
+  sets into one continuous series, actuals preferred at any overlap."""
+
+  P_MAR = date(2026, 3, 31)
+  P_APR = date(2026, 4, 30)
+
+  def test_default_query_pins_actuals(self) -> None:
+    session = MagicMock()
+    session.execute.return_value = _scalars([])
+    metric_handlers._load_metric_fact_sets(session, "str_metrics", None)
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "scenario_id IS NULL" in sql
+
+  def test_scenario_query_widens_to_both_slices(self) -> None:
+    session = MagicMock()
+    session.execute.return_value = _scalars([])
+    metric_handlers._load_metric_fact_sets(
+      session, "str_metrics", None, "struct_budget"
+    )
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "scenario_id IS NULL" in sql
+    assert "scenario_id = 'struct_budget'" in sql
+
+  def test_seam_prefers_actual_at_overlapping_period_end(self) -> None:
+    """The query orders actuals (NULL scenario) before scenario rows per
+    period_end; the per-period dedupe keeps the first — so a month that
+    closed after the forecast was computed reads as actual."""
+    actual_mar = _fact_set("fs_actual_mar", self.P_MAR, scenario_id=None)
+    scenario_mar = _fact_set("fs_scn_mar", self.P_MAR, scenario_id="struct_budget")
+    scenario_apr = _fact_set("fs_scn_apr", self.P_APR, scenario_id="struct_budget")
+    session = MagicMock()
+    session.execute.return_value = _scalars([actual_mar, scenario_mar, scenario_apr])
+    merged = metric_handlers._load_metric_fact_sets(
+      session, "str_metrics", None, "struct_budget"
+    )
+    assert [fs.id for fs in merged] == ["fs_actual_mar", "fs_scn_apr"]

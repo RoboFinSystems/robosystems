@@ -8,6 +8,7 @@ from robosystems.operations.information_block.rules.expressions import (
   EQUALITY_TOLERANCE,
   InvalidRuleExpression,
   desugar_aggregates,
+  desugar_priors,
   evaluate_derivation,
   evaluate_equality,
   lhs_variable_names,
@@ -260,3 +261,45 @@ class TestDesugarAggregates:
     assert synth == {}
     with pytest.raises(InvalidRuleExpression, match="disallowed"):
       parse_arithmetic_expression(expr, ["X", "A"])
+
+
+class TestDesugarPriors:
+  """$X[t-1] → synthesized $__prior_X — the forecast grammar's
+  prior-period reference, riding the same pre-parse rewrite as avg()."""
+
+  def test_rewrites_prior_reference_to_synthesized_operand(self) -> None:
+    expr, synth = desugar_priors(
+      "$Revenues = ($Revenues[t-1] * (1 + $RevenueGrowthRate))"
+    )
+    assert expr == "$Revenues = ($__prior_Revenues * (1 + $RevenueGrowthRate))"
+    assert synth == {"__prior_Revenues": "Revenues"}
+
+  def test_plain_expression_is_untouched(self) -> None:
+    original = "$CostOfRevenue = ($Revenues * $CostOfRevenueRate)"
+    expr, synth = desugar_priors(original)
+    assert expr == original
+    assert synth == {}
+
+  def test_desugared_compounding_parses_and_evaluates(self) -> None:
+    expr, synth = desugar_priors("$Rev = ($Rev[t-1] * (1 + $g))")
+    parsed = parse_arithmetic_expression(expr, ["Rev", "g", *list(synth)])
+    value = evaluate_derivation(parsed, {"__prior_Rev": 100.0, "g": 0.03})
+    assert value == pytest.approx(103.0)
+
+  def test_combines_with_avg_desugar(self) -> None:
+    expr, priors = desugar_priors("$X = ($Y[t-1] + avg($Z))")
+    expr, avgs = desugar_aggregates(expr)
+    assert expr == "$X = ($__prior_Y + $__avg_Z)"
+    assert priors == {"__prior_Y": "Y"}
+    assert avgs == {"__avg_Z": "Z"}
+    parsed = parse_arithmetic_expression(expr, ["X", "Y", "Z", *priors, *avgs])
+    assert evaluate_derivation(parsed, {"__prior_Y": 1.0, "__avg_Z": 2.0}) == 3.0
+
+  def test_other_lags_survive_and_are_rejected_structurally(self) -> None:
+    """The grammar ceiling is [t-1]: any other bracket form stays a
+    genuine ast.Subscript, which is outside the whitelist."""
+    for bad in ("$X = $Y[t-2]", "$X = $Y[0]", "$X = $Y[t]"):
+      expr, synth = desugar_priors(bad)
+      assert synth == {}
+      with pytest.raises(InvalidRuleExpression, match="disallowed"):
+        parse_arithmetic_expression(expr, ["X", "Y"])

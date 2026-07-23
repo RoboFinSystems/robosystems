@@ -59,6 +59,7 @@ def build_envelope(
   session: Session,
   structure_id: str,
   fact_set_id: str | None = None,
+  scenario_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Pack the envelope for a disclosure-note structure.
 
@@ -69,6 +70,10 @@ def build_envelope(
   Returns ``None`` when the structure doesn't exist, isn't a
   ``regulatory_disclosure``, or carries neither arcs nor content (the
   library's disclosure-identity envelopes — not renderable blocks).
+
+  ``scenario_id`` is accepted for dispatch-signature parity and ignored
+  — disclosures bind standing document/report content, not scenario
+  slices (the forecast engine never emits disclosure sets).
   """
   structure = session.get(Structure, structure_id)
   if structure is None or structure.block_type != DISCLOSURE_BLOCK_TYPE:

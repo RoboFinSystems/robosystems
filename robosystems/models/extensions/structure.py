@@ -87,6 +87,11 @@ class Structure(ExtensionsBase):
       "'comprehensive_income', "
       # Domain-specific working-paper / schedule patterns
       "'schedule', 'rollforward', 'reconciliation', 'policy', 'metric', "
+      # Forecast — the authored scenario container (FP&A engine): lever
+      # assertions + scenario identity; derived forward facts land in
+      # the EXISTING statement/metric block types stamped with
+      # fact_sets.scenario_id, never in a parallel forecast statement.
+      "'forecast', "
       # Chart-of-accounts and CoA→GAAP mapping
       "'chart_of_accounts', 'coa_mapping', "
       # Reference-taxonomy structure kinds (XBRL network roles distinct

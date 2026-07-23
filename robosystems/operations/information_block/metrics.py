@@ -60,7 +60,11 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
-from robosystems.operations.information_block.registry import METRIC_BLOCK_TYPE
+
+# From the envelope module (which owns the constant), NOT the registry —
+# the registry imports every handler module, so a registry import from a
+# module the handlers reach (forecast → metrics) would be circular.
+from robosystems.operations.information_block.metric import METRIC_BLOCK_TYPE
 from robosystems.operations.information_block.rules.expressions import (
   InvalidRuleExpression,
   desugar_aggregates,
@@ -99,6 +103,7 @@ def _bind_operand(
   entity_id: str,
   period_end: date,
   period_start: date | None,
+  scenario_id: str | None = None,
 ) -> _BoundOperand | None:
   """Most recent persisted fact for one operand at ``period_end``.
 
@@ -111,12 +116,22 @@ def _bind_operand(
   period; among same-set candidates the longest window wins (FY over Q4
   when both end on the date). No qname can collide across the two set
   types: metric facts land only on metric-namespace elements.
+
+  ``scenario_id=None`` binds actuals only (``scenario_id IS NULL`` —
+  the pin that keeps forward scenario facts out of every actual
+  compute). Non-None binds the scenario's facts WITH actuals as the
+  fallback, scenario preferred — the moving seam: a forward month's
+  operands resolve from the scenario slice while an ``avg()`` begin
+  bind at the seam still reaches the actual base month.
   """
   stmt = (
     select(Fact.value, Fact.period_start)
     .join(FactSet, Fact.fact_set_id == FactSet.id)
     .where(
       FactSet.factset_type.in_(("report", "metric")),
+      FactSet.scenario_id.is_(None)
+      if scenario_id is None
+      else or_(FactSet.scenario_id.is_(None), FactSet.scenario_id == scenario_id),
       Fact.entity_id == entity_id,
       Fact.element_id == element_id,
       Fact.period_end == period_end,
@@ -124,6 +139,7 @@ def _bind_operand(
       Fact.value.is_not(None),
     )
     .order_by(
+      FactSet.scenario_id.asc().nulls_last(),
       FactSet.created_at.desc(),
       Fact.period_start.asc().nulls_first(),
     )
@@ -140,7 +156,10 @@ def _bind_operand(
 
 
 def _latest_report_period_end_before(
-  session: Session, entity_id: str, before: date
+  session: Session,
+  entity_id: str,
+  before: date,
+  scenario_id: str | None = None,
 ) -> date | None:
   """The entity's newest report-fact ``period_end`` strictly before a date.
 
@@ -148,6 +167,9 @@ def _latest_report_period_end_before(
   request nor a bound duration operand supplies a window: annual
   comparatives resolve to the prior FY end, monthly series to the prior
   month end. Report facts only — the canonical period spine.
+  ``scenario_id`` widens the spine to include the scenario's forward
+  months (a forward month's prior is usually the previous forward
+  month); ``None`` pins actuals.
   """
   return session.execute(
     select(func.max(Fact.period_end))
@@ -155,6 +177,9 @@ def _latest_report_period_end_before(
     .join(FactSet, Fact.fact_set_id == FactSet.id)
     .where(
       FactSet.factset_type == "report",
+      FactSet.scenario_id.is_(None)
+      if scenario_id is None
+      else or_(FactSet.scenario_id.is_(None), FactSet.scenario_id == scenario_id),
       Fact.entity_id == entity_id,
       Fact.period_end < before,
       Fact.fact_scope == "in_scope",
@@ -306,7 +331,9 @@ def cmd_compute_metrics(
   def _data_driven_prior() -> date | None:
     if not _prior_cache:
       _prior_cache.append(
-        _latest_report_period_end_before(session, entity_id, body.period_end)
+        _latest_report_period_end_before(
+          session, entity_id, body.period_end, body.scenario_id
+        )
       )
     return _prior_cache[0]
 
@@ -376,6 +403,7 @@ def cmd_compute_metrics(
         entity_id=entity_id,
         period_end=body.period_end,
         period_start=body.period_start,
+        scenario_id=body.scenario_id,
       )
       if bound is None:
         if qname and qname in run_target_qnames:
@@ -410,6 +438,7 @@ def cmd_compute_metrics(
         entity_id=entity_id,
         period_end=begin_date,
         period_start=None,
+        scenario_id=body.scenario_id,
       )
       if begin_bound is None:
         missing.append(f"{qname} (prior @ {begin_date})")
@@ -471,6 +500,11 @@ def cmd_compute_metrics(
       FactSet.factset_type == "metric",
       FactSet.entity_id == entity_id,
       FactSet.period_end == body.period_end,
+      # Scenario slices keep their own standing sets — an actual compute
+      # never replaces a scenario month and vice versa.
+      FactSet.scenario_id.is_(None)
+      if body.scenario_id is None
+      else FactSet.scenario_id == body.scenario_id,
     )
     .order_by(FactSet.created_at.desc())
     .limit(1)
@@ -484,6 +518,7 @@ def cmd_compute_metrics(
       period_end=body.period_end,
       factset_type="metric",
       entity_id=entity_id,
+      scenario_id=body.scenario_id,
       provenance=provenance,
       created_by=created_by,
     )

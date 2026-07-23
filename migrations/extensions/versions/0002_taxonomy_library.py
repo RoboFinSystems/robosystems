@@ -132,7 +132,9 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   # 'rs-metric' — the metric catalog package (0022's backfill for existing
   # databases; fresh seeds pick it up here because this seed reads the
   # current frameworks/ manifest, which lists rs-metric).
-  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric'"
+  # 'rs-driver' — the forecast lever catalog package (0024's backfill for
+  # existing databases; same dynamic-manifest rule as rs-metric).
+  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric', 'rs-driver'"
   ")"
 )
 _WIDENED_TAXONOMY_TYPE_CHECK = (

@@ -35,6 +35,7 @@ def create_fact_set(
   structure_id: str | None = None,
   period_start: date | None = None,
   report_id: str | None = None,
+  scenario_id: str | None = None,
   metadata: dict | None = None,
   id: str | None = None,
 ) -> FactSet:
@@ -43,6 +44,11 @@ def create_fact_set(
   ``provenance`` is validated through the discriminated union and stored
   as JSON on the dedicated ``provenance`` column. Pass an arm instance
   (``PivotProvenance(...)`` etc.); a raw dict is accepted and validated.
+
+  ``scenario_id`` is the scenario axis (the forecast engine): NULL —
+  the default every existing producer keeps — means actuals; non-NULL
+  points at the owning forecast Structure and keys the set into that
+  scenario's parallel universe.
   """
   validated = _PROVENANCE.validate_python(provenance)
   fact_set = FactSet(
@@ -52,6 +58,7 @@ def create_fact_set(
     factset_type=factset_type,
     entity_id=entity_id,
     report_id=report_id,
+    scenario_id=scenario_id,
     provenance=validated.model_dump(mode="json"),
   )
   if id is not None:
