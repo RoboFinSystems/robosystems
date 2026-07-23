@@ -7,6 +7,7 @@ import pytest
 from robosystems.operations.information_block.rules.expressions import (
   EQUALITY_TOLERANCE,
   InvalidRuleExpression,
+  desugar_aggregates,
   evaluate_derivation,
   evaluate_equality,
   lhs_variable_names,
@@ -211,3 +212,51 @@ class TestEvaluateDerivation:
     parsed = parse_arithmetic_expression("$A + $B", ["A", "B"])
     with pytest.raises(InvalidRuleExpression, match="derivation expects"):
       evaluate_derivation(parsed, {"A": 1.0, "B": 2.0})
+
+
+class TestDesugarAggregates:
+  """avg($X) → synthesized $__avg_X — the pre-parse rewrite that keeps
+  the AST whitelist call-free."""
+
+  def test_rewrites_avg_to_synthesized_operand(self) -> None:
+    expr, synth = desugar_aggregates(
+      "$ReturnOnEquity = ($NetIncomeLoss / avg($StockholdersEquity))"
+    )
+    assert expr == "$ReturnOnEquity = ($NetIncomeLoss / $__avg_StockholdersEquity)"
+    assert synth == {"__avg_StockholdersEquity": "StockholdersEquity"}
+
+  def test_multiple_avg_calls_each_synthesize(self) -> None:
+    expr, synth = desugar_aggregates("$EM = (avg($Assets) / avg($Equity))")
+    assert expr == "$EM = ($__avg_Assets / $__avg_Equity)"
+    assert synth == {"__avg_Assets": "Assets", "__avg_Equity": "Equity"}
+
+  def test_plain_expression_is_untouched(self) -> None:
+    original = "$WorkingCapital = ($AssetsCurrent - $LiabilitiesCurrent)"
+    expr, synth = desugar_aggregates(original)
+    assert expr == original
+    assert synth == {}
+
+  def test_whitespace_inside_call_is_tolerated(self) -> None:
+    expr, synth = desugar_aggregates("$X = avg( $Y )")
+    assert expr == "$X = $__avg_Y"
+    assert synth == {"__avg_Y": "Y"}
+
+  def test_desugared_expression_parses_and_evaluates(self) -> None:
+    expr, synth = desugar_aggregates("$ROE = ($NI / avg($SE))")
+    parsed = parse_arithmetic_expression(expr, ["ROE", "NI", "SE", *list(synth)])
+    value = evaluate_derivation(parsed, {"NI": 30.0, "__avg_SE": 100.0})
+    assert value == pytest.approx(0.3)
+
+  def test_non_variable_argument_survives_and_is_rejected_downstream(self) -> None:
+    """avg($A + $B) is not the aggregate form — it stays a genuine
+    ast.Call and the whitelist rejects it."""
+    expr, synth = desugar_aggregates("$X = avg($A + $B)")
+    assert synth == {}
+    with pytest.raises(InvalidRuleExpression, match="disallowed"):
+      parse_arithmetic_expression(expr, ["X", "A", "B"])
+
+  def test_other_function_names_are_not_desugared(self) -> None:
+    expr, synth = desugar_aggregates("$X = median($A)")
+    assert synth == {}
+    with pytest.raises(InvalidRuleExpression, match="disallowed"):
+      parse_arithmetic_expression(expr, ["X", "A"])

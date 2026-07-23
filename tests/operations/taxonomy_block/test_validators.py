@@ -282,6 +282,71 @@ class TestRuleExpressionParse:
     issues = validate_create_envelope(payload, _session_empty())
     assert any(i.code == "unparseable_expression" for i in issues)
 
+  def test_derive_avg_expression_accepted(self) -> None:
+    """Derive rules validate through the same avg() desugar the compute
+    path runs, so authored avg expressions pass the gate."""
+    payload = _basic_coa(
+      rules=[
+        TaxonomyBlockRuleRequest(
+          name="derive-roe",
+          rule_category="ReportingSystemSpecificRule",
+          rule_pattern="Derive",
+          expression="$ROE = ($NetIncome / avg($Equity))",
+          variables=[
+            {"variable_name": "ROE", "variable_qname": "ext:ROE"},
+            {"variable_name": "NetIncome", "variable_qname": "rs-gaap:NetIncomeLoss"},
+            {
+              "variable_name": "Equity",
+              "variable_qname": "rs-gaap:StockholdersEquity",
+            },
+          ],
+          target_taxonomy_self=True,
+        )
+      ]
+    )
+    issues = validate_create_envelope(payload, _session_empty())
+    assert not any(i.phase == "rule_expression_parse" for i in issues)
+
+  def test_derive_avg_of_undeclared_variable_rejected(self) -> None:
+    payload = _basic_coa(
+      rules=[
+        TaxonomyBlockRuleRequest(
+          name="derive-roe-bad",
+          rule_category="ReportingSystemSpecificRule",
+          rule_pattern="Derive",
+          expression="$ROE = ($NetIncome / avg($Mystery))",
+          variables=[
+            {"variable_name": "ROE", "variable_qname": "ext:ROE"},
+            {"variable_name": "NetIncome", "variable_qname": "rs-gaap:NetIncomeLoss"},
+          ],
+          target_taxonomy_self=True,
+        )
+      ]
+    )
+    issues = validate_create_envelope(payload, _session_empty())
+    assert any(i.code == "unknown_aggregate_operand" for i in issues)
+
+  def test_avg_outside_derive_still_rejected(self) -> None:
+    """Verification patterns get no desugar — avg() there is a genuine
+    function call and fails the whitelist."""
+    payload = _basic_coa(
+      rules=[
+        TaxonomyBlockRuleRequest(
+          name="equalto-with-avg",
+          rule_category="FundamentalAccountingConceptRelation",
+          rule_pattern="EqualTo",
+          expression="$Assets = avg($Equity)",
+          variables=[
+            {"variable_name": "Assets", "variable_qname": "us-gaap:Assets"},
+            {"variable_name": "Equity", "variable_qname": "us-gaap:StockholdersEquity"},
+          ],
+          target_taxonomy_self=True,
+        )
+      ]
+    )
+    issues = validate_create_envelope(payload, _session_empty())
+    assert any(i.code == "unparseable_expression" for i in issues)
+
   def test_duplicate_variable_name_rejected(self) -> None:
     """Same-named variables silently merge in the engine's name-keyed
     fact bindings — the gate rejects them outright."""

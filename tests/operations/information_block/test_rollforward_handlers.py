@@ -31,6 +31,7 @@ def _element(element_id: str, qname: str, taxonomy_id: str = "tax_mini") -> Magi
   el.id = element_id
   el.qname = qname
   el.taxonomy_id = taxonomy_id
+  el.item_type = None
   return el
 
 

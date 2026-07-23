@@ -285,6 +285,7 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
   balance = _single(URIRef(f"{XBRLI_NS}balance"), "debit") or "debit"
   period_type = _single(URIRef(f"{XBRLI_NS}periodType"), "duration") or "duration"
   element_type = _single(URIRef(f"{RS_NS}elementType"), "concept") or "concept"
+  item_type = _single(URIRef(f"{RS_NS}itemType"), None)
   source = _single(URIRef(f"{RS_NS}source"), prefix) or prefix or "native"
 
   is_abstract = _bool(URIRef(f"{RS_NS}abstract"), False)
@@ -325,6 +326,7 @@ def _extract_element(graph: Graph, subject: URIRef) -> ElementSpec | None:
     is_abstract=is_abstract,
     is_monetary=is_monetary,
     element_type=element_type,
+    item_type=item_type,
     substitution_group=sub_group,
     source=source,
     parent_qname=parent_qname,

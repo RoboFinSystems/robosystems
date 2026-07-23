@@ -1,30 +1,48 @@
 """compute-metrics — evaluate Derive rules into a standing metric FactSet.
 
-The metric block's compute path (Metrics M-1). ``Derive`` rules carry the
-same ``$Var`` expression grammar as verification rules, but are evaluated
-for a VALUE: the LHS names the metric element being computed, the RHS
-operands bind to the entity's persisted report facts at the requested
-``period_end``, and the result is written as a Numeric fact in a standing
-``factset_type='metric'`` FactSet — one per (structure, entity,
-period_end), so successive runs accumulate the time series and re-running
-a period replaces its values.
+The metric block's compute path (Metrics M-1 + the M-2 grammar).
+``Derive`` rules carry the same ``$Var`` expression grammar as
+verification rules, but are evaluated for a VALUE: the LHS names the
+metric element being computed, the RHS operands bind to the entity's
+persisted facts at the requested ``period_end``, and the result is
+written as a Numeric fact in a standing ``factset_type='metric'``
+FactSet — one per (structure, entity, period_end), so successive runs
+accumulate the time series and re-running a period replaces its values.
+
+M-2 grammar:
+
+- ``avg($X)`` — the period average of an instant operand,
+  (begin + end) / 2. Desugared pre-parse to a synthesized ``$__avg_X``
+  operand (``expressions.desugar_aggregates``); the begin fact binds at
+  a resolved prior period end — ``body.period_start - 1 day`` when the
+  request carries a window, else a bound duration operand's start - 1
+  day, else the entity's newest report ``period_end`` strictly before
+  the requested one (run-cached; never the fiscal calendar, which
+  annual-comparative tenants don't populate at month ends).
+- **Composition** (DuPont) — an operand naming another rule's target is
+  an in-run metric dependency: rules evaluate in Kahn topological order
+  (``calc_dag.topo_sort_calculations``), in-run values resolve first,
+  and persisted-fact binding is widened to ``('report', 'metric')`` so
+  cross-structure metrics resolve when already computed for the period.
+  A cyclic or skipped dependency leaves the operand unbound → the
+  dependent metric soft-skips.
+
+The future ``$X[t-1]`` prior-period operand (the forecast grammar's
+general form) rides the same two seams: a pre-parse rewrite to a
+synthesized operand, bound through the same prior-period resolver.
 
 Soft-fail per metric: a missing operand fact (InterestExpense for a
-debt-free entity), an unresolvable qname, or an undefined ratio
-(division by zero) skips that metric with a reason — one broken metric
-never aborts the run.
-
-Operands bind against ``factset_type='report'`` facts only, so a metric
-referencing another metric simply skips in M-1 — composition (DuPont)
-is the M-2 DAG feature.
+debt-free entity), an unresolvable qname, a missing prior period for
+``avg()``, or an undefined ratio (division by zero) skips that metric
+with a reason — one broken metric never aborts the run.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.fact_provenance import DerivedProvenance
@@ -45,11 +63,13 @@ from robosystems.models.extensions.roboledger.fact_set import FactSet
 from robosystems.operations.information_block.registry import METRIC_BLOCK_TYPE
 from robosystems.operations.information_block.rules.expressions import (
   InvalidRuleExpression,
+  desugar_aggregates,
   evaluate_derivation,
   lhs_variable_names,
   parse_arithmetic_expression,
 )
 from robosystems.operations.roboledger.fact_set import create_fact_set
+from robosystems.operations.roboledger.reports.calc_dag import topo_sort_calculations
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 
@@ -80,20 +100,23 @@ def _bind_operand(
   period_end: date,
   period_start: date | None,
 ) -> _BoundOperand | None:
-  """Most recent persisted report fact for one operand at ``period_end``.
+  """Most recent persisted fact for one operand at ``period_end``.
 
-  Joins Fact → FactSet on ``factset_type='report'`` (the persisted
-  statement facts, including calc-DAG subtotals) scoped to the entity.
+  Joins Fact → FactSet on ``factset_type IN ('report', 'metric')`` —
+  the persisted statement facts (including calc-DAG subtotals) plus
+  standing metric facts, so a metric operand resolves across structures
+  once its own compute has run for the period. Scoped to the entity;
   ``period_end`` must match exactly — instant balances as of that date,
-  durations ending on it. Newest report wins when several cover the
+  durations ending on it. Newest set wins when several cover the
   period; among same-set candidates the longest window wins (FY over Q4
-  when both end on the date).
+  when both end on the date). No qname can collide across the two set
+  types: metric facts land only on metric-namespace elements.
   """
   stmt = (
     select(Fact.value, Fact.period_start)
     .join(FactSet, Fact.fact_set_id == FactSet.id)
     .where(
-      FactSet.factset_type == "report",
+      FactSet.factset_type.in_(("report", "metric")),
       Fact.entity_id == entity_id,
       Fact.element_id == element_id,
       Fact.period_end == period_end,
@@ -114,6 +137,38 @@ def _bind_operand(
   if row is None:
     return None
   return _BoundOperand(value=float(row[0]), period_start=row[1])
+
+
+def _latest_report_period_end_before(
+  session: Session, entity_id: str, before: date
+) -> date | None:
+  """The entity's newest report-fact ``period_end`` strictly before a date.
+
+  The data-driven prior-period fallback for ``avg()`` when neither the
+  request nor a bound duration operand supplies a window: annual
+  comparatives resolve to the prior FY end, monthly series to the prior
+  month end. Report facts only — the canonical period spine.
+  """
+  return session.execute(
+    select(func.max(Fact.period_end))
+    .select_from(Fact)
+    .join(FactSet, Fact.fact_set_id == FactSet.id)
+    .where(
+      FactSet.factset_type == "report",
+      Fact.entity_id == entity_id,
+      Fact.period_end < before,
+      Fact.fact_scope == "in_scope",
+      Fact.value.is_not(None),
+    )
+  ).scalar()
+
+
+def _metric_unit(target: Element) -> str:
+  """Fact unit for a computed metric — from ``item_type``, else the
+  ``is_monetary`` binary (NULL ``item_type`` keeps the M-1 behavior)."""
+  if target.item_type is not None:
+    return {"monetary": "USD", "days": "days"}.get(target.item_type, "pure")
+  return "USD" if target.is_monetary else "pure"
 
 
 def _load_derive_rules(
@@ -185,9 +240,55 @@ def cmd_compute_metrics(
     key=lambda r: order_by_element.get(r.target_element_id or "", float("inf"))
   )
 
+  # Dependency-ordered evaluation (M-2 composition): an operand qname
+  # naming another rule's target is an in-run metric dependency, so the
+  # run evaluates dependencies first. Rules sort by dependency DEPTH
+  # (longest in-run chain below the target), arc order as the tiebreak —
+  # depth is deterministic where Kahn's emission order among independents
+  # is not, so independent metrics keep presentation order. Cycle
+  # remnants get a finite depth and soft-skip when their operands stay
+  # unbound.
+  targets_by_rule = {
+    rule.id: (
+      session.get(Element, rule.target_element_id) if rule.target_element_id else None
+    )
+    for rule in rules
+  }
+  run_target_qnames = {
+    t.qname for t in targets_by_rule.values() if t is not None and t.qname
+  }
+  dependency_map: dict[str, list[tuple[str, float]]] = {}
+  for rule in rules:
+    target = targets_by_rule.get(rule.id)
+    if target is None or not target.qname:
+      continue
+    operand_qnames = {
+      v.get("variable_qname")
+      for v in (rule.rule_variables or [])
+      if isinstance(v, dict)
+    }
+    dependency_map[target.qname] = [
+      (q, 1.0)
+      for q in operand_qnames
+      if q and q != target.qname and q in run_target_qnames
+    ]
+  depth_by_qname: dict[str, int] = {}
+  for qname in topo_sort_calculations(dependency_map):
+    depth_by_qname[qname] = 1 + max(
+      (depth_by_qname.get(d, 0) for d, _ in dependency_map.get(qname, [])),
+      default=-1,
+    )
+  rules.sort(
+    key=lambda r: (
+      depth_by_qname.get(getattr(targets_by_rule.get(r.id), "qname", None) or "", 0),
+      order_by_element.get(r.target_element_id or "", float("inf")),
+    )
+  )
+
   computed: list[ComputedMetricLite] = []
   skipped: list[SkippedMetricLite] = []
   pending_facts: list[dict] = []
+  computed_by_qname: dict[str, float] = {}
 
   qname_cache: dict[str, Element | None] = {}
 
@@ -198,10 +299,26 @@ def cmd_compute_metrics(
       ).scalar_one_or_none()
     return qname_cache[qname]
 
+  # Data-driven prior period for avg() — resolved at most once per run
+  # so every parameterless avg in the run shares one begin date.
+  _prior_cache: list[date | None] = []
+
+  def _data_driven_prior() -> date | None:
+    if not _prior_cache:
+      _prior_cache.append(
+        _latest_report_period_end_before(session, entity_id, body.period_end)
+      )
+    return _prior_cache[0]
+
+  def _begin_date(duration_start: date | None) -> date | None:
+    if body.period_start is not None:
+      return body.period_start - timedelta(days=1)
+    if duration_start is not None:
+      return duration_start - timedelta(days=1)
+    return _data_driven_prior()
+
   for rule in rules:
-    target = (
-      session.get(Element, rule.target_element_id) if rule.target_element_id else None
-    )
+    target = targets_by_rule.get(rule.id)
     target_qname = target.qname if target is not None else None
 
     def _skip(reason: str, missing: list[str] | None = None) -> None:
@@ -225,9 +342,12 @@ def cmd_compute_metrics(
       continue
     qname_by_name = {v["variable_name"]: v.get("variable_qname") for v in variables}
 
-    expression = rule.rule_expression if isinstance(rule.rule_expression, str) else ""
+    raw_expression = (
+      rule.rule_expression if isinstance(rule.rule_expression, str) else ""
+    )
+    expression, avg_operands = desugar_aggregates(raw_expression)
     try:
-      parsed = parse_arithmetic_expression(expression, names)
+      parsed = parse_arithmetic_expression(expression, names + list(avg_operands))
       lhs_names = lhs_variable_names(parsed)
     except InvalidRuleExpression as exc:
       _skip(f"expression error: {exc}")
@@ -242,6 +362,10 @@ def cmd_compute_metrics(
     duration_start: date | None = None
     for name in operand_names:
       qname = qname_by_name.get(name)
+      if qname and qname in computed_by_qname:
+        # In-run metric dependency — topo order guarantees it ran first.
+        values[name] = computed_by_qname[qname]
+        continue
       operand_element = _element_by_qname(qname) if qname else None
       if operand_element is None:
         missing.append(qname or name)
@@ -254,11 +378,43 @@ def cmd_compute_metrics(
         period_start=body.period_start,
       )
       if bound is None:
-        missing.append(qname or name)
+        if qname and qname in run_target_qnames:
+          missing.append(f"{qname} (metric not computed)")
+        else:
+          missing.append(qname or name)
         continue
       values[name] = bound.value
       if bound.period_start is not None and duration_start is None:
         duration_start = bound.period_start
+
+    # Second pass — avg() operands. The end value is the base operand's
+    # bound value (declared operands always bind above); the begin fact
+    # binds at the resolved prior period end.
+    for synth_name, base_name in avg_operands.items():
+      if base_name not in values:
+        if base_name not in names:
+          missing.append(f"{base_name} (avg operand not declared)")
+        continue  # base already recorded as missing above
+      begin_date = _begin_date(duration_start)
+      qname = qname_by_name.get(base_name)
+      if begin_date is None:
+        missing.append(f"{qname or base_name} (no prior period for avg)")
+        continue
+      operand_element = _element_by_qname(qname) if qname else None
+      if operand_element is None:
+        missing.append(qname or base_name)
+        continue
+      begin_bound = _bind_operand(
+        session,
+        element_id=operand_element.id,
+        entity_id=entity_id,
+        period_end=begin_date,
+        period_start=None,
+      )
+      if begin_bound is None:
+        missing.append(f"{qname} (prior @ {begin_date})")
+        continue
+      values[synth_name] = (begin_bound.value + values[base_name]) / 2.0
 
     if missing:
       _skip("no report fact bound for operand(s)", missing=missing)
@@ -270,7 +426,7 @@ def cmd_compute_metrics(
       _skip(f"evaluation error: {exc}")
       continue
 
-    unit = "USD" if target.is_monetary else "pure"
+    unit = _metric_unit(target)
     period_type = target.period_type or "instant"
     fact_period_start = None
     if period_type == "duration":
@@ -294,8 +450,17 @@ def cmd_compute_metrics(
         value=value,
         unit=unit,
         period_type=period_type,
+        item_type=target.item_type,
       )
     )
+    if target_qname:
+      computed_by_qname[target_qname] = value
+
+  # Evaluation ran in dependency order; present in arc order.
+  computed.sort(key=lambda m: order_by_element.get(m.element_id, float("inf")))
+  pending_facts.sort(
+    key=lambda pf: order_by_element.get(pf["element_id"], float("inf"))
+  )
 
   provenance = DerivedProvenance(computation="compute-metrics", source_fact_ids=[])
 

@@ -222,6 +222,7 @@ class TestBuildEnvelope:
     element_revenue.is_monetary = True
     element_revenue.balance_type = "credit"
     element_revenue.period_type = "duration"
+    element_revenue.item_type = None
 
     element_sales = MagicMock()
     element_sales.id = "elem_sales"
@@ -233,6 +234,7 @@ class TestBuildEnvelope:
     element_sales.is_monetary = True
     element_sales.balance_type = "credit"
     element_sales.period_type = "duration"
+    element_sales.item_type = None
 
     # Query order (1 association → elements + classifications queries run):
     # fact_set → taxonomy → associations → elements → rules → classifications →
@@ -295,6 +297,7 @@ class TestBuildEnvelope:
     element.is_monetary = True
     element.balance_type = "debit"
     element.period_type = "instant"
+    element.item_type = None
 
     fact_set = MagicMock()
     fact_set.id = "fset_balance_sheet_2026q1"

@@ -27,6 +27,9 @@
     "elementType": {
       "@id": "https://robosystems.ai/vocab/elementType"
     },
+    "itemType": {
+      "@id": "https://robosystems.ai/vocab/itemType"
+    },
     "from": {
       "@id": "xlink:from",
       "@type": "@id"
@@ -108,7 +111,7 @@
   "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/metrics/v1/",
   "default_block_type": "metric",
   "origin": "native",
-  "description": "rs-metric — the library metric catalog (Metrics M-1). Each metric is a qname-addressable concept in the rs-metric namespace plus one Derive rule whose ruleExpression computes it from rs-gaap anchor facts ($Metric = f(rs-gaap operands)). The Key Financial Metrics node is both an abstract element and a Structure (block_type='metric', CAP arithmetic) whose presentation arcs enumerate the catalog — the standing metric block every tenant receives. Operand qnames are the canonical calc-DAG anchors the report pivot persists (e.g. InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings, not InventoryNet). compute-metrics binds operands to persisted report facts per period and upserts a standing factset_type='metric' FactSet. Metrics with missing operands or undefined ratios are skipped with a reason, never errored. Hand-authored; avg()/composition metrics land in M-2.",
+  "description": "rs-metric — the library metric catalog (Metrics M-1 + M-2). Each metric is a qname-addressable concept in the rs-metric namespace plus one Derive rule whose ruleExpression computes it from rs-gaap anchor facts ($Metric = f(rs-gaap operands)). The Key Financial Metrics node is both an abstract element and a Structure (block_type='metric', CAP arithmetic) whose presentation arcs enumerate the catalog — the standing metric block every tenant receives. Operand qnames are the canonical calc-DAG anchors the report pivot persists (e.g. InventoryNetOfAllowancesCustomerAdvancesAndProgressBillings, not InventoryNet). compute-metrics binds operands to persisted report facts per period and upserts a standing factset_type='metric' FactSet. Metrics with missing operands or undefined ratios are skipped with a reason, never errored. M-2 adds the avg($Var) period-average aggregate (ReturnOnEquity), metric-on-metric composition in dependency order (the DuPont identity), and itemType format families (monetary | ratio | percent | multiple | days) that drive unit and display formatting. Hand-authored.",
   "@graph": [
     {
       "@id": "rs-metric:KeyFinancialMetrics",
@@ -130,7 +133,8 @@
       "elementType": "concept",
       "periodType": "instant",
       "balance": "debit",
-      "monetary": true
+      "monetary": true,
+      "itemType": "monetary"
     },
     {
       "@id": "rs-metric:CurrentRatio",
@@ -138,7 +142,8 @@
       "documentation": "Current assets over current liabilities.",
       "elementType": "concept",
       "periodType": "instant",
-      "monetary": false
+      "monetary": false,
+      "itemType": "ratio"
     },
     {
       "@id": "rs-metric:QuickRatio",
@@ -146,7 +151,8 @@
       "documentation": "Current assets excluding inventory, over current liabilities (acid test).",
       "elementType": "concept",
       "periodType": "instant",
-      "monetary": false
+      "monetary": false,
+      "itemType": "ratio"
     },
     {
       "@id": "rs-metric:DebtToEquity",
@@ -154,7 +160,8 @@
       "documentation": "Total liabilities over stockholders' equity.",
       "elementType": "concept",
       "periodType": "instant",
-      "monetary": false
+      "monetary": false,
+      "itemType": "ratio"
     },
     {
       "@id": "rs-metric:InterestCoverage",
@@ -162,7 +169,53 @@
       "documentation": "Operating income over interest expense. Skips (rather than errors) for debt-free entities with no interest expense fact.",
       "elementType": "concept",
       "periodType": "duration",
-      "monetary": false
+      "monetary": false,
+      "itemType": "multiple"
+    },
+    {
+      "@id": "rs-metric:ReturnOnEquity",
+      "label": "Return on Equity",
+      "documentation": "Net income over average stockholders' equity — avg($StockholdersEquity) is the period average (begin + end over 2), so the first period of a series skips with a reason (no prior period).",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "percent"
+    },
+    {
+      "@id": "rs-metric:NetProfitMargin",
+      "label": "Net Profit Margin",
+      "documentation": "Net income over revenues — the profitability leg of the DuPont identity.",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "percent"
+    },
+    {
+      "@id": "rs-metric:AssetTurnover",
+      "label": "Asset Turnover",
+      "documentation": "Revenues over average total assets — the efficiency leg of the DuPont identity.",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "multiple"
+    },
+    {
+      "@id": "rs-metric:EquityMultiplier",
+      "label": "Equity Multiplier",
+      "documentation": "Average total assets over average stockholders' equity — the leverage leg of the DuPont identity.",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "multiple"
+    },
+    {
+      "@id": "rs-metric:ReturnOnEquityDuPont",
+      "label": "Return on Equity (DuPont)",
+      "documentation": "Net Profit Margin × Asset Turnover × Equity Multiplier — metric-on-metric composition; agrees with Return on Equity by construction, so a divergence flags an operand inconsistency.",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "percent"
     },
     {
       "@id": "_:rs-metric-pres-arc-1",
@@ -233,6 +286,76 @@
       "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
       "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
       "order": 5.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-6",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:ReturnOnEquity"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 6.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-7",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:NetProfitMargin"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 7.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-8",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:AssetTurnover"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 8.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-9",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:EquityMultiplier"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 9.0
+    },
+    {
+      "@id": "_:rs-metric-pres-arc-10",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-metric:KeyFinancialMetrics"
+      },
+      "to": {
+        "@id": "rs-metric:ReturnOnEquityDuPont"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/metrics/KeyFinancialMetrics",
+      "order": 10.0
     },
     {
       "@id": "_:rs-metric-derive-working-capital",
@@ -370,6 +493,145 @@
         }
       ],
       "ruleMessage": "Interest Coverage = Operating Income / Interest Expense",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-return-on-equity",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$ReturnOnEquity = ($NetIncomeLoss / avg($StockholdersEquity))",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:ReturnOnEquity"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "ReturnOnEquity",
+          "variableQname": "rs-metric:ReturnOnEquity"
+        },
+        {
+          "variableName": "NetIncomeLoss",
+          "variableQname": "rs-gaap:NetIncomeLoss"
+        },
+        {
+          "variableName": "StockholdersEquity",
+          "variableQname": "rs-gaap:StockholdersEquity"
+        }
+      ],
+      "ruleMessage": "Return on Equity = Net Income / Average Stockholders' Equity",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-net-profit-margin",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$NetProfitMargin = ($NetIncomeLoss / $Revenues)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:NetProfitMargin"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "NetProfitMargin",
+          "variableQname": "rs-metric:NetProfitMargin"
+        },
+        {
+          "variableName": "NetIncomeLoss",
+          "variableQname": "rs-gaap:NetIncomeLoss"
+        },
+        {
+          "variableName": "Revenues",
+          "variableQname": "rs-gaap:Revenues"
+        }
+      ],
+      "ruleMessage": "Net Profit Margin = Net Income / Revenues",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-asset-turnover",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$AssetTurnover = ($Revenues / avg($Assets))",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:AssetTurnover"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "AssetTurnover",
+          "variableQname": "rs-metric:AssetTurnover"
+        },
+        {
+          "variableName": "Revenues",
+          "variableQname": "rs-gaap:Revenues"
+        },
+        {
+          "variableName": "Assets",
+          "variableQname": "rs-gaap:Assets"
+        }
+      ],
+      "ruleMessage": "Asset Turnover = Revenues / Average Total Assets",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-equity-multiplier",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$EquityMultiplier = (avg($Assets) / avg($StockholdersEquity))",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:EquityMultiplier"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "EquityMultiplier",
+          "variableQname": "rs-metric:EquityMultiplier"
+        },
+        {
+          "variableName": "Assets",
+          "variableQname": "rs-gaap:Assets"
+        },
+        {
+          "variableName": "StockholdersEquity",
+          "variableQname": "rs-gaap:StockholdersEquity"
+        }
+      ],
+      "ruleMessage": "Equity Multiplier = Average Total Assets / Average Stockholders' Equity",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-metric-derive-return-on-equity-dupont",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$ReturnOnEquityDuPont = ($NetProfitMargin * $AssetTurnover * $EquityMultiplier)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-metric:ReturnOnEquityDuPont"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "ReturnOnEquityDuPont",
+          "variableQname": "rs-metric:ReturnOnEquityDuPont"
+        },
+        {
+          "variableName": "NetProfitMargin",
+          "variableQname": "rs-metric:NetProfitMargin"
+        },
+        {
+          "variableName": "AssetTurnover",
+          "variableQname": "rs-metric:AssetTurnover"
+        },
+        {
+          "variableName": "EquityMultiplier",
+          "variableQname": "rs-metric:EquityMultiplier"
+        }
+      ],
+      "ruleMessage": "Return on Equity (DuPont) = Net Profit Margin × Asset Turnover × Equity Multiplier",
       "ruleSeverity": "info",
       "ruleOrigin": "native"
     }

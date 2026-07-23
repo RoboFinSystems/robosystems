@@ -56,6 +56,7 @@ def element_to_lite(element: Element) -> ElementLite:
     is_monetary=element.is_monetary,
     balance_type=element.balance_type,
     period_type=element.period_type,
+    item_type=element.item_type,
   )
 
 

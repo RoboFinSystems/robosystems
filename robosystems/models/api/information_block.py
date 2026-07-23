@@ -55,6 +55,13 @@ class ElementLite(BaseModel):
   is_monetary: bool = True
   balance_type: str | None = None
   period_type: str | None = None
+  item_type: str | None = Field(
+    None,
+    description=(
+      "Value-domain vocabulary (monetary | ratio | percent | multiple | "
+      "days | string | …). None means untyped; fall back to is_monetary."
+    ),
+  )
 
 
 class ClassificationLite(BaseModel):
@@ -687,6 +694,14 @@ class RenderingRowLite(BaseModel):
     ),
   )
   balance_type: str | None = None
+  item_type: str | None = Field(
+    None,
+    description=(
+      "Value-domain format family from the element (monetary | ratio | "
+      "percent | multiple | days | …). Drives per-row value formatting; "
+      "None falls back to is_monetary on the element."
+    ),
+  )
   values: list[float | None] = Field(default_factory=list)
   text_value: str | None = Field(
     None,
@@ -1380,8 +1395,17 @@ class ComputedMetricLite(BaseModel):
   )
   name: str = Field(..., description="Metric display name.")
   value: float = Field(..., description="Computed value.")
-  unit: str = Field(..., description="Fact unit — 'USD' for monetary, else 'pure'.")
+  unit: str = Field(
+    ..., description="Fact unit — 'USD' for monetary, 'days' for days, else 'pure'."
+  )
   period_type: str = Field(..., description="'instant' or 'duration'.")
+  item_type: str | None = Field(
+    None,
+    description=(
+      "Format family from the metric element (monetary | ratio | percent "
+      "| multiple | days). None means untyped; fall back to unit."
+    ),
+  )
 
 
 class SkippedMetricLite(BaseModel):

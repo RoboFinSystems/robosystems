@@ -224,6 +224,7 @@ def create_library_taxonomy_elements(
         is_abstract=element.is_abstract,
         is_monetary=element.is_monetary,
         element_type=element.element_type,
+        item_type=element.item_type,
         parent_id=None,
         depth=0,
         path="",
@@ -247,6 +248,7 @@ def create_library_taxonomy_elements(
           "is_abstract": pg_insert(Element.__table__).excluded.is_abstract,
           "is_monetary": pg_insert(Element.__table__).excluded.is_monetary,
           "element_type": pg_insert(Element.__table__).excluded.element_type,
+          "item_type": pg_insert(Element.__table__).excluded.item_type,
         },
       )
     )
