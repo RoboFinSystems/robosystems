@@ -347,7 +347,16 @@ def load_statement_fact_set_series(
   scenario's sets, and at an overlapping ``period_end`` the actual wins
   (the moving seam — a closed month's draft supersedes its forecast).
 
-  Three collisions collapse per ``period_end``, in order:
+  A set whose period window strictly CONTAINS another loaded set's
+  window is dropped first (:func:`_drop_covering_windows`): an annual
+  report set is a coarser aggregate of months the series already shows,
+  and without the drop the FY-end column would render 12-month totals
+  inside a monthly grid — or, in scenario mode, shadow that month's
+  forecast column (the actual-beats-forecast rule would prefer it). A
+  tenant whose ONLY sets are annual reports keeps them: nothing narrower
+  exists inside their windows.
+
+  Three collisions then collapse per ``period_end``, in order:
 
   1. ``scenario_id ASC NULLS FIRST`` — the actual beats the forecast.
   2. canonical before publication (``report_id IS NULL`` first) — the
@@ -382,10 +391,41 @@ def load_statement_fact_set_series(
     .scalars()
     .all()
   )
+  rows = _drop_covering_windows(rows)
   by_period_end: dict[date, FactSet] = {}
   for row in rows:
     by_period_end.setdefault(row.period_end, row)
   return [fact_set_to_lite(row) for row in by_period_end.values()]
+
+
+def _drop_covering_windows(rows: list) -> list:
+  """Drop sets whose window strictly contains another loaded set's window.
+
+  The series is a per-period grid; a covering window (an annual set over
+  monthly sets, an annual over its own FY-end forecast month) duplicates
+  months already present as narrower columns — and its duration facts
+  are multi-month totals that read as one giant month. Strict
+  containment only: identical windows are left to the per-period_end
+  collapse, and sets without a ``period_start`` (instant-only envelopes)
+  neither cover nor get covered. O(n²) over a series-sized list.
+  """
+  windowed = [r for r in rows if r.period_start is not None]
+  kept = []
+  for candidate in rows:
+    if candidate.period_start is None:
+      kept.append(candidate)
+      continue
+    covered_narrower = any(
+      other is not candidate
+      and candidate.period_start <= other.period_start
+      and other.period_end <= candidate.period_end
+      and (other.period_start, other.period_end)
+      != (candidate.period_start, candidate.period_end)
+      for other in windowed
+    )
+    if not covered_narrower:
+      kept.append(candidate)
+  return kept
 
 
 def load_fact_set_by_id_for_structure(
