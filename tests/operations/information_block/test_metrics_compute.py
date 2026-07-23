@@ -724,3 +724,60 @@ class TestUnitFamilies:
       response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
 
     assert response.computed[0].unit == "USD"
+
+
+class TestScenarioBinding:
+  """The scenario pins on operand binding — the compute-side half of the
+  hijack fix. Asserted on the emitted SQL (the predicates ARE the
+  behavior; full-cascade coverage lives in the forecast compute tests
+  and the showcase e2e)."""
+
+  def _captured_sql(self, session: MagicMock) -> str:
+    stmt = session.execute.call_args.args[0]
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+  def test_bind_operand_default_pins_actuals(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.first.return_value = None
+    metrics_mod._bind_operand(
+      session,
+      element_id="el_1",
+      entity_id="ent_1",
+      period_end=date(2026, 3, 31),
+      period_start=None,
+    )
+    sql = self._captured_sql(session)
+    assert "scenario_id IS NULL" in sql
+
+  def test_bind_operand_scenario_widens_with_actual_fallback(self) -> None:
+    """Scenario binds reach the scenario slice AND actuals — the seam
+    fallback that lets an avg() begin bind at the actual base month."""
+    session = MagicMock()
+    session.execute.return_value.first.return_value = None
+    metrics_mod._bind_operand(
+      session,
+      element_id="el_1",
+      entity_id="ent_1",
+      period_end=date(2026, 4, 30),
+      period_start=None,
+      scenario_id="struct_budget",
+    )
+    sql = self._captured_sql(session)
+    assert "scenario_id IS NULL" in sql
+    assert "scenario_id = 'struct_budget'" in sql
+
+  def test_prior_period_spine_default_pins_actuals(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = None
+    metrics_mod._latest_report_period_end_before(session, "ent_1", date(2026, 3, 31))
+    sql = self._captured_sql(session)
+    assert "scenario_id IS NULL" in sql
+
+  def test_prior_period_spine_scenario_widens(self) -> None:
+    session = MagicMock()
+    session.execute.return_value.scalar.return_value = None
+    metrics_mod._latest_report_period_end_before(
+      session, "ent_1", date(2026, 4, 30), "struct_budget"
+    )
+    sql = self._captured_sql(session)
+    assert "scenario_id = 'struct_budget'" in sql

@@ -92,6 +92,49 @@ class TestLoadLatestFactSetForStructure:
     assert lite.id == "fs_2026Q1"
     assert lite.factset_type == "report"
 
+  def test_default_read_pins_actuals(self) -> None:
+    """**The hijack regression.** Scenario sets live at FUTURE
+    period_ends, so without the ``scenario_id IS NULL`` pin one computed
+    forecast month would win this period_end-descending read and hijack
+    every default envelope. Assert the pin is in the emitted SQL."""
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar.return_value = None
+    session.execute.return_value = result
+
+    load_latest_fact_set_for_structure(session, "struct_bs")
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "scenario_id IS NULL" in sql
+
+  def test_scenario_read_pins_that_scenario_exactly(self) -> None:
+    """A scenario read binds ONLY that scenario's sets — never a mix
+    with actuals (statement + scenario = the latest forecast month)."""
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar.return_value = None
+    session.execute.return_value = result
+
+    load_latest_fact_set_for_structure(session, "struct_bs", "struct_budget")
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "scenario_id = 'struct_budget'" in sql
+    assert "scenario_id IS NULL" not in sql
+
+  def test_future_scenario_set_never_wins_default_read(self) -> None:
+    """End-to-end shape of the regression: with a scenario row present
+    the default read still projects the actual row the (filtered) query
+    returned — the filter is what excludes the scenario set."""
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar.return_value = _make_fact_set(fs_id="fs_actual", scenario_id=None)
+    session.execute.return_value = result
+
+    lite = load_latest_fact_set_for_structure(session, "struct_bs")
+    assert lite is not None
+    assert lite.id == "fs_actual"
+    assert lite.scenario_id is None
+
 
 class TestLoadFactSetByIdForStructure:
   """Pin lookup for the Report-Block read path — match Structure + id, or None."""
