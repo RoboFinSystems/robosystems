@@ -25,6 +25,7 @@ from sqlalchemy import (
   Index,
   String,
   event,
+  text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -51,6 +52,11 @@ class FactSet(ExtensionsBase):
     Index("idx_fact_sets_period", "period_start", "period_end"),
     Index("idx_fact_sets_entity", "entity_id"),
     Index("idx_fact_sets_report", "report_id"),
+    Index(
+      "idx_fact_sets_scenario",
+      "scenario_id",
+      postgresql_where=text("scenario_id IS NOT NULL"),
+    ),
     CheckConstraint(
       # 'disclosure' = a standing text-block binding set: the durable
       # Document->fact bind that report builds snapshot from.
@@ -91,6 +97,19 @@ class FactSet(ExtensionsBase):
   # Report whose id isn't known until the snapshot is copied; report
   # facts created via ``create_report`` always populate it.
   report_id = Column(String, nullable=True)
+
+  # Scenario axis (the forecast engine's parallel universes). NULL =
+  # actuals — every pre-forecast writer leaves it unset, so the entire
+  # historical corpus is the null scenario by construction. Non-NULL
+  # points at the owning ``forecast`` Structure (the block IS the
+  # scenario), and ON DELETE CASCADE removes the whole scenario slice
+  # with its block. Never SET NULL here: an orphaned scenario set
+  # demoted to NULL would masquerade as actuals.
+  scenario_id = Column(
+    String,
+    ForeignKey("structures.id", ondelete="CASCADE"),
+    nullable=True,
+  )
 
   # Free-form metadata (render config pins, template id at creation time,
   # agent prompt, etc.). NOTE: typed fact provenance lives on its own

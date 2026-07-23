@@ -23,6 +23,10 @@ discipline as ``ArtifactMechanics``, which discriminates on ``kind``):
 * ``document`` — text-block fact bound from a platform Document; the
                  document is the editable source of truth and
                  ``content_hash`` is the drift signal.
+* ``forecast`` — forward facts derived by the forecast engine's driver
+                 cascade (scenario slice, ``fact_sets.scenario_id`` set);
+                 deterministic recompute from lever assertions + actual
+                 seeds, no posted event behind any forward month.
 * ``filed``    — as-filed public disclosure filed with a regulator/authority
                  (SEC EDGAR XBRL); the filing itself is the source of record,
                  citable by accession + filing date. No posted-ledger lineage
@@ -167,6 +171,36 @@ class DocumentProvenance(BaseModel):
   asserted_by: str | None = Field(None, description="Actor that bound the text.")
 
 
+class ForecastProvenance(BaseModel):
+  """Forward facts derived by the forecast engine (scenario slice).
+
+  ``compute-forecast`` walks a scenario's driver cascade month-by-month
+  from the last closed actuals and emits the results into scenario-keyed
+  standing FactSets (``fact_sets.scenario_id`` = the owning forecast
+  block). A forecast-specialized sibling of ``derived``: deterministic
+  recompute from lever assertions + actual seed values, with no posted
+  event behind any forward month. Distinct from ``schedule`` (a single
+  self-projecting template) — this is the multi-driver cascade.
+  """
+
+  origin: Literal["forecast"] = "forecast"
+  scenario_structure_id: str = Field(
+    ..., description="Forecast Structure (the scenario) that generated the facts."
+  )
+  base_period: str = Field(
+    ...,
+    description="Seed month the walk projected forward from ('YYYY-MM').",
+  )
+  month_index: int = Field(
+    ...,
+    description="1-based offset of this month past the actual/forecast seam.",
+  )
+  drivers: list[str] = Field(
+    default_factory=list,
+    description="Active lever qnames that shaped this month's cascade.",
+  )
+
+
 class FiledProvenance(BaseModel):
   """As-filed public disclosure filed with a regulator/authority.
 
@@ -201,6 +235,7 @@ FactProvenance = Annotated[
   | DerivedProvenance
   | AssertedProvenance
   | DocumentProvenance
+  | ForecastProvenance
   | FiledProvenance,
   Field(discriminator="origin"),
 ]

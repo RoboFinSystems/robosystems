@@ -1,0 +1,326 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "skos": "http://www.w3.org/2004/02/skos/core#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "xbrli": "http://www.xbrl.org/2003/instance#",
+    "link": "http://www.xbrl.org/2003/linkbase#",
+    "xlink": "http://www.w3.org/1999/xlink#",
+    "rs-gaap": "https://robosystems.ai/taxonomy/rs-gaap/v1/",
+    "rs-driver": "https://robosystems.ai/taxonomy/rs-gaap/drivers/v1/",
+    "rs": "https://robosystems.ai/vocab/",
+    "balance": {
+      "@id": "xbrli:balance"
+    },
+    "periodType": {
+      "@id": "xbrli:periodType"
+    },
+    "abstract": {
+      "@id": "https://robosystems.ai/vocab/abstract",
+      "@type": "xsd:boolean"
+    },
+    "monetary": {
+      "@id": "https://robosystems.ai/vocab/monetary",
+      "@type": "xsd:boolean"
+    },
+    "elementType": {
+      "@id": "https://robosystems.ai/vocab/elementType"
+    },
+    "itemType": {
+      "@id": "https://robosystems.ai/vocab/itemType"
+    },
+    "from": {
+      "@id": "xlink:from",
+      "@type": "@id"
+    },
+    "to": {
+      "@id": "xlink:to",
+      "@type": "@id"
+    },
+    "arcrole": {
+      "@id": "xlink:arcrole",
+      "@type": "@id"
+    },
+    "role": {
+      "@id": "xlink:role",
+      "@type": "@id"
+    },
+    "order": {
+      "@id": "link:order",
+      "@type": "xsd:decimal"
+    },
+    "associationType": {
+      "@id": "https://robosystems.ai/vocab/associationType"
+    },
+    "label": "rdfs:label",
+    "documentation": "rdfs:comment",
+    "structureName": {
+      "@id": "https://robosystems.ai/vocab/structureName"
+    },
+    "blockType": {
+      "@id": "https://robosystems.ai/vocab/blockType"
+    },
+    "roleUri": {
+      "@id": "https://robosystems.ai/vocab/roleUri"
+    },
+    "conceptArrangementPattern": {
+      "@id": "https://robosystems.ai/vocab/conceptArrangementPattern"
+    },
+    "ruleCategory": {
+      "@id": "https://robosystems.ai/vocab/ruleCategory"
+    },
+    "rulePattern": {
+      "@id": "https://robosystems.ai/vocab/rulePattern"
+    },
+    "ruleExpression": {
+      "@id": "https://robosystems.ai/vocab/ruleExpression"
+    },
+    "ruleTarget": {
+      "@id": "https://robosystems.ai/vocab/ruleTarget"
+    },
+    "targetKind": {
+      "@id": "https://robosystems.ai/vocab/targetKind"
+    },
+    "targetRef": {
+      "@id": "https://robosystems.ai/vocab/targetRef"
+    },
+    "ruleVariables": {
+      "@id": "https://robosystems.ai/vocab/ruleVariables",
+      "@container": "@list"
+    },
+    "variableName": {
+      "@id": "https://robosystems.ai/vocab/variableName"
+    },
+    "variableQname": {
+      "@id": "https://robosystems.ai/vocab/variableQname"
+    },
+    "ruleMessage": {
+      "@id": "https://robosystems.ai/vocab/ruleMessage"
+    },
+    "ruleSeverity": {
+      "@id": "https://robosystems.ai/vocab/ruleSeverity"
+    },
+    "ruleOrigin": {
+      "@id": "https://robosystems.ai/vocab/ruleOrigin"
+    }
+  },
+  "standard": "rs-driver",
+  "version": "v1",
+  "taxonomy_type": "reporting_extension",
+  "namespace_uri": "https://robosystems.ai/taxonomy/rs-gaap/drivers/v1/",
+  "default_block_type": "custom",
+  "origin": "native",
+  "description": "rs-driver — the curated forecast lever catalog (Forecast F-1). Each lever is a qname-addressable concept in the rs-driver namespace plus one Derive rule whose ruleExpression states the driven mechanics against rs-gaap anchor targets ($Anchor = f(prior anchors, lever)) — rules for mechanics, authored facts for values. Lever VALUES are asserted per scenario as facts on these elements inside a forecast block's lever FactSet; a rule activates for a scenario only when every rs-driver operand it names has asserted values, and inactive targets fall to the engine's carry-forward default. compute-forecast walks the cascade month-by-month from the last closed actuals: the $X[t-1] prior-period operand binds the previous forecast month (seeded from actuals at the base period). Value conventions: percent levers are decimals per month (0.03 = 3%/month), days levers are day counts. The Driver Catalog node is both an abstract element and a Structure (block_type='custom' — a reference catalog, not a renderable block) whose presentation arcs enumerate the levers. Hand-authored.",
+  "@graph": [
+    {
+      "@id": "rs-driver:DriverCatalog",
+      "label": "Driver Catalog",
+      "documentation": "Container for the seeded forecast lever catalog — an abstract element and a reference Structure (block_type='custom', never rendered). Forecast blocks assert lever values against the member concepts; compute-forecast reads the Derive rules for the driven mechanics.",
+      "elementType": "abstract",
+      "periodType": "duration",
+      "abstract": true,
+      "monetary": false,
+      "roleUri": "https://robosystems.ai/seattle/cm-roles/roles/drivers/DriverCatalog",
+      "structureName": "Driver Catalog",
+      "blockType": "custom",
+      "conceptArrangementPattern": "set"
+    },
+    {
+      "@id": "rs-driver:RevenueGrowthRate",
+      "label": "Revenue Growth Rate",
+      "documentation": "Month-over-month revenue growth (compounding lever): Revenues[t] = Revenues[t-1] x (1 + rate). Decimal per month (0.03 = 3%/month). Derive-backward seam: trailing growth is computable from the actual monthly series; asserted forward per scenario.",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "percent"
+    },
+    {
+      "@id": "rs-driver:CostOfRevenueRate",
+      "label": "Cost of Revenue Rate",
+      "documentation": "Cost of revenue as a fraction of the same month's revenues (rate-on-base lever). Decimal (0.62 = 62% of revenue).",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "percent"
+    },
+    {
+      "@id": "rs-driver:DaysSalesOutstanding",
+      "label": "Days Sales Outstanding",
+      "documentation": "Collection-cycle lever (days-based balance): Accounts Receivable = monthly Revenues / 30 x DSO. Day count (45 = 45 days). Drives the AR working-capital balance from the revenue flow rate.",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "days"
+    },
+    {
+      "@id": "rs-driver:DaysPayableOutstanding",
+      "label": "Days Payable Outstanding",
+      "documentation": "Payment-cycle lever (days-based balance): Accounts Payable = monthly Cost of Revenue / 30 x DPO. Day count (30 = 30 days). COGS-based (the standard DPO definition) — Cost of Revenue is itself rule-driven in the cascade, so the base is always available at eval time.",
+      "elementType": "concept",
+      "periodType": "duration",
+      "monetary": false,
+      "itemType": "days"
+    },
+    {
+      "@id": "_:rs-driver-pres-arc-1",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-driver:DriverCatalog"
+      },
+      "to": {
+        "@id": "rs-driver:RevenueGrowthRate"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/drivers/DriverCatalog",
+      "order": 1.0
+    },
+    {
+      "@id": "_:rs-driver-pres-arc-2",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-driver:DriverCatalog"
+      },
+      "to": {
+        "@id": "rs-driver:CostOfRevenueRate"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/drivers/DriverCatalog",
+      "order": 2.0
+    },
+    {
+      "@id": "_:rs-driver-pres-arc-3",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-driver:DriverCatalog"
+      },
+      "to": {
+        "@id": "rs-driver:DaysSalesOutstanding"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/drivers/DriverCatalog",
+      "order": 3.0
+    },
+    {
+      "@id": "_:rs-driver-pres-arc-4",
+      "@type": "rs:Association",
+      "from": {
+        "@id": "rs-driver:DriverCatalog"
+      },
+      "to": {
+        "@id": "rs-driver:DaysPayableOutstanding"
+      },
+      "associationType": "presentation",
+      "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child",
+      "role": "https://robosystems.ai/seattle/cm-roles/roles/drivers/DriverCatalog",
+      "order": 4.0
+    },
+    {
+      "@id": "_:rs-driver-derive-revenue-growth",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$Revenues = ($Revenues[t-1] * (1 + $RevenueGrowthRate))",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:Revenues"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "Revenues",
+          "variableQname": "rs-gaap:Revenues"
+        },
+        {
+          "variableName": "RevenueGrowthRate",
+          "variableQname": "rs-driver:RevenueGrowthRate"
+        }
+      ],
+      "ruleMessage": "Revenues[t] = Revenues[t-1] x (1 + Revenue Growth Rate)",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-driver-derive-cost-of-revenue",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$CostOfRevenue = ($Revenues * $CostOfRevenueRate)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:CostOfRevenue"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "CostOfRevenue",
+          "variableQname": "rs-gaap:CostOfRevenue"
+        },
+        {
+          "variableName": "Revenues",
+          "variableQname": "rs-gaap:Revenues"
+        },
+        {
+          "variableName": "CostOfRevenueRate",
+          "variableQname": "rs-driver:CostOfRevenueRate"
+        }
+      ],
+      "ruleMessage": "Cost of Revenue = Revenues x Cost of Revenue Rate",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-driver-derive-accounts-receivable",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$ReceivablesNetCurrent = (($Revenues / 30) * $DaysSalesOutstanding)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:ReceivablesNetCurrent"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "ReceivablesNetCurrent",
+          "variableQname": "rs-gaap:ReceivablesNetCurrent"
+        },
+        {
+          "variableName": "Revenues",
+          "variableQname": "rs-gaap:Revenues"
+        },
+        {
+          "variableName": "DaysSalesOutstanding",
+          "variableQname": "rs-driver:DaysSalesOutstanding"
+        }
+      ],
+      "ruleMessage": "Accounts Receivable = (Revenues / 30) x Days Sales Outstanding",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    },
+    {
+      "@id": "_:rs-driver-derive-accounts-payable",
+      "ruleCategory": "ReportingSystemSpecificRule",
+      "rulePattern": "Derive",
+      "ruleExpression": "$AccountsPayableCurrent = (($CostOfRevenue / 30) * $DaysPayableOutstanding)",
+      "ruleTarget": {
+        "targetKind": "element",
+        "targetRef": "rs-gaap:AccountsPayableCurrent"
+      },
+      "ruleVariables": [
+        {
+          "variableName": "AccountsPayableCurrent",
+          "variableQname": "rs-gaap:AccountsPayableCurrent"
+        },
+        {
+          "variableName": "CostOfRevenue",
+          "variableQname": "rs-gaap:CostOfRevenue"
+        },
+        {
+          "variableName": "DaysPayableOutstanding",
+          "variableQname": "rs-driver:DaysPayableOutstanding"
+        }
+      ],
+      "ruleMessage": "Accounts Payable = (Cost of Revenue / 30) x Days Payable Outstanding",
+      "ruleSeverity": "info",
+      "ruleOrigin": "native"
+    }
+  ]
+}
