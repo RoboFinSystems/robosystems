@@ -48,6 +48,15 @@ class ReportFact:
   # derivation, but excluded from structure rendering so it doesn't
   # double-count when rolled up to an in-structure ancestor.
   audit_only: bool = False
+  # The portion of ``value`` the RE/NI close sweeps may count — the close
+  # is over POSTINGS, not mapping fan-out. A CoA account mapped to N
+  # reporting concepts (statement anchor + disclosure disaggregation
+  # concepts, e.g. revenue accounts double-mapped so a revenue-by-stream
+  # note renders fact-driven) produces N pivoted facts; only the
+  # account's PRIMARY target carries the postings' close contribution,
+  # the others carry 0 here so net income counts each posting exactly
+  # once. ``None`` (every non-pivot producer) means "same as value".
+  close_value: float | None = None
 
 
 @dataclass
@@ -159,6 +168,13 @@ def generate_report_facts(
           period_start=period.start,
           period_end=period.end,
           period_type=_infer_period_type(balance.classification),
+          # Close-eligible portion — primary-source contributions only,
+          # so the RE/NI close counts fan-out-mapped postings once.
+          close_value=(
+            _natural_sign(balance.close_net_balance, balance.balance_type)
+            if balance.close_net_balance is not None
+            else None
+          ),
         )
       )
 
@@ -544,6 +560,13 @@ class _Balance:
   total_debits: float
   total_credits: float
   net_balance: float
+  # The portion of ``net_balance`` contributed by source accounts for
+  # which THIS target is the close-primary mapping. Multi-mapped sources
+  # (statement anchor + disclosure disaggregation concepts) carry their
+  # postings' close contribution on exactly one target, so the RE/NI
+  # close counts each posting once. Defaults to the full balance —
+  # single-mapped sources, the overwhelmingly common case.
+  close_net_balance: float | None = None
 
 
 @dataclass
@@ -733,10 +756,21 @@ def _read_mapped_balances(
   Belt-and-suspenders ``element_type='concept'`` filter on the target
   ensures facts never land on abstracts, hypercubes, axes, or members
   even if a future bad mapping arc points there.
+
+  **Close-primary designation.** Rows come back per (source, target) so
+  mapping fan-out is visible: a source account mapped to several
+  targets (its statement anchor + disclosure disaggregation concepts)
+  contributes its full postings to every target's ``net_balance`` —
+  that's the disaggregation feature — but its CLOSE contribution to
+  exactly one primary target (trait-classified targets outrank
+  inferred ones; deterministic qname tiebreak). ``close_net_balance``
+  carries the primary-only sum so the RE/NI close counts each posting
+  once (the Cadence revenue-by-stream double-count, 2026-07-23).
   """
   result = session.execute(
     text("""
       SELECT
+        source_elem.id AS source_id,
         target.id AS reporting_element_id,
         target.qname,
         target.name AS reporting_name,
@@ -768,7 +802,7 @@ def _read_mapped_balances(
           OR e.posting_date >= :start_date
           OR :start_date IS NULL
         )
-      GROUP BY target.id, target.qname, target.name,
+      GROUP BY source_elem.id, target.id, target.qname, target.name,
                tcls.identifier, target.balance_type
       ORDER BY target.qname
     """),
@@ -780,23 +814,50 @@ def _read_mapped_balances(
     },
   )
 
+  # Pass 1 — group the per-(source, target) rows both ways.
+  rows = list(result)
+  by_source: dict[str, list] = {}
+  for row in rows:
+    by_source.setdefault(row.source_id, []).append(row)
+
+  # Pass 2 — per source, pick the close-primary target: trait-classified
+  # targets outrank inferred ones, qname as the deterministic tiebreak.
+  # (For single-mapped sources — the overwhelmingly common case — the
+  # only target is trivially primary.)
+  primary_pairs: set[tuple[str, str]] = set()
+  for source_id, source_rows in by_source.items():
+    ranked = sorted(source_rows, key=lambda r: (r.classification is None, r.qname))
+    primary_pairs.add((source_id, ranked[0].reporting_element_id))
+
+  # Pass 3 — aggregate per target: full balance from every source,
+  # close balance from primary sources only.
   balances: dict[str, _Balance] = {}
-  for row in result:
+  for row in rows:
     debits = cents_to_dollars(row.total_debits)
     credits = cents_to_dollars(row.total_credits)
     classification = row.classification or _infer_classification(
       row.qname, row.balance_type
     )
-    balances[row.reporting_element_id] = _Balance(
-      element_id=row.reporting_element_id,
-      qname=row.qname,
-      name=row.reporting_name,
-      classification=classification,
-      balance_type=row.balance_type,
-      total_debits=debits,
-      total_credits=credits,
-      net_balance=debits - credits,
-    )
+    balance = balances.get(row.reporting_element_id)
+    if balance is None:
+      balance = _Balance(
+        element_id=row.reporting_element_id,
+        qname=row.qname,
+        name=row.reporting_name,
+        classification=classification,
+        balance_type=row.balance_type,
+        total_debits=0.0,
+        total_credits=0.0,
+        net_balance=0.0,
+        close_net_balance=0.0,
+      )
+      balances[row.reporting_element_id] = balance
+    balance.total_debits += debits
+    balance.total_credits += credits
+    balance.net_balance += debits - credits
+    if (row.source_id, row.reporting_element_id) in primary_pairs:
+      assert balance.close_net_balance is not None
+      balance.close_net_balance += debits - credits
 
   return balances
 
@@ -927,6 +988,10 @@ def _emit_net_income_facts(
   here once per period; the persistence fan-out then stamps the same
   fact into every structure that references the element.
 
+  Sums use each fact's close-eligible portion (:func:`_close_value`) so
+  accounts double-mapped to disclosure disaggregation concepts count
+  once in the bottom line.
+
   Skips zero net income — the renderer treats absent facts as 0 anyway.
   Mutates the facts list in place.
   """
@@ -955,9 +1020,9 @@ def _emit_net_income_facts(
       if f.period_start != period.start or f.period_end != period.end:
         continue
       if f.classification == "revenue":
-        revenue += f.value
+        revenue += _close_value(f)
       elif f.classification == "expense":
-        expense += f.value
+        expense += _close_value(f)
     net_income = revenue - expense
     if net_income == 0.0:
       continue
@@ -1881,6 +1946,113 @@ def _find_close_target(
   return None
 
 
+def _cumulative_closeable_sums(
+  session: Session,
+  mapping_id: str,
+  period_end: date,
+  arc_type: str = "mapping",
+) -> tuple[float, float, float]:
+  """Cumulative (revenue, expense, equity_reductions) counted ONCE per source.
+
+  The close is over POSTINGS, not over mapping fan-out: a CoA account
+  mapped to N reporting concepts (its statement anchor PLUS disclosure
+  disaggregation concepts — e.g. revenue accounts double-mapped to
+  ``rs-gaap:RevenueFromContract…`` and a tenant ``…:SubscriptionRevenue``
+  so the revenue-by-stream note renders fact-driven) joins its postings
+  into N target rows, and a per-target classification sweep counts the
+  same postings N times — inflating net income by exactly the
+  disaggregated amount and unbalancing the BS through retained earnings
+  (the Cadence bug, 2026-07-23). This helper groups by SOURCE element
+  and classifies each source through its targets — reducer targets
+  first (the cumulative close's historical precedence), then P&L
+  targets with a real trait ahead of inferred ones — so every posting
+  contributes exactly once. Window: inception → ``period_end`` (the
+  prior-period close semantics).
+  """
+  result = session.execute(
+    text("""
+      SELECT
+        source_elem.id AS source_id,
+        target.qname,
+        target.balance_type,
+        tcls.identifier AS classification,
+        COALESCE(SUM(li.debit_amount), 0) AS total_debits,
+        COALESCE(SUM(li.credit_amount), 0) AS total_credits
+      FROM elements source_elem
+      JOIN line_items li ON li.element_id = source_elem.id
+      JOIN entries e ON e.id = li.entry_id
+      JOIN associations mapping
+        ON mapping.from_element_id = source_elem.id
+        AND mapping.association_type = :arc_type
+        AND mapping.structure_id = :mapping_id
+      JOIN elements target ON target.id = mapping.to_element_id
+      LEFT JOIN (
+        SELECT et.element_id, t.identifier
+        FROM element_traits et
+        JOIN traits t ON t.id = et.trait_id
+        WHERE et.is_primary = TRUE
+          AND t.category = 'elementsOfFinancialStatements'
+      ) tcls ON tcls.element_id = target.id
+      WHERE e.status = 'posted'
+        AND target.element_type = 'concept'
+        AND target.is_abstract = false
+        AND e.posting_date <= :end_date
+      GROUP BY source_elem.id, target.qname, target.balance_type, tcls.identifier
+    """),
+    {
+      "mapping_id": mapping_id,
+      "arc_type": arc_type,
+      "end_date": period_end,
+    },
+  )
+
+  # Per source: every target row carries the SAME source postings (the
+  # join fans line_items across arcs), so pick one classification per
+  # source and count its sums once.
+  by_source: dict[str, list] = {}
+  for row in result:
+    by_source.setdefault(row.source_id, []).append(row)
+
+  total_revenue = 0.0
+  total_expenses = 0.0
+  total_equity_reductions = 0.0
+  for rows in by_source.values():
+    reducer = next((r for r in rows if _is_equity_flow_reducer(r.qname)), None)
+    if reducer is not None:
+      net = cents_to_dollars(reducer.total_debits - reducer.total_credits)
+      total_equity_reductions += _natural_sign(net, reducer.balance_type)
+      continue
+    classified = []
+    for r in rows:
+      cls = r.classification or _infer_classification(r.qname, r.balance_type)
+      if cls in ("revenue", "expense"):
+        # Trait-carrying targets sort ahead of inferred ones.
+        classified.append((r.classification is None, r.qname, cls, r))
+    if not classified:
+      continue
+    classified.sort()
+    _, _, cls, row = classified[0]
+    net = cents_to_dollars(row.total_debits - row.total_credits)
+    natural = _natural_sign(net, row.balance_type)
+    if cls == "revenue":
+      total_revenue += natural
+    else:
+      total_expenses += natural
+
+  return total_revenue, total_expenses, total_equity_reductions
+
+
+def _close_value(fact: ReportFact) -> float:
+  """The close-eligible portion of a fact's value.
+
+  ``close_value`` is set by the mapped-balance pivot so an account
+  fanned out to several concepts contributes its postings exactly once
+  (the primary target carries them; disaggregation copies carry 0).
+  ``None`` — every non-pivot producer — means the full value counts.
+  """
+  return fact.value if fact.close_value is None else fact.close_value
+
+
 def _close_to_retained_earnings(
   facts: list[ReportFact],
   period_start: date,
@@ -1896,6 +2068,11 @@ def _close_to_retained_earnings(
   CORP→RetainedEarnings, PART→PartnersCapital, LLC→MembersEquity). On
   unmapped graphs where no target fact exists, appends a fresh anonymous
   row with that qname so downstream rendering still has a bottom line.
+
+  Sums use each fact's close-eligible portion (:func:`_close_value`) so
+  accounts double-mapped to disclosure disaggregation concepts count
+  once — the Cadence revenue-by-stream bug (2026-07-23) doubled NI by
+  exactly the disaggregated amount without this.
 
   Mutates the facts list in place.
   """
@@ -1915,11 +2092,11 @@ def _close_to_retained_earnings(
     if fact.period_start != period_start or fact.period_end != period_end:
       continue
     if fact.classification == "revenue":
-      total_revenue += fact.value
+      total_revenue += _close_value(fact)
     elif fact.classification == "expense":
-      total_expenses += fact.value
+      total_expenses += _close_value(fact)
     elif _is_equity_flow_reducer(fact.element_qname):
-      total_equity_reductions += fact.value
+      total_equity_reductions += _close_value(fact)
 
   net_income = total_revenue - total_expenses + total_equity_reductions
   if net_income == 0.0:
@@ -1998,83 +2175,25 @@ def _close_prior_periods_to_retained_earnings(
   so seed.py us-gaap, FAC, rs-gaap, and other equity-element shapes all
   receive the prior-period closing amount.
   """
-  # Cumulative net income from inception through period_end.
-  # Classification is resolved via element_traits → classifications
-  # (FASB elementsOfFinancialStatements trait axis); rows whose target
-  # element lacks a primary trait fall back to qname-based inference
-  # (see :func:`_infer_classification`) so reference taxonomies (FAC,
-  # rs-gaap) without wired traits don't get a phantom $0 cumulative
-  # that would undo the current-period close.
-  result = session.execute(
-    text("""
-      SELECT
-        tcls.identifier AS classification,
-        target.qname,
-        target.balance_type,
-        COALESCE(SUM(li.debit_amount), 0) AS total_debits,
-        COALESCE(SUM(li.credit_amount), 0) AS total_credits
-      FROM elements source_elem
-      JOIN line_items li ON li.element_id = source_elem.id
-      JOIN entries e ON e.id = li.entry_id
-      JOIN associations mapping
-        ON mapping.from_element_id = source_elem.id
-        AND mapping.association_type = :arc_type
-        AND mapping.structure_id = :mapping_id
-      JOIN elements target ON target.id = mapping.to_element_id
-      LEFT JOIN (
-        SELECT et.element_id, t.identifier
-        FROM element_traits et
-        JOIN traits t ON t.id = et.trait_id
-        WHERE et.is_primary = TRUE
-          AND t.category = 'elementsOfFinancialStatements'
-      ) tcls ON tcls.element_id = target.id
-      WHERE e.status = 'posted'
-        AND target.element_type = 'concept'
-        AND target.is_abstract = false
-        AND e.posting_date <= :end_date
-      GROUP BY tcls.identifier, target.qname, target.balance_type
-    """),
-    {
-      "mapping_id": mapping_id,
-      "arc_type": arc_type,
-      "end_date": period_end,
-    },
+  # Cumulative net income from inception through period_end — counted
+  # once per SOURCE account via ``_cumulative_closeable_sums``
+  # (classification resolved via traits with qname/balance-type
+  # inference fallback; the per-source dedupe keeps
+  # disclosure-disaggregation fan-out from double-counting postings).
+  cumulative_revenue, cumulative_expenses, cumulative_equity_reductions = (
+    _cumulative_closeable_sums(session, mapping_id, period_end, arc_type)
   )
-
-  cumulative_revenue = 0.0
-  cumulative_expenses = 0.0
-  # Equity-flow concepts (dividends paid, distributions, treasury buybacks)
-  # reduce retained earnings on the balance sheet. Detect by qname pattern
-  # rather than classification because rs-gaap models these as
-  # balance_type='credit' flow concepts that often lack the 'equity' EFS
-  # trait. Tracked separately so prior-period closing nets them out of RE.
-  cumulative_equity_reductions = 0.0
-  for row in result:
-    if _is_equity_flow_reducer(row.qname):
-      net = cents_to_dollars(row.total_debits - row.total_credits)
-      cumulative_equity_reductions += _natural_sign(net, row.balance_type)
-      continue
-    classification = row.classification or _infer_classification(
-      row.qname, row.balance_type
-    )
-    if classification not in ("revenue", "expense"):
-      continue
-    net = cents_to_dollars(row.total_debits - row.total_credits)
-    natural = _natural_sign(net, row.balance_type)
-    if classification == "revenue":
-      cumulative_revenue += natural
-    else:
-      cumulative_expenses += natural
-
   cumulative_net_income = (
     cumulative_revenue - cumulative_expenses + cumulative_equity_reductions
   )
 
-  # Current period net income was already closed — compute it from facts.
-  # The closed amount is now sitting on whichever element
-  # ``_find_close_target`` selected (seed.py RE, us-gaap-shaped RE, or
-  # a single-line equity element like ``fac:Equity``); we don't need to
-  # locate that fact here, only to compute the prior-period delta.
+  # Current period net income was already closed — compute it from facts,
+  # counting each fact's close-eligible portion (the same source-once
+  # semantics the pivot stamped via ``close_value``). The closed amount
+  # is now sitting on whichever element ``_find_close_target`` selected
+  # (seed.py RE, us-gaap-shaped RE, or a single-line equity element like
+  # ``fac:Equity``); we don't need to locate that fact here, only to
+  # compute the prior-period delta.
   current_revenue = 0.0
   current_expenses = 0.0
   current_equity_reductions = 0.0
@@ -2082,11 +2201,11 @@ def _close_prior_periods_to_retained_earnings(
     if fact.period_start != period_start or fact.period_end != period_end:
       continue
     if fact.classification == "revenue":
-      current_revenue += fact.value
+      current_revenue += _close_value(fact)
     elif fact.classification == "expense":
-      current_expenses += fact.value
+      current_expenses += _close_value(fact)
     elif _is_equity_flow_reducer(fact.element_qname):
-      current_equity_reductions += fact.value
+      current_equity_reductions += _close_value(fact)
 
   current_net_income = current_revenue - current_expenses + current_equity_reductions
   prior_periods_net_income = cumulative_net_income - current_net_income

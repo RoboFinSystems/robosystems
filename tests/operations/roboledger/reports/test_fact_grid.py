@@ -649,6 +649,10 @@ class TestClosePriorPeriodsToRetainedEarnings:
           # close logic now inspects qname to detect dividend / buyback
           # concepts). Synthetic test rows use canonical us-gaap qnames
           # that the equity-flow-reducer check will not match.
+          # source_id: the cumulative close dedupes by SOURCE account
+          # (mapping fan-out must count postings once); one distinct
+          # source per row = the plain single-mapped shape.
+          source_id="src_revenue_account",
           qname="us-gaap:Revenues",
           classification="revenue",
           balance_type="credit",
@@ -659,6 +663,7 @@ class TestClosePriorPeriodsToRetainedEarnings:
     if expense_cents:
       rows.append(
         SimpleNamespace(
+          source_id="src_expense_account",
           qname="us-gaap:OperatingExpenses",
           classification="expense",
           balance_type="debit",
@@ -2594,3 +2599,155 @@ class TestSynthesizePpeNetFacts:
     msg = mock_warn.call_args[0][0]
     assert "CF Investing" in msg
     assert "PaymentsToAcquirePropertyPlantAndEquipment" in msg
+
+
+class TestCloseSourceDedupe:
+  """The close is over POSTINGS, not mapping fan-out (Cadence bug,
+  2026-07-23): revenue accounts double-mapped to a statement anchor AND
+  disclosure disaggregation concepts (revenue-by-stream) inflated net
+  income by exactly the disaggregated amount, unbalancing the BS
+  through retained earnings. These tests pin the source-once semantics
+  at each layer: the pivot's close_value stamping, the in-memory close
+  sweeps, and the cumulative prior-period sum."""
+
+  PS = date(2026, 1, 1)
+  PE = date(2026, 1, 31)
+
+  def _fan_out_rows(self):
+    """One revenue account mapped to BOTH the rs-gaap anchor (trait-
+    classified) and a tenant disaggregation concept (trait-less,
+    classification inferred from the qname) — each (source, target) row
+    carries the source's full postings, exactly as the fan-out join
+    produces them."""
+    return [
+      SimpleNamespace(
+        source_id="src_4000",
+        reporting_element_id="el_rs_gaap_rev",
+        qname="rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        reporting_name="Revenue from Contract with Customer",
+        classification="revenue",  # trait-carrying anchor
+        balance_type="credit",
+        total_debits=0,
+        total_credits=1_000_000,  # $10k
+      ),
+      SimpleNamespace(
+        source_id="src_4000",
+        reporting_element_id="el_cadence_sub_rev",
+        qname="cadence:SubscriptionRevenue",
+        reporting_name="Subscription Revenue",
+        classification=None,  # trait-less; inferred 'revenue' from qname
+        balance_type="credit",
+        total_debits=0,
+        total_credits=1_000_000,
+      ),
+      SimpleNamespace(
+        source_id="src_5000",
+        reporting_element_id="el_rs_gaap_cogs",
+        qname="rs-gaap:CostOfRevenue",
+        reporting_name="Cost of Revenue",
+        classification="expense",
+        balance_type="debit",
+        total_debits=600_000,  # $6k
+        total_credits=0,
+      ),
+    ]
+
+  def test_read_mapped_balances_stamps_primary_only_close_value(self):
+    from robosystems.operations.roboledger.reports.fact_grid import (
+      _read_mapped_balances,
+    )
+
+    session = MagicMock()
+    session.execute.return_value = iter(self._fan_out_rows())
+    balances = _read_mapped_balances(session, "struct_map", self.PS, self.PE)
+
+    anchor = balances["el_rs_gaap_rev"]
+    disagg = balances["el_cadence_sub_rev"]
+    cogs = balances["el_rs_gaap_cogs"]
+
+    # Both targets render the full disaggregated balance — the feature.
+    assert anchor.net_balance == -10_000.0  # debits - credits
+    assert disagg.net_balance == -10_000.0
+    # But the close contribution lives on the trait-classified anchor
+    # ONLY — the inferred disaggregation copy carries 0.
+    assert anchor.close_net_balance == -10_000.0
+    assert disagg.close_net_balance == 0.0
+    # Single-mapped sources: close == full, unchanged semantics.
+    assert cogs.close_net_balance == cogs.net_balance == 6_000.0
+
+  def test_close_counts_fanned_out_revenue_once(self):
+    """The full Cadence shape through the in-memory close: the anchor
+    fact carries the close portion, the disaggregation fact carries 0 —
+    RE lands at the TRUE net income, not truth + revenue-again."""
+
+    def _fact(element_id, qname, cls, value, close_value):
+      return ReportFact(
+        element_id=element_id,
+        element_qname=qname,
+        element_name=qname,
+        classification=cls,
+        balance_type="credit" if cls == "revenue" else "debit",
+        value=value,
+        period_start=self.PS,
+        period_end=self.PE,
+        period_type="duration",
+        close_value=close_value,
+      )
+
+    facts = [
+      _fact("el_rs_gaap_rev", "rs-gaap:Revenues", "revenue", 10_000.0, 10_000.0),
+      _fact(
+        "el_cadence_sub_rev", "cadence:SubscriptionRevenue", "revenue", 10_000.0, 0.0
+      ),
+      _fact("el_cogs", "rs-gaap:CostOfRevenue", "expense", 6_000.0, 6_000.0),
+    ]
+    _close_to_retained_earnings(facts, self.PS, self.PE)
+    re = next(f for f in facts if "retainedearnings" in (f.element_qname or "").lower())
+    assert re.value == 4_000.0, (
+      "NI must be 10k - 6k = 4k; the pre-fix per-fact sweep produced "
+      "14k (revenue counted twice through the disaggregation fact)."
+    )
+
+  def test_emit_net_income_counts_fanned_out_revenue_once(self):
+    session = MagicMock()
+    session.execute.return_value.fetchone.return_value = ("el_ni", "credit")
+
+    def _fact(element_id, qname, cls, value, close_value):
+      return ReportFact(
+        element_id=element_id,
+        element_qname=qname,
+        element_name=qname,
+        classification=cls,
+        balance_type="credit" if cls == "revenue" else "debit",
+        value=value,
+        period_start=self.PS,
+        period_end=self.PE,
+        period_type="duration",
+        close_value=close_value,
+      )
+
+    facts = [
+      _fact("el_rs_gaap_rev", "rs-gaap:Revenues", "revenue", 10_000.0, 10_000.0),
+      _fact(
+        "el_cadence_sub_rev", "cadence:SubscriptionRevenue", "revenue", 10_000.0, 0.0
+      ),
+      _fact("el_cogs", "rs-gaap:CostOfRevenue", "expense", 6_000.0, 6_000.0),
+    ]
+    periods = [PeriodSpec(start=self.PS, end=self.PE, label="Jan")]
+    _emit_net_income_facts(session, facts, periods)
+    ni = next(f for f in facts if f.element_id == "el_ni")
+    assert ni.value == 4_000.0
+
+  def test_cumulative_sums_dedupe_by_source(self):
+    from robosystems.operations.roboledger.reports.fact_grid import (
+      _cumulative_closeable_sums,
+    )
+
+    session = MagicMock()
+    session.execute.return_value = iter(self._fan_out_rows())
+    revenue, expense, reductions = _cumulative_closeable_sums(
+      session, "struct_map", self.PE
+    )
+    assert revenue == 10_000.0, "fan-out source counted once (trait target wins)"
+    assert expense == 6_000.0
+    assert reductions == 0.0
