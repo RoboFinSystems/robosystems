@@ -1771,6 +1771,104 @@ class ComputeMetricsResponse(BaseModel):
   skipped: list[SkippedMetricLite] = Field(default_factory=list)
 
 
+class ForecastMonthLite(BaseModel):
+  """One computed forward month in a ``compute-forecast`` response."""
+
+  period: str = Field(..., description="Month key (``YYYY-MM``).")
+  period_start: date
+  period_end: date
+  income_statement_fact_set_id: str | None = Field(
+    None,
+    description="Scenario IS FactSet upserted for the month.",
+  )
+  balance_sheet_fact_set_id: str | None = Field(
+    None,
+    description=(
+      "Scenario BS FactSet upserted for the month (working-capital "
+      "instants only in F-1 — the full BS roll is a later phase)."
+    ),
+  )
+  computed_count: int = Field(
+    0, description="Number of facts emitted for the month across both sets."
+  )
+
+
+class SkippedForecastLite(BaseModel):
+  """One rule/month soft-skip in a ``compute-forecast`` response.
+
+  A skipped rule never aborts the walk — its target falls back to the
+  carry-forward value for that month (when a prior value exists).
+  """
+
+  rule_id: str | None = None
+  element_qname: str | None = None
+  period: str = Field(..., description="Month key (``YYYY-MM``) of the skip.")
+  reason: str
+  missing: list[str] = Field(default_factory=list)
+
+
+class ComputeForecastRequest(BaseModel):
+  """Request body for the ``compute-forecast`` operation.
+
+  Walks the scenario's driver cascade month-by-month forward from the
+  forecast block's ``base_period``: lever-driven Derive rules in
+  dependency order, carry-forward for unmodeled IS lines, calc-DAG
+  subtotals — upserting one scenario IS FactSet (+ a working-capital BS
+  set) per forward month, all keyed by the forecast block's
+  ``scenario_id``. Re-running replaces each month's values (the
+  compute-metrics drift semantics). Deterministic and non-AI — no
+  credits consumed.
+  """
+
+  structure_id: str = Field(
+    ...,
+    description="Forecast block structure (block_type='forecast') to compute.",
+  )
+  months: int | None = Field(
+    None,
+    ge=1,
+    description=(
+      "Forward months to compute — defaults to the block's full "
+      "horizon_months; must not exceed it (lever assertions don't "
+      "extend past the horizon)."
+    ),
+  )
+  entity_id: str | None = Field(
+    None,
+    description=(
+      "Entity to compute for. Defaults to the lever FactSet's entity "
+      "(the entity the scenario was authored against)."
+    ),
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {"structure_id": "struct_fy26_budget"},
+        {"structure_id": "struct_fy26_budget", "months": 6},
+      ]
+    }
+  )
+
+
+class ComputeForecastResponse(BaseModel):
+  """Response for the ``compute-forecast`` operation."""
+
+  structure_id: str
+  scenario_id: str = Field(
+    ...,
+    description=(
+      "The scenario key every emitted FactSet carries — the forecast "
+      "block's own structure id."
+    ),
+  )
+  entity_id: str
+  base_period: str = Field(..., description="Seed month the walk projected from.")
+  months: int = Field(..., description="Forward months requested.")
+  months_computed: list[ForecastMonthLite] = Field(default_factory=list)
+  skipped: list[SkippedForecastLite] = Field(default_factory=list)
+
+
 __all__ = [
   "ArtifactMechanics",
   "ArtifactResponse",
@@ -1778,6 +1876,8 @@ __all__ = [
   "ChartPanelLite",
   "ChartSeriesLite",
   "ClassificationLite",
+  "ComputeForecastRequest",
+  "ComputeForecastResponse",
   "ComputeMetricsRequest",
   "ComputeMetricsResponse",
   "ComputedMetricLite",
@@ -1791,6 +1891,7 @@ __all__ = [
   "FactLite",
   "FactSetLite",
   "ForecastMechanics",
+  "ForecastMonthLite",
   "InformationBlockEnvelope",
   "InformationModelResponse",
   "LeverAssertionLite",
@@ -1802,6 +1903,7 @@ __all__ = [
   "RuleTargetLite",
   "RuleVariableLite",
   "ScheduleMechanics",
+  "SkippedForecastLite",
   "SkippedMetricLite",
   "StatementMechanics",
   "UpdateInformationBlockRequest",
