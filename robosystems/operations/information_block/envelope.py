@@ -10,6 +10,7 @@ diverge.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -301,6 +302,58 @@ def load_latest_fact_set_for_structure(
     .limit(1)
   ).scalar()
   return fact_set_to_lite(row) if row is not None else None
+
+
+def load_statement_fact_set_series(
+  session: Session, structure_id: str, scenario_id: str | None = None
+) -> list[FactSetLite]:
+  """The full report-set series for a statement structure, one per period.
+
+  The statement analog of the metric series loader
+  (:func:`metric._load_metric_fact_sets` is hard-scoped to
+  ``factset_type='metric'``): every ``'report'`` set for the structure,
+  ascending ``period_end`` — the monthly columns of the F-4 Plan grid.
+
+  Scenario semantics mirror the metric series: ``scenario_id=None``
+  loads actuals only; a scenario id loads actuals **plus** that
+  scenario's sets, and at an overlapping ``period_end`` the actual wins
+  (the moving seam — a closed month's draft supersedes its forecast).
+
+  Two collisions collapse per ``period_end``, in order:
+
+  1. ``scenario_id ASC NULLS FIRST`` — the actual beats the forecast.
+  2. ``period_start DESC NULLS LAST`` — the NARROWER window wins, so at
+     the FY-end month the monthly set beats the annual report set
+     created later (the FY-capture lesson applied at series level;
+     ``created_at DESC`` alone would pick the annual).
+  """
+  scenario_predicate = (
+    FactSet.scenario_id.is_(None)
+    if scenario_id is None
+    else or_(FactSet.scenario_id.is_(None), FactSet.scenario_id == scenario_id)
+  )
+  rows = (
+    session.execute(
+      select(FactSet)
+      .where(
+        FactSet.structure_id == structure_id,
+        FactSet.factset_type == "report",
+        scenario_predicate,
+      )
+      .order_by(
+        FactSet.period_end.asc(),
+        FactSet.scenario_id.asc().nulls_first(),
+        FactSet.period_start.desc().nulls_last(),
+        FactSet.created_at.desc(),
+      )
+    )
+    .scalars()
+    .all()
+  )
+  by_period_end: dict[date, FactSet] = {}
+  for row in rows:
+    by_period_end.setdefault(row.period_end, row)
+  return [fact_set_to_lite(row) for row in by_period_end.values()]
 
 
 def load_fact_set_by_id_for_structure(

@@ -103,8 +103,13 @@ def build_envelope(
   structure_id: str,
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
+  series: bool = False,
 ) -> InformationBlockEnvelope | None:
   """Pack a metric Structure + its standing time series into the envelope.
+
+  ``series`` is accepted for dispatch-signature parity and ignored — a
+  metric envelope IS the full series already; the flag exists for the
+  statement family, whose default read binds a single set.
 
   Rendering: one period column per metric FactSet (ascending
   ``period_end``), one row per catalog concept in presentation-arc
