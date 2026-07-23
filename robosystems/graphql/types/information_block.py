@@ -24,6 +24,15 @@ from robosystems.models.api.information_block import (
   ArtifactResponse as PydanticArtifact,
 )
 from robosystems.models.api.information_block import (
+  ChartLite as PydanticChart,
+)
+from robosystems.models.api.information_block import (
+  ChartPanelLite as PydanticChartPanel,
+)
+from robosystems.models.api.information_block import (
+  ChartSeriesLite as PydanticChartSeries,
+)
+from robosystems.models.api.information_block import (
   ClassificationLite as PydanticClassification,
 )
 from robosystems.models.api.information_block import (
@@ -170,6 +179,21 @@ class InformationBlockRendering:
   """Pre-computed rendering projection — rows + periods + validation."""
 
 
+@pydantic_type(model=PydanticChartSeries, all_fields=True)
+class InformationBlockChartSeries:
+  """One plottable series — identity only; values join rendering.rows."""
+
+
+@pydantic_type(model=PydanticChartPanel, all_fields=True)
+class InformationBlockChartPanel:
+  """One chart panel — series sharing a y-axis format family."""
+
+
+@pydantic_type(model=PydanticChart, all_fields=True)
+class InformationBlockChart:
+  """Server-shaped chart projection — panel/series config, never values."""
+
+
 @pydantic_type(model=PydanticViewProjections, all_fields=True)
 class InformationBlockViewProjections:
   """Charlie's six type-of View arms surfaced in the envelope."""
@@ -288,6 +312,9 @@ class InformationBlock:
 __all__ = [
   "Artifact",
   "InformationBlock",
+  "InformationBlockChart",
+  "InformationBlockChartPanel",
+  "InformationBlockChartSeries",
   "InformationBlockClassification",
   "InformationBlockConnection",
   "InformationBlockElement",

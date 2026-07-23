@@ -167,6 +167,14 @@ class TestBuildEnvelope:
     assert envelope.fact_set is not None
     assert envelope.fact_set.id == "fs2"  # latest period is the envelope's set
 
+    # The chart arm rides alongside — panel per format family (both
+    # fixture elements are untyped non-monetary → one untyped panel),
+    # series joining the rendering rows by element_id.
+    chart = envelope.view.chart
+    assert chart is not None
+    assert len(chart.panels) == 1
+    assert [s.element_id for s in chart.panels[0].series] == ["el_wc", "el_cr"]
+
   def test_never_computed_block_renders_catalog_skeleton(self) -> None:
     structure = _structure()
     arcs = [_arc("el_wc", 1.0), _arc("el_cr", 2.0)]

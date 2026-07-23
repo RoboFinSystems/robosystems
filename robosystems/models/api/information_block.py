@@ -759,6 +759,62 @@ class RenderingLite(BaseModel):
   unmapped_count: int = 0
 
 
+class ChartSeriesLite(BaseModel):
+  """One plottable series in a chart panel.
+
+  Carries structure and identity only — the values live in the sibling
+  ``rendering.rows`` (join on ``element_id``), so the chart arm never
+  duplicates the value matrix. ``key`` is the stable series identity for
+  client state (colors, toggles); today it equals ``element_id``, and
+  future axes (the forecast scenario) arrive as new fields on this
+  model, never a new arm shape.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  key: str = Field(..., description="Stable series id — element_id today.")
+  element_id: str
+  label: str = Field(..., description="Display name for legends.")
+
+
+class ChartPanelLite(BaseModel):
+  """One chart panel — series sharing a y-axis format family.
+
+  Mixed-unit catalogs are unplottable on one axis, so the server groups
+  rows into panels by ``item_type`` family (NULL falls back to
+  ``is_monetary``). The x-axis is always ``rendering.periods``.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  label: str | None = Field(
+    None, description="Panel heading — e.g. 'Monetary', 'Ratios'."
+  )
+  item_type: str | None = Field(
+    None,
+    description=(
+      "Format family shared by the panel's series (monetary | ratio | "
+      "percent | multiple | days); None for the untyped fallback panel."
+    ),
+  )
+  kind: str = Field("line", description="Per-panel mark — 'line' or 'bar'.")
+  series: list[ChartSeriesLite] = Field(default_factory=list)
+
+
+class ChartLite(BaseModel):
+  """Server-shaped chart projection — panel/series CONFIG, never values.
+
+  The second real server-computed View arm (after ``rendering``). Values
+  come from ``rendering.rows`` joined by ``element_id``; the x-axis is
+  ``rendering.periods``. Renderers (report-components) turn one panel
+  into one chart.
+  """
+
+  model_config = ConfigDict(from_attributes=True)
+
+  panels: list[ChartPanelLite] = Field(default_factory=list)
+
+
 class ViewProjections(BaseModel):
   """Charlie's six ``type-of View`` arms, surfaced at the envelope boundary.
 
@@ -768,7 +824,9 @@ class ViewProjections(BaseModel):
   mode; missing projections (those still in backlog) render as empty
   states without breaking the dispatcher.
 
-  Today: ``rendering`` is computed for the statement family.
+  Today: ``rendering`` is computed for the statement family, and
+  ``chart`` (the 7th arm — panel/series config over the rendering's
+  rows and periods) for metric blocks.
   Other arms (``fact_table``, ``model_structure``, ``verification_results``,
   ``report_elements``, ``business_rules``) come online as their backend
   support lands; ``fact_table`` is trivially derivable from
@@ -779,6 +837,7 @@ class ViewProjections(BaseModel):
   model_config = ConfigDict(from_attributes=True)
 
   rendering: RenderingLite | None = None
+  chart: ChartLite | None = None
 
 
 # ── Envelope root ──────────────────────────────────────────────────────────
@@ -1499,6 +1558,9 @@ class ComputeMetricsResponse(BaseModel):
 __all__ = [
   "ArtifactMechanics",
   "ArtifactResponse",
+  "ChartLite",
+  "ChartPanelLite",
+  "ChartSeriesLite",
   "ClassificationLite",
   "ComputeMetricsRequest",
   "ComputeMetricsResponse",
