@@ -28,6 +28,7 @@ def _make_fact_set(
   factset_type: str = "report",
   entity_id: str = "ent_demo",
   report_id: str | None = None,
+  scenario_id: str | None = None,
   provenance: dict | None = None,
 ) -> MagicMock:
   row = MagicMock()
@@ -38,6 +39,7 @@ def _make_fact_set(
   row.factset_type = factset_type
   row.entity_id = entity_id
   row.report_id = report_id
+  row.scenario_id = scenario_id
   row.provenance = provenance
   return row
 

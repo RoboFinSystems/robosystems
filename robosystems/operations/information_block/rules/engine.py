@@ -181,14 +181,20 @@ def _load_period_balances(
   reconciling plug), within the period window.
 
   Scoped to a single FactSet: pinned when ``fact_set_id`` is given, else the
-  LATEST FactSet for the structure. The FactSet is the summing unit on purpose
-  — two coexisting reports over the same period both stamp this structure, so a
-  bare ``structure_id`` scope would sum across reports and double every balance.
+  LATEST **actual** FactSet for the structure (``scenario_id IS NULL`` —
+  scenario verification is a later phase, and without the pin a computed
+  forecast month would silently become the summing unit for every rule
+  run). The FactSet is the summing unit on purpose — two coexisting
+  reports over the same period both stamp this structure, so a bare
+  ``structure_id`` scope would sum across reports and double every balance.
   """
   if fact_set_id is None:
     fact_set_id = session.execute(
       select(FactSet.id)
-      .where(FactSet.structure_id == structure_id)
+      .where(
+        FactSet.structure_id == structure_id,
+        FactSet.scenario_id.is_(None),
+      )
       .order_by(FactSet.created_at.desc(), FactSet.id.desc())
       .limit(1)
     ).scalar()
@@ -470,6 +476,13 @@ def evaluate_rules_for_structure(
   for rule_lite in rule_lites:
     rule = rule_map.get(rule_lite.id)
     if rule is None:
+      continue
+    # Derive rules COMPUTE values (compute-metrics / compute-forecast) —
+    # they are not checks and must not emit VerificationResults. Without
+    # this, the rs-driver catalog's rules (whose targets are rs-gaap
+    # statement elements) would add a "skipped" row to every statement
+    # verification run.
+    if rule.rule_pattern == "Derive":
       continue
     try:
       outcome: EvaluationOutcome | None = None

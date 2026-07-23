@@ -207,8 +207,8 @@ class FactSetLite(BaseModel):
   factset_type: str = Field(
     ...,
     description=(
-      "'report' | 'schedule' | 'custom' | 'disclosure'. Enum closure "
-      "enforced by the ``public.fact_sets`` CHECK constraint."
+      "'report' | 'schedule' | 'custom' | 'disclosure' | 'metric'. Enum "
+      "closure enforced by the ``public.fact_sets`` CHECK constraint."
     ),
   )
   entity_id: str
@@ -217,6 +217,14 @@ class FactSetLite(BaseModel):
     description=(
       "Back-pointer to the ``reports`` table while ``report_id`` still "
       "lives on facts. Drops out once the retirement migration lands."
+    ),
+  )
+  scenario_id: str | None = Field(
+    None,
+    description=(
+      "Scenario axis (the forecast engine). NULL = actuals; non-NULL "
+      "names the owning forecast block whose parallel universe this "
+      "set belongs to."
     ),
   )
   provenance: dict | None = Field(
@@ -1737,6 +1745,17 @@ class ComputeMetricsRequest(BaseModel):
     description=(
       "Entity to compute for. Defaults to the graph's earliest-created "
       "entity (the primary entity for single-entity graphs)."
+    ),
+  )
+  scenario_id: str | None = Field(
+    None,
+    description=(
+      "Compute on a scenario slice: operands bind that scenario's facts "
+      "(actuals as the fallback across the seam) and the standing metric "
+      "set is stamped with the scenario. None (the default) computes "
+      "actuals only. Pass a forecast block's structure id after "
+      "compute-forecast to extend the metric series into its forward "
+      "months."
     ),
   )
 

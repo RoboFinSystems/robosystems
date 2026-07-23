@@ -49,10 +49,18 @@ class InformationBlockQuery:
     self,
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
+    scenario_id: str | None = None,
   ) -> InformationBlock | None:
-    """Fetch a single Information Block envelope by id."""
+    """Fetch a single Information Block envelope by id.
+
+    ``scenarioId`` selects the FactSet slice: omitted = actuals; a
+    forecast block's structure id = that scenario's parallel universe
+    (statement envelopes bind its latest computed month, metric
+    envelopes extend the series with its forward columns, labeled
+    "(forecast)").
+    """
     with _open_session(info) as session:
-      envelope = get_information_block(session, str(id))
+      envelope = get_information_block(session, str(id), scenario_id=scenario_id)
       return InformationBlock.from_pydantic(envelope) if envelope else None
 
   @strawberry.field
@@ -63,12 +71,15 @@ class InformationBlockQuery:
     category: str | None = None,
     limit: int | None = None,
     offset: int | None = None,
+    scenario_id: str | None = None,
   ) -> list[InformationBlock]:
     """List Information Blocks with optional block_type + category filters.
 
     ``blockType`` filters to one registered block type (e.g.
     ``'schedule'``). ``category`` filters on the registry entry's
     category label ('Close', 'Reporting', …). Both combine as AND.
+    ``scenarioId`` threads into each envelope's FactSet binding (the
+    Structure list itself is scenario-independent).
     """
     limit, offset = _resolve_pagination(limit, offset, default_limit=50)
     graph_id = require_graph_id(info)
@@ -80,6 +91,7 @@ class InformationBlockQuery:
         limit=limit,
         offset=offset,
         library_sentinel=(graph_id == LIBRARY_GRAPH_ID),
+        scenario_id=scenario_id,
       )
       return [InformationBlock.from_pydantic(r) for r in rows]
 

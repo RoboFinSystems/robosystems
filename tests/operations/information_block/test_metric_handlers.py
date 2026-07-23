@@ -65,7 +65,9 @@ def _arc(to_element_id: str, order: float) -> SimpleNamespace:
   )
 
 
-def _fact_set(fs_id: str, period_end: date) -> SimpleNamespace:
+def _fact_set(
+  fs_id: str, period_end: date, scenario_id: str | None = None
+) -> SimpleNamespace:
   return SimpleNamespace(
     id=fs_id,
     structure_id="str_metrics",
@@ -74,6 +76,7 @@ def _fact_set(fs_id: str, period_end: date) -> SimpleNamespace:
     factset_type="metric",
     entity_id="ent_1",
     report_id=None,
+    scenario_id=scenario_id,
     provenance={"origin": "derived", "computation": "compute-metrics"},
   )
 

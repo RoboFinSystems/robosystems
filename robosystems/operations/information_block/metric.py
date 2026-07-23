@@ -49,7 +49,10 @@ METRIC_CATEGORY = "Reporting"
 
 
 def _load_metric_fact_sets(
-  session: Session, structure_id: str, fact_set_id: str | None
+  session: Session,
+  structure_id: str,
+  fact_set_id: str | None,
+  scenario_id: str | None = None,
 ) -> list[FactSet]:
   """The structure's standing metric FactSets, oldest period first.
 
@@ -58,6 +61,12 @@ def _load_metric_fact_sets(
   structure is a period column; when several sets share a period_end
   (defensive — the compute op upserts one per (entity, period_end)),
   the newest wins.
+
+  ``scenario_id=None`` loads the actual series only. A non-None value
+  loads actuals AND that scenario's sets merged into one continuous
+  series — with **actuals preferred** where both cover a period_end
+  (the moving seam: a month that closes after the forecast was computed
+  reads as actual, never as the stale projection).
   """
   if fact_set_id is not None:
     row = session.get(FactSet, fact_set_id)
@@ -68,8 +77,17 @@ def _load_metric_fact_sets(
       .where(
         FactSet.structure_id == structure_id,
         FactSet.factset_type == "metric",
+        FactSet.scenario_id.is_(None)
+        if scenario_id is None
+        else FactSet.scenario_id.is_(None) | (FactSet.scenario_id == scenario_id),
       )
-      .order_by(FactSet.period_end.asc(), FactSet.created_at.desc())
+      # Actuals (NULL scenario) sort before scenario sets per period so
+      # the seam prefers them; newest-first within each slice.
+      .order_by(
+        FactSet.period_end.asc(),
+        FactSet.scenario_id.asc().nulls_first(),
+        FactSet.created_at.desc(),
+      )
     )
     .scalars()
     .all()
@@ -81,7 +99,10 @@ def _load_metric_fact_sets(
 
 
 def build_envelope(
-  session: Session, structure_id: str, fact_set_id: str | None = None
+  session: Session,
+  structure_id: str,
+  fact_set_id: str | None = None,
+  scenario_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Pack a metric Structure + its standing time series into the envelope.
 
@@ -91,18 +112,23 @@ def build_envelope(
   metric — e.g. InterestCoverage skipped for a debt-free year). A
   never-computed block renders the catalog skeleton: rows with no
   period columns.
+
+  ``scenario_id`` extends the series with that scenario's forward
+  columns (actuals preferred at any overlap — the moving seam); the
+  scenario-sourced columns carry ``"... (forecast)"`` period labels.
   """
   atoms = load_base_envelope_atoms(
     session,
     structure_id,
     expected_block_type=METRIC_BLOCK_TYPE,
     fact_set_id=fact_set_id,
+    scenario_id=scenario_id,
   )
   if atoms is None:
     return None
   structure = atoms.structure
 
-  fact_sets = _load_metric_fact_sets(session, structure_id, fact_set_id)
+  fact_sets = _load_metric_fact_sets(session, structure_id, fact_set_id, scenario_id)
 
   facts: list[Fact] = []
   if fact_sets:
@@ -147,6 +173,13 @@ def build_envelope(
       RenderingPeriodLite(
         start=fs.period_start if fs.period_start is not None else fs.period_end,
         end=fs.period_end,
+        # Scenario-sourced columns are labeled honestly; actual columns
+        # keep label=None and the frontend formats dates as today.
+        label=(
+          f"{fs.period_end.strftime('%b %Y')} (forecast)"
+          if fs.scenario_id is not None
+          else None
+        ),
       )
       for fs in fact_sets
     ],

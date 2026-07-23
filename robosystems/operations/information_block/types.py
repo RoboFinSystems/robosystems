@@ -117,11 +117,15 @@ class BlockTypeRegistryEntry:
 
   dispatch_build_envelope: Callable[..., InformationBlockEnvelope | None]
   """Handler that reads the block and packs its envelope. Signature:
-  ``(session, structure_id, fact_set_id=None) -> InformationBlockEnvelope | None``.
+  ``(session, structure_id, fact_set_id=None, scenario_id=None) ->
+  InformationBlockEnvelope | None``.
   Returns None when the structure_id doesn't exist or its row doesn't
   belong to this block type. ``fact_set_id`` pins the envelope to a
   specific FactSet snapshot (used by Report Block rehydration); when
-  omitted the latest FactSet is used."""
+  omitted the latest FactSet is used. ``scenario_id`` selects the
+  FactSet slice (None = actuals; a forecast block's id = that
+  scenario) — block types without scenario slices accept and ignore
+  it, so every handler carries the parameter."""
 
   surfaces_in_library: bool = False
   """When True, ``list_information_blocks`` surfaces this block type on

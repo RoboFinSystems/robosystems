@@ -95,6 +95,7 @@ def _build_statement_envelope(
   session: Session,
   structure_id: str,
   fact_set_id: str | None = None,
+  scenario_id: str | None = None,
   *,
   block_type: str,
 ) -> InformationBlockEnvelope | None:
@@ -115,12 +116,19 @@ def _build_statement_envelope(
   "latest Report touching these elements" heuristic; writes have
   stamped both ``report_id`` and ``fact_set_id`` since Phase gamma.1 so
   the switch is a strict simplification (one less query per envelope).
+
+  **Scenario slice.** ``scenario_id=None`` binds actuals (the
+  scenario-pinned latest-set read); a non-None value binds the
+  scenario's latest computed forecast month and every rendered period
+  column carries a ``"... (forecast)"`` label so the surface is honest
+  about what it shows.
   """
   atoms = load_base_envelope_atoms(
     session,
     structure_id,
     expected_block_type=block_type,
     fact_set_id=fact_set_id,
+    scenario_id=scenario_id,
   )
   if atoms is None:
     return None
@@ -161,6 +169,23 @@ def _build_statement_envelope(
     block_type=block_type,
     concept_arrangement=structure.concept_arrangement,
   )
+
+  # Scenario mode bound a forecast set — every rendered column is a
+  # forward month; stamp the labels so tables and chart axes read
+  # honestly.
+  if (
+    scenario_id is not None
+    and atoms.fact_set is not None
+    and atoms.fact_set.scenario_id == scenario_id
+  ):
+    rendering = rendering.model_copy(
+      update={
+        "periods": [
+          p.model_copy(update={"label": _forecast_period_label(p.end)})
+          for p in rendering.periods
+        ]
+      }
+    )
 
   # Statement-family types carry fixed display strings; block types that
   # share this builder without an entry (regulatory_disclosure) display
@@ -205,6 +230,16 @@ def _build_statement_envelope(
 
 
 # ── Rendering projection — server-side computed at envelope build ─────────
+
+
+def _forecast_period_label(period_end: date) -> str:
+  """Display-ready column label for a forecast period — ``"Mar 2027 (forecast)"``.
+
+  The full label (month + marker), not a bare suffix, so any consumer —
+  table header, chart axis — can use it verbatim without composing.
+  Actual columns keep ``label=None`` and format their own dates as today.
+  """
+  return f"{period_end.strftime('%b %Y')} (forecast)"
 
 
 def _build_statement_rendering(

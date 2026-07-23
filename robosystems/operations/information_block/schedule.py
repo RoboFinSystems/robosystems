@@ -164,7 +164,10 @@ def _latest_instant_per_element(facts: Sequence[Fact]) -> list[Fact]:
 
 
 def build_envelope(
-  session: Session, structure_id: str, fact_set_id: str | None = None
+  session: Session,
+  structure_id: str,
+  fact_set_id: str | None = None,
+  scenario_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Reload a schedule Structure and pack its Information Block envelope.
 
@@ -172,6 +175,9 @@ def build_envelope(
   so the generic reader can cleanly distinguish misses from errors.
   Mechanics are read from the typed ``artifact_mechanics`` column with
   fallback to legacy ``metadata_`` JSONB.
+
+  ``scenario_id`` is accepted for dispatch-signature parity and ignored
+  — schedules are physical-ledger projections with no scenario slices.
 
   ``fact_set_id`` pins the envelope to a specific FactSet snapshot —
   the Report-Block rehydration path uses this to surface the frozen

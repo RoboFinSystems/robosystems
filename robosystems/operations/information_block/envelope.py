@@ -169,6 +169,7 @@ def fact_set_to_lite(fact_set: FactSet) -> FactSetLite:
     factset_type=fact_set.factset_type,
     entity_id=fact_set.entity_id,
     report_id=fact_set.report_id,
+    scenario_id=fact_set.scenario_id,
     provenance=fact_set.provenance,
   )
 
@@ -271,7 +272,7 @@ def build_verification_summary(
 
 
 def load_latest_fact_set_for_structure(
-  session: Session, structure_id: str
+  session: Session, structure_id: str, scenario_id: str | None = None
 ) -> FactSetLite | None:
   """Fetch the most recent FactSet for a Structure, if any.
 
@@ -280,10 +281,22 @@ def load_latest_fact_set_for_structure(
   period runs) surfaces the latest slice. Returns ``None`` when no
   FactSet row exists — typically library-seeded Structures whose
   tenant has not yet generated facts.
+
+  ``scenario_id`` selects the slice: ``None`` (the default) pins
+  **actuals** (``scenario_id IS NULL``) — load-bearing, not cosmetic:
+  scenario sets live at FUTURE period_ends, so without the pin one
+  computed forecast month would win this period_end-descending read and
+  hijack every default envelope. A non-None value pins that scenario
+  exactly — statement + scenario binds the latest forecast month.
   """
   row = session.execute(
     select(FactSet)
-    .where(FactSet.structure_id == structure_id)
+    .where(
+      FactSet.structure_id == structure_id,
+      FactSet.scenario_id.is_(None)
+      if scenario_id is None
+      else FactSet.scenario_id == scenario_id,
+    )
     .order_by(FactSet.period_end.desc(), FactSet.created_at.desc())
     .limit(1)
   ).scalar()
@@ -421,6 +434,7 @@ def load_base_envelope_atoms(
   *,
   expected_block_type: str,
   fact_set_id: str | None = None,
+  scenario_id: str | None = None,
 ) -> BaseEnvelopeAtoms | None:
   """Load every atom shared by Information Block envelope builders.
 
@@ -432,9 +446,12 @@ def load_base_envelope_atoms(
   order each individual handler used to inline.
 
   When ``fact_set_id`` is provided the atoms are pinned to that specific
-  FactSet (used by Report Block rehydration). Returns ``None`` if the
-  named FactSet doesn't belong to this Structure — callers treat the
-  pin mismatch as a clean miss.
+  FactSet (used by Report Block rehydration) and ``scenario_id`` is
+  ignored — an explicit pin bypasses scenario selection. Returns
+  ``None`` if the named FactSet doesn't belong to this Structure —
+  callers treat the pin mismatch as a clean miss. Without a pin,
+  ``scenario_id`` selects the FactSet slice (``None`` = actuals; see
+  :func:`load_latest_fact_set_for_structure`).
   """
   from robosystems.models.extensions import Taxonomy
 
@@ -450,7 +467,7 @@ def load_base_envelope_atoms(
     if fact_set is None:
       return None
   else:
-    fact_set = load_latest_fact_set_for_structure(session, structure_id)
+    fact_set = load_latest_fact_set_for_structure(session, structure_id, scenario_id)
 
   taxonomy_name = session.execute(
     select(Taxonomy.name).where(Taxonomy.id == structure.taxonomy_id)

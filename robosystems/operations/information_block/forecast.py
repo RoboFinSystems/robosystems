@@ -403,9 +403,16 @@ def delete(
 
 
 def build_envelope(
-  session: Session, structure_id: str, fact_set_id: str | None = None
+  session: Session,
+  structure_id: str,
+  fact_set_id: str | None = None,
+  scenario_id: str | None = None,
 ) -> InformationBlockEnvelope | None:
   """Reload a forecast Structure and pack its envelope.
+
+  ``scenario_id`` is accepted for dispatch-signature parity and ignored
+  — the forecast block IS the scenario; its envelope is the lever grid
+  regardless of which scenario filter the read carried.
 
   Renders the **lever grid** metric-style: one row per lever (authoring
   order, ``item_type`` driving percent/days formatting), one period
