@@ -31,6 +31,7 @@ from robosystems.models.api.information_block import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
+from robosystems.operations.information_block.chart import build_chart_projection
 from robosystems.operations.information_block.envelope import (
   association_to_connection,
   element_to_lite,
@@ -188,7 +189,10 @@ def build_envelope(
     fact_set=latest_lite,
     verification_results=atoms.verification_results,
     verification_summary=atoms.verification_summary,
-    view=ViewProjections(rendering=rendering),
+    view=ViewProjections(
+      rendering=rendering,
+      chart=build_chart_projection(rendering, elements_by_id),
+    ),
   )
 
 
