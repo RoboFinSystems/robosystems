@@ -44,7 +44,11 @@ class TestMigration0024Constants:
 
   def test_widened_source_admits_rs_driver(self) -> None:
     assert "'rs-driver'" in mig_0024._SOURCE_WIDENED
-    assert "'rs-driver'" not in mig_0024._SOURCE_ORIGINAL
+    # The downgrade target ALSO admits 'rs-driver' — fresh chains seed
+    # the catalog at 0002 (before this migration exists), so narrowing
+    # it out would break a fresh-chain downgrade. Deployed downgrades
+    # delete the package content first, so the value is unused there.
+    assert "'rs-driver'" in mig_0024._SOURCE_ORIGINAL
 
   def test_package_identity(self) -> None:
     assert mig_0024._PACKAGE_STANDARD == "rs-driver"
@@ -65,6 +69,30 @@ class TestFreshPathParity:
     """0002's seed is dynamic (reads the current manifest) — a fresh DB
     inserts rs-driver elements AT 0002, before 0024's widen ever runs."""
     assert "'rs-driver'" in mig_0002._WIDENED_ELEMENT_SOURCE_CHECK
+
+  def test_0002_adds_item_type_before_the_seed(self) -> None:
+    """The seed runs the CURRENT library_creator, whose element upsert
+    writes item_type (M-2) — the column historically arrived at 0021,
+    so 0002 must pre-create it or every fresh chain fails mid-seed
+    (the 2026-07-23 dagster-daemon rebuild failure)."""
+    import inspect
+
+    source = inspect.getsource(mig_0002.upgrade)
+    add = source.find("ADD COLUMN IF NOT EXISTS item_type")
+    seed = source.find("for seed_path in SEED_FILES")
+    assert add != -1, "0002.upgrade no longer pre-creates elements.item_type"
+    assert seed != -1, "0002.upgrade seed loop moved — update this anchor"
+    assert add < seed, "item_type add must precede the seed passes"
+
+  def test_every_source_check_reinstall_admits_rs_driver(self) -> None:
+    """Migrations between the 0002 seed and the 0024 widen that DROP+ADD
+    check_element_source must admit 'rs-driver' — fresh chains carry the
+    rows from 0002, so a narrower re-install CheckViolations mid-chain
+    (0007 and 0022 both bit during the fresh-chain verification)."""
+    mig_0007 = _load_migration("0007_frameworks_bridges.py", "mig_0007_forecast_shape")
+    mig_0022 = _load_migration("0022_metrics.py", "mig_0022_source_shape")
+    assert "'rs-driver'" in mig_0007._WIDENED_ELEMENT_SOURCE_CHECK
+    assert "'rs-driver'" in mig_0022._SOURCE_WIDENED
 
   def test_provisioning_widens_match(self) -> None:
     """Fresh tenant schemas get their CHECKs from _widen_library_checks,
