@@ -1080,10 +1080,12 @@ def verify_metrics(
 ) -> None:
   """Compute + render the Key Financial Metrics standing time series.
 
-  With ``period_windows`` (from :func:`generate_monthly_reports`) the
-  library-seeded rs-metric catalog computes at every month-end — the
-  monthly series the FP&A cadence doctrine calls for. Detailed values
-  print for the final window only; every window prints its counts.
+  With ``period_windows`` (the CLOSED windows from
+  :func:`close_monthly_history` — the caller slices off the open
+  close-target month) the library-seeded rs-metric catalog computes at
+  every month-end — the monthly series the FP&A cadence doctrine calls
+  for, bound to the close-stamped canonical statement sets. Detailed
+  values print for the final window only; every window prints its counts.
   InterestCoverage skips with a reason for a debt-free scenario,
   exercising the soft-fail path on purpose.
   """
@@ -1727,12 +1729,18 @@ def run_ai_mapping(graph_id: str) -> None:
 
 
 def initialize_fiscal_calendar(graph_id: str, scenario: Scenario) -> str:
-  """Initialize the fiscal calendar with closed_through = month before last.
+  """Initialize a never-closed fiscal calendar and set the close target.
 
-  Uses `LedgerClient.initialize_ledger()` — the HTTP API — which creates
-  the fiscal calendar, seeds FiscalPeriod rows from `earliest_data_period`
-  to the current month, and marks periods as closed/open based on
-  `closed_through`.
+  Uses `LedgerClient.initialize_ledger()` — the HTTP API — with
+  ``closed_through=None`` ("fresh business, never closed"): every seeded
+  FiscalPeriod starts open, and :func:`close_monthly_history` then closes
+  each historical month for real — closing is the act that stamps a
+  month's canonical statement FactSets, so the monthly series comes from
+  genuine closes rather than a pre-set boundary plus draft reports.
+
+  The close target must be set explicitly (initialize leaves it None
+  when closed_through is None) — without it the catch-up sequence,
+  auto-advance, and the Closing Book UI degrade.
 
   Returns the `close_target` period string for use in the next-steps output.
   """
@@ -1743,28 +1751,26 @@ def initialize_fiscal_calendar(graph_id: str, scenario: Scenario) -> str:
 
   from .engine import get_demo_start_date
 
-  # closed_through = month before last completed month
-  # → close_target = last completed month (one period ready to close)
+  # close_target = last completed month; every month before it will be
+  # closed by close_monthly_history, leaving exactly one period queued.
   last_completed = previous_period(current_month_period())
-  closed_through = previous_period(last_completed)
   demo_start = get_demo_start_date(scenario.months)
   demo_start_period = f"{demo_start.year:04d}-{demo_start.month:02d}"
 
   client = _get_ledger_client()
   result = client.initialize_ledger(
     graph_id,
-    closed_through=closed_through,
+    closed_through=None,
     earliest_data_period=demo_start_period,
     note=f"{scenario.slug} initialization",
   )
+  client.set_close_target(
+    graph_id, last_completed, note=f"{scenario.slug} initialization"
+  )
 
-  fc = result.fiscal_calendar
-  close_target = fc.close_target or last_completed
-
-  print(f"  closed_through: {closed_through}")
-  print(f"  close_target:   {close_target}")
-  print(f"  periods seeded: {result.periods_created}")
-  return close_target
+  print(f"  close_target:   {last_completed}")
+  print(f"  periods seeded: {result.periods_created} (all open)")
+  return last_completed
 
 
 # ---------------------------------------------------------------------------
@@ -1959,62 +1965,70 @@ def materialize_graph(graph_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def generate_monthly_reports(
-  graph_id: str, scenario: Scenario
-) -> list[tuple[date, date]]:
-  """Create a draft monthly report for every completed month of the history.
+def close_monthly_history(graph_id: str, scenario: Scenario) -> list[tuple[date, date]]:
+  """Close every completed historical month, in sequence.
 
-  The monthly series is the metric engine's substrate: ``compute-metrics``
-  binds operands to persisted report facts at each ``period_end``, so
-  series length is downstream of report cadence — monthly drafts make the
-  standing metric sets a monthly time series (the FP&A operating-plan
-  cadence). Draft only: no filing, no bundles — the annual report stays
-  the filed artifact.
+  Closing IS the act that persists a month's statements: each close
+  pivots the posted ledger and stamps the month's canonical statement
+  FactSets (``report_id NULL``), which is the monthly series the metric
+  engine, the forecast, and the Plan grid all bind. No draft Report rows
+  are minted — reports are a deliberate publication act (the annual
+  report stays the filed artifact).
 
-  ``comparative=False``: each month's begin instants come from the prior
-  month's own report, so comparative windows would be redundant work.
+  The FINAL window — the close target — stays OPEN deliberately: closing
+  it live is the AI-close demo beat, and its statements stamp then.
 
-  Returns the month windows so the metric computes downstream share the
-  exact report periods — passing ``period_start`` per window keeps the
-  final month's duration operands off the annual FY facts, which share
-  its ``period_end``.
+  Ordering matters: this must run BEFORE ``create_schedules`` — the
+  closeable gate counts pending ``schedule_entry_due`` obligations
+  globally, so pre-existing schedules would block every historical
+  close. Schedules created after this loop derive their scope from the
+  advanced ``closed_through`` and queue only the close-target month's
+  obligation (the demo beat intact).
+
+  Fail-loud: a close error aborts provisioning — a hole in the closed
+  history would silently hole the statement series.
+
+  Returns the full month-window list (including the open close-target
+  month) so downstream consumers share the exact period grid.
   """
-  from .engine import add_months, month_windows
+  from .engine import add_months, get_demo_start_date, month_windows
 
   client = _get_ledger_client()
   if scenario.report_period is None:
     print("  (skipped — scenario has no report_period)")
     return []
 
-  structures = client.list_structures(graph_id, block_type="coa_mapping")
-  if not structures:
-    print("  ERROR: No coa_mapping structure — was the CoA created?")
-    return []
-  mapping_id = structures[0]["id"]
-
   # Recover the rolling window's start from the annual period: the annual
   # window ends at the close target, offset ``months - 2`` from the start.
   annual_end = scenario.report_period[1]
   start = add_months(date(annual_end.year, annual_end.month, 1), -(scenario.months - 2))
-
   windows = month_windows(start, scenario.months)
-  created = 0
-  for period_start, period_end in windows:
-    try:
-      client.create_report(
-        graph_id,
-        name=f"{period_end.strftime('%B %Y')} Monthly Report",
-        mapping_id=mapping_id,
-        taxonomy_id="rs-gaap",
-        period_start=period_start,
-        period_end=period_end,
-        period_type="monthly",
-        comparative=False,
-      )
-      created += 1
-    except Exception as e:
-      print(f"  ERROR: monthly report {period_end}: {e}")
-  print(f"  Reports:      {created}/{len(windows)} monthly drafts")
+
+  # The two window derivations (period seeding from earliest_data_period,
+  # close windows from the annual period) must agree on the first month,
+  # or the very first close hits the SEQUENCE blocker.
+  demo_start = get_demo_start_date(scenario.months)
+  if (windows[0][0].year, windows[0][0].month) != (demo_start.year, demo_start.month):
+    raise RuntimeError(
+      f"Window derivations disagree: first close window starts {windows[0][0]} "
+      f"but the calendar was seeded from {demo_start} — the sequence gate "
+      f"would block every close."
+    )
+
+  stamped = 0
+  for _period_start, period_end in windows[:-1]:
+    period = f"{period_end.year:04d}-{period_end.month:02d}"
+    result = client.close_period(
+      graph_id, period, note="historical close (provisioning)"
+    )
+    # The published SDK predates the stamping fields — read them off the
+    # untyped overflow until the regen lands.
+    props = getattr(result, "additional_properties", None) or {}
+    if props.get("statements_stamped"):
+      stamped += 1
+  closed = len(windows) - 1
+  print(f"  Closed:       {closed}/{closed} historical months")
+  print(f"  Stamped:      {stamped} months of canonical statement sets")
   return windows
 
 
@@ -2271,6 +2285,14 @@ def run_demo(
   print("\nInitializing fiscal calendar...")
   close_target = initialize_fiscal_calendar(graph_id, scenario)
 
+  # Close the completed history — closing stamps each month's canonical
+  # statement FactSets (the monthly series the metrics, forecast, and
+  # Plan grid bind). Runs BEFORE schedule creation: the closeable gate
+  # counts pending schedule obligations globally, and schedules created
+  # after the loop scope themselves to the advanced closed_through.
+  print("\nClosing monthly history...")
+  period_windows = close_monthly_history(graph_id, scenario)
+
   # Create schedules (derived from the scenario's capex + prepaids)
   print("\nCreating schedules...")
   schedule_count = create_schedules(graph_id, element_lookup, scenario)
@@ -2300,12 +2322,8 @@ def run_demo(
   print("\nMaterializing to graph...")
   materialize_graph(graph_id)
 
-  # Draft monthly reports across the completed history — the monthly
-  # metric-series substrate (series length is downstream of report cadence).
-  print("\nGenerating monthly reports...")
-  period_windows = generate_monthly_reports(graph_id, scenario)
-
-  # Generate + file the annual report
+  # Generate + file the annual report — the deliberate publication act
+  # (the monthly series comes from the close loop above, not reports).
   print("\nGenerating annual report...")
   report_id = generate_annual_report(graph_id, scenario, output_dir)
 
@@ -2316,16 +2334,19 @@ def run_demo(
     verify_disclosure_notes(graph_id)
 
   # Metrics probe — compute the seeded Key Financial Metrics catalog
-  # at every monthly window (falling back to the two comparative period
-  # ends), then render the standing time series.
+  # at every CLOSED monthly window (the final window is the still-open
+  # close target with no stamped facts yet — its column arrives when the
+  # AI close stamps it), then render the standing time series.
   if report_id:
     print("\nComputing key financial metrics...")
-    verify_metrics(graph_id, scenario, period_windows)
+    verify_metrics(graph_id, scenario, period_windows[:-1])
 
   # Tenant metric catalogs compute through the same structure-agnostic op.
   if report_id and authored_metric_catalogs:
     print("\nComputing custom metrics...")
-    compute_custom_metrics(graph_id, scenario, authored_metric_catalogs, period_windows)
+    compute_custom_metrics(
+      graph_id, scenario, authored_metric_catalogs, period_windows[:-1]
+    )
 
   # Forecast scenario — the FP&A F-1 walk: authored levers, driver
   # cascade 12 months past the close boundary, scenario metric series.
