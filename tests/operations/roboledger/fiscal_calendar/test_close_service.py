@@ -173,6 +173,37 @@ class TestCloseHappyPath:
     assert fp.closed_by == "usr_test"
     assert isinstance(fp.closed_at, datetime)
 
+  def test_calendar_advance_runs_before_fiscal_period_flip(self):
+    """Never-closed regression: with `closed_through IS NULL`, the
+    advance's sequence check resolves the expected close from the
+    earliest NON-closed FiscalPeriod. The period being closed must
+    therefore still be un-flipped when advance_closed_through runs —
+    flipping first made every first close on a fresh calendar reject
+    with 'Next period must be <the following month>'."""
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    fp = _fp(status="open")
+    observed = {}
+
+    def _advance(session, graph_id, period, **kwargs):
+      observed["fp_status_at_advance"] = fp.status
+      return _calendar(closed_through="2026-01", close_target="2026-03")
+
+    fcs.advance_closed_through.side_effect = _advance
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    session = _mock_session_with_fp(fp)
+
+    svc.close(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      actor_id="usr_1",
+      has_sync_connection=False,
+      last_sync_at=None,
+    )
+
+    assert observed["fp_status_at_advance"] == "open"
+    assert fp.status == "closed"
+
   def test_target_auto_advanced_flag(self):
     """When advance_closed_through returns a calendar with a different
     close_target than before, the result reports target_auto_advanced=True."""
