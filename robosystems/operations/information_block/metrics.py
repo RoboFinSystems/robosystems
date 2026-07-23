@@ -60,7 +60,11 @@ from robosystems.models.extensions import (
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
-from robosystems.operations.information_block.registry import METRIC_BLOCK_TYPE
+
+# From the envelope module (which owns the constant), NOT the registry —
+# the registry imports every handler module, so a registry import from a
+# module the handlers reach (forecast → metrics) would be circular.
+from robosystems.operations.information_block.metric import METRIC_BLOCK_TYPE
 from robosystems.operations.information_block.rules.expressions import (
   InvalidRuleExpression,
   desugar_aggregates,

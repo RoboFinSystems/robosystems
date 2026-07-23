@@ -17,6 +17,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from robosystems.models.api.extensions.forecasts import (
+  CreateForecastRequest,
+  DeleteForecastRequest,
+  UpdateForecastRequest,
+)
 from robosystems.models.api.extensions.rollforward import (
   CreateRollforwardRequest,
   DeleteRollforwardRequest,
@@ -28,12 +33,14 @@ from robosystems.models.api.extensions.schedules import (
   UpdateScheduleRequest,
 )
 from robosystems.models.api.information_block import (
+  ForecastMechanics,
   MetricMechanics,
   RollforwardMechanics,
   ScheduleMechanics,
   StatementMechanics,
 )
 from robosystems.operations.information_block import disclosure as disclosure_handlers
+from robosystems.operations.information_block import forecast as forecast_handlers
 from robosystems.operations.information_block import metric as metric_handlers
 from robosystems.operations.information_block import rollforward as rollforward_handlers
 from robosystems.operations.information_block import schedule as schedule_handlers
@@ -211,6 +218,39 @@ ROLLFORWARD_BLOCK = BlockTypeRegistryEntry(
 )
 
 
+# ── Forecast (declarative) ─────────────────────────────────────────────────
+
+FORECAST_BLOCK = BlockTypeRegistryEntry(
+  id=forecast_handlers.FORECAST_BLOCK_TYPE,
+  display_name=forecast_handlers.FORECAST_DISPLAY_NAME,
+  display_plural="Forecasts",
+  category=forecast_handlers.FORECAST_CATEGORY,
+  icon="trending-up-down",
+  description=(
+    "Authored scenario container (FP&A) — scenario identity, horizon, "
+    "and lever assertions on the rs-driver catalog. The block IS the "
+    "scenario: compute-forecast walks the driver cascade forward from "
+    "the last closed actuals and lands the derived months in the "
+    "existing statement/metric block types keyed by this block's "
+    "scenario_id (NULL = actuals)."
+  ),
+  concept_arrangement_default="set",
+  member_arrangement_default=None,
+  mechanics_schema=ForecastMechanics,
+  create_request_model=CreateForecastRequest,
+  update_request_model=UpdateForecastRequest,
+  delete_request_model=DeleteForecastRequest,
+  construction_mode="declarative",
+  dispatch_create=forecast_handlers.create,
+  dispatch_update=forecast_handlers.update,
+  dispatch_delete=forecast_handlers.delete,
+  dispatch_build_envelope=forecast_handlers.build_envelope,
+  # Forecasts are tenant-authored scenarios against live ledger data —
+  # never on the library sentinel.
+  surfaces_in_library=False,
+)
+
+
 # ── Statements (compositional) ─────────────────────────────────────────────
 
 
@@ -324,6 +364,7 @@ METRIC_BLOCK = BlockTypeRegistryEntry(
 REGISTRY: dict[str, BlockTypeRegistryEntry] = {
   SCHEDULE_BLOCK.id: SCHEDULE_BLOCK,
   ROLLFORWARD_BLOCK.id: ROLLFORWARD_BLOCK,
+  FORECAST_BLOCK.id: FORECAST_BLOCK,
   BALANCE_SHEET_BLOCK.id: BALANCE_SHEET_BLOCK,
   INCOME_STATEMENT_BLOCK.id: INCOME_STATEMENT_BLOCK,
   CASH_FLOW_STATEMENT_BLOCK.id: CASH_FLOW_STATEMENT_BLOCK,
@@ -358,6 +399,7 @@ __all__ = [
   "COMPREHENSIVE_INCOME_BLOCK",
   "DISCLOSURE_BLOCK",
   "EQUITY_STATEMENT_BLOCK",
+  "FORECAST_BLOCK",
   "INCOME_STATEMENT_BLOCK",
   "METRIC_BLOCK",
   "REGISTRY",
