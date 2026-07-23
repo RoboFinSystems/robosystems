@@ -28,8 +28,23 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CloseableGateResult,
 )
+from robosystems.operations.roboledger.reports.statement_sets import (
+  StatementStampError,
+  StatementStampResult,
+)
 
 GRAPH_ID = "kg01234567890abcdef"
+
+
+def _noop_stamper(session, **kwargs):
+  """Stub statement stamper for tests exercising the close flow itself.
+
+  The real stamper resolves mapping/style/taxonomy and runs the pivot —
+  against these MagicMock sessions it would consume the ordered
+  ``session.execute.side_effect`` lists and 'find' a mapping in mock
+  truthiness. Injection keeps every pre-existing assertion exact.
+  """
+  return StatementStampResult(stamped=False, note="no_coa_mapping")
 
 
 def _fp(status: str, name: str = "2026-01"):
@@ -120,7 +135,7 @@ def _mock_session_with_fp(fp, debit: int = 0, credit: int = 0, updated: int = 0)
 class TestCloseHappyPath:
   def test_normal_close_calls_advance(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(
       _fp(status="open"), debit=5000, credit=5000, updated=3
     )
@@ -141,7 +156,7 @@ class TestCloseHappyPath:
 
   def test_close_sets_period_status_and_actor(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     fp = _fp(status="open")
     session = _mock_session_with_fp(fp)
 
@@ -168,7 +183,7 @@ class TestCloseHappyPath:
       cal_before=cal_before,
       advance_return=cal_after,
     )
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(_fp(status="open"))
 
     result = svc.close(
@@ -195,7 +210,7 @@ class TestCloseGateFailure:
         blockers=[CloseableGateResult.SEQUENCE],
       )
     )
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = MagicMock()
 
     with pytest.raises(CloseGateFailed) as exc_info:
@@ -217,7 +232,7 @@ class TestCloseGateFailure:
         blockers=[CloseableGateResult.NO_CALENDAR],
       )
     )
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
 
     with pytest.raises(CloseGateFailed) as exc_info:
       svc.close(
@@ -241,7 +256,7 @@ class TestUnbalancedLedger:
     """The BS check runs BEFORE any state mutation, so raising it leaves
     the session unchanged (no rollback needed)."""
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(_fp(status="open"), debit=1000, credit=900)
 
     with pytest.raises(UnbalancedLedgerError) as exc_info:
@@ -269,7 +284,7 @@ class TestUnbalancedLedger:
 class TestPeriodNotFound:
   def test_raises_when_fiscal_period_missing(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(None)
 
     with pytest.raises(PeriodNotFoundError):
@@ -295,7 +310,7 @@ class TestRecloseRouting:
       gate_result=CloseableGateResult(is_closeable=True),
       is_latest=True,
     )
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(_fp(status="closing"))
 
     svc.close(
@@ -316,7 +331,7 @@ class TestRecloseRouting:
       gate_result=CloseableGateResult(is_closeable=True),
       is_latest=False,
     )
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(_fp(status="closing", name="2025-06"))
 
     result = svc.close(
@@ -343,7 +358,7 @@ class TestStaleSyncAudit:
 
   def test_override_annotates_note(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(_fp(status="open"))
 
     svc.close(
@@ -365,7 +380,7 @@ class TestStaleSyncAudit:
   def test_override_without_sync_connection_is_not_annotated(self):
     """No sync connection → allow_stale_sync is a no-op, no annotation."""
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(_fp(status="open"))
 
     svc.close(
@@ -384,7 +399,7 @@ class TestStaleSyncAudit:
 
   def test_no_override_passes_note_unchanged(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
     session = _mock_session_with_fp(_fp(status="open"))
 
     svc.close(
@@ -440,7 +455,7 @@ class TestCloseAutoRunsRules:
 
   def test_rule_summary_aggregates_across_schedules(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
 
     _r = lambda status: MagicMock(status=status)  # noqa: E731
     session, eval_patcher = self._session_with_schedules_and_rule_results(
@@ -468,7 +483,7 @@ class TestCloseAutoRunsRules:
 
   def test_no_schedules_returns_none_summary(self):
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
 
     session, eval_patcher = self._session_with_schedules_and_rule_results(
       _fp(status="open"), schedule_ids=[], rule_results_per_struct={}
@@ -492,7 +507,7 @@ class TestCloseAutoRunsRules:
     """A bare exception out of the rule engine is logged and skipped — the
     close still succeeds with whatever results were tallied beforehand."""
     fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
-    svc = PeriodCloseService(fcs)
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
 
     _r = lambda status: MagicMock(status=status)  # noqa: E731
     session = _mock_session_with_fp(_fp(status="open"))
@@ -529,6 +544,162 @@ class TestCloseAutoRunsRules:
     # close succeeded — only the good schedule's results land in the summary
     assert result.rule_summary == {"pass": 1, "fail": 0, "error": 0, "skipped": 0}
     assert result.evaluated_structure_ids == ("struct_ok", "struct_bad")
+
+
+class TestCloseStampsStatementSets:
+  """Step 5b: the close stamps the period's canonical statement sets.
+
+  Contract: stamp outcome rides `PeriodCloseResult`; a soft-skip never
+  blocks the close; `StatementStampError` propagates (the command layer
+  never commits, so the whole close rolls back); stamping runs after the
+  draft→posted transition (the pivot reads posted entries only) and
+  before the schedule-rule pass; reclose stamps too (replace semantics
+  live inside the stamper).
+  """
+
+  def test_stamp_result_rides_close_result(self):
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    sets = {"struct_bs": "fs_bs", "struct_is": "fs_is"}
+    summary = {"pass": 4, "fail": 1, "error": 0, "skipped": 0}
+
+    def _stamper(session, **kwargs):
+      return StatementStampResult(stamped=True, fact_set_ids=sets, rule_summary=summary)
+
+    svc = PeriodCloseService(fcs, statement_stamper=_stamper)
+    session = _mock_session_with_fp(_fp(status="open"))
+
+    result = svc.close(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      actor_id="usr_1",
+      has_sync_connection=False,
+      last_sync_at=None,
+    )
+
+    assert result.statements_stamped is True
+    assert result.statement_stamp_note is None
+    assert result.stamped_statement_sets == sets
+    assert result.statement_rule_summary == summary
+
+  def test_soft_skip_keeps_close_succeeding(self):
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    svc = PeriodCloseService(fcs, statement_stamper=_noop_stamper)
+    fp = _fp(status="open")
+    session = _mock_session_with_fp(fp)
+
+    result = svc.close(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      actor_id="usr_1",
+      has_sync_connection=False,
+      last_sync_at=None,
+    )
+
+    assert fp.status == "closed"
+    assert result.statements_stamped is False
+    assert result.statement_stamp_note == "no_coa_mapping"
+    assert result.stamped_statement_sets == {}
+
+  def test_stamp_error_propagates(self):
+    """Reporting is configured but the pivot failed — the exception must
+    reach the command layer so nothing commits (full close rollback)."""
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+
+    def _stamper(session, **kwargs):
+      raise StatementStampError("pivot exploded")
+
+    svc = PeriodCloseService(fcs, statement_stamper=_stamper)
+    session = _mock_session_with_fp(_fp(status="open"))
+
+    with pytest.raises(StatementStampError):
+      svc.close(
+        session,
+        GRAPH_ID,
+        "2026-01",
+        actor_id="usr_1",
+        has_sync_connection=False,
+        last_sync_at=None,
+      )
+
+  def test_stamp_runs_after_post_and_before_schedule_rules(self):
+    """At stamp time the FiscalPeriod is already closed (drafts posted)
+    and only the BS-preflight execute has run — the schedule-rule query
+    (the second session.execute) hasn't happened yet."""
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    fp = _fp(status="open")
+    observed = {}
+
+    def _stamper(session, **kwargs):
+      observed["fp_status"] = fp.status
+      observed["execute_calls"] = session.execute.call_count
+      return StatementStampResult(stamped=True)
+
+    svc = PeriodCloseService(fcs, statement_stamper=_stamper)
+    session = _mock_session_with_fp(fp)
+
+    svc.close(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      actor_id="usr_1",
+      has_sync_connection=False,
+      last_sync_at=None,
+    )
+
+    assert observed["fp_status"] == "closed"
+    assert observed["execute_calls"] == 1
+
+  def test_stamper_receives_period_window_and_actor(self):
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True))
+    captured = {}
+
+    def _stamper(session, **kwargs):
+      captured.update(kwargs)
+      return StatementStampResult(stamped=True)
+
+    svc = PeriodCloseService(fcs, statement_stamper=_stamper)
+    session = _mock_session_with_fp(_fp(status="open"))
+
+    svc.close(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      actor_id="usr_close",
+      has_sync_connection=False,
+      last_sync_at=None,
+    )
+
+    assert captured["graph_id"] == GRAPH_ID
+    assert captured["actor_id"] == "usr_close"
+    assert captured["period_start"] == datetime(2026, 1, 1).date()
+    assert captured["period_end"] == datetime(2026, 1, 31).date()
+
+  def test_reclose_also_stamps(self):
+    """A reclose (status='closing') replaces the month's canonical sets —
+    the stamper must run on that path too."""
+    fcs = _mock_fcs(gate_result=CloseableGateResult(is_closeable=True), is_latest=True)
+    calls = []
+
+    def _stamper(session, **kwargs):
+      calls.append(kwargs["period_end"])
+      return StatementStampResult(stamped=True)
+
+    svc = PeriodCloseService(fcs, statement_stamper=_stamper)
+    session = _mock_session_with_fp(_fp(status="closing"))
+
+    result = svc.close(
+      session,
+      GRAPH_ID,
+      "2026-01",
+      actor_id="usr_1",
+      has_sync_connection=False,
+      last_sync_at=None,
+    )
+
+    assert result.was_reclose is True
+    assert len(calls) == 1
 
 
 class TestClosePrePublishWriteback:

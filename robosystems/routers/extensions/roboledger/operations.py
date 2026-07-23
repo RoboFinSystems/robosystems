@@ -412,6 +412,9 @@ from robosystems.operations.roboledger.fiscal_calendar.service import (
   CalendarAlreadyInitializedError,
   InvalidCloseTargetError,
 )
+from robosystems.operations.roboledger.reports.statement_sets import (
+  StatementStampError,
+)
 from robosystems.operations.taxonomy_block.commands import (
   TaxonomyAuthoringDisabledError,
 )
@@ -1737,12 +1740,15 @@ async def set_close_target_op(
   description=(
     "Lock a single fiscal period. Posts draft entries, runs the "
     "balance-sheet equation check, advances `closed_through` by one, "
-    "and auto-advances `close_target` if this close caught up to it. "
-    "Period must be exactly `closed_through + 1` — sequence violations "
-    "return 422 with structured `blockers`. Common blockers: "
-    "`sync_stale` (override with `allow_stale_sync=true` after manual "
-    "verification), `period_incomplete` (draft entries unbalanced), "
-    "`sequence_violation` (out-of-order)."
+    "auto-advances `close_target` if this close caught up to it, and "
+    "stamps the period's canonical statement FactSets from the posted "
+    "ledger (`statements_stamped` / `stamped_statement_sets` in the "
+    "response; soft-skipped with `statement_stamp_note` when reporting "
+    "isn't set up). Period must be exactly `closed_through + 1` — "
+    "sequence violations return 422 with structured `blockers`. Common "
+    "blockers: `sync_stale` (override with `allow_stale_sync=true` "
+    "after manual verification), `period_incomplete` (draft entries "
+    "unbalanced), `sequence_violation` (out-of-order)."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -1844,6 +1850,18 @@ async def close_period_op(
           "code": "WRITE_BACK_FAILED",
         },
       )
+    except StatementStampError as e:
+      # The close rolled back: reporting is configured but the pivot
+      # couldn't stamp the period's canonical statement sets. Fix the
+      # cause (mapping/style) and re-run the close — nothing was
+      # committed.
+      raise HTTPException(
+        status_code=422,
+        detail={
+          "message": str(e),
+          "code": "STATEMENT_STAMP_FAILED",
+        },
+      )
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))
     except ProgrammingError as e:
@@ -1861,10 +1879,12 @@ async def close_period_op(
   summary="Reopen Fiscal Period",
   description=(
     "Decrement `closed_through` by one. Only the most recently closed "
-    "period can be reopened (no reach-back). The required `reason` is "
-    "captured in the audit log. Use sparingly — reopen invalidates "
-    "downstream artifacts that trusted the closed state (reports, "
-    "shared filings)."
+    "period can be reopened (no reach-back). Retracts the month's "
+    "canonical statement FactSets (a reopened month is no longer a "
+    "closed assertion; re-closing restamps them). The required "
+    "`reason` is captured in the audit log. Use sparingly — reopen "
+    "invalidates downstream artifacts that trusted the closed state "
+    "(reports, shared filings)."
   ),
   tags=[_OP_TAG],
   dependencies=[_RATE_LIMIT],
@@ -1900,6 +1920,8 @@ async def reopen_period_op(
   def _runner():
     try:
       with extensions_session(graph_id) as session:
+        # Wire shape unchanged: the envelope still carries the refreshed
+        # calendar; the retraction count rides the MCP surface only.
         return cmd_reopen_period(
           session,
           platform_db,
@@ -1909,7 +1931,7 @@ async def reopen_period_op(
           reason=body.reason,
           note=body.note,
           service=_fiscal_svc,
-        )
+        ).fiscal_calendar
     except PeriodNotFoundInLedgerError:
       raise HTTPException(
         status_code=404, detail=f"Fiscal period {body.period!r} not found."

@@ -52,6 +52,9 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
   qb_sync_state,
 )
+from robosystems.operations.roboledger.reports.statement_sets import (
+  StatementStampError,
+)
 
 
 def _calendar_dict(session, graph_id: str, calendar, service) -> dict[str, Any]:
@@ -169,11 +172,17 @@ class ClosePeriodTool:
 3. Validates the BS equation balances for the period
 4. Transitions the FiscalPeriod from open → closed
 5. Advances closed_through; auto-advances close_target if reached
-6. Auto-runs the rule engine for every schedule Structure with facts in
-   the closed period. Rule outcomes ride on the response as
-   `rule_summary` / `evaluated_structure_ids` so you can report which
-   schedules passed / failed to the user.
-7. Emits a period_closed audit event
+6. Pivots the posted ledger and stamps the period's canonical statement
+   FactSets (balance sheet / income statement / cash flow) — closing IS
+   the act that persists the month's statements. Re-closing replaces
+   them. Soft-skipped (statements_stamped=false with a note) when the
+   tenant has no CoA mapping yet.
+7. Auto-runs the rule engine for every schedule Structure with facts in
+   the closed period, and the statement rule corpus against the stamped
+   sets. Rule outcomes ride on the response as `rule_summary` /
+   `evaluated_structure_ids` / `statement_rule_summary` so you can
+   report which schedules and statements passed / failed to the user.
+8. Emits a period_closed audit event
 
 **PARAMETERS:**
 - period (required): YYYY-MM format (e.g., "2026-03")
@@ -191,6 +200,13 @@ class ClosePeriodTool:
   null when no schedules had facts in the period.
 - evaluated_structure_ids: ids of schedule Structures whose rules were
   evaluated. Pairs with rule_summary.
+- statements_stamped / statement_stamp_note: whether the close stamped
+  the period's canonical statement FactSets (note carries the soft-skip
+  reason, e.g. no_coa_mapping).
+- stamped_statement_sets: structure_id -> fact_set_id for the minted
+  canonical sets — use get-information-block to render them.
+- statement_rule_summary: verification tally across the stamped
+  statements (pass / fail / error / skipped); null when no rules exist.
 
 **GUARDS (422 errors):**
 - Cannot close out of sequence
@@ -276,6 +292,13 @@ class ClosePeriodTool:
           # consumers see the same surface.
           "rule_summary": result.rule_summary,
           "evaluated_structure_ids": list(result.evaluated_structure_ids),
+          # Canonical statement stamping (the close-time pivot). Shaped
+          # by hand here — without these keys agents never see that the
+          # close persisted the month's statements.
+          "statements_stamped": result.statements_stamped,
+          "statement_stamp_note": result.statement_stamp_note,
+          "stamped_statement_sets": dict(result.stamped_statement_sets),
+          "statement_rule_summary": result.statement_rule_summary,
         }
     except CloseGateFailed as exc:
       if exc.no_calendar:
@@ -314,6 +337,14 @@ class ClosePeriodTool:
           "Review the ledger before closing."
         ),
       }
+    except StatementStampError as exc:
+      return {
+        "error": "statement_stamp_failed",
+        "message": (
+          f"{exc} The close rolled back — nothing was committed. Fix the "
+          "mapping/reporting configuration and re-run close-period."
+        ),
+      }
     except FiscalCalendarError as exc:
       return {"error": "calendar_error", "message": str(exc)}
     except Exception as exc:
@@ -345,9 +376,11 @@ class ReopenPeriodTool:
 **WHAT IT DOES:**
 1. Transitions FiscalPeriod from 'closed' → 'closing' (drafts may still exist)
 2. If this was the latest closed period, decrements closed_through
-3. Does NOT modify close_target — that's a separate user decision
-4. Does NOT modify existing posted entries — they stay posted
-5. Emits a period_reopened audit event with the required reason
+3. Retracts the month's canonical statement FactSets (a reopened month is
+   no longer a closed assertion; re-closing restamps them fresh)
+4. Does NOT modify close_target — that's a separate user decision
+5. Does NOT modify existing posted entries — they stay posted
+6. Emits a period_reopened audit event with the required reason
 
 **PARAMETERS:**
 - period (required): YYYY-MM format
@@ -355,6 +388,8 @@ class ReopenPeriodTool:
 
 **RETURNS:**
 - Updated fiscal_calendar state
+- statement_sets_retracted: how many canonical statement FactSets the
+  reopen deleted (0 for months closed before close-time stamping existed)
 
 **GUARDS:**
 - Period must be in 'closed' status (422 otherwise)
@@ -412,7 +447,7 @@ class ReopenPeriodTool:
     try:
       with extensions_session(graph_id) as session, _platform_session() as platform_db:
         try:
-          fc_response = ops_reopen_period(
+          result = ops_reopen_period(
             session,
             platform_db,
             graph_id,
@@ -433,13 +468,16 @@ class ReopenPeriodTool:
             "error": "not_closed",
             "message": f"Period {period!r} is not closed (status={exc.status!r}).",
           }
-        fc_payload = fc_response.model_dump(mode="json")
+        fc_payload = result.fiscal_calendar.model_dump(mode="json")
         has_sync, _ = qb_sync_state(platform_db, graph_id)
         fc_payload["has_sync_connection"] = has_sync
         return {
           "period": period,
           "reason": reason,
           "fiscal_calendar": fc_payload,
+          # Canonical statement sets deleted by the reopen (a reopened
+          # month is no longer a closed assertion; re-closing restamps).
+          "statement_sets_retracted": result.statement_sets_retracted,
         }
     except FiscalCalendarError as exc:
       return {"error": "calendar_error", "message": str(exc)}

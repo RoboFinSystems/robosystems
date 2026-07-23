@@ -319,6 +319,36 @@ class ClosePeriodResponse(BaseModel):
       "close. Pairs with rule_summary."
     ),
   )
+  statements_stamped: bool = Field(
+    False,
+    description=(
+      "Whether the close stamped the period's canonical statement "
+      "FactSets (the close-time pivot). False when the tenant hasn't "
+      "set up reporting yet — see statement_stamp_note."
+    ),
+  )
+  statement_stamp_note: str | None = Field(
+    None,
+    description=(
+      "Soft-skip reason when statements_stamped is false: "
+      "no_coa_mapping | no_entity | no_statement_structures | no_taxonomy."
+    ),
+  )
+  stamped_statement_sets: dict[str, str] = Field(
+    default_factory=dict,
+    description=(
+      "structure_id -> fact_set_id for every canonical statement FactSet "
+      "minted by this close (report_id NULL; replaced on reclose)."
+    ),
+  )
+  statement_rule_summary: dict[str, int] | None = Field(
+    None,
+    description=(
+      "Aggregated statement-rule verification outcome across the stamped "
+      "structures — keys: pass/fail/error/skipped. None when no statement "
+      "rules exist. Distinct from rule_summary (the schedule-rule pass)."
+    ),
+  )
 
 
 # ── Draft review (read-only) ──────────────────────────────────────────────

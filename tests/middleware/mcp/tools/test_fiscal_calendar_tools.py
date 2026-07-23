@@ -30,6 +30,9 @@ from robosystems.models.api.extensions.fiscal_calendar import (
   ClosePeriodResponse,
   FiscalCalendarResponse,
 )
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  ReopenPeriodResult,
+)
 from robosystems.operations.roboledger.fiscal_calendar import (
   CloseGateFailed,
   PeriodNotFoundError,
@@ -37,6 +40,9 @@ from robosystems.operations.roboledger.fiscal_calendar import (
 )
 from robosystems.operations.roboledger.fiscal_calendar.service import (
   CloseableGateResult,
+)
+from robosystems.operations.roboledger.reports.statement_sets import (
+  StatementStampError,
 )
 
 MODULE = "robosystems.middleware.mcp.tools.fiscal_calendar_tools"
@@ -181,6 +187,54 @@ class TestClosePeriodToolHappyPath:
     assert result["evaluated_structure_ids"] == []
 
   @pytest.mark.asyncio
+  async def test_response_includes_statement_stamp_fields(self):
+    """The close-time stamping outcome must reach agents — the MCP dict
+    is shaped by hand, so these keys are pinned explicitly."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    response = _close_response(
+      statements_stamped=True,
+      statement_stamp_note=None,
+      stamped_statement_sets={"struct_bs": "fs_bs", "struct_is": "fs_is"},
+      statement_rule_summary={"pass": 5, "fail": 0, "error": 0, "skipped": 1},
+    )
+
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=response),
+    ):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["statements_stamped"] is True
+    assert result["statement_stamp_note"] is None
+    assert result["stamped_statement_sets"] == {
+      "struct_bs": "fs_bs",
+      "struct_is": "fs_is",
+    }
+    assert result["statement_rule_summary"] == {
+      "pass": 5,
+      "fail": 0,
+      "error": 0,
+      "skipped": 1,
+    }
+
+  @pytest.mark.asyncio
+  async def test_response_soft_skip_note_surfaces(self):
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    response = _close_response(
+      statements_stamped=False, statement_stamp_note="no_coa_mapping"
+    )
+
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_close_period", return_value=response),
+    ):
+      result = await tool.execute({"period": "2026-01"})
+
+    assert result["statements_stamped"] is False
+    assert result["statement_stamp_note"] == "no_coa_mapping"
+    assert result["stamped_statement_sets"] == {}
+
+  @pytest.mark.asyncio
   async def test_actor_id_falls_back_to_graph_scoped_sentinel(self):
     """When the MCP client has no user_id, fall back to mcp:{graph_id}
     so audit logs stay traceable per tenant (matches ReopenPeriodTool)."""
@@ -291,6 +345,44 @@ class TestClosePeriodToolErrors:
     assert result["error"] == "unbalanced"
     assert "1000" in result["message"]
     assert "900" in result["message"]
+
+
+class TestStatementStampErrorTranslation:
+  @pytest.mark.asyncio
+  async def test_statement_stamp_failed_error_shape(self):
+    """A stamp hard-fail rolled the close back — the MCP error must say
+    so and encourage a retry after fixing the reporting config."""
+    tool = ClosePeriodTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_close_period",
+        side_effect=StatementStampError("pivot failed for 2026-03"),
+      ),
+    ):
+      result = await tool.execute({"period": "2026-03"})
+
+    assert result["error"] == "statement_stamp_failed"
+    assert "rolled back" in result["message"]
+    assert "pivot failed for 2026-03" in result["message"]
+
+
+class TestReopenPeriodToolResult:
+  @pytest.mark.asyncio
+  async def test_retraction_count_surfaces(self):
+    tool = ReopenPeriodTool(_client(user_id="usr_abc"))
+    result_obj = ReopenPeriodResult(
+      fiscal_calendar=_fc_response(), statement_sets_retracted=3
+    )
+    with (
+      _patch_sessions(),
+      patch(f"{MODULE}.ops_reopen_period", return_value=result_obj),
+    ):
+      result = await tool.execute({"period": "2026-01", "reason": "missed accrual"})
+
+    assert result["period"] == "2026-01"
+    assert result["statement_sets_retracted"] == 3
+    assert result["fiscal_calendar"]["graph_id"] == GRAPH_ID
 
 
 # ────────────────────────────────────────────────────────────────────────────

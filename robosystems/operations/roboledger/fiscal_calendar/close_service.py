@@ -12,7 +12,9 @@ the domain exceptions defined here into their respective error formats.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -27,6 +29,13 @@ from .service import (
   CloseableGateResult,
   FiscalCalendarService,
 )
+
+if TYPE_CHECKING:
+  from collections.abc import Callable
+
+  from robosystems.operations.roboledger.reports.statement_sets import (
+    StatementStampResult,
+  )
 
 # ────────────────────────────────────────────────────────────────────────────
 # Errors
@@ -119,6 +128,15 @@ class PeriodCloseResult:
   # ids of schedule Structures whose rules were evaluated. Empty when no
   # schedule structures had facts in the closed period.
   evaluated_structure_ids: tuple[str, ...] = ()
+  # Canonical statement stamping (close-time pivot). False + note when
+  # the tenant hasn't set up reporting (soft-skip); True with the minted
+  # structure_id -> fact_set_id map otherwise. A stamp failure on a
+  # reporting-configured tenant raises StatementStampError instead —
+  # the close rolls back rather than holing the statement series.
+  statements_stamped: bool = False
+  statement_stamp_note: str | None = None
+  stamped_statement_sets: dict[str, str] = dataclass_field(default_factory=dict)
+  statement_rule_summary: dict[str, int] | None = None
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -142,13 +160,29 @@ class PeriodCloseService:
      `closed_by=actor_id`.
   5. **Calendar advance or reclose** — advance_closed_through if this is
      a first-close or latest-reopen reclose, otherwise record_reclose.
+  5b. **Canonical statement stamping** — pivot the posted ledger and
+     stamp the period's statement FactSets (`report_id NULL`), replacing
+     any prior canonical sets for the window (reclose/retry idempotency).
+     Soft-skips when the tenant hasn't set up reporting; raises
+     `StatementStampError` (rolling back the close) when reporting is
+     configured but the pivot fails. Runs after the draft→posted
+     transition because the pivot reads posted entries only.
 
   Callers commit the session. All failures raise domain exceptions that
   the REST / MCP caller translates into its native error format.
+
+  ``statement_stamper`` is injectable for tests; the default resolves
+  :func:`stamp_canonical_statement_sets` lazily so this module stays
+  free of information-block imports at module load.
   """
 
-  def __init__(self, fcs: FiscalCalendarService | None = None):
+  def __init__(
+    self,
+    fcs: FiscalCalendarService | None = None,
+    statement_stamper: Callable[..., StatementStampResult] | None = None,
+  ):
     self._fcs = fcs or FiscalCalendarService()
+    self._statement_stamper = statement_stamper
 
   def close(
     self,
@@ -268,6 +302,20 @@ class PeriodCloseService:
       and calendar.close_target_period is not None
     )
 
+    # 5b. Canonical statement stamping — the close IS the act that
+    # persists the month's statements. Replace semantics inside the
+    # stamper make this idempotent for first-close, reclose, and
+    # retry-after-failure; StatementStampError propagates so the whole
+    # close (including the transitions above) rolls back rather than
+    # leaving a closed month with no canonical sets.
+    stamp = self._stamp_statement_sets(
+      session,
+      graph_id=graph_id,
+      period_start=period_start,
+      period_end=period_end,
+      actor_id=actor_id,
+    )
+
     # 6. Auto-run rules on schedules with facts in the closing period.
     # Rule failures are isolated from the close result: the close succeeds
     # even if a rule errors, and the failure surfaces only in rule_summary
@@ -286,6 +334,8 @@ class PeriodCloseService:
       f"Period {period} closed for graph {graph_id}: "
       f"entries_posted={entries_posted} reclose={is_reclose} "
       f"target_auto_advanced={target_auto_advanced} "
+      f"statements_stamped={stamp.stamped} "
+      f"stamp_note={stamp.note} "
       f"rule_summary={rule_summary}"
     )
 
@@ -297,9 +347,44 @@ class PeriodCloseService:
       was_reclose=is_reclose,
       rule_summary=rule_summary,
       evaluated_structure_ids=evaluated_ids,
+      statements_stamped=stamp.stamped,
+      statement_stamp_note=stamp.note,
+      stamped_statement_sets=stamp.fact_set_ids,
+      statement_rule_summary=stamp.rule_summary,
     )
 
   # ── Private helpers ────────────────────────────────────────────────────
+
+  def _stamp_statement_sets(
+    self,
+    session: Session,
+    *,
+    graph_id: str,
+    period_start,
+    period_end,
+    actor_id: str,
+  ) -> StatementStampResult:
+    """Run the canonical statement stamper (injected or lazily resolved).
+
+    Lazy import mirrors `_evaluate_schedule_rules_in_period` — the close
+    service stays free of information-block/report dependencies at module
+    import time, and mocked-session tests inject a stub stamper instead
+    of exercising the pivot.
+    """
+    stamper = self._statement_stamper
+    if stamper is None:
+      from robosystems.operations.roboledger.reports.statement_sets import (
+        stamp_canonical_statement_sets,
+      )
+
+      stamper = stamp_canonical_statement_sets
+    return stamper(
+      session,
+      graph_id=graph_id,
+      period_start=period_start,
+      period_end=period_end,
+      actor_id=actor_id,
+    )
 
   def _publish_drafts_to_qb(
     self,

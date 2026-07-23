@@ -306,6 +306,13 @@ def load_latest_fact_set_for_structure(
   computed forecast month would win this period_end-descending read and
   hijack every default envelope. A non-None value pins that scenario
   exactly — statement + scenario binds the latest forecast month.
+
+  At equal ``period_end``, canonical sets (``report_id IS NULL`` — the
+  close-time stamp) beat publication snapshots: a Report published
+  later for the same month must not flip the default envelope off the
+  canonical record. Boolean-expression tiebreak, not a raw
+  ``report_id`` ordering — the latter would order publication sets by
+  id and invert the created_at preference among them.
   """
   row = session.execute(
     select(FactSet)
@@ -315,7 +322,11 @@ def load_latest_fact_set_for_structure(
       if scenario_id is None
       else FactSet.scenario_id == scenario_id,
     )
-    .order_by(FactSet.period_end.desc(), FactSet.created_at.desc())
+    .order_by(
+      FactSet.period_end.desc(),
+      FactSet.report_id.isnot(None).asc(),
+      FactSet.created_at.desc(),
+    )
     .limit(1)
   ).scalar()
   return fact_set_to_lite(row) if row is not None else None
@@ -336,10 +347,13 @@ def load_statement_fact_set_series(
   scenario's sets, and at an overlapping ``period_end`` the actual wins
   (the moving seam — a closed month's draft supersedes its forecast).
 
-  Two collisions collapse per ``period_end``, in order:
+  Three collisions collapse per ``period_end``, in order:
 
   1. ``scenario_id ASC NULLS FIRST`` — the actual beats the forecast.
-  2. ``period_start DESC NULLS LAST`` — the NARROWER window wins, so at
+  2. canonical before publication (``report_id IS NULL`` first) — the
+     close-time stamp is the series source; a Report published later
+     for the same month must not flip the column onto its snapshot.
+  3. ``period_start DESC NULLS LAST`` — the NARROWER window wins, so at
      the FY-end month the monthly set beats the annual report set
      created later (the FY-capture lesson applied at series level;
      ``created_at DESC`` alone would pick the annual).
@@ -360,6 +374,7 @@ def load_statement_fact_set_series(
       .order_by(
         FactSet.period_end.asc(),
         FactSet.scenario_id.asc().nulls_first(),
+        FactSet.report_id.isnot(None).asc(),
         FactSet.period_start.desc().nulls_last(),
         FactSet.created_at.desc(),
       )
