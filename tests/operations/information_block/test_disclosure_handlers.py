@@ -145,6 +145,7 @@ class TestBuildEnvelope:
     elem_total.is_monetary = True
     elem_total.balance_type = "debit"
     elem_total.period_type = "instant"
+    elem_total.item_type = None
 
     elem_raw = MagicMock()
     elem_raw.id = "elem_raw_materials"
@@ -156,6 +157,7 @@ class TestBuildEnvelope:
     elem_raw.is_monetary = True
     elem_raw.balance_type = "debit"
     elem_raw.period_type = "instant"
+    elem_raw.item_type = None
 
     # Query order with associations: fact_set → taxonomy name →
     # associations → elements → rules → association classifications →

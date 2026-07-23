@@ -11,6 +11,15 @@ constructs that could be exploited.
 
 ``eval()`` is never called. The AST walker evaluates the tree directly
 by recursing over :class:`ast.BinOp` / :class:`ast.UnaryOp` nodes.
+
+Aggregates are desugared, never evaluated: ``avg($X)`` rewrites to a
+synthesized ``$__avg_X`` operand *before* parsing
+(:func:`desugar_aggregates`), so the whitelist keeps rejecting every
+``ast.Call`` and the evaluator stays pure arithmetic — averaging happens
+at bind time in the caller, where the begin + end facts live. A future
+``$X[t-1]`` prior-period operand rides the same mechanism (rewrite to a
+synthesized operand, bind at a resolved prior period) — see
+``compute-metrics``.
 """
 
 from __future__ import annotations
@@ -43,6 +52,35 @@ class InvalidRuleExpression(ValueError):
   """Raised when a rule expression cannot be parsed or evaluated safely."""
 
 
+AVG_OPERAND_PREFIX = "__avg_"
+
+_AVG_CALL_RE = re.compile(r"\bavg\(\s*\$([A-Za-z_]\w*)\s*\)")
+
+
+def desugar_aggregates(expr: str) -> tuple[str, dict[str, str]]:
+  """Rewrite ``avg($X)`` calls to synthesized ``$__avg_X`` operands.
+
+  Returns the rewritten expression plus a map of synthesized variable
+  name → base variable name. Callers append the synthesized names to
+  the parse variable list and bind each one at evaluation time (the
+  period-average of the base operand: begin + end over 2).
+
+  Only the exact single-variable form matches; anything else —
+  ``avg($A + $B)``, ``median($X)`` — survives as a genuine
+  :class:`ast.Call` and is rejected by the whitelist walker, so the
+  no-function-calls security posture is unchanged.
+  """
+  synthesized: dict[str, str] = {}
+
+  def _sub(match: re.Match[str]) -> str:
+    base = match.group(1)
+    name = f"{AVG_OPERAND_PREFIX}{base}"
+    synthesized[name] = base
+    return f"${name}"
+
+  return _AVG_CALL_RE.sub(_sub, expr), synthesized
+
+
 @dataclass
 class ParsedExpression:
   tree: ast.Expression
@@ -52,6 +90,11 @@ class ParsedExpression:
 def _validate(node: ast.AST) -> None:
   for child in ast.walk(node):
     if not isinstance(child, _ALLOWED_NODES):
+      if isinstance(child, ast.Call):
+        raise InvalidRuleExpression(
+          "disallowed AST node: Call — function calls are not allowed; "
+          "the only aggregate form is avg($Var) in Derive expressions"
+        )
       raise InvalidRuleExpression(f"disallowed AST node: {type(child).__name__}")
 
 
@@ -257,10 +300,12 @@ def build_rollup_expression(parent_name: str, children: list[tuple[str, float]])
 
 
 __all__ = [
+  "AVG_OPERAND_PREFIX",
   "EQUALITY_TOLERANCE",
   "InvalidRuleExpression",
   "ParsedExpression",
   "build_rollup_expression",
+  "desugar_aggregates",
   "evaluate_arithmetic",
   "evaluate_derivation",
   "evaluate_equality",

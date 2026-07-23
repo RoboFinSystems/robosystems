@@ -107,6 +107,14 @@ class ElementSpec(BaseModel):
   element_type: str = Field(
     "concept", description="concept | abstract | axis | member | hypercube"
   )
+  item_type: str | None = Field(
+    None,
+    description=(
+      "Value-domain vocabulary (rs:itemType) — monetary | ratio | percent "
+      "| multiple | days | string | …; None means untyped (consumers fall "
+      "back to is_monetary)"
+    ),
+  )
   substitution_group: str | None = Field(
     None, description="XBRL substitution group qname, e.g. 'xbrli:item'"
   )

@@ -34,6 +34,12 @@ def _first(row: Any) -> MagicMock:
   return result
 
 
+def _scalar(value: Any) -> MagicMock:
+  result = MagicMock()
+  result.scalar.return_value = value
+  return result
+
+
 def _fetchone(row: Any) -> MagicMock:
   result = MagicMock()
   result.fetchone.return_value = row
@@ -54,6 +60,7 @@ def _element(
   *,
   monetary: bool = False,
   period_type: str = "instant",
+  item_type: str | None = None,
 ) -> SimpleNamespace:
   return SimpleNamespace(
     id=element_id,
@@ -61,6 +68,7 @@ def _element(
     name=name,
     is_monetary=monetary,
     period_type=period_type,
+    item_type=item_type,
   )
 
 
@@ -320,3 +328,399 @@ class TestComputeMetrics:
     session.execute.side_effect = [_fetchone(None)]
     with pytest.raises(ValueError, match="No entity found"):
       metrics_mod.cmd_compute_metrics(session, _body(entity_id=None), "usr_1")
+
+
+EL_NI = _element("el_ni", "rs-gaap:NetIncomeLoss", "Net Income", period_type="duration")
+EL_REV = _element("el_rev", "rs-gaap:Revenues", "Revenues", period_type="duration")
+EL_SE = _element("el_se", "rs-gaap:StockholdersEquity", "Stockholders' Equity")
+EL_A = _element("el_a", "rs-gaap:Assets", "Assets")
+EL_ROE = _element(
+  "el_roe",
+  "rs-metric:ReturnOnEquity",
+  "Return on Equity",
+  period_type="duration",
+  item_type="percent",
+)
+EL_NPM = _element(
+  "el_npm",
+  "rs-metric:NetProfitMargin",
+  "Net Profit Margin",
+  period_type="duration",
+  item_type="percent",
+)
+EL_EM = _element(
+  "el_em",
+  "rs-metric:EquityMultiplier",
+  "Equity Multiplier",
+  period_type="duration",
+  item_type="multiple",
+)
+
+RULE_ROE = _rule(
+  "rule_roe",
+  "el_roe",
+  "$ReturnOnEquity = ($NetIncomeLoss / avg($StockholdersEquity))",
+  [
+    ("ReturnOnEquity", "rs-metric:ReturnOnEquity"),
+    ("NetIncomeLoss", "rs-gaap:NetIncomeLoss"),
+    ("StockholdersEquity", "rs-gaap:StockholdersEquity"),
+  ],
+)
+RULE_EM = _rule(
+  "rule_em",
+  "el_em",
+  "$EquityMultiplier = (avg($Assets) / avg($StockholdersEquity))",
+  [
+    ("EquityMultiplier", "rs-metric:EquityMultiplier"),
+    ("Assets", "rs-gaap:Assets"),
+    ("StockholdersEquity", "rs-gaap:StockholdersEquity"),
+  ],
+)
+RULE_NPM = _rule(
+  "rule_npm",
+  "el_npm",
+  "$NetProfitMargin = ($NetIncomeLoss / $Revenues)",
+  [
+    ("NetProfitMargin", "rs-metric:NetProfitMargin"),
+    ("NetIncomeLoss", "rs-gaap:NetIncomeLoss"),
+    ("Revenues", "rs-gaap:Revenues"),
+  ],
+)
+RULE_DOUBLE_NPM = _rule(
+  "rule_double_npm",
+  "el_em",
+  "$EquityMultiplier = ($NetProfitMargin * 2)",
+  [
+    ("EquityMultiplier", "rs-metric:EquityMultiplier"),
+    ("NetProfitMargin", "rs-metric:NetProfitMargin"),
+  ],
+)
+
+
+class TestAvgOperand:
+  """avg($X) — the M-2 period-average aggregate."""
+
+  def test_avg_via_request_window(self) -> None:
+    """body.period_start present → begin fact binds at period_start - 1d."""
+    structure = _structure()
+    session = _session(structure, {"el_roe": EL_ROE, "el_ni": EL_NI, "el_se": EL_SE})
+    session.execute.side_effect = [
+      _scalars([_arc("el_roe", 1.0)]),
+      _scalars([RULE_ROE]),
+      _scalar_one(EL_NI),
+      _first((30.0, date(2026, 3, 1))),  # NetIncomeLoss for the month
+      _scalar_one(EL_SE),
+      _first((120.0, None)),  # StockholdersEquity end instant
+      _first((80.0, None)),  # StockholdersEquity begin instant (@ 2026-02-28)
+      _scalar_one(None),  # standing lookup
+    ]
+
+    with patch.object(
+      metrics_mod,
+      "create_fact_set",
+      return_value=SimpleNamespace(id="fs_new", provenance=None),
+    ):
+      response = metrics_mod.cmd_compute_metrics(
+        session, _body(period_start=date(2026, 3, 1)), "usr_1"
+      )
+
+    assert len(response.computed) == 1
+    roe = response.computed[0]
+    # 30 / ((80 + 120) / 2) = 0.3
+    assert roe.value == pytest.approx(0.3)
+    assert roe.item_type == "percent"
+    assert roe.unit == "pure"
+    # Exactly the choreographed queries ran — in particular, NO
+    # data-driven prior lookup (the request window supplied the begin).
+    assert len(session.execute.call_args_list) == 8
+
+  def test_avg_via_duration_operand_window(self) -> None:
+    """No request window — a bound duration operand's start supplies it."""
+    structure = _structure()
+    session = _session(structure, {"el_roe": EL_ROE, "el_ni": EL_NI, "el_se": EL_SE})
+    fy_start = date(2025, 4, 1)
+    session.execute.side_effect = [
+      _scalars([_arc("el_roe", 1.0)]),
+      _scalars([RULE_ROE]),
+      _scalar_one(EL_NI),
+      _first((50.0, fy_start)),  # duration operand carries the window
+      _scalar_one(EL_SE),
+      _first((150.0, None)),
+      _first((100.0, None)),  # begin @ fy_start - 1d — no prior-lookup query
+      _scalar_one(None),
+    ]
+
+    with patch.object(
+      metrics_mod,
+      "create_fact_set",
+      return_value=SimpleNamespace(id="fs_new", provenance=None),
+    ):
+      response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
+
+    assert response.computed[0].value == pytest.approx(50.0 / 125.0)
+    assert response.skipped == []
+
+  def test_avg_data_driven_prior_fallback_shared_across_operands(self) -> None:
+    """All-instant rule with no window — one cached prior-period lookup."""
+    structure = _structure()
+    session = _session(structure, {"el_em": EL_EM, "el_a": EL_A, "el_se": EL_SE})
+    session.execute.side_effect = [
+      _scalars([_arc("el_em", 1.0)]),
+      _scalars([RULE_EM]),
+      _scalar_one(EL_A),
+      _first((400.0, None)),  # Assets end
+      _scalar_one(EL_SE),
+      _first((200.0, None)),  # Equity end
+      _scalar(date(2026, 2, 28)),  # data-driven prior period (ONE query)
+      _first((300.0, None)),  # Assets begin
+      _first((100.0, None)),  # Equity begin — prior cached, no second lookup
+      _scalar_one(None),
+    ]
+
+    with patch.object(
+      metrics_mod,
+      "create_fact_set",
+      return_value=SimpleNamespace(id="fs_new", provenance=None),
+    ):
+      response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
+
+    # avg(A)=350, avg(SE)=150 → 2.333…
+    assert response.computed[0].value == pytest.approx(350.0 / 150.0)
+    assert response.computed[0].unit == "pure"
+    assert response.computed[0].item_type == "multiple"
+
+  def test_avg_with_no_prior_period_skips_with_reason(self) -> None:
+    """First period of a series — the data-driven fallback finds nothing."""
+    structure = _structure()
+    session = _session(structure, {"el_em": EL_EM, "el_a": EL_A, "el_se": EL_SE})
+    session.execute.side_effect = [
+      _scalars([_arc("el_em", 1.0)]),
+      _scalars([RULE_EM]),
+      _scalar_one(EL_A),
+      _first((400.0, None)),
+      _scalar_one(EL_SE),
+      _first((200.0, None)),
+      _scalar(None),  # no prior report period exists
+      _scalar_one(None),
+    ]
+
+    with patch.object(metrics_mod, "create_fact_set") as create_fs:
+      response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
+
+    assert response.computed == []
+    skip = response.skipped[0]
+    assert skip.element_qname == "rs-metric:EquityMultiplier"
+    assert any("no prior period for avg" in m for m in skip.missing)
+    create_fs.assert_not_called()
+
+  def test_avg_missing_begin_fact_skips_with_prior_annotation(self) -> None:
+    structure = _structure()
+    session = _session(structure, {"el_roe": EL_ROE, "el_ni": EL_NI, "el_se": EL_SE})
+    session.execute.side_effect = [
+      _scalars([_arc("el_roe", 1.0)]),
+      _scalars([RULE_ROE]),
+      _scalar_one(EL_NI),
+      _first((30.0, date(2026, 3, 1))),
+      _scalar_one(EL_SE),
+      _first((120.0, None)),
+      _first(None),  # begin instant absent at the prior period end
+      _scalar_one(None),
+    ]
+
+    response = metrics_mod.cmd_compute_metrics(
+      session, _body(period_start=date(2026, 3, 1)), "usr_1"
+    )
+
+    assert response.computed == []
+    skip = response.skipped[0]
+    assert any("prior @ 2026-02-28" in m for m in skip.missing)
+
+
+class TestComposition:
+  """Metric-on-metric operands — the M-2 DuPont dependency feature."""
+
+  def test_in_run_dependency_evaluates_first_and_reuses_value(self) -> None:
+    """The composite's operand resolves from the in-run value (no bind
+    query), evaluation runs dependency-first, and the response re-sorts
+    to presentation-arc order (composite first here)."""
+    structure = _structure()
+    session = _session(
+      structure,
+      {"el_em": EL_EM, "el_npm": EL_NPM, "el_ni": EL_NI, "el_rev": EL_REV},
+    )
+    session.execute.side_effect = [
+      # Composite is arc-FIRST — topo must still evaluate NPM before it.
+      _scalars([_arc("el_em", 1.0), _arc("el_npm", 2.0)]),
+      _scalars([RULE_DOUBLE_NPM, RULE_NPM]),
+      _scalar_one(EL_NI),
+      _first((20.0, date(2026, 3, 1))),
+      _scalar_one(EL_REV),
+      _first((100.0, date(2026, 3, 1))),
+      # NO bind for the composite's NPM operand — in-run value reused.
+      _scalar_one(None),
+    ]
+
+    with patch.object(
+      metrics_mod,
+      "create_fact_set",
+      return_value=SimpleNamespace(id="fs_new", provenance=None),
+    ):
+      response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
+
+    assert [m.element_qname for m in response.computed] == [
+      "rs-metric:EquityMultiplier",  # arc order 1.0
+      "rs-metric:NetProfitMargin",  # arc order 2.0
+    ]
+    composite, npm = response.computed
+    assert npm.value == pytest.approx(0.2)
+    assert composite.value == pytest.approx(0.4)
+    assert response.skipped == []
+
+  def test_skipped_dependency_cascades_with_reason(self) -> None:
+    structure = _structure()
+    session = _session(
+      structure,
+      {"el_em": EL_EM, "el_npm": EL_NPM, "el_ni": EL_NI, "el_rev": EL_REV},
+    )
+    session.execute.side_effect = [
+      _scalars([_arc("el_em", 1.0), _arc("el_npm", 2.0)]),
+      _scalars([RULE_DOUBLE_NPM, RULE_NPM]),
+      _scalar_one(EL_NI),
+      _first(None),  # NetIncomeLoss missing → NPM skips
+      _scalar_one(EL_REV),
+      _first((100.0, date(2026, 3, 1))),
+      # Composite falls back to a persisted-metric bind, which also misses.
+      _scalar_one(EL_NPM),
+      _first(None),
+      _scalar_one(None),
+    ]
+
+    with patch.object(metrics_mod, "create_fact_set") as create_fs:
+      response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
+
+    assert response.computed == []
+    reasons = {s.element_qname: s.missing for s in response.skipped}
+    assert reasons["rs-metric:NetProfitMargin"] == ["rs-gaap:NetIncomeLoss"]
+    assert reasons["rs-metric:EquityMultiplier"] == [
+      "rs-metric:NetProfitMargin (metric not computed)"
+    ]
+    create_fs.assert_not_called()
+
+  def test_cyclic_rules_degrade_to_skips(self) -> None:
+    el_a = _element("el_ma", "rs-metric:MetricA", "Metric A")
+    el_b = _element("el_mb", "rs-metric:MetricB", "Metric B")
+    rule_a = _rule(
+      "rule_ma",
+      "el_ma",
+      "$MetricA = ($MetricB * 1)",
+      [("MetricA", "rs-metric:MetricA"), ("MetricB", "rs-metric:MetricB")],
+    )
+    rule_b = _rule(
+      "rule_mb",
+      "el_mb",
+      "$MetricB = ($MetricA * 1)",
+      [("MetricB", "rs-metric:MetricB"), ("MetricA", "rs-metric:MetricA")],
+    )
+    structure = _structure()
+    session = _session(structure, {"el_ma": el_a, "el_mb": el_b})
+    session.execute.side_effect = [
+      _scalars([_arc("el_ma", 1.0), _arc("el_mb", 2.0)]),
+      _scalars([rule_a, rule_b]),
+      _scalar_one(el_b),  # A's operand B — no in-run value yet
+      _first(None),  # no persisted metric fact either
+      _scalar_one(el_a),  # B's operand A
+      _first(None),
+      _scalar_one(None),
+    ]
+
+    with patch.object(metrics_mod, "create_fact_set") as create_fs:
+      response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
+
+    assert response.computed == []
+    assert len(response.skipped) == 2
+    for skip in response.skipped:
+      assert any("(metric not computed)" in m for m in skip.missing)
+    create_fs.assert_not_called()
+
+
+class TestUnitFamilies:
+  """item_type → fact unit mapping (M-2 unit/format)."""
+
+  def test_days_item_type_maps_to_days_unit(self) -> None:
+    el_dso = _element(
+      "el_dso",
+      "rs-metric:DaysSalesOutstanding",
+      "Days Sales Outstanding",
+      period_type="duration",
+      item_type="days",
+    )
+    rule_dso = _rule(
+      "rule_dso",
+      "el_dso",
+      "$DaysSalesOutstanding = ($Assets / $Revenues)",
+      [
+        ("DaysSalesOutstanding", "rs-metric:DaysSalesOutstanding"),
+        ("Assets", "rs-gaap:Assets"),
+        ("Revenues", "rs-gaap:Revenues"),
+      ],
+    )
+    structure = _structure()
+    session = _session(structure, {"el_dso": el_dso, "el_a": EL_A, "el_rev": EL_REV})
+    session.execute.side_effect = [
+      _scalars([_arc("el_dso", 1.0)]),
+      _scalars([rule_dso]),
+      _scalar_one(EL_A),
+      _first((300.0, None)),
+      _scalar_one(EL_REV),
+      _first((10.0, date(2026, 3, 1))),
+      _scalar_one(None),
+    ]
+
+    with patch.object(
+      metrics_mod,
+      "create_fact_set",
+      return_value=SimpleNamespace(id="fs_new", provenance=None),
+    ):
+      response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
+
+    assert response.computed[0].unit == "days"
+    assert response.computed[0].item_type == "days"
+
+  def test_monetary_item_type_maps_to_usd(self) -> None:
+    el = _element(
+      "el_wc2",
+      "rs-metric:WorkingCapital",
+      "Working Capital",
+      monetary=True,
+      item_type="monetary",
+    )
+    structure = _structure()
+    session = _session(structure, {"el_wc2": el, "el_ac": EL_AC, "el_lc": EL_LC})
+    rule = _rule(
+      "rule_wc2",
+      "el_wc2",
+      "$WorkingCapital = ($AssetsCurrent - $LiabilitiesCurrent)",
+      [
+        ("WorkingCapital", "rs-metric:WorkingCapital"),
+        ("AssetsCurrent", "rs-gaap:AssetsCurrent"),
+        ("LiabilitiesCurrent", "rs-gaap:LiabilitiesCurrent"),
+      ],
+    )
+    session.execute.side_effect = [
+      _scalars([_arc("el_wc2", 1.0)]),
+      _scalars([rule]),
+      _scalar_one(EL_AC),
+      _first((100.0, None)),
+      _scalar_one(EL_LC),
+      _first((40.0, None)),
+      _scalar_one(None),
+    ]
+
+    with patch.object(
+      metrics_mod,
+      "create_fact_set",
+      return_value=SimpleNamespace(id="fs_new", provenance=None),
+    ):
+      response = metrics_mod.cmd_compute_metrics(session, _body(), "usr_1")
+
+    assert response.computed[0].unit == "USD"

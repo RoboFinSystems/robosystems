@@ -54,7 +54,7 @@ _TAXONOMY_COLS = (
 _ELEMENT_COLS = (
   "id, code, name, description, qname, namespace, uri, "
   "balance_type, period_type, substitution_group, is_abstract, is_monetary, "
-  "element_type, parent_id, depth, path, taxonomy_id, source, currency, "
+  "element_type, item_type, parent_id, depth, path, taxonomy_id, source, currency, "
   "is_active, is_placeholder, external_id, external_source, "
   "agent_id, aliases, embedding, "
   "metadata, version, created_at, updated_at, created_by"
@@ -420,7 +420,7 @@ _RESYNC_ELEMENT_CONFLICT = (
   "balance_type = EXCLUDED.balance_type, period_type = EXCLUDED.period_type, "
   "substitution_group = EXCLUDED.substitution_group, "
   "is_abstract = EXCLUDED.is_abstract, is_monetary = EXCLUDED.is_monetary, "
-  "element_type = EXCLUDED.element_type"
+  "element_type = EXCLUDED.element_type, item_type = EXCLUDED.item_type"
 )
 _RESYNC_TRAIT_CONFLICT = (
   "ON CONFLICT (id) DO UPDATE SET "

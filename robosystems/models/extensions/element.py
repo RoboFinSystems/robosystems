@@ -133,7 +133,8 @@ class Element(ExtensionsBase):
   element_type = Column(String, nullable=False, default="concept")
   # Value domain (orthogonal to element_type, which is the structural role).
   # Open XBRL item-type vocabulary — intended values: monetary | string |
-  # date | boolean | shares | decimal | integer | text_block. NULL means
+  # date | boolean | shares | decimal | integer | text_block, plus the
+  # metric format families ratio | percent | multiple | days. NULL means
   # untyped; consumers fall back to is_monetary.
   item_type = Column(String, nullable=True)
 

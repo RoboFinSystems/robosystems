@@ -38,6 +38,7 @@ def _element() -> SimpleNamespace:
     is_monetary=False,
     balance_type="debit",
     period_type="duration",
+    item_type=None,
   )
 
 

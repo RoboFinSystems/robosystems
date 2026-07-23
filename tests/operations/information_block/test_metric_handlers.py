@@ -32,7 +32,9 @@ def _structure(*, mechanics: dict | None = None) -> MagicMock:
   return s
 
 
-def _element(element_id: str, qname: str, name: str) -> SimpleNamespace:
+def _element(
+  element_id: str, qname: str, name: str, *, item_type: str | None = None
+) -> SimpleNamespace:
   return SimpleNamespace(
     id=element_id,
     qname=qname,
@@ -43,6 +45,7 @@ def _element(element_id: str, qname: str, name: str) -> SimpleNamespace:
     is_monetary=False,
     balance_type="debit",
     period_type="instant",
+    item_type=item_type,
   )
 
 

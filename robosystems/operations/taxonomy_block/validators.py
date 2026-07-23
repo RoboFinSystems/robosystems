@@ -44,6 +44,7 @@ from robosystems.models.api.taxonomy_block import (
 from robosystems.models.extensions import Element
 from robosystems.operations.information_block.rules.expressions import (
   InvalidRuleExpression,
+  desugar_aggregates,
   lhs_variable_names,
   parse_arithmetic_expression,
 )
@@ -433,8 +434,36 @@ def _phase_rule_expression_parse(
       )
       continue
 
+    # Derive rules may use the avg($Var) aggregate — desugar to the
+    # synthesized operand form the compute path evaluates, so authored
+    # avg expressions validate the same way they run. Other patterns
+    # keep the raw expression: a stray avg() there is a genuine
+    # ast.Call and fails the whitelist below, as it should.
+    expression = rule.expression
+    parse_names = variable_names
+    if rule.rule_pattern == "Derive":
+      expression, synthesized = desugar_aggregates(expression)
+      undeclared = sorted(
+        base for base in synthesized.values() if base not in variable_names
+      )
+      if undeclared:
+        issues.append(
+          ValidationIssue(
+            phase="rule_expression_parse",
+            code="unknown_aggregate_operand",
+            message=(
+              f"rule {rule.name!r} averages undeclared variable(s) "
+              f"{undeclared}; every avg($Var) base must appear in the "
+              f"rule's variables with a qname binding."
+            ),
+            context={"rule_name": rule.name, "undeclared": undeclared},
+          )
+        )
+        continue
+      parse_names = variable_names + list(synthesized)
+
     try:
-      parsed = parse_arithmetic_expression(rule.expression, variable_names)
+      parsed = parse_arithmetic_expression(expression, parse_names)
     except InvalidRuleExpression as exc:
       issues.append(
         ValidationIssue(

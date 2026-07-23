@@ -135,6 +135,7 @@ def build_envelope(
         element_qname=element.qname if element else None,
         element_name=element.name if element else element_id,
         balance_type=element.balance_type if element else None,
+        item_type=element.item_type if element else None,
         values=[value_by_set_element.get((fs.id, element_id)) for fs in fact_sets],
       )
     )
