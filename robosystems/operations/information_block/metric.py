@@ -178,13 +178,15 @@ def build_envelope(
       RenderingPeriodLite(
         start=fs.period_start if fs.period_start is not None else fs.period_end,
         end=fs.period_end,
-        # Scenario-sourced columns are labeled honestly; actual columns
-        # keep label=None and the frontend formats dates as today.
+        # Scenario-sourced columns are labeled honestly AND flagged
+        # machine-readably; actual columns keep label=None (the
+        # frontend formats dates) and no flag.
         label=(
           f"{fs.period_end.strftime('%b %Y')} (forecast)"
           if fs.scenario_id is not None
           else None
         ),
+        forecast=True if fs.scenario_id is not None else None,
       )
       for fs in fact_sets
     ],
