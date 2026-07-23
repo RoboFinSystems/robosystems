@@ -16,6 +16,7 @@ from robosystems.operations.information_block.envelope import (
   fact_set_to_lite,
   load_fact_set_by_id_for_structure,
   load_latest_fact_set_for_structure,
+  load_verification_results_for_structure,
 )
 
 
@@ -162,3 +163,37 @@ class TestLoadFactSetByIdForStructure:
     assert lite is not None
     assert lite.id == "fs_pinned"
     assert lite.structure_id == "struct_bs"
+
+
+class TestVerificationResultsScenarioScope:
+  """**The verification-bleed regression** (the F-2 analog of the FactSet
+  hijack): compute-forecast verifies every scenario month against the
+  statement structures, so the envelope's verification loader must scope
+  results by scenario or the actuals envelope grows a failed/passed row
+  per scenario month per rule."""
+
+  @staticmethod
+  def _session() -> MagicMock:
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = []
+    return session
+
+  def test_actuals_read_excludes_scenario_set_results(self) -> None:
+    session = self._session()
+    load_verification_results_for_structure(session, "struct_bs")
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    # Structure-level results (no set) stay; set-pinned results must
+    # come from actuals sets only.
+    assert "fact_set_id IS NULL" in sql
+    assert "scenario_id IS NULL" in sql
+
+  def test_scenario_read_includes_only_that_scenarios_results(self) -> None:
+    session = self._session()
+    load_verification_results_for_structure(session, "struct_bs", "struct_budget")
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "scenario_id = 'struct_budget'" in sql
+    assert "scenario_id IS NULL" not in sql
+    # Structure-level (unpinned) results still ride along.
+    assert "fact_set_id IS NULL" in sql

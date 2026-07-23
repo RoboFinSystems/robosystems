@@ -191,18 +191,35 @@ def verification_result_to_lite(row: VerificationResult) -> VerificationResultLi
 
 
 def load_verification_results_for_structure(
-  session: Session, structure_id: str
+  session: Session, structure_id: str, scenario_id: str | None = None
 ) -> list[VerificationResultLite]:
-  """Fetch verification results scoped to a Structure.
+  """Fetch verification results scoped to a Structure and scenario slice.
 
   Returns the full history ordered by ``evaluated_at`` descending so
   the envelope exposes the most recent run first. Empty list when no
   rows — the common case until the rule engine writes results.
+
+  ``scenario_id`` scopes results the same way FactSet reads are scoped:
+  compute-forecast verifies every scenario month against the statement
+  structures, so without the filter those runs would pollute the
+  actuals envelope's verification list (the verification-bleed analog
+  of the FactSet-read hijack). ``None`` keeps structure-level results
+  (``fact_set_id IS NULL``) plus results pinned to actuals sets; a
+  scenario id swaps the pinned half for that scenario's sets.
   """
+  scenario_predicate = (
+    FactSet.scenario_id.is_(None)
+    if scenario_id is None
+    else FactSet.scenario_id == scenario_id
+  )
   rows = (
     session.execute(
       select(VerificationResult)
-      .where(VerificationResult.structure_id == structure_id)
+      .outerjoin(FactSet, VerificationResult.fact_set_id == FactSet.id)
+      .where(
+        VerificationResult.structure_id == structure_id,
+        or_(VerificationResult.fact_set_id.is_(None), scenario_predicate),
+      )
       .order_by(VerificationResult.evaluated_at.desc())
     )
     .scalars()
@@ -503,7 +520,13 @@ def load_base_envelope_atoms(
     session, [a.id for a in associations]
   )
 
-  verification_results = load_verification_results_for_structure(session, structure_id)
+  # Results scope to the slice being read: a pinned set filters by ITS
+  # scenario (a snapshot of a scenario month shows that month's runs).
+  verification_results = load_verification_results_for_structure(
+    session,
+    structure_id,
+    scenario_id=fact_set.scenario_id if fact_set is not None else scenario_id,
+  )
 
   return BaseEnvelopeAtoms(
     structure=structure,

@@ -1803,12 +1803,31 @@ class ForecastMonthLite(BaseModel):
   balance_sheet_fact_set_id: str | None = Field(
     None,
     description=(
-      "Scenario BS FactSet upserted for the month (working-capital "
-      "instants only in F-1 — the full BS roll is a later phase)."
+      "Scenario BS FactSet upserted for the month — the full roll: "
+      "carry-forward, rule-driven working capital, schedule movements, "
+      "RE roll, balancing cash (A = L + E by construction)."
+    ),
+  )
+  cash_flow_fact_set_id: str | None = Field(
+    None,
+    description=(
+      "Scenario CF FactSet upserted for the month — indirect-method, "
+      "derived from BS deltas + NI, reconciled to the balancing ΔCash."
     ),
   )
   computed_count: int = Field(
-    0, description="Number of facts emitted for the month across both sets."
+    0, description="Number of facts emitted for the month across all sets."
+  )
+  verification_passed: bool | None = Field(
+    None,
+    description=(
+      "Whether every rule evaluated against the month's scenario sets "
+      "passed (None = no rules ran for the month)."
+    ),
+  )
+  verification_failures: list[str] = Field(
+    default_factory=list,
+    description="Failed/errored rule messages for the month (capped).",
   )
 
 
@@ -1886,6 +1905,14 @@ class ComputeForecastResponse(BaseModel):
   months: int = Field(..., description="Forward months requested.")
   months_computed: list[ForecastMonthLite] = Field(default_factory=list)
   skipped: list[SkippedForecastLite] = Field(default_factory=list)
+  diagnostics: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Articulation notes — a missing cash/earnings anchor, schedule "
+      "contributions with no base-set landing spot, an absent "
+      "cash-flow structure. Informational; the walk still computed."
+    ),
+  )
 
 
 __all__ = [
