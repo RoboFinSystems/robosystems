@@ -122,6 +122,26 @@ class TestLoadLatestFactSetForStructure:
     assert "scenario_id = 'struct_budget'" in sql
     assert "scenario_id IS NULL" not in sql
 
+  def test_canonical_beats_publication_snapshot_at_equal_period_end(self) -> None:
+    """Close-time canonical sets (``report_id IS NULL``) outrank a
+    Report's publication snapshot at the same ``period_end`` — a report
+    published later for the month must not flip the default envelope
+    off the canonical record. The tiebreak is a boolean expression
+    (``report_id IS NOT NULL ASC``) sitting between the period_end and
+    created_at orderings."""
+    session = MagicMock()
+    result = MagicMock()
+    result.scalar.return_value = None
+    session.execute.return_value = result
+
+    load_latest_fact_set_for_structure(session, "struct_bs")
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    order_by = sql.split("ORDER BY")[1]
+    assert "report_id IS NOT NULL" in order_by
+    assert order_by.index("period_end DESC") < order_by.index("report_id IS NOT NULL")
+    assert order_by.index("report_id IS NOT NULL") < order_by.index("created_at DESC")
+
   def test_future_scenario_set_never_wins_default_read(self) -> None:
     """End-to-end shape of the regression: with a scenario row present
     the default read still projects the actual row the (filtered) query
@@ -174,8 +194,10 @@ class TestLoadStatementFactSetSeries:
   def test_ordering_encodes_seam_and_window_precedence(self) -> None:
     """The collapse is first-row-per-period_end, so the ORDER BY IS the
     semantics: actual beats forecast (scenario NULLS FIRST), then the
-    NARROWER window beats the annual set sharing the FY-end period_end
-    (period_start DESC — the FY-capture lesson at series level)."""
+    canonical close-stamped set beats a publication snapshot
+    (``report_id IS NOT NULL ASC``), then the NARROWER window beats the
+    annual set sharing the FY-end period_end (period_start DESC — the
+    FY-capture lesson at series level)."""
     from robosystems.operations.information_block.envelope import (
       load_statement_fact_set_series,
     )
@@ -187,9 +209,39 @@ class TestLoadStatementFactSetSeries:
     order_by = sql.split("ORDER BY")[1]
     assert "period_end ASC" in order_by
     assert "scenario_id ASC NULLS FIRST" in order_by
+    assert "report_id IS NOT NULL" in order_by
     assert "period_start DESC NULLS LAST" in order_by
     assert order_by.index("period_end ASC") < order_by.index("scenario_id ASC")
-    assert order_by.index("scenario_id ASC") < order_by.index("period_start DESC")
+    assert order_by.index("scenario_id ASC") < order_by.index("report_id IS NOT NULL")
+    assert order_by.index("report_id IS NOT NULL") < order_by.index("period_start DESC")
+
+  def test_canonical_column_survives_later_publication_snapshot(self) -> None:
+    """Collapse narrative for the canonical tiebreak: at one period_end
+    the close-stamped set (report_id NULL) is ordered first and keeps
+    the column; the monthly Report's snapshot minted later never flips
+    the series source."""
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    june = date(2026, 6, 30)
+    rows = [
+      _make_fact_set(
+        fs_id="fs_canonical",
+        period_start=date(2026, 6, 1),
+        period_end=june,
+        report_id=None,
+      ),
+      _make_fact_set(
+        fs_id="fs_snapshot",
+        period_start=date(2026, 6, 1),
+        period_end=june,
+        report_id="rep_june",
+      ),
+    ]
+    session = self._session(rows)
+    series = load_statement_fact_set_series(session, "struct_bs")
+    assert [fs.id for fs in series] == ["fs_canonical"]
 
   def test_collapse_keeps_first_row_per_period_end(self) -> None:
     from robosystems.operations.information_block.envelope import (

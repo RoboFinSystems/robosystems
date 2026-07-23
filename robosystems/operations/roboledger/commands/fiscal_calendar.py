@@ -29,6 +29,7 @@ from robosystems.operations.roboledger.fiscal_calendar import (
   PeriodCloseService,
   add_months,
   current_month_period,
+  period_date_range,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
@@ -38,9 +39,17 @@ from robosystems.operations.roboledger.reads.fiscal_calendar import (
 
 @dataclass
 class ReopenPeriodResult:
-  """Return value for `reopen_period` — wraps the refreshed calendar."""
+  """Return value for `reopen_period` — wraps the refreshed calendar.
+
+  ``statement_sets_retracted`` counts the reopened month's canonical
+  statement FactSets deleted by the reopen (0 when the month was closed
+  before close-time stamping existed, or was soft-skipped). The REST
+  router keeps returning only ``fiscal_calendar`` (wire shape
+  unchanged); the MCP tool surfaces the count.
+  """
 
   fiscal_calendar: FiscalCalendarResponse
+  statement_sets_retracted: int = 0
 
 
 class PeriodNotFoundInLedgerError(LookupError):
@@ -191,6 +200,10 @@ def close_period(
     target_auto_advanced=result.target_auto_advanced,
     rule_summary=result.rule_summary,
     evaluated_structure_ids=list(result.evaluated_structure_ids),
+    statements_stamped=result.statements_stamped,
+    statement_stamp_note=result.statement_stamp_note,
+    stamped_statement_sets=dict(result.stamped_statement_sets),
+    statement_rule_summary=result.statement_rule_summary,
   )
 
 
@@ -204,8 +217,13 @@ def reopen_period(
   note: str | None,
   service: FiscalCalendarService,
   actor_type: str = "user",
-) -> FiscalCalendarResponse:
+) -> ReopenPeriodResult:
   """Reopen a closed fiscal period.
+
+  Retracts the month's canonical statement FactSets (close-time
+  stamping's inverse): a reopened month is no longer a closed assertion,
+  so its persisted statements — and their verification results — go
+  with it. The re-close restamps fresh sets.
 
   Raises `PeriodNotFoundInLedgerError` if the `FiscalPeriod` row
   doesn't exist, `PeriodNotClosedError` if it's not actually closed,
@@ -245,9 +263,23 @@ def reopen_period(
   )
 
   reinstate_reopened_schedule_scopes(session)
+
+  # Retract the reopened month's canonical statement sets. Function-level
+  # import — statement_sets pulls in information-block machinery this
+  # module otherwise never loads (same posture as the schedules import
+  # above).
+  from robosystems.operations.roboledger.reports.statement_sets import (
+    retract_canonical_statement_sets,
+  )
+
+  ps, pe = period_date_range(period)
+  retracted = retract_canonical_statement_sets(session, period_start=ps, period_end=pe)
   session.commit()
 
   has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
-  return build_fiscal_calendar_response(
-    session, graph_id, calendar, has_sync, last_sync_at, service
+  return ReopenPeriodResult(
+    fiscal_calendar=build_fiscal_calendar_response(
+      session, graph_id, calendar, has_sync, last_sync_at, service
+    ),
+    statement_sets_retracted=len(retracted),
   )

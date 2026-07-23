@@ -49,7 +49,12 @@ class _FakeFacts:
     self.facts = facts
 
 
-_PICKER_PATH = "robosystems.operations.roboledger.commands.reports.get_render_network"
+# The mapping builder moved to `reports.statement_sets` (shared by the
+# close-time stamper); it resolves the picker from ITS namespace, so the
+# patch path follows the function. Assertions are unchanged.
+_PICKER_PATH = (
+  "robosystems.operations.roboledger.reports.statement_sets.get_render_network"
+)
 
 
 def test_build_structure_mapping_resolves_each_statement_type_via_picker() -> None:
