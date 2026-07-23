@@ -11,8 +11,8 @@ universal accounting-concept substrate) live next door at
 `depends_on: [{framework: fac, version: v1}]` and load first.
 
 Each package here is a versioned, self-contained JSON-LD unit;
-migration 0002 walks the framework manifest to load them in dependency
-+ ordinal order at extensions DB provisioning time.
+migration 0002 walks the framework manifest to load them in
+dependency-then-ordinal order at extensions DB provisioning time.
 
 For cross-namespace equivalence taxonomies (bridges) see `../bridges/`.
 For framework composition rules and manifest schema see
@@ -77,8 +77,7 @@ packages/
 ├── rs-gaap-disclosure-mechanics/v1/  native  — DM rules per Disclosure
 ├── rs-gaap-reporting-checklist/v1/   native  — DR rules per report type
 └── rs-gaap-reporting-styles/v1/      native  — vertical / filer-profile composition surface
-                                                (Default, Small Private, Banking, Insurance,
-                                                Mining, Cannabis, …)
+                                                (Default, Small Private, Banking, Insurance, Mining, …)
 ```
 
 The trait vocabulary (`fac-traits/v1`, 99 traits across 26 categories)
@@ -97,8 +96,8 @@ currently scoped to rs-gaap; if/when another framework needs the same
 pattern, promote to `fac@v1` or extract to its own framework.
 
 **`rs-gaap-references`** and **`rs-gaap-labels`** are pure linkbases split
-out of `rs-gaap-type-subtype` (which originally clumped arcs + ASC citations
-+ labels + a redundant re-definition of every concept). They define **no
+out of `rs-gaap-type-subtype` (which originally clumped arcs, ASC citations,
+labels, and a redundant re-definition of every concept). They define **no
 concepts** — each node references a concept defined in the `rs-gaap` base
 **by qname** (the XBRL reference/label-linkbase pattern). The loader emits
 them as `reference_assignments` / `label_assignments`; the seeder attaches
@@ -113,7 +112,7 @@ are now the source of truth, edit them directly. Both are `tenant_copy: true` �
 tenants get the citations and labels for the concepts they keep.
 
 **`rs-gaap-reporting-styles`** is THE vertical-flavor surface. New
-industries (Mining, Cannabis, Cooperative, B-Corp, etc.) are added
+industries (Mining, Cooperative, B-Corp, etc.) are added
 here as new Reporting Style rows, **not** as new frameworks. The
 framework boundary is regulatory regime (GAAP, IFRS, call report,
 statutory, tax); the Reporting Style boundary is filer profile
@@ -125,7 +124,7 @@ Liabilities, Equity, Revenues, Expenses, etc.) is encoded as the
 `fac-traits/v1` (in the `fac` framework) and attached to rs-gaap
 concepts via `rs-gaap-traits/v1`'s trait-assignment arcs.
 This keeps SFAC 6 categorization queryable per-element without giving
-it a separate concept namespace, and lets every rs-* framework
+it a separate concept namespace, and lets every rs-\* framework
 inherit the same axes.
 
 ## Adding a Reporting Style preset
@@ -148,7 +147,7 @@ composition.
    mirrors `_:rs-gaap-pres-is-multistep`): a role node with `roleUri`,
    `structureName`, `blockType`, `conceptArrangementPattern`, then its
    `presentation` arcs. The calc-DAG (`rs-gaap-calculations`) is global,
-   so a presentation Structure only selects *which* rows render —
+   so a presentation Structure only selects _which_ rows render —
    subtotals like `GrossProfit` are still computed even if not presented.
 2. **Declare the Style** in `rs-gaap-reporting-styles/v1` by adding two
    fields to the Style's Structure node (the one carrying `roleUri`):
@@ -158,22 +157,22 @@ composition.
      (`balance_sheet`, `income_statement`, `cash_flow_statement`,
      `equity_statement`). Each `networkRoleUri` is a presentation
      Structure's `roleUri`.
-   A Style with no `reportingStyleNetworks` (e.g. `Banking`) stays a
-   non-selectable placeholder.
+     A Style with no `reportingStyleNetworks` (e.g. `Banking`) stays a
+     non-selectable placeholder.
 3. `just reset-local`, then `change-reporting-style` to the preset's
    Structure id (`uuid5(roleUri, "structure")`) and re-render.
 
 ### The equity-form axis (worked example)
 
 The second segment of the code is the entity's legal form
-(`CORP`/`PART`/`LLC`/…). Because composition is per-*statement*, an
+(`CORP`/`PART`/`LLC`/…). Because composition is per-_statement_, an
 equity-form variant is a **full balance-sheet Structure** that clones the
 corporate asset/liability arcs and swaps only the equity section, plus a
 form-specific Statement-of-Changes rollforward:
 
 - `BS-classified-PART` / `BS-classified-LLC` keep `rs-gaap:StockholdersEquity`
-  as the equity *total* (the calc-DAG plug: `StockholdersEquity = Σ equity
-  leaves`, which already sums `PartnersCapital`/`MembersEquity`), so the
+  as the equity _total_ (the calc-DAG plug: `StockholdersEquity = Σ equity
+leaves`, which already sums `PartnersCapital`/`MembersEquity`), so the
   balance sheet still foots. They differ from `BS-classified` only in which
   child the equity section presents — `PartnersCapital` / `MembersEquity`
   instead of the corporate stack.
