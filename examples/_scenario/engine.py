@@ -73,6 +73,18 @@ def trailing_year(start: date, months: int) -> tuple[date, date]:
   return month_date(start, first_offset, 1), month_date(start, close_offset, 31)
 
 
+def month_windows(start: date, months: int) -> list[tuple[date, date]]:
+  """Monthly reporting windows for every completed month of the rolling
+  history — offsets ``0 .. months - 2`` (offset ``months - 1`` is the
+  still-open current month). The final window ends on the close target,
+  coinciding with the annual report's period end.
+  """
+  return [
+    (month_date(start, off, 1), month_date(start, off, 31))
+    for off in range(months - 1)
+  ]
+
+
 # ---------------------------------------------------------------------------
 # Curve builders — author driver curves as intent, not 16 literals
 # ---------------------------------------------------------------------------

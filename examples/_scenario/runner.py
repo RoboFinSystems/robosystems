@@ -1017,18 +1017,76 @@ def verify_disclosure_notes(graph_id: str) -> None:
       print(f"    Verification: {passed}/{total} rules passed")
 
 
-def verify_metrics(graph_id: str, scenario) -> None:
-  """Compute + render the Key Financial Metrics standing time series.
+def _metric_period_windows(
+  scenario, period_windows: list[tuple[date, date]] | None
+) -> list[tuple[date | None, date]]:
+  """The (period_start, period_end) windows a metric compute should run.
 
-  The Metrics M-1 probe: the library-seeded rs-metric catalog computes
-  from the filed report's persisted facts. Two period ends (current +
-  prior comparative — ``comparative=True`` persists both windows) make
-  an honest 2-period series for the instant metrics; InterestCoverage
-  skips with a reason for a debt-free scenario, exercising the
-  soft-fail path on purpose.
+  Monthly windows when the monthly-report loop provided them (the
+  standing series at the operating cadence); otherwise the legacy
+  two-window probe — prior comparative end + report end, mirroring the
+  report's ``_compute_prior_period``.
+  """
+  if period_windows:
+    return list(period_windows)
+  if scenario.report_period is None:
+    return []
+  period_start, period_end = scenario.report_period
+  prior_end = period_start - timedelta(days=1)
+  return [(None, prior_end), (None, period_end)]
+
+
+def _post_compute_metrics(
+  graph_id: str,
+  structure_id: str,
+  window: tuple[date | None, date],
+  api_key: str,
+) -> dict | None:
+  """One ``compute-metrics`` call; returns the result dict or None on error.
+
+  ``period_start`` rides along when the window carries one — load-bearing
+  for the final monthly window, whose ``period_end`` coincides with the
+  annual report's: the start bound keeps FY-duration facts out of the
+  monthly column.
   """
   import httpx
 
+  period_start, period_end = window
+  payload: dict = {
+    "structure_id": structure_id,
+    "period_end": period_end.isoformat(),
+  }
+  if period_start is not None:
+    payload["period_start"] = period_start.isoformat()
+  resp = httpx.post(
+    f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-metrics",
+    json=payload,
+    headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+    timeout=60.0,
+  )
+  if resp.status_code >= 400:
+    print(
+      f"  ERROR: compute-metrics {period_end} -> "
+      f"HTTP {resp.status_code}: {resp.text[:200]}"
+    )
+    return None
+  return (resp.json() or {}).get("result") or {}
+
+
+def verify_metrics(
+  graph_id: str,
+  scenario,
+  period_windows: list[tuple[date, date]] | None = None,
+) -> None:
+  """Compute + render the Key Financial Metrics standing time series.
+
+  With ``period_windows`` (from :func:`generate_monthly_reports`) the
+  library-seeded rs-metric catalog computes at every month-end — the
+  monthly series the FP&A cadence doctrine calls for. Detailed values
+  print for the final window only; every window prints its counts.
+  InterestCoverage skips with a reason for a debt-free scenario,
+  exercising the soft-fail path on purpose.
+  """
   client = _get_ledger_client()
   blocks = client.list_information_blocks(graph_id, block_type="metric")
   if not blocks:
@@ -1042,37 +1100,28 @@ def verify_metrics(graph_id: str, scenario) -> None:
   structure_id = block.get("id")
   print(f"  Metric block: {block.get('name')} ({structure_id})")
 
-  if scenario.report_period is None:
+  windows = _metric_period_windows(scenario, period_windows)
+  if not windows:
     print("  (skipped — scenario has no report_period)")
     return
-  period_start, period_end = scenario.report_period
-  # Mirrors the report's comparative window (_compute_prior_period):
-  # the prior period ends the day before the current window starts.
-  prior_end = period_start - timedelta(days=1)
 
   api_key = _client_config()["token"]
-  for pe in (prior_end, period_end):
-    resp = httpx.post(
-      f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-metrics",
-      json={"structure_id": structure_id, "period_end": pe.isoformat()},
-      headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-      timeout=60.0,
-    )
-    if resp.status_code >= 400:
-      print(f"  ERROR: compute-metrics {pe} -> HTTP {resp.status_code}: {resp.text[:200]}")
+  for window in windows:
+    result = _post_compute_metrics(graph_id, structure_id, window, api_key)
+    if result is None:
       continue
-    result = (resp.json() or {}).get("result") or {}
     computed = result.get("computed") or []
     skipped = result.get("skipped") or []
-    print(f"  {pe}: {len(computed)} computed, {len(skipped)} skipped")
-    for m in computed:
-      value = m.get("value")
-      if not isinstance(value, (int, float)):
-        continue
-      shown = f"${value:,.2f}" if m.get("unit") == "USD" else f"{value:,.2f}"
-      print(f"    {m.get('name')}: {shown}")
-    for s in skipped:
-      print(f"    (skipped) {s.get('element_qname')}: {s.get('reason')}")
+    print(f"  {window[1]}: {len(computed)} computed, {len(skipped)} skipped")
+    if window is windows[-1]:
+      for m in computed:
+        value = m.get("value")
+        if not isinstance(value, (int, float)):
+          continue
+        shown = f"${value:,.2f}" if m.get("unit") == "USD" else f"{value:,.2f}"
+        print(f"    {m.get('name')}: {shown}")
+      for s in skipped:
+        print(f"    (skipped) {s.get('element_qname')}: {s.get('reason')}")
 
   # Re-read the block — the standing sets are now the rendered series.
   blocks = client.list_information_blocks(graph_id, block_type="metric")
@@ -1093,10 +1142,13 @@ def verify_metrics(graph_id: str, scenario) -> None:
   values = current_ratio.get("values") or []
   print(f"    Current Ratio series: {values}")
   numeric = [v for v in values if isinstance(v, (int, float))]
-  if len(periods) >= 2 and len(numeric) >= 2:
-    print("  Two-period metric series verified")
-  elif not numeric:
-    print("  WARNING: Current Ratio has no computed values")
+  if len(periods) >= len(windows) and len(numeric) >= len(windows):
+    print(f"  Metric series verified ({len(periods)} periods, all numeric)")
+  elif len(numeric) < len(windows):
+    print(
+      f"  WARNING: Current Ratio has {len(numeric)} numeric value(s) "
+      f"across {len(windows)} computed window(s)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1228,46 +1280,48 @@ def create_custom_metrics(graph_id: str, catalogs: list[dict]) -> list[dict]:
   return created
 
 
-def compute_custom_metrics(graph_id: str, scenario, catalogs: list[dict]) -> None:
-  """Compute each tenant metric catalog for both comparative period ends.
+def compute_custom_metrics(
+  graph_id: str,
+  scenario,
+  catalogs: list[dict],
+  period_windows: list[tuple[date, date]] | None = None,
+) -> None:
+  """Compute each tenant metric catalog across the metric windows.
 
-  Same two-window probe as :func:`verify_metrics`, against the
-  tenant-authored structures — proving compute-metrics is
-  structure-agnostic (library catalog and tenant catalog run the same op).
+  Same windows as :func:`verify_metrics` (monthly when the monthly-report
+  loop ran), against the tenant-authored structures — proving
+  compute-metrics is structure-agnostic (library catalog and tenant
+  catalog run the same op). Values print for the final window only.
   """
-  import httpx
-
-  if scenario.report_period is None:
+  windows = _metric_period_windows(scenario, period_windows)
+  if not windows:
     print("  (skipped — scenario has no report_period)")
     return
-  period_start, period_end = scenario.report_period
-  prior_end = period_start - timedelta(days=1)
 
   api_key = _client_config()["token"]
   for catalog in catalogs:
     print(f"  {catalog['name']}:")
-    for pe in (prior_end, period_end):
-      resp = httpx.post(
-        f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-metrics",
-        json={"structure_id": catalog["structure_id"], "period_end": pe.isoformat()},
-        headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-        timeout=60.0,
+    computed_windows = 0
+    for window in windows:
+      result = _post_compute_metrics(
+        graph_id, catalog["structure_id"], window, api_key
       )
-      if resp.status_code >= 400:
-        print(
-          f"    ERROR: compute-metrics {pe} -> "
-          f"HTTP {resp.status_code}: {resp.text[:200]}"
-        )
+      if result is None:
         continue
-      result = (resp.json() or {}).get("result") or {}
-      for m in result.get("computed") or []:
-        value = m.get("value")
-        if not isinstance(value, (int, float)):
-          continue
-        shown = f"${value:,.2f}" if m.get("unit") == "USD" else f"{value:,.4f}"
-        print(f"    {pe}  {m.get('name')}: {shown}")
-      for s in result.get("skipped") or []:
-        print(f"    {pe}  (skipped) {s.get('element_qname')}: {s.get('reason')}")
+      if result.get("computed"):
+        computed_windows += 1
+      if window is windows[-1]:
+        for m in result.get("computed") or []:
+          value = m.get("value")
+          if not isinstance(value, (int, float)):
+            continue
+          shown = f"${value:,.2f}" if m.get("unit") == "USD" else f"{value:,.4f}"
+          print(f"    {window[1]}  {m.get('name')}: {shown}")
+        for s in result.get("skipped") or []:
+          print(
+            f"    {window[1]}  (skipped) {s.get('element_qname')}: {s.get('reason')}"
+          )
+    print(f"    Series: {computed_windows}/{len(windows)} window(s) computed")
 
 
 # ---------------------------------------------------------------------------
@@ -1613,6 +1667,67 @@ def materialize_graph(graph_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def generate_monthly_reports(
+  graph_id: str, scenario: Scenario
+) -> list[tuple[date, date]]:
+  """Create a draft monthly report for every completed month of the history.
+
+  The monthly series is the metric engine's substrate: ``compute-metrics``
+  binds operands to persisted report facts at each ``period_end``, so
+  series length is downstream of report cadence — monthly drafts make the
+  standing metric sets a monthly time series (the FP&A operating-plan
+  cadence). Draft only: no filing, no bundles — the annual report stays
+  the filed artifact.
+
+  ``comparative=False``: each month's begin instants come from the prior
+  month's own report, so comparative windows would be redundant work.
+
+  Returns the month windows so the metric computes downstream share the
+  exact report periods — passing ``period_start`` per window keeps the
+  final month's duration operands off the annual FY facts, which share
+  its ``period_end``.
+  """
+  from .engine import add_months, month_windows
+
+  client = _get_ledger_client()
+  if scenario.report_period is None:
+    print("  (skipped — scenario has no report_period)")
+    return []
+
+  structures = client.list_structures(graph_id, block_type="coa_mapping")
+  if not structures:
+    print("  ERROR: No coa_mapping structure — was the CoA created?")
+    return []
+  mapping_id = structures[0]["id"]
+
+  # Recover the rolling window's start from the annual period: the annual
+  # window ends at the close target, offset ``months - 2`` from the start.
+  annual_end = scenario.report_period[1]
+  start = add_months(
+    date(annual_end.year, annual_end.month, 1), -(scenario.months - 2)
+  )
+
+  windows = month_windows(start, scenario.months)
+  created = 0
+  for period_start, period_end in windows:
+    try:
+      client.create_report(
+        graph_id,
+        name=f"{period_end.strftime('%B %Y')} Monthly Report",
+        mapping_id=mapping_id,
+        taxonomy_id="rs-gaap",
+        period_start=period_start,
+        period_end=period_end,
+        period_type="monthly",
+        comparative=False,
+      )
+      created += 1
+    except Exception as e:
+      print(f"  ERROR: monthly report {period_end}: {e}")
+  print(f"  Reports:      {created}/{len(windows)} monthly drafts")
+  return windows
+
+
 def generate_annual_report(
   graph_id: str, scenario: Scenario, output_dir: Path
 ) -> str | None:
@@ -1891,6 +2006,11 @@ def run_demo(
   print("\nMaterializing to graph...")
   materialize_graph(graph_id)
 
+  # Draft monthly reports across the completed history — the monthly
+  # metric-series substrate (series length is downstream of report cadence).
+  print("\nGenerating monthly reports...")
+  period_windows = generate_monthly_reports(graph_id, scenario)
+
   # Generate + file the annual report
   print("\nGenerating annual report...")
   report_id = generate_annual_report(graph_id, scenario, output_dir)
@@ -1902,16 +2022,16 @@ def run_demo(
     verify_disclosure_notes(graph_id)
 
   # Metrics probe — compute the seeded Key Financial Metrics catalog
-  # against the report's persisted facts for both comparative period
-  # ends, then render the standing time series.
+  # at every monthly window (falling back to the two comparative period
+  # ends), then render the standing time series.
   if report_id:
     print("\nComputing key financial metrics...")
-    verify_metrics(graph_id, scenario)
+    verify_metrics(graph_id, scenario, period_windows)
 
   # Tenant metric catalogs compute through the same structure-agnostic op.
   if report_id and authored_metric_catalogs:
     print("\nComputing custom metrics...")
-    compute_custom_metrics(graph_id, scenario, authored_metric_catalogs)
+    compute_custom_metrics(graph_id, scenario, authored_metric_catalogs, period_windows)
 
   # Summary
   print("\n" + "=" * 60)
