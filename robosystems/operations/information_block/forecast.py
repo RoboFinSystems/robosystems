@@ -389,11 +389,27 @@ def delete(
   structure = _load_forecast_or_404(session, payload.structure_id)
   structure_id = structure.id
 
-  for fact_set in (
+  scenario_sets = (
     session.execute(select(FactSet).where(FactSet.scenario_id == structure_id))
     .scalars()
     .all()
-  ):
+  )
+  # Verification rows pin the scenario's month sets (compute-forecast
+  # verifies each month, F-2); no DB-level FK ties them to fact_sets,
+  # so sweep them here or they orphan invisibly.
+  set_ids = [fs.id for fs in scenario_sets]
+  if set_ids:
+    from robosystems.models.extensions import VerificationResult
+
+    for stale in (
+      session.execute(
+        select(VerificationResult).where(VerificationResult.fact_set_id.in_(set_ids))
+      )
+      .scalars()
+      .all()
+    ):
+      session.delete(stale)
+  for fact_set in scenario_sets:
     session.delete(fact_set)
   session.flush()
 

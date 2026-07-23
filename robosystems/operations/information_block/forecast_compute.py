@@ -63,6 +63,13 @@ from robosystems.operations.information_block.forecast import (
   FORECAST_BLOCK_TYPE,
   _load_lever_fact_set,
 )
+from robosystems.operations.information_block.forecast_articulation import (
+  ArticulationContext,
+  derive_cash_flow,
+  load_articulation_context,
+  roll_balance_sheet,
+  schedule_is_delta,
+)
 from robosystems.operations.information_block.metrics import (
   _default_entity_id,
   _metric_unit,
@@ -295,14 +302,24 @@ def cmd_compute_forecast(
       base_is_element_ids.append(fact.element_id)
     prior_values[fact.element_id] = float(fact.value)
 
-  # BS instants seed [t-1]/carry context for balance-driven rules.
+  # BS instants seed [t-1]/carry context for balance-driven rules — and,
+  # since F-2, the full roll: base_bs_element_ids preserves emission
+  # order, bs_prior is the roll's month-zero state.
+  base_bs_set = None
+  base_bs_element_ids: list[str] = []
+  bs_prior: dict[str, float] = {}
   if bs_structure_id is not None:
     base_bs_set = _actual_set_at(
       session, bs_structure_id, entity_id, base_start, base_end
     )
     if base_bs_set is not None:
       for fact in _numeric_facts(session, base_bs_set.id):
-        if fact.value is not None and fact.element_id not in prior_values:
+        if fact.value is None:
+          continue
+        if fact.element_id not in bs_prior:
+          base_bs_element_ids.append(fact.element_id)
+        bs_prior[fact.element_id] = float(fact.value)
+        if fact.element_id not in prior_values:
           prior_values[fact.element_id] = float(fact.value)
 
   # ── Activate driver rules for this scenario ───────────────────────────
@@ -387,9 +404,14 @@ def cmd_compute_forecast(
   )
 
   # ── Calc DAG + carry pool ─────────────────────────────────────────────
+  global_calcs = load_rs_gaap_calculations(session)
   calculations = merge_calculations(
-    load_rs_gaap_calculations(session), _local_calc_arcs(session, is_structure_id)
+    global_calcs, _local_calc_arcs(session, is_structure_id)
   )
+  if bs_structure_id is not None:
+    calculations = merge_calculations(
+      calculations, _local_calc_arcs(session, bs_structure_id)
+    )
   calc_order = topo_sort_calculations(calculations)
   calc_targets = set(calculations.keys())
   carry_pool = [
@@ -397,6 +419,49 @@ def cmd_compute_forecast(
     for el in base_is_element_ids
     if el not in calc_targets and el not in active_target_ids
   ]
+
+  # ── Articulation context (F-2) — BS roll + schedules + derived CF ─────
+  # The mapping id rides the base report set's PivotProvenance; without
+  # it schedule contributions can't route CoA→rs-gaap and are skipped.
+  mapping_id: str | None = None
+  for seed_set in (base_is_set, base_bs_set):
+    prov = getattr(seed_set, "provenance", None) if seed_set is not None else None
+    if isinstance(prov, dict) and prov.get("origin") == "pivot":
+      mapping_id = prov.get("mapping_id")
+      if mapping_id:
+        break
+  cf_structure_id = _newest_actual_structure_id(session, "cash_flow_statement")
+
+  ctx: ArticulationContext | None = None
+  diagnostics: list[str] = []
+  if bs_structure_id is not None and base_bs_set is not None:
+    horizon_end = period_date_range(add_months(mechanics.base_period, months_n))[1]
+    ctx = load_articulation_context(
+      session,
+      bs_structure_id=bs_structure_id,
+      cf_structure_id=cf_structure_id,
+      mapping_id=mapping_id,
+      entity_id=entity_id,
+      base_bs_element_ids=base_bs_element_ids,
+      bs_prior=bs_prior,
+      base_is_element_ids=base_is_element_ids,
+      base_start=base_start,
+      horizon_end=horizon_end,
+    )
+    diagnostics.extend(ctx.diagnostics)
+    if cf_structure_id is None:
+      diagnostics.append(
+        "no actual cash-flow statement exists — scenario CF sets skipped"
+      )
+    if mapping_id is None:
+      diagnostics.append(
+        "base report carries no mapping provenance — schedule projections skipped"
+      )
+  else:
+    diagnostics.append(
+      "no actual balance sheet at the base period — emitting the "
+      "rule-driven working-capital instants only (no BS roll / CF)"
+    )
 
   elements_by_id: dict[str, Element] = {}
 
@@ -410,6 +475,11 @@ def cmd_compute_forecast(
   # ── The walk ──────────────────────────────────────────────────────────
   months_computed: list[ForecastMonthLite] = []
   months = [add_months(mechanics.base_period, i) for i in range(1, months_n + 1)]
+  active_instant_ids = {
+    ar.target.id for ar in ordered_active if ar.target.period_type == "instant"
+  }
+  prior_bs = dict(bs_prior)
+  prev_period_end = base_end
 
   for month_index, month in enumerate(months, start=1):
     month_start, month_end = period_date_range(month)
@@ -419,6 +489,15 @@ def cmd_compute_forecast(
     for element_id in carry_pool:
       if element_id in prior_values:
         current[element_id] = prior_values[element_id]
+
+    # (a2) Schedule deltas — a schedule's own projection overrides the
+    # carry for its expense lines (an ended schedule's expense stops;
+    # the base month's contribution is already inside the carried value).
+    if ctx is not None:
+      for element_id in list(current):
+        delta = schedule_is_delta(ctx, element_id, month, mechanics.base_period)
+        if delta:
+          current[element_id] += delta
 
     # (b) Driver rules in same-month dependency order.
     for ar in ordered_active:
@@ -529,6 +608,14 @@ def cmd_compute_forecast(
       if element_id not in current and element_id in prior_values:
         current[element_id] = prior_values[element_id]
 
+    # (b2) Push rule deltas down the composition — a Derive rule that
+    # targets a calc PARENT (Revenues, CostOfRevenue) scales the
+    # parent's carried children proportionally, the workbook's implicit
+    # semantics (every revenue stream grows at g). Without this the
+    # statement's own RollUp verification fails: driven parent, stale
+    # children.
+    _scale_rule_target_children(current, active_target_ids, calculations)
+
     # (c) Calc-DAG subtotals — derive, never carry (present = direct wins).
     resolved = resolve_calc_dag(current, set(current), calculations, calc_order)
 
@@ -547,10 +634,56 @@ def cmd_compute_forecast(
         continue
       is_facts.append((element, resolved[element_id]))
 
+    # (d2) Balance-sheet roll + derived CF (F-2) — with an articulation
+    # context the BS is the full roll (carry, rules, schedules, RE,
+    # balancing cash) and the CF derives from its deltas; without one
+    # (no actual BS at the base period) the F-1 behavior stands: the
+    # rule-driven working-capital instants alone.
     bs_facts: list[tuple[Element, float]] = []
-    for ar in ordered_active:
-      if ar.target.id in current and ar.target.period_type == "instant":
-        bs_facts.append((ar.target, current[ar.target.id]))
+    cf_facts: list[tuple[Element, float]] = []
+    bs_values: dict[str, float] = {}
+    if ctx is not None:
+      bs_values = roll_balance_sheet(
+        ctx,
+        month_end=month_end,
+        prev_end=prev_period_end,
+        prior_bs=prior_bs,
+        rule_values=current,
+        rule_instant_targets=active_instant_ids,
+        resolved_is=resolved,
+        calculations=calculations,
+        calc_order=calc_order,
+      )
+      final_bs = resolve_calc_dag(bs_values, set(bs_values), calculations, calc_order)
+      emitted_bs: set[str] = set()
+      for element_id in base_bs_element_ids:
+        element = _element(element_id)
+        if element is None or element_id not in final_bs:
+          continue
+        bs_facts.append((element, final_bs[element_id]))
+        emitted_bs.add(element_id)
+      for element_id in sorted(set(bs_values) - emitted_bs):
+        element = _element(element_id)
+        if element is not None:
+          bs_facts.append((element, bs_values[element_id]))
+
+      if ctx.cf_structure_id is not None:
+        cf_values, _plug = derive_cash_flow(
+          ctx,
+          bs=bs_values,
+          prior_bs=prior_bs,
+          resolved_is=resolved,
+          calculations=calculations,
+          calc_order=calc_order,
+        )
+        for element_id in sorted(cf_values):
+          element = _element(element_id)
+          if element is not None:
+            cf_facts.append((element, cf_values[element_id]))
+    else:
+      for ar in ordered_active:
+        if ar.target.id in current and ar.target.period_type == "instant":
+          bs_facts.append((ar.target, current[ar.target.id]))
 
     is_set_id = _upsert_month_set(
       session,
@@ -576,6 +709,36 @@ def cmd_compute_forecast(
         created_by=created_by,
         facts=bs_facts,
       )
+    cf_set_id = None
+    if ctx is not None and ctx.cf_structure_id is not None and cf_facts:
+      cf_set_id = _upsert_month_set(
+        session,
+        structure_id=ctx.cf_structure_id,
+        entity_id=entity_id,
+        scenario_id=scenario_id,
+        period_start=month_start,
+        period_end=month_end,
+        provenance=provenance,
+        created_by=created_by,
+        facts=cf_facts,
+      )
+
+    # (f) Verify the month — the same rule corpus that gates actuals,
+    # pinned to each scenario set (the fact_set_id pin scopes balances
+    # and binds; no scenario threading inside the engine). Prior runs
+    # for a set are replaced, mirroring the fact upsert's drift
+    # semantics — results are per-month state, not append-only history.
+    verification_passed, verification_failures = _verify_month_sets(
+      session,
+      sets=(
+        (is_structure_id, is_set_id),
+        (bs_structure_id, bs_set_id),
+        (ctx.cf_structure_id if ctx is not None else None, cf_set_id),
+      ),
+      period_end=month_end,
+      created_by=created_by,
+      global_calculations=global_calcs,
+    )
 
     months_computed.append(
       ForecastMonthLite(
@@ -584,17 +747,25 @@ def cmd_compute_forecast(
         period_end=month_end,
         income_statement_fact_set_id=is_set_id,
         balance_sheet_fact_set_id=bs_set_id,
-        computed_count=len(is_facts) + len(bs_facts),
+        cash_flow_fact_set_id=cf_set_id,
+        computed_count=len(is_facts) + len(bs_facts) + len(cf_facts),
+        verification_passed=verification_passed,
+        verification_failures=verification_failures,
       )
     )
 
     # (e) Roll the window: next month's [t-1]/carry context is this
-    # month's resolved IS values + the balance instants.
+    # month's resolved IS values + the full balance sheet.
     prior_values.clear()
     for element, value in is_facts:
       prior_values[element.id] = value
-    for element, value in bs_facts:
-      prior_values[element.id] = value
+    if bs_values:
+      prior_values.update(bs_values)
+      prior_bs = bs_values
+    else:
+      for element, value in bs_facts:
+        prior_values[element.id] = value
+    prev_period_end = month_end
 
   session.flush()
   return ComputeForecastResponse(
@@ -605,7 +776,103 @@ def cmd_compute_forecast(
     months=months_n,
     months_computed=months_computed,
     skipped=skipped,
+    diagnostics=diagnostics,
   )
+
+
+def _scale_rule_target_children(
+  current: dict[str, float],
+  active_target_ids: set[str],
+  calculations: dict[str, list[tuple[str, float]]],
+) -> None:
+  """Scale a rule-driven calc parent's present children so the
+  composition articulates with the driven value.
+
+  Proportional: each child (and its own subtree, recursively) multiplies
+  by ``driven / Σ child·weight``. A zero children-sum is left untouched
+  — proportional scaling has no basis, and the visible RollUp failure is
+  more honest than inventing a split. A skipped rule that fell back to
+  carry scales by exactly 1.0 (children carried too), so this is a no-op
+  for inactive months.
+  """
+
+  def _scale_subtree(parent: str, factor: float, visited: set[str]) -> None:
+    for child, _weight in calculations.get(parent, ()):
+      if child in visited or child not in current:
+        continue
+      visited.add(child)
+      current[child] *= factor
+      _scale_subtree(child, factor, visited)
+
+  for target in active_target_ids:
+    children = calculations.get(target)
+    if not children or target not in current:
+      continue
+    children_sum = sum(
+      current[child] * weight for child, weight in children if child in current
+    )
+    if abs(children_sum) < 1e-9:
+      continue
+    factor = current[target] / children_sum
+    if factor == 1.0:
+      continue
+    _scale_subtree(target, factor, set())
+
+
+_MAX_FAILURES_PER_MONTH = 5
+
+
+def _verify_month_sets(
+  session: Session,
+  *,
+  sets: tuple[tuple[str | None, str | None], ...],
+  period_end: date,
+  created_by: str,
+  global_calculations: dict[str, list[tuple[str, float]]],
+) -> tuple[bool | None, list[str]]:
+  """Run the rule corpus against each emitted scenario set, pinned.
+
+  Prior results for a set are deleted first — a recompute replaces the
+  month's verification state the same way the fact upsert replaces its
+  values. Returns ``(passed, failures)``: ``passed`` is ``None`` when
+  no rules produced results, else whether nothing failed/errored;
+  ``failures`` carries the first few failed/errored messages.
+  """
+  from robosystems.models.extensions import VerificationResult
+  from robosystems.operations.information_block.rules.engine import (
+    evaluate_rules_for_structure,
+  )
+
+  any_results = False
+  failures: list[str] = []
+  for structure_id, fact_set_id in sets:
+    if structure_id is None or fact_set_id is None:
+      continue
+    for stale in (
+      session.execute(
+        select(VerificationResult).where(VerificationResult.fact_set_id == fact_set_id)
+      )
+      .scalars()
+      .all()
+    ):
+      session.delete(stale)
+    results = evaluate_rules_for_structure(
+      session,
+      structure_id,
+      fact_set_id=fact_set_id,
+      period_end=period_end,
+      created_by=created_by,
+      global_calculations=global_calculations,
+    )
+    if results:
+      any_results = True
+    for result in results:
+      if result.status in ("fail", "error") and len(failures) < _MAX_FAILURES_PER_MONTH:
+        failures.append(f"{result.status}: {result.message}")
+
+  if not any_results:
+    return None, []
+  return not failures, failures
 
 
 def _upsert_month_set(

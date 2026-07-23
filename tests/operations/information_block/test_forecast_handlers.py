@@ -390,9 +390,10 @@ class TestDelete:
 
     lever_set = SimpleNamespace(id="fs_lever")
     month_set = SimpleNamespace(id="fs_july_is")
-    session.execute.return_value.scalars.return_value.all.return_value = [
-      lever_set,
-      month_set,
+    stale_verification = SimpleNamespace(id="vr_stale")
+    session.execute.return_value.scalars.return_value.all.side_effect = [
+      [lever_set, month_set],  # the scenario's FactSets
+      [stale_verification],  # verification rows pinned to those sets
     ]
 
     result = forecast_handlers.delete(
@@ -401,9 +402,11 @@ class TestDelete:
 
     assert result == "struct_budget_01"
     deleted = [call.args[0] for call in session.delete.call_args_list]
-    # Scenario sets first (they attach to OTHER structures — the
-    # structure delete alone wouldn't reach them), then the block.
-    assert deleted == [lever_set, month_set, structure]
+    # Verification rows first (no DB-level FK ties them to fact_sets —
+    # unswept they'd orphan invisibly), then the scenario sets (they
+    # attach to OTHER structures — the structure delete alone wouldn't
+    # reach them), then the block.
+    assert deleted == [stale_verification, lever_set, month_set, structure]
     session.commit.assert_called_once()
 
 

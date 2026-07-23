@@ -1403,6 +1403,8 @@ def run_forecast_scenario(
 
   # 1. Author the scenario — lever VALUES on rs-driver concepts; the
   #    mechanics (what each lever drives) are the library's Derive rules.
+  #    (Provisioning idempotency is owned by ``reset_demo``, which wipes
+  #    prior demo state — including any earlier forecast block.)
   levers = [
     {"qname": qname, "value": value} for qname, value in forecast_levers.items()
   ]
@@ -1433,10 +1435,13 @@ def run_forecast_scenario(
   for qname, value in forecast_levers.items():
     print(f"    {qname.split(':')[-1]}: {value}")
 
-  # 2. Walk the cascade — first to horizon-1 (the compounding probe's
-  #    baseline), then the full horizon (rerun replaces cleanly).
+  # 2. Walk the cascade — first to horizon-1 (the compounding /
+  #    continuity probes' baseline), then the full horizon (rerun
+  #    replaces cleanly).
   is_block_id = _statement_block_id(graph_id, "income_statement")
-  rev_prev = None
+  bs_block_id = _statement_block_id(graph_id, "balance_sheet")
+  cf_block_id = _statement_block_id(graph_id, "cash_flow_statement")
+  rev_prev = cash_prev = re_prev = None
   if is_block_id:
     probe = httpx.post(
       f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-forecast",
@@ -1447,6 +1452,14 @@ def run_forecast_scenario(
     if probe.status_code < 400:
       rendering = _graphql_rendering(graph_id, is_block_id, headers, scenario_id)
       rev_prev = _rendering_value(rendering, "rs-gaap:Revenues")
+      if bs_block_id:
+        probe_bs = _graphql_rendering(graph_id, bs_block_id, headers, scenario_id)
+        cash_prev = _rendering_value(
+          probe_bs, "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+        )
+        re_prev = _rendering_value(
+          probe_bs, "rs-gaap:RetainedEarningsAccumulatedDeficit"
+        )
 
   resp = httpx.post(
     f"{BASE_URL}/extensions/roboledger/{graph_id}/operations/compute-forecast",
@@ -1486,9 +1499,12 @@ def run_forecast_scenario(
   # 4. Working capital — AR against the same month's revenue must
   #    reproduce the asserted DSO (days-based balance mechanics).
   dso = forecast_levers.get("rs-driver:DaysSalesOutstanding")
-  bs_block_id = _statement_block_id(graph_id, "balance_sheet")
-  if dso and rev_last and bs_block_id:
-    bs_rendering = _graphql_rendering(graph_id, bs_block_id, headers, scenario_id)
+  bs_rendering = (
+    _graphql_rendering(graph_id, bs_block_id, headers, scenario_id)
+    if bs_block_id
+    else {}
+  )
+  if dso and rev_last:
     ar = _rendering_value(bs_rendering, "rs-gaap:ReceivablesNetCurrent")
     if ar is not None:
       implied = ar / (rev_last / 30)
@@ -1496,6 +1512,53 @@ def run_forecast_scenario(
         print(f"  DSO:          AR / (Revenues/30) == {implied:.1f} days")
       else:
         print(f"  WARNING: implied DSO {implied:.4f} != asserted {dso}")
+
+  # 4b. Articulation (F-2) — the three-statement claims, live:
+  #     A = L + E by construction; RE rolls by exactly NI; cash moves by
+  #     exactly the CF net change; every month's rule corpus passes.
+  assets = _rendering_value(bs_rendering, "rs-gaap:Assets")
+  le_total = _rendering_value(bs_rendering, "rs-gaap:LiabilitiesAndStockholdersEquity")
+  if assets is not None and le_total is not None:
+    if abs(assets - le_total) < 0.01:
+      print(f"  A = L + E:    {assets:,.2f} == {le_total:,.2f}")
+    else:
+      print(f"  WARNING: balance sheet out of balance ({assets} != {le_total})")
+  cash_last = _rendering_value(
+    bs_rendering, "rs-gaap:CashAndCashEquivalentsAtCarryingValue"
+  )
+  re_last = _rendering_value(bs_rendering, "rs-gaap:RetainedEarningsAccumulatedDeficit")
+  ni_last = _rendering_value(rendering, "rs-gaap:NetIncomeLoss")
+  if re_prev is not None and re_last is not None and ni_last is not None:
+    if abs((re_last - re_prev) - ni_last) < 0.01:
+      print(f"  RE roll:      ΔRE == NI ({ni_last:,.2f})")
+    else:
+      print(f"  WARNING: ΔRE {re_last - re_prev:,.2f} != NI {ni_last:,.2f}")
+  if cf_block_id and cash_prev is not None and cash_last is not None:
+    cf_rendering = _graphql_rendering(graph_id, cf_block_id, headers, scenario_id)
+    net_change = _rendering_value(
+      cf_rendering, "rs-gaap:CashAndCashEquivalentsPeriodIncreaseDecrease"
+    )
+    if net_change is not None:
+      if abs((cash_last - cash_prev) - net_change) < 0.01:
+        print(f"  Cash roll:    ΔCash == CF net change ({net_change:,.2f})")
+      else:
+        print(
+          f"  WARNING: ΔCash {cash_last - cash_prev:,.2f} != "
+          f"CF net change {net_change:,.2f}"
+        )
+  verified = [m for m in months_computed if m.get("verification_passed")]
+  failed = [m for m in months_computed if m.get("verification_passed") is False]
+  if failed:
+    print(f"  WARNING: {len(failed)} months failed verification")
+    for month in failed[:2]:
+      for failure in (month.get("verification_failures") or [])[:2]:
+        print(f"    {month.get('period')}: {failure}")
+  elif verified:
+    print(f"  Verification: {len(verified)}/{len(months_computed)} months pass")
+  cf_months = [m for m in months_computed if m.get("cash_flow_fact_set_id")]
+  print(f"  Statements:   IS + BS + CF ({len(cf_months)}/{len(months_computed)} CF)")
+  for note in result.get("diagnostics") or []:
+    print(f"    (note) {note}")
 
   # 5. Extend the metric series into the scenario's forward months, then
   #    prove the seam: actuals envelope unchanged, scenario envelope

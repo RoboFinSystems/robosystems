@@ -238,6 +238,7 @@ def _run(
       return_value=SimpleNamespace(id="fs_lever", entity_id="ent_1"),
     ),
     patch.object(fc, "_upsert_month_set", recorder),
+    patch.object(fc, "_verify_month_sets", return_value=(None, [])),
   ):
     response = fc.cmd_compute_forecast(
       _session(structure),
