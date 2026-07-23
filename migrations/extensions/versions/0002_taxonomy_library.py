@@ -916,6 +916,19 @@ def upgrade() -> None:
   )
 
   # ──────────────────────────────────────────────────────────────────────
+  # 2a. Add item_type BEFORE the seed passes below.
+  # ──────────────────────────────────────────────────────────────────────
+  # The dynamic seed runs the CURRENT ``library_creator``, whose element
+  # upsert has written ``item_type`` since Metrics M-2 — but the column
+  # was historically added at 0021, so a FRESH database chain failed at
+  # this migration's seed with UndefinedColumn (deployed databases never
+  # noticed: they were past 0002 before M-2 shipped). Adding it here
+  # keeps the fresh chain's schema a superset of every column the seed
+  # writes; 0021's ``TenantOps.add_column`` is IF NOT EXISTS, so the
+  # later add is a safe no-op on fresh chains.
+  op.execute("ALTER TABLE elements ADD COLUMN IF NOT EXISTS item_type VARCHAR")
+
+  # ──────────────────────────────────────────────────────────────────────
   # 2b. Canonical-concept columns for cross-tenant unification.
   # ──────────────────────────────────────────────────────────────────────
   # agent_id groups elements that refer to the same cross-tenant concept;
@@ -1589,6 +1602,10 @@ def downgrade() -> None:
   # Drop substitution_group.
   op.drop_index("idx_elements_substitution_group", table_name="elements")
   op.drop_column("elements", "substitution_group")
+
+  # Drop item_type (added pre-seed in upgrade 2a). Tolerant: a chain
+  # walking down through 0021 already dropped it there.
+  op.execute("ALTER TABLE elements DROP COLUMN IF EXISTS item_type")
 
   # Re-add the old columns for 0001 compatibility. Values lost — 0001's
   # seed_reporting_taxonomy rerun repopulates them.

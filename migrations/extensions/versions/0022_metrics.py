@@ -79,7 +79,10 @@ _SOURCE_WIDENED = (
   "source IN ("
   "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
   "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric'"
+  # 'rs-driver' — fresh databases seed the forecast lever catalog at
+  # 0002 (dynamic manifest), so the rows exist when this DROP+ADD
+  # re-validates them; deployed databases get the value at 0024.
+  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric', 'rs-driver'"
   ")"
 )
 _SOURCE_ORIGINAL = (

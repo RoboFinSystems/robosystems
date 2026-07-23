@@ -92,11 +92,16 @@ _SOURCE_WIDENED = (
   "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric', 'rs-driver'"
   ")"
 )
+# The downgrade target mirrors 0022's _SOURCE_WIDENED as written, which
+# admits 'rs-driver' for fresh-chain correctness (fresh databases seed
+# the catalog at 0002, before this migration exists). Harmless on a
+# deployed downgrade: the package content is deleted first, so the
+# admitted-but-unused value never matches a row.
 _SOURCE_ORIGINAL = (
   "source IN ("
   "'fac', 'rs-gaap', 'us-gaap', 'ifrs', "
   "'quickbooks', 'xero', 'plaid', 'native', 'import', 'system', "
-  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric'"
+  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric', 'rs-driver'"
   ")"
 )
 

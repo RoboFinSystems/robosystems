@@ -261,7 +261,9 @@ _WIDENED_ELEMENT_SOURCE_CHECK = (
   # schemas (which now contain cm rows) doesn't fail constraint validation.
   # 'rs-metric' — same reason: fresh databases seed the metric catalog at
   # 0002, so the rows exist when this DROP+ADD re-validates them.
-  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric'"
+  # 'rs-driver' — same reason again: the forecast lever catalog seeds at
+  # 0002 on fresh databases (0024's backfill covers deployed ones).
+  "'disclosures', 'checklist', 'styles', 'cm', 'rs-metric', 'rs-driver'"
   ")"
 )
 _PRIOR_ELEMENT_SOURCE_CHECK = (
