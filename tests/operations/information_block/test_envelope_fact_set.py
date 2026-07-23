@@ -137,6 +137,88 @@ class TestLoadLatestFactSetForStructure:
     assert lite.scenario_id is None
 
 
+class TestLoadStatementFactSetSeries:
+  """The F-4 series loader — every report set as one column, with the
+  actuals-preferred seam and the narrower-window-wins collapse."""
+
+  @staticmethod
+  def _session(rows: list) -> MagicMock:
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = rows
+    return session
+
+  def test_actuals_read_excludes_scenario_sets(self) -> None:
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    session = self._session([])
+    load_statement_fact_set_series(session, "struct_bs")
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "scenario_id IS NULL" in sql
+    assert "scenario_id =" not in sql  # no scenario arm in actuals mode
+
+  def test_scenario_read_merges_actuals_plus_that_scenario(self) -> None:
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    session = self._session([])
+    load_statement_fact_set_series(session, "struct_bs", "struct_budget")
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "scenario_id IS NULL" in sql
+    assert "scenario_id = 'struct_budget'" in sql
+
+  def test_ordering_encodes_seam_and_window_precedence(self) -> None:
+    """The collapse is first-row-per-period_end, so the ORDER BY IS the
+    semantics: actual beats forecast (scenario NULLS FIRST), then the
+    NARROWER window beats the annual set sharing the FY-end period_end
+    (period_start DESC — the FY-capture lesson at series level)."""
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    session = self._session([])
+    load_statement_fact_set_series(session, "struct_bs", "struct_budget")
+    stmt = session.execute.call_args.args[0]
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    order_by = sql.split("ORDER BY")[1]
+    assert "period_end ASC" in order_by
+    assert "scenario_id ASC NULLS FIRST" in order_by
+    assert "period_start DESC NULLS LAST" in order_by
+    assert order_by.index("period_end ASC") < order_by.index("scenario_id ASC")
+    assert order_by.index("scenario_id ASC") < order_by.index("period_start DESC")
+
+  def test_collapse_keeps_first_row_per_period_end(self) -> None:
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    may = date(2026, 5, 31)
+    june = date(2026, 6, 30)
+    # Pre-ordered as the SQL would return them: May actual, June actual
+    # (draft), June forecast (loses the seam), then a second May row
+    # (an annual set at the same period_end — loses the window rule).
+    rows = [
+      _make_fact_set(fs_id="fs_may", period_start=date(2026, 5, 1), period_end=may),
+      _make_fact_set(
+        fs_id="fs_june_draft", period_start=date(2026, 6, 1), period_end=june
+      ),
+      _make_fact_set(
+        fs_id="fs_june_forecast",
+        period_start=date(2026, 6, 1),
+        period_end=june,
+        scenario_id="struct_budget",
+      ),
+      _make_fact_set(fs_id="fs_fy", period_start=date(2025, 6, 1), period_end=may),
+    ]
+    session = self._session(rows)
+    series = load_statement_fact_set_series(session, "struct_bs", "struct_budget")
+    assert [fs.id for fs in series] == ["fs_may", "fs_june_draft"]
+
+
 class TestLoadFactSetByIdForStructure:
   """Pin lookup for the Report-Block read path — match Structure + id, or None."""
 

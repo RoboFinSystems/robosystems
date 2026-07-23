@@ -77,7 +77,26 @@ class TestGetInformationBlock:
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
       result = get_information_block(session, "struct_1")
     assert result is expected
-    mock_build.assert_called_once_with(session, "struct_1", None, scenario_id=None)
+    mock_build.assert_called_once_with(
+      session, "struct_1", None, scenario_id=None, series=False
+    )
+
+  def test_series_threads_through_dispatch(self) -> None:
+    """The F-4 series flag reaches the handler as a keyword — statement
+    handlers render the whole report-set series; others ignore it."""
+    session = MagicMock()
+    structure = MagicMock()
+    structure.block_type = "schedule"
+    session.get.return_value = structure
+    mock_build = MagicMock(return_value=_envelope("struct_1"))
+    patched = _schedule_entry_with_build(mock_build)
+    with patch.dict(REGISTRY_PATH, {"schedule": patched}):
+      get_information_block(
+        session, "struct_1", scenario_id="struct_budget", series=True
+      )
+    mock_build.assert_called_once_with(
+      session, "struct_1", None, scenario_id="struct_budget", series=True
+    )
 
 
 # ── list_information_blocks ────────────────────────────────────────────────
@@ -303,4 +322,6 @@ class TestGetInformationBlockForFactSet:
       result = get_information_block_for_fact_set(session, "fs_01")
 
     assert result is expected
-    mock_build.assert_called_once_with(session, "struct_1", "fs_01", scenario_id=None)
+    mock_build.assert_called_once_with(
+      session, "struct_1", "fs_01", scenario_id=None, series=False
+    )

@@ -50,6 +50,7 @@ class InformationBlockQuery:
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
     scenario_id: str | None = None,
+    series: bool = False,
   ) -> InformationBlock | None:
     """Fetch a single Information Block envelope by id.
 
@@ -58,9 +59,16 @@ class InformationBlockQuery:
     (statement envelopes bind its latest computed month, metric
     envelopes extend the series with its forward columns, labeled
     "(forecast)").
+
+    ``series`` renders a statement block as its whole report-set time
+    series — one column per period, actuals-preferred at the seam when
+    combined with ``scenarioId``; forecast columns carry
+    ``periods[].forecast = true``. Non-statement block types ignore it.
     """
     with _open_session(info) as session:
-      envelope = get_information_block(session, str(id), scenario_id=scenario_id)
+      envelope = get_information_block(
+        session, str(id), scenario_id=scenario_id, series=series
+      )
       return InformationBlock.from_pydantic(envelope) if envelope else None
 
   @strawberry.field

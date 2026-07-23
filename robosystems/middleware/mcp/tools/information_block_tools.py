@@ -56,6 +56,10 @@ class GetInformationBlockTool:
   scenario's FactSet slice instead of actuals (statement envelopes show
   the latest computed forecast month; metric envelopes extend the series
   with the scenario's forward columns, labeled "(forecast)")
+- series (optional): Render a statement block as its whole report-set
+  time series — one column per period; combined with scenario_id the
+  columns cross the actuals/forecast seam (forecast columns carry
+  periods[].forecast = true). Non-statement block types ignore it
 
 **RETURNS:**
 A typed envelope with:
@@ -87,6 +91,14 @@ were retired in favor of this pair.""",
               "FactSet slice instead of actuals."
             ),
           },
+          "series": {
+            "type": "boolean",
+            "description": (
+              "Statement blocks only: render the whole report-set time "
+              "series (one column per period, actuals-preferred at the "
+              "forecast seam)."
+            ),
+          },
         },
         "required": ["id"],
       },
@@ -96,10 +108,13 @@ were retired in favor of this pair.""",
     graph_id = self.client.graph_id
     block_id = arguments["id"]
     scenario_id = arguments.get("scenario_id")
+    series = bool(arguments.get("series", False))
 
     try:
       with extensions_session(graph_id) as session:
-        envelope = ops_get_information_block(session, block_id, scenario_id=scenario_id)
+        envelope = ops_get_information_block(
+          session, block_id, scenario_id=scenario_id, series=series
+        )
         if envelope is None:
           return {
             "error": "not_found",

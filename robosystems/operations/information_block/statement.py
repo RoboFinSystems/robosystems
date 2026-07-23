@@ -58,6 +58,7 @@ from robosystems.operations.information_block.envelope import (
   fact_to_lite,
   load_base_envelope_atoms,
   load_disclosure_id_for_structure,
+  load_statement_fact_set_series,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   FactRow,
@@ -96,6 +97,7 @@ def _build_statement_envelope(
   structure_id: str,
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
+  series: bool = False,
   *,
   block_type: str,
 ) -> InformationBlockEnvelope | None:
@@ -122,6 +124,16 @@ def _build_statement_envelope(
   scenario's latest computed forecast month and every rendered period
   column carries a ``"... (forecast)"`` label so the surface is honest
   about what it shows.
+
+  **Series mode (F-4).** ``series=True`` binds the structure's WHOLE
+  report-set series instead of one set — one rendered column per
+  period, actuals-preferred at the seam when a scenario is selected
+  (:func:`envelope.load_statement_fact_set_series`). This is the
+  statement analog of the metric time series and the data spine of the
+  Plan grid. Facts are windowed per set to the set's own period so an
+  annual report's comparative facts can't leak into a monthly column.
+  An explicit ``fact_set_id`` pin bypasses series mode (a snapshot is
+  a single set by definition).
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -136,8 +148,44 @@ def _build_statement_envelope(
   structure = atoms.structure
   element_ids = atoms.element_ids
 
+  series_mode = series and fact_set_id is None
+  forecast_period_ends: set[date] = set()
   facts: list[Fact] = []
-  if element_ids and atoms.fact_set is not None:
+  if element_ids and series_mode:
+    series_sets = load_statement_fact_set_series(session, structure_id, scenario_id)
+    forecast_period_ends = {
+      fs.period_end for fs in series_sets if fs.scenario_id is not None
+    }
+    if series_sets:
+      all_facts = (
+        session.execute(
+          select(Fact).where(
+            Fact.fact_set_id.in_([fs.id for fs in series_sets]),
+            Fact.element_id.in_(element_ids),
+          )
+        )
+        .scalars()
+        .all()
+      )
+      # Window each fact to its OWN set's period — a set may carry
+      # comparative-period facts (annual reports do) and those belong
+      # to another column, not this one.
+      window_by_set = {fs.id: (fs.period_start, fs.period_end) for fs in series_sets}
+      for f in all_facts:
+        window = window_by_set.get(f.fact_set_id or "")
+        if window is None:
+          continue
+        set_start, set_end = window
+        if f.period_end != set_end:
+          continue
+        if (
+          f.period_start is not None
+          and set_start is not None
+          and f.period_start < set_start
+        ):
+          continue
+        facts.append(f)
+  elif element_ids and atoms.fact_set is not None:
     facts = list(
       session.execute(
         select(Fact).where(
@@ -170,10 +218,25 @@ def _build_statement_envelope(
     concept_arrangement=structure.concept_arrangement,
   )
 
-  # Scenario mode bound a forecast set — every rendered column is a
-  # forward month; stamp the labels so tables and chart axes read
-  # honestly.
-  if (
+  # Stamp forecast columns — label + machine-readable flag — so tables
+  # and chart axes read honestly. Series mode marks exactly the columns
+  # whose winning set is a scenario set (the seam falls out of the
+  # actuals-preferred collapse); single-set scenario mode marks every
+  # column of the bound forecast month.
+  if series_mode and forecast_period_ends:
+    rendering = rendering.model_copy(
+      update={
+        "periods": [
+          p.model_copy(
+            update={"label": _forecast_period_label(p.end), "forecast": True}
+          )
+          if p.end in forecast_period_ends
+          else p
+          for p in rendering.periods
+        ]
+      }
+    )
+  elif (
     scenario_id is not None
     and atoms.fact_set is not None
     and atoms.fact_set.scenario_id == scenario_id
@@ -181,7 +244,9 @@ def _build_statement_envelope(
     rendering = rendering.model_copy(
       update={
         "periods": [
-          p.model_copy(update={"label": _forecast_period_label(p.end)})
+          p.model_copy(
+            update={"label": _forecast_period_label(p.end), "forecast": True}
+          )
           for p in rendering.periods
         ]
       }

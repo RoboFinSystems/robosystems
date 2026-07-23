@@ -28,6 +28,7 @@ def get_information_block(
   structure_id: str,
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
+  series: bool = False,
 ) -> InformationBlockEnvelope | None:
   """Fetch one block by id, dispatching via the structure's block_type.
 
@@ -35,8 +36,8 @@ def get_information_block(
   registered — callers map that to a GraphQL null / REST 404. When
   ``fact_set_id`` is provided the envelope is rehydrated from that
   specific FactSet instead of the latest one (used by Report Block
-  rehydration to surface a frozen snapshot) and ``scenario_id`` is
-  ignored — an explicit pin bypasses scenario selection.
+  rehydration to surface a frozen snapshot) and ``scenario_id`` /
+  ``series`` are ignored — an explicit pin bypasses both.
 
   ``scenario_id`` selects the FactSet slice the envelope binds:
   ``None`` = actuals; a forecast block's structure id = that scenario
@@ -44,6 +45,12 @@ def get_information_block(
   extend the series with its forward columns). Block types without
   scenario slices (schedule, rollforward, disclosure) accept and
   ignore it.
+
+  ``series=True`` renders a statement block as its whole report-set
+  time series — one column per period, actuals-preferred at the seam
+  when combined with ``scenario_id`` (the F-4 statement-series
+  projection). Non-statement block types accept and ignore it (metric
+  envelopes are always the full series).
   """
   structure = session.get(Structure, structure_id)
   if structure is None:
@@ -56,7 +63,7 @@ def get_information_block(
     # be built.
     return None
   return entry.dispatch_build_envelope(
-    session, structure_id, fact_set_id, scenario_id=scenario_id
+    session, structure_id, fact_set_id, scenario_id=scenario_id, series=series
   )
 
 

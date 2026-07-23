@@ -103,8 +103,13 @@ def build_envelope(
   structure_id: str,
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
+  series: bool = False,
 ) -> InformationBlockEnvelope | None:
   """Pack a metric Structure + its standing time series into the envelope.
+
+  ``series`` is accepted for dispatch-signature parity and ignored — a
+  metric envelope IS the full series already; the flag exists for the
+  statement family, whose default read binds a single set.
 
   Rendering: one period column per metric FactSet (ascending
   ``period_end``), one row per catalog concept in presentation-arc
@@ -173,13 +178,15 @@ def build_envelope(
       RenderingPeriodLite(
         start=fs.period_start if fs.period_start is not None else fs.period_end,
         end=fs.period_end,
-        # Scenario-sourced columns are labeled honestly; actual columns
-        # keep label=None and the frontend formats dates as today.
+        # Scenario-sourced columns are labeled honestly AND flagged
+        # machine-readably; actual columns keep label=None (the
+        # frontend formats dates) and no flag.
         label=(
           f"{fs.period_end.strftime('%b %Y')} (forecast)"
           if fs.scenario_id is not None
           else None
         ),
+        forecast=True if fs.scenario_id is not None else None,
       )
       for fs in fact_sets
     ],

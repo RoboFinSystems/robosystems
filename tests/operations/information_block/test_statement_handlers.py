@@ -627,3 +627,190 @@ class TestRenderingComposesCalcsCrossStructure:
 
     flags = {r.element_qname: r.is_subtotal for r in rendering.rows}
     assert flags["rs-gaap:GrossProfit"] is False
+
+
+class TestSeriesMode:
+  """F-4 statement-series projection — one column per report set,
+  actuals-preferred at the seam, facts windowed to their own set."""
+
+  @staticmethod
+  def _element(element_id: str, qname: str, period_type: str = "instant") -> MagicMock:
+    element = MagicMock()
+    element.id = element_id
+    element.qname = qname
+    element.name = qname.split(":")[-1]
+    element.code = None
+    element.element_type = "concept"
+    element.is_abstract = False
+    element.is_monetary = True
+    element.balance_type = "debit"
+    element.period_type = period_type
+    element.item_type = None
+    return element
+
+  @staticmethod
+  def _assoc() -> MagicMock:
+    assoc = MagicMock()
+    assoc.id = "assoc_1"
+    assoc.from_element_id = "elem_assets"
+    assoc.to_element_id = "elem_cash"
+    assoc.association_type = "presentation"
+    assoc.arcrole = None
+    assoc.order_value = None
+    assoc.weight = None
+    return assoc
+
+  @staticmethod
+  def _fact_set(
+    fs_id: str,
+    period_start: date,
+    period_end: date,
+    scenario_id: str | None = None,
+  ) -> MagicMock:
+    fs = MagicMock()
+    fs.id = fs_id
+    fs.structure_id = "struct_balance_sheet"
+    fs.period_start = period_start
+    fs.period_end = period_end
+    fs.factset_type = "report"
+    fs.entity_id = "ent_demo"
+    fs.report_id = None
+    fs.scenario_id = scenario_id
+    fs.provenance = None
+    return fs
+
+  @staticmethod
+  def _fact(
+    fact_id: str,
+    fact_set_id: str,
+    period_end: date,
+    value: float,
+    period_start: date | None = None,
+  ) -> MagicMock:
+    fact = MagicMock()
+    fact.id = fact_id
+    fact.element_id = "elem_cash"
+    fact.value = value
+    fact.string_value = None
+    fact.fact_type = "Numeric"
+    fact.content_type = None
+    fact.period_start = period_start
+    fact.period_end = period_end
+    fact.period_type = "instant"
+    fact.unit = "USD"
+    fact.fact_scope = "in_scope"
+    fact.fact_set_id = fact_set_id
+    return fact
+
+  def _run_series(
+    self,
+    series_sets: list[MagicMock],
+    facts: list[MagicMock],
+    scenario_id: str | None,
+  ):
+    session = MagicMock()
+    structure = _make_statement_structure(
+      structure_id="struct_balance_sheet",
+      block_type="balance_sheet",
+      name="Balance Sheet",
+    )
+    session.get.return_value = structure
+    latest = series_sets[-1] if series_sets else None
+    session.execute.side_effect = [
+      _exec_result(scalar=latest),  # latest set (atoms.fact_set)
+      _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[self._assoc()]),  # associations
+      _exec_result(
+        scalars_all=[self._element("elem_cash", "rs-gaap:Cash")]
+      ),  # elements
+      _exec_result(scalars_all=[]),  # rules
+      _exec_result(all_rows=[]),  # association classifications
+      _exec_result(scalars_all=[]),  # verification results
+      _exec_result(scalars_all=series_sets),  # the series (F-4)
+      _exec_result(scalars_all=facts),  # facts across the series sets
+      _exec_result(all_rows=[]),  # element classifications
+    ]
+    build = statement_handlers.make_statement_handlers("balance_sheet")
+    return build(session, "struct_balance_sheet", scenario_id=scenario_id, series=True)
+
+  def test_one_column_per_set_with_seam_flags(self) -> None:
+    may, june = date(2026, 5, 31), date(2026, 6, 30)
+    sets = [
+      self._fact_set("fs_may", date(2026, 5, 1), may),
+      self._fact_set("fs_june", date(2026, 6, 1), june, scenario_id="struct_budget"),
+    ]
+    facts = [
+      self._fact("f_may", "fs_may", may, 100_000.0),
+      self._fact("f_june", "fs_june", june, 110_000.0),
+    ]
+    envelope = self._run_series(sets, facts, "struct_budget")
+
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert [p.end for p in rendering.periods] == [may, june]
+    # The seam: actual column unmarked, forecast column labeled + flagged.
+    assert rendering.periods[0].label is None
+    assert rendering.periods[0].forecast is None
+    assert rendering.periods[1].label == "Jun 2026 (forecast)"
+    assert rendering.periods[1].forecast is True
+    cash_row = next(r for r in rendering.rows if r.element_qname == "rs-gaap:Cash")
+    assert cash_row.values == [100_000.0, 110_000.0]
+
+  def test_facts_window_to_their_own_set(self) -> None:
+    """An annual set carries comparative-period facts; they must not
+    leak into other columns (nor mint phantom columns)."""
+    may, june = date(2026, 5, 31), date(2026, 6, 30)
+    sets = [
+      self._fact_set("fs_may", date(2026, 5, 1), may),
+      self._fact_set("fs_june", date(2026, 6, 1), june),
+    ]
+    facts = [
+      self._fact("f_may", "fs_may", may, 100_000.0),
+      self._fact("f_june", "fs_june", june, 110_000.0),
+      # Comparative fact inside fs_june pointing at MAY — windowed out.
+      self._fact("f_comparative", "fs_june", may, 999_999.0),
+    ]
+    envelope = self._run_series(sets, facts, None)
+
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    cash_row = next(r for r in rendering.rows if r.element_qname == "rs-gaap:Cash")
+    assert cash_row.values == [100_000.0, 110_000.0]  # not 999_999
+
+  def test_fact_set_pin_bypasses_series(self) -> None:
+    """A snapshot pin is a single set by definition — series is ignored."""
+    may = date(2026, 5, 31)
+    pinned = self._fact_set("fs_pinned", date(2026, 5, 1), may)
+    session = MagicMock()
+    structure = _make_statement_structure(
+      structure_id="struct_balance_sheet",
+      block_type="balance_sheet",
+      name="Balance Sheet",
+    )
+    session.get.return_value = structure
+    session.execute.side_effect = [
+      _exec_result(scalar=pinned),  # fact set by id (pin validation)
+      _exec_result(scalar="US GAAP"),  # taxonomy name
+      _exec_result(scalars_all=[self._assoc()]),  # associations
+      _exec_result(
+        scalars_all=[self._element("elem_cash", "rs-gaap:Cash")]
+      ),  # elements
+      _exec_result(scalars_all=[]),  # rules
+      _exec_result(all_rows=[]),  # association classifications
+      _exec_result(scalars_all=[]),  # verification results
+      _exec_result(
+        scalars_all=[self._fact("f_may", "fs_pinned", may, 100_000.0)]
+      ),  # facts by pinned set — NO series query in between
+      _exec_result(all_rows=[]),  # element classifications
+    ]
+    build = statement_handlers.make_statement_handlers("balance_sheet")
+    envelope = build(
+      session, "struct_balance_sheet", "fs_pinned", scenario_id=None, series=True
+    )
+
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert len(rendering.periods) == 1

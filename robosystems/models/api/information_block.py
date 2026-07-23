@@ -811,6 +811,15 @@ class RenderingPeriodLite(BaseModel):
   start: date
   end: date
   label: str | None = None
+  forecast: bool | None = Field(
+    None,
+    description=(
+      "True when this column comes from a forecast scenario's FactSet "
+      "— the machine-readable seam marker (labels also carry a "
+      "'(forecast)' suffix, but consumers should key styling off this "
+      "flag, not label parsing). None/absent = an actuals column."
+    ),
+  )
 
 
 class ValidationLite(BaseModel):

@@ -60,6 +60,7 @@ def build_envelope(
   structure_id: str,
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
+  series: bool = False,
 ) -> InformationBlockEnvelope | None:
   """Pack the envelope for a disclosure-note structure.
 
