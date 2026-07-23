@@ -156,10 +156,14 @@ class PeriodCloseService:
      rollback after flipping drafts to posted.
   3. **Draft → posted transition** — all draft entries whose posting_date
      falls in the period are bulk-updated to `posted`.
-  4. **FiscalPeriod transition** — `status='closed'`, `closed_at=now`,
-     `closed_by=actor_id`.
-  5. **Calendar advance or reclose** — advance_closed_through if this is
+  4. **Calendar advance or reclose** — advance_closed_through if this is
      a first-close or latest-reopen reclose, otherwise record_reclose.
+     Runs BEFORE the FiscalPeriod flip: the never-closed
+     (`closed_through IS NULL`) sequence check resolves the expected
+     close from the earliest non-closed FiscalPeriod, which must still
+     be the period being closed.
+  5. **FiscalPeriod transition** — `status='closed'`, `closed_at=now`,
+     `closed_by=actor_id`.
   5b. **Canonical statement stamping** — pivot the posted ledger and
      stamp the period's statement FactSets (`report_id NULL`), replacing
      any prior canonical sets for the window (reclose/retry idempotency).
@@ -254,14 +258,14 @@ class PeriodCloseService:
     )
     session.flush()
 
-    # 4. FiscalPeriod transition
-    fp.status = "closed"
-    fp.closed_at = now
-    fp.closed_by = actor_id
-    session.flush()
-
-    # 5. Advance / reclose. Capture target before so we can report
-    # auto-advance to the caller.
+    # 4. Advance / reclose. Capture target before so we can report
+    # auto-advance to the caller. This runs BEFORE the FiscalPeriod
+    # transition below: on a never-closed calendar (closed_through IS
+    # NULL) both `advance_closed_through`'s sequence check and
+    # `is_latest_sequential_close` resolve the expected next close from
+    # the earliest NON-closed FiscalPeriod — flipping this period's
+    # status first would make that lookup land on the FOLLOWING month
+    # and reject (or mis-route) every first close.
     cal_before = self._fcs.get(session, graph_id)
     target_before = cal_before.close_target_period if cal_before else None
 
@@ -301,6 +305,12 @@ class PeriodCloseService:
       target_before != calendar.close_target_period
       and calendar.close_target_period is not None
     )
+
+    # 5. FiscalPeriod transition
+    fp.status = "closed"
+    fp.closed_at = now
+    fp.closed_by = actor_id
+    session.flush()
 
     # 5b. Canonical statement stamping — the close IS the act that
     # persists the month's statements. Replace semantics inside the

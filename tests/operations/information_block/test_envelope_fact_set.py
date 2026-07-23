@@ -215,6 +215,112 @@ class TestLoadStatementFactSetSeries:
     assert order_by.index("scenario_id ASC") < order_by.index("report_id IS NOT NULL")
     assert order_by.index("report_id IS NOT NULL") < order_by.index("period_start DESC")
 
+  def test_covering_annual_window_is_dropped_from_a_monthly_series(self) -> None:
+    """An annual set strictly containing monthly windows is a coarser
+    aggregate of columns the series already shows — without the drop the
+    FY-end column renders 12-month totals inside a monthly grid."""
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    rows = [
+      _make_fact_set(
+        fs_id="fs_may",
+        period_start=date(2026, 5, 1),
+        period_end=date(2026, 5, 31),
+      ),
+      _make_fact_set(
+        fs_id="fs_annual",
+        period_start=date(2025, 7, 1),
+        period_end=date(2026, 6, 30),
+        report_id="rpt_fy26",
+      ),
+    ]
+    session = self._session(rows)
+    series = load_statement_fact_set_series(session, "struct_bs")
+    assert [fs.id for fs in series] == ["fs_may"]
+
+  def test_annual_never_shadows_its_fy_end_forecast_month(self) -> None:
+    """The June wart, live-found: with the FY-end month still open, the
+    annual actual set shares the forecast month's period_end and the
+    actual-beats-forecast rule would hand the seam column FY totals.
+    The forecast month's window sits inside the annual's — the annual
+    drops, the forecast column survives."""
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    june = date(2026, 6, 30)
+    rows = [
+      _make_fact_set(
+        fs_id="fs_may",
+        period_start=date(2026, 5, 1),
+        period_end=date(2026, 5, 31),
+      ),
+      # SQL order at equal period_end: actual (scenario NULL) first.
+      _make_fact_set(
+        fs_id="fs_annual",
+        period_start=date(2025, 7, 1),
+        period_end=june,
+        report_id="rpt_fy26",
+      ),
+      _make_fact_set(
+        fs_id="fs_june_forecast",
+        period_start=date(2026, 6, 1),
+        period_end=june,
+        scenario_id="struct_budget",
+      ),
+    ]
+    session = self._session(rows)
+    series = load_statement_fact_set_series(session, "struct_bs", "struct_budget")
+    assert [fs.id for fs in series] == ["fs_may", "fs_june_forecast"]
+
+  def test_annual_only_tenant_keeps_its_annual_columns(self) -> None:
+    """Nothing narrower exists inside their windows — a tenant whose only
+    sets are annual reports still gets a (coarse) series."""
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    rows = [
+      _make_fact_set(
+        fs_id="fs_fy25",
+        period_start=date(2024, 7, 1),
+        period_end=date(2025, 6, 30),
+        report_id="rpt_fy25",
+      ),
+      _make_fact_set(
+        fs_id="fs_fy26",
+        period_start=date(2025, 7, 1),
+        period_end=date(2026, 6, 30),
+        report_id="rpt_fy26",
+      ),
+    ]
+    session = self._session(rows)
+    series = load_statement_fact_set_series(session, "struct_bs")
+    assert [fs.id for fs in series] == ["fs_fy25", "fs_fy26"]
+
+  def test_startless_sets_neither_cover_nor_get_covered(self) -> None:
+    from robosystems.operations.information_block.envelope import (
+      load_statement_fact_set_series,
+    )
+
+    rows = [
+      _make_fact_set(
+        fs_id="fs_instant",
+        period_start=None,
+        period_end=date(2026, 4, 30),
+      ),
+      _make_fact_set(
+        fs_id="fs_may",
+        period_start=date(2026, 5, 1),
+        period_end=date(2026, 5, 31),
+      ),
+    ]
+    session = self._session(rows)
+    series = load_statement_fact_set_series(session, "struct_bs")
+    assert [fs.id for fs in series] == ["fs_instant", "fs_may"]
+
   def test_canonical_column_survives_later_publication_snapshot(self) -> None:
     """Collapse narrative for the canonical tiebreak: at one period_end
     the close-stamped set (report_id NULL) is ordered first and keeps
