@@ -127,30 +127,22 @@ class CreateRollforwardRequest(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Cash rollforward via mini TransactionDescriptionCode",
-          "description": (
-            "Decompose the period change in Cash across the seven mini "
-            "flow concepts that touch cash. Matches Test Case 1 (mini / "
-            "Charlie Hoffman, Q1 2024 lemonade stand)."
+          "name": "Cash and Cash Equivalents Rollforward",
+          "bs_source_qname": "mini:CashAndCashEquivalents",
+          "default_change_tag_qname": (
+            "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCash"
+            "EquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect"
           ),
-          "value": {
-            "name": "Cash and Cash Equivalents Rollforward",
-            "bs_source_qname": "mini:CashAndCashEquivalents",
-            "default_change_tag_qname": (
-              "rs-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCash"
-              "EquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect"
-            ),
-            "attribution_filters": [
-              {
-                "target_qname": "mini:ProceedsFromInvestmentsByOwner",
-                "predicate": {
-                  "kind": "line_item_metadata_field",
-                  "field": "transaction_description_code",
-                  "values": ["mini:ProceedsFromInvestmentsByOwner"],
-                },
-              }
-            ],
-          },
+          "attribution_filters": [
+            {
+              "target_qname": "mini:ProceedsFromInvestmentsByOwner",
+              "predicate": {
+                "kind": "line_item_metadata_field",
+                "field": "transaction_description_code",
+                "values": ["mini:ProceedsFromInvestmentsByOwner"],
+              },
+            }
+          ],
         }
       ]
     }

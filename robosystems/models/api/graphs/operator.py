@@ -76,47 +76,35 @@ class OperatorRequest(BaseModel):
     json_schema_extra = {
       "examples": [
         {
-          "summary": "Simple query with auto-selection",
-          "description": "Basic query letting the system choose the best operator",
-          "value": {
-            "message": "What was Apple's revenue in Q4 2023?",
-            "enable_rag": True,
-          },
+          "message": "What was Apple's revenue in Q4 2023?",
+          "enable_rag": True,
         },
         {
-          "summary": "Query with conversation history",
-          "description": "Follow-up question using conversation context",
-          "value": {
-            "message": "How did that compare to the previous quarter?",
-            "history": [
-              {"role": "user", "content": "What was Apple's revenue in Q4 2023?"},
-              {
-                "role": "assistant",
-                "content": "Apple's Q4 2023 revenue was $89.5 billion, representing a 1% year-over-year decline.",
-              },
-            ],
-            "enable_rag": True,
-          },
+          "message": "How did that compare to the previous quarter?",
+          "history": [
+            {"role": "user", "content": "What was Apple's revenue in Q4 2023?"},
+            {
+              "role": "assistant",
+              "content": "Apple's Q4 2023 revenue was $89.5 billion, representing a 1% year-over-year decline.",
+            },
+          ],
+          "enable_rag": True,
         },
         {
-          "summary": "Advanced query with selection criteria",
-          "description": "Complex query with specific operator requirements and extended analysis",
-          "value": {
-            "message": "Analyze the competitive landscape in cloud computing, focusing on market share and growth trends",
-            "mode": "extended",
-            "enable_rag": True,
-            "force_extended_analysis": True,
-            "context": {
-              "industry": "technology",
-              "focus_areas": ["market_share", "growth_trends"],
-              "time_period": "2023-2024",
-            },
-            "selection_criteria": {
-              "min_confidence": 0.7,
-              "required_capabilities": ["financial_analysis", "market_research"],
-              "preferred_mode": "extended",
-              "max_response_time": 45.0,
-            },
+          "message": "Analyze the competitive landscape in cloud computing, focusing on market share and growth trends",
+          "mode": "extended",
+          "enable_rag": True,
+          "force_extended_analysis": True,
+          "context": {
+            "industry": "technology",
+            "focus_areas": ["market_share", "growth_trends"],
+            "time_period": "2023-2024",
+          },
+          "selection_criteria": {
+            "min_confidence": 0.7,
+            "required_capabilities": ["financial_analysis", "market_research"],
+            "preferred_mode": "extended",
+            "max_response_time": 45.0,
           },
         },
       ]
@@ -135,40 +123,32 @@ class BatchOperatorRequest(BaseModel):
     json_schema_extra = {
       "examples": [
         {
-          "summary": "Sequential batch processing",
-          "description": "Process multiple company queries sequentially",
-          "value": {
-            "queries": [
-              {"message": "What was Apple's Q4 2023 revenue?", "enable_rag": True},
-              {"message": "What was Microsoft's Q4 2023 revenue?", "enable_rag": True},
-              {"message": "What was Google's Q4 2023 revenue?", "enable_rag": True},
-            ],
-            "parallel": False,
-          },
+          "queries": [
+            {"message": "What was Apple's Q4 2023 revenue?", "enable_rag": True},
+            {"message": "What was Microsoft's Q4 2023 revenue?", "enable_rag": True},
+            {"message": "What was Google's Q4 2023 revenue?", "enable_rag": True},
+          ],
+          "parallel": False,
         },
         {
-          "summary": "Parallel batch processing",
-          "description": "Process multiple queries in parallel for faster results",
-          "value": {
-            "queries": [
-              {
-                "message": "Analyze Tesla's financial performance",
-                "mode": "extended",
-                "enable_rag": True,
-              },
-              {
-                "message": "Analyze Ford's financial performance",
-                "mode": "extended",
-                "enable_rag": True,
-              },
-              {
-                "message": "Compare EV market trends",
-                "mode": "standard",
-                "enable_rag": True,
-              },
-            ],
-            "parallel": True,
-          },
+          "queries": [
+            {
+              "message": "Analyze Tesla's financial performance",
+              "mode": "extended",
+              "enable_rag": True,
+            },
+            {
+              "message": "Analyze Ford's financial performance",
+              "mode": "extended",
+              "enable_rag": True,
+            },
+            {
+              "message": "Compare EV market trends",
+              "mode": "standard",
+              "enable_rag": True,
+            },
+          ],
+          "parallel": True,
         },
       ]
     }
@@ -201,57 +181,49 @@ class OperatorResponse(BaseModel):
     json_schema_extra = {
       "examples": [
         {
-          "summary": "Successful financial analysis",
-          "description": "Auto-selected financial operator with high confidence",
-          "value": {
-            "content": "Apple's Q4 2023 revenue was $89.5 billion, representing a 1% year-over-year decline. This was driven by strong iPhone sales offset by weakness in the Mac and iPad segments. Services revenue grew 16% to $22.3 billion, continuing its strong growth trajectory.",
-            "operator_used": "financial",
-            "mode_used": "standard",
-            "metadata": {
-              "routing_info": {
-                "candidates_evaluated": 3,
-                "selection_reason": "Financial query with revenue and metrics keywords",
-                "confidence_scores": {"financial": 0.92, "research": 0.45, "rag": 0.23},
-              },
-              "rag_enrichment": {
-                "documents_retrieved": 5,
-                "sources": ["Apple 10-Q Q4 2023", "Earnings Call Transcript Oct 2023"],
-              },
+          "content": "Apple's Q4 2023 revenue was $89.5 billion, representing a 1% year-over-year decline. This was driven by strong iPhone sales offset by weakness in the Mac and iPad segments. Services revenue grew 16% to $22.3 billion, continuing its strong growth trajectory.",
+          "operator_used": "financial",
+          "mode_used": "standard",
+          "metadata": {
+            "routing_info": {
+              "candidates_evaluated": 3,
+              "selection_reason": "Financial query with revenue and metrics keywords",
+              "confidence_scores": {"financial": 0.92, "research": 0.45, "rag": 0.23},
             },
-            "tokens_used": {
-              "prompt_tokens": 450,
-              "completion_tokens": 320,
-              "total_tokens": 770,
+            "rag_enrichment": {
+              "documents_retrieved": 5,
+              "sources": ["Apple 10-Q Q4 2023", "Earnings Call Transcript Oct 2023"],
             },
-            "confidence_score": 0.92,
-            "execution_time": 3.45,
-            "timestamp": "2024-01-15T10:30:45Z",
           },
+          "tokens_used": {
+            "prompt_tokens": 450,
+            "completion_tokens": 320,
+            "total_tokens": 770,
+          },
+          "confidence_score": 0.92,
+          "execution_time": 3.45,
+          "timestamp": "2024-01-15T10:30:45Z",
         },
         {
-          "summary": "Research query with extended analysis",
-          "description": "Research operator with comprehensive market analysis",
-          "value": {
-            "content": "The cloud computing market is dominated by three major players: AWS (32% market share), Microsoft Azure (23%), and Google Cloud (10%). Over the past year, growth rates have been: AWS 12%, Azure 27%, Google Cloud 28%. The market shows clear consolidation trends...",
-            "operator_used": "research",
-            "mode_used": "extended",
-            "metadata": {
-              "routing_info": {
-                "candidates_evaluated": 3,
-                "selection_reason": "Market research query requiring comprehensive analysis",
-              },
-              "analysis_depth": "comprehensive",
-              "sources_consulted": 15,
+          "content": "The cloud computing market is dominated by three major players: AWS (32% market share), Microsoft Azure (23%), and Google Cloud (10%). Over the past year, growth rates have been: AWS 12%, Azure 27%, Google Cloud 28%. The market shows clear consolidation trends...",
+          "operator_used": "research",
+          "mode_used": "extended",
+          "metadata": {
+            "routing_info": {
+              "candidates_evaluated": 3,
+              "selection_reason": "Market research query requiring comprehensive analysis",
             },
-            "tokens_used": {
-              "prompt_tokens": 1200,
-              "completion_tokens": 850,
-              "total_tokens": 2050,
-            },
-            "confidence_score": 0.88,
-            "execution_time": 12.3,
-            "timestamp": "2024-01-15T10:35:22Z",
+            "analysis_depth": "comprehensive",
+            "sources_consulted": 15,
           },
+          "tokens_used": {
+            "prompt_tokens": 1200,
+            "completion_tokens": 850,
+            "total_tokens": 2050,
+          },
+          "confidence_score": 0.88,
+          "execution_time": 12.3,
+          "timestamp": "2024-01-15T10:35:22Z",
         },
       ]
     }
@@ -274,77 +246,69 @@ class BatchOperatorResponse(BaseModel):
     json_schema_extra = {
       "examples": [
         {
-          "summary": "Successful sequential batch",
-          "description": "All queries processed successfully in sequence",
-          "value": {
-            "results": [
-              {
-                "content": "Apple's Q4 2023 revenue was $89.5 billion...",
-                "operator_used": "financial",
-                "mode_used": "standard",
-                "confidence_score": 0.92,
-                "execution_time": 3.2,
-                "timestamp": "2024-01-15T10:30:00Z",
-              },
-              {
-                "content": "Microsoft's Q4 2023 revenue was $62.0 billion...",
-                "operator_used": "financial",
-                "mode_used": "standard",
-                "confidence_score": 0.89,
-                "execution_time": 3.5,
-                "timestamp": "2024-01-15T10:30:03Z",
-              },
-              {
-                "content": "Google's Q4 2023 revenue was $86.3 billion...",
-                "operator_used": "financial",
-                "mode_used": "standard",
-                "confidence_score": 0.91,
-                "execution_time": 3.1,
-                "timestamp": "2024-01-15T10:30:07Z",
-              },
-            ],
-            "total_execution_time": 9.8,
-            "parallel_processed": False,
-          },
+          "results": [
+            {
+              "content": "Apple's Q4 2023 revenue was $89.5 billion...",
+              "operator_used": "financial",
+              "mode_used": "standard",
+              "confidence_score": 0.92,
+              "execution_time": 3.2,
+              "timestamp": "2024-01-15T10:30:00Z",
+            },
+            {
+              "content": "Microsoft's Q4 2023 revenue was $62.0 billion...",
+              "operator_used": "financial",
+              "mode_used": "standard",
+              "confidence_score": 0.89,
+              "execution_time": 3.5,
+              "timestamp": "2024-01-15T10:30:03Z",
+            },
+            {
+              "content": "Google's Q4 2023 revenue was $86.3 billion...",
+              "operator_used": "financial",
+              "mode_used": "standard",
+              "confidence_score": 0.91,
+              "execution_time": 3.1,
+              "timestamp": "2024-01-15T10:30:07Z",
+            },
+          ],
+          "total_execution_time": 9.8,
+          "parallel_processed": False,
         },
         {
-          "summary": "Parallel batch with partial failure",
-          "description": "Some queries succeed, one fails due to insufficient credits",
-          "value": {
-            "results": [
-              {
-                "content": "Tesla's financial performance shows strong revenue growth...",
-                "operator_used": "financial",
-                "mode_used": "extended",
-                "confidence_score": 0.88,
-                "execution_time": 12.3,
-                "timestamp": "2024-01-15T10:35:12Z",
+          "results": [
+            {
+              "content": "Tesla's financial performance shows strong revenue growth...",
+              "operator_used": "financial",
+              "mode_used": "extended",
+              "confidence_score": 0.88,
+              "execution_time": 12.3,
+              "timestamp": "2024-01-15T10:35:12Z",
+            },
+            {
+              "content": "",
+              "operator_used": "financial",
+              "mode_used": "extended",
+              "error_details": {
+                "code": "insufficient_credits",
+                "message": "Insufficient credits for extended analysis",
+                "required_credits": 50,
+                "available_credits": 25,
               },
-              {
-                "content": "",
-                "operator_used": "financial",
-                "mode_used": "extended",
-                "error_details": {
-                  "code": "insufficient_credits",
-                  "message": "Insufficient credits for extended analysis",
-                  "required_credits": 50,
-                  "available_credits": 25,
-                },
-                "execution_time": 0.1,
-                "timestamp": "2024-01-15T10:35:00Z",
-              },
-              {
-                "content": "EV market trends show continued growth with 45% YoY increase...",
-                "operator_used": "research",
-                "mode_used": "standard",
-                "confidence_score": 0.85,
-                "execution_time": 8.7,
-                "timestamp": "2024-01-15T10:35:09Z",
-              },
-            ],
-            "total_execution_time": 12.5,
-            "parallel_processed": True,
-          },
+              "execution_time": 0.1,
+              "timestamp": "2024-01-15T10:35:00Z",
+            },
+            {
+              "content": "EV market trends show continued growth with 45% YoY increase...",
+              "operator_used": "research",
+              "mode_used": "standard",
+              "confidence_score": 0.85,
+              "execution_time": 8.7,
+              "timestamp": "2024-01-15T10:35:09Z",
+            },
+          ],
+          "total_execution_time": 12.5,
+          "parallel_processed": True,
         },
       ]
     }

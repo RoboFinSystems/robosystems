@@ -88,36 +88,23 @@ class CreateForecastRequest(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "FY operating budget — growth + margin ramp + working capital",
-          "description": (
-            "A 12-month budget scenario: 3%/month revenue growth "
-            "compounding, cost-of-revenue rate ramping from 44% toward "
-            "62% via per-month overrides (rate-on-base: each value is "
-            "that month's cost as a fraction of revenues), 45-day DSO, "
-            "30-day DPO. Each lever's semantics come from its catalog "
-            "documentation (on the envelope's elements). After "
-            "creating, run `compute-forecast` to derive the forward "
-            "months."
-          ),
-          "value": {
-            "name": "FY26 Operating Budget",
-            "scenario_kind": "budget",
-            "horizon_months": 12,
-            "levers": [
-              {"qname": "rs-driver:RevenueGrowthRate", "value": 0.03},
-              {
-                "qname": "rs-driver:CostOfRevenueRate",
-                "value": 0.62,
-                "values_by_period": {
-                  "2026-06": 0.44,
-                  "2026-07": 0.47,
-                  "2026-08": 0.5,
-                },
+          "name": "FY26 Operating Budget",
+          "scenario_kind": "budget",
+          "horizon_months": 12,
+          "levers": [
+            {"qname": "rs-driver:RevenueGrowthRate", "value": 0.03},
+            {
+              "qname": "rs-driver:CostOfRevenueRate",
+              "value": 0.62,
+              "values_by_period": {
+                "2026-06": 0.44,
+                "2026-07": 0.47,
+                "2026-08": 0.5,
               },
-              {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
-              {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
-            ],
-          },
+            },
+            {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
+            {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
+          ],
         }
       ]
     }
