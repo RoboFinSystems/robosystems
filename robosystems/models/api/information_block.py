@@ -1051,33 +1051,20 @@ class _CreateScheduleArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "5-year straight-line depreciation",
-          "description": (
-            "Monthly depreciation schedule for a $50,000 asset amortized "
-            "over 60 months. Each in-scope period produces a draft closing "
-            "entry via `entry_template`. NOTE: `element_ids` and the "
-            "`entry_template.*_element_id` fields are CoA *element ids* (the "
-            "`id` returned by get-unmapped-elements / get-graph-schema), NOT "
-            "taxonomy qnames — the placeholder tokens below stand in for real "
-            "ids. One schedule models a single debit/credit pair; a "
-            "multi-account entry is several schedules, one per pair."
-          ),
-          "value": {
-            "block_type": "schedule",
-            "payload": {
-              "name": "Office Building Depreciation",
-              "element_ids": [
-                "<depreciation_expense_element_id>",
-                "<accumulated_depreciation_element_id>",
-              ],
-              "period_start": "2026-01-01",
-              "period_end": "2030-12-31",
-              "monthly_amount": 83333,
-              "entry_template": {
-                "debit_element_id": "<depreciation_expense_element_id>",
-                "credit_element_id": "<accumulated_depreciation_element_id>",
-                "entry_type": "adjusting",
-              },
+          "block_type": "schedule",
+          "payload": {
+            "name": "Office Building Depreciation",
+            "element_ids": [
+              "<depreciation_expense_element_id>",
+              "<accumulated_depreciation_element_id>",
+            ],
+            "period_start": "2026-01-01",
+            "period_end": "2030-12-31",
+            "monthly_amount": 83333,
+            "entry_template": {
+              "debit_element_id": "<depreciation_expense_element_id>",
+              "credit_element_id": "<accumulated_depreciation_element_id>",
+              "entry_type": "adjusting",
             },
           },
         }
@@ -1158,29 +1145,21 @@ class _CreateRollforwardArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Cash rollforward via mini TransactionDescriptionCode",
-          "description": (
-            "Decompose Cash's period change across the seven mini flow "
-            "concepts that touch cash. Matches cross-taxonomy "
-            "Test Case 1 (mini / Charlie Hoffman)."
-          ),
-          "value": {
-            "block_type": "rollforward",
-            "payload": {
-              "name": "Cash and Cash Equivalents Rollforward",
-              "bs_source_qname": "mini:CashAndCashEquivalents",
-              "default_change_tag_qname": None,
-              "attribution_filters": [
-                {
-                  "target_qname": "mini:ProceedsFromInvestmentsByOwner",
-                  "predicate": {
-                    "kind": "line_item_metadata_field",
-                    "field": "transaction_description_code",
-                    "values": ["mini:ProceedsFromInvestmentsByOwner"],
-                  },
-                }
-              ],
-            },
+          "block_type": "rollforward",
+          "payload": {
+            "name": "Cash and Cash Equivalents Rollforward",
+            "bs_source_qname": "mini:CashAndCashEquivalents",
+            "default_change_tag_qname": None,
+            "attribution_filters": [
+              {
+                "target_qname": "mini:ProceedsFromInvestmentsByOwner",
+                "predicate": {
+                  "kind": "line_item_metadata_field",
+                  "field": "transaction_description_code",
+                  "values": ["mini:ProceedsFromInvestmentsByOwner"],
+                },
+              }
+            ],
           },
         }
       ]
@@ -1210,26 +1189,17 @@ class _CreateForecastArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "12-month operating budget scenario",
-          "description": (
-            "Budget scenario: 3%/month revenue growth compounding, 62% "
-            "cost-of-revenue rate, 45-day DSO, 30-day DPO. Lever values "
-            "follow the rs-driver catalog conventions (percent levers "
-            "as decimals per month, days levers as day counts)."
-          ),
-          "value": {
-            "block_type": "forecast",
-            "payload": {
-              "name": "FY26 Operating Budget",
-              "scenario_kind": "budget",
-              "horizon_months": 12,
-              "levers": [
-                {"qname": "rs-driver:RevenueGrowthRate", "value": 0.03},
-                {"qname": "rs-driver:CostOfRevenueRate", "value": 0.62},
-                {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
-                {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
-              ],
-            },
+          "block_type": "forecast",
+          "payload": {
+            "name": "FY26 Operating Budget",
+            "scenario_kind": "budget",
+            "horizon_months": 12,
+            "levers": [
+              {"qname": "rs-driver:RevenueGrowthRate", "value": 0.03},
+              {"qname": "rs-driver:CostOfRevenueRate", "value": 0.62},
+              {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
+              {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
+            ],
           },
         }
       ]
@@ -1292,13 +1262,10 @@ class _UpdateScheduleArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Rename a schedule",
-          "value": {
-            "block_type": "schedule",
-            "payload": {
-              "structure_id": "struct_depr_office_2026",
-              "name": "Office Building Depreciation (Renamed)",
-            },
+          "block_type": "schedule",
+          "payload": {
+            "structure_id": "struct_depr_office_2026",
+            "name": "Office Building Depreciation (Renamed)",
           },
         }
       ]
@@ -1352,13 +1319,10 @@ class _UpdateRollforwardArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Rename a rollforward block",
-          "value": {
-            "block_type": "rollforward",
-            "payload": {
-              "structure_id": "struct_rf_cash_2026",
-              "name": "Cash Rollforward (Renamed)",
-            },
+          "block_type": "rollforward",
+          "payload": {
+            "structure_id": "struct_rf_cash_2026",
+            "name": "Cash Rollforward (Renamed)",
           },
         }
       ]
@@ -1387,18 +1351,15 @@ class _UpdateForecastArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Raise the growth assumption",
-          "value": {
-            "block_type": "forecast",
-            "payload": {
-              "structure_id": "struct_fy26_budget",
-              "levers": [
-                {"qname": "rs-driver:RevenueGrowthRate", "value": 0.04},
-                {"qname": "rs-driver:CostOfRevenueRate", "value": 0.62},
-                {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
-                {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
-              ],
-            },
+          "block_type": "forecast",
+          "payload": {
+            "structure_id": "struct_fy26_budget",
+            "levers": [
+              {"qname": "rs-driver:RevenueGrowthRate", "value": 0.04},
+              {"qname": "rs-driver:CostOfRevenueRate", "value": 0.62},
+              {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
+              {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
+            ],
           },
         }
       ]
@@ -1458,16 +1419,8 @@ class _DeleteScheduleArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Hard-delete a schedule",
-          "description": (
-            "Cascades through facts and associations. To end a "
-            "schedule early without removing history, fire "
-            "`create-event-block(event_type='asset_disposed')` instead."
-          ),
-          "value": {
-            "block_type": "schedule",
-            "payload": {"structure_id": "struct_depr_office_2026"},
-          },
+          "block_type": "schedule",
+          "payload": {"structure_id": "struct_depr_office_2026"},
         }
       ]
     }
@@ -1520,11 +1473,8 @@ class _DeleteRollforwardArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Hard-delete a rollforward block",
-          "value": {
-            "block_type": "rollforward",
-            "payload": {"structure_id": "struct_rf_cash_2026"},
-          },
+          "block_type": "rollforward",
+          "payload": {"structure_id": "struct_rf_cash_2026"},
         }
       ]
     }
@@ -1551,11 +1501,8 @@ class _DeleteForecastArm(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Delete a forecast scenario",
-          "value": {
-            "block_type": "forecast",
-            "payload": {"structure_id": "struct_fy26_budget"},
-          },
+          "block_type": "forecast",
+          "payload": {"structure_id": "struct_fy26_budget"},
         }
       ]
     }

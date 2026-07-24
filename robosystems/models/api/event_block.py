@@ -71,76 +71,50 @@ class CreateEventBlockRequest(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Capture-only invoice (no GL impact yet)",
-          "description": (
-            "Persist an invoice event from QuickBooks for review. "
-            "`apply_handlers=false` (default) leaves status='captured' "
-            "and produces no GL entries — the inbox UI shows it for "
-            "the bookkeeper to triage."
-          ),
-          "value": {
-            "event_type": "invoice_issued",
-            "event_category": "sales",
-            "event_class": "economic",
-            "agent_id": "ent_customer_acme",
-            "resource_type": "services",
-            "occurred_at": "2026-05-01T14:30:00Z",
-            "source": "quickbooks",
-            "external_id": "qb_inv_4521",
-            "external_url": "https://app.qbo.intuit.com/app/invoice?txnId=4521",
-            "amount": 250000,
-            "currency": "USD",
-            "description": "April consulting retainer — Acme Corp",
-            "metadata": {
-              "invoice_number": "INV-2026-0421",
-              "terms": "net_30",
-            },
-            "dimension_ids": ["dim_dept_consulting"],
+          "event_type": "invoice_issued",
+          "event_category": "sales",
+          "event_class": "economic",
+          "agent_id": "ent_customer_acme",
+          "resource_type": "services",
+          "occurred_at": "2026-05-01T14:30:00Z",
+          "source": "quickbooks",
+          "external_id": "qb_inv_4521",
+          "external_url": "https://app.qbo.intuit.com/app/invoice?txnId=4521",
+          "amount": 250000,
+          "currency": "USD",
+          "description": "April consulting retainer — Acme Corp",
+          "metadata": {
+            "invoice_number": "INV-2026-0421",
+            "terms": "net_30",
           },
+          "dimension_ids": ["dim_dept_consulting"],
         },
         {
-          "summary": "Atomic capture + classify (fires handler)",
-          "description": (
-            "Persist a bank transaction and immediately resolve a "
-            "matching event_handler to post the GL entries in the same "
-            "transaction. Status lands at 'classified'. Use "
-            "`preview-event-block` first to confirm the GL plan."
-          ),
-          "value": {
-            "event_type": "bank_transaction",
-            "event_category": "treasury",
-            "event_class": "economic",
-            "occurred_at": "2026-05-03T00:00:00Z",
-            "source": "plaid",
-            "external_id": "plaid_txn_abc123",
-            "amount": -125000,
-            "currency": "USD",
-            "description": "ACH out — Office rent May 2026",
-            "metadata": {
-              "merchant_name": "Westlake Properties LLC",
-              "category": ["Rent"],
-            },
-            "apply_handlers": True,
+          "event_type": "bank_transaction",
+          "event_category": "treasury",
+          "event_class": "economic",
+          "occurred_at": "2026-05-03T00:00:00Z",
+          "source": "plaid",
+          "external_id": "plaid_txn_abc123",
+          "amount": -125000,
+          "currency": "USD",
+          "description": "ACH out — Office rent May 2026",
+          "metadata": {
+            "merchant_name": "Westlake Properties LLC",
+            "category": ["Rent"],
           },
+          "apply_handlers": True,
         },
         {
-          "summary": "Support event (no GL impact)",
-          "description": (
-            "Audit-trail primitive — a control execution. "
-            "`event_class='support'` skips the economic value path "
-            "entirely; `amount` is null."
-          ),
-          "value": {
-            "event_type": "control_executed",
-            "event_category": "control",
-            "event_class": "support",
-            "occurred_at": "2026-05-06T16:00:00Z",
-            "source": "manual",
-            "description": "Monthly bank reconciliation completed",
-            "metadata": {
-              "control_id": "ctl_bank_recon_monthly",
-              "reconciled_balance": 4287500,
-            },
+          "event_type": "control_executed",
+          "event_category": "control",
+          "event_class": "support",
+          "occurred_at": "2026-05-06T16:00:00Z",
+          "source": "manual",
+          "description": "Monthly bank reconciliation completed",
+          "metadata": {
+            "control_id": "ctl_bank_recon_monthly",
+            "reconciled_balance": 4287500,
           },
         },
       ]
@@ -468,47 +442,22 @@ class UpdateEventBlockRequest(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Captured → committed (fires handler)",
-          "description": (
-            "Promote a captured event to committed. The registered "
-            "Python handler runs against the captured metadata to "
-            "produce GL rows; if the handler fails (validation, closed "
-            "period, unbalanced lines) the call returns 422."
-          ),
-          "value": {
-            "event_id": "evt_abc123",
-            "transition_to": "committed",
+          "event_id": "evt_abc123",
+          "transition_to": "committed",
+        },
+        {
+          "event_id": "evt_abc123",
+          "effective_at": "2026-04-30T23:59:59Z",
+          "description": "Reviewed and approved by controller",
+          "metadata_patch": {
+            "reviewed_by": "usr_controller_jane",
+            "review_note": "Recognized in April per terms",
           },
         },
         {
-          "summary": "Field correction without status change",
-          "description": (
-            "Reclassify the recognition date and append review metadata "
-            "without moving status. `metadata_patch` merges keys into "
-            "existing metadata."
-          ),
-          "value": {
-            "event_id": "evt_abc123",
-            "effective_at": "2026-04-30T23:59:59Z",
-            "description": "Reviewed and approved by controller",
-            "metadata_patch": {
-              "reviewed_by": "usr_controller_jane",
-              "review_note": "Recognized in April per terms",
-            },
-          },
-        },
-        {
-          "summary": "Supersede with replacement",
-          "description": (
-            "Mark this event as superseded by a corrected one. "
-            "`superseded_by_id` is required when "
-            "`transition_to='superseded'`."
-          ),
-          "value": {
-            "event_id": "evt_oldwrong",
-            "transition_to": "superseded",
-            "superseded_by_id": "evt_newcorrect",
-          },
+          "event_id": "evt_oldwrong",
+          "transition_to": "superseded",
+          "superseded_by_id": "evt_newcorrect",
         },
       ]
     }

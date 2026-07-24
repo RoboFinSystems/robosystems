@@ -156,46 +156,26 @@ class CypherStatementRequest(BaseModel):
     json_schema_extra = {
       "examples": [
         {
-          "summary": "Simple entity lookup",
-          "description": "Find entities by type with parameterized values",
-          "value": {
-            "query": "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
-            "parameters": {"entity_type": "Company", "limit": 100},
-            "timeout": 60,
-          },
+          "query": "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
+          "parameters": {"entity_type": "Company", "limit": 100},
+          "timeout": 60,
         },
         {
-          "summary": "Relationship traversal query",
-          "description": "Find transactions between entities with amount filtering",
-          "value": {
-            "query": "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount AND e.name = $entity_name RETURN e, r, t LIMIT $limit",
-            "parameters": {"min_amount": 1000, "entity_name": "Acme Corp", "limit": 50},
-            "timeout": 120,
-          },
+          "query": "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount AND e.name = $entity_name RETURN e, r, t LIMIT $limit",
+          "parameters": {"min_amount": 1000, "entity_name": "Acme Corp", "limit": 50},
+          "timeout": 120,
         },
         {
-          "summary": "Lookup by identifier",
-          "description": "Find specific entity using unique identifier",
-          "value": {
-            "query": "MATCH (n:Entity) WHERE n.identifier = $identifier RETURN n",
-            "parameters": {"identifier": "ENT123456"},
-            "timeout": 30,
-          },
+          "query": "MATCH (n:Entity) WHERE n.identifier = $identifier RETURN n",
+          "parameters": {"identifier": "ENT123456"},
+          "timeout": 30,
         },
         {
-          "summary": "Company financial query",
-          "description": "Aggregation query for financial metrics",
-          "value": {
-            "query": "MATCH (c:Company)-[:FILED]->(f:Filing) WHERE f.form_type = $form RETURN c.ticker, c.name, COUNT(f) as filing_count ORDER BY filing_count DESC LIMIT $limit",
-            "parameters": {"form": "10-K", "limit": 20},
-            "timeout": 60,
-          },
+          "query": "MATCH (c:Company)-[:FILED]->(f:Filing) WHERE f.form_type = $form RETURN c.ticker, c.name, COUNT(f) as filing_count ORDER BY filing_count DESC LIMIT $limit",
+          "parameters": {"form": "10-K", "limit": 20},
+          "timeout": 60,
         },
-        {
-          "summary": "Explore all nodes",
-          "description": "Simple query without parameters to explore graph structure",
-          "value": {"query": "MATCH (n) RETURN n LIMIT 10", "timeout": 30},
-        },
+        {"query": "MATCH (n) RETURN n LIMIT 10", "timeout": 30},
       ]
     }
 
@@ -229,78 +209,62 @@ class CypherStatementResponse(BaseModel):
     json_schema_extra = {
       "examples": [
         {
-          "summary": "Successful entity query",
-          "description": "Query returned multiple entity nodes",
-          "value": {
-            "success": True,
-            "data": [
-              {
-                "n": {
-                  "type": "Company",
-                  "name": "Apple Inc.",
-                  "ticker": "AAPL",
-                  "identifier": "ENT123456",
-                }
-              },
-              {
-                "n": {
-                  "type": "Company",
-                  "name": "Microsoft Corporation",
-                  "ticker": "MSFT",
-                  "identifier": "ENT789012",
-                }
-              },
-            ],
-            "columns": ["n"],
-            "row_count": 2,
-            "execution_time_ms": 45.3,
-            "graph_id": "kg1a2b3c4d5",
-            "timestamp": "2024-01-15T10:30:45Z",
-          },
+          "success": True,
+          "data": [
+            {
+              "n": {
+                "type": "Company",
+                "name": "Apple Inc.",
+                "ticker": "AAPL",
+                "identifier": "ENT123456",
+              }
+            },
+            {
+              "n": {
+                "type": "Company",
+                "name": "Microsoft Corporation",
+                "ticker": "MSFT",
+                "identifier": "ENT789012",
+              }
+            },
+          ],
+          "columns": ["n"],
+          "row_count": 2,
+          "execution_time_ms": 45.3,
+          "graph_id": "kg1a2b3c4d5",
+          "timestamp": "2024-01-15T10:30:45Z",
         },
         {
-          "summary": "Aggregation query result",
-          "description": "Financial metrics aggregation with multiple columns",
-          "value": {
-            "success": True,
-            "data": [
-              {"ticker": "AAPL", "name": "Apple Inc.", "filing_count": 42},
-              {"ticker": "MSFT", "name": "Microsoft Corporation", "filing_count": 38},
-              {"ticker": "GOOGL", "name": "Alphabet Inc.", "filing_count": 35},
-            ],
-            "columns": ["ticker", "name", "filing_count"],
-            "row_count": 3,
-            "execution_time_ms": 128.7,
-            "graph_id": "kg1a2b3c4d5",
-            "timestamp": "2024-01-15T10:35:22Z",
-          },
+          "success": True,
+          "data": [
+            {"ticker": "AAPL", "name": "Apple Inc.", "filing_count": 42},
+            {"ticker": "MSFT", "name": "Microsoft Corporation", "filing_count": 38},
+            {"ticker": "GOOGL", "name": "Alphabet Inc.", "filing_count": 35},
+          ],
+          "columns": ["ticker", "name", "filing_count"],
+          "row_count": 3,
+          "execution_time_ms": 128.7,
+          "graph_id": "kg1a2b3c4d5",
+          "timestamp": "2024-01-15T10:35:22Z",
         },
         {
-          "summary": "Empty result set",
-          "description": "Query executed successfully but returned no results",
-          "value": {
-            "success": True,
-            "data": [],
-            "columns": ["n"],
-            "row_count": 0,
-            "execution_time_ms": 12.5,
-            "graph_id": "kg1a2b3c4d5",
-            "timestamp": "2024-01-15T10:40:15Z",
-          },
+          "success": True,
+          "data": [],
+          "columns": ["n"],
+          "row_count": 0,
+          "execution_time_ms": 12.5,
+          "graph_id": "kg1a2b3c4d5",
+          "timestamp": "2024-01-15T10:40:15Z",
         },
         {
-          "summary": "Query error",
-          "description": "Query failed due to syntax error",
-          "value": {
-            "success": False,
-            "data": None,
-            "columns": None,
-            "row_count": 0,
-            "execution_time_ms": 5.2,
-            "graph_id": "kg1a2b3c4d5",
-            "timestamp": "2024-01-15T10:45:30Z",
-            "error": "Syntax error: Expected MATCH, CREATE, or RETURN at line 1",
-          },
+          "success": False,
+          "data": None,
+          "columns": None,
+          "row_count": 0,
+          "execution_time_ms": 5.2,
+          "graph_id": "kg1a2b3c4d5",
+          "timestamp": "2024-01-15T10:45:30Z",
+          "error": "Syntax error: Expected MATCH, CREATE, or RETURN at line 1",
         },
       ]
     }

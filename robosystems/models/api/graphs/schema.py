@@ -17,166 +17,154 @@ class CustomSchemaDefinition(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "People, companies, and projects schema",
-          "description": "Custom schema from custom_graph_demo showing organizational structure",
-          "value": {
-            "name": "custom_graph_demo",
-            "version": "1.0.0",
-            "description": "People, companies, and projects schema for the custom graph demo",
-            "extends": "base",
-            "nodes": [
-              {
-                "name": "Company",
-                "properties": [
-                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
-                  {"name": "industry", "type": "STRING"},
-                  {"name": "location", "type": "STRING"},
-                  {"name": "founded_year", "type": "INT64"},
-                ],
-              },
-              {
-                "name": "Project",
-                "properties": [
-                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
-                  {"name": "status", "type": "STRING"},
-                  {"name": "budget", "type": "DOUBLE"},
-                  {"name": "start_date", "type": "STRING"},
-                  {"name": "end_date", "type": "STRING"},
-                ],
-              },
-              {
-                "name": "Person",
-                "properties": [
-                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
-                  {"name": "age", "type": "INT64"},
-                  {"name": "title", "type": "STRING"},
-                  {"name": "interests", "type": "STRING"},
-                ],
-              },
-            ],
-            "relationships": [
-              {
-                "name": "PERSON_WORKS_FOR_COMPANY",
-                "from_node": "Person",
-                "to_node": "Company",
-                "properties": [
-                  {"name": "role", "type": "STRING"},
-                  {"name": "started_on", "type": "STRING"},
-                ],
-              },
-              {
-                "name": "PERSON_WORKS_ON_PROJECT",
-                "from_node": "Person",
-                "to_node": "Project",
-                "properties": [
-                  {"name": "hours_per_week", "type": "INT64"},
-                  {"name": "contribution", "type": "STRING"},
-                ],
-              },
-              {
-                "name": "COMPANY_SPONSORS_PROJECT",
-                "from_node": "Company",
-                "to_node": "Project",
-                "properties": [
-                  {"name": "sponsorship_level", "type": "STRING"},
-                  {"name": "budget_committed", "type": "DOUBLE"},
-                ],
-              },
-            ],
-            "metadata": {"domain": "custom_graph_demo"},
-          },
+          "name": "custom_graph_demo",
+          "version": "1.0.0",
+          "description": "People, companies, and projects schema for the custom graph demo",
+          "extends": "base",
+          "nodes": [
+            {
+              "name": "Company",
+              "properties": [
+                {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "industry", "type": "STRING"},
+                {"name": "location", "type": "STRING"},
+                {"name": "founded_year", "type": "INT64"},
+              ],
+            },
+            {
+              "name": "Project",
+              "properties": [
+                {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "status", "type": "STRING"},
+                {"name": "budget", "type": "DOUBLE"},
+                {"name": "start_date", "type": "STRING"},
+                {"name": "end_date", "type": "STRING"},
+              ],
+            },
+            {
+              "name": "Person",
+              "properties": [
+                {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "age", "type": "INT64"},
+                {"name": "title", "type": "STRING"},
+                {"name": "interests", "type": "STRING"},
+              ],
+            },
+          ],
+          "relationships": [
+            {
+              "name": "PERSON_WORKS_FOR_COMPANY",
+              "from_node": "Person",
+              "to_node": "Company",
+              "properties": [
+                {"name": "role", "type": "STRING"},
+                {"name": "started_on", "type": "STRING"},
+              ],
+            },
+            {
+              "name": "PERSON_WORKS_ON_PROJECT",
+              "from_node": "Person",
+              "to_node": "Project",
+              "properties": [
+                {"name": "hours_per_week", "type": "INT64"},
+                {"name": "contribution", "type": "STRING"},
+              ],
+            },
+            {
+              "name": "COMPANY_SPONSORS_PROJECT",
+              "from_node": "Company",
+              "to_node": "Project",
+              "properties": [
+                {"name": "sponsorship_level", "type": "STRING"},
+                {"name": "budget_committed", "type": "DOUBLE"},
+              ],
+            },
+          ],
+          "metadata": {"domain": "custom_graph_demo"},
         },
         {
-          "summary": "Inventory management schema",
-          "description": "Simple schema for tracking products and warehouses",
-          "value": {
-            "name": "inventory_management",
-            "version": "1.0.0",
-            "description": "Inventory tracking system with products, warehouses, and suppliers",
-            "nodes": [
-              {
-                "name": "Product",
-                "properties": [
-                  {"name": "sku", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
-                  {"name": "price", "type": "DOUBLE"},
-                  {"name": "quantity", "type": "INT64"},
-                  {"name": "category", "type": "STRING"},
-                ],
-              },
-              {
-                "name": "Warehouse",
-                "properties": [
-                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                  {"name": "location", "type": "STRING", "is_required": True},
-                  {"name": "capacity", "type": "INT64"},
-                ],
-              },
-              {
-                "name": "Supplier",
-                "properties": [
-                  {"name": "id", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
-                  {"name": "contact", "type": "STRING"},
-                ],
-              },
-            ],
-            "relationships": [
-              {
-                "name": "STORED_IN",
-                "from_node": "Product",
-                "to_node": "Warehouse",
-                "properties": [
-                  {"name": "since", "type": "DATE"},
-                  {"name": "quantity", "type": "INT64"},
-                ],
-              },
-              {
-                "name": "SUPPLIED_BY",
-                "from_node": "Product",
-                "to_node": "Supplier",
-                "properties": [{"name": "cost", "type": "DOUBLE"}],
-              },
-            ],
-            "metadata": {"created_by": "inventory_team", "industry": "retail"},
-          },
+          "name": "inventory_management",
+          "version": "1.0.0",
+          "description": "Inventory tracking system with products, warehouses, and suppliers",
+          "nodes": [
+            {
+              "name": "Product",
+              "properties": [
+                {"name": "sku", "type": "STRING", "is_primary_key": True},
+                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "price", "type": "DOUBLE"},
+                {"name": "quantity", "type": "INT64"},
+                {"name": "category", "type": "STRING"},
+              ],
+            },
+            {
+              "name": "Warehouse",
+              "properties": [
+                {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                {"name": "location", "type": "STRING", "is_required": True},
+                {"name": "capacity", "type": "INT64"},
+              ],
+            },
+            {
+              "name": "Supplier",
+              "properties": [
+                {"name": "id", "type": "STRING", "is_primary_key": True},
+                {"name": "name", "type": "STRING", "is_required": True},
+                {"name": "contact", "type": "STRING"},
+              ],
+            },
+          ],
+          "relationships": [
+            {
+              "name": "STORED_IN",
+              "from_node": "Product",
+              "to_node": "Warehouse",
+              "properties": [
+                {"name": "since", "type": "DATE"},
+                {"name": "quantity", "type": "INT64"},
+              ],
+            },
+            {
+              "name": "SUPPLIED_BY",
+              "from_node": "Product",
+              "to_node": "Supplier",
+              "properties": [{"name": "cost", "type": "DOUBLE"}],
+            },
+          ],
+          "metadata": {"created_by": "inventory_team", "industry": "retail"},
         },
         {
-          "summary": "Minimal schema",
-          "description": "Simplest custom schema with just two node types",
-          "value": {
-            "name": "simple_graph",
-            "version": "1.0.0",
-            "description": "Basic graph with just two node types",
-            "nodes": [
-              {
-                "name": "Item",
-                "properties": [
-                  {"name": "id", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
-                ],
-              },
-              {
-                "name": "Category",
-                "properties": [
-                  {"name": "id", "type": "STRING", "is_primary_key": True},
-                  {"name": "name", "type": "STRING", "is_required": True},
-                ],
-              },
-            ],
-            "relationships": [
-              {
-                "name": "BELONGS_TO",
-                "from_node": "Item",
-                "to_node": "Category",
-                "properties": [],
-              }
-            ],
-            "metadata": {},
-          },
+          "name": "simple_graph",
+          "version": "1.0.0",
+          "description": "Basic graph with just two node types",
+          "nodes": [
+            {
+              "name": "Item",
+              "properties": [
+                {"name": "id", "type": "STRING", "is_primary_key": True},
+                {"name": "name", "type": "STRING", "is_required": True},
+              ],
+            },
+            {
+              "name": "Category",
+              "properties": [
+                {"name": "id", "type": "STRING", "is_primary_key": True},
+                {"name": "name", "type": "STRING", "is_required": True},
+              ],
+            },
+          ],
+          "relationships": [
+            {
+              "name": "BELONGS_TO",
+              "from_node": "Item",
+              "to_node": "Category",
+              "properties": [],
+            }
+          ],
+          "metadata": {},
         },
       ]
     }
@@ -496,151 +484,135 @@ class SchemaInfoResponse(BaseModel):
     "json_schema_extra": {
       "examples": [
         {
-          "summary": "SEC shared repository schema",
-          "description": "Runtime schema from SEC shared repository showing XBRL structures",
-          "value": {
-            "graph_id": "sec",
-            "schema": {
-              "node_labels": [
-                "Entity",
-                "Report",
-                "Fact",
-                "Element",
-                "Period",
-                "Unit",
-                "Dimension",
-                "Taxonomy",
-                "Structure",
-                "Association",
-              ],
-              "relationship_types": [
-                "ENTITY_HAS_REPORT",
-                "REPORT_HAS_FACT",
-                "FACT_HAS_ELEMENT",
-                "FACT_HAS_PERIOD",
-                "FACT_HAS_UNIT",
-                "FACT_HAS_DIMENSION",
-                "REPORT_USES_TAXONOMY",
-                "STRUCTURE_HAS_TAXONOMY",
-                "STRUCTURE_HAS_ASSOCIATION",
-                "ASSOCIATION_HAS_FROM_ELEMENT",
-                "ASSOCIATION_HAS_TO_ELEMENT",
-              ],
-              "node_properties": {
-                "Entity": {
-                  "cik": "STRING",
-                  "name": "STRING",
-                  "ticker": "STRING",
-                  "entity_type": "STRING",
-                  "industry": "STRING",
-                  "state_of_incorporation": "STRING",
-                  "fiscal_year_end": "STRING",
-                },
-                "Report": {
-                  "form": "STRING",
-                  "report_date": "STRING",
-                  "filing_date": "STRING",
-                  "accession_number": "STRING",
-                  "name": "STRING",
-                },
-                "Fact": {
-                  "numeric_value": "DOUBLE",
-                  "decimals": "INT64",
-                  "fact_type": "STRING",
-                },
+          "graph_id": "sec",
+          "schema": {
+            "node_labels": [
+              "Entity",
+              "Report",
+              "Fact",
+              "Element",
+              "Period",
+              "Unit",
+              "Dimension",
+              "Taxonomy",
+              "Structure",
+              "Association",
+            ],
+            "relationship_types": [
+              "ENTITY_HAS_REPORT",
+              "REPORT_HAS_FACT",
+              "FACT_HAS_ELEMENT",
+              "FACT_HAS_PERIOD",
+              "FACT_HAS_UNIT",
+              "FACT_HAS_DIMENSION",
+              "REPORT_USES_TAXONOMY",
+              "STRUCTURE_HAS_TAXONOMY",
+              "STRUCTURE_HAS_ASSOCIATION",
+              "ASSOCIATION_HAS_FROM_ELEMENT",
+              "ASSOCIATION_HAS_TO_ELEMENT",
+            ],
+            "node_properties": {
+              "Entity": {
+                "cik": "STRING",
+                "name": "STRING",
+                "ticker": "STRING",
+                "entity_type": "STRING",
+                "industry": "STRING",
+                "state_of_incorporation": "STRING",
+                "fiscal_year_end": "STRING",
+              },
+              "Report": {
+                "form": "STRING",
+                "report_date": "STRING",
+                "filing_date": "STRING",
+                "accession_number": "STRING",
+                "name": "STRING",
+              },
+              "Fact": {
+                "numeric_value": "DOUBLE",
+                "decimals": "INT64",
+                "fact_type": "STRING",
               },
             },
           },
         },
         {
-          "summary": "Accounting graph schema",
-          "description": "Runtime schema for accounting graph showing double-entry bookkeeping structure",
-          "value": {
-            "graph_id": "kg1a2b3c4d5",
-            "schema": {
-              "node_labels": [
-                "Transaction",
-                "LineItem",
-                "Element",
-                "Report",
-                "Entity",
-                "Fact",
-                "Period",
-                "Unit",
-              ],
-              "relationship_types": [
-                "TRANSACTION_HAS_ENTRY",
-                "ENTRY_HAS_LINE_ITEM",
-                "LINE_ITEM_RELATES_TO_ELEMENT",
-                "ENTITY_HAS_REPORT",
-                "REPORT_HAS_FACT",
-                "FACT_HAS_ELEMENT",
-                "FACT_HAS_PERIOD",
-                "FACT_HAS_UNIT",
-              ],
-              "node_properties": {
-                "Transaction": {
-                  "date": "STRING",
-                  "description": "STRING",
-                  "type": "STRING",
-                },
-                "LineItem": {
-                  "debit_amount": "DOUBLE",
-                  "credit_amount": "DOUBLE",
-                },
-                "Element": {
-                  "name": "STRING",
-                  "classification": "STRING",
-                  "balance": "STRING",
-                },
+          "graph_id": "kg1a2b3c4d5",
+          "schema": {
+            "node_labels": [
+              "Transaction",
+              "LineItem",
+              "Element",
+              "Report",
+              "Entity",
+              "Fact",
+              "Period",
+              "Unit",
+            ],
+            "relationship_types": [
+              "TRANSACTION_HAS_ENTRY",
+              "ENTRY_HAS_LINE_ITEM",
+              "LINE_ITEM_RELATES_TO_ELEMENT",
+              "ENTITY_HAS_REPORT",
+              "REPORT_HAS_FACT",
+              "FACT_HAS_ELEMENT",
+              "FACT_HAS_PERIOD",
+              "FACT_HAS_UNIT",
+            ],
+            "node_properties": {
+              "Transaction": {
+                "date": "STRING",
+                "description": "STRING",
+                "type": "STRING",
+              },
+              "LineItem": {
+                "debit_amount": "DOUBLE",
+                "credit_amount": "DOUBLE",
+              },
+              "Element": {
+                "name": "STRING",
+                "classification": "STRING",
+                "balance": "STRING",
               },
             },
           },
         },
         {
-          "summary": "Custom graph schema",
-          "description": "Runtime schema from custom graph showing people, companies, and projects",
-          "value": {
-            "graph_id": "kg9f8e7d6c5",
-            "schema": {
-              "node_labels": ["Person", "Company", "Project"],
-              "relationship_types": [
-                "PERSON_WORKS_FOR_COMPANY",
-                "PERSON_WORKS_ON_PROJECT",
-                "COMPANY_SPONSORS_PROJECT",
-              ],
-              "node_properties": {
-                "Person": {
-                  "identifier": "STRING",
-                  "name": "STRING",
-                  "title": "STRING",
-                  "interests": "STRING",
-                },
-                "Company": {
-                  "identifier": "STRING",
-                  "name": "STRING",
-                  "industry": "STRING",
-                  "location": "STRING",
-                },
-                "Project": {
-                  "name": "STRING",
-                  "status": "STRING",
-                  "budget": "DOUBLE",
-                },
+          "graph_id": "kg9f8e7d6c5",
+          "schema": {
+            "node_labels": ["Person", "Company", "Project"],
+            "relationship_types": [
+              "PERSON_WORKS_FOR_COMPANY",
+              "PERSON_WORKS_ON_PROJECT",
+              "COMPANY_SPONSORS_PROJECT",
+            ],
+            "node_properties": {
+              "Person": {
+                "identifier": "STRING",
+                "name": "STRING",
+                "title": "STRING",
+                "interests": "STRING",
+              },
+              "Company": {
+                "identifier": "STRING",
+                "name": "STRING",
+                "industry": "STRING",
+                "location": "STRING",
+              },
+              "Project": {
+                "name": "STRING",
+                "status": "STRING",
+                "budget": "DOUBLE",
               },
             },
           },
         },
         {
-          "summary": "Empty graph schema",
-          "description": "Runtime schema from a newly created graph with no data yet",
-          "value": {
-            "graph_id": "kg2x3y4z5a6",
-            "schema": {
-              "node_labels": [],
-              "relationship_types": [],
-              "node_properties": {},
-            },
+          "graph_id": "kg2x3y4z5a6",
+          "schema": {
+            "node_labels": [],
+            "relationship_types": [],
+            "node_properties": {},
           },
         },
       ]

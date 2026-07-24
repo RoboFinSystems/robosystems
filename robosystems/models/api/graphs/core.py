@@ -41,37 +41,25 @@ class InitialEntityData(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Public company entity",
-          "description": "Initial entity data for a publicly-traded company with SEC information",
-          "value": {
-            "name": "Apple Inc.",
-            "uri": "https://www.apple.com",
-            "cik": "0000320193",
-            "ein": "94-2404110",
-            "sic": "3571",
-            "sic_description": "Electronic Computers",
-            "state_of_incorporation": "California",
-            "fiscal_year_end": "0930",
-          },
+          "name": "Apple Inc.",
+          "uri": "https://www.apple.com",
+          "cik": "0000320193",
+          "ein": "94-2404110",
+          "sic": "3571",
+          "sic_description": "Electronic Computers",
+          "state_of_incorporation": "California",
+          "fiscal_year_end": "0930",
         },
         {
-          "summary": "Private company entity",
-          "description": "Initial entity data for a private company with minimal information",
-          "value": {
-            "name": "Acme Consulting LLC",
-            "uri": "https://acmeconsulting.com",
-            "ein": "12-3456789",
-            "state_of_incorporation": "Delaware",
-            "category": "Professional Services",
-          },
+          "name": "Acme Consulting LLC",
+          "uri": "https://acmeconsulting.com",
+          "ein": "12-3456789",
+          "state_of_incorporation": "Delaware",
+          "category": "Professional Services",
         },
         {
-          "summary": "Minimal entity",
-          "description": "Simplest entity with just required fields",
-          "value": {
-            "name": "Startup Inc",
-            "uri": "https://startup.io",
-          },
+          "name": "Startup Inc",
+          "uri": "https://startup.io",
         },
       ]
     }
@@ -126,135 +114,119 @@ class CreateGraphRequest(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Entity graph with initial entity",
-          "description": "Create a graph with initial entity data for a specific company/organization",
-          "value": {
-            "metadata": {
-              "graph_name": "Acme Consulting LLC",
-              "description": "Professional consulting services with full accounting integration",
-              "schema_extensions": ["roboledger"],
-            },
-            "instance_tier": "ladybug-standard",
-            "initial_entity": {
-              "name": "Acme Consulting LLC",
-              "uri": "https://acmeconsulting.com",
-              "ein": "12-3456789",
-              "cik": "0001234567",
-              "state_of_incorporation": "Delaware",
-            },
-            "create_entity": True,
-            "tags": ["consulting", "professional-services", "production"],
+          "metadata": {
+            "graph_name": "Acme Consulting LLC",
+            "description": "Professional consulting services with full accounting integration",
+            "schema_extensions": ["roboledger"],
           },
+          "instance_tier": "ladybug-standard",
+          "initial_entity": {
+            "name": "Acme Consulting LLC",
+            "uri": "https://acmeconsulting.com",
+            "ein": "12-3456789",
+            "cik": "0001234567",
+            "state_of_incorporation": "Delaware",
+          },
+          "create_entity": True,
+          "tags": ["consulting", "professional-services", "production"],
         },
         {
-          "summary": "Custom graph with people and companies",
-          "description": "Create a generic graph with custom schema from custom_graph_demo",
-          "value": {
-            "metadata": {
-              "graph_name": "custom_graph_demo_1234",
-              "description": "Custom graph demo with people, companies, and projects",
-              "schema_extensions": [],
-            },
-            "instance_tier": "ladybug-standard",
-            "custom_schema": {
-              "name": "custom_graph_demo",
-              "version": "1.0.0",
-              "description": "People, companies, and projects schema",
-              "extends": "base",
-              "nodes": [
-                {
-                  "name": "Person",
-                  "properties": [
-                    {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                    {"name": "name", "type": "STRING", "is_required": True},
-                    {"name": "title", "type": "STRING"},
-                  ],
-                },
-                {
-                  "name": "Company",
-                  "properties": [
-                    {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                    {"name": "name", "type": "STRING", "is_required": True},
-                    {"name": "industry", "type": "STRING"},
-                  ],
-                },
-              ],
-              "relationships": [
-                {
-                  "name": "PERSON_WORKS_FOR_COMPANY",
-                  "from_node": "Person",
-                  "to_node": "Company",
-                  "properties": [{"name": "role", "type": "STRING"}],
-                }
-              ],
-              "metadata": {"domain": "custom_graph_demo"},
-            },
-            "tags": ["custom", "demo", "generic"],
+          "metadata": {
+            "graph_name": "custom_graph_demo_1234",
+            "description": "Custom graph demo with people, companies, and projects",
+            "schema_extensions": [],
           },
+          "instance_tier": "ladybug-standard",
+          "custom_schema": {
+            "name": "custom_graph_demo",
+            "version": "1.0.0",
+            "description": "People, companies, and projects schema",
+            "extends": "base",
+            "nodes": [
+              {
+                "name": "Person",
+                "properties": [
+                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "title", "type": "STRING"},
+                ],
+              },
+              {
+                "name": "Company",
+                "properties": [
+                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "industry", "type": "STRING"},
+                ],
+              },
+            ],
+            "relationships": [
+              {
+                "name": "PERSON_WORKS_FOR_COMPANY",
+                "from_node": "Person",
+                "to_node": "Company",
+                "properties": [{"name": "role", "type": "STRING"}],
+              }
+            ],
+            "metadata": {"domain": "custom_graph_demo"},
+          },
+          "tags": ["custom", "demo", "generic"],
         },
         {
-          "summary": "Inventory management custom graph",
-          "description": "Create a custom graph for inventory tracking",
-          "value": {
-            "metadata": {
-              "graph_name": "warehouse_inventory",
-              "description": "Inventory management system",
-              "schema_extensions": [],
-            },
-            "instance_tier": "ladybug-standard",
-            "custom_schema": {
-              "name": "inventory_management",
-              "version": "1.0.0",
-              "description": "Inventory tracking with products and warehouses",
-              "nodes": [
-                {
-                  "name": "Product",
-                  "properties": [
-                    {"name": "sku", "type": "STRING", "is_primary_key": True},
-                    {"name": "name", "type": "STRING", "is_required": True},
-                    {"name": "price", "type": "DOUBLE"},
-                    {"name": "quantity", "type": "INT64"},
-                  ],
-                },
-                {
-                  "name": "Warehouse",
-                  "properties": [
-                    {"name": "identifier", "type": "STRING", "is_primary_key": True},
-                    {"name": "location", "type": "STRING", "is_required": True},
-                  ],
-                },
-              ],
-              "relationships": [
-                {
-                  "name": "STORED_IN",
-                  "from_node": "Product",
-                  "to_node": "Warehouse",
-                  "properties": [{"name": "quantity", "type": "INT64"}],
-                }
-              ],
-              "metadata": {"industry": "retail"},
-            },
-            "tags": ["inventory", "retail"],
+          "metadata": {
+            "graph_name": "warehouse_inventory",
+            "description": "Inventory management system",
+            "schema_extensions": [],
           },
+          "instance_tier": "ladybug-standard",
+          "custom_schema": {
+            "name": "inventory_management",
+            "version": "1.0.0",
+            "description": "Inventory tracking with products and warehouses",
+            "nodes": [
+              {
+                "name": "Product",
+                "properties": [
+                  {"name": "sku", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "price", "type": "DOUBLE"},
+                  {"name": "quantity", "type": "INT64"},
+                ],
+              },
+              {
+                "name": "Warehouse",
+                "properties": [
+                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                  {"name": "location", "type": "STRING", "is_required": True},
+                ],
+              },
+            ],
+            "relationships": [
+              {
+                "name": "STORED_IN",
+                "from_node": "Product",
+                "to_node": "Warehouse",
+                "properties": [{"name": "quantity", "type": "INT64"}],
+              }
+            ],
+            "metadata": {"industry": "retail"},
+          },
+          "tags": ["inventory", "retail"],
         },
         {
-          "summary": "Minimal custom graph",
-          "description": "Create a generic custom graph with a minimal schema",
-          "value": {
-            "metadata": {
-              "graph_name": "Customer Analytics Graph",
-              "description": "Graph database for customer relationship and behavior analysis",
-              "schema_extensions": [],
-            },
-            "instance_tier": "ladybug-standard",
-            "custom_schema": {
-              "name": "customer_analytics",
-              "version": "1.0.0",
-              "nodes": [],
-              "relationships": [],
-            },
-            "tags": ["analytics", "customers", "marketing"],
+          "metadata": {
+            "graph_name": "Customer Analytics Graph",
+            "description": "Graph database for customer relationship and behavior analysis",
+            "schema_extensions": [],
           },
+          "instance_tier": "ladybug-standard",
+          "custom_schema": {
+            "name": "customer_analytics",
+            "version": "1.0.0",
+            "nodes": [],
+            "relationships": [],
+          },
+          "tags": ["analytics", "customers", "marketing"],
         },
       ]
     }

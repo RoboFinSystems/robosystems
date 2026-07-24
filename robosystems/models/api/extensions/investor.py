@@ -68,60 +68,35 @@ class CreateSecurityRequest(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Common stock class A",
-          "description": (
-            "Vanilla equity security tied to an issuer entity. "
-            "`terms` is empty — common stock has no instrument "
-            "specifics beyond the share count."
-          ),
-          "value": {
-            "entity_id": "ent_acme_holdings",
-            "name": "Common Stock Class A",
-            "security_type": "common_stock",
-            "security_subtype": "class_a",
-            "authorized_shares": 10_000_000,
-            "outstanding_shares": 6_500_000,
+          "entity_id": "ent_acme_holdings",
+          "name": "Common Stock Class A",
+          "security_type": "common_stock",
+          "security_subtype": "class_a",
+          "authorized_shares": 10_000_000,
+          "outstanding_shares": 6_500_000,
+        },
+        {
+          "entity_id": "ent_seed_co",
+          "name": "Series A Convertible Note",
+          "security_type": "convertible_note",
+          "security_subtype": "series_a",
+          "terms": {
+            "principal_cents": 50_000_00,
+            "interest_rate_bps": 800,
+            "discount_pct": 20,
+            "valuation_cap_cents": 10_000_000_00,
+            "maturity_date": "2028-06-30",
           },
         },
         {
-          "summary": "Series A convertible note",
-          "description": (
-            "Convertible debt with a discount and valuation cap. "
-            "Conversion mechanics live in `terms`; the surface stays "
-            "schemaless to support future instrument types without "
-            "schema migrations."
-          ),
-          "value": {
-            "entity_id": "ent_seed_co",
-            "name": "Series A Convertible Note",
-            "security_type": "convertible_note",
-            "security_subtype": "series_a",
-            "terms": {
-              "principal_cents": 50_000_00,
-              "interest_rate_bps": 800,
-              "discount_pct": 20,
-              "valuation_cap_cents": 10_000_000_00,
-              "maturity_date": "2028-06-30",
-            },
-          },
-        },
-        {
-          "summary": "Warrant pre-associated to a company graph",
-          "description": (
-            "Warrant linked to a tenant graph (`source_graph_id`) "
-            "before the issuer entity is finalized. The strike/expiry "
-            "live in `terms`."
-          ),
-          "value": {
-            "source_graph_id": "kg_acme_pre_seed",
-            "name": "Founder Warrant — 2026",
-            "security_type": "warrant",
-            "terms": {
-              "strike_price_cents": 25,
-              "shares_underlying": 100_000,
-              "expiration_date": "2031-05-01",
-              "vesting": "cliff_1y_then_monthly_36",
-            },
+          "source_graph_id": "kg_acme_pre_seed",
+          "name": "Founder Warrant — 2026",
+          "security_type": "warrant",
+          "terms": {
+            "strike_price_cents": 25,
+            "shares_underlying": 100_000,
+            "expiration_date": "2031-05-01",
+            "vesting": "cliff_1y_then_monthly_36",
           },
         },
       ]
@@ -254,23 +229,12 @@ class UpdateSecurityOperation(UpdateSecurityRequest):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Refresh outstanding shares after issuance round",
-          "value": {
-            "security_id": "sec_acme_common_a",
-            "outstanding_shares": 7_250_000,
-          },
+          "security_id": "sec_acme_common_a",
+          "outstanding_shares": 7_250_000,
         },
         {
-          "summary": "Deactivate a retired class",
-          "description": (
-            "Soft-deactivate a security after a class consolidation. "
-            "Existing positions still resolve; new active-only lookups "
-            "skip it."
-          ),
-          "value": {
-            "security_id": "sec_legacy_pref_seed",
-            "is_active": False,
-          },
+          "security_id": "sec_legacy_pref_seed",
+          "is_active": False,
         },
       ]
     }
@@ -283,14 +247,7 @@ class DeleteSecurityOperation(BaseModel):
   """CQRS body for `POST /operations/delete-security` (soft delete)."""
 
   model_config = ConfigDict(
-    json_schema_extra={
-      "examples": [
-        {
-          "summary": "Soft-delete a security",
-          "value": {"security_id": "sec_misclassified_warrant"},
-        }
-      ]
-    }
+    json_schema_extra={"examples": [{"security_id": "sec_misclassified_warrant"}]}
   )
 
   security_id: str = Field(..., description="Target security ID.")
@@ -939,59 +896,45 @@ class CreatePortfolioBlockRequest(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Portfolio with initial positions",
-          "description": (
-            "Create a growth-strategy portfolio for an entity with two "
-            "marked positions in existing securities."
-          ),
-          "value": {
-            "portfolio": {
-              "name": "Q1 2026 Growth",
-              "description": "Mid-cap public equities",
-              "strategy": "growth",
-              "inception_date": "2026-01-01",
-              "base_currency": "USD",
-              "entity_id": "ent_acme_holdings",
-            },
-            "positions": [
-              {
-                "security_id": "sec_aapl",
-                "quantity": 100,
-                "quantity_type": "shares",
-                "cost_basis": 1850000,
-                "currency": "USD",
-                "current_value": 2010000,
-                "valuation_date": "2026-04-30",
-                "valuation_source": "broker_statement",
-                "acquisition_date": "2026-01-15",
-              },
-              {
-                "security_id": "sec_msft",
-                "quantity": 50,
-                "quantity_type": "shares",
-                "cost_basis": 2125000,
-                "currency": "USD",
-                "current_value": 2240000,
-                "valuation_date": "2026-04-30",
-                "valuation_source": "broker_statement",
-                "acquisition_date": "2026-02-08",
-              },
-            ],
+          "portfolio": {
+            "name": "Q1 2026 Growth",
+            "description": "Mid-cap public equities",
+            "strategy": "growth",
+            "inception_date": "2026-01-01",
+            "base_currency": "USD",
+            "entity_id": "ent_acme_holdings",
           },
+          "positions": [
+            {
+              "security_id": "sec_aapl",
+              "quantity": 100,
+              "quantity_type": "shares",
+              "cost_basis": 1850000,
+              "currency": "USD",
+              "current_value": 2010000,
+              "valuation_date": "2026-04-30",
+              "valuation_source": "broker_statement",
+              "acquisition_date": "2026-01-15",
+            },
+            {
+              "security_id": "sec_msft",
+              "quantity": 50,
+              "quantity_type": "shares",
+              "cost_basis": 2125000,
+              "currency": "USD",
+              "current_value": 2240000,
+              "valuation_date": "2026-04-30",
+              "valuation_source": "broker_statement",
+              "acquisition_date": "2026-02-08",
+            },
+          ],
         },
         {
-          "summary": "Empty portfolio",
-          "description": (
-            "Create a portfolio with no initial positions; populate "
-            "later via `update-portfolio-block`."
-          ),
-          "value": {
-            "portfolio": {
-              "name": "Watchlist",
-              "base_currency": "USD",
-            },
-            "positions": [],
+          "portfolio": {
+            "name": "Watchlist",
+            "base_currency": "USD",
           },
+          "positions": [],
         },
       ]
     }
@@ -1023,57 +966,43 @@ class UpdatePortfolioBlockOperation(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "Refresh marks and dispose a position",
-          "description": (
-            "Update the strategy note, mark two positions to today's "
-            "close, and dispose a third — all atomically."
-          ),
-          "value": {
-            "portfolio_id": "port_q1_growth_2026",
-            "portfolio": {"description": "Pivoted toward defensive holdings"},
-            "positions": {
-              "add": [],
-              "update": [
-                {
-                  "id": "pos_aapl_lot_1",
-                  "current_value": 1980000,
-                  "valuation_date": "2026-05-06",
-                  "valuation_source": "broker_statement",
-                },
-                {
-                  "id": "pos_msft_lot_1",
-                  "current_value": 2310000,
-                  "valuation_date": "2026-05-06",
-                  "valuation_source": "broker_statement",
-                },
-              ],
-              "dispose": [
-                {
-                  "id": "pos_oldcorp_lot_3",
-                  "disposition_reason": "Liquidated; rotated capital",
-                }
-              ],
-            },
+          "portfolio_id": "port_q1_growth_2026",
+          "portfolio": {"description": "Pivoted toward defensive holdings"},
+          "positions": {
+            "add": [],
+            "update": [
+              {
+                "id": "pos_aapl_lot_1",
+                "current_value": 1980000,
+                "valuation_date": "2026-05-06",
+                "valuation_source": "broker_statement",
+              },
+              {
+                "id": "pos_msft_lot_1",
+                "current_value": 2310000,
+                "valuation_date": "2026-05-06",
+                "valuation_source": "broker_statement",
+              },
+            ],
+            "dispose": [
+              {
+                "id": "pos_oldcorp_lot_3",
+                "disposition_reason": "Liquidated; rotated capital",
+              }
+            ],
           },
         },
         {
-          "summary": "Add a new lot only",
-          "description": (
-            "Mint a fresh position into an existing portfolio; leave "
-            "the portfolio core and other positions untouched."
-          ),
-          "value": {
-            "portfolio_id": "port_q1_growth_2026",
-            "positions": {
-              "add": [
-                {
-                  "security_id": "sec_googl",
-                  "quantity": 25,
-                  "cost_basis": 4250000,
-                  "acquisition_date": "2026-05-01",
-                }
-              ]
-            },
+          "portfolio_id": "port_q1_growth_2026",
+          "positions": {
+            "add": [
+              {
+                "security_id": "sec_googl",
+                "quantity": 25,
+                "cost_basis": 4250000,
+                "acquisition_date": "2026-05-01",
+              }
+            ]
           },
         },
       ]
@@ -1109,24 +1038,10 @@ class DeletePortfolioBlockOperation(BaseModel):
   model_config = ConfigDict(
     json_schema_extra={
       "examples": [
+        {"portfolio_id": "port_watchlist_2026"},
         {
-          "summary": "Delete an empty portfolio",
-          "description": (
-            "Default request shape — no acknowledgement needed when "
-            "the portfolio has no active positions."
-          ),
-          "value": {"portfolio_id": "port_watchlist_2026"},
-        },
-        {
-          "summary": "Delete a portfolio with active positions",
-          "description": (
-            "Cascade-delete a populated portfolio. Without "
-            "`confirm_active_positions: true` the operation returns 409."
-          ),
-          "value": {
-            "portfolio_id": "port_legacy_2024",
-            "confirm_active_positions": True,
-          },
+          "portfolio_id": "port_legacy_2024",
+          "confirm_active_positions": True,
         },
       ]
     }
