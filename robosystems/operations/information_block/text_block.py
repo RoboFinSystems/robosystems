@@ -34,7 +34,7 @@ from robosystems.models.extensions.roboledger import Fact
 from robosystems.operations.information_block.envelope import (
   DISCLOSURE_BLOCK_TYPE,
   association_to_connection,
-  element_to_lite,
+  elements_to_lites,
   fact_to_lite,
   load_base_envelope_atoms,
   load_disclosure_id_for_structure,
@@ -138,7 +138,7 @@ def build_text_block_envelope(
       template=None,
       mechanics=mechanics,
     ),
-    elements=[element_to_lite(e) for e in atoms.elements],
+    elements=elements_to_lites(session, atoms.elements),
     connections=[
       association_to_connection(a, atoms.classifications_by_assoc.get(a.id, []))
       for a in atoms.associations
