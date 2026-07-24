@@ -33,6 +33,7 @@ from robosystems.models.extensions import (
   AssociationClassification,
   Classification,
   Element,
+  ElementLabel,
   Rule,
   Structure,
   VerificationResult,
@@ -45,7 +46,7 @@ from robosystems.models.extensions.roboledger import Fact, FactSet
 DISCLOSURE_BLOCK_TYPE = "regulatory_disclosure"
 
 
-def element_to_lite(element: Element) -> ElementLite:
+def element_to_lite(element: Element, documentation: str | None = None) -> ElementLite:
   """Project an :class:`Element` ORM row onto :class:`ElementLite`."""
   return ElementLite(
     id=element.id,
@@ -58,7 +59,40 @@ def element_to_lite(element: Element) -> ElementLite:
     balance_type=element.balance_type,
     period_type=element.period_type,
     item_type=element.item_type,
+    documentation=documentation,
   )
+
+
+def load_documentation_for_elements(
+  session: Session, element_ids: list[str]
+) -> dict[str, str]:
+  """Documentation-role label text keyed by element id, one batched query.
+
+  The taxonomy loader lands each catalog element's ``documentation``
+  field as an :class:`ElementLabel` row with ``role='documentation'`` —
+  the authoritative value semantics for driver/metric concepts. Elements
+  without one (CoA entries, most tenant-native elements) simply have no
+  entry in the returned map.
+  """
+  if not element_ids:
+    return {}
+  rows = session.execute(
+    select(ElementLabel.element_id, ElementLabel.text).where(
+      ElementLabel.element_id.in_(element_ids),
+      ElementLabel.role == "documentation",
+    )
+  ).all()
+  return dict(rows)
+
+
+def elements_to_lites(session: Session, elements: list[Element]) -> list[ElementLite]:
+  """Project elements with their documentation labels attached.
+
+  The shared path every envelope builder uses — one batched label query
+  per envelope, never per element.
+  """
+  docs = load_documentation_for_elements(session, [e.id for e in elements])
+  return [element_to_lite(e, documentation=docs.get(e.id)) for e in elements]
 
 
 def association_to_connection(
@@ -761,11 +795,13 @@ __all__ = [
   "association_to_connection",
   "build_verification_summary",
   "element_to_lite",
+  "elements_to_lites",
   "fact_set_to_lite",
   "fact_to_lite",
   "load_base_envelope_atoms",
   "load_classifications_for_associations",
   "load_disclosure_id_for_structure",
+  "load_documentation_for_elements",
   "load_fact_set_by_id_for_structure",
   "load_latest_fact_set_for_structure",
   "load_rules_for_structure",

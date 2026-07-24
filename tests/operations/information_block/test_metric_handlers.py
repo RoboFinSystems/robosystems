@@ -18,6 +18,13 @@ def _scalars(items: list[Any]) -> MagicMock:
   return result
 
 
+def _docs() -> MagicMock:
+  """The envelope's batched documentation-label query — empty result."""
+  result = MagicMock()
+  result.all.return_value = []
+  return result
+
+
 def _structure(*, mechanics: dict | None = None) -> MagicMock:
   s = MagicMock()
   s.id = "str_metrics"
@@ -148,6 +155,7 @@ class TestBuildEnvelope:
     session.execute.side_effect = [
       _scalars([fs1, fs2]),  # metric FactSets, period asc
       _scalars(facts),
+      _docs(),
     ]
 
     with patch.object(
@@ -182,7 +190,7 @@ class TestBuildEnvelope:
     structure = _structure()
     arcs = [_arc("el_wc", 1.0), _arc("el_cr", 2.0)]
     session = MagicMock()
-    session.execute.side_effect = [_scalars([])]  # no metric FactSets
+    session.execute.side_effect = [_scalars([]), _docs()]  # no metric FactSets
 
     with patch.object(
       metric_handlers,
@@ -210,6 +218,7 @@ class TestBuildEnvelope:
     session.get.return_value = fs2  # _load_metric_fact_sets pin path
     session.execute.side_effect = [
       _scalars([_fact("f2", "el_wc", 60.0, "fs2", P2)]),
+      _docs(),
     ]
     pinned_atoms = BaseEnvelopeAtoms(
       structure=structure,
@@ -252,7 +261,7 @@ class TestBuildEnvelope:
       }
     )
     session = MagicMock()
-    session.execute.side_effect = [_scalars([])]
+    session.execute.side_effect = [_scalars([]), _docs()]
 
     with patch.object(
       metric_handlers, "load_base_envelope_atoms", return_value=_atoms(structure)
@@ -271,7 +280,7 @@ class TestBuildEnvelope:
   def test_mechanics_default_when_column_null(self) -> None:
     structure = _structure(mechanics=None)
     session = MagicMock()
-    session.execute.side_effect = [_scalars([])]
+    session.execute.side_effect = [_scalars([]), _docs()]
 
     with patch.object(
       metric_handlers, "load_base_envelope_atoms", return_value=_atoms(structure)

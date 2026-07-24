@@ -455,7 +455,14 @@ class TestBuildEnvelope:
     elements_result.scalars.return_value.all.return_value = [GROWTH]
     lever_set_result = MagicMock()
     lever_set_result.scalar_one_or_none.return_value = None
-    session.execute.side_effect = [computed_result, elements_result, lever_set_result]
+    docs_result = MagicMock()
+    docs_result.all.return_value = []
+    session.execute.side_effect = [
+      computed_result,
+      elements_result,
+      lever_set_result,
+      docs_result,
+    ]
 
     with patch.object(
       forecast_handlers, "load_base_envelope_atoms", return_value=atoms

@@ -275,8 +275,10 @@ def cmd_compute_forecast(
   is_structure_id = _newest_actual_structure_id(session, "income_statement")
   if is_structure_id is None:
     raise ValueError(
-      "No actual income-statement report FactSet exists — generate at "
-      "least one report before computing a forecast."
+      "No actual income-statement sets exist to project from — close at "
+      "least one month first (closing a period stamps its statement "
+      "sets). If months are already closed without statements, set up "
+      "the CoA mapping and reporting style, then reclose."
     )
   bs_structure_id = _newest_actual_structure_id(session, "balance_sheet")
 
@@ -286,11 +288,11 @@ def cmd_compute_forecast(
   )
   if base_is_set is None:
     raise ValueError(
-      f"No actual income-statement report at the base period "
-      f"{mechanics.base_period} (a monthly report whose window starts "
-      f"{base_start} and ends {base_end}). Generate monthly reports "
-      "through the base period, or set base_period to a month that has "
-      "one."
+      f"No actual income statement at the base period "
+      f"{mechanics.base_period} (a monthly set whose window starts "
+      f"{base_start} and ends {base_end}). Close the months through the "
+      "base period (closing stamps each month's statement sets), or set "
+      "base_period to a month that has one."
     )
 
   prior_values: dict[str, float] = {}

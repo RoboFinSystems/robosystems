@@ -28,13 +28,21 @@ class LeverAssertionRequest(BaseModel):
   """One lever's asserted values for the scenario.
 
   ``qname`` must resolve to an ``rs-driver:*`` catalog element (the
-  create handler rejects anything else). Value conventions follow the
-  catalog: percent levers are decimals per month (0.03 = 3%/month),
-  days levers are day counts.
+  create handler rejects anything else). Each lever's value semantics
+  are defined by its catalog element's documentation — surfaced as
+  ``documentation`` on the elements bundled in the forecast block's
+  envelope (``get-information-block``). Percent levers are decimals but
+  their *meaning* varies by lever: growth levers are month-over-month
+  rates (``RevenueGrowthRate`` 0.03 = +3%/month, compounding), while
+  rate-on-base levers are fractions of the same month's base
+  (``CostOfRevenueRate`` 0.62 = cost of revenue at 62% of that month's
+  revenues — not a growth rate). Days levers (``DaysSalesOutstanding``,
+  ``DaysPayableOutstanding``) are day counts.
 
   ``value`` is a uniform fill across the whole horizon;
   ``values_by_period`` overrides individual months (``"YYYY-MM"``
-  keys). At least one of the two must be provided. Months covered by
+  keys) — e.g. a margin-compression ramp asserts a different rate each
+  month. At least one of the two must be provided. Months covered by
   neither carry no assertion — the lever's rule is inactive for that
   month and its target falls to the engine's carry-forward default.
   """
@@ -80,13 +88,16 @@ class CreateForecastRequest(BaseModel):
     json_schema_extra={
       "examples": [
         {
-          "summary": "FY operating budget — growth + margins + working capital",
+          "summary": "FY operating budget — growth + margin ramp + working capital",
           "description": (
             "A 12-month budget scenario: 3%/month revenue growth "
-            "compounding, 62% cost-of-revenue rate, 45-day DSO, 30-day "
-            "DPO. Lever values are decimals/day-counts per the "
-            "rs-driver catalog conventions. After creating, run "
-            "`compute-forecast` to derive the forward months."
+            "compounding, cost-of-revenue rate ramping from 44% toward "
+            "62% via per-month overrides (rate-on-base: each value is "
+            "that month's cost as a fraction of revenues), 45-day DSO, "
+            "30-day DPO. Each lever's semantics come from its catalog "
+            "documentation (on the envelope's elements). After "
+            "creating, run `compute-forecast` to derive the forward "
+            "months."
           ),
           "value": {
             "name": "FY26 Operating Budget",
@@ -94,7 +105,15 @@ class CreateForecastRequest(BaseModel):
             "horizon_months": 12,
             "levers": [
               {"qname": "rs-driver:RevenueGrowthRate", "value": 0.03},
-              {"qname": "rs-driver:CostOfRevenueRate", "value": 0.62},
+              {
+                "qname": "rs-driver:CostOfRevenueRate",
+                "value": 0.62,
+                "values_by_period": {
+                  "2026-06": 0.44,
+                  "2026-07": 0.47,
+                  "2026-08": 0.5,
+                },
+              },
               {"qname": "rs-driver:DaysSalesOutstanding", "value": 45},
               {"qname": "rs-driver:DaysPayableOutstanding", "value": 30},
             ],

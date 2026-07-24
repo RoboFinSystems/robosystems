@@ -161,7 +161,7 @@ class TestBuildEnvelope:
 
     # Query order with associations: fact_set → taxonomy name →
     # associations → elements → rules → association classifications →
-    # verification_results.
+    # verification_results → documentation labels.
     session.execute.side_effect = [
       _exec_result(scalar=None),
       _exec_result(scalar="Driftline Extension"),
@@ -170,6 +170,7 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[]),
       _exec_result(all_rows=[]),
       _exec_result(scalars_all=[]),
+      _exec_result(all_rows=[]),
     ]
 
     envelope = disclosure_handlers.build_envelope(session, "struct_inventory_note")

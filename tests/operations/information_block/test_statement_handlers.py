@@ -238,7 +238,7 @@ class TestBuildEnvelope:
 
     # Query order (1 association → elements + classifications queries run):
     # fact_set → taxonomy → associations → elements → rules → classifications →
-    # verification_results
+    # verification_results → documentation labels
     session.execute.side_effect = [
       _exec_result(scalar=None),  # latest fact set → None
       _exec_result(scalar="US GAAP"),  # taxonomy name
@@ -247,6 +247,7 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[]),  # rules
       _exec_result(all_rows=[]),  # association classifications
       _exec_result(scalars_all=[]),  # verification results
+      _exec_result(all_rows=[]),  # documentation labels
     ]
 
     build = statement_handlers.make_statement_handlers("income_statement")
@@ -333,7 +334,8 @@ class TestBuildEnvelope:
     # fact_set → taxonomy → associations → elements → rules →
     # assoc-classifications → verification_results →
     # facts (filtered by fact_set.id) →
-    # element-classifications (rendering projection trait lookup)
+    # element-classifications (rendering projection trait lookup) →
+    # documentation labels
     session.execute.side_effect = [
       _exec_result(scalar=fact_set),  # latest fact set
       _exec_result(scalar="US GAAP"),  # taxonomy name
@@ -344,6 +346,7 @@ class TestBuildEnvelope:
       _exec_result(scalars_all=[]),  # verification results
       _exec_result(scalars_all=[fact]),  # facts (filtered by fact_set.id)
       _exec_result(all_rows=[]),  # element classifications (Plan B)
+      _exec_result(all_rows=[]),  # documentation labels
     ]
 
     build = statement_handlers.make_statement_handlers("balance_sheet")
@@ -729,6 +732,7 @@ class TestSeriesMode:
       _exec_result(scalars_all=series_sets),  # the series (F-4)
       _exec_result(scalars_all=facts),  # facts across the series sets
       _exec_result(all_rows=[]),  # element classifications
+      _exec_result(all_rows=[]),  # documentation labels
     ]
     build = statement_handlers.make_statement_handlers("balance_sheet")
     return build(session, "struct_balance_sheet", scenario_id=scenario_id, series=True)
@@ -804,6 +808,7 @@ class TestSeriesMode:
         scalars_all=[self._fact("f_may", "fs_pinned", may, 100_000.0)]
       ),  # facts by pinned set — NO series query in between
       _exec_result(all_rows=[]),  # element classifications
+      _exec_result(all_rows=[]),  # documentation labels
     ]
     build = statement_handlers.make_statement_handlers("balance_sheet")
     envelope = build(

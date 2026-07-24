@@ -67,6 +67,15 @@ class ElementLite(BaseModel):
       "days | string | …). None means untyped; fall back to is_monetary."
     ),
   )
+  documentation: str | None = Field(
+    None,
+    description=(
+      "The element's documentation-role label — the catalog's "
+      "authoritative value semantics (e.g. whether a percent driver is "
+      "a growth rate or a rate-on-base fraction). None when the "
+      "element carries no documentation label."
+    ),
+  )
 
 
 class ClassificationLite(BaseModel):
@@ -1402,7 +1411,11 @@ class _UpdateForecastArm(BaseModel):
   )
   payload: UpdateForecastRequest = Field(
     ...,
-    description="Forecast update payload.",
+    description=(
+      "Forecast update payload. Updating does NOT recompute — lever, "
+      "horizon, or base-period changes leave the scenario's computed "
+      "months stale until the next `compute-forecast` run."
+    ),
   )
 
 

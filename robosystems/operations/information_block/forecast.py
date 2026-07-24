@@ -46,7 +46,7 @@ from robosystems.models.extensions import Element, Structure
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
 from robosystems.operations.information_block.envelope import (
-  element_to_lite,
+  elements_to_lites,
   fact_set_to_lite,
   fact_to_lite,
   load_base_envelope_atoms,
@@ -536,7 +536,7 @@ def build_envelope(
       template=None,
       mechanics=mechanics,
     ),
-    elements=[element_to_lite(e) for e in lever_elements],
+    elements=elements_to_lites(session, lever_elements),
     connections=[],
     facts=[fact_to_lite(f, elements_by_id) for f in facts],
     rules=atoms.rules,
