@@ -75,6 +75,59 @@ class LeverAssertionRequest(BaseModel):
     return self
 
 
+class LineAssertionRequest(BaseModel):
+  """One statement line's directly asserted values for the scenario.
+
+  The manual-override half of the authored surface: where a lever
+  asserts a *driver* (growth %, DSO) whose rule derives the line, a
+  line assertion asserts the **line itself** — an rs-gaap (or tenant
+  extension) statement leaf pinned to typed values for the months it
+  names. Assertions win over driver rules and carry-forward for those
+  months (a displaced rule lands in ``skipped``, legibly); months the
+  assertion doesn't name keep the engine's normal derivation.
+
+  **Leaves only** — subtotals stay calc-DAG-derived, so a manually set
+  line still articulates through RollUps, RE, balancing cash, and the
+  derived CF, and stays verification-gated (the whole pitch vs a
+  spreadsheet cell). The create handler rejects calc-parent qnames.
+
+  Value/period grammar is identical to levers: ``value`` is a uniform
+  fill across the horizon, ``values_by_period`` overrides individual
+  months. The canonical uses: zero out a base-month one-off so
+  carry-forward stops replicating it, or hold a line at a known budget
+  number no driver models.
+  """
+
+  qname: str = Field(
+    ...,
+    description=(
+      "QName of the statement leaf to assert (e.g. "
+      "``rs-gaap:NonoperatingIncomeExpense``). Must be a calc-DAG leaf; "
+      "rs-driver concepts belong in ``levers``."
+    ),
+  )
+  value: float | None = Field(
+    None,
+    description="Uniform value asserted for every month of the horizon.",
+  )
+  values_by_period: dict[str, float] | None = Field(
+    None,
+    description=(
+      "Per-month overrides keyed by ``YYYY-MM``. Wins over ``value`` "
+      "for the months it names."
+    ),
+  )
+
+  @model_validator(mode="after")
+  def _require_some_value(self) -> LineAssertionRequest:
+    if self.value is None and not self.values_by_period:
+      raise ValueError(
+        f"Line assertion {self.qname!r} needs a uniform `value` and/or "
+        "`values_by_period` overrides."
+      )
+    return self
+
+
 class CreateForecastRequest(BaseModel):
   """Create a forecast block — the authored scenario container.
 
@@ -139,6 +192,14 @@ class CreateForecastRequest(BaseModel):
     min_length=1,
     description="Lever assertions — at least one.",
   )
+  line_assertions: list[LineAssertionRequest] = Field(
+    default_factory=list,
+    description=(
+      "Direct statement-line assertions (manual overrides). Each names "
+      "a calc-DAG leaf and wins over driver rules and carry-forward "
+      "for the months it asserts."
+    ),
+  )
   entity_id: str | None = Field(
     None,
     description=(
@@ -151,11 +212,13 @@ class CreateForecastRequest(BaseModel):
 class UpdateForecastRequest(BaseModel):
   """Update a forecast block in place.
 
-  Mutable: name, scenario_kind, horizon_months, base_period, levers.
-  ``levers`` is a **full replace** when provided (partial lever edits
-  would make the asserted set ambiguous). Updating does NOT recompute —
-  previously computed scenario months go stale until the next
-  ``compute-forecast`` run (the compute-metrics drift semantics).
+  Mutable: name, scenario_kind, horizon_months, base_period, levers,
+  line_assertions. ``levers`` and ``line_assertions`` are each a
+  **full replace** when provided (partial edits would make the asserted
+  set ambiguous); replacing one leaves the other as stored. Updating
+  does NOT recompute — previously computed scenario months go stale
+  until the next ``compute-forecast`` run (the compute-metrics drift
+  semantics).
   """
 
   structure_id: str = Field(..., description="Structure ID of the forecast block.")
@@ -167,6 +230,13 @@ class UpdateForecastRequest(BaseModel):
     None,
     min_length=1,
     description="Full replacement of the lever set when provided.",
+  )
+  line_assertions: list[LineAssertionRequest] | None = Field(
+    None,
+    description=(
+      "Full replacement of the line-assertion set when provided. Pass "
+      "an empty list to clear every assertion."
+    ),
   )
 
 

@@ -22,6 +22,7 @@ from robosystems.models.api.information_block import (
   ComputeForecastRequest,
   ForecastMechanics,
   LeverAssertionLite,
+  LineAssertionLite,
 )
 from robosystems.operations.information_block import (
   forecast_compute as fc,
@@ -50,8 +51,22 @@ EL_COGS = _element("el_cogs", "rs-gaap:CostOfRevenue")
 EL_AR = _element("el_ar", "rs-gaap:ReceivablesNetCurrent", period_type="instant")
 EL_RENT = _element("el_rent", "rs-gaap:RentExpense")
 EL_GP = _element("el_gp", "rs-gaap:GrossProfit")
+EL_REV_A = _element("el_rev_a", "rs-gaap:RevenueStreamA")
+EL_REV_B = _element("el_rev_b", "rs-gaap:RevenueStreamB")
+EL_LOAN = _element("el_loan", "rs-gaap:NotesPayable", period_type="instant")
+EL_MKT = _element("el_mkt", "rs-gaap:MarketingExpense")
 
-ELEMENTS = [EL_REV, EL_COGS, EL_AR, EL_RENT, EL_GP]
+ELEMENTS = [
+  EL_REV,
+  EL_COGS,
+  EL_AR,
+  EL_RENT,
+  EL_GP,
+  EL_REV_A,
+  EL_REV_B,
+  EL_LOAN,
+  EL_MKT,
+]
 BY_ID = {e.id: e for e in ELEMENTS}
 BY_QNAME = {e.qname: e for e in ELEMENTS}
 
@@ -108,12 +123,17 @@ BASE_IS_FACTS = [
 CALC_DAG = {"el_gp": [("el_rev", 1.0), ("el_cogs", -1.0)]}
 
 
-def _mechanics(levers: list[LeverAssertionLite], horizon: int = 3) -> dict:
+def _mechanics(
+  levers: list[LeverAssertionLite],
+  horizon: int = 3,
+  assertions: list[LineAssertionLite] | None = None,
+) -> dict:
   return ForecastMechanics(
     scenario_kind="budget",
     horizon_months=horizon,
     base_period="2026-06",
     levers=levers,
+    line_assertions=assertions or [],
   ).model_dump(mode="json")
 
 
@@ -122,6 +142,23 @@ def _lever(qname: str, element_id: str, value: float, months: list[str]) -> Any:
     qname=qname,
     element_id=element_id,
     item_type="percent",
+    values_by_period=dict.fromkeys(months, value),
+  )
+
+
+def _assertion(
+  qname: str,
+  element_id: str,
+  value: float,
+  months: list[str],
+  *,
+  period_type: str = "duration",
+) -> LineAssertionLite:
+  return LineAssertionLite(
+    qname=qname,
+    element_id=element_id,
+    item_type=None,
+    period_type=period_type,
     values_by_period=dict.fromkeys(months, value),
   )
 
@@ -206,6 +243,9 @@ def _run(
   *,
   months: int | None = None,
   bs_structure: str | None = "struct_bs",
+  assertions: list[LineAssertionLite] | None = None,
+  calc_dag: dict | None = None,
+  base_is_facts: list[Any] | None = None,
 ):
   structure = _structure(mechanics)
   recorder = _Recorder()
@@ -215,7 +255,11 @@ def _run(
       block_type
     )
 
-  facts_by_set = {"fs_base_is": BASE_IS_FACTS, "fs_lever": _lever_facts(levers)}
+  authored_facts = _lever_facts(levers) + _lever_facts(assertions or [])
+  facts_by_set = {
+    "fs_base_is": base_is_facts if base_is_facts is not None else BASE_IS_FACTS,
+    "fs_lever": authored_facts,
+  }
 
   with (
     patch.object(fc, "_newest_actual_structure_id", side_effect=_structures),
@@ -231,7 +275,11 @@ def _run(
     ),
     patch.object(fc, "_load_driver_rules", return_value=rules),
     patch.object(fc, "_local_calc_arcs", return_value={}),
-    patch.object(fc, "load_rs_gaap_calculations", return_value=dict(CALC_DAG)),
+    patch.object(
+      fc,
+      "load_rs_gaap_calculations",
+      return_value=dict(calc_dag if calc_dag is not None else CALC_DAG),
+    ),
     patch.object(
       fc,
       "_load_lever_fact_set",
@@ -354,6 +402,122 @@ class TestCascade:
         ComputeForecastRequest(structure_id="struct_metric"),
         "usr_test",
       )
+
+
+class TestLineAssertions:
+  """The manual-override path (fpa §11 #10): assertions win over carry
+  and driver rules for the months they name, articulate through the
+  calc DAG, and pin their values against the rule-delta push-down."""
+
+  def test_assertion_overrides_carry_forward(self) -> None:
+    """The Harbinger case: zero out a base-month one-off so carry stops
+    replicating it into every forward month."""
+    assertions = [_assertion("rs-gaap:RentExpense", "el_rent", 0.0, ALL_MONTHS)]
+    _, rec = _run(
+      _mechanics(FULL_LEVERS, assertions=assertions),
+      FULL_RULES,
+      FULL_LEVERS,
+      assertions=assertions,
+    )
+    for month_end in (JUL, AUG, SEP):
+      assert rec.value("struct_is", month_end, "el_rent") == pytest.approx(0.0)
+
+  def test_assertion_displaces_rule_with_legible_skip(self) -> None:
+    """An asserted month wins over the driver rule (skip recorded);
+    unasserted months fall back to the rule."""
+    assertions = [_assertion("rs-gaap:CostOfRevenue", "el_cogs", 50.0, ["2026-07"])]
+    response, rec = _run(
+      _mechanics(FULL_LEVERS, assertions=assertions),
+      FULL_RULES,
+      FULL_LEVERS,
+      assertions=assertions,
+    )
+    assert rec.value("struct_is", JUL, "el_cogs") == pytest.approx(50.0)
+    assert rec.value("struct_is", AUG, "el_cogs") == pytest.approx(106.09 * 0.62)
+    displaced = [
+      s for s in response.skipped if s.reason == "displaced by line assertion"
+    ]
+    assert [(s.rule_id, s.period) for s in displaced] == [("rule_cogs", "2026-07")]
+
+  def test_asserted_leaf_articulates_through_subtotals(self) -> None:
+    """GrossProfit re-derives against the asserted CostOfRevenue — the
+    manual line still articulates, never breaks the calc DAG."""
+    assertions = [_assertion("rs-gaap:CostOfRevenue", "el_cogs", 50.0, ["2026-07"])]
+    _, rec = _run(
+      _mechanics(FULL_LEVERS, assertions=assertions),
+      FULL_RULES,
+      FULL_LEVERS,
+      assertions=assertions,
+    )
+    assert rec.value("struct_is", JUL, "el_gp") == pytest.approx(103.0 - 50.0)
+
+  def test_asserted_child_is_pinned_against_rule_delta_push_down(self) -> None:
+    """A driven calc parent's remainder distributes over the UNPINNED
+    children only — the asserted child never rescales."""
+    calc_dag = {
+      "el_gp": [("el_rev", 1.0), ("el_cogs", -1.0)],
+      "el_rev": [("el_rev_a", 1.0), ("el_rev_b", 1.0)],
+    }
+    base_facts = [
+      *BASE_IS_FACTS,
+      SimpleNamespace(element_id="el_rev_a", value=60.0),
+      SimpleNamespace(element_id="el_rev_b", value=40.0),
+    ]
+    levers = [_lever("rs-driver:RevenueGrowthRate", "el_growth", 0.03, ALL_MONTHS)]
+    assertions = [_assertion("rs-gaap:RevenueStreamA", "el_rev_a", 30.0, ["2026-07"])]
+    _, rec = _run(
+      _mechanics(levers, assertions=assertions),
+      [GROWTH_RULE],
+      levers,
+      assertions=assertions,
+      calc_dag=calc_dag,
+      base_is_facts=base_facts,
+    )
+    assert rec.value("struct_is", JUL, "el_rev") == pytest.approx(103.0)
+    assert rec.value("struct_is", JUL, "el_rev_a") == pytest.approx(30.0)
+    # Remainder over the unpinned child: (103 - 30) / 40 scales 40 → 73.
+    assert rec.value("struct_is", JUL, "el_rev_b") == pytest.approx(73.0)
+
+  def test_instant_assertion_lands_in_the_bs_set(self) -> None:
+    assertions = [
+      _assertion(
+        "rs-gaap:NotesPayable", "el_loan", 500.0, ALL_MONTHS, period_type="instant"
+      )
+    ]
+    _, rec = _run(
+      _mechanics(FULL_LEVERS, assertions=assertions),
+      FULL_RULES,
+      FULL_LEVERS,
+      assertions=assertions,
+    )
+    assert rec.value("struct_bs", JUL, "el_loan") == pytest.approx(500.0)
+    # Instant assertions never leak into the IS emission.
+    is_call = rec.month("struct_is", JUL)
+    assert is_call is not None
+    assert all(el.id != "el_loan" for el, _ in is_call["facts"])
+
+  def test_asserted_line_absent_from_base_still_emits(self) -> None:
+    assertions = [_assertion("rs-gaap:MarketingExpense", "el_mkt", 5.0, ["2026-07"])]
+    _, rec = _run(
+      _mechanics(FULL_LEVERS, assertions=assertions),
+      FULL_RULES,
+      FULL_LEVERS,
+      assertions=assertions,
+    )
+    assert rec.value("struct_is", JUL, "el_mkt") == pytest.approx(5.0)
+
+  def test_unasserted_months_resume_normal_derivation(self) -> None:
+    """After the asserted window ends, the line carries the last emitted
+    value (the engine's normal carry-forward, seeded by the assertion)."""
+    assertions = [_assertion("rs-gaap:RentExpense", "el_rent", 2.0, ["2026-07"])]
+    _, rec = _run(
+      _mechanics(FULL_LEVERS, assertions=assertions),
+      FULL_RULES,
+      FULL_LEVERS,
+      assertions=assertions,
+    )
+    assert rec.value("struct_is", JUL, "el_rent") == pytest.approx(2.0)
+    assert rec.value("struct_is", AUG, "el_rent") == pytest.approx(2.0)
 
 
 class TestUpsertMonthSet:

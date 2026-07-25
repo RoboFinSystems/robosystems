@@ -84,11 +84,14 @@ _PPE_ROUTES: dict[str, float] = {
   "rs-gaap:AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment": -1.0,
 }
 
-# The library's AP derivation arc sources the combined
+# The library's original AP derivation arc sourced only the combined
 # AccountsPayableAndAccruedLiabilitiesCurrent anchor; tenants mapped to
 # the sibling AccountsPayableCurrent (the DPO rule's target) would land
 # their AP movement in the reconciling plug instead of the named CF
-# line. Supplement the arc in code until the library grows the arc.
+# line. The library now carries the split-anchor arc too
+# (deriv-cf-ap-arc-2), but it reaches an existing tenant only at its
+# next resync — this alias bridges that window (the guard below makes
+# it a no-op once the arc is present).
 _AP_CF_LEAF_QNAME = "rs-gaap:IncreaseDecreaseInAccountsPayableAndAccruedLiabilities"
 _AP_ALIAS_SOURCE_QNAME = "rs-gaap:AccountsPayableCurrent"
 
