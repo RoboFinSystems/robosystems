@@ -1,19 +1,22 @@
 """Handlers for ``block_type='forecast'`` — the authored scenario container.
 
 The forecast block is the FP&A engine's authored surface (F-1): scenario
-identity (name + ``scenario_kind``), horizon, base period, and lever
-assertions on ``rs-driver:*`` catalog elements. The block IS the
+identity (name + ``scenario_kind``), horizon, base period, lever
+assertions on ``rs-driver:*`` catalog elements, and direct **line
+assertions** on statement leaves (manual overrides that win over driver
+rules and carry-forward for the months they name). The block IS the
 scenario — its structure id is the ``scenario_id`` every derived forward
 FactSet carries (NULL = actuals), and deleting the block removes the
 whole scenario slice.
 
 Persistence follows the rules-for-mechanics / **facts-for-values**
 doctrine: lever *mechanics* are the library-seeded rs-driver Derive
-rules; lever *values* land as authored Numeric facts in ONE
-``factset_type='custom'`` FactSet whose ``scenario_id`` is the forecast
-block itself (self-referential — the levers belong to the scenario,
-cascade-delete with it, and stay invisible to actuals reads and to
-metric operand binding, which only joins ``('report', 'metric')`` sets).
+rules; lever and line-assertion *values* land as authored Numeric facts
+in ONE ``factset_type='custom'`` FactSet whose ``scenario_id`` is the
+forecast block itself (self-referential — the assertions belong to the
+scenario, cascade-delete with it, and stay invisible to actuals reads
+and to metric operand binding, which only joins ``('report', 'metric')``
+sets).
 
 ``create`` / ``update`` / ``delete`` follow the Schedule/rollforward
 declarative pattern; ``build_envelope`` renders the lever grid
@@ -37,6 +40,7 @@ from robosystems.models.api.information_block import (
   InformationBlockEnvelope,
   InformationModelResponse,
   LeverAssertionLite,
+  LineAssertionLite,
   RenderingLite,
   RenderingPeriodLite,
   RenderingRowLite,
@@ -62,6 +66,9 @@ from robosystems.operations.roboledger.fiscal_calendar.periods import (
   period_date_range,
   period_from_date,
 )
+from robosystems.operations.roboledger.reports.calc_dag import (
+  load_rs_gaap_calculations,
+)
 from robosystems.utils.ulid import generate_prefixed_ulid
 
 if TYPE_CHECKING:
@@ -71,6 +78,7 @@ if TYPE_CHECKING:
     CreateForecastRequest,
     DeleteForecastRequest,
     LeverAssertionRequest,
+    LineAssertionRequest,
     UpdateForecastRequest,
   )
 
@@ -181,6 +189,99 @@ def _expand_levers(
   return expanded
 
 
+_ASSERTION_BLOCKED_SOURCES = {
+  _LEVER_SOURCE: "rs-driver concepts are levers — assert them via `levers`",
+  "rs-metric": "rs-metric concepts are computed by compute-metrics, never asserted",
+}
+
+
+def _expand_line_assertions(
+  session: Session,
+  assertions: list[LineAssertionRequest],
+  base_period: str,
+  horizon_months: int,
+) -> list[LineAssertionLite]:
+  """Resolve + expand wire-level line assertions to explicit per-month maps.
+
+  Same grammar and expansion as levers; the validation differs: an
+  assertion names a **statement leaf** — any resolvable non-abstract
+  concept that isn't an rs-driver lever or rs-metric output, and isn't
+  a parent in the global rs-gaap calc DAG (**leaves only** — subtotals
+  stay derived so a manual line still articulates and stays
+  verification-gated).
+  """
+  if not assertions:
+    return []
+
+  months = [add_months(base_period, i) for i in range(1, horizon_months + 1)]
+  month_set = set(months)
+  calc_parent_ids = set(load_rs_gaap_calculations(session).keys())
+
+  expanded: list[LineAssertionLite] = []
+  seen: set[str] = set()
+  for assertion in assertions:
+    if assertion.qname in seen:
+      raise ValueError(
+        f"Duplicate line-assertion qname {assertion.qname!r} in the assertion set."
+      )
+    seen.add(assertion.qname)
+
+    element = session.execute(
+      select(Element).where(Element.qname == assertion.qname).limit(1)
+    ).scalar_one_or_none()
+    if element is None:
+      raise ValueError(
+        f"Line-assertion qname {assertion.qname!r} did not resolve to an "
+        "Element — assertions name rs-gaap (or tenant extension) "
+        "statement concepts."
+      )
+    blocked = _ASSERTION_BLOCKED_SOURCES.get(element.source or "")
+    if blocked is not None:
+      raise ValueError(f"Line-assertion qname {assertion.qname!r}: {blocked}.")
+    if element.is_abstract:
+      raise ValueError(
+        f"Line-assertion qname {assertion.qname!r} is abstract — assert a "
+        "concrete statement leaf."
+      )
+    if element.id in calc_parent_ids:
+      raise ValueError(
+        f"Line-assertion qname {assertion.qname!r} is a calc-DAG subtotal — "
+        "assertions are leaves-only so the manual value still articulates "
+        "(subtotals derive from their children)."
+      )
+
+    overrides = assertion.values_by_period or {}
+    outside = sorted(set(overrides) - month_set)
+    if outside:
+      raise ValueError(
+        f"Line assertion {assertion.qname!r} has values_by_period entries "
+        f"outside the horizon ({base_period} + {horizon_months} months): "
+        f"{outside}"
+      )
+
+    values: dict[str, float] = {}
+    for month in months:
+      if month in overrides:
+        values[month] = float(overrides[month])
+      elif assertion.value is not None:
+        values[month] = float(assertion.value)
+    if not values:
+      raise ValueError(
+        f"Line assertion {assertion.qname!r} asserts no months within the horizon."
+      )
+
+    expanded.append(
+      LineAssertionLite(
+        qname=assertion.qname,
+        element_id=element.id,
+        item_type=element.item_type,
+        period_type=element.period_type or "duration",
+        values_by_period=values,
+      )
+    )
+  return expanded
+
+
 def _load_lever_fact_set(session: Session, structure_id: str) -> FactSet | None:
   """The scenario's lever FactSet — ``'custom'`` + self-referential scenario."""
   return session.execute(
@@ -202,8 +303,11 @@ def _write_lever_fact_set(
   entity_id: str,
   created_by: str,
 ) -> FactSet:
-  """Persist the lever assertions as authored facts in one scenario set."""
-  asserted_months = sorted({m for lv in mechanics.levers for m in lv.values_by_period})
+  """Persist the lever + line assertions as authored facts in one scenario set."""
+  asserted_months = sorted(
+    {m for lv in mechanics.levers for m in lv.values_by_period}
+    | {m for la in mechanics.line_assertions for m in la.values_by_period}
+  )
   span_start = period_date_range(asserted_months[0])[0]
   span_end = period_date_range(asserted_months[-1])[1]
 
@@ -222,34 +326,44 @@ def _write_lever_fact_set(
   )
   session.flush()
 
+  authored_element_ids = [lv.element_id for lv in mechanics.levers] + [
+    la.element_id for la in mechanics.line_assertions
+  ]
   elements_by_id = {
     e.id: e
     for e in session.execute(
-      select(Element).where(Element.id.in_([lv.element_id for lv in mechanics.levers]))
+      select(Element).where(Element.id.in_(authored_element_ids))
     )
     .scalars()
     .all()
   }
-  for lever in mechanics.levers:
-    element = elements_by_id.get(lever.element_id)
+
+  def _add_fact(element_id: str, month: str, value: float, period_type: str) -> None:
+    element = elements_by_id.get(element_id)
     unit = _metric_unit(element) if element is not None else "pure"
-    for month, value in sorted(lever.values_by_period.items()):
-      month_start, month_end = period_date_range(month)
-      session.add(
-        Fact(
-          id=generate_prefixed_ulid("fact"),
-          element_id=lever.element_id,
-          value=value,
-          fact_type="Numeric",
-          period_start=month_start,
-          period_end=month_end,
-          period_type="duration",
-          unit=unit,
-          entity_id=entity_id,
-          structure_id=structure.id,
-          fact_set_id=fact_set.id,
-        )
+    month_start, month_end = period_date_range(month)
+    session.add(
+      Fact(
+        id=generate_prefixed_ulid("fact"),
+        element_id=element_id,
+        value=value,
+        fact_type="Numeric",
+        period_start=None if period_type == "instant" else month_start,
+        period_end=month_end,
+        period_type=period_type,
+        unit=unit,
+        entity_id=entity_id,
+        structure_id=structure.id,
+        fact_set_id=fact_set.id,
       )
+    )
+
+  for lever in mechanics.levers:
+    for month, value in sorted(lever.values_by_period.items()):
+      _add_fact(lever.element_id, month, value, "duration")
+  for assertion in mechanics.line_assertions:
+    for month, value in sorted(assertion.values_by_period.items()):
+      _add_fact(assertion.element_id, month, value, assertion.period_type)
   session.flush()
   return fact_set
 
@@ -266,12 +380,16 @@ def create(
   entity_id = payload.entity_id or _default_entity_id(session)
   base_period = _resolve_base_period(session, entity_id, payload.base_period)
   levers = _expand_levers(session, payload.levers, base_period, payload.horizon_months)
+  line_assertions = _expand_line_assertions(
+    session, payload.line_assertions, base_period, payload.horizon_months
+  )
 
   mechanics = ForecastMechanics(
     scenario_kind=payload.scenario_kind,
     horizon_months=payload.horizon_months,
     base_period=base_period,
     levers=levers,
+    line_assertions=line_assertions,
   )
 
   # The lever elements all live in the tenant's rs-driver taxonomy —
@@ -340,21 +458,33 @@ def update(
       "— the horizon window shifted, so every lever's per-month assertions "
       "must be restated."
     )
+  if window_changed and payload.line_assertions is None and current.line_assertions:
+    raise ValueError(
+      "Changing horizon_months or base_period requires re-supplying "
+      "`line_assertions` (or an empty list to clear them) — the horizon "
+      "window shifted, so every asserted month must be restated."
+    )
 
   levers = current.levers
   if payload.levers is not None:
     levers = _expand_levers(session, payload.levers, base_period, horizon_months)
+  line_assertions = current.line_assertions
+  if payload.line_assertions is not None:
+    line_assertions = _expand_line_assertions(
+      session, payload.line_assertions, base_period, horizon_months
+    )
 
   next_mechanics = ForecastMechanics(
     scenario_kind=scenario_kind,
     horizon_months=horizon_months,
     base_period=base_period,
     levers=levers,
+    line_assertions=line_assertions,
   )
   structure.artifact_mechanics = next_mechanics.model_dump(mode="json")
   structure.updated_by = updated_by
 
-  if payload.levers is not None:
+  if payload.levers is not None or payload.line_assertions is not None:
     existing = _load_lever_fact_set(session, structure.id)
     entity_id = existing.entity_id if existing is not None else None
     if existing is not None:
@@ -466,17 +596,18 @@ def build_envelope(
   )
   mechanics = mechanics.model_copy(update={"computed_months": len(computed_months)})
 
-  # Lever elements are not reachable via associations (the container is
-  # arc-less) — load them off the mechanics for the envelope's element
-  # list and the row metadata.
-  lever_elements = list(
-    session.execute(
-      select(Element).where(Element.id.in_([lv.element_id for lv in mechanics.levers]))
-    )
+  # Authored elements (levers + line assertions) are not reachable via
+  # associations (the container is arc-less) — load them off the
+  # mechanics for the envelope's element list and the row metadata.
+  authored_element_ids = [lv.element_id for lv in mechanics.levers] + [
+    la.element_id for la in mechanics.line_assertions
+  ]
+  authored_elements = list(
+    session.execute(select(Element).where(Element.id.in_(authored_element_ids)))
     .scalars()
     .all()
   )
-  elements_by_id = {e.id: e for e in lever_elements}
+  elements_by_id = {e.id: e for e in authored_elements}
 
   months = [
     add_months(mechanics.base_period, i) for i in range(1, mechanics.horizon_months + 1)
@@ -496,6 +627,27 @@ def build_envelope(
     )
     for lever in mechanics.levers
   ]
+  # Line assertions render as additional assumption rows — the manual
+  # overrides sit in the same grid the levers do, in authoring order.
+  rows.extend(
+    RenderingRowLite(
+      element_id=assertion.element_id,
+      element_qname=assertion.qname,
+      element_name=(
+        elements_by_id[assertion.element_id].name
+        if assertion.element_id in elements_by_id
+        else assertion.qname
+      ),
+      balance_type=(
+        elements_by_id[assertion.element_id].balance_type
+        if assertion.element_id in elements_by_id
+        else None
+      ),
+      item_type=assertion.item_type,
+      values=[assertion.values_by_period.get(month) for month in months],
+    )
+    for assertion in mechanics.line_assertions
+  )
   rendering = RenderingLite(
     rows=rows,
     periods=[
@@ -536,7 +688,7 @@ def build_envelope(
       template=None,
       mechanics=mechanics,
     ),
-    elements=elements_to_lites(session, lever_elements),
+    elements=elements_to_lites(session, authored_elements),
     connections=[],
     facts=[fact_to_lite(f, elements_by_id) for f in facts],
     rules=atoms.rules,

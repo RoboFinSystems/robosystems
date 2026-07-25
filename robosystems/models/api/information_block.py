@@ -618,6 +618,44 @@ class LeverAssertionLite(BaseModel):
   )
 
 
+class LineAssertionLite(BaseModel):
+  """One statement line's persisted direct assertion inside
+  ``ForecastMechanics``.
+
+  The manual-override sibling of :class:`LeverAssertionLite`: a lever
+  asserts a *driver* whose rule derives a line; a line assertion pins
+  the **line itself** (a calc-DAG leaf) to typed values for the months
+  it names — winning over driver rules and carry-forward for exactly
+  those months (a displaced rule surfaces in the compute response's
+  ``skipped`` list). Subtotals stay calc-DAG-derived, so a manual line
+  still articulates through RollUps, RE, balancing cash, and derived
+  CF, and stays verification-gated.
+
+  Same persistence doctrine as levers: values are duplicated as
+  authored facts in the scenario's lever FactSet (facts are what
+  ``compute-forecast`` binds); this mechanics copy is the
+  operator-legible round-trip shape.
+  """
+
+  qname: str = Field(..., description="Asserted statement-leaf qname.")
+  element_id: str = Field(..., description="Resolved tenant element id.")
+  item_type: str | None = Field(
+    None,
+    description="Format family from the element (monetary | ...).",
+  )
+  period_type: str = Field(
+    "duration",
+    description=(
+      "The element's period type — duration assertions pin IS lines; "
+      "instant assertions pin BS lines through the roll."
+    ),
+  )
+  values_by_period: dict[str, float] = Field(
+    ...,
+    description="Expanded per-month assertions keyed by ``YYYY-MM``.",
+  )
+
+
 class ForecastMechanics(BaseModel):
   """Authored scenario container for ``block_type='forecast'`` (FP&A F-1).
 
@@ -655,6 +693,14 @@ class ForecastMechanics(BaseModel):
   levers: list[LeverAssertionLite] = Field(
     ...,
     description="Expanded lever assertions (authoring order).",
+  )
+  line_assertions: list[LineAssertionLite] = Field(
+    default_factory=list,
+    description=(
+      "Direct statement-line assertions (authoring order) — manual "
+      "overrides that win over driver rules and carry-forward for the "
+      "months they name."
+    ),
   )
   computed_months: int = Field(
     default=0,
@@ -1910,6 +1956,7 @@ __all__ = [
   "InformationBlockEnvelope",
   "InformationModelResponse",
   "LeverAssertionLite",
+  "LineAssertionLite",
   "MetricMechanics",
   "RenderingLite",
   "RenderingPeriodLite",

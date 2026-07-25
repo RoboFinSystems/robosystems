@@ -19,11 +19,13 @@ from robosystems.models.api.extensions.forecasts import (
   CreateForecastRequest,
   DeleteForecastRequest,
   LeverAssertionRequest,
+  LineAssertionRequest,
   UpdateForecastRequest,
 )
 from robosystems.models.api.information_block import (
   ForecastMechanics,
   LeverAssertionLite,
+  LineAssertionLite,
 )
 from robosystems.operations.information_block import forecast as forecast_handlers
 
@@ -175,6 +177,124 @@ class TestExpandLevers:
       )
 
 
+RENT = _element("el_rent", "rs-gaap:RentExpense", source="rs-gaap", item_type=None)
+LOAN = _element("el_loan", "rs-gaap:NotesPayable", source="rs-gaap", item_type=None)
+LOAN.period_type = "instant"
+LOAN.is_monetary = True
+
+
+class TestExpandLineAssertions:
+  def _session(self, *elements: MagicMock) -> MagicMock:
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.side_effect = list(elements)
+    return session
+
+  def _expand(self, session: MagicMock, assertions, calc_parents=None):
+    with patch.object(
+      forecast_handlers,
+      "load_rs_gaap_calculations",
+      return_value={key: [] for key in calc_parents or []},
+    ):
+      return forecast_handlers._expand_line_assertions(
+        session, assertions, "2026-06", 3
+      )
+
+  def test_expands_with_element_metadata(self) -> None:
+    session = self._session(RENT)
+    expanded = self._expand(
+      session, [LineAssertionRequest(qname="rs-gaap:RentExpense", value=0.0)]
+    )
+    assert len(expanded) == 1
+    assertion = expanded[0]
+    assert assertion.element_id == "el_rent"
+    assert assertion.period_type == "duration"
+    assert assertion.values_by_period == {
+      "2026-07": 0.0,
+      "2026-08": 0.0,
+      "2026-09": 0.0,
+    }
+
+  def test_captures_instant_period_type(self) -> None:
+    session = self._session(LOAN)
+    expanded = self._expand(
+      session, [LineAssertionRequest(qname="rs-gaap:NotesPayable", value=500.0)]
+    )
+    assert expanded[0].period_type == "instant"
+
+  def test_empty_list_short_circuits(self) -> None:
+    session = MagicMock()
+    assert forecast_handlers._expand_line_assertions(session, [], "2026-06", 3) == []
+    session.execute.assert_not_called()
+
+  def test_rejects_rs_driver_source(self) -> None:
+    session = self._session(GROWTH)
+    with pytest.raises(ValueError, match="levers"):
+      self._expand(
+        session,
+        [LineAssertionRequest(qname="rs-driver:RevenueGrowthRate", value=0.03)],
+      )
+
+  def test_rejects_rs_metric_source(self) -> None:
+    metric = _element(
+      "el_wc", "rs-metric:WorkingCapital", source="rs-metric", item_type=None
+    )
+    session = self._session(metric)
+    with pytest.raises(ValueError, match="compute-metrics"):
+      self._expand(
+        session, [LineAssertionRequest(qname="rs-metric:WorkingCapital", value=1.0)]
+      )
+
+  def test_rejects_abstract_element(self) -> None:
+    abstract = _element(
+      "el_abs", "rs-gaap:OperatingExpensesAbstract", source="rs-gaap", item_type=None
+    )
+    abstract.is_abstract = True
+    session = self._session(abstract)
+    with pytest.raises(ValueError, match="abstract"):
+      self._expand(
+        session,
+        [LineAssertionRequest(qname="rs-gaap:OperatingExpensesAbstract", value=1.0)],
+      )
+
+  def test_rejects_calc_parent_leaves_only(self) -> None:
+    revenues = _element("el_rev", "rs-gaap:Revenues", source="rs-gaap", item_type=None)
+    session = self._session(revenues)
+    with pytest.raises(ValueError, match="leaves-only"):
+      self._expand(
+        session,
+        [LineAssertionRequest(qname="rs-gaap:Revenues", value=100.0)],
+        calc_parents=["el_rev"],
+      )
+
+  def test_rejects_unresolved_qname(self) -> None:
+    session = self._session(None)
+    with pytest.raises(ValueError, match="did not resolve"):
+      self._expand(session, [LineAssertionRequest(qname="rs-gaap:Nope", value=1.0)])
+
+  def test_rejects_override_outside_horizon(self) -> None:
+    session = self._session(RENT)
+    with pytest.raises(ValueError, match="outside the horizon"):
+      self._expand(
+        session,
+        [
+          LineAssertionRequest(
+            qname="rs-gaap:RentExpense", values_by_period={"2027-01": 0.0}
+          )
+        ],
+      )
+
+  def test_rejects_duplicate_assertion(self) -> None:
+    session = self._session(RENT, RENT)
+    with pytest.raises(ValueError, match="Duplicate line-assertion"):
+      self._expand(
+        session,
+        [
+          LineAssertionRequest(qname="rs-gaap:RentExpense", value=0.0),
+          LineAssertionRequest(qname="rs-gaap:RentExpense", value=1.0),
+        ],
+      )
+
+
 class TestResolveBasePeriod:
   def test_request_value_wins(self) -> None:
     session = MagicMock()
@@ -318,6 +438,55 @@ class TestWriteLeverFactSet:
     assert first.period_type == "duration"
     assert first.unit == "pure"  # percent → 'pure'
 
+  def test_line_assertions_ride_the_same_set_with_typed_periods(self) -> None:
+    structure = SimpleNamespace(id="struct_budget_01")
+    mechanics = ForecastMechanics(
+      scenario_kind="budget",
+      horizon_months=2,
+      base_period="2026-06",
+      levers=[
+        LeverAssertionLite(
+          qname="rs-driver:RevenueGrowthRate",
+          element_id="el_growth",
+          item_type="percent",
+          values_by_period={"2026-07": 0.03},
+        )
+      ],
+      line_assertions=[
+        LineAssertionLite(
+          qname="rs-gaap:NotesPayable",
+          element_id="el_loan",
+          item_type=None,
+          period_type="instant",
+          values_by_period={"2026-07": 500.0, "2026-08": 500.0},
+        )
+      ],
+    )
+    session = MagicMock()
+    session.execute.return_value.scalars.return_value.all.return_value = [GROWTH, LOAN]
+    added_facts: list[Any] = []
+    session.add.side_effect = added_facts.append
+
+    with patch.object(
+      forecast_handlers,
+      "create_fact_set",
+      return_value=SimpleNamespace(id="fs_lever"),
+    ) as create_fs:
+      forecast_handlers._write_lever_fact_set(
+        session, structure, mechanics, "ent_1", "usr_test"
+      )
+
+    # The span covers the assertion months beyond the lever's.
+    kwargs = create_fs.call_args.kwargs
+    assert kwargs["period_start"] == date(2026, 7, 1)
+    assert kwargs["period_end"] == date(2026, 8, 31)
+
+    assertion_facts = [f for f in added_facts if f.element_id == "el_loan"]
+    assert len(assertion_facts) == 2
+    assert all(f.period_type == "instant" for f in assertion_facts)
+    assert all(f.period_start is None for f in assertion_facts)
+    assert all(f.unit == "USD" for f in assertion_facts)
+
 
 class TestUpdate:
   def _structure(self) -> MagicMock:
@@ -368,6 +537,72 @@ class TestUpdate:
         "usr_test",
       )
     session.commit.assert_not_called()
+
+  def _structure_with_assertions(self) -> MagicMock:
+    structure = self._structure()
+    mechanics = ForecastMechanics.model_validate(structure.artifact_mechanics)
+    structure.artifact_mechanics = mechanics.model_copy(
+      update={
+        "line_assertions": [
+          LineAssertionLite(
+            qname="rs-gaap:RentExpense",
+            element_id="el_rent",
+            item_type=None,
+            period_type="duration",
+            values_by_period={"2026-07": 0.0},
+          )
+        ]
+      }
+    ).model_dump(mode="json")
+    return structure
+
+  def test_window_change_requires_line_assertions_when_present(self) -> None:
+    structure = self._structure_with_assertions()
+    session = MagicMock()
+    session.get.return_value = structure
+    with (
+      patch.object(forecast_handlers, "_expand_levers", return_value=[]),
+      pytest.raises(ValueError, match="`line_assertions`"),
+    ):
+      forecast_handlers.update(
+        session,
+        UpdateForecastRequest(
+          structure_id="struct_budget_01",
+          horizon_months=6,
+          levers=[
+            LeverAssertionRequest(qname="rs-driver:RevenueGrowthRate", value=0.03)
+          ],
+        ),
+        "usr_test",
+      )
+    session.commit.assert_not_called()
+
+  def test_line_assertions_only_update_rewrites_the_authored_set(self) -> None:
+    """Passing an empty list clears the assertions AND rewrites the
+    authored FactSet (full-replace semantics, levers untouched)."""
+    structure = self._structure_with_assertions()
+    session = MagicMock()
+    session.get.return_value = structure
+    existing_set = MagicMock()
+    existing_set.entity_id = "ent_1"
+
+    with (
+      patch.object(
+        forecast_handlers, "_load_lever_fact_set", return_value=existing_set
+      ),
+      patch.object(forecast_handlers, "_write_lever_fact_set") as write_set,
+    ):
+      forecast_handlers.update(
+        session,
+        UpdateForecastRequest(structure_id="struct_budget_01", line_assertions=[]),
+        "usr_test",
+      )
+
+    mech = ForecastMechanics.model_validate(structure.artifact_mechanics)
+    assert mech.line_assertions == []
+    assert mech.levers[0].qname == "rs-driver:RevenueGrowthRate"
+    session.delete.assert_called_once_with(existing_set)
+    write_set.assert_called_once()
 
   def test_missing_or_wrong_type_raises(self) -> None:
     session = MagicMock()
@@ -490,6 +725,84 @@ class TestBuildEnvelope:
       date(2026, 7, 31),
       date(2026, 8, 31),
     ]
+
+  def test_line_assertions_render_as_assumption_rows(self) -> None:
+    structure = MagicMock()
+    structure.id = "struct_budget_01"
+    structure.block_type = "forecast"
+    structure.name = "FY26 Operating Budget"
+    structure.description = None
+    structure.renderer_note = None
+    structure.taxonomy_id = "tax_rs_driver"
+    structure.concept_arrangement = "set"
+    structure.member_arrangement = None
+    structure.artifact_mechanics = ForecastMechanics(
+      scenario_kind="budget",
+      horizon_months=2,
+      base_period="2026-06",
+      levers=[
+        LeverAssertionLite(
+          qname="rs-driver:RevenueGrowthRate",
+          element_id="el_growth",
+          item_type="percent",
+          values_by_period={"2026-07": 0.03},
+        )
+      ],
+      line_assertions=[
+        LineAssertionLite(
+          qname="rs-gaap:RentExpense",
+          element_id="el_rent",
+          item_type=None,
+          period_type="duration",
+          values_by_period={"2026-07": 0.0, "2026-08": 0.0},
+        )
+      ],
+    ).model_dump(mode="json")
+
+    atoms = SimpleNamespace(
+      structure=structure,
+      taxonomy_name="rs-driver",
+      associations=[],
+      elements=[],
+      element_ids=[],
+      rules=[],
+      classifications_by_assoc={},
+      fact_set=None,
+      verification_results=[],
+      verification_summary=None,
+    )
+
+    session = MagicMock()
+    computed_result = MagicMock()
+    computed_result.scalars.return_value.all.return_value = []
+    elements_result = MagicMock()
+    elements_result.scalars.return_value.all.return_value = [GROWTH, RENT]
+    lever_set_result = MagicMock()
+    lever_set_result.scalar_one_or_none.return_value = None
+    docs_result = MagicMock()
+    docs_result.all.return_value = []
+    session.execute.side_effect = [
+      computed_result,
+      elements_result,
+      lever_set_result,
+      docs_result,
+    ]
+
+    with patch.object(
+      forecast_handlers, "load_base_envelope_atoms", return_value=atoms
+    ):
+      envelope = forecast_handlers.build_envelope(session, "struct_budget_01")
+
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert [r.element_qname for r in rendering.rows] == [
+      "rs-driver:RevenueGrowthRate",
+      "rs-gaap:RentExpense",
+    ]
+    assertion_row = rendering.rows[1]
+    assert assertion_row.values == [0.0, 0.0]
+    assert assertion_row.balance_type == "debit"
 
   def test_returns_none_for_wrong_block_type(self) -> None:
     session = MagicMock()

@@ -8,6 +8,11 @@ month at a time from the block's ``base_period``:
 1. **Carry-forward** — every IS leaf that carried a fact in the base
    month's actual report and isn't rule-driven repeats its prior value
    (the engine default for unmodeled lines — no rules involved).
+   **Line assertions** override both carry and schedule projection for
+   the months they name (the manual-override half of the authored
+   surface — zero out a base-month one-off, hold a line at a budget
+   number), and displace a driver rule targeting the same element that
+   month (the rule lands in ``skipped``, legibly).
 2. **Driver rules** — the rs-driver catalog's ``Derive`` rules, in
    dependency order (``topo_sort_calculations`` over same-month operand
    edges). A rule is *active* for the scenario iff every rs-driver
@@ -258,18 +263,27 @@ def cmd_compute_forecast(
     )
   entity_id = body.entity_id or lever_set.entity_id or _default_entity_id(session)
 
-  # Lever VALUES bind from the scenario's authored facts (facts are the
-  # values; the mechanics copy is the legible round-trip shape).
+  # Lever + line-assertion VALUES bind from the scenario's authored
+  # facts (facts are the values; the mechanics copy is the legible
+  # round-trip shape). Levers key by qname (rule operands name qnames);
+  # assertions key by element id (the walk works in element-id space).
   element_qname_by_id: dict[str, str] = {
     lv.element_id: lv.qname for lv in mechanics.levers
   }
+  assertion_period_type: dict[str, str] = {
+    la.element_id: la.period_type for la in mechanics.line_assertions
+  }
   lever_values: dict[str, dict[str, float]] = {}
+  assertion_values: dict[str, dict[str, float]] = {}
   for fact in _numeric_facts(session, lever_set.id):
-    qname = element_qname_by_id.get(fact.element_id)
-    if qname is None or fact.value is None:
+    if fact.value is None:
       continue
     month = period_from_date(fact.period_end)
-    lever_values.setdefault(qname, {})[month] = float(fact.value)
+    qname = element_qname_by_id.get(fact.element_id)
+    if qname is not None:
+      lever_values.setdefault(qname, {})[month] = float(fact.value)
+    elif fact.element_id in assertion_period_type:
+      assertion_values.setdefault(fact.element_id, {})[month] = float(fact.value)
 
   # ── Resolve the actual structures + seed month ────────────────────────
   is_structure_id = _newest_actual_structure_id(session, "income_statement")
@@ -501,8 +515,31 @@ def cmd_compute_forecast(
         if delta:
           current[element_id] += delta
 
+    # (a3) Line assertions — the manual overrides win over carry and
+    # schedule projection for the months they name; a displaced driver
+    # rule is skipped legibly in (b), and dependent rules bind the
+    # asserted value through the same-month operand path.
+    asserted_this_month: set[str] = set()
+    for element_id, by_month in assertion_values.items():
+      if month in by_month:
+        current[element_id] = by_month[month]
+        asserted_this_month.add(element_id)
+    month_asserted_instants = {
+      el for el in asserted_this_month if assertion_period_type.get(el) == "instant"
+    }
+
     # (b) Driver rules in same-month dependency order.
     for ar in ordered_active:
+      if ar.target.id in asserted_this_month:
+        skipped.append(
+          SkippedForecastLite(
+            rule_id=ar.rule.id,
+            element_qname=ar.target.qname,
+            period=month,
+            reason="displaced by line assertion",
+          )
+        )
+        continue
       raw = ar.rule.rule_expression if isinstance(ar.rule.rule_expression, str) else ""
       expr, prior_operands = desugar_priors(raw)
       expr, avg_operands = desugar_aggregates(expr)
@@ -615,8 +652,11 @@ def cmd_compute_forecast(
     # parent's carried children proportionally, the workbook's implicit
     # semantics (every revenue stream grows at g). Without this the
     # statement's own RollUp verification fails: driven parent, stale
-    # children.
-    _scale_rule_target_children(current, active_target_ids, calculations)
+    # children. Asserted leaves are pinned — the remainder distributes
+    # over the unpinned children only.
+    _scale_rule_target_children(
+      current, active_target_ids, calculations, pinned=asserted_this_month
+    )
 
     # (c) Calc-DAG subtotals — derive, never carry (present = direct wins).
     resolved = resolve_calc_dag(current, set(current), calculations, calc_order)
@@ -630,11 +670,21 @@ def cmd_compute_forecast(
     )
 
     is_facts: list[tuple[Element, float]] = []
+    emitted_is: set[str] = set()
     for element_id in base_is_element_ids:
       element = _element(element_id)
       if element is None or element_id not in resolved:
         continue
       is_facts.append((element, resolved[element_id]))
+      emitted_is.add(element_id)
+    # An asserted duration line absent from the base month's report
+    # (e.g. a budget line the actuals never carried) still emits.
+    for element_id in sorted(
+      asserted_this_month - month_asserted_instants - emitted_is
+    ):
+      element = _element(element_id)
+      if element is not None and element_id in resolved:
+        is_facts.append((element, resolved[element_id]))
 
     # (d2) Balance-sheet roll + derived CF (F-2) — with an articulation
     # context the BS is the full roll (carry, rules, schedules, RE,
@@ -651,7 +701,7 @@ def cmd_compute_forecast(
         prev_end=prev_period_end,
         prior_bs=prior_bs,
         rule_values=current,
-        rule_instant_targets=active_instant_ids,
+        rule_instant_targets=active_instant_ids | month_asserted_instants,
         resolved_is=resolved,
         calculations=calculations,
         calc_order=calc_order,
@@ -683,9 +733,15 @@ def cmd_compute_forecast(
           if element is not None:
             cf_facts.append((element, cf_values[element_id]))
     else:
+      emitted_instants: set[str] = set()
       for ar in ordered_active:
         if ar.target.id in current and ar.target.period_type == "instant":
           bs_facts.append((ar.target, current[ar.target.id]))
+          emitted_instants.add(ar.target.id)
+      for element_id in sorted(month_asserted_instants - emitted_instants):
+        element = _element(element_id)
+        if element is not None and element_id in current:
+          bs_facts.append((element, current[element_id]))
 
     is_set_id = _upsert_month_set(
       session,
@@ -786,6 +842,7 @@ def _scale_rule_target_children(
   current: dict[str, float],
   active_target_ids: set[str],
   calculations: dict[str, list[tuple[str, float]]],
+  pinned: set[str] | None = None,
 ) -> None:
   """Scale a rule-driven calc parent's present children so the
   composition articulates with the driven value.
@@ -796,11 +853,18 @@ def _scale_rule_target_children(
   more honest than inventing a split. A skipped rule that fell back to
   carry scales by exactly 1.0 (children carried too), so this is a no-op
   for inactive months.
+
+  ``pinned`` elements (line-asserted leaves) are never scaled: the
+  driven parent's remainder after the pinned contributions distributes
+  proportionally over the unpinned children. A parent whose children
+  are all pinned (or whose unpinned sum is zero) is left untouched —
+  the visible RollUp failure again beats inventing a split.
   """
+  pinned = pinned or set()
 
   def _scale_subtree(parent: str, factor: float, visited: set[str]) -> None:
     for child, _weight in calculations.get(parent, ()):
-      if child in visited or child not in current:
+      if child in visited or child not in current or child in pinned:
         continue
       visited.add(child)
       current[child] *= factor
@@ -810,12 +874,19 @@ def _scale_rule_target_children(
     children = calculations.get(target)
     if not children or target not in current:
       continue
+    pinned_sum = sum(
+      current[child] * weight
+      for child, weight in children
+      if child in current and child in pinned
+    )
     children_sum = sum(
-      current[child] * weight for child, weight in children if child in current
+      current[child] * weight
+      for child, weight in children
+      if child in current and child not in pinned
     )
     if abs(children_sum) < 1e-9:
       continue
-    factor = current[target] / children_sum
+    factor = (current[target] - pinned_sum) / children_sum
     if factor == 1.0:
       continue
     _scale_subtree(target, factor, set())

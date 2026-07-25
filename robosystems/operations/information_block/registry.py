@@ -228,11 +228,14 @@ FORECAST_BLOCK = BlockTypeRegistryEntry(
   icon="trending-up-down",
   description=(
     "Authored scenario container (FP&A) — scenario identity, horizon, "
-    "and lever assertions on the rs-driver catalog. The block IS the "
-    "scenario: compute-forecast walks the driver cascade forward from "
-    "the last closed actuals and lands the derived months in the "
-    "existing statement/metric block types keyed by this block's "
-    "scenario_id (NULL = actuals)."
+    "lever assertions on the rs-driver catalog, and direct line "
+    "assertions on statement leaves (manual overrides that win over "
+    "driver rules and carry-forward for the months they name — zero "
+    "out a base-month one-off, hold a line at a budget number). The "
+    "block IS the scenario: compute-forecast walks the driver cascade "
+    "forward from the last closed actuals and lands the derived months "
+    "in the existing statement/metric block types keyed by this "
+    "block's scenario_id (NULL = actuals)."
   ),
   concept_arrangement_default="set",
   member_arrangement_default=None,
