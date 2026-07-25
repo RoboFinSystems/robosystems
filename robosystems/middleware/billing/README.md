@@ -1,12 +1,12 @@
 # Credits Middleware
 
-This middleware implements the credit-based billing system exclusively for AI operations (Anthropic/OpenAI API calls) on the RoboSystems platform.
+This middleware implements the credit-based billing system exclusively for AI operations (Anthropic Claude calls via AWS Bedrock) on the RoboSystems platform.
 
 ## Overview
 
 The credits middleware:
 
-- Tracks credit consumption ONLY for AI operations (Anthropic/OpenAI API calls)
+- Tracks credit consumption ONLY for AI operations (Anthropic Claude calls via AWS Bedrock)
 - Handles token-based billing using actual API usage
 - Enforces credit limits for AI operations
 - Provides caching for high-performance credit checks

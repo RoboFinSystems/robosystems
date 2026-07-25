@@ -15,12 +15,12 @@ MAIN_API_TAGS = [
     "description": "🏗️ Graphs - Create and manage knowledge graph tenants",
   },
   {
-    "name": "Schema",
-    "description": "📐 Schema management - Validate and manage custom graph schemas",
-  },
-  {
     "name": "Graph Operations",
     "description": "⚙️ Graph lifecycle — Subgraphs, backups, tier changes, and materialization",
+  },
+  {
+    "name": "Schema",
+    "description": "📐 Schema management - Validate and manage custom graph schemas",
   },
   {
     "name": "Subgraphs",
@@ -31,6 +31,14 @@ MAIN_API_TAGS = [
     "description": "💾 Backup - List, download, and inspect graph backups",
   },
   # ── Interact with the graph — query, search, AI ───────────────────────────
+  {
+    "name": "MCP",
+    "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
+  },
+  {
+    "name": "Operator",
+    "description": "🤖 AI Operators - AI agent orchestration and execution",
+  },
   {
     "name": "Query",
     "description": "🕸️ Graph queries - Execute Cypher queries on the knowledge graph",
@@ -43,34 +51,26 @@ MAIN_API_TAGS = [
     "name": "Memory",
     "description": "🧠 Memory - Recall, list, and inspect the graph's per-graph semantic memory store",
   },
-  {
-    "name": "MCP",
-    "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
-  },
-  {
-    "name": "Operator",
-    "description": "🤖 AI Operators - AI agent orchestration and execution",
-  },
   # ── Data & content management ─────────────────────────────────────────────
-  {
-    "name": "Connections",
-    "description": "🔗 Connections — Manage external data source integrations",
-  },
-  {
-    "name": "Files",
-    "description": "📄 File management - Upload, track, and manage data files for generic graphs",
-  },
-  {
-    "name": "Tables",
-    "description": "🗃️ Staging tables - Table metadata and SQL queries on the staging layer",
-  },
-  {
-    "name": "Documents",
-    "description": "📑 Documents - Upload, list, and manage documents for search and analysis",
-  },
   {
     "name": "Content Operations",
     "description": "✍️ Content operations - Write content across memory, documents, and files",
+  },
+  {
+    "name": "Connections",
+    "description": "🔗 Connection management — Manage external data source integrations",
+  },
+  {
+    "name": "Documents",
+    "description": "📑 Documents - List documents for search and analysis",
+  },
+  {
+    "name": "Files",
+    "description": "📄 File management - List stored data files for generic graphs",
+  },
+  {
+    "name": "Tables",
+    "description": "🗃️ Staging tables - Table metadata for the staging layer",
   },
   # ── Domain applications — extensions ──────────────────────────────────────
   {
@@ -89,6 +89,10 @@ MAIN_API_TAGS = [
   {
     "name": "Operations",
     "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
+  },
+  {
+    "name": "Credits",
+    "description": "🪙 Credits - Manage credit-based usage and allocation",
   },
   {
     "name": "Usage",
@@ -120,20 +124,12 @@ MAIN_API_TAGS = [
     "description": "📈 Organization usage - Track organization-wide usage, limits, and analytics",
   },
   {
-    "name": "Service Offerings",
-    "description": "🛍️ Service offerings - View available offers and pricing",
-  },
-  {
     "name": "Subscriptions",
     "description": "💳 Subscriptions - Shared repository subscription management",
   },
   {
     "name": "Billing",
     "description": "🛒 Billing - Create and manage billing checkout sessions",
-  },
-  {
-    "name": "Credits",
-    "description": "🪙 Credits - Manage credit-based usage and allocation",
   },
   {
     "name": "User",
@@ -144,6 +140,10 @@ MAIN_API_TAGS = [
     "description": "🔐 Authentication - Login, register, and access token management",
   },
   # ── Platform ──────────────────────────────────────────────────────────────
+  {
+    "name": "Service Offerings",
+    "description": "🛍️ Service offerings - View available offers and pricing",
+  },
   {
     "name": "Status",
     "description": "❤️ Service status - API status and monitoring",
