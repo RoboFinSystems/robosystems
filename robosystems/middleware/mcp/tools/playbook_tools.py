@@ -191,6 +191,7 @@ def _build_playbook(mode: str) -> dict[str, Any]:
     "create-event-block",
     "list-period-drafts",
     "close-period",
+    "backfill-plan-history",
     "search-documents",
     "get-graph-schema",
     "get-unmapped-elements",

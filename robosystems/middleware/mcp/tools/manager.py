@@ -250,6 +250,7 @@ class GraphMCPTools:
     self.get_fiscal_calendar_tool = None
     self.close_period_tool = None
     self.reopen_period_tool = None
+    self.backfill_plan_history_tool = None
     # Information Block read tools (get/list-information-block) — these
     # replaced the retired schedule-specific reads (list-schedule-structures,
     # get-schedule-facts).
@@ -257,6 +258,7 @@ class GraphMCPTools:
     self.list_information_blocks_tool = None
     if self._has_extension("roboledger") and env.ROBOLEDGER_ENABLED and not read_only:
       from .fiscal_calendar_tools import (
+        BackfillPlanHistoryTool,
         ClosePeriodTool,
         GetFiscalCalendarTool,
         ReopenPeriodTool,
@@ -286,6 +288,7 @@ class GraphMCPTools:
       self.get_fiscal_calendar_tool = GetFiscalCalendarTool(graph_client)
       self.close_period_tool = ClosePeriodTool(graph_client)
       self.reopen_period_tool = ReopenPeriodTool(graph_client)
+      self.backfill_plan_history_tool = BackfillPlanHistoryTool(graph_client)
 
     # Information Block reads stay available on read-only *tenant* graphs (no
     # read_only guard) but are excluded on shared repos: they read the
@@ -664,6 +667,8 @@ class GraphMCPTools:
       tools.append(self.close_period_tool.get_tool_definition())
     if self.reopen_period_tool is not None:
       tools.append(self.reopen_period_tool.get_tool_definition())
+    if self.backfill_plan_history_tool is not None:
+      tools.append(self.backfill_plan_history_tool.get_tool_definition())
     return tools
 
   def _get_taxonomy_tool_definitions(self) -> list[dict[str, Any]]:
@@ -1239,6 +1244,15 @@ class GraphMCPTools:
             "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
           )
         result = await self.reopen_period_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "backfill-plan-history":
+        if self.backfill_plan_history_tool is None:
+          raise ValueError(
+            "backfill-plan-history tool is not available. "
+            "Requires roboledger extension and ROBOLEDGER_ENABLED=true."
+          )
+        result = await self.backfill_plan_history_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       # Taxonomy mapping tools

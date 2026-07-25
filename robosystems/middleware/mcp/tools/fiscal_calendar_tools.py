@@ -1,6 +1,6 @@
 """Fiscal calendar MCP tools for AI accounting close workflows.
 
-Three tools that expose the fiscal calendar state machine to Claude:
+Four tools that expose the fiscal calendar state machine to Claude:
 
 1. get-fiscal-calendar — read current state (closed_through, close_target,
    gap, closeable_now, blockers)
@@ -8,13 +8,16 @@ Three tools that expose the fiscal calendar state machine to Claude:
    the period, marks the period closed, advances closed_through, auto-advances
    close_target when reached
 3. reopen-period — undo a prior close. Requires a reason for the audit log.
+4. backfill-plan-history — compile monthly statement history behind the
+   close boundary (chunked reopen → reclose restamps, feeding the plan's
+   historical columns).
 
 Initialize and set-close-target are deliberately NOT exposed as MCP tools:
 initialize is a one-time onboarding operation done via the UI, and
 set-close-target is a configuration action that normal close workflows
 don't need (auto-advance handles it). Both are still available via REST.
 
-All three tools route through `operations/roboledger/{reads,commands}/
+All tools route through `operations/roboledger/{reads,commands}/
 fiscal_calendar.py` so MCP, GraphQL, and the REST operation surface
 share one source of truth for both behavior and wire shape.
 """
@@ -28,9 +31,16 @@ from robosystems.middleware.mcp.tools._gate import (
   MCPExtensionGateError,
   require_graph_extension_mcp,
 )
+from robosystems.models.api.extensions.fiscal_calendar import (
+  BackfillPlanHistoryRequest,
+)
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  BackfillPreconditionError,
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
+)
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  backfill_plan_history as ops_backfill_plan_history,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   close_period as ops_close_period,
@@ -483,4 +493,160 @@ class ReopenPeriodTool:
       return {"error": "calendar_error", "message": str(exc)}
     except Exception as exc:
       logger.warning(f"reopen-period failed: {exc}")
+      return {"error": str(exc)}
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# backfill-plan-history
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class BackfillPlanHistoryTool:
+  """Compile monthly statement history behind the close boundary."""
+
+  def __init__(self, graph_client):
+    self.client = graph_client
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "backfill-plan-history",
+      "description": """Compile monthly statement history behind the close boundary — the plan's historical columns.
+
+**WHEN TO USE:**
+- The Plan page shows only annual (or missing) columns because historical
+  months were closed before close-time statement stamping existed, or were
+  baseline-closed at calendar initialization and never really closed
+- A tenant with deep ledger history (QB sync) wants monthly statement
+  columns further back than the calendar currently covers
+- After onboarding: CoA mapping is done and the user wants their history
+  compiled into the monthly statement series
+
+**WHAT IT DOES (per call, oldest month first):**
+1. Finds the earliest month with ledger data (the hard floor — a request
+   can never reach past real data)
+2. Seeds any missing FiscalPeriod rows back to the clamped start
+   (baseline-closed)
+3. For each month in range that lacks canonical statement FactSets, runs
+   the REAL reopen → reclose cycle: balance validation, statement
+   stamping, statement rules, and audit events — identical to a manual
+   restamp
+4. Stops after max_periods months and reports the rest in
+   remaining_periods — call again to continue (chunked, resumable)
+
+**IDEMPOTENT / SAFE:**
+- Months that already have canonical statement sets are never touched
+- Months holding draft entries are SKIPPED, never posted — the backfill
+  refuses to commit ledger changes nobody reviewed (resolve via
+  list-period-drafts + close-period, then re-run)
+- A failed reclose halts the run (no holes in the series); the failure
+  rides that month's outcome
+- The open month and close_target are never touched
+
+**PARAMETERS:**
+- start_period (optional): YYYY-MM to backfill from. Defaults to the
+  earliest month with ledger data; clamped there when set earlier.
+- max_periods (optional, default 12, max 24): months to restamp this call.
+- allow_stale_sync (optional): override the sync gate on each reclose —
+  rarely needed since historical months predate the last sync.
+- note (optional): attached to each close audit event.
+
+**RETURNS:**
+- earliest_available_period / effective_start_period / closed_through:
+  the resolved range
+- period_rows_created: FiscalPeriod rows seeded for uncovered months
+- processed: per-month outcomes (stamped | skipped_drafts | failed) with
+  statement stamp + rule details
+- remaining_periods: months still needing stamps — LOOP UNTIL EMPTY
+- fiscal_calendar: refreshed calendar state
+
+**WORKFLOW:**
+1. Call with defaults (or a start_period the user chose)
+2. Report per-month outcomes to the user
+3. If remaining_periods is non-empty, call again
+4. Verify in the Plan page / statement series when done""",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_period": {
+            "type": "string",
+            "description": (
+              "YYYY-MM to backfill from (default: earliest month with "
+              "ledger data; clamped to it when earlier)"
+            ),
+            "pattern": r"^\d{4}-(0[1-9]|1[0-2])$",
+          },
+          "max_periods": {
+            "type": "integer",
+            "description": "Months to restamp in this call (default 12, max 24)",
+            "minimum": 1,
+            "maximum": 24,
+          },
+          "allow_stale_sync": {
+            "type": "boolean",
+            "description": (
+              "Override the sync-currency gate on each reclose (default "
+              "false). Rarely needed — historical months predate the last "
+              "sync in the normal case."
+            ),
+          },
+          "note": {
+            "type": "string",
+            "description": "Optional note attached to each close audit event",
+          },
+        },
+        "required": [],
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> Any:
+    graph_id = self.client.graph_id
+
+    try:
+      require_graph_extension_mcp("roboledger", graph_id)
+    except MCPExtensionGateError as exc:
+      return {"error": exc.code, "message": exc.message}
+
+    body = BackfillPlanHistoryRequest(
+      start_period=arguments.get("start_period"),
+      max_periods=int(arguments.get("max_periods", 12)),
+      allow_stale_sync=bool(arguments.get("allow_stale_sync", False)),
+      note=arguments.get("note"),
+    )
+    actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"
+
+    svc = FiscalCalendarService()
+    close_svc = PeriodCloseService(svc)
+
+    try:
+      with extensions_session(graph_id) as session, _platform_session() as platform_db:
+        result = ops_backfill_plan_history(
+          session,
+          platform_db,
+          graph_id,
+          body,
+          actor_id=actor_id,
+          service=svc,
+          close_service=close_svc,
+          actor_type="agent",
+        )
+        fc_payload = result.fiscal_calendar.model_dump(mode="json")
+        has_sync, _ = qb_sync_state(platform_db, graph_id)
+        fc_payload["has_sync_connection"] = has_sync
+        return {
+          "earliest_available_period": result.earliest_available_period,
+          "effective_start_period": result.effective_start_period,
+          "closed_through": result.closed_through,
+          "period_rows_created": result.period_rows_created,
+          "processed": [
+            outcome.model_dump(mode="json") for outcome in result.processed
+          ],
+          "remaining_periods": result.remaining_periods,
+          "fiscal_calendar": fc_payload,
+        }
+    except BackfillPreconditionError as exc:
+      return {"error": exc.code, "message": str(exc)}
+    except FiscalCalendarError as exc:
+      return {"error": "calendar_error", "message": str(exc)}
+    except Exception as exc:
+      logger.warning(f"backfill-plan-history failed: {exc}")
       return {"error": str(exc)}

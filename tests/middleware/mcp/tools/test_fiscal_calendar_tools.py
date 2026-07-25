@@ -23,14 +23,18 @@ import pytest
 
 from robosystems.middleware.mcp.tools._gate import MCPExtensionGateError
 from robosystems.middleware.mcp.tools.fiscal_calendar_tools import (
+  BackfillPlanHistoryTool,
   ClosePeriodTool,
   ReopenPeriodTool,
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
+  BackfillPeriodOutcome,
+  BackfillPlanHistoryResponse,
   ClosePeriodResponse,
   FiscalCalendarResponse,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  BackfillPreconditionError,
   ReopenPeriodResult,
 )
 from robosystems.operations.roboledger.fiscal_calendar import (
@@ -453,4 +457,105 @@ class TestFiscalCalendarGate:
       result = await tool.execute({"period": "2026-03", "reason": "fix"})
 
     assert result["error"] == "extension_not_provisioned"
+    ops.assert_not_called()
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# BackfillPlanHistoryTool
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _backfill_response(**overrides) -> BackfillPlanHistoryResponse:
+  defaults: dict = {
+    "fiscal_calendar": _fc_response(),
+    "earliest_available_period": "2024-07",
+    "effective_start_period": "2024-07",
+    "closed_through": "2026-05",
+    "period_rows_created": 0,
+    "processed": [
+      BackfillPeriodOutcome(
+        period="2024-07",
+        status="stamped",
+        statements_stamped=True,
+        statement_rule_summary={"pass": 3, "fail": 0, "error": 0, "skipped": 0},
+      )
+    ],
+    "remaining_periods": ["2024-08", "2024-09"],
+  }
+  defaults.update(overrides)
+  return BackfillPlanHistoryResponse(**defaults)
+
+
+class TestBackfillPlanHistoryTool:
+  @pytest.mark.asyncio
+  async def test_delegates_and_reshapes(self):
+    tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_backfill_plan_history", return_value=_backfill_response()
+      ) as ops,
+    ):
+      result = await tool.execute({"start_period": "2024-07", "max_periods": 1})
+
+    ops.assert_called_once()
+    body = ops.call_args.args[3]
+    assert body.start_period == "2024-07"
+    assert body.max_periods == 1
+    assert ops.call_args.kwargs["actor_type"] == "agent"
+    assert result["effective_start_period"] == "2024-07"
+    assert result["remaining_periods"] == ["2024-08", "2024-09"]
+    assert result["processed"][0]["period"] == "2024-07"
+    assert result["processed"][0]["status"] == "stamped"
+    assert result["fiscal_calendar"]["graph_id"] == GRAPH_ID
+
+  @pytest.mark.asyncio
+  async def test_defaults_apply_when_arguments_empty(self):
+    tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_backfill_plan_history", return_value=_backfill_response()
+      ) as ops,
+    ):
+      await tool.execute({})
+
+    body = ops.call_args.args[3]
+    assert body.start_period is None
+    assert body.max_periods == 12
+    assert body.allow_stale_sync is False
+
+  @pytest.mark.asyncio
+  async def test_precondition_error_maps_to_code(self):
+    tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
+    with (
+      _patch_sessions(),
+      patch(
+        f"{MODULE}.ops_backfill_plan_history",
+        side_effect=BackfillPreconditionError(
+          "nothing_closed", "Nothing is closed yet."
+        ),
+      ),
+    ):
+      result = await tool.execute({})
+
+    assert result["error"] == "nothing_closed"
+    assert "closed" in result["message"]
+
+  @pytest.mark.asyncio
+  async def test_rejects_on_repo_graph_before_ops(self):
+    tool = BackfillPlanHistoryTool(_client(user_id="usr_abc"))
+    with (
+      patch(
+        f"{MODULE}.require_graph_extension_mcp",
+        side_effect=MCPExtensionGateError(
+          "repository_write_forbidden",
+          "roboledger commands are not available on repository graphs",
+        ),
+      ),
+      patch(f"{MODULE}.ops_backfill_plan_history") as ops,
+    ):
+      result = await tool.execute({})
+
+    assert result["error"] == "repository_write_forbidden"
     ops.assert_not_called()

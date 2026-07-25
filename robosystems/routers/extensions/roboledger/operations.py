@@ -123,6 +123,8 @@ from robosystems.models.api.extensions.entity import (
   UpdateEntityRequest,
 )
 from robosystems.models.api.extensions.fiscal_calendar import (
+  BackfillPlanHistoryRequest,
+  BackfillPlanHistoryResponse,
   ClosePeriodRequest,
   ClosePeriodResponse,
   FiscalCalendarResponse,
@@ -273,8 +275,12 @@ from robosystems.operations.roboledger.commands.event_handler import (
   update_event_handler as cmd_update_event_handler,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  BackfillPreconditionError,
   PeriodNotClosedError,
   PeriodNotFoundInLedgerError,
+)
+from robosystems.operations.roboledger.commands.fiscal_calendar import (
+  backfill_plan_history as cmd_backfill_plan_history,
 )
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   close_period as cmd_close_period,
@@ -575,6 +581,12 @@ class ReopenPeriodOperation(ReopenPeriodRequest):
       ]
     },
   )
+
+
+class BackfillPlanHistoryOperation(BackfillPlanHistoryRequest):
+  """Compile monthly statement history behind the close boundary."""
+
+  pass  # range and chunking already in body
 
 
 class RegenerateReportOperation(RegenerateReportRequest):
@@ -1938,6 +1950,78 @@ async def reopen_period_op(
       )
     except PeriodNotClosedError as e:
       raise HTTPException(status_code=422, detail=str(e))
+    except FiscalCalendarError as e:
+      raise HTTPException(status_code=404, detail=str(e))
+    except ProgrammingError as e:
+      if _is_schema_missing(e):
+        raise _ledger_404()
+      raise
+
+  return await _dispatch(ctx, _runner, cache)
+
+
+@router.post(
+  "/backfill-plan-history",
+  response_model=OperationEnvelope[BackfillPlanHistoryResponse],
+  operation_id="backfillPlanHistory",
+  summary="Backfill Plan History",
+  description=(
+    "Compile monthly statement history behind the close boundary — the "
+    "plan's historical columns. Seeds any missing FiscalPeriod rows "
+    "(baseline-closed) back to the clamped `start_period`, then "
+    "restamps each month lacking canonical statement FactSets by "
+    "running the real reopen → reclose cycle (balance validation, "
+    "statement rules, and audit events per month). Chunked: at most "
+    "`max_periods` months per call, oldest first — loop until "
+    "`remaining_periods` comes back empty. Idempotent: already-stamped "
+    "months are never touched. Months holding draft entries are "
+    "skipped, never posted. `start_period` is clamped to the earliest "
+    "month with ledger data, so deep-history tenants only backfill "
+    "what actually exists."
+  ),
+  tags=[_OP_TAG],
+  dependencies=[_RATE_LIMIT],
+  responses={**OPERATION_ERROR_RESPONSES},
+)
+@endpoint_metrics_decorator(
+  "/extensions/roboledger/{graph_id}/operations/backfill-plan-history",
+  method="POST",
+  business_event_type="ledger_backfill_plan_history",
+)
+async def backfill_plan_history_op(
+  body: BackfillPlanHistoryOperation,
+  graph_id: str = Path(..., pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN),
+  user: User = Depends(get_current_user_with_graph),
+  _ext: GraphExtensionContext = Depends(_require_roboledger),
+  idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+  cache: IdempotencyCache = Depends(get_idempotency_cache),
+  platform_db: Session = Depends(get_db_session),
+) -> OperationEnvelope:
+  ctx = _ctx(
+    graph_id=graph_id,
+    user_id=str(user.id),
+    op="backfill-plan-history",
+    idempotency_key=idempotency_key,
+    body=body,
+  )
+
+  def _runner():
+    try:
+      with extensions_session(graph_id) as session:
+        return cmd_backfill_plan_history(
+          session,
+          platform_db,
+          graph_id,
+          body,
+          actor_id=str(user.id),
+          service=_fiscal_svc,
+          close_service=_close_svc,
+        )
+    except BackfillPreconditionError as e:
+      raise HTTPException(
+        status_code=422,
+        detail={"message": str(e), "code": e.code},
+      )
     except FiscalCalendarError as e:
       raise HTTPException(status_code=404, detail=str(e))
     except ProgrammingError as e:

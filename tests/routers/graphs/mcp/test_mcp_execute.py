@@ -30,6 +30,7 @@ class TestWriteClassificationFailClosed:
       "delete-journal-entry",
       "close-period",
       "reopen-period",
+      "backfill-plan-history",
       "execute-event-block",
       "create-information-block",
       "delete-information-block",

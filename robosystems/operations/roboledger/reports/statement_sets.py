@@ -474,6 +474,17 @@ def _canonical_set_ids_in_window(
   )
 
 
+def has_canonical_statement_sets(
+  session: Session, *, period_start: date, period_end: date
+) -> bool:
+  """Whether the window already carries close-stamped canonical sets.
+
+  The plan-history backfill's idempotency check: months that answer True
+  are already part of the statement series and are never touched again.
+  """
+  return bool(_canonical_set_ids_in_window(session, period_start, period_end))
+
+
 def retract_canonical_statement_sets(
   session: Session, *, period_start: date, period_end: date
 ) -> list[str]:
