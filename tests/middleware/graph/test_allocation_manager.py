@@ -213,6 +213,9 @@ def _make_manager(**overrides):
     manager = LadybugAllocationManager(environment="test")
     manager.environment = overrides.get("environment", "test")
     manager.graph_table = overrides.get("graph_table", MagicMock())
+    if not overrides.get("graph_table"):
+      # Occupancy is derived from graph-registry queries; default to empty
+      manager.graph_table.query.return_value = {"Items": []}
     manager.instance_table = overrides.get("instance_table", MagicMock())
     manager.volume_table = overrides.get("volume_table", MagicMock())
     manager.autoscaling = overrides.get("autoscaling", MagicMock())
@@ -858,6 +861,21 @@ class TestCheckTierCapacity:
 # ===========================================================================
 
 
+def _stub_graph_occupancy(manager, occupancy: dict[str, int]) -> None:
+  """Stub graph-registry queries to report N active graphs per instance."""
+
+  def _query(**kwargs):
+    instance_id = kwargs["KeyConditionExpression"]._values[1]
+    count = occupancy.get(instance_id, 0)
+    return {
+      "Items": [
+        {"graph_id": f"kg{instance_id}{i}", "status": "active"} for i in range(count)
+      ]
+    }
+
+  manager.graph_table.query.side_effect = _query
+
+
 class TestFindBestInstance:
   """Tests for LadybugAllocationManager._find_best_instance."""
 
@@ -891,6 +909,8 @@ class TestFindBestInstance:
         },
       ]
     }
+
+    _stub_graph_occupancy(manager, {"i-0000000000000aaaa": 8, "i-0000000000000bbbb": 2})
 
     best = await manager._find_best_instance(GraphTier.LADYBUG_STANDARD)
     assert best is not None
@@ -954,6 +974,7 @@ class TestFindBestInstance:
         },
       ]
     }
+    _stub_graph_occupancy(manager, {"i-0000000000000aaaa": 10})
 
     best = await manager._find_best_instance(GraphTier.LADYBUG_STANDARD)
     assert best is None

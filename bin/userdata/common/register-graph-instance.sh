@@ -48,6 +48,23 @@ TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if [ "${NODE_TYPE}" = "writer" ]; then
   # User database writer registration
   echo "Registering user writer instance..."
+
+  # A replacement instance adopts the databases already on its reattached
+  # volume, so registering with a hardcoded count of 0 makes the allocator
+  # believe an occupied dedicated writer has free capacity and double-book
+  # it. The volume-manager Lambda response written during storage setup
+  # carries the authoritative database list; count parent graphs from it
+  # (subgraph IDs contain "_" and share the parent's capacity slot).
+  DB_COUNT=0
+  if [ -f /tmp/volume-response.json ]; then
+    DB_COUNT=$(jq -r '[.databases[]? | select(contains("_") | not)] | length' \
+      /tmp/volume-response.json 2>/dev/null || echo "0")
+    case "${DB_COUNT}" in
+      ''|*[!0-9]*) DB_COUNT=0 ;;
+    esac
+  fi
+  echo "Registering with database_count=${DB_COUNT} (from volume-manager response)"
+
   aws dynamodb put-item \
     --table-name "$REGISTRY_TABLE" \
     --item "{
@@ -60,7 +77,7 @@ if [ "${NODE_TYPE}" = "writer" ]; then
       \"status\": {\"S\": \"initializing\"},
       \"created_at\": {\"S\": \"${TIMESTAMP}\"},
       \"last_health_check\": {\"S\": \"${TIMESTAMP}\"},
-      \"database_count\": {\"N\": \"0\"},
+      \"database_count\": {\"N\": \"${DB_COUNT}\"},
       \"max_databases\": {\"N\": \"${MAX_DATABASES}\"},
       \"tier\": {\"S\": \"${CLUSTER_TIER}\"},
       \"region\": {\"S\": \"${AWS_REGION}\"},
