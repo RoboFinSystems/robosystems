@@ -8,6 +8,7 @@
 #
 # QUICK START:
 #   just start             # Full Docker setup (creates .env files automatically)
+#   just upgrade           # Fetch the latest images / rebuild, recreate what changed
 #   just restart           # After code changes (no rebuild)
 #   just test              # Run tests
 #   just logs api          # View API logs
@@ -39,6 +40,10 @@ stop profile="robosystems":
 # Tear down and remove containers entirely
 teardown profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} down
+
+# Upgrade to the latest images - pulls published images, or rebuilds in build mode (scope="all" also refreshes postgres/valkey/opensearch)
+upgrade profile="robosystems" scope="":
+    @bin/tools/upgrade.sh {{profile}} {{scope}}
 
 # Rebuild containers (rebuilds images and force recreates - for package/env changes)
 rebuild profile="robosystems":
