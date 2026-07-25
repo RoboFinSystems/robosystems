@@ -1010,6 +1010,42 @@ class LadybugAllocationManager:
       logger.error(f"Error checking ASG headroom for {tier.value}: {e}")
       return False
 
+  def _count_allocated_graphs(self, instance_id: str) -> int:
+    """Count graphs allocated to an instance according to the graph registry.
+
+    The graph registry is the authoritative allocation record — rows are
+    created with conditional writes at allocation time and re-pointed by the
+    volume-manager Lambda when instances cycle. The instance registry's
+    denormalized database_count is reset when a replacement instance
+    re-registers after ASG cycling, so capacity decisions must not trust it
+    (a drifted zero makes an occupied dedicated writer look empty and gets
+    it double-booked).
+    """
+    from boto3.dynamodb.conditions import Key
+
+    occupying_statuses = {
+      DatabaseStatus.ACTIVE.value,
+      DatabaseStatus.CREATING.value,
+      DatabaseStatus.MIGRATING.value,
+    }
+    count = 0
+    query_kwargs: dict[str, Any] = {
+      "IndexName": "instance-index",
+      "KeyConditionExpression": Key("instance_id").eq(instance_id),
+    }
+    while True:
+      response = self.graph_table.query(**query_kwargs)
+      count += sum(
+        1
+        for item in response.get("Items", [])
+        if item.get("status") in occupying_statuses
+      )
+      last_key = response.get("LastEvaluatedKey")
+      if not last_key:
+        break
+      query_kwargs["ExclusiveStartKey"] = last_key
+    return count
+
   async def _find_best_instance(
     self,
     instance_tier: GraphTier | None = None,
@@ -1072,7 +1108,12 @@ class LadybugAllocationManager:
         if exclude_instance and instance_id == exclude_instance:
           continue
 
-        database_count = int(item.get("database_count", 0))
+        # Occupancy comes from the graph registry, not the instance
+        # registry's database_count — that counter resets to a stale value
+        # when a replacement instance re-registers after ASG cycling, which
+        # would make an occupied dedicated writer look empty. The counter is
+        # still used as the atomic race guard during allocation (STEP 2).
+        database_count = self._count_allocated_graphs(instance_id)
         max_databases = int(item.get("max_databases", self.max_databases_per_instance))
 
         # Only include instances with available capacity

@@ -58,7 +58,24 @@ def _create_manager(environment="test", max_dbs=10, asg_name="test-asg"):
     manager.volume_table = MagicMock()
     manager.autoscaling = MagicMock()
     manager.cloudwatch = MagicMock()
+    # Occupancy is derived from graph-registry queries; default to empty
+    manager.graph_table.query.return_value = {"Items": []}
     return manager
+
+
+def _stub_graph_occupancy(manager, occupancy: dict[str, int]) -> None:
+  """Stub graph-registry queries to report N active graphs per instance."""
+
+  def _query(**kwargs):
+    instance_id = kwargs["KeyConditionExpression"]._values[1]
+    count = occupancy.get(instance_id, 0)
+    return {
+      "Items": [
+        {"graph_id": f"kg{instance_id}{i}", "status": "active"} for i in range(count)
+      ]
+    }
+
+  manager.graph_table.query.side_effect = _query
 
 
 @pytest.mark.unit
@@ -747,6 +764,7 @@ class TestFindBestInstance:
         },
       ]
     }
+    _stub_graph_occupancy(manager, {"i-11111111": 8, "i-22222222": 2})
 
     result = await manager._find_best_instance(GraphTier.LADYBUG_STANDARD)
     assert result is not None
@@ -783,6 +801,8 @@ class TestFindBestInstance:
       ]
     }
 
+    _stub_graph_occupancy(manager, {"i-11111111": 2, "i-22222222": 5})
+
     result = await manager._find_best_instance(
       GraphTier.LADYBUG_STANDARD, exclude_instance="i-11111111"
     )
@@ -808,9 +828,73 @@ class TestFindBestInstance:
         },
       ]
     }
+    _stub_graph_occupancy(manager, {"i-11111111": 10})
 
     result = await manager._find_best_instance(GraphTier.LADYBUG_STANDARD)
     assert result is None
+
+  @pytest.mark.asyncio
+  async def test_find_best_instance_ignores_drifted_instance_counter(self):
+    """A full instance whose registry counter reset to 0 must not be selected.
+
+    Replacement instances re-register with database_count=0 after ASG
+    cycling even when their reattached volume holds a customer graph. The
+    graph registry is authoritative, so a dedicated instance with an active
+    graph is full regardless of the drifted counter.
+    """
+    manager = _create_manager()
+    now_iso = datetime.now(UTC).isoformat()
+
+    manager.instance_table.scan.return_value = {
+      "Items": [
+        {
+          "instance_id": "i-drifted",
+          "private_ip": "10.0.0.1",
+          "availability_zone": "us-east-1a",
+          "database_count": 0,
+          "max_databases": 1,
+          "created_at": now_iso,
+          "status": "healthy",
+          "cluster_tier": "ladybug-standard",
+        },
+      ]
+    }
+    _stub_graph_occupancy(manager, {"i-drifted": 1})
+
+    result = await manager._find_best_instance(GraphTier.LADYBUG_STANDARD)
+    assert result is None
+
+  @pytest.mark.asyncio
+  async def test_find_best_instance_ignores_deleted_graphs(self):
+    """Deleted and failed graph rows do not consume capacity."""
+    manager = _create_manager()
+    now_iso = datetime.now(UTC).isoformat()
+
+    manager.instance_table.scan.return_value = {
+      "Items": [
+        {
+          "instance_id": "i-11111111",
+          "private_ip": "10.0.0.1",
+          "availability_zone": "us-east-1a",
+          "database_count": 1,
+          "max_databases": 1,
+          "created_at": now_iso,
+          "status": "healthy",
+          "cluster_tier": "ladybug-standard",
+        },
+      ]
+    }
+    manager.graph_table.query.return_value = {
+      "Items": [
+        {"graph_id": "kg-old", "status": "deleted"},
+        {"graph_id": "kg-broken", "status": "failed"},
+      ]
+    }
+
+    result = await manager._find_best_instance(GraphTier.LADYBUG_STANDARD)
+    assert result is not None
+    assert result.instance_id == "i-11111111"
+    assert result.database_count == 0
 
   @pytest.mark.asyncio
   async def test_find_best_instance_empty_scan(self):

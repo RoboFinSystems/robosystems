@@ -20,6 +20,8 @@ class TestLadybugAllocationManager:
     self.mock_dynamodb = MagicMock()
     self.mock_graph_table = MagicMock()
     self.mock_instance_table = MagicMock()
+    # Occupancy is derived from graph-registry queries; default to empty
+    self.mock_graph_table.query.return_value = {"Items": []}
 
     # Patch the get_dynamodb_resource function
     self.patcher = patch(
@@ -266,6 +268,8 @@ class TestLadybugAllocationManagerSubgraphs:
     self.mock_dynamodb = MagicMock()
     self.mock_graph_table = MagicMock()
     self.mock_instance_table = MagicMock()
+    # Occupancy is derived from graph-registry queries; default to empty
+    self.mock_graph_table.query.return_value = {"Items": []}
 
     # Patch the get_dynamodb_resource function
     self.patcher = patch(
