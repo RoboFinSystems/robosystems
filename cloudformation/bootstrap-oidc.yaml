@@ -8,10 +8,43 @@ Parameters:
     AllowedPattern: ^[a-zA-Z0-9-]+$
     ConstraintDescription: Must be a valid GitHub organization or username
 
-  # Repository names are hardcoded for security:
-  # - Backend: robosystems (main infrastructure repo)
-  # - Frontend: robosystems-app, roboledger-app, roboinvestor-app
-  # Only GitHubOrg needs to be parameterized for forks
+  # Repository names are parameterized so forks that rename the repos
+  # (e.g. a dedicated-tenant fork in the same org) bind trust to the
+  # correct repo slug. Defaults preserve the canonical deployment exactly.
+  GitHubRepoName:
+    Type: String
+    Default: robosystems
+    Description: Backend repository name (override for renamed forks)
+    AllowedPattern: ^[a-zA-Z0-9._-]+$
+    ConstraintDescription: Must be a valid GitHub repository name
+
+  GitHubAppRepoName:
+    Type: String
+    Default: robosystems-app
+    Description: Primary dashboard frontend repository name
+    AllowedPattern: ^[a-zA-Z0-9._-]+$
+    ConstraintDescription: Must be a valid GitHub repository name
+
+  GitHubLedgerAppRepoName:
+    Type: String
+    Default: roboledger-app
+    Description: RoboLedger frontend repository name
+    AllowedPattern: ^[a-zA-Z0-9._-]+$
+    ConstraintDescription: Must be a valid GitHub repository name
+
+  GitHubInvestorAppRepoName:
+    Type: String
+    Default: roboinvestor-app
+    Description: RoboInvestor frontend repository name
+    AllowedPattern: ^[a-zA-Z0-9._-]+$
+    ConstraintDescription: Must be a valid GitHub repository name
+
+  GitHubHolonViewerRepoName:
+    Type: String
+    Default: robosystems-holon-viewer
+    Description: Holon viewer static SPA repository name
+    AllowedPattern: ^[a-zA-Z0-9._-]+$
+    ConstraintDescription: Must be a valid GitHub repository name
 
   # Tagging Configuration
   ServiceTag:
@@ -89,9 +122,9 @@ Resources:
               StringLike:
                 # Allow main, release branches, and version tags for backend repo only
                 token.actions.githubusercontent.com:sub:
-                  - !Sub repo:${GitHubOrg}/robosystems:ref:refs/heads/main
-                  - !Sub repo:${GitHubOrg}/robosystems:ref:refs/heads/release/*
-                  - !Sub repo:${GitHubOrg}/robosystems:ref:refs/tags/v*
+                  - !Sub repo:${GitHubOrg}/${GitHubRepoName}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/${GitHubRepoName}:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}/${GitHubRepoName}:ref:refs/tags/v*
       Policies:
         - PolicyName: !Sub ${ServiceTag}DeploymentPolicy
           PolicyDocument:
@@ -506,25 +539,25 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                # Explicitly allow only these frontend repos (hardcoded for security)
+                # Explicitly allow only these frontend repos
                 # If a repo isn't used, it simply won't assume this role
                 token.actions.githubusercontent.com:sub:
-                  # robosystems-app
-                  - !Sub repo:${GitHubOrg}/robosystems-app:ref:refs/heads/main
-                  - !Sub repo:${GitHubOrg}/robosystems-app:ref:refs/heads/release/*
-                  - !Sub repo:${GitHubOrg}/robosystems-app:ref:refs/tags/v*
-                  # roboledger-app
-                  - !Sub repo:${GitHubOrg}/roboledger-app:ref:refs/heads/main
-                  - !Sub repo:${GitHubOrg}/roboledger-app:ref:refs/heads/release/*
-                  - !Sub repo:${GitHubOrg}/roboledger-app:ref:refs/tags/v*
-                  # roboinvestor-app
-                  - !Sub repo:${GitHubOrg}/roboinvestor-app:ref:refs/heads/main
-                  - !Sub repo:${GitHubOrg}/roboinvestor-app:ref:refs/heads/release/*
-                  - !Sub repo:${GitHubOrg}/roboinvestor-app:ref:refs/tags/v*
-                  # robosystems-holon-viewer (static SPA → S3 + CloudFront)
-                  - !Sub repo:${GitHubOrg}/robosystems-holon-viewer:ref:refs/heads/main
-                  - !Sub repo:${GitHubOrg}/robosystems-holon-viewer:ref:refs/heads/release/*
-                  - !Sub repo:${GitHubOrg}/robosystems-holon-viewer:ref:refs/tags/v*
+                  # Primary dashboard frontend
+                  - !Sub repo:${GitHubOrg}/${GitHubAppRepoName}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/${GitHubAppRepoName}:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}/${GitHubAppRepoName}:ref:refs/tags/v*
+                  # RoboLedger frontend
+                  - !Sub repo:${GitHubOrg}/${GitHubLedgerAppRepoName}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/${GitHubLedgerAppRepoName}:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}/${GitHubLedgerAppRepoName}:ref:refs/tags/v*
+                  # RoboInvestor frontend
+                  - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}/${GitHubInvestorAppRepoName}:ref:refs/tags/v*
+                  # Holon viewer (static SPA → S3 + CloudFront)
+                  - !Sub repo:${GitHubOrg}/${GitHubHolonViewerRepoName}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOrg}/${GitHubHolonViewerRepoName}:ref:refs/heads/release/*
+                  - !Sub repo:${GitHubOrg}/${GitHubHolonViewerRepoName}:ref:refs/tags/v*
       Policies:
         - PolicyName: !Sub ${ServiceTag}FrontendDeploymentPolicy
           PolicyDocument:
