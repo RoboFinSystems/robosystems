@@ -465,7 +465,7 @@ success = await repo.execute_transaction([
 
 Credit consumption is intentionally narrow:
 
-- **AI Operations**: Anthropic/OpenAI API calls consume credits (token-based billing) — the only credit-consuming path
+- **AI Operations**: Anthropic Claude calls via AWS Bedrock consume credits (token-based billing) — the only credit-consuming path
 - **Database Operations**: All graph queries, imports, backups are free (included in the subscription tier)
 - **Storage**: Currently limit-enforced, not metered into credits (see
   `middleware/billing/README.md`); if usage-based storage billing is added it
