@@ -339,13 +339,13 @@ deploy_github_oidc() {
     GITHUB_ORG=${input_org:-$GITHUB_ORG}
 
     echo ""
-    print_info "Repository names are hardcoded for security:"
     print_info "Backend role will allow:"
-    print_info "  - ${GITHUB_ORG}/robosystems"
-    print_info "Frontend role will allow:"
+    print_info "  - ${GITHUB_ORG}/${GITHUB_REPO}"
+    print_info "Frontend role will allow (template defaults; override via stack parameters):"
     print_info "  - ${GITHUB_ORG}/robosystems-app"
     print_info "  - ${GITHUB_ORG}/roboledger-app"
     print_info "  - ${GITHUB_ORG}/roboinvestor-app"
+    print_info "  - ${GITHUB_ORG}/robosystems-holon-viewer"
 
     # Branch patterns are hardcoded in the template: main, release/*, v* tags
     echo ""
@@ -388,6 +388,7 @@ deploy_github_oidc() {
             --template-body file://cloudformation/bootstrap-oidc.yaml \
             --parameters \
                 ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
+                ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --profile "${SSO_PROFILE}" \
             --region "${AWS_REGION}" \
@@ -404,6 +405,7 @@ deploy_github_oidc() {
             --template-body file://cloudformation/bootstrap-oidc.yaml \
             --parameters \
                 ParameterKey=GitHubOrg,ParameterValue="${GITHUB_ORG}" \
+                ParameterKey=GitHubRepoName,ParameterValue="${GITHUB_REPO}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --profile "${SSO_PROFILE}" \
             --region "${AWS_REGION}" 2>&1 || {
@@ -578,9 +580,11 @@ configure_essential_variables() {
 setup_ecr_repository() {
     print_header "ECR Repository Setup"
 
-    # Derive ECR repository name from GitHub repo name
-    local ecr_repo_name
-    ecr_repo_name=$(echo "${GITHUB_REPO}" | tr '[:upper:]' '[:lower:]')
+    # Fleet-uniform ECR name: the deploy role's ECR scope, the AWS_ECR_REPOSITORY
+    # default in gha.sh, and the workflow fallback all assume "robosystems"
+    # regardless of the GitHub repo name — a renamed fork deriving the name from
+    # its repo would create a repository the deploy role cannot access
+    local ecr_repo_name="robosystems"
 
     # Resolve the bundled operational policy file (lives alongside this script)
     local script_dir
