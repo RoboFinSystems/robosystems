@@ -15,21 +15,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.fiscal_calendar import (
+  BackfillPeriodOutcome,
+  BackfillPlanHistoryRequest,
+  BackfillPlanHistoryResponse,
   ClosePeriodResponse,
   FiscalCalendarResponse,
   InitializeLedgerRequest,
   InitializeLedgerResponse,
 )
+from robosystems.models.extensions.roboledger.entry import Entry
 from robosystems.models.extensions.roboledger.fiscal_period import FiscalPeriod
 from robosystems.operations.roboledger.fiscal_calendar import (
+  CloseGateFailed,
+  FiscalCalendarError,
   FiscalCalendarService,
   PeriodCloseService,
+  PeriodNotFoundError,
+  UnbalancedLedgerError,
   add_months,
   current_month_period,
+  next_period,
   period_date_range,
+  period_from_date,
+)
+from robosystems.operations.roboledger.fiscal_calendar.close_service import (
+  WritebackFailed,
 )
 from robosystems.operations.roboledger.reads.fiscal_calendar import (
   build_fiscal_calendar_response,
@@ -63,6 +77,20 @@ class PeriodNotClosedError(Exception):
     super().__init__(f"Period {period!r} is not closed (status={status!r}).")
     self.period = period
     self.status = status
+
+
+class BackfillPreconditionError(Exception):
+  """Raised when a plan-history backfill can't start.
+
+  ``code`` is machine-readable: ``nothing_closed`` (no close boundary to
+  backfill behind — run close-period first), ``no_ledger_data`` (the
+  graph has no entries to compile), or ``start_after_boundary`` (the
+  requested start is past `closed_through`).
+  """
+
+  def __init__(self, code: str, message: str) -> None:
+    super().__init__(message)
+    self.code = code
 
 
 def initialize_ledger(
@@ -282,4 +310,187 @@ def reopen_period(
       session, graph_id, calendar, has_sync, last_sync_at, service
     ),
     statement_sets_retracted=len(retracted),
+  )
+
+
+def backfill_plan_history(
+  session: Session,
+  platform_db: Session,
+  graph_id: str,
+  body: BackfillPlanHistoryRequest,
+  actor_id: str,
+  service: FiscalCalendarService,
+  close_service: PeriodCloseService,
+  actor_type: str = "user",
+) -> BackfillPlanHistoryResponse:
+  """Compile monthly statement history behind the close boundary.
+
+  Seeds missing `FiscalPeriod` rows (baseline-closed) back to the
+  clamped start, then walks every month in the range that lacks
+  canonical statement FactSets oldest-first, running the real
+  `reopen_period` → `close_period` cycle on each — identical semantics
+  to a manual restamp, so balance validation, statement rules, QB
+  writeback guards, and audit events all apply per month.
+
+  Chunked and resumable: at most ``body.max_periods`` months are
+  attempted per call; each month commits individually (via the reused
+  commands), so an interrupted run resumes where it left off — a month
+  left in status='closing' by a failed reclose skips straight to the
+  close on retry. Months with draft entries are skipped, never posted:
+  the backfill refuses to commit ledger changes nobody reviewed.
+
+  A failed reclose halts processing (continuing would hole the series);
+  the failure rides the month's outcome and everything untried lands in
+  ``remaining_periods``.
+
+  Raises `FiscalCalendarError` when the calendar isn't initialized and
+  `BackfillPreconditionError` for nothing-closed / no-data / bad-range.
+  """
+  calendar = service.require(session, graph_id)
+  closed_through = calendar.closed_through_period
+  if closed_through is None:
+    raise BackfillPreconditionError(
+      "nothing_closed",
+      "Nothing is closed yet — the backfill fills history behind the "
+      "close boundary. Close the first period with close-period, or "
+      "catch up normally.",
+    )
+
+  earliest_date = session.query(sa_func.min(Entry.posting_date)).scalar()
+  if earliest_date is None:
+    raise BackfillPreconditionError(
+      "no_ledger_data",
+      "The ledger has no entries — nothing to compile. Sync or import data first.",
+    )
+  earliest_available = period_from_date(earliest_date)
+
+  start = body.start_period or earliest_available
+  if start < earliest_available:
+    start = earliest_available
+  if start > closed_through:
+    raise BackfillPreconditionError(
+      "start_after_boundary",
+      f"start_period {body.start_period!r} is after closed_through "
+      f"{closed_through!r} — the backfill only compiles closed history.",
+    )
+
+  rows_created = service.ensure_fiscal_periods(
+    session,
+    graph_id,
+    start_period=start,
+    end_period=closed_through,
+    closed_through=closed_through,
+  )
+  if rows_created:
+    session.commit()
+
+  # Function-level import — statement_sets pulls in information-block
+  # machinery (same posture as reopen_period's imports above).
+  from robosystems.operations.roboledger.reports.statement_sets import (
+    StatementStampError,
+    has_canonical_statement_sets,
+  )
+
+  candidates: list[str] = []
+  current = start
+  while current <= closed_through:
+    ps, pe = period_date_range(current)
+    if not has_canonical_statement_sets(session, period_start=ps, period_end=pe):
+      candidates.append(current)
+    current = next_period(current)
+
+  processed: list[BackfillPeriodOutcome] = []
+  for period in candidates[: body.max_periods]:
+    ps, pe = period_date_range(period)
+    draft_count = (
+      session.query(Entry)
+      .filter(
+        Entry.posting_date >= ps,
+        Entry.posting_date <= pe,
+        Entry.status == "draft",
+      )
+      .count()
+    )
+    if draft_count:
+      processed.append(
+        BackfillPeriodOutcome(
+          period=period,
+          status="skipped_drafts",
+          detail=(
+            f"{draft_count} draft entries in the window — review via "
+            "list-period-drafts, then close-period or re-run the backfill."
+          ),
+        )
+      )
+      continue
+
+    fp = (
+      session.query(FiscalPeriod)
+      .filter(FiscalPeriod.graph_id == graph_id, FiscalPeriod.name == period)
+      .one()
+    )
+    try:
+      if fp.status == "closed":
+        reopen_period(
+          session,
+          platform_db,
+          graph_id,
+          period,
+          actor_id=actor_id,
+          reason="plan history backfill",
+          note=body.note,
+          service=service,
+          actor_type=actor_type,
+        )
+      close_result = close_period(
+        session,
+        platform_db,
+        graph_id,
+        period,
+        actor_id=actor_id,
+        allow_stale_sync=body.allow_stale_sync,
+        note=body.note,
+        service=service,
+        close_service=close_service,
+        actor_type=actor_type,
+      )
+      processed.append(
+        BackfillPeriodOutcome(
+          period=period,
+          status="stamped",
+          statements_stamped=close_result.statements_stamped,
+          statement_stamp_note=close_result.statement_stamp_note,
+          statement_rule_summary=close_result.statement_rule_summary,
+        )
+      )
+    except (
+      CloseGateFailed,
+      PeriodNotFoundError,
+      UnbalancedLedgerError,
+      WritebackFailed,
+      StatementStampError,
+      PeriodNotClosedError,
+      FiscalCalendarError,
+    ) as exc:
+      session.rollback()
+      processed.append(
+        BackfillPeriodOutcome(period=period, status="failed", detail=str(exc))
+      )
+      break
+
+  attempted = {outcome.period for outcome in processed}
+  remaining = [p for p in candidates if p not in attempted]
+
+  refreshed = service.require(session, graph_id)
+  has_sync, last_sync_at = qb_sync_state(platform_db, graph_id)
+  return BackfillPlanHistoryResponse(
+    fiscal_calendar=build_fiscal_calendar_response(
+      session, graph_id, refreshed, has_sync, last_sync_at, service
+    ),
+    earliest_available_period=earliest_available,
+    effective_start_period=start,
+    closed_through=closed_through,
+    period_rows_created=rows_created,
+    processed=processed,
+    remaining_periods=remaining,
   )

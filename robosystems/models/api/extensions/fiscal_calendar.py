@@ -167,6 +167,66 @@ class ReopenPeriodRequest(BaseModel):
   note: str | None = Field(None, description="Additional free-form note")
 
 
+class BackfillPlanHistoryRequest(BaseModel):
+  """Compile monthly statement history behind the close boundary.
+
+  Extends the fiscal calendar backward (seeding any missing
+  `FiscalPeriod` rows as baseline-closed) and restamps each closed
+  month that lacks canonical statement FactSets by running the real
+  reopen → reclose cycle — the same path a manual restamp takes, so
+  balance validation, statement rules, and audit events all apply.
+  Feeds the plan's monthly historical columns.
+
+  Chunked: each call processes at most ``max_periods`` months (oldest
+  first) and reports what's left in ``remaining_periods`` — loop until
+  it comes back empty. Idempotent: months that already have canonical
+  sets are never touched, so re-running is safe.
+
+  The backfill never reaches past the tenant's earliest ledger data —
+  ``start_period`` is clamped to the first month with entries.
+  """
+
+  start_period: str | None = Field(
+    None,
+    pattern=PERIOD_PATTERN,
+    description=(
+      "YYYY-MM period to backfill from. Clamped to the earliest month "
+      "with ledger data; defaults to that month when omitted. Must be "
+      "on or before `closed_through`."
+    ),
+  )
+  max_periods: int = Field(
+    12,
+    ge=1,
+    le=24,
+    description=(
+      "Maximum months to restamp in this call. Each month runs a full "
+      "reopen → reclose cycle; keep chunks modest and loop on "
+      "`remaining_periods`."
+    ),
+  )
+  allow_stale_sync: bool = Field(
+    False,
+    description=(
+      "Override the sync-currency gate on each reclose. Historical "
+      "months predate the last sync in the normal case, so this is "
+      "rarely needed."
+    ),
+  )
+  note: str | None = Field(
+    None, description="Free-form note attached to each close audit event"
+  )
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {},
+        {"start_period": "2019-07", "max_periods": 12},
+      ]
+    }
+  )
+
+
 # ── Responses ──────────────────────────────────────────────────────────────
 
 
@@ -347,6 +407,77 @@ class ClosePeriodResponse(BaseModel):
       "Aggregated statement-rule verification outcome across the stamped "
       "structures — keys: pass/fail/error/skipped. None when no statement "
       "rules exist. Distinct from rule_summary (the schedule-rule pass)."
+    ),
+  )
+
+
+class BackfillPeriodOutcome(BaseModel):
+  """Per-month result of a plan-history backfill pass."""
+
+  period: str = Field(..., description="The month, in YYYY-MM")
+  status: str = Field(
+    ...,
+    description=(
+      "stamped: reopen → reclose completed. skipped_drafts: the month "
+      "holds draft entries the backfill refuses to post — review via "
+      "list-period-drafts, then close-period or re-run. failed: the "
+      "reclose raised; processing halted (see detail)."
+    ),
+  )
+  statements_stamped: bool = Field(
+    False,
+    description=(
+      "Whether the reclose stamped canonical statement FactSets. False "
+      "with a statement_stamp_note soft-skip when reporting isn't set up."
+    ),
+  )
+  statement_stamp_note: str | None = Field(
+    None, description="Soft-skip reason when statements_stamped is false"
+  )
+  statement_rule_summary: dict[str, int] | None = Field(
+    None,
+    description=(
+      "Statement-rule verification tally for the month's stamped sets "
+      "(pass/fail/error/skipped); None when no rules ran."
+    ),
+  )
+  detail: str | None = Field(
+    None, description="Human-readable detail for skipped/failed months"
+  )
+
+
+class BackfillPlanHistoryResponse(BaseModel):
+  """Response from one chunked plan-history backfill call."""
+
+  fiscal_calendar: FiscalCalendarResponse
+  earliest_available_period: str = Field(
+    ...,
+    description="First month with ledger data — the hard floor for backfill",
+  )
+  effective_start_period: str = Field(
+    ...,
+    description=("The start actually used after clamping to earliest_available_period"),
+  )
+  closed_through: str = Field(
+    ..., description="The close boundary the backfill runs up to (inclusive)"
+  )
+  period_rows_created: int = Field(
+    0,
+    description=(
+      "FiscalPeriod rows seeded (baseline-closed) for months the calendar "
+      "didn't cover yet"
+    ),
+  )
+  processed: list[BackfillPeriodOutcome] = Field(
+    default_factory=list,
+    description="Months this call attempted, oldest first",
+  )
+  remaining_periods: list[str] = Field(
+    default_factory=list,
+    description=(
+      "Months still lacking canonical statement sets that this call did "
+      "not attempt (beyond max_periods, or after a failure halt). Loop "
+      "until empty."
     ),
   )
 
