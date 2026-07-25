@@ -5,11 +5,12 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import func
 
+from ...config.tuning import TuningConfig
 from ...database import get_db_session
 from ...logger import get_logger
 from ...middleware.auth.admin import require_admin
-from ...models.api.admin import OrgGraphInfo, OrgResponse, OrgUserInfo
-from ...models.core import Graph, Org, OrgUser, User
+from ...models.api.admin import OrgGraphInfo, OrgResponse, OrgUpdateRequest, OrgUserInfo
+from ...models.core import Graph, Org, OrgLimits, OrgUser, User
 from ...models.core.billing import BillingAuditLog, BillingCustomer
 from ...models.core.graph.graph_credits import GraphCredits
 
@@ -35,6 +36,18 @@ def _get_org_total_credits(org_id: str, session) -> float:
     .scalar()
   ) or 0.0
   return float(total)
+
+
+def _get_org_max_graphs(org_id: str, session) -> int:
+  """Get the effective graph limit for an organization.
+
+  Falls back to the environment default when no OrgLimits row exists yet
+  (rows are created lazily on registration or first limit check).
+  """
+  limits = OrgLimits.get_by_org_id(org_id, session)
+  if limits:
+    return limits.max_graphs
+  return TuningConfig.get_org_graphs_default_limit()
 
 
 def _get_org_customer(org_id: str, session) -> BillingCustomer | None:
@@ -131,6 +144,7 @@ async def list_orgs(
           org_type=org.org_type.value,
           user_count=user_count,
           graph_count=graph_count,
+          max_graphs=_get_org_max_graphs(org.id, session),
           total_credits=total_credits_sum,
           stripe_customer_id=customer.stripe_customer_id if customer else None,
           has_payment_method=customer.has_payment_method if customer else False,
@@ -196,6 +210,7 @@ async def get_org(request: Request, org_id: str):
       org_type=org.org_type.value,
       user_count=len(users),
       graph_count=len(graph_infos),
+      max_graphs=_get_org_max_graphs(org_id, session),
       total_credits=total_credits_sum,
       stripe_customer_id=customer.stripe_customer_id if customer else None,
       has_payment_method=customer.has_payment_method if customer else False,
@@ -220,12 +235,9 @@ async def get_org(request: Request, org_id: str):
 async def update_org(
   request: Request,
   org_id: str,
-  invoice_billing_enabled: bool | None = None,
-  billing_email: str | None = None,
-  billing_contact_name: str | None = None,
-  payment_terms: str | None = None,
+  data: OrgUpdateRequest,
 ):
-  """Update organization billing settings."""
+  """Update organization billing settings and limits."""
   session = next(get_db_session())
   try:
     org = Org.get_by_id(org_id, session)
@@ -241,30 +253,37 @@ async def update_org(
     new_values = {}
 
     if (
-      invoice_billing_enabled is not None
-      and invoice_billing_enabled != customer.invoice_billing_enabled
+      data.invoice_billing_enabled is not None
+      and data.invoice_billing_enabled != customer.invoice_billing_enabled
     ):
       old_values["invoice_billing_enabled"] = customer.invoice_billing_enabled
-      new_values["invoice_billing_enabled"] = invoice_billing_enabled
-      customer.invoice_billing_enabled = invoice_billing_enabled
+      new_values["invoice_billing_enabled"] = data.invoice_billing_enabled
+      customer.invoice_billing_enabled = data.invoice_billing_enabled
 
-    if billing_email is not None and billing_email != customer.billing_email:
+    if data.billing_email is not None and data.billing_email != customer.billing_email:
       old_values["billing_email"] = customer.billing_email
-      new_values["billing_email"] = billing_email
-      customer.billing_email = billing_email
+      new_values["billing_email"] = data.billing_email
+      customer.billing_email = data.billing_email
 
     if (
-      billing_contact_name is not None
-      and billing_contact_name != customer.billing_contact_name
+      data.billing_contact_name is not None
+      and data.billing_contact_name != customer.billing_contact_name
     ):
       old_values["billing_contact_name"] = customer.billing_contact_name
-      new_values["billing_contact_name"] = billing_contact_name
-      customer.billing_contact_name = billing_contact_name
+      new_values["billing_contact_name"] = data.billing_contact_name
+      customer.billing_contact_name = data.billing_contact_name
 
-    if payment_terms is not None and payment_terms != customer.payment_terms:
+    if data.payment_terms is not None and data.payment_terms != customer.payment_terms:
       old_values["payment_terms"] = customer.payment_terms
-      new_values["payment_terms"] = payment_terms
-      customer.payment_terms = payment_terms
+      new_values["payment_terms"] = data.payment_terms
+      customer.payment_terms = data.payment_terms
+
+    if data.max_graphs is not None:
+      limits = OrgLimits.get_or_create_for_org(org_id, session)
+      if data.max_graphs != limits.max_graphs:
+        old_values["max_graphs"] = limits.max_graphs
+        new_values["max_graphs"] = data.max_graphs
+        limits.update_limit(data.max_graphs, session)
 
     customer.updated_at = datetime.now(UTC)
     session.commit()
@@ -287,7 +306,7 @@ async def update_org(
         event_type="customer.updated",
         org_id=customer.org_id,
         actor_type="admin",
-        description=f"Org billing updated by admin {request.state.admin.get('name', 'unknown')}",
+        description=f"Org settings updated by admin {request.state.admin.get('name', 'unknown')}",
         event_data={
           "admin_key_id": request.state.admin_key_id,
           "admin_name": request.state.admin.get("name"),
@@ -306,7 +325,7 @@ async def update_org(
       log_changes["payment_terms"] = "[REDACTED]"
 
     logger.info(
-      f"Admin updated org {org_id} billing",
+      f"Admin updated org {org_id}",
       extra={
         "admin_key_id": request.state.admin_key_id,
         "org_id": org_id,
@@ -320,6 +339,7 @@ async def update_org(
       org_type=org.org_type.value,
       user_count=len(user_infos),
       graph_count=len(graph_infos),
+      max_graphs=_get_org_max_graphs(org_id, session),
       total_credits=total_credits_sum,
       stripe_customer_id=customer.stripe_customer_id,
       has_payment_method=customer.has_payment_method,
