@@ -766,7 +766,7 @@ class TestUpdateOrg:
 
     response = client.patch(
       f"/admin/v1/orgs/{test_org.id}",
-      params=payload,
+      json=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -784,7 +784,7 @@ class TestUpdateOrg:
 
     response = client.patch(
       f"/admin/v1/orgs/{test_org.id}",
-      params=payload,
+      json=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -805,7 +805,7 @@ class TestUpdateOrg:
 
     response = client.patch(
       f"/admin/v1/orgs/{test_org.id}",
-      params=payload,
+      json=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -822,7 +822,7 @@ class TestUpdateOrg:
 
     response = client.patch(
       f"/admin/v1/orgs/{test_org.id}",
-      params=payload,
+      json=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -845,6 +845,6 @@ class TestUpdateOrg:
 
     response = client.patch(
       f"/admin/v1/orgs/{test_org.id}",
-      params=payload,
+      json=payload,
     )
     assert response.status_code == 401

@@ -25,7 +25,7 @@ from .graphs import (
   GraphStorageResponse,
 )
 from .invoice import InvoiceLineItemResponse, InvoiceResponse
-from .orgs import OrgGraphInfo, OrgResponse, OrgUserInfo
+from .orgs import OrgGraphInfo, OrgResponse, OrgUpdateRequest, OrgUserInfo
 from .subscription import (
   SubscriptionCreateRequest,
   SubscriptionResponse,
@@ -61,6 +61,7 @@ __all__ = [
   "InvoiceResponse",
   "OrgGraphInfo",
   "OrgResponse",
+  "OrgUpdateRequest",
   "OrgUserInfo",
   "RepositoryCreditPoolResponse",
   "SubscriptionCreateRequest",

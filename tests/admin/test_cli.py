@@ -662,6 +662,7 @@ class TestOrgsCommands:
         "org_type": "team",
         "user_count": 5,
         "graph_count": 2,
+        "max_graphs": 2,
         "total_credits": 16000.0,
         "created_at": "2025-01-01T00:00:00Z",
       }
@@ -671,6 +672,7 @@ class TestOrgsCommands:
     assert result.exit_code == 0
     assert "Acme Corp" in result.output
     assert "org-1" in result.output
+    assert "Limit" in result.output
 
   def test_get(self, runner, mock_make_request):
     mock_make_request.return_value = {
@@ -679,6 +681,7 @@ class TestOrgsCommands:
       "org_type": "team",
       "user_count": 5,
       "graph_count": 2,
+      "max_graphs": 2,
       "total_credits": 16000.0,
       "has_payment_method": True,
       "invoice_billing_enabled": True,
@@ -695,6 +698,7 @@ class TestOrgsCommands:
     assert "Acme Corp" in result.output
     assert "Invoice Billing: Yes" in result.output
     assert "billing@acme.com" in result.output
+    assert "Max Graphs: 2" in result.output
 
   def test_update(self, runner, mock_make_request):
     mock_make_request.return_value = {
@@ -731,6 +735,56 @@ class TestOrgsCommands:
       },
     )
     assert "Updated org org-1" in result.output
+
+  def test_update_max_graphs(self, runner, mock_make_request):
+    mock_make_request.return_value = {
+      "org_id": "org-1",
+      "name": "Acme Corp",
+      "invoice_billing_enabled": False,
+      "payment_terms": "net_30",
+      "max_graphs": 2,
+    }
+
+    result = runner.invoke(
+      cli,
+      ["-e", "dev", "orgs", "update", "org-1", "--max-graphs", "2"],
+    )
+    assert result.exit_code == 0
+    mock_make_request.assert_called_once_with(
+      "PATCH",
+      "/admin/v1/orgs/org-1",
+      data={"max_graphs": 2},
+    )
+    assert "Max Graphs: 2" in result.output
+
+  def test_update_max_graphs_unlimited(self, runner, mock_make_request):
+    mock_make_request.return_value = {
+      "org_id": "org-1",
+      "name": "Acme Corp",
+      "invoice_billing_enabled": False,
+      "payment_terms": "net_30",
+      "max_graphs": -1,
+    }
+
+    result = runner.invoke(
+      cli,
+      ["-e", "dev", "orgs", "update", "org-1", "--max-graphs", "-1"],
+    )
+    assert result.exit_code == 0
+    mock_make_request.assert_called_once_with(
+      "PATCH",
+      "/admin/v1/orgs/org-1",
+      data={"max_graphs": -1},
+    )
+    assert "Max Graphs: unlimited" in result.output
+
+  def test_update_max_graphs_below_minimum_rejected(self, runner, mock_make_request):
+    result = runner.invoke(
+      cli,
+      ["-e", "dev", "orgs", "update", "org-1", "--max-graphs", "-2"],
+    )
+    assert result.exit_code != 0
+    mock_make_request.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -166,16 +166,19 @@ def list_orgs(client, limit):
   table.add_column("Type", overflow="fold")
   table.add_column("Users", justify="right")
   table.add_column("Graphs", justify="right")
+  table.add_column("Limit", justify="right")
   table.add_column("Credits", justify="right")
   table.add_column("Created", overflow="fold")
 
   for org in orgs_list:
+    max_graphs = org.get("max_graphs")
     table.add_row(
       org["org_id"],
       org["name"],
       org["org_type"],
       str(org["user_count"]),
       str(org["graph_count"]),
+      "unlimited" if max_graphs == -1 else str(max_graphs),
       f"{org['total_credits']:.2f}",
       org["created_at"][:10],
     )
@@ -203,6 +206,13 @@ def get_org(client, org_id):
   click.echo(f"  Users: {org['user_count']}")
   click.echo(f"  Graphs: {org['graph_count']}")
   click.echo(f"  Total Credits: {org['total_credits']:.2f}")
+
+  click.echo("\nLIMITS")
+  max_graphs = org.get("max_graphs")
+  if max_graphs == -1:
+    click.echo("  Max Graphs: unlimited")
+  else:
+    click.echo(f"  Max Graphs: {max_graphs}")
 
   click.echo("\nBILLING")
   click.echo(f"  Payment Method: {'Yes' if org.get('has_payment_method') else 'No'}")
@@ -240,6 +250,12 @@ def get_org(client, org_id):
 @click.option("--billing-email", help="Billing email address")
 @click.option("--billing-contact-name", help="Billing contact name")
 @click.option("--payment-terms", help="Payment terms (e.g., net_30, net_60)")
+@click.option(
+  "--max-graphs",
+  type=int,
+  default=None,
+  help="Maximum graphs the org may create (-1 for unlimited)",
+)
 @click.pass_obj
 def update_org(
   client,
@@ -248,8 +264,9 @@ def update_org(
   billing_email,
   billing_contact_name,
   payment_terms,
+  max_graphs,
 ):
-  """Update organization billing settings."""
+  """Update organization billing settings and limits."""
   params = {}
 
   if invoice_billing is not None:
@@ -260,6 +277,10 @@ def update_org(
     params["billing_contact_name"] = billing_contact_name
   if payment_terms:
     params["payment_terms"] = payment_terms
+  if max_graphs is not None:
+    if max_graphs < -1:
+      raise click.BadParameter("must be >= -1 (-1 means unlimited)")
+    params["max_graphs"] = max_graphs
 
   if not params:
     click.echo("❌ No updates specified")
@@ -275,3 +296,8 @@ def update_org(
   click.echo(f"   Payment Terms: {org.get('payment_terms', 'N/A')}")
   if billing_email:
     click.echo(f"   Billing Email: {org.get('billing_email', 'N/A')}")
+  if max_graphs is not None:
+    updated_limit = org.get("max_graphs")
+    click.echo(
+      f"   Max Graphs: {'unlimited' if updated_limit == -1 else updated_limit}"
+    )
