@@ -115,6 +115,7 @@ curl -X POST "http://localhost:8000/v1/graphs/$GRAPH_ID/operations/materialize" 
 
 ```bash
 just start                 # Start full Docker stack
+just upgrade               # Fetch latest images (or rebuild) and recreate what changed
 just restart               # Quick restart (Python code changes only)
 just rebuild               # Full rebuild (dependency/Dockerfile changes)
 just test                  # Run tests (excludes slow/integration)

@@ -62,14 +62,17 @@ Dedicated frontend app: [`roboinvestor-app`](https://github.com/RoboFinSystems/r
 ### Docker Development Environment
 
 ```bash
-# Install uv and just
-brew install uv just
+# Install uv and just (jq ships with macOS 15+; install it on older macOS or Linux)
+brew install uv just jq
 
 # Start robosystems backend api
 just start
 
 # Start frontend apps - robosystems-app, roboledger-app, roboinvestor-app
 just start apps
+
+# Fetch the latest images and recreate anything that changed (after a git pull)
+just upgrade
 ```
 
 This initializes the `.env` file and starts the complete RoboSystems stack with:
