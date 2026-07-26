@@ -184,7 +184,12 @@ def back_solve_lever_history(
   horizon alone in that case, exactly as before.
   """
   lever_qnames = {lever.qname for lever in mechanics.levers}
-  line_element_ids = {assertion.element_id for assertion in mechanics.line_assertions}
+  # Line assertions AND line-growth targets: both grid families render
+  # the line's own actuals behind the seam (growth rows derive the
+  # realized rate from consecutive actuals at render time).
+  line_element_ids = {
+    assertion.element_id for assertion in mechanics.line_assertions
+  } | {entry.element_id for entry in mechanics.line_growth}
   if not lever_qnames and not line_element_ids:
     return LeverHistory()
 

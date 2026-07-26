@@ -20,6 +20,7 @@ from robosystems.models.api.extensions.forecasts import (
   DeleteForecastRequest,
   LeverAssertionRequest,
   LineAssertionRequest,
+  LineGrowthRequest,
   UpdateForecastRequest,
 )
 from robosystems.models.api.information_block import (
@@ -293,6 +294,163 @@ class TestExpandLineAssertions:
           LineAssertionRequest(qname="rs-gaap:RentExpense", value=0.0),
           LineAssertionRequest(qname="rs-gaap:RentExpense", value=1.0),
         ],
+      )
+
+
+class TestExpandLineGrowth:
+  def _session(self, *elements: MagicMock) -> MagicMock:
+    session = MagicMock()
+    session.execute.return_value.scalar_one_or_none.side_effect = list(elements)
+    return session
+
+  def _expand(self, session: MagicMock, entries, calc_parents=None):
+    with patch.object(
+      forecast_handlers,
+      "load_rs_gaap_calculations",
+      return_value={key: [] for key in calc_parents or []},
+    ):
+      return forecast_handlers._expand_line_growth(session, entries, "2026-06", 3)
+
+  def test_expands_rates_with_percent_item_type(self) -> None:
+    session = self._session(RENT)
+    expanded = self._expand(
+      session, [LineGrowthRequest(qname="rs-gaap:RentExpense", value=0.02)]
+    )
+    assert len(expanded) == 1
+    entry = expanded[0]
+    assert entry.element_id == "el_rent"
+    assert entry.item_type == "percent"
+    assert entry.values_by_period == {
+      "2026-07": 0.02,
+      "2026-08": 0.02,
+      "2026-09": 0.02,
+    }
+
+  def test_sparse_overrides_leave_uncovered_months_to_the_carry(self) -> None:
+    session = self._session(RENT)
+    expanded = self._expand(
+      session,
+      [
+        LineGrowthRequest(
+          qname="rs-gaap:RentExpense", values_by_period={"2026-07": -0.05}
+        )
+      ],
+    )
+    assert expanded[0].values_by_period == {"2026-07": -0.05}
+
+  def test_rejects_instant_element(self) -> None:
+    session = self._session(LOAN)
+    with pytest.raises(ValueError, match="balance-sheet"):
+      self._expand(
+        session, [LineGrowthRequest(qname="rs-gaap:NotesPayable", value=0.1)]
+      )
+
+  def test_rejects_calc_parent_leaves_only(self) -> None:
+    revenues = _element("el_rev", "rs-gaap:Revenues", source="rs-gaap", item_type=None)
+    session = self._session(revenues)
+    with pytest.raises(ValueError, match="leaves-only"):
+      self._expand(
+        session,
+        [LineGrowthRequest(qname="rs-gaap:Revenues", value=0.03)],
+        calc_parents=["el_rev"],
+      )
+
+  def test_rejects_rs_driver_source(self) -> None:
+    session = self._session(GROWTH)
+    with pytest.raises(ValueError, match="levers"):
+      self._expand(
+        session,
+        [LineGrowthRequest(qname="rs-driver:RevenueGrowthRate", value=0.03)],
+      )
+
+  def test_empty_list_short_circuits(self) -> None:
+    session = MagicMock()
+    assert forecast_handlers._expand_line_growth(session, [], "2026-06", 3) == []
+    session.execute.assert_not_called()
+
+
+class TestLineGrowthConflicts:
+  """One owner per line — the FINAL-lists cross-check."""
+
+  def _lite_growth(self, qname: str = "rs-gaap:RentExpense"):
+    from robosystems.models.api.information_block import LineGrowthLite
+
+    return LineGrowthLite(
+      qname=qname, element_id="el_x", values_by_period={"2026-07": 0.02}
+    )
+
+  def _lite_assertion(self, qname: str):
+    return LineAssertionLite(
+      qname=qname,
+      element_id="el_x",
+      item_type=None,
+      period_type="duration",
+      values_by_period={"2026-07": 0.0},
+    )
+
+  def test_overlap_with_assertions_rejected(self) -> None:
+    with pytest.raises(ValueError, match="both line_growth and line_assertions"):
+      forecast_handlers._check_line_growth_conflicts(
+        MagicMock(),
+        [],
+        [self._lite_assertion("rs-gaap:RentExpense")],
+        [self._lite_growth("rs-gaap:RentExpense")],
+      )
+
+  def test_active_catalog_rule_target_rejected(self) -> None:
+    """Growth on Revenues while RevenueGrowthRate is set — the catalog
+    rule owns the line; the lever is the right knob."""
+    rule = SimpleNamespace(
+      rule_variables=[
+        {"variable_name": "Revenues", "variable_qname": "rs-gaap:Revenues"},
+        {
+          "variable_name": "RevenueGrowthRate",
+          "variable_qname": "rs-driver:RevenueGrowthRate",
+        },
+      ],
+      target_element_id="el_rev",
+    )
+    session = MagicMock()
+    session.get.return_value = _element(
+      "el_rev", "rs-gaap:Revenues", source="rs-gaap", item_type=None
+    )
+    lever = LeverAssertionLite(
+      qname="rs-driver:RevenueGrowthRate",
+      element_id="el_growth",
+      item_type="percent",
+      values_by_period={"2026-07": 0.03},
+    )
+    with (
+      patch(
+        "robosystems.operations.information_block.forecast_history.driver_rules",
+        return_value=[rule],
+      ),
+      pytest.raises(ValueError, match="already driven by"),
+    ):
+      forecast_handlers._check_line_growth_conflicts(
+        session, [lever], [], [self._lite_growth("rs-gaap:Revenues")]
+      )
+
+  def test_inactive_rule_is_no_conflict(self) -> None:
+    """Same rule, but the scenario never sets its lever — growth owns
+    the line freely."""
+    rule = SimpleNamespace(
+      rule_variables=[
+        {"variable_name": "Revenues", "variable_qname": "rs-gaap:Revenues"},
+        {
+          "variable_name": "RevenueGrowthRate",
+          "variable_qname": "rs-driver:RevenueGrowthRate",
+        },
+      ],
+      target_element_id="el_rev",
+    )
+    session = MagicMock()
+    with patch(
+      "robosystems.operations.information_block.forecast_history.driver_rules",
+      return_value=[rule],
+    ):
+      forecast_handlers._check_line_growth_conflicts(
+        session, [], [], [self._lite_growth("rs-gaap:Revenues")]
       )
 
 

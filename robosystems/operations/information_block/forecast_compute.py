@@ -221,6 +221,15 @@ def cmd_compute_forecast(
   assertion_period_type: dict[str, str] = {
     la.element_id: la.period_type for la in mechanics.line_assertions
   }
+  # Line-growth rates bind from the mechanics directly — rates aren't
+  # facts (a rate on a monetary statement element would lie about its
+  # unit), so the mechanics copy is their single authored store.
+  growth_rates: dict[str, dict[str, float]] = {
+    lg.element_id: lg.values_by_period for lg in mechanics.line_growth
+  }
+  growth_qname_by_id: dict[str, str] = {
+    lg.element_id: lg.qname for lg in mechanics.line_growth
+  }
   lever_values: dict[str, dict[str, float]] = {}
   assertion_values: dict[str, dict[str, float]] = {}
   for fact in numeric_facts(session, lever_set.id):
@@ -399,6 +408,17 @@ def cmd_compute_forecast(
       and element_id not in active_target_ids
     ):
       carry_pool.append(element_id)
+  # Grown lines join the carry pool too: a month without a rate holds
+  # the line's last grown value instead of vanishing (grow-then-hold
+  # ramps come out of a sparse values_by_period naturally).
+  for element_id in sorted(growth_rates):
+    if (
+      element_id not in base_id_set
+      and element_id not in calc_targets
+      and element_id not in active_target_ids
+      and element_id not in carry_pool
+    ):
+      carry_pool.append(element_id)
 
   # ── Articulation context (F-2) — BS roll + schedules + derived CF ─────
   # The mapping id rides the base report set's PivotProvenance; without
@@ -443,6 +463,13 @@ def cmd_compute_forecast(
       "rule-driven working-capital instants only (no BS roll / CF)"
     )
 
+  for element_id in sorted(growth_rates):
+    if element_id not in prior_values:
+      diagnostics.append(
+        f"line growth on {growth_qname_by_id.get(element_id, element_id)}: "
+        "no base-month value — grows from 0"
+      )
+
   elements_by_id: dict[str, Element] = {}
 
   def _element(element_id: str) -> Element | None:
@@ -478,6 +505,29 @@ def cmd_compute_forecast(
         delta = schedule_is_delta(ctx, element_id, month, mechanics.base_period)
         if delta:
           current[element_id] += delta
+
+    # (a2b) Line growth — the generic per-line trajectory:
+    # line[t] = line[t-1] * (1 + rate[t]), compounding through the
+    # prior-values roll. Overrides the carry and schedule projection
+    # for the months it names; rate-less months keep the carry (a).
+    # Authoring rejects overlap with assertions and active catalog
+    # rules, but a stale overlap (catalog rule activated after the
+    # growth entry was stored) yields to the rule, legibly.
+    for element_id, rate_by_month in growth_rates.items():
+      rate = rate_by_month.get(month)
+      if rate is None:
+        continue
+      if element_id in active_target_ids:
+        skipped.append(
+          SkippedForecastLite(
+            rule_id=None,
+            element_qname=growth_qname_by_id.get(element_id),
+            period=month,
+            reason="line growth displaced by catalog driver rule",
+          )
+        )
+        continue
+      current[element_id] = prior_values.get(element_id, 0.0) * (1.0 + rate)
 
     # (a3) Line assertions — the manual overrides win over carry and
     # schedule projection for the months they name; a displaced driver

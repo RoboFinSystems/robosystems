@@ -23,6 +23,7 @@ from robosystems.models.api.information_block import (
   ForecastMechanics,
   LeverAssertionLite,
   LineAssertionLite,
+  LineGrowthLite,
 )
 from robosystems.operations.information_block import (
   forecast_compute as fc,
@@ -131,6 +132,7 @@ def _mechanics(
   levers: list[LeverAssertionLite],
   horizon: int = 3,
   assertions: list[LineAssertionLite] | None = None,
+  growth: list[LineGrowthLite] | None = None,
 ) -> dict:
   return ForecastMechanics(
     scenario_kind="budget",
@@ -138,7 +140,16 @@ def _mechanics(
     base_period="2026-06",
     levers=levers,
     line_assertions=assertions or [],
+    line_growth=growth or [],
   ).model_dump(mode="json")
+
+
+def _growth(
+  qname: str, element_id: str, values_by_period: dict[str, float]
+) -> LineGrowthLite:
+  return LineGrowthLite(
+    qname=qname, element_id=element_id, values_by_period=values_by_period
+  )
 
 
 def _lever(qname: str, element_id: str, value: float, months: list[str]) -> Any:
@@ -627,6 +638,69 @@ class TestAssertionRollupIntoEmptySubtree:
       s.reason == "displaced by line assertion (contributing children pinned)"
       for s in response.skipped
     )
+
+
+class TestLineGrowth:
+  """The generic per-line trajectory: line[t] = line[t-1] * (1 + rate[t]),
+  binding rates from the mechanics (never facts), compounding through
+  the prior-values roll, yielding to catalog rules and to the carry on
+  rate-less months."""
+
+  def test_growth_compounds_from_the_base_value(self) -> None:
+    growth = [_growth("rs-gaap:RentExpense", "el_rent", dict.fromkeys(ALL_MONTHS, 0.1))]
+    _, rec = _run(_mechanics([], growth=growth), [], [])
+    assert rec.value("struct_is", JUL, "el_rent") == pytest.approx(11.0)
+    assert rec.value("struct_is", AUG, "el_rent") == pytest.approx(12.1)
+    assert rec.value("struct_is", SEP, "el_rent") == pytest.approx(13.31)
+
+  def test_rateless_months_keep_the_carry(self) -> None:
+    """Grow-then-hold: a sparse values_by_period grows July only; the
+    later months carry the grown value instead of reverting or vanishing."""
+    growth = [_growth("rs-gaap:RentExpense", "el_rent", {"2026-07": 0.1})]
+    _, rec = _run(_mechanics([], growth=growth), [], [])
+    assert rec.value("struct_is", JUL, "el_rent") == pytest.approx(11.0)
+    assert rec.value("struct_is", AUG, "el_rent") == pytest.approx(11.0)
+    assert rec.value("struct_is", SEP, "el_rent") == pytest.approx(11.0)
+
+  def test_catalog_rule_wins_over_stale_growth_overlap(self) -> None:
+    """Authoring rejects the overlap, but a stored growth entry can be
+    overtaken when levers change — the rule owns the line and the growth
+    skip is legible."""
+    growth = [_growth("rs-gaap:Revenues", "el_rev", dict.fromkeys(ALL_MONTHS, 0.5))]
+    response, rec = _run(
+      _mechanics(FULL_LEVERS, growth=growth), FULL_RULES, FULL_LEVERS
+    )
+    # The rule's 3% — not the growth entry's 50%.
+    assert rec.value("struct_is", JUL, "el_rev") == pytest.approx(103.0)
+    displaced = [
+      s
+      for s in response.skipped
+      if s.reason == "line growth displaced by catalog driver rule"
+    ]
+    assert [s.period for s in displaced] == ALL_MONTHS
+    assert all(s.element_qname == "rs-gaap:Revenues" for s in displaced)
+
+  def test_out_of_base_growth_grows_from_zero_with_diagnostic(self) -> None:
+    growth = [
+      _growth("rs-gaap:MarketingExpense", "el_mkt", dict.fromkeys(ALL_MONTHS, 0.2))
+    ]
+    response, rec = _run(_mechanics([], growth=growth), [], [])
+    assert any(
+      "line growth on rs-gaap:MarketingExpense" in d and "grows from 0" in d
+      for d in response.diagnostics
+    )
+    assert rec.value("struct_is", JUL, "el_mkt") == pytest.approx(0.0)
+
+  def test_growth_articulates_through_subtotals(self) -> None:
+    """A grown COGS re-derives GrossProfit — the grown leaf participates
+    in the calc DAG exactly like a carried or rule-driven one."""
+    growth = [
+      _growth("rs-gaap:CostOfRevenue", "el_cogs", dict.fromkeys(ALL_MONTHS, 0.1))
+    ]
+    _, rec = _run(_mechanics([], growth=growth), [], [])
+    assert rec.value("struct_is", JUL, "el_cogs") == pytest.approx(68.2)
+    # GP = carried revenue 100 - grown COGS 68.2.
+    assert rec.value("struct_is", JUL, "el_gp") == pytest.approx(31.8)
 
 
 class TestUpsertMonthSet:
