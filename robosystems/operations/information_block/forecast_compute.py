@@ -430,11 +430,27 @@ def cmd_compute_forecast(
     )
   calc_order = topo_sort_calculations(calculations)
   calc_targets = set(calculations.keys())
+  parents_by_child = _build_parents_by_child(calculations)
   carry_pool = [
     el
     for el in base_is_element_ids
     if el not in calc_targets and el not in active_target_ids
   ]
+  # Asserted duration lines join the carry pool: a ramp's last asserted
+  # value carries into the unasserted months (where the driver rules
+  # take over), exactly like any other leaf. Without this, a line
+  # asserted into a base month that never carried it would vanish the
+  # month after its last assertion.
+  base_id_set = set(base_is_element_ids)
+  for element_id in sorted(
+    el for el, pt in assertion_period_type.items() if pt != "instant"
+  ):
+    if (
+      element_id not in base_id_set
+      and element_id not in calc_targets
+      and element_id not in active_target_ids
+    ):
+      carry_pool.append(element_id)
 
   # ── Articulation context (F-2) — BS roll + schedules + derived CF ─────
   # The mapping id rides the base report set's PivotProvenance; without
@@ -529,14 +545,37 @@ def cmd_compute_forecast(
     }
 
     # (b) Driver rules in same-month dependency order.
+    asserted_ancestors = _ancestor_closure(
+      asserted_this_month - month_asserted_instants, parents_by_child
+    )
+    displaced_targets: set[str] = set()
     for ar in ordered_active:
       if ar.target.id in asserted_this_month:
+        displaced_targets.add(ar.target.id)
         skipped.append(
           SkippedForecastLite(
             rule_id=ar.rule.id,
             element_qname=ar.target.qname,
             period=month,
             reason="displaced by line assertion",
+          )
+        )
+        continue
+      # A rule driving a calc PARENT whose entire valued subtree is
+      # pinned by assertions this month has nothing to drive — the
+      # push-down would have no unpinned child for the remainder, and
+      # the final subtotal derivation would contradict the driven value.
+      # Displace it as legibly as a direct-target assertion.
+      if ar.target.id in asserted_ancestors and _subtree_all_pinned(
+        ar.target.id, calculations, current, asserted_this_month
+      ):
+        displaced_targets.add(ar.target.id)
+        skipped.append(
+          SkippedForecastLite(
+            rule_id=ar.rule.id,
+            element_qname=ar.target.qname,
+            period=month,
+            reason="displaced by line assertion (contributing children pinned)",
           )
         )
         continue
@@ -589,11 +628,18 @@ def cmd_compute_forecast(
         if operand_element is None:
           missing.append(qname)
           continue
-        # Same-month value first (carried or rule-computed earlier in the
-        # topo order), prior month as the fallback — a subtotal base like
-        # Revenues-as-rollup still binds even when its rule is inactive.
+        # Same-month value first (carried or rule-computed earlier in
+        # the topo order), then same-month DERIVED from valued children
+        # (a calc parent like Revenues whose only value this month is an
+        # asserted leaf), prior month last — a subtotal base still binds
+        # when its rule is inactive, and a stale prior never beats a
+        # derivable same-month value.
         if operand_element.id in current:
           values[name] = current[operand_element.id]
+          continue
+        derived = _derive_from_children(operand_element.id, calculations, current)
+        if derived is not None:
+          values[name] = derived
         elif operand_element.id in prior_values:
           values[name] = prior_values[operand_element.id]
         else:
@@ -643,8 +689,16 @@ def cmd_compute_forecast(
 
     # A skipped rule's target falls back to carry-forward for the month —
     # the honest default, and it keeps the cascade fed for dependents.
+    # Displaced targets never fall back: the assertion path owns their
+    # value (a carried stale parent would beat the freshly derived
+    # child sum at the subtotal step, breaking the very rollup the
+    # displacement protects).
     for element_id in active_target_ids:
-      if element_id not in current and element_id in prior_values:
+      if (
+        element_id not in current
+        and element_id not in displaced_targets
+        and element_id in prior_values
+      ):
         current[element_id] = prior_values[element_id]
 
     # (b2) Push rule deltas down the composition — a Derive rule that
@@ -677,14 +731,31 @@ def cmd_compute_forecast(
         continue
       is_facts.append((element, resolved[element_id]))
       emitted_is.add(element_id)
-    # An asserted duration line absent from the base month's report
-    # (e.g. a budget line the actuals never carried) still emits.
-    for element_id in sorted(
-      asserted_this_month - month_asserted_instants - emitted_is
-    ):
+    # Duration lines living OUTSIDE the base month's report still emit:
+    # the asserted (or assertion-carried) line itself AND its derived
+    # calc ancestors — without the ancestors the emitted set can't roll
+    # up (Revenues missing over an asserted revenue leaf), the month
+    # fails verification with a residual equal to the assertion, and
+    # the next month's [t-1] operands never see the derived parent.
+    extra_is: set[str] = set()
+    for element_id in current:
+      if element_id in emitted_is:
+        continue
+      element = _element(element_id)
+      if element is None or element.period_type == "instant":
+        continue
+      extra_is.add(element_id)
+    for ancestor_id in _ancestor_closure(extra_is, parents_by_child):
+      if ancestor_id in emitted_is or ancestor_id in extra_is:
+        continue
+      element = _element(ancestor_id)
+      if element is not None and element.period_type != "instant":
+        extra_is.add(ancestor_id)
+    for element_id in sorted(extra_is):
       element = _element(element_id)
       if element is not None and element_id in resolved:
         is_facts.append((element, resolved[element_id]))
+        emitted_is.add(element_id)
 
     # (d2) Balance-sheet roll + derived CF (F-2) — with an articulation
     # context the BS is the full roll (carry, rules, schedules, RE,
@@ -836,6 +907,98 @@ def cmd_compute_forecast(
     skipped=skipped,
     diagnostics=diagnostics,
   )
+
+
+def _build_parents_by_child(
+  calculations: dict[str, list[tuple[str, float]]],
+) -> dict[str, list[str]]:
+  """Reverse the calc DAG: child element id → parent element ids."""
+  parents: dict[str, list[str]] = {}
+  for parent, children in calculations.items():
+    for child_id, _weight in children:
+      parents.setdefault(child_id, []).append(parent)
+  return parents
+
+
+def _ancestor_closure(
+  seed_ids: set[str], parents_by_child: dict[str, list[str]]
+) -> set[str]:
+  """Every calc ancestor reachable upward from the seed elements."""
+  closure: set[str] = set()
+  stack = list(seed_ids)
+  while stack:
+    for parent in parents_by_child.get(stack.pop(), ()):
+      if parent not in closure:
+        closure.add(parent)
+        stack.append(parent)
+  return closure
+
+
+def _subtree_all_pinned(
+  target_id: str,
+  calculations: dict[str, list[tuple[str, float]]],
+  current: dict[str, float],
+  asserted: set[str],
+) -> bool:
+  """Whether every valued element under ``target_id`` is line-asserted.
+
+  The displacement test for rules that drive a calc PARENT (the growth
+  rule targets Revenues): when the target's entire contribution basis
+  this month is pinned by assertions, the rule has nothing left to
+  drive — push-down has no unpinned child to absorb the remainder — so
+  it must be displaced rather than fight the assertion. A partially
+  pinned subtree keeps the rule active (the existing pinned push-down
+  distributes the remainder over the unpinned children).
+  """
+  has_value = False
+  seen: set[str] = set()
+  stack = [child for child, _w in calculations.get(target_id, ())]
+  while stack:
+    node = stack.pop()
+    if node in seen:
+      continue
+    seen.add(node)
+    if node in current:
+      has_value = True
+      if node not in asserted:
+        return False
+    stack.extend(child for child, _w in calculations.get(node, ()))
+  return has_value
+
+
+def _derive_from_children(
+  element_id: str,
+  calculations: dict[str, list[tuple[str, float]]],
+  current: dict[str, float],
+  _seen: set[str] | None = None,
+) -> float | None:
+  """Σ child·weight over ``current``, recursing through subtotal children.
+
+  Same-month operand fallback: a rule operand naming a calc parent that
+  has no direct value yet (Revenues when only an asserted revenue leaf
+  exists) binds its derived value instead of falling to a stale prior.
+  Returns None when no descendant carries a value — an absent subtree
+  must stay a skip, never a fabricated zero.
+  """
+  seen = _seen or set()
+  if element_id in seen:
+    return None
+  seen.add(element_id)
+  children = calculations.get(element_id)
+  if not children:
+    return None
+  total = 0.0
+  any_value = False
+  for child_id, weight in children:
+    if child_id in current:
+      total += current[child_id] * weight
+      any_value = True
+    else:
+      sub = _derive_from_children(child_id, calculations, current, seen)
+      if sub is not None:
+        total += sub * weight
+        any_value = True
+  return total if any_value else None
 
 
 def _scale_rule_target_children(

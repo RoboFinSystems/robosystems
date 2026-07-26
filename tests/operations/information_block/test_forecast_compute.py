@@ -55,6 +55,9 @@ EL_REV_A = _element("el_rev_a", "rs-gaap:RevenueStreamA")
 EL_REV_B = _element("el_rev_b", "rs-gaap:RevenueStreamB")
 EL_LOAN = _element("el_loan", "rs-gaap:NotesPayable", period_type="instant")
 EL_MKT = _element("el_mkt", "rs-gaap:MarketingExpense")
+EL_REVC = _element(
+  "el_revc", "rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+)
 
 ELEMENTS = [
   EL_REV,
@@ -66,6 +69,7 @@ ELEMENTS = [
   EL_REV_B,
   EL_LOAN,
   EL_MKT,
+  EL_REVC,
 ]
 BY_ID = {e.id: e for e in ELEMENTS}
 BY_QNAME = {e.qname: e for e in ELEMENTS}
@@ -518,6 +522,111 @@ class TestLineAssertions:
     )
     assert rec.value("struct_is", JUL, "el_rent") == pytest.approx(2.0)
     assert rec.value("struct_is", AUG, "el_rent") == pytest.approx(2.0)
+
+
+class TestAssertionRollupIntoEmptySubtree:
+  """The Harbinger restart-ramp repro (prod, 2026-07-25): a leaf asserted
+  into a month whose BASE has no revenue subtree at all. The derived
+  ancestors must emit (else the set can't roll up and verification fails
+  with a residual equal to the assertion), same-month operands must bind
+  the derived parent (DSO), the parent-driving growth rule must be
+  displaced while the subtree is fully pinned, and after the ramp the
+  rule takes over from the carried assertion with the child scaling in
+  register."""
+
+  # Revenues is a PARENT of the asserted contract-revenue leaf; the base
+  # month carries only rent — no revenue subtree anywhere.
+  CALC_DAG_CHAIN = {
+    "el_rev": [("el_revc", 1.0)],
+    "el_gp": [("el_rev", 1.0), ("el_cogs", -1.0)],
+  }
+  BASE_RENT_ONLY = [SimpleNamespace(element_id="el_rent", value=10.0)]
+
+  def _ramp_run(self):
+    levers = [
+      _lever("rs-driver:RevenueGrowthRate", "el_growth", 0.03, ALL_MONTHS),
+      _lever("rs-driver:DaysSalesOutstanding", "el_dso", 45.0, ALL_MONTHS),
+    ]
+    assertion = LineAssertionLite(
+      qname="rs-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+      element_id="el_revc",
+      item_type=None,
+      period_type="duration",
+      values_by_period={"2026-07": 4000.0, "2026-08": 6000.0},
+    )
+    return _run(
+      _mechanics(levers, assertions=[assertion]),
+      [GROWTH_RULE, DSO_RULE],
+      levers,
+      assertions=[assertion],
+      calc_dag=dict(self.CALC_DAG_CHAIN),
+      base_is_facts=list(self.BASE_RENT_ONLY),
+    )
+
+  def test_derived_ancestors_emit_with_the_asserted_leaf(self) -> None:
+    _, rec = self._ramp_run()
+    assert rec.value("struct_is", JUL, "el_revc") == pytest.approx(4000.0)
+    assert rec.value("struct_is", JUL, "el_rev") == pytest.approx(4000.0)
+    assert rec.value("struct_is", JUL, "el_gp") == pytest.approx(4000.0)
+    assert rec.value("struct_is", AUG, "el_rev") == pytest.approx(6000.0)
+
+  def test_parent_driving_rule_displaced_while_subtree_fully_pinned(self) -> None:
+    response, _ = self._ramp_run()
+    pinned_skips = [
+      (s.rule_id, s.period)
+      for s in response.skipped
+      if s.reason == "displaced by line assertion (contributing children pinned)"
+    ]
+    assert ("rule_growth", "2026-07") in pinned_skips
+    assert ("rule_growth", "2026-08") in pinned_skips
+    assert all(period != "2026-09" for _, period in pinned_skips)
+
+  def test_same_month_operand_derives_from_asserted_child(self) -> None:
+    """DSO binds $Revenues from the asserted leaf the same month — no
+    skip, no stale prior."""
+    _, rec = self._ramp_run()
+    assert rec.value("struct_bs", JUL, "el_ar") == pytest.approx(4000.0 / 30 * 45)
+    assert rec.value("struct_bs", AUG, "el_ar") == pytest.approx(6000.0 / 30 * 45)
+
+  def test_rule_takes_over_after_the_ramp_and_scales_the_child(self) -> None:
+    """September (unasserted): the carried assertion seeds [t-1], the
+    growth rule drives the parent, and the push-down keeps the child in
+    register — the rollup stays exact past the ramp."""
+    _, rec = self._ramp_run()
+    assert rec.value("struct_is", SEP, "el_rev") == pytest.approx(6000.0 * 1.03)
+    assert rec.value("struct_is", SEP, "el_revc") == pytest.approx(6000.0 * 1.03)
+    assert rec.value("struct_bs", SEP, "el_ar") == pytest.approx(
+      6000.0 * 1.03 / 30 * 45
+    )
+
+  def test_partially_pinned_subtree_keeps_the_rule_active(self) -> None:
+    """Two revenue streams, one asserted: the growth rule still drives
+    the parent and the remainder lands on the unpinned stream — the
+    displacement only fires when the WHOLE valued subtree is pinned."""
+    calc_dag = {
+      "el_gp": [("el_rev", 1.0), ("el_cogs", -1.0)],
+      "el_rev": [("el_rev_a", 1.0), ("el_rev_b", 1.0)],
+    }
+    base_facts = [
+      *BASE_IS_FACTS,
+      SimpleNamespace(element_id="el_rev_a", value=60.0),
+      SimpleNamespace(element_id="el_rev_b", value=40.0),
+    ]
+    levers = [_lever("rs-driver:RevenueGrowthRate", "el_growth", 0.03, ALL_MONTHS)]
+    assertions = [_assertion("rs-gaap:RevenueStreamA", "el_rev_a", 30.0, ["2026-07"])]
+    response, rec = _run(
+      _mechanics(levers, assertions=assertions),
+      [GROWTH_RULE],
+      levers,
+      assertions=assertions,
+      calc_dag=calc_dag,
+      base_is_facts=base_facts,
+    )
+    assert rec.value("struct_is", JUL, "el_rev") == pytest.approx(103.0)
+    assert not any(
+      s.reason == "displaced by line assertion (contributing children pinned)"
+      for s in response.skipped
+    )
 
 
 class TestUpsertMonthSet:
