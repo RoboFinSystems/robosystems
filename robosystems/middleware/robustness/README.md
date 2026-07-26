@@ -173,7 +173,7 @@ operation_logger = get_operation_logger()
 # Explicit start/finish
 op_id = operation_logger.log_operation_start(
     operation="analytics_query",
-    endpoint="/v1/graphs/{graph_id}/analytics",
+    endpoint="/v1/graphs/{graph_id}/metrics",
     graph_id=graph_id,
     user_id=user_id,
 )
@@ -223,7 +223,7 @@ record_operation_metric(
     operation_type=OperationType.ANALYTICS_QUERY,
     status=OperationStatus.SUCCESS,
     duration_ms=operation_duration_ms,
-    endpoint="/v1/graphs/{graph_id}/analytics",
+    endpoint="/v1/graphs/{graph_id}/metrics",
     graph_id=graph_id,
     user_id=user_id,
     operation_name="get_graph_metrics",
@@ -254,7 +254,7 @@ async def handler(graph_id, user_id):
             operation_type=OperationType.ANALYTICS_QUERY,
             status=OperationStatus.SUCCESS,
             duration_ms=(time.time() - start) * 1000,
-            endpoint="/v1/graphs/{graph_id}/analytics",
+            endpoint="/v1/graphs/{graph_id}/metrics",
             graph_id=graph_id,
             user_id=user_id,
         )

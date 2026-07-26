@@ -1,4 +1,4 @@
-"""Comprehensive unit tests for the usage analytics router."""
+"""Comprehensive unit tests for the graph metrics + usage router."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -11,7 +11,7 @@ from robosystems.routers.graphs.usage import (
   _get_days_from_time_range,
   _parse_time_range,
   get_graph_metrics,
-  get_graph_usage_analytics,
+  get_graph_usage,
 )
 
 
@@ -268,7 +268,7 @@ class TestGetGraphMetrics:
 
 @pytest.mark.unit
 class TestGetGraphUsageAnalytics:
-  """Test the get_graph_usage_analytics endpoint."""
+  """Test the get_graph_usage endpoint."""
 
   @pytest.mark.asyncio
   async def test_basic_usage_analytics_no_data(self):
@@ -294,7 +294,7 @@ class TestGetGraphUsageAnalytics:
           return_value={},
         ),
       ):
-        result = await get_graph_usage_analytics(
+        result = await get_graph_usage(
           graph_id="kg01234567890abcdef",
           time_range="30d",
           include_storage=True,
@@ -341,7 +341,7 @@ class TestGetGraphUsageAnalytics:
           return_value={},
         ),
       ):
-        result = await get_graph_usage_analytics(
+        result = await get_graph_usage(
           graph_id=graph_id,
           time_range="30d",
           include_storage=True,
@@ -365,7 +365,7 @@ class TestGetGraphUsageAnalytics:
     cb_patch, tc_patch, ol_patch, rm_patch = _patch_robustness()
 
     with cb_patch, tc_patch, ol_patch, rm_patch:
-      result = await get_graph_usage_analytics(
+      result = await get_graph_usage(
         graph_id="kg01234567890abcdef",
         time_range="24h",
         include_storage=False,
@@ -402,7 +402,7 @@ class TestGetGraphUsageAnalytics:
       rm_patch,
     ):
       with pytest.raises(HTTPException) as exc_info:
-        await get_graph_usage_analytics(
+        await get_graph_usage(
           graph_id="kg01234567890abcdef",
           time_range="30d",
           include_storage=False,

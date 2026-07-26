@@ -254,8 +254,8 @@ class TestSanitizeEndpoint:
 
   def test_collapses_raw_graph_id(self):
     assert (
-      _sanitize_endpoint("/v1/graphs/kg19ea0c7f61d75b25f1c1/analytics")
-      == "/v1/graphs/{graph_id}/analytics"
+      _sanitize_endpoint("/v1/graphs/kg19ea0c7f61d75b25f1c1/metrics")
+      == "/v1/graphs/{graph_id}/metrics"
     )
 
   def test_collapses_subgraph_id(self):
@@ -265,7 +265,7 @@ class TestSanitizeEndpoint:
     )
 
   def test_leaves_templated_placeholder_untouched(self):
-    templated = "/v1/graphs/{graph_id}/analytics"
+    templated = "/v1/graphs/{graph_id}/metrics"
     assert _sanitize_endpoint(templated) == templated
 
   def test_leaves_non_graph_paths_untouched(self):
@@ -283,7 +283,7 @@ class TestSanitizeEndpoint:
   def test_record_business_event_sanitizes_label(self, metrics):
     # Even if a caller leaks a raw graph_id, the recorded label is collapsed.
     metrics.record_business_event(
-      endpoint="/v1/graphs/kg19ea0c7f61d75b25f1c1/analytics",
+      endpoint="/v1/graphs/kg19ea0c7f61d75b25f1c1/metrics",
       method="GET",
       event_type="graph_metrics_accessed",
     )

@@ -52,9 +52,9 @@ def test_unknown_tier_falls_back_to_base_limits():
     # graph-independent (no graph_id) but still read-like.
     ("/v1/graphs/abc/schema", "GET", EndpointCategory.GRAPH_READ),
     ("/v1/graphs/schema/validate", "POST", EndpointCategory.GRAPH_READ),
-    # Usage analytics — dedicated bucket
-    ("/v1/graphs/abc/analytics", "GET", EndpointCategory.GRAPH_ANALYTICS),
-    ("/v1/graphs/abc/analytics/usage", "GET", EndpointCategory.GRAPH_ANALYTICS),
+    # Content metrics + consumption usage — dedicated bucket
+    ("/v1/graphs/abc/metrics", "GET", EndpointCategory.GRAPH_ANALYTICS),
+    ("/v1/graphs/abc/usage", "GET", EndpointCategory.GRAPH_ANALYTICS),
     # Backup list is a read; download too
     ("/v1/graphs/abc/backups", "GET", EndpointCategory.GRAPH_READ),
     # Graph lifecycle operations get dedicated buckets
