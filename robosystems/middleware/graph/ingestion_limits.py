@@ -133,39 +133,39 @@ class IngestionLimitChecker:
         Dict with: allowed, errors, total_storage_gb, limit_gb,
         usage_percentage, status, databases
     """
-    from robosystems.models.core.graph import Graph
-
     limit_gb = GraphTierConfig.get_instance_storage_limit_gb(tier)
     warn_pct = (
       GraphTierConfig.get_graph_limits(tier).get("warn_at_percentage", 80) / 100
     )
 
-    # Collect all database IDs on this instance (parent + subgraphs)
-    database_ids = [(graph_id, True)]
-    subgraphs = Graph.get_subgraphs(graph_id, db)
-    for sg in subgraphs:
-      database_ids.append((sg.graph_id, False))
+    # One call covers the whole instance. Subgraphs always live on their
+    # parent's instance, so the breakdown's `{id}_*` scan already includes
+    # them — plus the memory database, vector indexes and staging file. This
+    # also replaces the previous N+1 (one Graph API call per subgraph), and
+    # catches on-disk leftovers the graph registry has lost track of.
+    breakdown = await cls._get_storage_breakdown(graph_id)
+    items: list[dict[str, Any]] = breakdown.get("items", []) if breakdown else []
+    total_bytes = breakdown.get("total_bytes", 0) if breakdown else None
 
-    # Fetch storage for all databases in parallel
-    size_tasks = [cls._get_database_size_bytes(gid) for gid, _ in database_ids]
-    sizes = await asyncio.gather(*size_tasks)
-
-    # Build breakdown and total
-    databases: list[dict[str, Any]] = []
-    total_bytes = 0
-    for (gid, is_parent), size_bytes in zip(database_ids, sizes, strict=True):
-      size_mb = round(size_bytes / (1024**2), 2) if size_bytes is not None else None
-      databases.append(
-        {
-          "graph_id": gid,
-          "is_parent": is_parent,
-          "size_mb": size_mb,
-        }
+    # Roll the itemized view up per database for the summary shape, so a
+    # database's graph/vector/staging bytes appear as one line.
+    bytes_by_database: dict[str, int] = {}
+    for item in items:
+      item_id = item.get("id") or graph_id
+      bytes_by_database[item_id] = bytes_by_database.get(item_id, 0) + item.get(
+        "bytes", 0
       )
-      if size_bytes is not None:
-        total_bytes += size_bytes
 
-    total_storage_gb = round(total_bytes / (1024**3), 2)
+    databases: list[dict[str, Any]] = [
+      {
+        "graph_id": gid,
+        "is_parent": gid == graph_id,
+        "size_mb": round(size / (1024**2), 2),
+      }
+      for gid, size in sorted(bytes_by_database.items())
+    ]
+
+    total_storage_gb = round((total_bytes or 0) / (1024**3), 2)
     usage_percentage = (
       round((total_storage_gb / limit_gb) * 100, 1) if limit_gb > 0 else 0
     )
@@ -194,6 +194,7 @@ class IngestionLimitChecker:
       "usage_percentage": usage_percentage,
       "status": instance_status,
       "databases": databases,
+      "items": items,
     }
 
   @classmethod
@@ -220,11 +221,17 @@ class IngestionLimitChecker:
     return {r.table_name: int(r.total_rows) for r in results if r.table_name}
 
   @classmethod
-  async def _get_database_size_bytes(cls, graph_id: str) -> int | None:
-    """Get database size in bytes from Graph API (file stat, instant).
+  async def _get_storage_breakdown(cls, graph_id: str) -> dict[str, Any] | None:
+    """Get itemized disk usage for a graph, from the Graph API.
+
+    Covers the graph's own database plus its memory database, subgraph
+    databases, vector indexes and staging file — all real disk on the same
+    instance. The pieces outside the primary ``.lbug`` frequently outweigh
+    it, so measuring only that file undercounts the cap denominator and
+    therefore real COGS.
 
     Returns:
-        Size in bytes, or None if unavailable
+        ``{graph_id, total_bytes, items}``, or None if unavailable
     """
     from robosystems.graph_api.client.factory import GraphClientFactory
 
@@ -232,9 +239,11 @@ class IngestionLimitChecker:
       client = await GraphClientFactory.create_client(
         graph_id=graph_id, operation_type="read"
       )
-      db_info = await asyncio.wait_for(client.get_database_info(graph_id), timeout=10)
+      breakdown = await asyncio.wait_for(
+        client.get_storage_breakdown(graph_id), timeout=10
+      )
       await client.close()
-      return db_info.get("size_bytes")
+      return breakdown
     except Exception as e:
       logger.debug(f"Could not get database size for {graph_id}: {e}")
       return None

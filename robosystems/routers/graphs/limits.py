@@ -30,6 +30,7 @@ from robosystems.models.api.graphs.limits import (
   InstanceUsage,
   QueryLimits,
   RateLimits,
+  StorageItem,
   StorageLimits,
 )
 from robosystems.models.core import User
@@ -116,17 +117,20 @@ async def get_graph_limits(
 
     is_shared = MultiTenantUtils.is_shared_repository(graph_id)
 
-    # Get storage information (instance storage limit from graph.yml)
+    # Get storage information (instance storage limit from graph.yml).
+    # Reads the itemized breakdown so this agrees with `instance_usage` below
+    # and with cap enforcement — all three previously disagreed, and this one
+    # read a field name the Graph API never emitted, so it was always 0.
     max_storage_gb = GraphTierConfig.get_instance_storage_limit_gb(graph_tier)
     storage_limits = {}
     try:
       graph_client = await _get_graph_client(graph_id)
-      db_info = await asyncio.wait_for(
-        graph_client.get_database_info(graph_id), timeout=10
+      breakdown = await asyncio.wait_for(
+        graph_client.get_storage_breakdown(graph_id), timeout=10
       )
       await graph_client.close()
 
-      current_storage_gb = db_info.get("database_size_bytes", 0) / (1024**3)
+      current_storage_gb = breakdown.get("total_bytes", 0) / (1024**3)
 
       storage_limits = {
         "current_usage_gb": round(current_storage_gb, 2),
@@ -191,9 +195,9 @@ async def get_graph_limits(
         pass
 
     # Get content limits and instance usage for non-shared graphs.
-    # Note: check_instance_storage issues parallel Graph API calls for the parent
-    # + each subgraph (N+1 calls). For graphs with many subgraphs this adds
-    # latency. Consider adding a short-TTL Valkey cache if this becomes an issue.
+    # check_instance_storage is a single Graph API call covering the whole
+    # instance — subgraphs live on the parent's box, so one breakdown itemizes
+    # them all.
     content_limits = None
     instance_usage = None
     if not is_shared:
@@ -241,6 +245,7 @@ async def get_graph_limits(
           databases=[
             DatabaseStorageEntry(**db_entry) for db_entry in storage_check["databases"]
           ],
+          items=[StorageItem(**item) for item in storage_check.get("items", [])],
         )
       except Exception as e:
         logger.warning(f"Could not get instance usage for {graph_id}: {e}")

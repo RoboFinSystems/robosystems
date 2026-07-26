@@ -102,9 +102,12 @@ class TestCheckMaterializationLimits:
       ),
       patch.object(
         IngestionLimitChecker,
-        "_get_database_size_bytes",
+        "_get_storage_breakdown",
         new_callable=AsyncMock,
-        return_value=25 * 1024**3,  # 25 GB on a 20 GB tier
+        return_value={
+          "total_bytes": 25 * 1024**3,
+          "items": [{"type": "graph", "id": "kg_test", "bytes": 25 * 1024**3}],
+        },  # 25 GB on a 20 GB tier
       ),
       patch(
         "robosystems.models.core.graph.Graph.get_subgraphs",
@@ -173,9 +176,12 @@ class TestCheckInstanceStorage:
     with (
       patch.object(
         IngestionLimitChecker,
-        "_get_database_size_bytes",
+        "_get_storage_breakdown",
         new_callable=AsyncMock,
-        return_value=5 * 1024**3,  # 5 GB
+        return_value={
+          "total_bytes": 5 * 1024**3,
+          "items": [{"type": "graph", "id": "kg_test", "bytes": 5 * 1024**3}],
+        },  # 5 GB
       ),
       patch(
         "robosystems.models.core.graph.Graph.get_subgraphs",
@@ -210,9 +216,12 @@ class TestCheckInstanceStorage:
     with (
       patch.object(
         IngestionLimitChecker,
-        "_get_database_size_bytes",
+        "_get_storage_breakdown",
         new_callable=AsyncMock,
-        return_value=17 * 1024**3,  # 17 GB
+        return_value={
+          "total_bytes": 17 * 1024**3,
+          "items": [{"type": "graph", "id": "kg_test", "bytes": 17 * 1024**3}],
+        },  # 17 GB
       ),
       patch(
         "robosystems.models.core.graph.Graph.get_subgraphs",
@@ -243,9 +252,12 @@ class TestCheckInstanceStorage:
     with (
       patch.object(
         IngestionLimitChecker,
-        "_get_database_size_bytes",
+        "_get_storage_breakdown",
         new_callable=AsyncMock,
-        return_value=21 * 1024**3,  # 21 GB
+        return_value={
+          "total_bytes": 21 * 1024**3,
+          "items": [{"type": "graph", "id": "kg_test", "bytes": 21 * 1024**3}],
+        },  # 21 GB
       ),
       patch(
         "robosystems.models.core.graph.Graph.get_subgraphs",
@@ -280,9 +292,12 @@ class TestCheckInstanceStorage:
     with (
       patch.object(
         IngestionLimitChecker,
-        "_get_database_size_bytes",
+        "_get_storage_breakdown",
         new_callable=AsyncMock,
-        return_value=5 * 1024**3,
+        return_value={
+          "total_bytes": 5 * 1024**3,
+          "items": [{"type": "graph", "id": "kg_test", "bytes": 5 * 1024**3}],
+        },
       ),
       patch(
         "robosystems.models.core.graph.Graph.get_subgraphs",
@@ -308,29 +323,30 @@ class TestCheckInstanceStorage:
 
   @pytest.mark.asyncio
   async def test_aggregates_subgraphs(self):
-    """Test that storage is summed across parent and subgraphs."""
+    """Storage covers parent and subgraphs from one instance-wide read.
+
+    Subgraphs always live on their parent's instance, so a single breakdown
+    already itemizes them — no per-subgraph call, and no dependence on the
+    graph registry being in step with what is actually on disk.
+    """
     mock_db = MagicMock()
 
-    # Create mock subgraph
-    mock_subgraph = MagicMock()
-    mock_subgraph.graph_id = "kg_test_dev"
-
-    # Return different sizes for parent vs subgraph
-    async def mock_get_size(graph_id):
-      if graph_id == "kg_test":
-        return 10 * 1024**3  # 10 GB parent
-      return 5 * 1024**3  # 5 GB subgraph
+    breakdown = {
+      "graph_id": "kg_test",
+      "total_bytes": 15 * 1024**3,
+      "items": [
+        {"type": "graph", "id": "kg_test", "bytes": 10 * 1024**3},
+        {"type": "subgraph", "id": "kg_test_dev", "bytes": 5 * 1024**3},
+      ],
+    }
 
     with (
       patch.object(
         IngestionLimitChecker,
-        "_get_database_size_bytes",
-        side_effect=mock_get_size,
-      ),
-      patch(
-        "robosystems.models.core.graph.Graph.get_subgraphs",
-        return_value=[mock_subgraph],
-      ),
+        "_get_storage_breakdown",
+        new_callable=AsyncMock,
+        return_value=breakdown,
+      ) as mock_breakdown,
       patch(
         "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_instance_storage_limit_gb",
         return_value=20.0,
@@ -353,29 +369,32 @@ class TestCheckInstanceStorage:
     assert result["databases"][0]["is_parent"] is True
     assert result["databases"][1]["is_parent"] is False
     assert result["databases"][1]["graph_id"] == "kg_test_dev"
+    assert result["items"] == breakdown["items"]
+
+    # One call for the whole instance, not one per database.
+    mock_breakdown.assert_awaited_once_with("kg_test")
 
   @pytest.mark.asyncio
-  async def test_handles_unavailable_subgraph(self):
-    """Test graceful degradation when a subgraph's size can't be fetched."""
+  async def test_rolls_types_up_per_database(self):
+    """A database's graph, vector and staging bytes report as one line."""
     mock_db = MagicMock()
 
-    mock_subgraph = MagicMock()
-    mock_subgraph.graph_id = "kg_test_dev"
-
-    async def mock_get_size(graph_id):
-      if graph_id == "kg_test":
-        return 10 * 1024**3
-      return None  # Subgraph unavailable
+    breakdown = {
+      "graph_id": "kg_test",
+      "total_bytes": 6 * 1024**3,
+      "items": [
+        {"type": "graph", "id": "kg_test", "bytes": 3 * 1024**3},
+        {"type": "vectors", "id": "kg_test", "bytes": 1 * 1024**3},
+        {"type": "staging", "id": "kg_test", "bytes": 2 * 1024**3},
+      ],
+    }
 
     with (
       patch.object(
         IngestionLimitChecker,
-        "_get_database_size_bytes",
-        side_effect=mock_get_size,
-      ),
-      patch(
-        "robosystems.models.core.graph.Graph.get_subgraphs",
-        return_value=[mock_subgraph],
+        "_get_storage_breakdown",
+        new_callable=AsyncMock,
+        return_value=breakdown,
       ),
       patch(
         "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_instance_storage_limit_gb",
@@ -392,7 +411,38 @@ class TestCheckInstanceStorage:
         tier="ladybug-standard",
       )
 
-    # Only parent size counted
-    assert result["total_storage_gb"] == 10.0
-    assert len(result["databases"]) == 2
-    assert result["databases"][1]["size_mb"] is None
+    assert len(result["databases"]) == 1
+    assert result["databases"][0]["size_mb"] == 6 * 1024
+    assert result["total_storage_gb"] == 6.0
+
+  @pytest.mark.asyncio
+  async def test_unavailable_breakdown_degrades_to_zero(self):
+    """An unreachable node must not fabricate usage or block on nothing."""
+    mock_db = MagicMock()
+
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_storage_breakdown",
+        new_callable=AsyncMock,
+        return_value=None,
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_instance_storage_limit_gb",
+        return_value=20.0,
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_graph_limits",
+        return_value={"warn_at_percentage": 80},
+      ),
+    ):
+      result = await IngestionLimitChecker.check_instance_storage(
+        db=mock_db,
+        graph_id="kg_test",
+        tier="ladybug-standard",
+      )
+
+    assert result["allowed"] is True
+    assert result["total_storage_gb"] == 0.0
+    assert result["databases"] == []
+    assert result["items"] == []

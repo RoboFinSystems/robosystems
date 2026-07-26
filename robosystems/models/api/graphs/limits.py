@@ -76,6 +76,17 @@ class DatabaseStorageEntry(BaseModel):
   size_mb: float | None = Field(None, description="Database size in MB")
 
 
+class StorageItem(BaseModel):
+  """One itemized piece of a graph's on-disk footprint."""
+
+  type: str = Field(
+    ...,
+    description="One of: graph, memory, subgraph, vectors, staging",
+  )
+  id: str = Field(..., description="Database or index identifier")
+  bytes: int = Field(..., description="Size in bytes")
+
+
 class InstanceUsage(BaseModel):
   """Aggregate storage usage across the dedicated instance.
 
@@ -100,6 +111,13 @@ class InstanceUsage(BaseModel):
   databases: list[DatabaseStorageEntry] = Field(
     default_factory=list,
     description="Per-database storage breakdown",
+  )
+  items: list[StorageItem] = Field(
+    default_factory=list,
+    description=(
+      "Itemized storage by type — graph, memory, subgraph, vectors, staging. "
+      "Sums to total_storage_gb."
+    ),
   )
 
 
