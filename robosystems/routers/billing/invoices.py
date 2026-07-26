@@ -17,7 +17,11 @@ from ...models.api.billing.invoice import (
 )
 from ...models.api.common import RESOURCE_ERROR_RESPONSES
 from ...models.core import User
-from ...models.core.billing import BillingCustomer, BillingInvoice
+from ...models.core.billing import (
+  BillingCustomer,
+  BillingInvoice,
+  BillingSubscription,
+)
 from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
@@ -150,8 +154,26 @@ async def get_upcoming_invoice(
     if not customer.stripe_customer_id:
       return None
 
+    # An upcoming invoice belongs to a subscription, so resolve one locally
+    # first. Beyond correctness this keeps the no-subscription case off the
+    # network entirely — the previous customer-only call spent ~4s per
+    # billing page load before Stripe rejected it.
+    subscription_id = next(
+      (
+        sub.stripe_subscription_id
+        for sub in BillingSubscription.get_active_subscriptions_for_org(org_id, db)
+        if sub.stripe_subscription_id
+      ),
+      None,
+    )
+
+    if not subscription_id:
+      return None
+
     provider = get_payment_provider("stripe")
-    upcoming = provider.get_upcoming_invoice(customer.stripe_customer_id)
+    upcoming = provider.get_upcoming_invoice(
+      customer.stripe_customer_id, subscription_id
+    )
 
     if not upcoming:
       return None
