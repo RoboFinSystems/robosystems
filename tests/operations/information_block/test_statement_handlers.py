@@ -710,6 +710,8 @@ class TestSeriesMode:
     series_sets: list[MagicMock],
     facts: list[MagicMock],
     scenario_id: str | None,
+    series_history: int | None = None,
+    series_forecast: int | None = None,
   ):
     session = MagicMock()
     structure = _make_statement_structure(
@@ -735,7 +737,14 @@ class TestSeriesMode:
       _exec_result(all_rows=[]),  # documentation labels
     ]
     build = statement_handlers.make_statement_handlers("balance_sheet")
-    return build(session, "struct_balance_sheet", scenario_id=scenario_id, series=True)
+    return build(
+      session,
+      "struct_balance_sheet",
+      scenario_id=scenario_id,
+      series=True,
+      series_history=series_history,
+      series_forecast=series_forecast,
+    )
 
   def test_one_column_per_set_with_seam_flags(self) -> None:
     may, june = date(2026, 5, 31), date(2026, 6, 30)
@@ -782,6 +791,34 @@ class TestSeriesMode:
     assert rendering is not None
     cash_row = next(r for r in rendering.rows if r.element_qname == "rs-gaap:Cash")
     assert cash_row.values == [100_000.0, 110_000.0]  # not 999_999
+
+  def test_series_window_trims_to_seam_adjacent_columns(self) -> None:
+    """series_history/series_forecast keep the last N actual + first N
+    forecast columns — the §11 #11 server-side window. Facts for the
+    trimmed sets never render."""
+    ends = [date(2026, m, 28) for m in (3, 4, 5, 6, 7)]
+    sets = [
+      self._fact_set("fs_mar", date(2026, 3, 1), ends[0]),
+      self._fact_set("fs_apr", date(2026, 4, 1), ends[1]),
+      self._fact_set("fs_may", date(2026, 5, 1), ends[2]),
+      self._fact_set("fs_jun", date(2026, 6, 1), ends[3], scenario_id="struct_budget"),
+      self._fact_set("fs_jul", date(2026, 7, 1), ends[4], scenario_id="struct_budget"),
+    ]
+    facts = [
+      self._fact(f"f_{fs.id}", fs.id, fs.period_end, 1_000.0 * (i + 1))
+      for i, fs in enumerate(sets)
+    ]
+    envelope = self._run_series(
+      sets, facts, "struct_budget", series_history=1, series_forecast=1
+    )
+
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert [p.end for p in rendering.periods] == [ends[2], ends[3]]
+    assert rendering.periods[1].forecast is True
+    cash_row = next(r for r in rendering.rows if r.element_qname == "rs-gaap:Cash")
+    assert cash_row.values == [3_000.0, 4_000.0]
 
   def test_fact_set_pin_bypasses_series(self) -> None:
     """A snapshot pin is a single set by definition — series is ignored."""

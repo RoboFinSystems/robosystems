@@ -51,6 +51,8 @@ class InformationBlockQuery:
     id: strawberry.ID,
     scenario_id: str | None = None,
     series: bool = False,
+    series_history: int | None = None,
+    series_forecast: int | None = None,
   ) -> InformationBlock | None:
     """Fetch a single Information Block envelope by id.
 
@@ -64,10 +66,20 @@ class InformationBlockQuery:
     series — one column per period, actuals-preferred at the seam when
     combined with ``scenarioId``; forecast columns carry
     ``periods[].forecast = true``. Non-statement block types ignore it.
+
+    ``seriesHistory`` / ``seriesForecast`` window the series to its
+    seam-adjacent columns — the last N actual columns and the first N
+    forecast columns; omitted = unbounded. Pass the visible window so
+    the envelope scales with the screen, not the ledger's age.
     """
     with _open_session(info) as session:
       envelope = get_information_block(
-        session, str(id), scenario_id=scenario_id, series=series
+        session,
+        str(id),
+        scenario_id=scenario_id,
+        series=series,
+        series_history=series_history,
+        series_forecast=series_forecast,
       )
       return InformationBlock.from_pydantic(envelope) if envelope else None
 
