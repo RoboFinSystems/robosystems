@@ -1322,17 +1322,26 @@ class GraphClient(BaseGraphClient):
     response = await self._request("GET", f"/databases/{graph_id}")
     return response.json()
 
-  async def get_database_metrics(self, graph_id: str) -> dict[str, Any]:
+  async def get_database_metrics(
+    self, graph_id: str, include_counts: bool = False
+  ) -> dict[str, Any]:
     """
-    Get metrics for a specific database (optimized for billing).
+    Get size and modification metrics for a specific database.
 
     Args:
         graph_id: Database to get metrics for
+        include_counts: Also compute node/relationship counts. These are full
+            graph scans — tens of seconds on a large database — so they are
+            off by default and come back as None. Only pass True off a
+            latency path.
 
     Returns:
-        Database metrics including size, counts, and timestamps
+        Database metrics including size and timestamps
     """
-    response = await self._request("GET", f"/databases/{graph_id}/metrics")
+    params = {"include_counts": "true"} if include_counts else None
+    response = await self._request(
+      "GET", f"/databases/{graph_id}/metrics", params=params
+    )
     return response.json()
 
   async def get_metrics(self) -> dict[str, Any]:

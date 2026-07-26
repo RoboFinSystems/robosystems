@@ -122,28 +122,41 @@ async def get_graph_limits(
     # and with cap enforcement — all three previously disagreed, and this one
     # read a field name the Graph API never emitted, so it was always 0.
     max_storage_gb = GraphTierConfig.get_instance_storage_limit_gb(graph_tier)
-    storage_limits = {}
-    try:
-      graph_client = await _get_graph_client(graph_id)
-      breakdown = await asyncio.wait_for(
-        graph_client.get_storage_breakdown(graph_id), timeout=10
-      )
-      await graph_client.close()
+    storage_limits = {
+      "current_usage_gb": None,
+      "max_storage_gb": max_storage_gb,
+      "approaching_limit": False,
+    }
 
-      current_storage_gb = breakdown.get("total_bytes", 0) / (1024**3)
+    # Shared repositories are measured for their tier limit only. Three
+    # reasons not to compute their live footprint:
+    #
+    # - There is nothing to enforce. The tenant does not own a shared
+    #   repository's size and cannot act on it, which is why `instance_usage`
+    #   below is already skipped for them.
+    # - It would be measured on a read replica, which serves the repository
+    #   over S3 ATTACH with no data volume — so local disk is a cache, not the
+    #   repository. The number would be wrong as well as expensive.
+    # - It is expensive in a place that hurts. A shared repository is large
+    #   (SEC is ~110 GB) and its replicas serve every tenant, so a recursive
+    #   walk per request is a latency hazard on shared infrastructure.
+    if not is_shared:
+      try:
+        graph_client = await _get_graph_client(graph_id)
+        breakdown = await asyncio.wait_for(
+          graph_client.get_storage_breakdown(graph_id), timeout=10
+        )
+        await graph_client.close()
 
-      storage_limits = {
-        "current_usage_gb": round(current_storage_gb, 2),
-        "max_storage_gb": max_storage_gb,
-        "approaching_limit": current_storage_gb > (max_storage_gb * 0.8),
-      }
-    except Exception as e:
-      logger.warning(f"Could not get storage info for {graph_id}: {e}")
-      storage_limits = {
-        "current_usage_gb": None,
-        "max_storage_gb": max_storage_gb,
-        "approaching_limit": False,
-      }
+        current_storage_gb = breakdown.get("total_bytes", 0) / (1024**3)
+
+        storage_limits = {
+          "current_usage_gb": round(current_storage_gb, 2),
+          "max_storage_gb": max_storage_gb,
+          "approaching_limit": current_storage_gb > (max_storage_gb * 0.8),
+        }
+      except Exception as e:
+        logger.warning(f"Could not get storage info for {graph_id}: {e}")
 
     # Get copy/ingestion limits from tier configuration (based on graph tier)
     copy_limits = get_tier_copy_operation_limits(graph_tier)

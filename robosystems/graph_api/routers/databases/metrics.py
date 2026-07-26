@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import Path as PathParam
 from fastapi import status as http_status
 
@@ -25,18 +25,26 @@ router = APIRouter(prefix="/databases", tags=["Metrics"])
 @router.get("/{graph_id}/metrics")
 async def get_database_metrics(
   graph_id: str = PathParam(..., description="Graph database identifier"),
+  include_counts: bool = Query(
+    False,
+    description=(
+      "Compute node and relationship counts. Off by default: these are full "
+      "graph scans, and on a large database they take tens of seconds."
+    ),
+  ),
   service=Depends(get_ladybug_service),
 ) -> dict[str, Any]:
   """
   Get metrics for a specific database.
 
-  Returns metrics specifically for billing and monitoring:
-  - Database size in bytes
-  - Node and relationship counts
-  - Last modified timestamp
-  - Database tier information
+  Returns size and modification metadata, which is what callers on a latency
+  path need. `node_count` / `relationship_count` are **opt-in** via
+  `include_counts` and are `None` otherwise.
 
-  This endpoint is optimized for per-database billing collection.
+  The counts are `MATCH (n) RETURN count(n)` and its relationship equivalent —
+  full scans with no index to lean on. On the SEC repository (~110 GB) that
+  exceeded 30s and timed out the caller, so the cost is explicit rather than
+  a default anyone can wander into.
   """
   try:
     validated_graph_id = validate_database_name(graph_id)
@@ -52,25 +60,26 @@ async def get_database_metrics(
     # Get database info from manager
     db_info = service.db_manager.get_database_info(validated_graph_id)
 
-    # Get node and relationship counts via Cypher
-    node_count = 0
-    relationship_count = 0
-    try:
-      from robosystems.graph_api.core.ladybug import get_connection_pool
+    # Node and relationship counts are full scans — opt-in only.
+    node_count = None
+    relationship_count = None
+    if include_counts:
+      try:
+        from robosystems.graph_api.core.ladybug import get_connection_pool
 
-      pool = get_connection_pool()
-      with pool.get_connection(validated_graph_id, read_only=True) as conn:
-        result = conn.execute("MATCH (n) RETURN count(n) as count")
-        if result.has_next():
-          node_count = result.get_next()[0]
-        result.close()
+        pool = get_connection_pool()
+        with pool.get_connection(validated_graph_id, read_only=True) as conn:
+          result = conn.execute("MATCH (n) RETURN count(n) as count")
+          if result.has_next():
+            node_count = result.get_next()[0]
+          result.close()
 
-        result = conn.execute("MATCH ()-[r]->() RETURN count(r) as count")
-        if result.has_next():
-          relationship_count = result.get_next()[0]
-        result.close()
-    except Exception as e:
-      logger.warning(f"Failed to get graph counts for {validated_graph_id}: {e}")
+          result = conn.execute("MATCH ()-[r]->() RETURN count(r) as count")
+          if result.has_next():
+            relationship_count = result.get_next()[0]
+          result.close()
+      except Exception as e:
+        logger.warning(f"Failed to get graph counts for {validated_graph_id}: {e}")
 
     # Get modification time
     last_modified = None
