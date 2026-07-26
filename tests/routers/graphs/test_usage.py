@@ -142,7 +142,14 @@ class TestGetGraphMetrics:
       "total_nodes": 1000,
       "total_relationships": 5000,
       "timestamp": "2024-06-15T00:00:00Z",
-      "estimated_size": {"nodes_bytes": 50000, "relationships_bytes": 100000},
+      "storage": {
+        "total_bytes": 3101581,
+        "total_mb": 2.96,
+        "items": [
+          {"type": "graph", "id": "kg01234567890abcdef", "bytes": 1159258},
+          {"type": "staging", "id": "kg01234567890abcdef", "bytes": 1847296},
+        ],
+      },
       "health_status": {"status": "healthy", "last_check": "2024-06-15T00:00:00Z"},
       "node_counts": {"Entity": 500, "Report": 300},
       "relationship_counts": {"FILED": 200},

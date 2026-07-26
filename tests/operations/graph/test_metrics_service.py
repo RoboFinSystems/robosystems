@@ -59,9 +59,9 @@ class TestCollectMetricsForGraph:
       ),
       patch.object(
         metrics_service,
-        "_estimate_database_size",
+        "_get_storage",
         new_callable=AsyncMock,
-        return_value={"estimated_bytes": 2250},
+        return_value={"total_bytes": 2250},
       ),
       patch.object(
         metrics_service,
@@ -310,31 +310,78 @@ class TestGetRelationshipCountsByType:
     assert result == {"_total": 20}
 
 
-class TestEstimateDatabaseSize:
-  @pytest.mark.asyncio
-  @pytest.mark.unit
-  async def test_query_success(self, metrics_service, mock_repository):
-    mock_repository.execute_query = AsyncMock(
-      return_value=[{"nodeCount": 100, "estimatedBytes": 10000}]
-    )
+class TestGetStorage:
+  """Storage is measured, never estimated.
 
-    result = await metrics_service._estimate_database_size(mock_repository)
-    assert result["method"] == "database_query"
-    assert result["size_info"]["nodeCount"] == 100
+  Replaces TestEstimateDatabaseSize, whose subject was a node-count
+  heuristic. The tests that matter now are that the real measure is
+  reported faithfully, and that an unreachable instance yields no number
+  rather than a plausible-looking one.
+  """
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_fallback_estimation(self, metrics_service, mock_repository):
-    mock_repository.execute_query = AsyncMock(
-      side_effect=[
-        Exception("query not supported"),
-        [{"total": 100}],
-      ]
+  async def test_reports_the_measured_total(self, metrics_service):
+    client = AsyncMock()
+    client.get_storage_breakdown = AsyncMock(
+      return_value={
+        "graph_id": MOCK_GRAPH_ID,
+        "total_bytes": 3145728,
+        "items": [{"type": "graph", "id": MOCK_GRAPH_ID, "bytes": 3145728}],
+      }
     )
 
-    result = await metrics_service._estimate_database_size(mock_repository)
-    assert result["method"] == "estimation"
-    assert result["estimated_bytes"] == 100 * 150
+    with patch(
+      "robosystems.graph_api.client.factory.GraphClientFactory.create_client",
+      new_callable=AsyncMock,
+      return_value=client,
+    ):
+      result = await metrics_service._get_storage(MOCK_GRAPH_ID)
+
+    assert result["total_bytes"] == 3145728
+    assert result["total_mb"] == 3.0
+    assert result["items"][0]["type"] == "graph"
+    client.close.assert_awaited_once()
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_carries_the_itemized_breakdown(self, metrics_service):
+    """The dashboard can show where the bytes went, not just how many."""
+    client = AsyncMock()
+    client.get_storage_breakdown = AsyncMock(
+      return_value={
+        "total_bytes": 300,
+        "items": [
+          {"type": "graph", "id": MOCK_GRAPH_ID, "bytes": 100},
+          {"type": "vectors", "id": MOCK_GRAPH_ID, "bytes": 50},
+          {"type": "staging", "id": MOCK_GRAPH_ID, "bytes": 150},
+        ],
+      }
+    )
+
+    with patch(
+      "robosystems.graph_api.client.factory.GraphClientFactory.create_client",
+      new_callable=AsyncMock,
+      return_value=client,
+    ):
+      result = await metrics_service._get_storage(MOCK_GRAPH_ID)
+
+    assert {i["type"] for i in result["items"]} == {"graph", "vectors", "staging"}
+    assert sum(i["bytes"] for i in result["items"]) == result["total_bytes"]
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_unreachable_instance_reports_no_number(self, metrics_service):
+    """A missing measure is honest; a fabricated one is what this replaced."""
+    with patch(
+      "robosystems.graph_api.client.factory.GraphClientFactory.create_client",
+      new_callable=AsyncMock,
+      side_effect=RuntimeError("node unreachable"),
+    ):
+      result = await metrics_service._get_storage(MOCK_GRAPH_ID)
+
+    assert "error" in result
+    assert "total_bytes" not in result
 
 
 class TestCheckGraphHealth:
@@ -373,7 +420,7 @@ class TestRecordOtelMetrics:
       "total_relationships": 50,
       "node_counts": {"Person": 100},
       "relationship_counts": {"WORKS_AT": 50},
-      "estimated_size": {"estimated_bytes": 15000},
+      "storage": {"total_bytes": 15000},
       "health_status": {"status": "healthy"},
     }
 
@@ -391,7 +438,7 @@ class TestRecordOtelMetrics:
       "total_relationships": 50,
       "node_counts": {},
       "relationship_counts": {},
-      "estimated_size": {},
+      "storage": {},
       "health_status": {},
     }
 
