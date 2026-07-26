@@ -560,14 +560,17 @@ class ClosePeriodOperation(ClosePeriodRequest):
 
 
 class ReopenPeriodOperation(ReopenPeriodRequest):
-  """Reopen the most recently closed fiscal period."""
+  """Reopen a closed fiscal period."""
 
   period: str = Field(
     ...,
     pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
     description=(
-      "Period to reopen, in YYYY-MM. Must equal current `closed_through` "
-      "— only the most recent close can be undone."
+      "Period to reopen, in YYYY-MM. Any closed period may be reopened. "
+      "Reopening the current `closed_through` retreats it by one month; "
+      "reopening an earlier period leaves `closed_through` where it is "
+      "(a prior-period adjustment), and its re-close restores the period "
+      "without moving the pointer."
     ),
   )
 
@@ -1890,10 +1893,13 @@ async def close_period_op(
   operation_id="reopenPeriod",
   summary="Reopen Fiscal Period",
   description=(
-    "Decrement `closed_through` by one. Only the most recently closed "
-    "period can be reopened (no reach-back). Retracts the month's "
-    "canonical statement FactSets (a reopened month is no longer a "
-    "closed assertion; re-closing restamps them). The required "
+    "Reopen a closed period for adjustment. Reopening the current "
+    "`closed_through` decrements it by one; reopening an earlier period "
+    "is a prior-period adjustment and leaves `closed_through` unchanged "
+    "— re-closing it restores the period without advancing the pointer. "
+    "Either way the period's entries become writable again. Retracts "
+    "the month's canonical statement FactSets (a reopened month is no "
+    "longer a closed assertion; re-closing restamps them). The required "
     "`reason` is captured in the audit log. Use sparingly — reopen "
     "invalidates downstream artifacts that trusted the closed state "
     "(reports, shared filings)."

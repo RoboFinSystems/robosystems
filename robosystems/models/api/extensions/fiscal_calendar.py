@@ -151,10 +151,12 @@ class ClosePeriodRequest(BaseModel):
 
 
 class ReopenPeriodRequest(BaseModel):
-  """Decrement ``closed_through`` by one — un-locks the most recent close.
+  """Un-lock a closed period for adjustment.
 
-  Only the most recently closed period can be reopened (no
-  reach-back). The ``reason`` is required and captured in the audit
+  Reopening the current ``closed_through`` decrements it by one.
+  Reopening an earlier period is a prior-period adjustment: the
+  watermark stays put, and the re-close restores the period without
+  advancing it. The ``reason`` is required and captured in the audit
   log. Use sparingly — reopen invalidates downstream artifacts that
   trusted the closed state (reports, shared filings).
   """
