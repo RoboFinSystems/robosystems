@@ -128,6 +128,66 @@ class LineAssertionRequest(BaseModel):
     return self
 
 
+class LineGrowthRequest(BaseModel):
+  """One statement line's asserted growth trajectory for the scenario.
+
+  The generic per-line sibling of ``rs-driver:RevenueGrowthRate``: where
+  the catalog lever grows *revenue* through its seeded rule, a line
+  growth entry grows **any income-statement leaf** at a month-over-month
+  rate — ``value`` -0.05 cuts the line 5% per month, compounding from
+  the base month's value. This is what expense trajectories ("opex +2%/mo
+  with inflation", "cut costs 5%/mo starting October") use; without it
+  every unmodeled line just carries flat.
+
+  Semantics per month: ``line[t] = line[t-1] * (1 + rate[t])``. Months
+  the entry doesn't name keep the engine's carry-forward (grow-then-hold
+  ramps fall out of ``values_by_period`` naturally). **Duration leaves
+  only**: balance-sheet lines roll from the IS and the working-capital
+  levers — grow the driving IS line instead. A line already driven by an
+  active catalog rule (e.g. Revenues with ``RevenueGrowthRate`` set) or
+  named by a ``line_assertions`` entry is rejected — one owner per line.
+  """
+
+  qname: str = Field(
+    ...,
+    description=(
+      "QName of the income-statement leaf to grow (e.g. "
+      "``rs-gaap:ResearchAndDevelopmentExpense``). Must be a calc-DAG "
+      "duration leaf."
+    ),
+  )
+  value: float | None = Field(
+    None,
+    gt=-1,
+    description=(
+      "Uniform month-over-month growth rate for every month of the "
+      "horizon (decimal: 0.02 = +2%/mo, -0.05 = -5%/mo)."
+    ),
+  )
+  values_by_period: dict[str, float] | None = Field(
+    None,
+    description=(
+      "Per-month rate overrides keyed by ``YYYY-MM``. Wins over "
+      "``value`` for the months it names; months named by neither "
+      "carry the line's prior value (rate 0)."
+    ),
+  )
+
+  @model_validator(mode="after")
+  def _require_some_value(self) -> LineGrowthRequest:
+    if self.value is None and not self.values_by_period:
+      raise ValueError(
+        f"Line growth {self.qname!r} needs a uniform `value` and/or "
+        "`values_by_period` overrides."
+      )
+    if self.values_by_period and any(v <= -1 for v in self.values_by_period.values()):
+      raise ValueError(
+        f"Line growth {self.qname!r}: rates must be greater than -1 "
+        "(-1 would zero the line — use a line assertion for that)."
+      )
+    return self
+
+
 class CreateForecastRequest(BaseModel):
   """Create a forecast block — the authored scenario container.
 
@@ -200,6 +260,15 @@ class CreateForecastRequest(BaseModel):
       "for the months it asserts."
     ),
   )
+  line_growth: list[LineGrowthRequest] = Field(
+    default_factory=list,
+    description=(
+      "Per-line growth trajectories. Each names an income-statement "
+      "leaf and grows it month-over-month at the asserted rate — the "
+      "generic form of the revenue growth lever, for lines the catalog "
+      "doesn't drive (opex trajectories, cost-cut ramps)."
+    ),
+  )
   entity_id: str | None = Field(
     None,
     description=(
@@ -236,6 +305,13 @@ class UpdateForecastRequest(BaseModel):
     description=(
       "Full replacement of the line-assertion set when provided. Pass "
       "an empty list to clear every assertion."
+    ),
+  )
+  line_growth: list[LineGrowthRequest] | None = Field(
+    None,
+    description=(
+      "Full replacement of the line-growth set when provided. Pass an "
+      "empty list to clear every growth entry."
     ),
   )
 

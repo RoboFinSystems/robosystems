@@ -2,12 +2,14 @@
 
 The forecast block is the FP&A engine's authored surface (F-1): scenario
 identity (name + ``scenario_kind``), horizon, base period, lever
-assertions on ``rs-driver:*`` catalog elements, and direct **line
+assertions on ``rs-driver:*`` catalog elements, direct **line
 assertions** on statement leaves (manual overrides that win over driver
-rules and carry-forward for the months they name). The block IS the
-scenario — its structure id is the ``scenario_id`` every derived forward
-FactSet carries (NULL = actuals), and deleting the block removes the
-whole scenario slice.
+rules and carry-forward for the months they name), and **line growth**
+entries (per-line month-over-month trajectories — the generic form of
+the revenue growth lever, for lines the catalog doesn't drive). The
+block IS the scenario — its structure id is the ``scenario_id`` every
+derived forward FactSet carries (NULL = actuals), and deleting the block
+removes the whole scenario slice.
 
 Persistence follows the rules-for-mechanics / **facts-for-values**
 doctrine: lever *mechanics* are the library-seeded rs-driver Derive
@@ -41,6 +43,7 @@ from robosystems.models.api.information_block import (
   InformationModelResponse,
   LeverAssertionLite,
   LineAssertionLite,
+  LineGrowthLite,
   RenderingLite,
   RenderingPeriodLite,
   RenderingRowLite,
@@ -82,6 +85,7 @@ if TYPE_CHECKING:
     DeleteForecastRequest,
     LeverAssertionRequest,
     LineAssertionRequest,
+    LineGrowthRequest,
     UpdateForecastRequest,
   )
 
@@ -285,6 +289,151 @@ def _expand_line_assertions(
   return expanded
 
 
+def _expand_line_growth(
+  session: Session,
+  entries: list[LineGrowthRequest],
+  base_period: str,
+  horizon_months: int,
+) -> list[LineGrowthLite]:
+  """Resolve + expand wire-level line-growth entries to per-month rate maps.
+
+  Same grammar and expansion as levers/assertions; the validation is the
+  line-assertion set plus **duration leaves only** — a balance-sheet
+  line rolls from the IS and the working-capital levers, so growing it
+  directly would fight the roll. Cross-list conflicts (a grown line
+  that's also asserted, or already driven by an active catalog rule)
+  are checked by :func:`_check_line_growth_conflicts` against the FINAL
+  lists, because an update can change one list without the other.
+  """
+  if not entries:
+    return []
+
+  months = [add_months(base_period, i) for i in range(1, horizon_months + 1)]
+  month_set = set(months)
+  calc_parent_ids = set(load_rs_gaap_calculations(session).keys())
+
+  expanded: list[LineGrowthLite] = []
+  seen: set[str] = set()
+  for entry in entries:
+    if entry.qname in seen:
+      raise ValueError(
+        f"Duplicate line-growth qname {entry.qname!r} in the growth set."
+      )
+    seen.add(entry.qname)
+
+    element = session.execute(
+      select(Element).where(Element.qname == entry.qname).limit(1)
+    ).scalar_one_or_none()
+    if element is None:
+      raise ValueError(
+        f"Line-growth qname {entry.qname!r} did not resolve to an Element "
+        "— growth entries name rs-gaap (or tenant extension) statement "
+        "concepts."
+      )
+    blocked = _ASSERTION_BLOCKED_SOURCES.get(element.source or "")
+    if blocked is not None:
+      raise ValueError(f"Line-growth qname {entry.qname!r}: {blocked}.")
+    if element.is_abstract:
+      raise ValueError(
+        f"Line-growth qname {entry.qname!r} is abstract — grow a concrete "
+        "statement leaf."
+      )
+    if element.id in calc_parent_ids:
+      raise ValueError(
+        f"Line-growth qname {entry.qname!r} is a calc-DAG subtotal — "
+        "growth is leaves-only so the grown line still articulates "
+        "(subtotals derive from their children)."
+      )
+    if element.period_type == "instant":
+      raise ValueError(
+        f"Line-growth qname {entry.qname!r} is a balance-sheet (instant) "
+        "line — the BS rolls from the IS and the working-capital levers; "
+        "grow the driving income-statement line instead."
+      )
+
+    overrides = entry.values_by_period or {}
+    outside = sorted(set(overrides) - month_set)
+    if outside:
+      raise ValueError(
+        f"Line growth {entry.qname!r} has values_by_period entries "
+        f"outside the horizon ({base_period} + {horizon_months} months): "
+        f"{outside}"
+      )
+
+    values: dict[str, float] = {}
+    for month in months:
+      if month in overrides:
+        values[month] = float(overrides[month])
+      elif entry.value is not None:
+        values[month] = float(entry.value)
+    if not values:
+      raise ValueError(
+        f"Line growth {entry.qname!r} asserts no months within the horizon."
+      )
+
+    expanded.append(
+      LineGrowthLite(
+        qname=entry.qname,
+        element_id=element.id,
+        values_by_period=values,
+      )
+    )
+  return expanded
+
+
+def _check_line_growth_conflicts(
+  session: Session,
+  levers: list[LeverAssertionLite],
+  line_assertions: list[LineAssertionLite],
+  line_growth: list[LineGrowthLite],
+) -> None:
+  """One owner per line — validated against the FINAL authored lists.
+
+  A grown line that's also line-asserted, or already driven by a catalog
+  rule whose levers this scenario sets, would have two writers with
+  order-dependent outcomes. Runs on both create and update (an update
+  can replace ``levers`` alone and silently activate a rule over a
+  stored growth entry).
+  """
+  if not line_growth:
+    return
+  growth_qnames = {g.qname for g in line_growth}
+  overlap = growth_qnames & {a.qname for a in line_assertions}
+  if overlap:
+    raise ValueError(
+      f"Line(s) named by both line_growth and line_assertions: "
+      f"{sorted(overlap)} — an assertion pins the value, growth derives "
+      "it; pick one per line."
+    )
+
+  from robosystems.operations.information_block.forecast_history import (
+    DRIVER_PREFIX,
+    driver_rules,
+  )
+
+  lever_qnames = {lv.qname for lv in levers}
+  for rule in driver_rules(session):
+    variables = rule.rule_variables or []
+    rule_levers = {
+      v["variable_qname"]
+      for v in variables
+      if isinstance(v, dict)
+      and isinstance(v.get("variable_qname"), str)
+      and v["variable_qname"].startswith(DRIVER_PREFIX)
+    }
+    if not rule_levers or not rule_levers <= lever_qnames:
+      continue  # rule inactive in this scenario
+    target = (
+      session.get(Element, rule.target_element_id) if rule.target_element_id else None
+    )
+    if target is not None and target.qname in growth_qnames:
+      raise ValueError(
+        f"Line growth {target.qname!r} is already driven by "
+        f"{', '.join(sorted(rule_levers))} in this scenario — set that "
+        "lever instead of a growth entry."
+      )
+
+
 def _load_lever_fact_set(session: Session, structure_id: str) -> FactSet | None:
   """The scenario's lever FactSet — ``'custom'`` + self-referential scenario."""
   return session.execute(
@@ -306,10 +455,17 @@ def _write_lever_fact_set(
   entity_id: str,
   created_by: str,
 ) -> FactSet:
-  """Persist the lever + line assertions as authored facts in one scenario set."""
+  """Persist the lever + line assertions as authored facts in one scenario set.
+
+  Line-growth rates are deliberately NOT written as facts (a rate on a
+  monetary statement element would be a unit-lying fact — the mechanics
+  copy is their single authored store), but their months still widen
+  the set's period envelope so it spans everything the scenario asserts.
+  """
   asserted_months = sorted(
     {m for lv in mechanics.levers for m in lv.values_by_period}
     | {m for la in mechanics.line_assertions for m in la.values_by_period}
+    | {m for lg in mechanics.line_growth for m in lg.values_by_period}
   )
   span_start = period_date_range(asserted_months[0])[0]
   span_end = period_date_range(asserted_months[-1])[1]
@@ -386,6 +542,10 @@ def create(
   line_assertions = _expand_line_assertions(
     session, payload.line_assertions, base_period, payload.horizon_months
   )
+  line_growth = _expand_line_growth(
+    session, payload.line_growth, base_period, payload.horizon_months
+  )
+  _check_line_growth_conflicts(session, levers, line_assertions, line_growth)
 
   mechanics = ForecastMechanics(
     scenario_kind=payload.scenario_kind,
@@ -393,6 +553,7 @@ def create(
     base_period=base_period,
     levers=levers,
     line_assertions=line_assertions,
+    line_growth=line_growth,
   )
 
   # The lever elements all live in the tenant's rs-driver taxonomy —
@@ -467,6 +628,12 @@ def update(
       "`line_assertions` (or an empty list to clear them) — the horizon "
       "window shifted, so every asserted month must be restated."
     )
+  if window_changed and payload.line_growth is None and current.line_growth:
+    raise ValueError(
+      "Changing horizon_months or base_period requires re-supplying "
+      "`line_growth` (or an empty list to clear it) — the horizon window "
+      "shifted, so every growth month must be restated."
+    )
 
   levers = current.levers
   if payload.levers is not None:
@@ -476,6 +643,14 @@ def update(
     line_assertions = _expand_line_assertions(
       session, payload.line_assertions, base_period, horizon_months
     )
+  line_growth = current.line_growth
+  if payload.line_growth is not None:
+    line_growth = _expand_line_growth(
+      session, payload.line_growth, base_period, horizon_months
+    )
+  # Against the FINAL lists — replacing `levers` alone can activate a
+  # catalog rule over a STORED growth entry.
+  _check_line_growth_conflicts(session, levers, line_assertions, line_growth)
 
   next_mechanics = ForecastMechanics(
     scenario_kind=scenario_kind,
@@ -483,6 +658,7 @@ def update(
     base_period=base_period,
     levers=levers,
     line_assertions=line_assertions,
+    line_growth=line_growth,
   )
   structure.artifact_mechanics = next_mechanics.model_dump(mode="json")
   structure.updated_by = updated_by
@@ -612,9 +788,11 @@ def build_envelope(
   # Authored elements (levers + line assertions) are not reachable via
   # associations (the container is arc-less) — load them off the
   # mechanics for the envelope's element list and the row metadata.
-  authored_element_ids = [lv.element_id for lv in mechanics.levers] + [
-    la.element_id for la in mechanics.line_assertions
-  ]
+  authored_element_ids = (
+    [lv.element_id for lv in mechanics.levers]
+    + [la.element_id for la in mechanics.line_assertions]
+    + [lg.element_id for lg in mechanics.line_growth]
+  )
   authored_elements = list(
     session.execute(select(Element).where(Element.id.in_(authored_element_ids)))
     .scalars()
@@ -645,6 +823,19 @@ def build_envelope(
     if month in forecast_months:
       return assertion.values_by_period.get(month)
     return history.line_values.get(assertion.element_id, {}).get(month)
+
+  def growth_value(entry: LineGrowthLite, month: str) -> float | None:
+    """Asserted rate ahead of the seam; the rate the line actually ran
+    at behind it (``v[t]/v[t-1] - 1`` — the trivial inversion), blanked
+    when either month's actual is missing or the prior is zero."""
+    if month in forecast_months:
+      return entry.values_by_period.get(month)
+    values = history.line_values.get(entry.element_id, {})
+    current_v = values.get(month)
+    prior_v = values.get(add_months(month, -1))
+    if current_v is None or prior_v is None or prior_v == 0:
+      return None
+    return current_v / prior_v - 1.0
 
   rows = [
     RenderingRowLite(
@@ -681,6 +872,23 @@ def build_envelope(
       values=[line_value(assertion, month) for month in months],
     )
     for assertion in mechanics.line_assertions
+  )
+  # Line-growth entries render as rate rows — asserted rates ahead of
+  # the seam, realized month-over-month rates behind it.
+  rows.extend(
+    RenderingRowLite(
+      element_id=entry.element_id,
+      element_qname=entry.qname,
+      element_name=(
+        elements_by_id[entry.element_id].name
+        if entry.element_id in elements_by_id
+        else entry.qname
+      ),
+      balance_type=None,
+      item_type=entry.item_type,
+      values=[growth_value(entry, month) for month in months],
+    )
+    for entry in mechanics.line_growth
   )
   rendering = RenderingLite(
     rows=rows,
