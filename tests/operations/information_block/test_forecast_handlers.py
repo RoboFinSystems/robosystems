@@ -28,6 +28,7 @@ from robosystems.models.api.information_block import (
   LineAssertionLite,
 )
 from robosystems.operations.information_block import forecast as forecast_handlers
+from robosystems.operations.information_block.forecast_history import LeverHistory
 
 
 def _element(
@@ -699,8 +700,13 @@ class TestBuildEnvelope:
       docs_result,
     ]
 
-    with patch.object(
-      forecast_handlers, "load_base_envelope_atoms", return_value=atoms
+    with (
+      patch.object(forecast_handlers, "load_base_envelope_atoms", return_value=atoms),
+      # The realized side has its own tests (``test_forecast_history``);
+      # a tenant with no closed months renders the horizon alone.
+      patch.object(
+        forecast_handlers, "back_solve_lever_history", return_value=LeverHistory()
+      ),
     ):
       envelope = forecast_handlers.build_envelope(session, "struct_budget_01")
 
@@ -788,8 +794,13 @@ class TestBuildEnvelope:
       docs_result,
     ]
 
-    with patch.object(
-      forecast_handlers, "load_base_envelope_atoms", return_value=atoms
+    with (
+      patch.object(forecast_handlers, "load_base_envelope_atoms", return_value=atoms),
+      # The realized side has its own tests (``test_forecast_history``);
+      # a tenant with no closed months renders the horizon alone.
+      patch.object(
+        forecast_handlers, "back_solve_lever_history", return_value=LeverHistory()
+      ),
     ):
       envelope = forecast_handlers.build_envelope(session, "struct_budget_01")
 
@@ -803,6 +814,121 @@ class TestBuildEnvelope:
     assertion_row = rendering.rows[1]
     assert assertion_row.values == [0.0, 0.0]
     assert assertion_row.balance_type == "debit"
+
+  def _history_envelope(self, history: LeverHistory, horizon: int = 2):
+    """Build the standard one-lever envelope against a given history."""
+    structure = MagicMock()
+    structure.id = "struct_budget_01"
+    structure.block_type = "forecast"
+    structure.name = "FY26 Operating Budget"
+    structure.description = None
+    structure.renderer_note = None
+    structure.taxonomy_id = "tax_rs_driver"
+    structure.concept_arrangement = "set"
+    structure.member_arrangement = None
+    structure.artifact_mechanics = ForecastMechanics(
+      scenario_kind="budget",
+      horizon_months=horizon,
+      base_period="2026-06",
+      levers=[
+        LeverAssertionLite(
+          qname="rs-driver:RevenueGrowthRate",
+          element_id="el_growth",
+          item_type="percent",
+          values_by_period={"2026-07": 0.03, "2026-08": 0.03},
+        )
+      ],
+    ).model_dump(mode="json")
+
+    atoms = SimpleNamespace(
+      structure=structure,
+      taxonomy_name="rs-driver",
+      associations=[],
+      elements=[],
+      element_ids=[],
+      rules=[],
+      classifications_by_assoc={},
+      fact_set=None,
+      verification_results=[],
+      verification_summary=None,
+    )
+
+    session = MagicMock()
+    computed_result = MagicMock()
+    computed_result.scalars.return_value.all.return_value = []
+    elements_result = MagicMock()
+    elements_result.scalars.return_value.all.return_value = [GROWTH]
+    lever_set_result = MagicMock()
+    lever_set_result.scalar_one_or_none.return_value = None
+    docs_result = MagicMock()
+    docs_result.all.return_value = []
+    session.execute.side_effect = [
+      computed_result,
+      elements_result,
+      lever_set_result,
+      docs_result,
+    ]
+
+    with (
+      patch.object(forecast_handlers, "load_base_envelope_atoms", return_value=atoms),
+      patch.object(forecast_handlers, "back_solve_lever_history", return_value=history),
+    ):
+      return forecast_handlers.build_envelope(session, "struct_budget_01")
+
+  def test_realized_months_extend_the_grid_behind_the_seam(self) -> None:
+    envelope = self._history_envelope(
+      LeverHistory(
+        months=["2026-05", "2026-06"],
+        lever_values={
+          "rs-driver:RevenueGrowthRate": {"2026-05": 0.021, "2026-06": 0.038}
+        },
+      )
+    )
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert [p.end for p in rendering.periods] == [
+      date(2026, 5, 31),
+      date(2026, 6, 30),
+      date(2026, 7, 31),
+      date(2026, 8, 31),
+    ]
+    # Realized rates, then the asserted horizon — one continuous series.
+    assert rendering.rows[0].values == [0.021, 0.038, 0.03, 0.03]
+    # The seam marker rides the forward columns only.
+    assert [p.forecast for p in rendering.periods] == [None, None, True, True]
+
+  def test_a_closed_horizon_month_shows_the_realized_rate_not_the_assertion(
+    self,
+  ) -> None:
+    # The scenario asserted 3% for July; July has since closed at 1.2%.
+    envelope = self._history_envelope(
+      LeverHistory(
+        months=["2026-06", "2026-07"],
+        lever_values={
+          "rs-driver:RevenueGrowthRate": {"2026-06": 0.038, "2026-07": 0.012}
+        },
+      )
+    )
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert [p.end for p in rendering.periods] == [
+      date(2026, 6, 30),
+      date(2026, 7, 31),
+      date(2026, 8, 31),
+    ]
+    assert rendering.rows[0].values == [0.038, 0.012, 0.03]
+    assert [p.forecast for p in rendering.periods] == [None, None, True]
+
+  def test_a_blank_realized_cell_stays_blank(self) -> None:
+    envelope = self._history_envelope(
+      LeverHistory(months=["2026-05", "2026-06"], lever_values={})
+    )
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert rendering.rows[0].values == [None, None, 0.03, 0.03]
 
   def test_returns_none_for_wrong_block_type(self) -> None:
     session = MagicMock()

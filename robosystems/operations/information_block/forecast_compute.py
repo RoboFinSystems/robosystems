@@ -60,7 +60,6 @@ from robosystems.models.extensions import (
   Element,
   Rule,
   Structure,
-  Taxonomy,
 )
 from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.models.extensions.roboledger.fact_set import FactSet
@@ -74,6 +73,12 @@ from robosystems.operations.information_block.forecast_articulation import (
   load_articulation_context,
   roll_balance_sheet,
   schedule_is_delta,
+)
+from robosystems.operations.information_block.forecast_history import (
+  DRIVER_PREFIX,
+  driver_rules,
+  newest_actual_structure_id,
+  numeric_facts,
 )
 from robosystems.operations.information_block.metrics import (
   _default_entity_id,
@@ -106,9 +111,6 @@ if TYPE_CHECKING:
 
   from sqlalchemy.orm import Session
 
-_DRIVER_STANDARD = "rs-driver"
-_DRIVER_PREFIX = "rs-driver:"
-
 
 @dataclass
 class _ActiveRule:
@@ -118,26 +120,6 @@ class _ActiveRule:
   target: Element
   qname_by_name: dict[str, str]
   operand_names: list[str]
-
-
-def _newest_actual_structure_id(session: Session, block_type: str) -> str | None:
-  """Structure behind the entity's newest actual report set of a block type.
-
-  Data-driven (never by name) — multi-variant reporting styles mean the
-  'income_statement' structure a tenant actually reports under is
-  whichever one its newest actual ``'report'`` FactSet instantiates.
-  """
-  return session.execute(
-    select(FactSet.structure_id)
-    .join(Structure, FactSet.structure_id == Structure.id)
-    .where(
-      FactSet.factset_type == "report",
-      FactSet.scenario_id.is_(None),
-      Structure.block_type == block_type,
-    )
-    .order_by(FactSet.created_at.desc())
-    .limit(1)
-  ).scalar()
 
 
 def _actual_set_at(
@@ -167,40 +149,6 @@ def _actual_set_at(
     .order_by(FactSet.created_at.desc())
     .limit(1)
   ).scalar_one_or_none()
-
-
-def _numeric_facts(session: Session, fact_set_id: str) -> list[Fact]:
-  return list(
-    session.execute(
-      select(Fact).where(
-        Fact.fact_set_id == fact_set_id,
-        Fact.fact_scope == "in_scope",
-        Fact.value.is_not(None),
-      )
-    )
-    .scalars()
-    .all()
-  )
-
-
-def _load_driver_rules(session: Session) -> list[Rule]:
-  """Every Derive rule seeded by the rs-driver catalog (tenant copy)."""
-  taxonomy_ids = (
-    session.execute(select(Taxonomy.id).where(Taxonomy.standard == _DRIVER_STANDARD))
-    .scalars()
-    .all()
-  )
-  if not taxonomy_ids:
-    return []
-  return list(
-    session.execute(
-      select(Rule)
-      .where(Rule.taxonomy_id.in_(taxonomy_ids), Rule.rule_pattern == "Derive")
-      .order_by(Rule.id)
-    )
-    .scalars()
-    .all()
-  )
 
 
 def _local_calc_arcs(
@@ -275,7 +223,7 @@ def cmd_compute_forecast(
   }
   lever_values: dict[str, dict[str, float]] = {}
   assertion_values: dict[str, dict[str, float]] = {}
-  for fact in _numeric_facts(session, lever_set.id):
+  for fact in numeric_facts(session, lever_set.id):
     if fact.value is None:
       continue
     month = period_from_date(fact.period_end)
@@ -286,7 +234,7 @@ def cmd_compute_forecast(
       assertion_values.setdefault(fact.element_id, {})[month] = float(fact.value)
 
   # ── Resolve the actual structures + seed month ────────────────────────
-  is_structure_id = _newest_actual_structure_id(session, "income_statement")
+  is_structure_id = newest_actual_structure_id(session, "income_statement")
   if is_structure_id is None:
     raise ValueError(
       "No actual income-statement sets exist to project from — close at "
@@ -294,7 +242,7 @@ def cmd_compute_forecast(
       "sets). If months are already closed without statements, set up "
       "the CoA mapping and reporting style, then reclose."
     )
-  bs_structure_id = _newest_actual_structure_id(session, "balance_sheet")
+  bs_structure_id = newest_actual_structure_id(session, "balance_sheet")
 
   base_start, base_end = period_date_range(mechanics.base_period)
   base_is_set = _actual_set_at(
@@ -311,7 +259,7 @@ def cmd_compute_forecast(
 
   prior_values: dict[str, float] = {}
   base_is_element_ids: list[str] = []
-  for fact in _numeric_facts(session, base_is_set.id):
+  for fact in numeric_facts(session, base_is_set.id):
     if fact.value is None:
       continue
     if fact.element_id not in prior_values:
@@ -329,7 +277,7 @@ def cmd_compute_forecast(
       session, bs_structure_id, entity_id, base_start, base_end
     )
     if base_bs_set is not None:
-      for fact in _numeric_facts(session, base_bs_set.id):
+      for fact in numeric_facts(session, base_bs_set.id):
         if fact.value is None:
           continue
         if fact.element_id not in bs_prior:
@@ -350,7 +298,7 @@ def cmd_compute_forecast(
 
   skipped: list[SkippedForecastLite] = []
   active_rules: list[_ActiveRule] = []
-  for rule in _load_driver_rules(session):
+  for rule in driver_rules(session):
     variables = rule.rule_variables or []
     names = [v.get("variable_name") for v in variables if isinstance(v, dict)]
     if not all(isinstance(n, str) and n for n in names):
@@ -360,7 +308,7 @@ def cmd_compute_forecast(
       for v in variables
       if isinstance(v, dict) and isinstance(v.get("variable_qname"), str)
     }
-    lever_qnames = [q for q in qname_by_name.values() if q.startswith(_DRIVER_PREFIX)]
+    lever_qnames = [q for q in qname_by_name.values() if q.startswith(DRIVER_PREFIX)]
     # Active iff every lever operand has asserted values in this scenario.
     if not lever_qnames or any(q not in lever_values for q in lever_qnames):
       continue
@@ -415,7 +363,7 @@ def cmd_compute_forecast(
       q
       for ar in active_rules
       for q in ar.qname_by_name.values()
-      if q.startswith(_DRIVER_PREFIX)
+      if q.startswith(DRIVER_PREFIX)
     }
   )
 
@@ -462,7 +410,7 @@ def cmd_compute_forecast(
       mapping_id = prov.get("mapping_id")
       if mapping_id:
         break
-  cf_structure_id = _newest_actual_structure_id(session, "cash_flow_statement")
+  cf_structure_id = newest_actual_structure_id(session, "cash_flow_statement")
 
   ctx: ArticulationContext | None = None
   diagnostics: list[str] = []
@@ -617,7 +565,7 @@ def cmd_compute_forecast(
         if qname is None:
           missing.append(name)
           continue
-        if qname.startswith(_DRIVER_PREFIX):
+        if qname.startswith(DRIVER_PREFIX):
           lever_month_values = lever_values.get(qname, {})
           if month not in lever_month_values:
             missing.append(f"{qname} (lever not asserted for {month})")

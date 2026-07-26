@@ -266,7 +266,7 @@ def _run(
   }
 
   with (
-    patch.object(fc, "_newest_actual_structure_id", side_effect=_structures),
+    patch.object(fc, "newest_actual_structure_id", side_effect=_structures),
     patch.object(
       fc,
       "_actual_set_at",
@@ -275,9 +275,9 @@ def _run(
       ),
     ),
     patch.object(
-      fc, "_numeric_facts", side_effect=lambda session, fs_id: facts_by_set[fs_id]
+      fc, "numeric_facts", side_effect=lambda session, fs_id: facts_by_set[fs_id]
     ),
-    patch.object(fc, "_load_driver_rules", return_value=rules),
+    patch.object(fc, "driver_rules", return_value=rules),
     patch.object(fc, "_local_calc_arcs", return_value={}),
     patch.object(
       fc,

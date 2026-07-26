@@ -55,6 +55,9 @@ from robosystems.operations.information_block.envelope import (
   fact_to_lite,
   load_base_envelope_atoms,
 )
+from robosystems.operations.information_block.forecast_history import (
+  back_solve_lever_history,
+)
 from robosystems.operations.information_block.metrics import (
   _default_entity_id,
   _latest_report_period_end_before,
@@ -562,12 +565,22 @@ def build_envelope(
   regardless of which scenario filter the read carried.
 
   Renders the **lever grid** metric-style: one row per lever (authoring
-  order, ``item_type`` driving percent/days formatting), one period
-  column per horizon month, values from the mechanics' expanded
-  assertions. ``computed_months`` is filled from the scenario's derived
-  statement sets. No chart arm — the scenario's time-series surface is
-  the metric/statement blocks read with the scenario filter, not the
-  container itself.
+  order, ``item_type`` driving percent/days formatting), values from the
+  mechanics' expanded assertions. ``computed_months`` is filled from the
+  scenario's derived statement sets. No chart arm — the scenario's
+  time-series surface is the metric/statement blocks read with the
+  scenario filter, not the container itself.
+
+  Columns span the **closed months plus the horizon**, not the horizon
+  alone (:mod:`.forecast_history`): behind the seam each lever shows the
+  rate the book actually ran at, recovered by inverting its own Derive
+  rule against the month's actuals, so an assumption reads as one series
+  across the seam. Actual beats forecast at overlap — a horizon month
+  that has since closed renders its realized rate, never the stale
+  assertion made for it. ``periods[].forecast`` marks the forward
+  columns exactly as the statement series does; its presence anywhere in
+  this rendering is also what tells a client the envelope carries
+  history at all (pre-history envelopes never set the flag).
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -609,9 +622,30 @@ def build_envelope(
   )
   elements_by_id = {e.id: e for e in authored_elements}
 
-  months = [
+  horizon_months = [
     add_months(mechanics.base_period, i) for i in range(1, mechanics.horizon_months + 1)
   ]
+  # The realized side of the grid: each lever's rule inverted against the
+  # closed months' actuals, so an assumption reads as one series across
+  # the seam instead of starting from nothing at the horizon.
+  history = back_solve_lever_history(session, mechanics)
+  actual_months = set(history.months)
+  # Actual beats forecast at overlap — a horizon month that has since
+  # closed is history now, and its cell shows the rate the book ran at,
+  # not the rate that was asserted for it.
+  months = sorted(actual_months | set(horizon_months))
+  forecast_months = {month for month in horizon_months if month not in actual_months}
+
+  def lever_value(lever: LeverAssertionLite, month: str) -> float | None:
+    if month in forecast_months:
+      return lever.values_by_period.get(month)
+    return history.lever_values.get(lever.qname, {}).get(month)
+
+  def line_value(assertion: LineAssertionLite, month: str) -> float | None:
+    if month in forecast_months:
+      return assertion.values_by_period.get(month)
+    return history.line_values.get(assertion.element_id, {}).get(month)
+
   rows = [
     RenderingRowLite(
       element_id=lever.element_id,
@@ -623,7 +657,7 @@ def build_envelope(
       ),
       balance_type=None,
       item_type=lever.item_type,
-      values=[lever.values_by_period.get(month) for month in months],
+      values=[lever_value(lever, month) for month in months],
     )
     for lever in mechanics.levers
   ]
@@ -644,7 +678,7 @@ def build_envelope(
         else None
       ),
       item_type=assertion.item_type,
-      values=[assertion.values_by_period.get(month) for month in months],
+      values=[line_value(assertion, month) for month in months],
     )
     for assertion in mechanics.line_assertions
   )
@@ -654,6 +688,11 @@ def build_envelope(
       RenderingPeriodLite(
         start=period_date_range(month)[0],
         end=period_date_range(month)[1],
+        # The seam marker, same contract as the statement series: True
+        # only where the column is the scenario's own forward month.
+        # Absent on the realized months — and its presence anywhere is
+        # what tells a client this envelope carries history at all.
+        forecast=True if month in forecast_months else None,
       )
       for month in months
     ],
