@@ -479,20 +479,31 @@ def _facts_to_balance_dict_for_period(
   set to "debit" to keep ``_build_rows`` from re-applying sign
   conversion (it dispatches on balance_type when ``pre_signed=False``;
   with ``pre_signed=True`` the balance is returned as-is).
+
+  Multiple facts on the same ``element_id`` for the same period sum —
+  the fact-generation contract (see ``_derive_cash_flow_facts``) allows
+  it, and the stamped CF carries a derived ΔWC fact plus the
+  cash-reconciliation plug on the same operating leaf. Overwriting here
+  would drop the plug from the rendered cell while the stamped subtotal
+  still includes it, so the section stops footing.
   """
   balances: dict[str, _Balance] = {}
   for fact in facts:
     if fact.period_start == period_start and fact.period_end == period_end:
-      balances[fact.element_id] = _Balance(
-        element_id=fact.element_id,
-        qname=fact.element_qname,
-        name=fact.element_name,
-        classification=fact.classification,
-        balance_type="debit",
-        total_debits=0.0,
-        total_credits=0.0,
-        net_balance=fact.value,
-      )
+      existing = balances.get(fact.element_id)
+      if existing is None:
+        balances[fact.element_id] = _Balance(
+          element_id=fact.element_id,
+          qname=fact.element_qname,
+          name=fact.element_name,
+          classification=fact.classification,
+          balance_type="debit",
+          total_debits=0.0,
+          total_credits=0.0,
+          net_balance=fact.value,
+        )
+      else:
+        existing.net_balance += fact.value
   return balances
 
 

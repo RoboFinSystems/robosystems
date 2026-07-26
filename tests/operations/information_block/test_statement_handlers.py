@@ -508,6 +508,55 @@ class TestRenderingSkipsNonnumericFacts:
     assert rendering.rows == []
 
 
+class TestRenderingSumsDuplicateFacts:
+  def test_two_facts_on_same_element_and_period_sum_into_one_cell(self) -> None:
+    """The stamped CF can carry two facts on one operating leaf for the
+    same month — the derived ΔWC value plus the cash-reconciliation plug
+    from ``_reconcile_operating_to_cash``. The balance dict must sum them
+    (mirroring ``fact_grid._facts_to_balance_dict``); overwriting drops
+    the plug from the rendered cell while the stamped subtotal still
+    includes it, so the operating section stops footing."""
+    from types import SimpleNamespace
+
+    session = MagicMock()
+    session.execute.return_value = _exec_result(all_rows=[])
+
+    structure_id = "struct_cf_indirect"
+    element = SimpleNamespace(
+      id="elem_other_wc",
+      qname="rs-gaap:IncreaseDecreaseInOtherOperatingCapitalNet",
+      name="Other operating capital, net",
+      balance_type="debit",
+      is_abstract=False,
+    )
+    association = MagicMock()
+    association.association_type = "presentation"
+    association.from_element_id = structure_id
+    association.to_element_id = "elem_other_wc"
+    association.order_value = 0.0
+
+    def _fact(value: float) -> SimpleNamespace:
+      return SimpleNamespace(
+        element_id="elem_other_wc",
+        value=value,
+        period_start=date(2026, 3, 1),
+        period_end=date(2026, 3, 31),
+        period_type="duration",
+      )
+
+    rendering = statement_handlers._build_statement_rendering(
+      session,
+      elements=[element],  # type: ignore[list-item]
+      associations=[association],
+      facts=[_fact(-1000.00), _fact(-1819.25)],  # type: ignore[list-item]
+      structure_id=structure_id,
+      block_type="cash_flow_statement",
+    )
+
+    assert len(rendering.rows) == 1
+    assert rendering.rows[0].values == [pytest.approx(-2819.25)]
+
+
 class TestRenderingComposesCalcsCrossStructure:
   """Regression: rs-gaap ``arithmetic`` statement blocks carry only
   presentation arcs — their calc DAG lives in a sibling calculation
