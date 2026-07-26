@@ -29,6 +29,61 @@ router = APIRouter(tags=["Graph Health"])
 circuit_breaker = CircuitBreakerManager()
 timeout_coordinator = TimeoutCoordinator()
 
+# Below this on both axes the instance has obvious headroom.
+_IDLE_CEILING_PERCENT = 50.0
+
+
+def _resources_exposable(graph_id: str, graph_tier: str) -> bool:
+  """Whether instance CPU/memory may be shown to this graph's owner.
+
+  Safe only when the instance is genuinely single-tenant, so both checks are
+  required and neither is redundant:
+
+  - Shared repositories (e.g. sec) run one database per box but are read by
+    every tenant, so instance load leaks cross-tenant activity.
+  - A packed tier co-locates unrelated tenants by construction.
+
+  Driving the second check off the tier's ``databases_per_instance`` rather
+  than a tier allowlist means a future packed tier closes this automatically.
+  """
+  from robosystems.config.graph_tier import GraphTierConfig
+  from robosystems.middleware.graph.utils import MultiTenantUtils
+
+  if MultiTenantUtils.is_shared_repository(graph_id):
+    return False
+  return GraphTierConfig.get_databases_per_instance(graph_tier) == 1
+
+
+def _derive_resource_status(
+  cpu_percent: float | None,
+  memory_percent: float | None,
+  admission_control: dict,
+) -> str | None:
+  """Interpret raw load, so a normal workload doesn't read as a fault.
+
+  Materialization deliberately boosts to near the whole instance, so a high
+  memory reading is usually the engine working as designed. ``constrained``
+  is therefore anchored to the admission controller's own thresholds — the
+  point at which the node starts shedding work — rather than an arbitrary
+  number, so it means "actually worth acting on".
+  """
+  if cpu_percent is None and memory_percent is None:
+    return None
+
+  cpu = cpu_percent or 0.0
+  memory = memory_percent or 0.0
+
+  cpu_threshold = admission_control.get("cpu_threshold")
+  memory_threshold = admission_control.get("memory_threshold")
+  if (cpu_threshold and cpu >= cpu_threshold) or (
+    memory_threshold and memory >= memory_threshold
+  ):
+    return "constrained"
+
+  if cpu < _IDLE_CEILING_PERCENT and memory < _IDLE_CEILING_PERCENT:
+    return "idle"
+  return "busy"
+
 
 async def _get_graph_client(graph_id: str) -> GraphClient:
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
@@ -136,6 +191,34 @@ async def get_database_health(
         if is_stale:
           staleness_alert = ["Graph is stale — materialization recommended"]
 
+      # Instance CPU/memory, dedicated single-tenant instances only.
+      # Best-effort: a failure here must not fail the health check.
+      cpu_usage_percent = None
+      memory_usage_percent = None
+      memory_usage_mb = None
+      resource_status = None
+      if graph_record and _resources_exposable(graph_id, str(graph_record.graph_tier)):
+        try:
+          node_metrics = await asyncio.wait_for(
+            graph_client.get_metrics(), timeout=health_timeout
+          )
+          system = node_metrics.get("system", {})
+          memory = system.get("memory", {})
+          cpu = system.get("cpu", {})
+
+          memory_usage_percent = memory.get("usage_percent")
+          used_gb = memory.get("used_gb")
+          if used_gb is not None:
+            memory_usage_mb = round(used_gb * 1024, 1)
+          cpu_usage_percent = cpu.get("usage_percent")
+          resource_status = _derive_resource_status(
+            cpu_usage_percent,
+            memory_usage_percent,
+            node_metrics.get("admission_control", {}),
+          )
+        except Exception as e:
+          logger.debug(f"Could not fetch instance resources for {graph_id}: {e}")
+
       return DatabaseHealthResponse(
         graph_id=graph_id,
         status="degraded" if is_stale else ("healthy" if db_metrics else "unknown"),
@@ -145,7 +228,10 @@ async def get_database_health(
         query_count_24h=0,
         avg_query_time_ms=0.0,
         error_rate_24h=0.0,
-        memory_usage_mb=None,
+        memory_usage_mb=memory_usage_mb,
+        memory_usage_percent=memory_usage_percent,
+        cpu_usage_percent=cpu_usage_percent,
+        resource_status=resource_status,
         storage_usage_mb=db_metrics.get("size_mb"),
         alerts=staleness_alert,
         is_stale=is_stale,
