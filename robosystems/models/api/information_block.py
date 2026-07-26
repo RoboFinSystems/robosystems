@@ -656,6 +656,36 @@ class LineAssertionLite(BaseModel):
   )
 
 
+class LineGrowthLite(BaseModel):
+  """One statement line's persisted growth trajectory inside
+  ``ForecastMechanics``.
+
+  The generic per-line form of the revenue growth lever: grows an
+  income-statement leaf month-over-month at the asserted rate
+  (``line[t] = line[t-1] * (1 + rate[t])``), compounding from the base
+  month's value. Months without a rate keep the engine's carry-forward.
+  Duration leaves only; disjoint from ``line_assertions`` and from any
+  active catalog rule's target (one owner per line).
+
+  Persistence deviates from levers/assertions deliberately: rates are
+  NOT duplicated as facts in the scenario FactSet — a growth rate on a
+  monetary statement element would be a unit-lying fact. This mechanics
+  copy is the single authored store; ``compute-forecast`` binds rates
+  from here.
+  """
+
+  qname: str = Field(..., description="Grown statement-leaf qname.")
+  element_id: str = Field(..., description="Resolved tenant element id.")
+  item_type: str = Field(
+    "percent",
+    description="Always 'percent' — the grid row renders rates, not values.",
+  )
+  values_by_period: dict[str, float] = Field(
+    ...,
+    description="Expanded per-month growth rates keyed by ``YYYY-MM``.",
+  )
+
+
 class ForecastMechanics(BaseModel):
   """Authored scenario container for ``block_type='forecast'`` (FP&A F-1).
 
@@ -700,6 +730,14 @@ class ForecastMechanics(BaseModel):
       "Direct statement-line assertions (authoring order) — manual "
       "overrides that win over driver rules and carry-forward for the "
       "months they name."
+    ),
+  )
+  line_growth: list[LineGrowthLite] = Field(
+    default_factory=list,
+    description=(
+      "Per-line growth trajectories (authoring order) — each grows an "
+      "income-statement leaf month-over-month at the asserted rate, "
+      "compounding from the base month."
     ),
   )
   computed_months: int = Field(
