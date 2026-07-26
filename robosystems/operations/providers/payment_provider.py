@@ -112,11 +112,16 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
-  def get_upcoming_invoice(self, customer_id: str) -> dict[str, Any] | None:
-    """Get the upcoming invoice for a customer.
+  def get_upcoming_invoice(
+    self, customer_id: str, subscription_id: str
+  ) -> dict[str, Any] | None:
+    """Get the upcoming invoice for a customer's subscription.
 
     Args:
         customer_id: Provider customer ID
+        subscription_id: Provider subscription ID to preview. Required —
+            an upcoming invoice is a property of a subscription, not of a
+            customer, so there is nothing to preview without one.
 
     Returns:
         Upcoming invoice details or None if no upcoming invoice
@@ -602,11 +607,22 @@ class StripePaymentProvider(PaymentProvider):
       logger.error(f"Failed to list invoices: {e}", exc_info=True)
       raise
 
-  def get_upcoming_invoice(self, customer_id: str) -> dict[str, Any] | None:
-    """Get the upcoming invoice for a Stripe customer."""
+  def get_upcoming_invoice(
+    self, customer_id: str, subscription_id: str
+  ) -> dict[str, Any] | None:
+    """Get the upcoming invoice for a Stripe subscription.
+
+    `Invoice.create_preview` previews a *subscription*, not a customer.
+    Called with only `customer` it returns 400 every time — Stripe requires
+    one of subscription / schedule / subscription_details.items /
+    schedule_details.phases / invoice_items — so passing the subscription is
+    what makes this work at all, not an optimization.
+    """
     try:
       # v2026 API: Invoice.upcoming() replaced by Invoice.create_preview()
-      invoice = self.stripe.Invoice.create_preview(customer=customer_id)
+      invoice = self.stripe.Invoice.create_preview(
+        customer=customer_id, subscription=subscription_id
+      )
 
       if not invoice:
         return None
@@ -630,8 +646,14 @@ class StripePaymentProvider(PaymentProvider):
       }
 
     except self.stripe.error.InvalidRequestError as e:
-      # create_preview requires subscription/schedule params when none exist
-      logger.debug(f"No upcoming invoice for customer {customer_id}: {e}")
+      # Reachable when the subscription is in a state with nothing to bill
+      # (already canceled, fully credited). Logged at warning rather than
+      # debug: with the subscription supplied this should be rare, and the
+      # previous debug-level swallow is why a permanent 400 went unnoticed.
+      logger.warning(
+        f"No upcoming invoice for subscription {subscription_id}: {e}",
+        extra={"customer_id": customer_id, "subscription_id": subscription_id},
+      )
       return None
     except self.stripe.error.StripeError as e:
       logger.error(f"Failed to get upcoming invoice: {e}", exc_info=True)

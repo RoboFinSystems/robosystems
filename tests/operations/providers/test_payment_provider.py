@@ -453,7 +453,7 @@ class TestStripeInvoiceOperations:
     mock_invoice.lines = mock_lines
     stripe_provider.stripe.Invoice.create_preview.return_value = mock_invoice
 
-    result = stripe_provider.get_upcoming_invoice("cus_123")
+    result = stripe_provider.get_upcoming_invoice("cus_123", "sub_123")
 
     assert result["amount_due"] == 5999
     assert result["currency"] == "usd"
@@ -461,7 +461,7 @@ class TestStripeInvoiceOperations:
     assert len(result["lines"]) == 1
     assert result["lines"][0]["description"] == "Standard Plan - Monthly"
     stripe_provider.stripe.Invoice.create_preview.assert_called_once_with(
-      customer="cus_123"
+      customer="cus_123", subscription="sub_123"
     )
 
   def test_get_upcoming_invoice_none(self, stripe_provider):
@@ -483,7 +483,7 @@ class TestStripeInvoiceOperations:
       "No upcoming invoice"
     )
 
-    result = stripe_provider.get_upcoming_invoice("cus_123")
+    result = stripe_provider.get_upcoming_invoice("cus_123", "sub_123")
 
     assert result is None
 

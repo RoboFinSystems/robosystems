@@ -249,8 +249,17 @@ class TestGetUpcomingInvoice:
   @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
+  @patch(
+    "robosystems.routers.billing.invoices.BillingSubscription.get_active_subscriptions_for_org"
+  )
   async def test_get_upcoming_invoice_none(
-    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
+    self,
+    mock_get_subs,
+    mock_get_provider,
+    mock_get_customer,
+    mock_get_org_user,
+    mock_user,
+    mock_db,
   ):
     """Test getting upcoming invoice when none exists."""
     from robosystems.models.core import OrgRole
@@ -262,6 +271,10 @@ class TestGetUpcomingInvoice:
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
+
+    mock_sub = Mock()
+    mock_sub.stripe_subscription_id = "sub_123"
+    mock_get_subs.return_value = [mock_sub]
 
     mock_provider = Mock()
     mock_provider.get_upcoming_invoice.return_value = None
@@ -275,11 +288,105 @@ class TestGetUpcomingInvoice:
   @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
+  @patch(
+    "robosystems.routers.billing.invoices.BillingSubscription.get_active_subscriptions_for_org"
+  )
+  async def test_no_subscription_never_calls_stripe(
+    self,
+    mock_get_subs,
+    mock_get_provider,
+    mock_get_customer,
+    mock_get_org_user,
+    mock_user,
+    mock_db,
+  ):
+    """No subscription means nothing to preview — and no network call.
+
+    Stripe rejects a preview that names only a customer, so the previous
+    behaviour spent ~4s per billing page load to be told so.
+    """
+    from robosystems.models.core import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
+    mock_customer = Mock(spec=BillingCustomer)
+    mock_customer.stripe_customer_id = "cus_123"
+    mock_get_customer.return_value = mock_customer
+
+    mock_get_subs.return_value = []
+
+    result = await get_upcoming_invoice("org_123", mock_user, mock_db, None)
+
+    assert result is None
+    mock_get_provider.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
+  @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.invoices.get_payment_provider")
+  @patch(
+    "robosystems.routers.billing.invoices.BillingSubscription.get_active_subscriptions_for_org"
+  )
+  async def test_subscription_id_is_passed_to_the_provider(
+    self,
+    mock_get_subs,
+    mock_get_provider,
+    mock_get_customer,
+    mock_get_org_user,
+    mock_user,
+    mock_db,
+  ):
+    """The subscription is what makes the preview valid, so it must reach Stripe."""
+    from robosystems.models.core import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
+    mock_customer = Mock(spec=BillingCustomer)
+    mock_customer.stripe_customer_id = "cus_123"
+    mock_get_customer.return_value = mock_customer
+
+    # A subscription with no Stripe id (e.g. a local-only record) is skipped
+    # in favour of one that can actually be previewed.
+    unlinked = Mock()
+    unlinked.stripe_subscription_id = None
+    linked = Mock()
+    linked.stripe_subscription_id = "sub_abc"
+    mock_get_subs.return_value = [unlinked, linked]
+
+    mock_provider = Mock()
+    mock_provider.get_upcoming_invoice.return_value = None
+    mock_get_provider.return_value = mock_provider
+
+    await get_upcoming_invoice("org_123", mock_user, mock_db, None)
+
+    mock_provider.get_upcoming_invoice.assert_called_once_with("cus_123", "sub_abc")
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
+  @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.invoices.get_payment_provider")
+  @patch(
+    "robosystems.routers.billing.invoices.BillingSubscription.get_active_subscriptions_for_org"
+  )
   async def test_get_upcoming_invoice_success(
-    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
+    self,
+    mock_get_subs,
+    mock_get_provider,
+    mock_get_customer,
+    mock_get_org_user,
+    mock_user,
+    mock_db,
   ):
     """Test successful upcoming invoice retrieval."""
     from robosystems.models.core import OrgRole
+
+    mock_sub = Mock()
+    mock_sub.stripe_subscription_id = "sub_123"
+    mock_get_subs.return_value = [mock_sub]
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
@@ -323,11 +430,24 @@ class TestGetUpcomingInvoice:
   @patch("robosystems.models.core.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
+  @patch(
+    "robosystems.routers.billing.invoices.BillingSubscription.get_active_subscriptions_for_org"
+  )
   async def test_get_upcoming_invoice_with_multiple_line_items(
-    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
+    self,
+    mock_get_subs,
+    mock_get_provider,
+    mock_get_customer,
+    mock_get_org_user,
+    mock_user,
+    mock_db,
   ):
     """Test upcoming invoice with multiple line items."""
     from robosystems.models.core import OrgRole
+
+    mock_sub = Mock()
+    mock_sub.stripe_subscription_id = "sub_123"
+    mock_get_subs.return_value = [mock_sub]
 
     mock_org_user = Mock()
     mock_org_user.role = OrgRole.OWNER
