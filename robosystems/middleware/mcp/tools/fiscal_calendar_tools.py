@@ -535,6 +535,7 @@ class BackfillPlanHistoryTool:
 
 **IDEMPOTENT / SAFE:**
 - Months that already have canonical statement sets are never touched
+  (unless restamp=true — the deliberate healing pass that re-derives them)
 - Months holding draft entries are SKIPPED, never posted — the backfill
   refuses to commit ledger changes nobody reviewed (resolve via
   list-period-drafts + close-period, then re-run)
@@ -548,6 +549,10 @@ class BackfillPlanHistoryTool:
 - max_periods (optional, default 12, max 24): months to restamp this call.
 - allow_stale_sync (optional): override the sync gate on each reclose —
   rarely needed since historical months predate the last sync.
+- restamp (optional, default false): also re-derive months that already
+  have canonical sets — the healing pass after an engine improvement.
+  Advance start_period between chunks (a restamp run is not
+  self-resuming).
 - note (optional): attached to each close audit event.
 
 **RETURNS:**
@@ -589,6 +594,17 @@ class BackfillPlanHistoryTool:
               "sync in the normal case."
             ),
           },
+          "restamp": {
+            "type": "boolean",
+            "description": (
+              "Also re-derive months that ALREADY have canonical statement "
+              "sets (default false). The healing pass after an engine "
+              "improvement changes what a stamp produces. NOT self-resuming "
+              "— every month in range stays a candidate, so advance "
+              "start_period between chunks instead of looping on "
+              "remaining_periods."
+            ),
+          },
           "note": {
             "type": "string",
             "description": "Optional note attached to each close audit event",
@@ -610,6 +626,7 @@ class BackfillPlanHistoryTool:
       start_period=arguments.get("start_period"),
       max_periods=int(arguments.get("max_periods", 12)),
       allow_stale_sync=bool(arguments.get("allow_stale_sync", False)),
+      restamp=bool(arguments.get("restamp", False)),
       note=arguments.get("note"),
     )
     actor_id = getattr(self.client, "user_id", None) or f"mcp:{graph_id}"

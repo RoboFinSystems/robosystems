@@ -337,6 +337,23 @@ class TestBackfillPlanHistory:
     assert reopen_mock.call_count == 2
     assert close_mock.call_count == 2
 
+  def test_restamp_re_derives_already_stamped_months(self):
+    """restamp=true widens the walk to every month in range — the
+    healing pass after an engine improvement changes what a stamp
+    produces (e.g. the two-period CF derivation)."""
+    session = self._session(draft_counts=[0] * 4, fp_statuses=["closed"] * 4)
+    response, reopen_mock, close_mock = self._run(
+      session,
+      self._service(),
+      body=BackfillPlanHistoryRequest(restamp=True),
+      stamped_windows={"2025-11", "2025-12"},
+    )
+    attempted = [outcome.period for outcome in response.processed]
+    assert attempted == ["2025-11", "2025-12", "2026-01", "2026-02"]
+    assert all(o.status == "stamped" for o in response.processed)
+    assert reopen_mock.call_count == 4
+    assert close_mock.call_count == 4
+
   def test_chunking_respects_max_periods(self):
     session = self._session(draft_counts=[0, 0], fp_statuses=["closed", "closed"])
     response, _, close_mock = self._run(
