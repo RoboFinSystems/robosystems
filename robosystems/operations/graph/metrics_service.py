@@ -18,7 +18,6 @@ class GraphMetricsService:
 
   # Configuration constants
   DEFAULT_GRAPH_LIMIT = 5
-  DEFAULT_NODE_SIZE_ESTIMATE = 150  # bytes per node for size estimation
 
   def __init__(self):
     self.metrics_instance = get_endpoint_metrics()
@@ -47,7 +46,7 @@ class GraphMetricsService:
         "relationship_counts": await self._get_relationship_counts_by_type(repository),
         "total_nodes": 0,
         "total_relationships": 0,
-        "estimated_size": await self._estimate_database_size(repository),
+        "storage": await self._get_storage(graph_id),
         "health_status": await self._check_graph_health(repository),
       }
 
@@ -303,49 +302,39 @@ class GraphMetricsService:
         logger.warning(f"Fallback relationship count also failed: {fallback_e}")
         return {"_total": 0}  # Return 0 instead of string to avoid type issues
 
-  async def _estimate_database_size(self, repository) -> dict[str, Any]:
-    """Estimate database storage usage."""
+  async def _get_storage(self, graph_id: str) -> dict[str, Any]:
+    """Measured on-disk storage for a graph and everything it owns.
+
+    Replaces a ``node_count * 100 bytes`` heuristic that reported roughly
+    7 KB for a real 1 MB graph. The measure spans the LadybugDB databases,
+    vector indexes and staging file, so it reflects actual occupied disk
+    rather than a guess derived from node count.
+    """
+    from robosystems.graph_api.client.factory import GraphClientFactory
+
     try:
-      # Try to get database size information with fallback strategies
-      size_queries = [
-        # Try to get database size information (LadybugDB doesn't have JMX, skip this)
-        # "CALL dbms.queryJmx('...') YIELD attributes RETURN attributes",
-        # Simple fallback with estimation
-        "MATCH (n) RETURN count(n) as nodeCount, count(n) * 100 as estimatedBytes",
-      ]
-
-      for query in size_queries:
-        try:
-          result = await repository.execute_query(query)
-          records = list(result)
-          if records:
-            return {"size_info": dict(records[0]), "method": "database_query"}
-        except Exception as query_error:
-          logger.debug(f"Size query failed: {query_error}")
-          continue
-
-      # Final fallback - basic estimation
+      client = await GraphClientFactory.create_client(
+        graph_id=graph_id, operation_type="read"
+      )
       try:
-        result = await repository.execute_query("MATCH (n) RETURN count(n) as total")
-        node_count = result[0]["total"] if result else 0
-      except Exception as count_e:
-        logger.debug(f"Node count estimation failed: {count_e}")
-        node_count = 0
-      estimated_bytes = (
-        node_count * self.DEFAULT_NODE_SIZE_ESTIMATE
-      )  # Configurable estimate per node
+        breakdown = await client.get_storage_breakdown(graph_id)
+      finally:
+        await client.close()
 
+      total_bytes = breakdown.get("total_bytes", 0)
       return {
-        "estimated_bytes": estimated_bytes,
-        "estimated_kb": estimated_bytes / 1024,
-        "estimated_mb": estimated_bytes / (1024 * 1024),
-        "method": "estimation",
-        "note": "Based on node count estimation",
+        "total_bytes": total_bytes,
+        "total_kb": total_bytes / 1024,
+        "total_mb": total_bytes / (1024 * 1024),
+        "total_gb": total_bytes / (1024**3),
+        "items": breakdown.get("items", []),
       }
 
     except Exception as e:
-      logger.warning(f"Failed to estimate database size: {e}")
-      return {"error": "Unable to estimate size", "method": "failed"}
+      # Degrade to an absent measure rather than a fabricated one — a missing
+      # number is honest, a made-up number is what this replaced.
+      logger.warning(f"Failed to measure storage for {graph_id}: {e}")
+      return {"error": "Unable to measure storage"}
 
   async def _check_graph_health(self, repository) -> dict[str, Any]:
     """Check graph database health status."""
@@ -364,15 +353,15 @@ class GraphMetricsService:
       # Record node and relationship counts as gauges
       if "error" not in metrics:
         # Record graph metrics
-        estimated_size = metrics.get("estimated_size", {}).get("estimated_bytes", 0)
-        if not isinstance(estimated_size, int):
-          estimated_size = 0
+        storage_bytes = metrics.get("storage", {}).get("total_bytes", 0)
+        if not isinstance(storage_bytes, int):
+          storage_bytes = 0
 
         self.metrics_instance.record_graph_metrics(
           graph_id=graph_id,
           node_count=metrics.get("total_nodes", 0),
           relationship_count=metrics.get("total_relationships", 0),
-          estimated_size_bytes=estimated_size,
+          estimated_size_bytes=storage_bytes,
           additional_attributes={
             "node_label_count": len(metrics.get("node_counts", {})),
             "relationship_type_count": len(metrics.get("relationship_counts", {})),

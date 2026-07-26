@@ -18,7 +18,15 @@ class GraphMetricsResponse(BaseModel):
   relationship_counts: dict[str, int] = Field(
     ..., description="Relationship counts by type"
   )
-  estimated_size: dict[str, Any] = Field(..., description="Database size estimates")
+  storage: dict[str, Any] = Field(
+    ...,
+    description=(
+      "Measured on-disk storage: total_bytes/kb/mb/gb plus itemized `items` "
+      "(graph, memory, subgraph, vectors, staging). Carries `error` instead "
+      "if the instance could not be reached — the fields are absent rather "
+      "than estimated."
+    ),
+  )
   health_status: dict[str, Any] = Field(..., description="Database health information")
 
 
