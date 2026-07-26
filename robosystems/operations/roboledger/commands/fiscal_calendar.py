@@ -327,7 +327,9 @@ def backfill_plan_history(
 
   Seeds missing `FiscalPeriod` rows (baseline-closed) back to the
   clamped start, then walks every month in the range that lacks
-  canonical statement FactSets oldest-first, running the real
+  canonical statement FactSets oldest-first (``body.restamp`` widens
+  the walk to every month in range — the healing pass after an engine
+  improvement changes what a stamp produces), running the real
   `reopen_period` → `close_period` cycle on each — identical semantics
   to a manual restamp, so balance validation, statement rules, QB
   writeback guards, and audit events all apply per month.
@@ -395,7 +397,9 @@ def backfill_plan_history(
   current = start
   while current <= closed_through:
     ps, pe = period_date_range(current)
-    if not has_canonical_statement_sets(session, period_start=ps, period_end=pe):
+    if body.restamp or not has_canonical_statement_sets(
+      session, period_start=ps, period_end=pe
+    ):
       candidates.append(current)
     current = next_period(current)
 

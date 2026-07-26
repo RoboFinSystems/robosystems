@@ -180,7 +180,8 @@ class BackfillPlanHistoryRequest(BaseModel):
   Chunked: each call processes at most ``max_periods`` months (oldest
   first) and reports what's left in ``remaining_periods`` — loop until
   it comes back empty. Idempotent: months that already have canonical
-  sets are never touched, so re-running is safe.
+  sets are never touched, so re-running is safe (``restamp=true``
+  deliberately trades this away to re-derive existing sets).
 
   The backfill never reaches past the tenant's earliest ledger data —
   ``start_period`` is clamped to the first month with entries.
@@ -213,6 +214,17 @@ class BackfillPlanHistoryRequest(BaseModel):
       "rarely needed."
     ),
   )
+  restamp: bool = Field(
+    False,
+    description=(
+      "Also re-derive months that ALREADY have canonical statement "
+      "sets (default: skip them). Use after an engine improvement "
+      "changes what a stamp produces — each month reruns the full "
+      "reopen → reclose cycle and replaces its sets. A restamp run is "
+      "not self-resuming (every month in range stays a candidate); "
+      "advance `start_period` between chunks."
+    ),
+  )
   note: str | None = Field(
     None, description="Free-form note attached to each close audit event"
   )
@@ -222,6 +234,7 @@ class BackfillPlanHistoryRequest(BaseModel):
       "examples": [
         {},
         {"start_period": "2019-07", "max_periods": 12},
+        {"restamp": True, "start_period": "2024-08", "max_periods": 12},
       ]
     }
   )

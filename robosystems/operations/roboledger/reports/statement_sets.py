@@ -31,6 +31,7 @@ lazy-import posture toward information-block machinery.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, text
@@ -524,6 +525,16 @@ def stamp_canonical_statement_sets(
   the disclosure picker out — text-block snapshots and disclosure
   membership are publication concerns that stay in ``create_report``).
 
+  The pivot runs over TWO periods — the prior calendar month plus the
+  close month — so the indirect cash flow articulates: operating CF
+  leaves derive from month-over-month BS deltas and the statement foots
+  to the actual ΔCash via the reconciling plug, exactly the
+  ``create_report`` / forecast doctrine. Only the close month's facts
+  are stamped. A close month with no prior ledger activity deltas
+  against zero balances — correct for a book's genuinely first month —
+  and a backfill's clamped seed month deltas against the ledger's true
+  prior-month balances even when that month was never itself stamped.
+
   Two-zone failure semantics:
 
   - **Soft-skip** (returns ``stamped=False`` with a note): the tenant
@@ -576,15 +587,28 @@ def stamp_canonical_statement_sets(
     return StatementStampResult(stamped=False, note="no_taxonomy")
 
   period_label = period_end.strftime("%Y-%m")
+  # The prior month rides the pivot as the indirect-CF delta basis: the
+  # working-capital derivation (``_derive_cash_flow_facts``) and the
+  # cash foot (``_reconcile_operating_to_cash``) both no-op below two
+  # periods, which is why single-period stamps used to mint a CF of
+  # NetIncome + DDA that never tied to the actual cash movement. Only
+  # the close month's facts are stamped — the prior month's are dropped
+  # after derivation (its own canonical sets, if any, are untouched).
+  prior_end = period_start - timedelta(days=1)
+  prior_start = prior_end.replace(day=1)
   try:
     close_target = load_close_target_concept(session, reporting_style_id)
     facts = generate_report_facts(
       session=session,
       taxonomy_id=taxonomy_row.id,
       mapping_id=mapping.id,
-      periods=[PeriodSpec(start=period_start, end=period_end, label=period_label)],
+      periods=[
+        PeriodSpec(start=prior_start, end=prior_end, label=prior_end.strftime("%Y-%m")),
+        PeriodSpec(start=period_start, end=period_end, label=period_label),
+      ],
       close_target_qname=close_target,
     )
+    facts.facts = [f for f in facts.facts if f.period_end == period_end]
     retract_canonical_statement_sets(
       session, period_start=period_start, period_end=period_end
     )
