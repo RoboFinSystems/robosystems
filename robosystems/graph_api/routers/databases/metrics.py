@@ -15,6 +15,7 @@ from fastapi import Path as PathParam
 from fastapi import status as http_status
 
 from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.core.storage_breakdown import compute_storage_breakdown
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
@@ -101,4 +102,32 @@ async def get_database_metrics(
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to retrieve database metrics",
+    )
+
+
+@router.get("/{graph_id}/storage")
+async def get_database_storage(
+  graph_id: str = PathParam(..., description="Graph database identifier"),
+) -> dict[str, Any]:
+  """
+  Get itemized disk usage for a graph and everything it owns.
+
+  Spans all three instance-local roots — the LadybugDB databases (graph,
+  memory, subgraphs, and their write-ahead logs), the LanceDB vector indexes,
+  and the DuckDB staging file — so the total reflects real occupied disk
+  rather than the primary database alone.
+
+  Returns `total_bytes` plus per-item `{type, id, bytes}`, where type is one
+  of graph, memory, subgraph, vectors, staging. S3 backups are off-instance
+  and excluded.
+  """
+  try:
+    return compute_storage_breakdown(graph_id)
+  except HTTPException:
+    raise
+  except Exception as e:
+    logger.error(f"Failed to compute storage breakdown for {graph_id}: {e!s}")
+    raise HTTPException(
+      status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+      detail="Failed to retrieve storage breakdown",
     )

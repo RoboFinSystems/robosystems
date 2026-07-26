@@ -23,6 +23,7 @@ import ladybug as lbug
 from fastapi import HTTPException, status
 
 from robosystems.config import env
+from robosystems.graph_api.core.storage_breakdown import path_size_bytes
 from robosystems.graph_api.models.database import (
   DatabaseCreateRequest,
   DatabaseCreateResponse,
@@ -545,7 +546,10 @@ class LadybugDatabaseManager:
       )
 
     try:
-      size_bytes = db_path.stat().st_size if db_path.is_file() else 0
+      # A LadybugDB database is a single file in some engine versions and a
+      # directory in others. Sizing only the file case reported 0 for every
+      # directory-shaped database, which is why storage read as empty.
+      size_bytes = path_size_bytes(db_path)
       created_at = datetime.fromtimestamp(db_path.stat().st_ctime).isoformat()
       database_path = str(db_path)
 

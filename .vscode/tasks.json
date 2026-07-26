@@ -54,6 +54,13 @@
       "problemMatcher": []
     },
     {
+      "label": "RoboSystems Upgrade",
+      "type": "shell",
+      "command": "just",
+      "args": ["upgrade", "${input:profileDocker}"],
+      "problemMatcher": []
+    },
+    {
       "label": "RoboSystems Clone Apps",
       "type": "shell",
       "command": "just",

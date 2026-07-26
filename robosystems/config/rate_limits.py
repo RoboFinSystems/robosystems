@@ -362,10 +362,12 @@ class RateLimitConfig:
           return EndpointCategory.TABLE_QUERY
         return EndpointCategory.GRAPH_QUERY
 
-      # Usage analytics — aggregation-heavy reads get a dedicated bucket
-      # (the endpoint segment is "analytics"; this previously checked
-      # `endpoint_type == "graph"` and never matched).
-      elif endpoint_type == "analytics":
+      # Content metrics + consumption usage — aggregation-heavy reads get a
+      # dedicated bucket. Match the endpoint segment, which is what actually
+      # appears in the path: this checked `endpoint_type == "graph"` once and
+      # never matched, then "analytics" until those routes were renamed to
+      # /metrics and /usage. Keep this in step with routers/graphs/usage.py.
+      elif endpoint_type in ("metrics", "usage"):
         return EndpointCategory.GRAPH_ANALYTICS
 
       # Graph lifecycle operations — POST /operations/{op_name}. Dedicated

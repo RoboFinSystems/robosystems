@@ -1,4 +1,13 @@
-"""Graph usage analytics and monitoring API endpoints."""
+"""Graph content metrics and consumption usage API endpoints.
+
+Two distinct questions, two routes:
+
+- ``GET /metrics`` — what is *in* the graph (node/relationship counts, size, health)
+- ``GET /usage`` — what the graph *consumed* (storage, credits, performance, events)
+
+Neither is analytics. "Analytics" is reserved for the BI surface; these routes were
+renamed off ``/analytics`` so they stop squatting on it.
+"""
 
 import asyncio
 import time
@@ -39,18 +48,21 @@ from robosystems.operations.graph.metrics_service import GraphMetricsService
 
 router = APIRouter(tags=["Usage"])
 
+_METRICS_ENDPOINT = "/v1/graphs/{graph_id}/metrics"
+_USAGE_ENDPOINT = "/v1/graphs/{graph_id}/usage"
+
 graph_metrics_service = GraphMetricsService()
 
 
 @router.get(
-  "",
+  "/metrics",
   response_model=GraphMetricsResponse,
   summary="Get Graph Metrics",
   operation_id="getGraphMetrics",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
-  endpoint_name="/v1/graphs/{graph_id}/analytics",
+  endpoint_name=_METRICS_ENDPOINT,
   business_event_type="graph_metrics_accessed",
 )
 async def get_graph_metrics(
@@ -74,7 +86,7 @@ async def get_graph_metrics(
     operation_type=OperationType.ANALYTICS_QUERY,
     status=OperationStatus.SUCCESS,
     duration_ms=0.0,
-    endpoint="/v1/graphs/{graph_id}/analytics",
+    endpoint=_METRICS_ENDPOINT,
     graph_id=graph_id,
     user_id=current_user.id,
     operation_name="get_graph_metrics",
@@ -98,7 +110,7 @@ async def get_graph_metrics(
     )
 
     operation_logger.log_external_service_call(
-      endpoint="/v1/graphs/{graph_id}/analytics",
+      endpoint=_METRICS_ENDPOINT,
       service_name="graph_metrics_service",
       operation="collect_comprehensive_metrics",
       duration_ms=0.0,
@@ -123,7 +135,7 @@ async def get_graph_metrics(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/analytics",
+      endpoint=_METRICS_ENDPOINT,
       method="GET",
       event_type="graph_metrics_accessed",
       event_data={
@@ -142,7 +154,7 @@ async def get_graph_metrics(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.SUCCESS,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/analytics",
+      endpoint=_METRICS_ENDPOINT,
       graph_id=graph_id,
       user_id=current_user.id,
       operation_name="get_graph_metrics",
@@ -165,7 +177,7 @@ async def get_graph_metrics(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/analytics",
+      endpoint=_METRICS_ENDPOINT,
       graph_id=graph_id,
       user_id=current_user.id,
       operation_name="get_graph_metrics",
@@ -190,7 +202,7 @@ async def get_graph_metrics(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/analytics",
+      endpoint=_METRICS_ENDPOINT,
       graph_id=graph_id,
       user_id=current_user.id,
       operation_name="get_graph_metrics",
@@ -208,7 +220,7 @@ async def get_graph_metrics(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/analytics",
+      endpoint=_METRICS_ENDPOINT,
       graph_id=graph_id,
       user_id=current_user.id,
       operation_name="get_graph_metrics",
@@ -231,16 +243,16 @@ async def get_graph_metrics(
 @router.get(
   "/usage",
   response_model=GraphUsageResponse,
-  summary="Get Graph Usage Analytics",
+  summary="Get Graph Usage",
   description="Time ranges: 24h, 7d, 30d, current_month, last_month. Toggle storage, credits, performance, and events sections via query params.",
-  operation_id="getGraphUsageAnalytics",
+  operation_id="getGraphUsage",
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 @endpoint_metrics_decorator(
-  endpoint_name="/v1/graphs/{graph_id}/usage",
+  endpoint_name=_USAGE_ENDPOINT,
   business_event_type="graph_usage_accessed",
 )
-async def get_graph_usage_analytics(
+async def get_graph_usage(
   graph_id: str = Path(
     ...,
     description="The graph ID to get usage analytics for",
@@ -272,7 +284,7 @@ async def get_graph_usage_analytics(
     operation_type=OperationType.ANALYTICS_QUERY,
     status=OperationStatus.SUCCESS,
     duration_ms=0.0,
-    endpoint="/v1/graphs/{graph_id}/usage",
+    endpoint=_USAGE_ENDPOINT,
     graph_id=graph_id,
     user_id=current_user.id,
     operation_name="get_usage_analytics",
@@ -301,7 +313,7 @@ async def get_graph_usage_analytics(
     )
 
     operation_logger.log_external_service_call(
-      endpoint="/v1/graphs/{graph_id}/usage",
+      endpoint=_USAGE_ENDPOINT,
       service_name="graph_usage",
       operation="query_usage_analytics",
       duration_ms=0.0,
@@ -397,7 +409,7 @@ async def get_graph_usage_analytics(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/usage",
+      endpoint=_USAGE_ENDPOINT,
       method="GET",
       event_type="graph_usage_accessed",
       event_data={
@@ -418,7 +430,7 @@ async def get_graph_usage_analytics(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.SUCCESS,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/usage",
+      endpoint=_USAGE_ENDPOINT,
       graph_id=graph_id,
       user_id=current_user.id,
       operation_name="get_usage_analytics",
@@ -446,7 +458,7 @@ async def get_graph_usage_analytics(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/usage",
+      endpoint=_USAGE_ENDPOINT,
       graph_id=graph_id,
       user_id=current_user.id,
       operation_name="get_usage_analytics",
@@ -472,7 +484,7 @@ async def get_graph_usage_analytics(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/usage",
+      endpoint=_USAGE_ENDPOINT,
       graph_id=graph_id,
       user_id=current_user.id,
       operation_name="get_usage_analytics",
@@ -491,7 +503,7 @@ async def get_graph_usage_analytics(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/usage",
+      endpoint=_USAGE_ENDPOINT,
       graph_id=graph_id,
       user_id=current_user.id,
       operation_name="get_usage_analytics",

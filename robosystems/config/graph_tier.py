@@ -174,6 +174,25 @@ class GraphTierConfig:
     return instance_config.get("memory_per_db_mb", 2048)
 
   @classmethod
+  def get_databases_per_instance(cls, tier: str, environment: str | None = None) -> int:
+    """Get how many graph databases share one instance for a tier.
+
+    1 means the tier is dedicated (single-tenant per box); >1 means packed.
+    This is the packing property of the *product tier*, distinct from the
+    dev-only ``LBUG_DATABASES_PER_INSTANCE`` allocation override.
+
+    Args:
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
+        environment: Environment (defaults to current env)
+
+    Returns:
+        Databases co-located on one instance (defaults to 1 = dedicated)
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    instance_config = tier_config.get("instance", {})
+    return instance_config.get("databases_per_instance", 1)
+
+  @classmethod
   def get_max_memory_mb(cls, tier: str, environment: str | None = None) -> int:
     """Get total memory allocation for a tier.
 

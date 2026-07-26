@@ -1292,6 +1292,23 @@ class GraphClient(BaseGraphClient):
     response = await self._request("GET", f"/databases/{graph_id}/backup")
     return response.content
 
+  async def get_storage_breakdown(self, graph_id: str) -> dict[str, Any]:
+    """
+    Get itemized disk usage for a graph and everything it owns.
+
+    Covers the LadybugDB databases (graph, memory, subgraphs, WALs), the
+    LanceDB vector indexes and the DuckDB staging file — so the total is
+    real occupied disk, not just the primary database.
+
+    Args:
+        graph_id: Parent graph to measure
+
+    Returns:
+        ``{graph_id, total_bytes, items: [{type, id, bytes}]}``
+    """
+    response = await self._request("GET", f"/databases/{graph_id}/storage")
+    return response.json()
+
   async def get_database_info(self, graph_id: str) -> dict[str, Any]:
     """
     Get comprehensive database information and statistics.

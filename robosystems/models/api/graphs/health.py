@@ -31,7 +31,38 @@ class DatabaseHealthResponse(BaseModel):
     ..., description="Error rate in last 24 hours (percentage)", examples=[0.5]
   )
   memory_usage_mb: float | None = Field(
-    None, description="Memory usage in MB", examples=[512.3]
+    None,
+    description=(
+      "Instance memory in use, MB. Only populated for dedicated "
+      "single-tenant instances; null on shared repositories and packed tiers."
+    ),
+    examples=[512.3],
+  )
+  memory_usage_percent: float | None = Field(
+    None,
+    description=(
+      "Instance memory in use, percent. Expect high values during "
+      "materialization — the engine deliberately boosts to near the whole "
+      "instance while rebuilding. Read `resource_status` rather than this "
+      "number alone. Dedicated instances only."
+    ),
+    examples=[41.8],
+  )
+  cpu_usage_percent: float | None = Field(
+    None,
+    description=(
+      "Instance CPU in use, percent. Dedicated single-tenant instances only."
+    ),
+    examples=[12.4],
+  )
+  resource_status: str | None = Field(
+    None,
+    description=(
+      "Interpreted instance load: 'idle' (headroom), 'busy' (working "
+      "normally — typical while materializing), 'constrained' (sustained "
+      "pressure worth acting on). Null when resource metrics are not exposed."
+    ),
+    examples=["idle"],
   )
   storage_usage_mb: float | None = Field(
     None, description="Storage usage in MB", examples=[1024.7]

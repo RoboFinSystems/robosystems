@@ -87,7 +87,9 @@ router.include_router(
 )  # No prefix - handled in the operator module itself
 router.include_router(mcp_router, prefix="/mcp")
 router.include_router(backups_router, prefix="/backups")
-router.include_router(usage_router, prefix="/analytics")
+router.include_router(
+  usage_router
+)  # No prefix - handles /metrics and /usage internally
 router.include_router(query_router)  # No prefix - handled in the query module itself
 router.include_router(schema_router)  # No prefix - handled in the schema module itself
 router.include_router(credits_router)  # Already has /credits prefix

@@ -95,8 +95,11 @@ async def get_database_info(
 
       logger.debug(f"Database info retrieved for graph {graph_id}")
 
-      # Calculate derived fields
-      database_size_bytes = info_result.get("database_size_bytes", 0)
+      # Calculate derived fields. The Graph API emits `size_bytes`; reading
+      # `database_size_bytes` here meant this always reported 0. This stays a
+      # lightweight single-database summary — see /limits for the itemized,
+      # instance-wide total that includes memory, vectors and staging.
+      database_size_bytes = info_result.get("size_bytes", 0)
       database_size_mb = round(database_size_bytes / (1024 * 1024), 2)
 
       return DatabaseInfoResponse(
