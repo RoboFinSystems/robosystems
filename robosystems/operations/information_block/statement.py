@@ -59,6 +59,7 @@ from robosystems.operations.information_block.envelope import (
   load_base_envelope_atoms,
   load_disclosure_id_for_structure,
   load_statement_fact_set_series,
+  window_series_sets,
 )
 from robosystems.operations.roboledger.reports.fact_grid import (
   FactRow,
@@ -98,6 +99,8 @@ def _build_statement_envelope(
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
   series: bool = False,
+  series_history: int | None = None,
+  series_forecast: int | None = None,
   *,
   block_type: str,
 ) -> InformationBlockEnvelope | None:
@@ -134,6 +137,15 @@ def _build_statement_envelope(
   annual report's comparative facts can't leak into a monthly column.
   An explicit ``fact_set_id`` pin bypasses series mode (a snapshot is
   a single set by definition).
+
+  **Series window.** ``series_history`` / ``series_forecast`` trim the
+  series to its seam-adjacent columns BEFORE facts load — the last N
+  actual columns and the first N forecast columns
+  (:func:`envelope.window_series_sets`). ``None`` = unbounded (the
+  pre-window behavior), so existing callers are untouched; the Plan
+  page passes its visible window so a deep-history tenant's envelope
+  stays proportional to what's on screen rather than to the ledger's
+  age.
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -153,6 +165,7 @@ def _build_statement_envelope(
   facts: list[Fact] = []
   if element_ids and series_mode:
     series_sets = load_statement_fact_set_series(session, structure_id, scenario_id)
+    series_sets = window_series_sets(series_sets, series_history, series_forecast)
     forecast_period_ends = {
       fs.period_end for fs in series_sets if fs.scenario_id is not None
     }

@@ -432,6 +432,39 @@ def load_statement_fact_set_series(
   return [fact_set_to_lite(row) for row in by_period_end.values()]
 
 
+def window_series_sets(
+  series_sets: list[FactSetLite],
+  history: int | None,
+  forecast: int | None,
+) -> list[FactSetLite]:
+  """Trim a collapsed statement series to its seam-adjacent window.
+
+  ``history`` keeps the LAST N actual columns (``scenario_id`` None —
+  the months nearest the close boundary); ``forecast`` keeps the FIRST
+  N forecast columns (the months nearest the seam). ``None`` leaves
+  that side unbounded, so ``(None, None)`` is the identity — existing
+  callers see the full series unchanged. Column order (ascending
+  ``period_end``, the :func:`load_statement_fact_set_series` contract)
+  is preserved.
+
+  Counts are COLUMNS, not calendar months: post-backfill the actual
+  series is monthly so they coincide, but an annual-only tenant's
+  ``history=12`` keeps twelve annual columns rather than one year.
+  """
+  if history is None and forecast is None:
+    return series_sets
+  if (history is not None and history < 0) or (forecast is not None and forecast < 0):
+    raise ValueError("series window counts must be >= 0")
+  actuals = [fs for fs in series_sets if fs.scenario_id is None]
+  forecasts = [fs for fs in series_sets if fs.scenario_id is not None]
+  if history is not None:
+    actuals = actuals[-history:] if history > 0 else []
+  if forecast is not None:
+    forecasts = forecasts[:forecast]
+  keep = {fs.id for fs in actuals} | {fs.id for fs in forecasts}
+  return [fs for fs in series_sets if fs.id in keep]
+
+
 def _drop_covering_windows(rows: list) -> list:
   """Drop sets whose window strictly contains another loaded set's window.
 

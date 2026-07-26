@@ -78,7 +78,13 @@ class TestGetInformationBlock:
       result = get_information_block(session, "struct_1")
     assert result is expected
     mock_build.assert_called_once_with(
-      session, "struct_1", None, scenario_id=None, series=False
+      session,
+      "struct_1",
+      None,
+      scenario_id=None,
+      series=False,
+      series_history=None,
+      series_forecast=None,
     )
 
   def test_series_threads_through_dispatch(self) -> None:
@@ -92,10 +98,21 @@ class TestGetInformationBlock:
     patched = _schedule_entry_with_build(mock_build)
     with patch.dict(REGISTRY_PATH, {"schedule": patched}):
       get_information_block(
-        session, "struct_1", scenario_id="struct_budget", series=True
+        session,
+        "struct_1",
+        scenario_id="struct_budget",
+        series=True,
+        series_history=12,
+        series_forecast=6,
       )
     mock_build.assert_called_once_with(
-      session, "struct_1", None, scenario_id="struct_budget", series=True
+      session,
+      "struct_1",
+      None,
+      scenario_id="struct_budget",
+      series=True,
+      series_history=12,
+      series_forecast=6,
     )
 
 
@@ -323,5 +340,11 @@ class TestGetInformationBlockForFactSet:
 
     assert result is expected
     mock_build.assert_called_once_with(
-      session, "struct_1", "fs_01", scenario_id=None, series=False
+      session,
+      "struct_1",
+      "fs_01",
+      scenario_id=None,
+      series=False,
+      series_history=None,
+      series_forecast=None,
     )

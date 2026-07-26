@@ -157,6 +157,97 @@ class TestLoadLatestFactSetForStructure:
     assert lite.scenario_id is None
 
 
+class TestWindowSeriesSets:
+  """Seam-adjacent series windowing — the §11 #11 server-side trim.
+
+  ``history`` keeps the LAST N actual columns; ``forecast`` keeps the
+  FIRST N forecast columns; ``None`` = unbounded on that side.
+  """
+
+  @staticmethod
+  def _series() -> list:
+    """5 actual months (Jan..May) + 3 forecast months (Jun..Aug), ascending."""
+    from robosystems.operations.information_block.envelope import fact_set_to_lite
+
+    sets = []
+    for month in range(1, 6):
+      sets.append(
+        fact_set_to_lite(
+          _make_fact_set(
+            fs_id=f"fs_a{month}",
+            period_start=date(2026, month, 1),
+            period_end=date(2026, month, 28),
+          )
+        )
+      )
+    for month in range(6, 9):
+      sets.append(
+        fact_set_to_lite(
+          _make_fact_set(
+            fs_id=f"fs_f{month}",
+            period_start=date(2026, month, 1),
+            period_end=date(2026, month, 28),
+            scenario_id="struct_budget",
+          )
+        )
+      )
+    return sets
+
+  def test_unbounded_is_identity(self) -> None:
+    from robosystems.operations.information_block.envelope import window_series_sets
+
+    series = self._series()
+    assert window_series_sets(series, None, None) is series
+
+  def test_history_keeps_last_n_actuals(self) -> None:
+    from robosystems.operations.information_block.envelope import window_series_sets
+
+    kept = window_series_sets(self._series(), 2, None)
+    assert [fs.id for fs in kept] == ["fs_a4", "fs_a5", "fs_f6", "fs_f7", "fs_f8"]
+
+  def test_forecast_keeps_first_n_forecasts(self) -> None:
+    from robosystems.operations.information_block.envelope import window_series_sets
+
+    kept = window_series_sets(self._series(), None, 1)
+    assert [fs.id for fs in kept] == [
+      "fs_a1",
+      "fs_a2",
+      "fs_a3",
+      "fs_a4",
+      "fs_a5",
+      "fs_f6",
+    ]
+
+  def test_combined_window_preserves_ascending_order(self) -> None:
+    from robosystems.operations.information_block.envelope import window_series_sets
+
+    kept = window_series_sets(self._series(), 3, 2)
+    assert [fs.id for fs in kept] == ["fs_a3", "fs_a4", "fs_a5", "fs_f6", "fs_f7"]
+
+  def test_zero_history_is_forecast_only(self) -> None:
+    from robosystems.operations.information_block.envelope import window_series_sets
+
+    kept = window_series_sets(self._series(), 0, None)
+    assert [fs.id for fs in kept] == ["fs_f6", "fs_f7", "fs_f8"]
+
+  def test_oversized_windows_keep_everything(self) -> None:
+    from robosystems.operations.information_block.envelope import window_series_sets
+
+    series = self._series()
+    kept = window_series_sets(series, 100, 100)
+    assert [fs.id for fs in kept] == [fs.id for fs in series]
+
+  def test_negative_counts_raise(self) -> None:
+    import pytest
+
+    from robosystems.operations.information_block.envelope import window_series_sets
+
+    with pytest.raises(ValueError):
+      window_series_sets(self._series(), -1, None)
+    with pytest.raises(ValueError):
+      window_series_sets(self._series(), None, -1)
+
+
 class TestLoadStatementFactSetSeries:
   """The F-4 series loader — every report set as one column, with the
   actuals-preferred seam and the narrower-window-wins collapse."""

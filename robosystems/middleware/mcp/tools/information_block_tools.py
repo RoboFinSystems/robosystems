@@ -60,6 +60,10 @@ class GetInformationBlockTool:
   time series — one column per period; combined with scenario_id the
   columns cross the actuals/forecast seam (forecast columns carry
   periods[].forecast = true). Non-statement block types ignore it
+- series_history / series_forecast (optional): Window the series to its
+  seam-adjacent columns — the last N actual columns and the first N
+  forecast columns. Omitted = unbounded. Prefer a window on deep-history
+  tenants: an unbounded series envelope grows with the ledger's age
 
 **RETURNS:**
 A typed envelope with:
@@ -99,6 +103,22 @@ were retired in favor of this pair.""",
               "forecast seam)."
             ),
           },
+          "series_history": {
+            "type": "integer",
+            "minimum": 0,
+            "description": (
+              "With series: keep only the last N actual columns "
+              "(nearest the close boundary). Omitted = all history."
+            ),
+          },
+          "series_forecast": {
+            "type": "integer",
+            "minimum": 0,
+            "description": (
+              "With series: keep only the first N forecast columns "
+              "(nearest the seam). Omitted = the full horizon."
+            ),
+          },
         },
         "required": ["id"],
       },
@@ -109,11 +129,18 @@ were retired in favor of this pair.""",
     block_id = arguments["id"]
     scenario_id = arguments.get("scenario_id")
     series = bool(arguments.get("series", False))
+    series_history = arguments.get("series_history")
+    series_forecast = arguments.get("series_forecast")
 
     try:
       with extensions_session(graph_id) as session:
         envelope = ops_get_information_block(
-          session, block_id, scenario_id=scenario_id, series=series
+          session,
+          block_id,
+          scenario_id=scenario_id,
+          series=series,
+          series_history=int(series_history) if series_history is not None else None,
+          series_forecast=int(series_forecast) if series_forecast is not None else None,
         )
         if envelope is None:
           return {

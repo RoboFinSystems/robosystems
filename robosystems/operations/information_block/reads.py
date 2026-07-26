@@ -29,6 +29,8 @@ def get_information_block(
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
   series: bool = False,
+  series_history: int | None = None,
+  series_forecast: int | None = None,
 ) -> InformationBlockEnvelope | None:
   """Fetch one block by id, dispatching via the structure's block_type.
 
@@ -51,6 +53,12 @@ def get_information_block(
   when combined with ``scenario_id`` (the F-4 statement-series
   projection). Non-statement block types accept and ignore it (metric
   envelopes are always the full series).
+
+  ``series_history`` / ``series_forecast`` window the series to its
+  seam-adjacent columns — the last N actual columns and the first N
+  forecast columns; ``None`` = unbounded. Only meaningful with
+  ``series=True`` on statement-family blocks; other block types accept
+  and ignore them (signature parity).
   """
   structure = session.get(Structure, structure_id)
   if structure is None:
@@ -63,7 +71,13 @@ def get_information_block(
     # be built.
     return None
   return entry.dispatch_build_envelope(
-    session, structure_id, fact_set_id, scenario_id=scenario_id, series=series
+    session,
+    structure_id,
+    fact_set_id,
+    scenario_id=scenario_id,
+    series=series,
+    series_history=series_history,
+    series_forecast=series_forecast,
   )
 
 

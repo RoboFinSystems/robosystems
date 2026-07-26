@@ -104,6 +104,8 @@ def build_envelope(
   fact_set_id: str | None = None,
   scenario_id: str | None = None,
   series: bool = False,
+  series_history: int | None = None,
+  series_forecast: int | None = None,
 ) -> InformationBlockEnvelope | None:
   """Pack a metric Structure + its standing time series into the envelope.
 
