@@ -1,4 +1,4 @@
-"""Graph query API models."""
+"""Graph metrics and usage API models."""
 
 from typing import Any
 

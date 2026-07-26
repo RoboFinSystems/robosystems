@@ -91,33 +91,6 @@ def translate_neo4j_to_lbug(query: str) -> str:
     return translated
 
 
-class GraphMetricsResponse(BaseModel):
-  """Response model for graph metrics."""
-
-  graph_id: str = Field(..., description="Graph database identifier")
-  graph_name: str | None = Field(None, description="Display name for the graph")
-  user_role: str | None = Field(None, description="User's role in this graph")
-  timestamp: str = Field(..., description="Metrics collection timestamp")
-  total_nodes: int = Field(..., description="Total number of nodes")
-  total_relationships: int = Field(..., description="Total number of relationships")
-  node_counts: dict[str, int] = Field(..., description="Node counts by label")
-  relationship_counts: dict[str, int] = Field(
-    ..., description="Relationship counts by type"
-  )
-  estimated_size: dict[str, Any] = Field(..., description="Database size estimates")
-  health_status: dict[str, Any] = Field(..., description="Database health information")
-
-
-class GraphUsageResponse(BaseModel):
-  """Response model for graph usage statistics."""
-
-  graph_id: str = Field(..., description="Graph database identifier")
-  storage_usage: dict[str, Any] = Field(..., description="Storage usage information")
-  query_statistics: dict[str, Any] = Field(..., description="Query statistics")
-  recent_activity: dict[str, Any] = Field(..., description="Recent activity summary")
-  timestamp: str = Field(..., description="Usage collection timestamp")
-
-
 class CypherStatementRequest(BaseModel):
   """Request model for Cypher query execution."""
 
