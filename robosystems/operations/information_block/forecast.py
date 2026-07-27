@@ -57,6 +57,7 @@ from robosystems.operations.information_block.envelope import (
   fact_set_to_lite,
   fact_to_lite,
   load_base_envelope_atoms,
+  window_month_axis,
 )
 from robosystems.operations.information_block.forecast_history import (
   back_solve_lever_history,
@@ -759,6 +760,11 @@ def build_envelope(
   columns exactly as the statement series does; its presence anywhere in
   this rendering is also what tells a client the envelope carries
   history at all (pre-history envelopes never set the flag).
+
+  ``series_history`` / ``series_forecast`` window the month axis with
+  statement-series semantics (last N actual months, first N forecast
+  months; ``None`` = unbounded) so the assumptions grid stays in
+  register with windowed statement reads on the Plan page.
   """
   atoms = load_base_envelope_atoms(
     session,
@@ -815,6 +821,11 @@ def build_envelope(
   # not the rate that was asserted for it.
   months = sorted(actual_months | set(horizon_months))
   forecast_months = {month for month in horizon_months if month not in actual_months}
+  # Seam-adjacent windowing, in register with the statement series: the
+  # Plan grid unions this axis with the windowed statement columns, so
+  # an unwindowed assumptions axis would resurface every trimmed month
+  # as a phantom column (statement rows blank, mis-read as forecast).
+  months = window_month_axis(months, forecast_months, series_history, series_forecast)
 
   def lever_value(lever: LeverAssertionLite, month: str) -> float | None:
     if month in forecast_months:

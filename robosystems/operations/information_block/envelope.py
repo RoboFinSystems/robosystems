@@ -465,6 +465,38 @@ def window_series_sets(
   return [fs for fs in series_sets if fs.id in keep]
 
 
+def window_month_axis(
+  months: list[str],
+  forecast_months: set[str],
+  history: int | None,
+  forecast: int | None,
+) -> list[str]:
+  """Trim a chronological ``YYYY-MM`` axis to its seam-adjacent window.
+
+  The month-keyed counterpart of :func:`window_series_sets` for
+  envelopes whose column axis is a month list rather than FactSet
+  columns (the forecast block's assumptions grid). Same semantics:
+  ``history`` keeps the LAST N non-forecast months, ``forecast`` keeps
+  the FIRST N forecast months, ``None`` leaves that side unbounded.
+  Keeping the two in register matters — the Plan grid unions the
+  assumptions axis with the windowed statement series, and any month
+  this axis carries beyond the statements' window surfaces as a
+  phantom column with no statement values behind it.
+  """
+  if history is None and forecast is None:
+    return months
+  if (history is not None and history < 0) or (forecast is not None and forecast < 0):
+    raise ValueError("series window counts must be >= 0")
+  actuals = [m for m in months if m not in forecast_months]
+  forwards = [m for m in months if m in forecast_months]
+  if history is not None:
+    actuals = actuals[-history:] if history > 0 else []
+  if forecast is not None:
+    forwards = forwards[:forecast]
+  keep = set(actuals) | set(forwards)
+  return [m for m in months if m in keep]
+
+
 def _drop_covering_windows(rows: list) -> list:
   """Drop sets whose window strictly contains another loaded set's window.
 
