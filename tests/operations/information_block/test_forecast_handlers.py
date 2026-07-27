@@ -973,7 +973,13 @@ class TestBuildEnvelope:
     assert assertion_row.values == [0.0, 0.0]
     assert assertion_row.balance_type == "debit"
 
-  def _history_envelope(self, history: LeverHistory, horizon: int = 2):
+  def _history_envelope(
+    self,
+    history: LeverHistory,
+    horizon: int = 2,
+    series_history: int | None = None,
+    series_forecast: int | None = None,
+  ):
     """Build the standard one-lever envelope against a given history."""
     structure = MagicMock()
     structure.id = "struct_budget_01"
@@ -1031,7 +1037,12 @@ class TestBuildEnvelope:
       patch.object(forecast_handlers, "load_base_envelope_atoms", return_value=atoms),
       patch.object(forecast_handlers, "back_solve_lever_history", return_value=history),
     ):
-      return forecast_handlers.build_envelope(session, "struct_budget_01")
+      return forecast_handlers.build_envelope(
+        session,
+        "struct_budget_01",
+        series_history=series_history,
+        series_forecast=series_forecast,
+      )
 
   def test_realized_months_extend_the_grid_behind_the_seam(self) -> None:
     envelope = self._history_envelope(
@@ -1087,6 +1098,51 @@ class TestBuildEnvelope:
     rendering = envelope.view.rendering
     assert rendering is not None
     assert rendering.rows[0].values == [None, None, 0.03, 0.03]
+
+  def test_series_windows_trim_the_axis_in_register_with_statements(self) -> None:
+    """The Plan grid unions this axis with the windowed statement series;
+    an unwindowed assumptions axis resurfaces every trimmed month as a
+    phantom column (statement rows blank, mis-read as forecast)."""
+    envelope = self._history_envelope(
+      LeverHistory(
+        months=["2026-04", "2026-05", "2026-06"],
+        lever_values={
+          "rs-driver:RevenueGrowthRate": {
+            "2026-04": 0.011,
+            "2026-05": 0.021,
+            "2026-06": 0.038,
+          }
+        },
+      ),
+      series_history=1,
+      series_forecast=1,
+    )
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    # Last 1 actual month + first 1 forecast month — seam-adjacent.
+    assert [p.end for p in rendering.periods] == [
+      date(2026, 6, 30),
+      date(2026, 7, 31),
+    ]
+    assert [p.forecast for p in rendering.periods] == [None, True]
+    assert rendering.rows[0].values == [0.038, 0.03]
+
+  def test_series_windows_none_keep_the_full_axis(self) -> None:
+    envelope = self._history_envelope(
+      LeverHistory(
+        months=["2026-05", "2026-06"],
+        lever_values={
+          "rs-driver:RevenueGrowthRate": {"2026-05": 0.021, "2026-06": 0.038}
+        },
+      ),
+      series_history=None,
+      series_forecast=None,
+    )
+    assert envelope is not None
+    rendering = envelope.view.rendering
+    assert rendering is not None
+    assert len(rendering.periods) == 4
 
   def test_returns_none_for_wrong_block_type(self) -> None:
     session = MagicMock()

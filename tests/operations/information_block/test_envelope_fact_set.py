@@ -248,6 +248,55 @@ class TestWindowSeriesSets:
       window_series_sets(self._series(), None, -1)
 
 
+class TestWindowMonthAxis:
+  """Month-keyed counterpart of window_series_sets — the forecast
+  block's assumptions axis must window in register with the statement
+  series, or the Plan grid's axis union resurfaces trimmed months as
+  phantom columns."""
+
+  MONTHS = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
+  FORECAST = {"2026-05", "2026-06"}
+
+  def test_unbounded_is_identity(self) -> None:
+    from robosystems.operations.information_block.envelope import window_month_axis
+
+    assert window_month_axis(self.MONTHS, self.FORECAST, None, None) is self.MONTHS
+
+  def test_history_keeps_last_n_actuals(self) -> None:
+    from robosystems.operations.information_block.envelope import window_month_axis
+
+    kept = window_month_axis(self.MONTHS, self.FORECAST, 2, None)
+    assert kept == ["2026-03", "2026-04", "2026-05", "2026-06"]
+
+  def test_forecast_keeps_first_n_forwards(self) -> None:
+    from robosystems.operations.information_block.envelope import window_month_axis
+
+    kept = window_month_axis(self.MONTHS, self.FORECAST, None, 1)
+    assert kept == ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05"]
+
+  def test_combined_window_stays_chronological(self) -> None:
+    from robosystems.operations.information_block.envelope import window_month_axis
+
+    kept = window_month_axis(self.MONTHS, self.FORECAST, 1, 1)
+    assert kept == ["2026-04", "2026-05"]
+
+  def test_zero_history_is_forecast_only(self) -> None:
+    from robosystems.operations.information_block.envelope import window_month_axis
+
+    kept = window_month_axis(self.MONTHS, self.FORECAST, 0, None)
+    assert kept == ["2026-05", "2026-06"]
+
+  def test_negative_counts_raise(self) -> None:
+    import pytest
+
+    from robosystems.operations.information_block.envelope import window_month_axis
+
+    with pytest.raises(ValueError):
+      window_month_axis(self.MONTHS, self.FORECAST, -1, None)
+    with pytest.raises(ValueError):
+      window_month_axis(self.MONTHS, self.FORECAST, None, -1)
+
+
 class TestLoadStatementFactSetSeries:
   """The F-4 series loader — every report set as one column, with the
   actuals-preferred seam and the narrower-window-wins collapse."""
