@@ -440,16 +440,38 @@ class StripePaymentProvider(PaymentProvider):
       product = products.data[0]
       logger.info(f"Found existing Stripe product for {plan_name}: {product.id}")
 
-      prices = self.stripe.Price.list(product=product.id, active=True, limit=1)
-      if prices.data:
-        return prices.data[0].id
+      # Match on unit_amount, as the repository path does. Returning the first
+      # active price regardless of amount meant a base_price_cents change never
+      # reached Stripe: the old price stayed active on the product and kept
+      # being handed back, so checkout quoted the new price from config and
+      # billed the old one. Prices are immutable in Stripe, so a repricing is
+      # always "find the one at this amount, else create it" — never a mutation.
+      prices = self.stripe.Price.list(product=product.id, active=True, limit=100)
+      for price in prices.data:
+        if price.unit_amount == target_amount and price.recurring:
+          logger.info(
+            f"Found existing price {price.id} ({target_amount} cents) for {plan_name}"
+          )
+          return price.id
 
-      logger.warning(f"No active price for product {product.id}, creating new price")
+      logger.info(
+        f"No active price at {target_amount} cents for {plan_name}, creating one",
+        extra={"product_id": product.id, "amount": target_amount},
+      )
       price = self.stripe.Price.create(
         product=product.id,
         unit_amount=target_amount,
         currency="usd",
         recurring={"interval": "month"},
+        metadata={
+          "plan_name": plan_name,
+          "resource_type": "graph",
+          "environment": env.ENVIRONMENT,
+        },
+      )
+      logger.info(
+        f"Created price {price.id} ({target_amount} cents) for {plan_name}",
+        extra={"product_id": product.id, "price_id": price.id, "amount": target_amount},
       )
       return price.id
 
