@@ -9,9 +9,16 @@ inside a transaction that has executed ``SET LOCAL robosystems.library_resync =
 'on'`` — the GUC the immutability trigger (migration 0016) honors so the seeder,
 and only the seeder, may update library-origin rows in tenant scope.
 
-The admin CLI surface (``just admin … taxonomy resync``) and the
-auto-propagate-on-publish hook wrap these functions; nothing here is wired to a
-publish event yet.
+**These two wrappers currently have no callers.** No admin CLI group, no job, no
+publish hook invokes them — an earlier version of this docstring described that
+surface as if it existed. What *does* run in production is the lower-level
+``resync_library_into_tenant`` called directly from migrations (0022 rs-metric,
+0023 rs-metric grown in place, 0024 rs-driver), each fanning one **package-pinned**
+resync across ``for_each_tenant_schema``. So the propagation machinery is proven;
+what is missing is only an operator entrypoint that does not require authoring a
+migration — and, because every migration so far pinned a single package,
+**rs-gaap core has never been re-propagated to a provisioned tenant**. Keep these
+functions: they are the intended seam for that entrypoint.
 
 Propagation policy: only safe for **in-place fixes within a framework version**
 (mapping targets stay version-stable; filed reports pin their own FactSets; live
