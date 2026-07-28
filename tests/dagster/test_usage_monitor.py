@@ -6,6 +6,7 @@ from dagster import build_sensor_context
 
 from robosystems.dagster.sensors.usage_monitor import (
   _ALERT_DEDUP_TTL_SECONDS,
+  _ALERTS_ENABLED_FLAG,
   graph_usage_monitor_sensor,
 )
 
@@ -19,6 +20,53 @@ def _make_graph(graph_id="kg_test123", tier="ladybug-standard"):
   graph.parent_graph_id = None
   graph.status = "active"
   return graph
+
+
+class TestSensorEnablement:
+  """The sensor must be on, and must stay switchable off without a deploy.
+
+  It shipped STOPPED on 2026-04-04 next to a soft cap, the cap went hard on
+  2026-05-13, and nobody restarted the sensor — so the hard 413 lost the 80%
+  warning meant to precede it. Pinned here so that cannot recur silently.
+  """
+
+  def test_sensor_default_status_is_running(self):
+    from dagster import DefaultSensorStatus
+
+    from robosystems.dagster.sensors.usage_monitor import _SENSOR_STATUS
+
+    assert _SENSOR_STATUS is DefaultSensorStatus.RUNNING
+
+  @patch("robosystems.config.parameter_store.get_parameter_value")
+  @patch("robosystems.database.session")
+  def test_ssm_flag_false_skips_before_touching_the_database(
+    self, mock_session_factory, mock_get_param
+  ):
+    """The kill switch short-circuits before any DB or Graph API work."""
+    mock_get_param.return_value = "false"
+    mock_db = MagicMock()
+    mock_session_factory.return_value = mock_db
+
+    result = graph_usage_monitor_sensor(build_sensor_context())
+
+    assert result is not None
+    assert _ALERTS_ENABLED_FLAG in str(result)
+    mock_db.query.assert_not_called()
+
+  @patch("robosystems.config.parameter_store.get_parameter_value")
+  @patch("robosystems.database.session")
+  def test_defaults_to_enabled_when_flag_unset(
+    self, mock_session_factory, mock_get_param
+  ):
+    """Absent config, alerting runs — it should fail toward telling you."""
+    mock_get_param.side_effect = lambda _key, default="": default
+    mock_db = MagicMock()
+    mock_session_factory.return_value = mock_db
+    mock_db.query.return_value.filter.return_value.all.return_value = []
+
+    graph_usage_monitor_sensor(build_sensor_context())
+
+    mock_db.query.assert_called_once()
 
 
 class TestGraphUsageMonitorSensor:

@@ -189,8 +189,29 @@ def test_get_graph_limits_returns_large_tier_values(mock_graph_config):
 def test_get_graph_limits_falls_back_to_defaults(mock_graph_config):
   limits = GraphTierConfig.get_graph_limits("unknown-tier")
   assert limits["instance_storage_limit_gb"] == 20
-  assert limits["max_rows_per_copy"] == 2_000_000
-  assert limits["chunk_size_rows"] == 1_000_000
+  assert limits["max_rows_per_copy"] == 1_000_000
+  assert limits["chunk_size_rows"] == 250_000
+
+
+def test_graph_limit_defaults_do_not_exceed_the_smallest_tier():
+  """Fallback row caps must never be larger than the smallest tier's.
+
+  The row caps are OOM guardrails sized to instance RAM. A fallback larger
+  than the actual box would apply a bigger tier's copy limit to a smaller
+  instance — the exact OOM the guardrail exists to prevent. This drifted
+  once already: the defaults kept m7g.large's 2M/5M after ladybug-standard
+  moved to m7g.medium, so they are pinned against real config here rather
+  than against literals in the mocked fixture.
+  """
+  GraphTierConfig.clear_cache()
+  standard = GraphTierConfig.get_graph_limits("ladybug-standard", "production")
+  defaults = GraphTierConfig.get_graph_limits("does-not-exist", "production")
+
+  for key in ("max_rows_per_copy", "max_single_table_rows", "chunk_size_rows"):
+    assert defaults[key] <= standard[key], (
+      f"default {key}={defaults[key]:,} exceeds ladybug-standard's "
+      f"{standard[key]:,} — a fallback must never be larger than the smallest tier"
+    )
 
 
 def test_get_instance_storage_limit_gb(mock_graph_config):
