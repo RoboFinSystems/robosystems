@@ -8,10 +8,16 @@
 # - Supports "MotherDuck for Graphs" pattern: DuckDB staging → LadybugDB materialization
 #
 # TIER PHILOSOPHY:
-# - Standard: Dedicated m7g.large, single database + 3 subgraphs, cost-efficient entry
-# - Large: Dedicated r7g.large, subgraphs for organization, team collaboration
+# - Standard: Dedicated m7g.medium, single database + 3 subgraphs, cost-efficient entry
+# - Large: Dedicated m7g.large, subgraphs for organization, team collaboration
 # - XLarge: Dedicated r7g.xlarge, maximum subgraphs, advanced scale
 # - Shared: Public data repositories (SEC) - separate infrastructure
+#
+# MEMORY SIZING: LadybugDB buffer pools are lazily filled caps, not reservations,
+# so nominal (parent + subgraphs) may exceed max_memory_mb — subgraphs are rarely
+# all active at once. The hard ceiling is the admission-control guard, which
+# trips at 85% of *instance* RAM (graph_api/core/admission_control.py), so size
+# parent + duckdb_memory_limit to stay under that even when both are hot.
 
 production:
   writers:
@@ -19,7 +25,7 @@ production:
     # LADYBUGDB STANDARD TIER - Dedicated m7g.large
     # =========================================================================
     - name: ladybug-standard
-      description: Dedicated m7g.large LadybugDB tier for cost-efficient entry with subgraph support
+      description: Dedicated m7g.medium LadybugDB tier for cost-efficient entry with subgraph support
       backend: ladybug
       stack_suffix: LadybugStandard
       tier: ladybug-standard
@@ -47,36 +53,34 @@ production:
       # Graph content limits
       graph_limits:
         instance_storage_limit_gb: 20 # Soft storage cap for entire instance (parent + subgraphs + staging)
-        max_rows_per_copy: 2000000   # 2M rows per copy operation (hard limit, prevents OOM during materialization)
-        max_single_table_rows: 5000000 # 5M rows per staging table
-        chunk_size_rows: 500000      # 500K rows per materialization chunk (conservative for 2GB buffer pool)
+        max_rows_per_copy: 1000000   # 1M rows per copy operation (hard limit, prevents OOM during materialization)
+        max_single_table_rows: 2500000 # 2.5M rows per staging table
+        chunk_size_rows: 250000      # 250K rows per materialization chunk (conservative for 1GB parent buffer pool)
         warn_at_percentage: 80       # Warn when approaching storage limit
-
-      # Memory boost configuration
-      memory:
-        baseline_mb: 2048    # Default LadybugDB memory (m7g.large = 8GB)
-        max_boost_mb: 6144   # Max boost during materialization
-        auto_reset: true     # Reset to baseline after operation
 
       # Instance configuration
       instance:
-        type: m7g.large # 8GB RAM, 2 vCPUs, ARM64 - dedicated per customer
+        type: m7g.medium # 4GB RAM, 1 vCPU, ARM64 - dedicated per customer
         databases_per_instance: 1 # Dedicated: one customer per instance
 
         # Memory configuration
-        max_memory_mb: 6144 # 6GB available (8GB - 2GB OS overhead)
-        memory_per_db_mb: 2048 # 2GB per database
+        # Admission control trips at 85% of 4GB = ~3.4GB. Worst concurrent case
+        # is parent buffer pool (1GB) + DuckDB staging (1GB) = 2GB, leaving
+        # headroom for the OS and the API container.
+        max_memory_mb: 3072 # 3GB available (4GB - 1GB OS/container overhead)
+        memory_per_db_mb: 1024 # 1GB for the parent database
+        memory_per_subgraph_mb: 384 # 384MB per subgraph (3 max, rarely all active)
 
         # LadybugDB-specific performance settings
-        chunk_size: 1000 # Batch operation chunk size
-        query_timeout: 30 # Query timeout in seconds
+        chunk_size: 500 # Batch operation chunk size
+        query_timeout: 45 # Query timeout in seconds (raised for 1 vCPU)
         max_query_length: 10000 # Maximum query size in characters
-        ingestion_batch_size: 1000 # Batch size for data ingestion
-        connection_pool_size: 10 # Max concurrent connections per database
+        ingestion_batch_size: 500 # Batch size for data ingestion
+        connection_pool_size: 5 # Max concurrent connections per database (1 vCPU)
 
         # DuckDB staging configuration
-        duckdb_memory_limit: "2GB" # Conservative for standard tier
-        duckdb_max_threads: 2 # m7g.large = 2 vCPU
+        duckdb_memory_limit: "1GB" # Spills to disk beyond this - slower, not fatal
+        duckdb_max_threads: 2 # m7g.medium = 1 vCPU (2x oversubscription is fine for DuckDB)
 
       # Deployment configuration
       deployment:
@@ -87,7 +91,7 @@ production:
     # LADYBUGDB LARGE TIER - Dedicated r7g.large
     # =========================================================================
     - name: ladybug-large
-      description: Dedicated r7g.large with subgraph support (10 subgraphs)
+      description: Dedicated m7g.large with subgraph support (10 subgraphs)
       backend: ladybug
       stack_suffix: LadybugLarge
       tier: ladybug-large
@@ -96,7 +100,7 @@ production:
       max_subgraphs: 10 # Support up to 10 subgraphs (1 parent + 10 children = 11 databases total)
 
       # Resource limits
-      api_rate_multiplier: 1.5 # 1.5x rate limits (2x RAM, same CPU as standard)
+      api_rate_multiplier: 1.5 # 1.5x rate limits (2x RAM, 2x CPU vs standard)
 
       # Copy operation limits
       copy_operations:
@@ -115,37 +119,33 @@ production:
       # Graph content limits
       graph_limits:
         instance_storage_limit_gb: 50 # Soft storage cap for entire instance (parent + subgraphs + staging)
-        max_rows_per_copy: 10000000  # 10M rows per copy operation (hard limit, prevents OOM during materialization)
-        max_single_table_rows: 25000000 # 25M rows per staging table
-        chunk_size_rows: 1000000     # 1M rows per materialization chunk (conservative for 1.3GB buffer pool)
+        max_rows_per_copy: 5000000   # 5M rows per copy operation (hard limit, prevents OOM during materialization)
+        max_single_table_rows: 12500000 # 12.5M rows per staging table
+        chunk_size_rows: 500000      # 500K rows per materialization chunk (conservative for 2GB parent buffer pool)
         warn_at_percentage: 80       # Warn when approaching storage limit
-
-      # Memory boost configuration
-      memory:
-        baseline_mb: 4096    # Default LadybugDB memory (r7g.large = 16GB)
-        max_boost_mb: 12288  # Max boost during materialization
-        auto_reset: true     # Reset to baseline after operation
 
       # Instance configuration
       instance:
-        type: r7g.large # 16GB RAM, 2 vCPUs, ARM64 - dedicated per customer
+        type: m7g.large # 8GB RAM, 2 vCPUs, ARM64 - dedicated per customer
         databases_per_instance: 1 # One parent database per instance (subgraphs on same instance)
 
         # Memory configuration
-        max_memory_mb: 14336 # 14GB total available for parent + subgraphs
-        memory_per_db_mb: 1300 # ~1.3GB average per database (14GB / 11 databases)
-        # Note: Memory is dynamically shared among parent and subgraphs
+        # Parent gets a full 2GB pool; subgraphs are intentionally oversubscribed
+        # (2048 + 10x384 = 5.9GB nominal) since they are rarely all active.
+        max_memory_mb: 6144 # 6GB available (8GB - 2GB OS/container overhead)
+        memory_per_db_mb: 2048 # 2GB for the parent database
+        memory_per_subgraph_mb: 384 # 384MB per subgraph (10 max)
 
         # LadybugDB-specific performance settings
-        chunk_size: 1500 # Larger chunks for better performance
+        chunk_size: 1000 # Larger chunks for better performance
         query_timeout: 60 # 60 second timeout for complex queries
         max_query_length: 25000 # Support more complex queries
-        ingestion_batch_size: 2500 # Faster ingestion with dedicated resources
-        connection_pool_size: 25 # Higher concurrency for team usage
+        ingestion_batch_size: 1500 # Faster ingestion with dedicated resources
+        connection_pool_size: 15 # Higher concurrency for team usage
 
         # DuckDB staging configuration
-        duckdb_memory_limit: "4GB" # More memory for dedicated instance staging
-        duckdb_max_threads: 2 # Match vCPU count (r7g.large = 2 vCPU)
+        duckdb_memory_limit: "2GB" # More memory for dedicated instance staging
+        duckdb_max_threads: 2 # Match vCPU count (m7g.large = 2 vCPU)
 
       # Deployment configuration
       deployment:
@@ -190,21 +190,19 @@ production:
         chunk_size_rows: 5000000     # 5M rows per materialization chunk
         warn_at_percentage: 80       # Warn when approaching storage limit
 
-      # Memory boost configuration
-      memory:
-        baseline_mb: 8192    # Default LadybugDB memory (r7g.xlarge = 32GB)
-        max_boost_mb: 28672  # Max boost during materialization
-        auto_reset: true     # Reset to baseline after operation
-
       # Instance configuration
       instance:
         type: r7g.xlarge # 32GB RAM, 4 vCPUs, ARM64 - large dedicated per customer
         databases_per_instance: 1 # One parent database per instance (many subgraphs on same instance)
 
         # Memory configuration
+        # Parent gets a full 8GB pool; subgraphs are intentionally oversubscribed
+        # (8192 + 25x1024 = 33.8GB nominal) since they are rarely all active.
+        # Previously the parent was capped at 1180MB - below Standard's - because
+        # a single flat average was divided across all 26 databases.
         max_memory_mb: 30720 # 30GB available (32GB - 2GB OS overhead)
-        memory_per_db_mb: 1180 # ~1.2GB average per database (30GB / 26 databases)
-        # Note: Memory is dynamically shared, some databases can use more when needed
+        memory_per_db_mb: 8192 # 8GB for the parent database
+        memory_per_subgraph_mb: 1024 # 1GB per subgraph (25 max)
 
         # LadybugDB-specific performance settings
         chunk_size: 2000 # Maximum chunk size for best performance
@@ -325,7 +323,7 @@ staging:
     # LADYBUGDB STANDARD TIER - Staging
     # =========================================================================
     - name: ladybug-standard
-      description: Dedicated m7g.large LadybugDB tier with subgraph support
+      description: Dedicated m7g.medium LadybugDB tier with subgraph support
       backend: ladybug
       stack_suffix: LadybugStandard
       tier: ladybug-standard
@@ -349,30 +347,24 @@ staging:
 
       # Graph content limits (same as production)
       graph_limits:
-        max_nodes: 5000000
-        max_relationships: 10000000
-        max_rows_per_copy: 2000000
-        max_single_table_rows: 5000000
-        chunk_size_rows: 500000
+        instance_storage_limit_gb: 20
+        max_rows_per_copy: 1000000
+        max_single_table_rows: 2500000
+        chunk_size_rows: 250000
         warn_at_percentage: 80
 
-      # Memory boost configuration
-      memory:
-        baseline_mb: 2048
-        max_boost_mb: 6144
-        auto_reset: true
-
       instance:
-        type: m7g.large # 8GB RAM, 2 vCPUs, ARM64 - aligned with production
+        type: m7g.medium # 4GB RAM, 1 vCPU, ARM64 - aligned with production
         databases_per_instance: 1 # Dedicated
-        max_memory_mb: 6144 # 6GB available (8GB - 2GB OS overhead)
-        memory_per_db_mb: 2048 # 2GB per database
-        chunk_size: 1000
-        query_timeout: 30
+        max_memory_mb: 3072 # 3GB available (4GB - 1GB OS/container overhead)
+        memory_per_db_mb: 1024 # 1GB for the parent database
+        memory_per_subgraph_mb: 384 # 384MB per subgraph (3 max)
+        chunk_size: 500
+        query_timeout: 45
         max_query_length: 10000
-        ingestion_batch_size: 1000
-        connection_pool_size: 10
-        duckdb_memory_limit: "2GB" # Aligned with production
+        ingestion_batch_size: 500
+        connection_pool_size: 5
+        duckdb_memory_limit: "1GB" # Aligned with production
         duckdb_max_threads: 2
 
       deployment:
@@ -383,7 +375,7 @@ staging:
     # LADYBUGDB LARGE TIER - Staging
     # =========================================================================
     - name: ladybug-large
-      description: Dedicated r7g.large with subgraph support (10 subgraphs)
+      description: Dedicated m7g.large with subgraph support (10 subgraphs)
       backend: ladybug
       stack_suffix: LadybugLarge
       tier: ladybug-large
@@ -405,31 +397,25 @@ staging:
 
       # Graph content limits (same as production)
       graph_limits:
-        max_nodes: 50000000
-        max_relationships: 100000000
-        max_rows_per_copy: 10000000
-        max_single_table_rows: 25000000
-        chunk_size_rows: 1000000
+        instance_storage_limit_gb: 50
+        max_rows_per_copy: 5000000
+        max_single_table_rows: 12500000
+        chunk_size_rows: 500000
         warn_at_percentage: 80
 
-      # Memory boost configuration
-      memory:
-        baseline_mb: 4096
-        max_boost_mb: 12288
-        auto_reset: true
-
       instance:
-        type: r7g.large # 16GB RAM, 2 vCPUs, ARM64 - aligned with production
+        type: m7g.large # 8GB RAM, 2 vCPUs, ARM64 - aligned with production
         databases_per_instance: 1
-        max_memory_mb: 14336 # 14GB total available for parent + subgraphs
-        memory_per_db_mb: 1300 # ~1.3GB average per database (14GB / 11 databases)
-        chunk_size: 1500
+        max_memory_mb: 6144 # 6GB available (8GB - 2GB OS/container overhead)
+        memory_per_db_mb: 2048 # 2GB for the parent database
+        memory_per_subgraph_mb: 384 # 384MB per subgraph (10 max)
+        chunk_size: 1000
         query_timeout: 60
         max_query_length: 25000
-        ingestion_batch_size: 2500
-        connection_pool_size: 25
-        duckdb_memory_limit: "4GB" # Aligned with production
-        duckdb_max_threads: 2 # r7g.large = 2 vCPU
+        ingestion_batch_size: 1500
+        connection_pool_size: 15
+        duckdb_memory_limit: "2GB" # Aligned with production
+        duckdb_max_threads: 2 # m7g.large = 2 vCPU
 
       deployment:
         enable_var: LBUG_LARGE_ENABLED_STAGING
@@ -461,24 +447,18 @@ staging:
 
       # Graph content limits (same as production)
       graph_limits:
-        max_nodes: 200000000
-        max_relationships: 500000000
+        instance_storage_limit_gb: 100
         max_rows_per_copy: 50000000
         max_single_table_rows: 100000000
         chunk_size_rows: 5000000
         warn_at_percentage: 80
 
-      # Memory boost configuration
-      memory:
-        baseline_mb: 8192
-        max_boost_mb: 28672
-        auto_reset: true
-
       instance:
         type: r7g.xlarge # 32GB RAM, 4 vCPUs, ARM64 - aligned with production
         databases_per_instance: 1
         max_memory_mb: 30720 # 30GB available (32GB - 2GB OS overhead)
-        memory_per_db_mb: 1180 # ~1.2GB average per database (30GB / 26 databases)
+        memory_per_db_mb: 8192 # 8GB for the parent database
+        memory_per_subgraph_mb: 1024 # 1GB per subgraph (25 max)
         chunk_size: 2000
         query_timeout: 120
         max_query_length: 50000
@@ -584,30 +564,24 @@ development:
 
       # Graph content limits (same as production)
       graph_limits:
-        max_nodes: 5000000
-        max_relationships: 10000000
-        max_rows_per_copy: 2000000
-        max_single_table_rows: 5000000
-        chunk_size_rows: 500000
+        instance_storage_limit_gb: 20
+        max_rows_per_copy: 1000000
+        max_single_table_rows: 2500000
+        chunk_size_rows: 250000
         warn_at_percentage: 80
 
-      # Memory boost configuration
-      memory:
-        baseline_mb: 2048
-        max_boost_mb: 6144
-        auto_reset: true
-
       instance:
-        type: m7g.large
+        type: m7g.medium
         databases_per_instance: 1 # Dedicated
-        max_memory_mb: 6144
-        memory_per_db_mb: 2048
-        chunk_size: 750
-        query_timeout: 30
+        max_memory_mb: 3072
+        memory_per_db_mb: 1024
+        memory_per_subgraph_mb: 384
+        chunk_size: 500
+        query_timeout: 45
         max_query_length: 10000
-        ingestion_batch_size: 750
-        connection_pool_size: 10
-        duckdb_memory_limit: "2GB" # Default for local development
+        ingestion_batch_size: 500
+        connection_pool_size: 5
+        duckdb_memory_limit: "1GB" # Matches production so local dev hits the same limits
         duckdb_max_threads: 4 # Local dev can use more threads
 
       deployment:

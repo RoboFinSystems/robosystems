@@ -32,8 +32,8 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-standard",
     "display_name": "Standard",
-    "description": "Dedicated m7g.large infrastructure with subgraph support",
-    "base_price_cents": 14900,  # $149/month
+    "description": "Dedicated infrastructure with subgraph support - AI controller layer for a single set of books",
+    "base_price_cents": 9900,  # $99/month
     "monthly_credit_allocation": 8000,  # ~200 agent calls/month
     "backup_downloads_per_month": 10,
     "max_documents": 100,
@@ -42,8 +42,8 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-large",
     "display_name": "Large",
-    "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
-    "base_price_cents": 29900,  # $299/month
+    "description": "Enhanced performance and expanded subgraph capacity for growing teams",
+    "base_price_cents": 24900,  # $249/month
     "monthly_credit_allocation": 32000,  # ~800 agent calls/month
     "backup_downloads_per_month": 20,
     "max_documents": 1000,
@@ -52,8 +52,8 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-xlarge",
     "display_name": "XLarge",
-    "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
-    "base_price_cents": 69900,  # $699/month
+    "description": "Maximum performance and scale with the highest subgraph capacity",
+    "base_price_cents": 59900,  # $599/month
     "monthly_credit_allocation": 100000,  # ~2,600 agent calls/month
     "backup_downloads_per_month": 40,
     "max_documents": 10000,

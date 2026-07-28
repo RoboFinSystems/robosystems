@@ -415,27 +415,6 @@ class GraphTierConfig:
     return float(graph_limits.get("instance_storage_limit_gb", 20))
 
   @classmethod
-  def get_memory_config(
-    cls, tier: str, environment: str | None = None
-  ) -> dict[str, Any]:
-    """Get memory boost configuration for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Memory config dictionary with baseline_mb, max_boost_mb, auto_reset
-    """
-    tier_config = cls.get_tier_config(tier, environment)
-    defaults: dict[str, Any] = {
-      "baseline_mb": 2048,
-      "max_boost_mb": 6144,
-      "auto_reset": True,
-    }
-    return tier_config.get("memory", defaults)
-
-  @classmethod
   def get_storage_cap_gb(cls, tier: str, environment: str | None = None) -> float:
     """Get storage safety cap in GB (from backup limits, not billed).
 
