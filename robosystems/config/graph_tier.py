@@ -315,17 +315,31 @@ class GraphTierConfig:
 
   @classmethod
   def get_api_rate_multiplier(cls, tier: str, environment: str | None = None) -> float:
-    """Get rate limit multiplier for a tier.
+    """Get this tier's rate limit relative to ladybug-standard.
+
+    Derived from the limits the limiter actually enforces, not from a
+    standalone knob. It used to read `api_rate_multiplier` out of graph.yml,
+    where it was 1.0/1.5/2.5 — read in several places, applied in none, so
+    /limits and /offering reported throughput no tier ever received. That key
+    is gone; the ratio now comes from SUBSCRIPTION_RATE_LIMITS, which means it
+    cannot drift from enforcement again.
 
     Args:
         tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
+        environment: Unused; retained for call-site compatibility.
 
     Returns:
-        Rate limit multiplier (1.0 = base limits)
+        Multiple of the standard tier's limits (1.0 = same as standard)
     """
-    tier_config = cls.get_tier_config(tier, environment)
-    return tier_config.get("api_rate_multiplier", 1.0)
+    from .rate_limits import EndpointCategory, RateLimitConfig
+
+    baseline = RateLimitConfig.get_rate_limit(
+      "ladybug-standard", EndpointCategory.GRAPH_QUERY
+    )
+    actual = RateLimitConfig.get_rate_limit(tier, EndpointCategory.GRAPH_QUERY)
+    if not baseline or not actual or not baseline[0]:
+      return 1.0
+    return actual[0] / baseline[0]
 
   @classmethod
   def get_copy_operation_limits(

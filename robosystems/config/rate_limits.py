@@ -92,15 +92,53 @@ class RateLimitConfig:
   # BURST-FOCUSED CONFIGURATION: Short windows for burst protection
   # Volume control is handled by the credit system
   # Format: {tier: {category: (limit, period)}}
+  # Categories served by the customer's own dedicated LadybugDB instance.
+  # These scale by tier and bucket per graph; everything else is shared
+  # infrastructure, stays flat, and buckets per user. See the comment on
+  # SUBSCRIPTION_RATE_LIMITS below for why the distinction matters.
+  #
+  # GRAPH_SEARCH is deliberately absent: it hits the shared OpenSearch cluster,
+  # not the tenant's instance. GRAPH_IMPORT is absent because LadybugDB ingests
+  # sequentially regardless of tier, so extra cores buy nothing there.
+  DEDICATED_RESOURCE_CATEGORIES: frozenset[EndpointCategory] = frozenset(
+    {
+      EndpointCategory.GRAPH_QUERY,
+      EndpointCategory.GRAPH_READ,
+      EndpointCategory.GRAPH_WRITE,
+      EndpointCategory.GRAPH_MCP,
+      EndpointCategory.GRAPH_OPERATOR,
+      EndpointCategory.GRAPH_ANALYTICS,
+    }
+  )
+
   SUBSCRIPTION_RATE_LIMITS: dict[
     str, dict[EndpointCategory, tuple[int, RateLimitPeriod]]
   ] = {
     # -----------------------------------------------------------------------
     # MANAGED SERVICE RATE LIMITS
-    # All tiers share managed infrastructure. Limits are conservative to
-    # protect shared resources (OpenSearch t3.medium, LadybugDB on m7g/r7g).
-    # For self-hosted scale, customers deploy their own infrastructure.
-    # Loosen these as infra scales up.
+    #
+    # Two kinds of limit live in this table, and they differ by what they
+    # protect:
+    #
+    #   Dedicated  — categories in DEDICATED_RESOURCE_CATEGORIES hit the
+    #                customer's own LadybugDB instance. Every customer tier is
+    #                databases_per_instance: 1, so a heavy tenant harms only
+    #                themselves. These scale with the tier's vCPU count
+    #                (m7g.medium 1 → m7g.large 2 → r7g.xlarge 4), because read
+    #                throughput is what the extra cores actually buy.
+    #
+    #   Shared     — everything else lands on infrastructure every tenant
+    #                shares: OpenSearch (t3.medium), the extensions RDS, the
+    #                API tier itself. These stay flat across tiers and bucket
+    #                per user, so buying more graphs cannot multiply one
+    #                customer's load on a resource others depend on.
+    #
+    # An earlier version of this comment described LadybugDB as shared, which
+    # is what kept every tier on identical limits. It is not shared, and that
+    # is the whole reason the dedicated half can differentiate at all.
+    #
+    # Admission control (85% of instance CPU/memory) remains the real overload
+    # backstop; these numbers are a product lever, not the safety mechanism.
     # -----------------------------------------------------------------------
     "base": {
       # Anonymous / unrecognized tier — tightest limits
@@ -130,7 +168,12 @@ class RateLimitConfig:
       EndpointCategory.TABLE_UPLOAD: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_MANAGEMENT: (5, RateLimitPeriod.MINUTE),
     },
-    # ladybug-standard: m7g.large (8GB, 2 vCPU) — anchor tier
+    # ladybug-standard: m7g.medium (4GB, 1 vCPU) — the anchor the other tiers
+    # multiply from. These values were originally sized for m7g.large and are
+    # deliberately left as-is after the resize rather than halved: observed
+    # production load is ~1% CPU, nowhere near binding, and cutting limits on
+    # existing customers to match a smaller box would be a service regression
+    # in exchange for protection admission control already provides.
     "ladybug-standard": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
@@ -161,11 +204,8 @@ class RateLimitConfig:
       EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
-    # ladybug-large: r7g.large (16GB, 2 vCPU)
-    # Identical enforcement to standard: the API limiter classifies all
-    # authenticated users as ladybug-standard, so these per-tier tables are
-    # reference/parity only. Burst protection is deliberately tier-flat;
-    # per-tier volume is governed by credits, not by a rate-limit multiplier.
+    # ladybug-large: m7g.large (8GB, 2 vCPU) — 2x Standard's vCPU, so the
+    # dedicated-resource categories double. Shared categories match Standard.
     "ladybug-large": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
@@ -173,20 +213,20 @@ class RateLimitConfig:
       EndpointCategory.STATUS: (120, RateLimitPeriod.MINUTE),
       EndpointCategory.SSE: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
-      # Graph-scoped — same base, multiplied by 1.5x from graph.yml
-      EndpointCategory.GRAPH_READ: (120, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
+      # Dedicated instance — 2x Standard (2 vCPU vs 1)
+      EndpointCategory.GRAPH_READ: (240, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_WRITE: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_ANALYTICS: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MANAGEMENT: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_OPERATOR: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MCP: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_OPERATOR: (30, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SEARCH: (
         10,
         RateLimitPeriod.MINUTE,
       ),  # Shared OpenSearch t3.medium
-      EndpointCategory.GRAPH_QUERY: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_QUERY: (120, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_IMPORT: (10, RateLimitPeriod.MINUTE),
       # Extensions surface (OLTP on shared RDS)
       EndpointCategory.EXTENSIONS_GRAPHQL: (600, RateLimitPeriod.MINUTE),
@@ -207,19 +247,19 @@ class RateLimitConfig:
       EndpointCategory.SSE: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
       # Graph-scoped — same base, multiplied by 2.5x from graph.yml
-      EndpointCategory.GRAPH_READ: (120, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_WRITE: (30, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_ANALYTICS: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_READ: (480, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_WRITE: (120, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_ANALYTICS: (60, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_BACKUP: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_MANAGEMENT: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SYNC: (10, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_MCP: (30, RateLimitPeriod.MINUTE),
-      EndpointCategory.GRAPH_OPERATOR: (15, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_MCP: (120, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_OPERATOR: (60, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_SEARCH: (
         10,
         RateLimitPeriod.MINUTE,
       ),  # Shared OpenSearch t3.medium
-      EndpointCategory.GRAPH_QUERY: (60, RateLimitPeriod.MINUTE),
+      EndpointCategory.GRAPH_QUERY: (240, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_IMPORT: (10, RateLimitPeriod.MINUTE),
       # Extensions surface (OLTP on shared RDS)
       EndpointCategory.EXTENSIONS_GRAPHQL: (600, RateLimitPeriod.MINUTE),

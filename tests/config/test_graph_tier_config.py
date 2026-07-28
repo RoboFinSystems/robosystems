@@ -129,7 +129,10 @@ def test_tier_config_loads_once_when_cached(mock_graph_config):
 
 def test_accessors_return_configured_values(mock_graph_config):
   assert get_tier_max_subgraphs("ladybug-standard") == 5
-  assert get_tier_api_rate_multiplier("ladybug-standard") == 1.5
+  # No longer read from graph.yml: the multiplier is derived from the limits
+  # SUBSCRIPTION_RATE_LIMITS actually enforces, so it cannot drift from them.
+  # The mocked YAML's api_rate_multiplier is therefore ignored by design.
+  assert get_tier_api_rate_multiplier("ladybug-standard") == 1.0
 
   copy_limits = get_tier_copy_operation_limits("ladybug-standard")
   assert copy_limits["max_file_size_gb"] == 3
@@ -150,7 +153,7 @@ def test_accessors_return_configured_values(mock_graph_config):
 def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
   # ladybug-large is missing multiplier/copy settings so defaults apply
   assert GraphTierConfig.get_tier_config("unknown-tier") == {}
-  assert get_tier_api_rate_multiplier("ladybug-large") == 1.0
+  assert get_tier_api_rate_multiplier("ladybug-large") == 2.0  # derived, 2 vCPU
 
   default_copy = get_tier_copy_operation_limits("ladybug-large")
   assert default_copy["max_file_size_gb"] == 1.0

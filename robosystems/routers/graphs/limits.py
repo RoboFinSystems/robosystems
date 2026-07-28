@@ -173,23 +173,25 @@ async def get_graph_limits(
     # Get backup limits from tier configuration (based on graph tier)
     backup_limits = get_tier_backup_limits(graph_tier)
 
-    # Define rate limits based on graph tier (using api_rate_multiplier from config)
-    base_requests_per_minute = 60
-    base_requests_per_hour = 1000
-    base_burst_capacity = 10
+    # Report what the limiter actually enforces, read from the same table the
+    # limiter reads. This previously computed 60 x api_rate_multiplier, which
+    # told Large 90/min and XLarge 150/min while enforcement gave every tier
+    # 60 — the multiplier is read in several places and applied in none.
+    # Reporting a limit we do not honour is worse than reporting a lower one.
+    from ...config.rate_limits import EndpointCategory, RateLimitConfig
 
-    multiplier = GraphTierConfig.get_api_rate_multiplier(graph_tier)
+    query_limit = RateLimitConfig.get_rate_limit(
+      graph_tier, EndpointCategory.GRAPH_QUERY
+    )
+    requests_per_minute = query_limit[0] if query_limit else 60
 
     rate_limits = {
-      "requests_per_minute": int(base_requests_per_minute * multiplier)
-      if multiplier
-      else base_requests_per_minute,
-      "requests_per_hour": int(base_requests_per_hour * multiplier)
-      if multiplier
-      else base_requests_per_hour,
-      "burst_capacity": int(base_burst_capacity * multiplier)
-      if multiplier
-      else base_burst_capacity,
+      "requests_per_minute": requests_per_minute,
+      # Derived, not separately enforced: the limiter uses fixed-window
+      # per-minute buckets, so these describe the same budget over a longer
+      # span rather than independent ceilings.
+      "requests_per_hour": requests_per_minute * 60,
+      "burst_capacity": requests_per_minute,
     }
 
     # Get credit limits if applicable

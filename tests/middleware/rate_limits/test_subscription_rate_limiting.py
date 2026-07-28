@@ -168,11 +168,14 @@ class TestSubscriptionRateLimits:
     assert limit == 30
     assert window == 60
 
-    # LadybugDB Large tier — same base as standard, multiplied by graph.yml
+    # LadybugDB Large tier — 2x Standard on dedicated-resource categories,
+    # matching its 2 vCPU against Standard's 1. This previously asserted 60
+    # with the note "1.5x multiplier applied separately"; nothing applied it,
+    # so the tables were identical and the comment documented a bug.
     limit, window = get_subscription_rate_limit(
       "ladybug-large", EndpointCategory.GRAPH_QUERY
     )
-    assert limit == 60  # Same base; 1.5x multiplier applied separately
+    assert limit == 120
     assert window == 60
 
   def test_standard_tier_has_appropriate_limits(self):
@@ -242,9 +245,12 @@ class TestSubscriptionAwareRateLimiting:
     # Call the dependency
     subscription_aware_rate_limit_dependency(mock_request)
 
-    # Verify correct limit was checked (120/minute for standard tier graph reads)
+    # Graph-scoped reads bucket per graph, not per user: graph_read is a
+    # dedicated-resource category, so each graph gets its own budget on its own
+    # instance. Buckets were keyed "user_sub:{user_id}" until per-graph pricing
+    # made that wrong — ten graphs shared one budget.
     mock_check_rate_limit.assert_called_once_with(
-      "user_sub:user_456:graph_read", 120, 60
+      "graph_sub:kg1a2b3c:graph_read", 120, 60
     )
 
     # Verify request state was updated
