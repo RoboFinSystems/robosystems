@@ -62,6 +62,8 @@ production:
       instance:
         type: m7g.medium # 4GB RAM, 1 vCPU, ARM64 - dedicated per customer
         databases_per_instance: 1 # Dedicated: one customer per instance
+        vcpus: 1 # Physical vCPU count (customer-facing; do not derive from duckdb_max_threads)
+        instance_ram_gb: 4 # Physical instance RAM (customer-facing; max_memory_mb is the LadybugDB budget)
 
         # Memory configuration
         # Admission control trips at 85% of 4GB = ~3.4GB. Worst concurrent case
@@ -128,6 +130,8 @@ production:
       instance:
         type: m7g.large # 8GB RAM, 2 vCPUs, ARM64 - dedicated per customer
         databases_per_instance: 1 # One parent database per instance (subgraphs on same instance)
+        vcpus: 2
+        instance_ram_gb: 8
 
         # Memory configuration
         # Parent gets a full 2GB pool; subgraphs are intentionally oversubscribed
@@ -194,6 +198,8 @@ production:
       instance:
         type: r7g.xlarge # 32GB RAM, 4 vCPUs, ARM64 - large dedicated per customer
         databases_per_instance: 1 # One parent database per instance (many subgraphs on same instance)
+        vcpus: 4
+        instance_ram_gb: 32
 
         # Memory configuration
         # Parent gets a full 8GB pool; subgraphs are intentionally oversubscribed
@@ -356,6 +362,8 @@ staging:
       instance:
         type: m7g.medium # 4GB RAM, 1 vCPU, ARM64 - aligned with production
         databases_per_instance: 1 # Dedicated
+        vcpus: 1
+        instance_ram_gb: 4
         max_memory_mb: 3072 # 3GB available (4GB - 1GB OS/container overhead)
         memory_per_db_mb: 1024 # 1GB for the parent database
         memory_per_subgraph_mb: 384 # 384MB per subgraph (3 max)
@@ -406,6 +414,8 @@ staging:
       instance:
         type: m7g.large # 8GB RAM, 2 vCPUs, ARM64 - aligned with production
         databases_per_instance: 1
+        vcpus: 2
+        instance_ram_gb: 8
         max_memory_mb: 6144 # 6GB available (8GB - 2GB OS/container overhead)
         memory_per_db_mb: 2048 # 2GB for the parent database
         memory_per_subgraph_mb: 384 # 384MB per subgraph (10 max)
@@ -456,6 +466,8 @@ staging:
       instance:
         type: r7g.xlarge # 32GB RAM, 4 vCPUs, ARM64 - aligned with production
         databases_per_instance: 1
+        vcpus: 4
+        instance_ram_gb: 32
         max_memory_mb: 30720 # 30GB available (32GB - 2GB OS overhead)
         memory_per_db_mb: 8192 # 8GB for the parent database
         memory_per_subgraph_mb: 1024 # 1GB per subgraph (25 max)
@@ -573,6 +585,8 @@ development:
       instance:
         type: m7g.medium
         databases_per_instance: 1 # Dedicated
+        vcpus: 1
+        instance_ram_gb: 4
         max_memory_mb: 3072
         memory_per_db_mb: 1024
         memory_per_subgraph_mb: 384
