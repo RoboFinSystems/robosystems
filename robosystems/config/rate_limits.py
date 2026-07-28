@@ -100,6 +100,12 @@ class RateLimitConfig:
   # GRAPH_SEARCH is deliberately absent: it hits the shared OpenSearch cluster,
   # not the tenant's instance. GRAPH_IMPORT is absent because LadybugDB ingests
   # sequentially regardless of tier, so extra cores buy nothing there.
+  # GRAPH_BACKUP, GRAPH_MANAGEMENT, and GRAPH_SYNC are also deliberately
+  # absent: they are low-frequency control-plane operations whose cost lands
+  # on shared infrastructure — S3 for backups, the platform database and
+  # orchestration for management, external providers via the shared worker
+  # pool for sync — not on the tenant's own cores, so tier vCPU is not the
+  # scaling axis for any of them.
   DEDICATED_RESOURCE_CATEGORIES: frozenset[EndpointCategory] = frozenset(
     {
       EndpointCategory.GRAPH_QUERY,
