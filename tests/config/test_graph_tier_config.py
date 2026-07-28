@@ -35,12 +35,9 @@ production:
         max_single_table_rows: 5000000
         chunk_size_rows: 1000000
         warn_at_percentage: 80
-      memory:
-        baseline_mb: 2048
-        max_boost_mb: 6144
-        auto_reset: true
       instance:
         memory_per_db_mb: 512
+        memory_per_subgraph_mb: 256
         max_memory_mb: 4096
         chunk_size: 256
         query_timeout: 120
@@ -52,10 +49,6 @@ production:
         max_single_table_rows: 25000000
         chunk_size_rows: 2000000
         warn_at_percentage: 80
-      memory:
-        baseline_mb: 4096
-        max_boost_mb: 12288
-        auto_reset: true
       instance:
         memory_per_db_mb: 2048
 staging:
@@ -196,8 +189,29 @@ def test_get_graph_limits_returns_large_tier_values(mock_graph_config):
 def test_get_graph_limits_falls_back_to_defaults(mock_graph_config):
   limits = GraphTierConfig.get_graph_limits("unknown-tier")
   assert limits["instance_storage_limit_gb"] == 20
-  assert limits["max_rows_per_copy"] == 2_000_000
-  assert limits["chunk_size_rows"] == 1_000_000
+  assert limits["max_rows_per_copy"] == 1_000_000
+  assert limits["chunk_size_rows"] == 250_000
+
+
+def test_graph_limit_defaults_do_not_exceed_the_smallest_tier():
+  """Fallback row caps must never be larger than the smallest tier's.
+
+  The row caps are OOM guardrails sized to instance RAM. A fallback larger
+  than the actual box would apply a bigger tier's copy limit to a smaller
+  instance — the exact OOM the guardrail exists to prevent. This drifted
+  once already: the defaults kept m7g.large's 2M/5M after ladybug-standard
+  moved to m7g.medium, so they are pinned against real config here rather
+  than against literals in the mocked fixture.
+  """
+  GraphTierConfig.clear_cache()
+  standard = GraphTierConfig.get_graph_limits("ladybug-standard", "production")
+  defaults = GraphTierConfig.get_graph_limits("does-not-exist", "production")
+
+  for key in ("max_rows_per_copy", "max_single_table_rows", "chunk_size_rows"):
+    assert defaults[key] <= standard[key], (
+      f"default {key}={defaults[key]:,} exceeds ladybug-standard's "
+      f"{standard[key]:,} — a fallback must never be larger than the smallest tier"
+    )
 
 
 def test_get_instance_storage_limit_gb(mock_graph_config):
@@ -205,24 +219,15 @@ def test_get_instance_storage_limit_gb(mock_graph_config):
   assert GraphTierConfig.get_instance_storage_limit_gb("ladybug-large") == 50.0
 
 
-def test_get_memory_config_returns_configured_values(mock_graph_config):
-  memory = GraphTierConfig.get_memory_config("ladybug-standard")
-  assert memory["baseline_mb"] == 2048
-  assert memory["max_boost_mb"] == 6144
-  assert memory["auto_reset"] is True
+def test_subgraph_memory_is_configured_separately_from_parent(mock_graph_config):
+  """Subgraphs get a smaller buffer pool than the parent database.
 
-
-def test_get_memory_config_large_tier(mock_graph_config):
-  memory = GraphTierConfig.get_memory_config("ladybug-large")
-  assert memory["baseline_mb"] == 4096
-  assert memory["max_boost_mb"] == 12288
-
-
-def test_get_memory_config_falls_back_to_defaults(mock_graph_config):
-  memory = GraphTierConfig.get_memory_config("unknown-tier")
-  assert memory["baseline_mb"] == 2048
-  assert memory["max_boost_mb"] == 6144
-  assert memory["auto_reset"] is True
+  get_database_memory_config() reads memory_per_subgraph_mb for names
+  containing an underscore, falling back to memory_per_db_mb otherwise.
+  """
+  instance = GraphTierConfig.get_tier_config("ladybug-standard")["instance"]
+  assert instance["memory_per_db_mb"] == 512
+  assert instance["memory_per_subgraph_mb"] == 256
 
 
 def test_get_storage_cap_gb_from_backup_limits(mock_graph_config):

@@ -385,11 +385,17 @@ class GraphTierConfig:
         Graph limits dictionary with instance_storage_limit_gb, row limits, etc.
     """
     tier_config = cls.get_tier_config(tier, environment)
+    # These fire only when a tier resolves without a graph_limits block (unknown
+    # tier, malformed config). They MUST track the smallest tier — the row caps
+    # are OOM guardrails sized to instance RAM, so falling back to a larger
+    # tier's values would apply an 8GB-sized copy limit to a 4GB box and cause
+    # the exact OOM the guardrail exists to prevent. Keep in sync with
+    # ladybug-standard in .github/configs/graph.yml on every tier resize.
     defaults: dict[str, Any] = {
       "instance_storage_limit_gb": 20,
-      "max_rows_per_copy": 2_000_000,
-      "max_single_table_rows": 5_000_000,
-      "chunk_size_rows": 1_000_000,
+      "max_rows_per_copy": 1_000_000,
+      "max_single_table_rows": 2_500_000,
+      "chunk_size_rows": 250_000,
       "warn_at_percentage": 80,
     }
     return tier_config.get("graph_limits", defaults)
@@ -413,27 +419,6 @@ class GraphTierConfig:
     """
     graph_limits = cls.get_graph_limits(tier, environment)
     return float(graph_limits.get("instance_storage_limit_gb", 20))
-
-  @classmethod
-  def get_memory_config(
-    cls, tier: str, environment: str | None = None
-  ) -> dict[str, Any]:
-    """Get memory boost configuration for a tier.
-
-    Args:
-        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Memory config dictionary with baseline_mb, max_boost_mb, auto_reset
-    """
-    tier_config = cls.get_tier_config(tier, environment)
-    defaults: dict[str, Any] = {
-      "baseline_mb": 2048,
-      "max_boost_mb": 6144,
-      "auto_reset": True,
-    }
-    return tier_config.get("memory", defaults)
 
   @classmethod
   def get_storage_cap_gb(cls, tier: str, environment: str | None = None) -> float:

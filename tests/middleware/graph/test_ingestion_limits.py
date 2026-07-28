@@ -152,7 +152,7 @@ class TestCheckMaterializationLimits:
     with patch.object(
       IngestionLimitChecker,
       "_get_pending_row_counts",
-      return_value={"Entity": 1_000_000, "ENTITY_HAS_FACT": 500_000},
+      return_value={"Entity": 500_000, "ENTITY_HAS_FACT": 250_000},
     ):
       result = await IngestionLimitChecker.check_materialization_limits(
         db=mock_db,

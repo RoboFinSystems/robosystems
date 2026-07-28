@@ -71,15 +71,18 @@ class IngestionLimitChecker:
     pending_rows = cls._get_pending_row_counts(db, graph_id)
     total_pending_rows = sum(pending_rows.values())
 
-    # Check max_rows_per_copy (hard limit — prevents OOM during materialization)
-    max_rows_per_copy = limits.get("max_rows_per_copy", 2_000_000)
+    # Check max_rows_per_copy (hard limit — prevents OOM during materialization).
+    # Fallbacks here and below track ladybug-standard, the smallest tier, for the
+    # reason given in GraphTierConfig.get_graph_limits: a fallback larger than the
+    # actual box defeats the guardrail.
+    max_rows_per_copy = limits.get("max_rows_per_copy", 1_000_000)
     if total_pending_rows > max_rows_per_copy:
       errors.append(
         f"Total rows ({total_pending_rows:,}) exceeds max_rows_per_copy limit ({max_rows_per_copy:,})"
       )
 
     # Check individual table row limits (hard limit)
-    max_single_table = limits.get("max_single_table_rows", 5_000_000)
+    max_single_table = limits.get("max_single_table_rows", 2_500_000)
     for tbl_name, row_count in pending_rows.items():
       if row_count > max_single_table:
         errors.append(
@@ -103,7 +106,7 @@ class IngestionLimitChecker:
       "limits": {
         "max_rows_per_copy": max_rows_per_copy,
         "max_single_table_rows": max_single_table,
-        "chunk_size_rows": limits.get("chunk_size_rows", 1_000_000),
+        "chunk_size_rows": limits.get("chunk_size_rows", 250_000),
         "instance_storage_limit_gb": storage_check["limit_gb"],
       },
       "tier": tier,

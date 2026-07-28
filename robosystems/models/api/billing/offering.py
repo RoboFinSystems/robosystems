@@ -35,6 +35,9 @@ class GraphSubscriptionTier(BaseModel):
   api_rate_multiplier: float = Field(..., description="API rate multiplier")
   backend: str = Field(..., description="Database backend identifier")
   instance_type: str | None = Field(None, description="Instance type")
+  instance_storage_limit_gb: float = Field(
+    0, description="Soft storage cap for the instance in GB"
+  )
 
 
 class GraphSubscriptions(BaseModel):

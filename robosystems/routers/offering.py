@@ -47,7 +47,16 @@ async def get_service_offerings(
     # Get tier configurations from graph.yml for technical specs
     from ..config.graph_tier import GraphTierConfig
 
-    tier_configs = GraphTierConfig.get_available_tiers(include_disabled=False)
+    # include_disabled=True is deliberate. get_available_tiers() gates on
+    # deployment.always_enabled / enabled_default, which answers "is the
+    # CloudFormation stack deployed by default" — not "can a customer buy
+    # this". Large and XLarge carry enabled_default: false plus an enable_var
+    # (LBUG_LARGE_ENABLED_PROD) that only the deploy workflow reads, so the
+    # running API cannot see that they are in fact enabled. Filtering here
+    # dropped their tier_config and silently zeroed max_subgraphs and
+    # api_rate_multiplier. The customer_tiers list below plus the billing
+    # plans are the real gate on what gets listed.
+    tier_configs = GraphTierConfig.get_available_tiers(include_disabled=True)
 
     # Filter to only customer-facing tiers (exclude internal/shared infrastructure)
     customer_tiers = ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]
@@ -66,13 +75,18 @@ async def get_service_offerings(
       backup_limits = GraphTierConfig.get_backup_limits(tier_name)
       backup_retention_days = backup_limits.get("backup_retention_days", 0)
 
-      # Get instance type from graph.yml
+      # Get instance type from graph.yml. vcpus and instance_ram_gb are the
+      # physical instance specs; duckdb_max_threads and max_memory_mb are
+      # tuning knobs (threads can oversubscribe the CPU, and max_memory_mb is
+      # the LadybugDB budget after OS overhead) and must not be reported here.
       instance_config = GraphTierConfig.get_instance_config(tier_name)
       instance_type = instance_config.get("type", "")
-      max_memory_mb = instance_config.get("max_memory_mb", 0)
-      vcpus = instance_config.get("duckdb_max_threads", 0)
+      vcpus = instance_config.get("vcpus", 0)
+      instance_ram_gb = instance_config.get("instance_ram_gb", 0)
       infrastructure = (
-        f"Dedicated {instance_type} ({vcpus} vCPU, {max_memory_mb // 1024} GB RAM)"
+        f"Dedicated {instance_type} ({vcpus} vCPU, {instance_ram_gb} GB RAM)"
+        if instance_type and vcpus and instance_ram_gb
+        else "Dedicated instance"
         if instance_type
         else "Managed infrastructure"
       )

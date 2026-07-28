@@ -206,6 +206,10 @@ function create_ssm_feature_flags() {
         "EMAIL_VERIFICATION_ENABLED=false"
         "FACT_GRID_ENABLED=false"
         "EXTENSIONS_ENABLED=false"
+        # Kill switch for graph_usage_monitor_sensor's 80%/100% storage emails.
+        # Seeded at its code default purely so it is discoverable in
+        # `just ssm-list <env> features` — a kill switch you cannot find is not one.
+        "GRAPH_USAGE_ALERTS_ENABLED=true"
         "LEDGER_ENABLED=false"
         "LOAD_SHEDDING_ENABLED=true"
         "MCP_AUTO_LIMIT_ENABLED=true"

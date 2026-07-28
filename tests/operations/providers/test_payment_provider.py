@@ -504,3 +504,64 @@ class TestStripeCaching:
     """Test that in-memory price cache is available."""
     assert hasattr(StripePaymentProvider, "_price_cache")
     assert hasattr(StripePaymentProvider, "_price_lock")
+
+
+class TestGraphPriceResolution:
+  """Graph prices must be matched by amount, not by 'first active price'.
+
+  Regression guard for a repricing that could not reach Stripe: the graph path
+  returned prices.data[0] without checking unit_amount, so changing
+  base_price_cents left the old price active and still being handed out —
+  checkout quoted the new amount from config and billed the old one. The
+  repository path had always matched on amount; only the graph path did not.
+  """
+
+  @pytest.fixture
+  def stripe_provider(self):
+    with patch("robosystems.operations.providers.payment_provider.env") as mock_env:
+      mock_env.ENVIRONMENT = "prod"
+      with patch.object(StripePaymentProvider, "__init__", lambda self: None):
+        provider = StripePaymentProvider()
+        provider.stripe = Mock()
+        yield provider
+
+  @staticmethod
+  def _price(price_id, unit_amount):
+    price = Mock()
+    price.id = price_id
+    price.unit_amount = unit_amount
+    price.recurring = {"interval": "month"}
+    return price
+
+  def _with_existing_prices(self, provider, prices):
+    product = Mock()
+    product.id = "prod_existing"
+    provider.stripe.Product.search.return_value = Mock(data=[product])
+    provider.stripe.Price.list.return_value = Mock(data=prices)
+    return product
+
+  def test_ignores_active_price_at_a_different_amount(self, stripe_provider):
+    """A stale $149 price must not satisfy a request for $99."""
+    self._with_existing_prices(stripe_provider, [self._price("price_old_149", 14900)])
+    stripe_provider.stripe.Price.create.return_value = self._price("price_new_99", 9900)
+
+    result = stripe_provider._get_or_create_graph_price(
+      "ladybug-standard", {"display_name": "Standard"}, 9900
+    )
+
+    assert result == "price_new_99"
+    assert stripe_provider.stripe.Price.create.call_args.kwargs["unit_amount"] == 9900
+
+  def test_reuses_the_price_that_matches_the_target_amount(self, stripe_provider):
+    """Matching price is reused, so repeated calls don't litter duplicates."""
+    self._with_existing_prices(
+      stripe_provider,
+      [self._price("price_old_149", 14900), self._price("price_99", 9900)],
+    )
+
+    result = stripe_provider._get_or_create_graph_price(
+      "ladybug-standard", {"display_name": "Standard"}, 9900
+    )
+
+    assert result == "price_99"
+    stripe_provider.stripe.Price.create.assert_not_called()
