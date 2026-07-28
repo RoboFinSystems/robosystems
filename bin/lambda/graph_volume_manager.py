@@ -473,9 +473,17 @@ def create_and_attach_volume(
   instance_id: str, tier: str, az: str, databases: list[str], node_type: str
 ) -> dict[str, Any]:
   """Create a new volume and attach it to the instance"""
-  # Tier configurations (updated to match .github/configs/graph.yml)
+  # Initial volume sizes. These are starting points, not caps: the volume
+  # monitor expands at 80% usage every 15 minutes, and EBS volumes can grow
+  # but never shrink - so provisioning small and growing on demand costs
+  # strictly less than provisioning for a ceiling most graphs never reach.
+  # The product cap is enforced separately by instance_storage_limit_gb in
+  # .github/configs/graph.yml (20/50/100 GB); these do not need to match it,
+  # since expansion at 80% fires before the write-path cap is reached.
+  # gp3's 3000 IOPS / 125 MBps baseline is size-independent, so a smaller
+  # volume carries no performance penalty.
   tier_config = {
-    "ladybug-standard": {"size": 50, "iops": 3000},
+    "ladybug-standard": {"size": 20, "iops": 3000},
     "ladybug-large": {"size": 50, "iops": 3000},
     "ladybug-xlarge": {"size": 50, "iops": 3000},
     "ladybug-shared": {"size": 200, "iops": 3000},

@@ -36,7 +36,11 @@ INSTANCE_REGISTRY_TABLE = os.environ.get("INSTANCE_REGISTRY_TABLE")
 ALERT_TOPIC_ARN = os.environ.get("ALERT_TOPIC_ARN")
 EXPANSION_THRESHOLD = float(os.environ.get("EXPANSION_THRESHOLD", "0.8"))  # 80%
 EXPANSION_FACTOR = float(os.environ.get("EXPANSION_FACTOR", "1.5"))  # 50% increase
-MIN_EXPANSION_GB = int(os.environ.get("MIN_EXPANSION_GB", "50"))
+# Floor on each expansion step. Kept meaningfully large because EBS enforces
+# a ~6 hour cooldown between volume modifications - too small a step risks
+# needing another expansion before the next one is allowed. At the 20GB
+# Standard starting size this yields 20 -> 40GB, a doubling.
+MIN_EXPANSION_GB = int(os.environ.get("MIN_EXPANSION_GB", "20"))
 MAX_VOLUME_SIZE_GB = int(os.environ.get("MAX_VOLUME_SIZE_GB", "16384"))  # EBS limit
 GRAPH_API_PORT = os.environ.get("GRAPH_API_PORT", "8001")
 GRAPH_API_SECRET_ARN = os.environ.get("GRAPH_API_SECRET_ARN", "")
