@@ -22,7 +22,7 @@
 production:
   writers:
     # =========================================================================
-    # LADYBUGDB STANDARD TIER - Dedicated m7g.large
+    # LADYBUGDB STANDARD TIER - Dedicated m7g.medium
     # =========================================================================
     - name: ladybug-standard
       description: Dedicated m7g.medium LadybugDB tier for cost-efficient entry with subgraph support
@@ -32,9 +32,6 @@ production:
 
       # Subgraph configuration
       max_subgraphs: 3 # Up to 3 subgraphs (1 parent + 3 children = 4 databases total)
-
-      # Resource limits
-      api_rate_multiplier: 1.0 # Base rate limits (1x)
 
       # Copy operation limits
       copy_operations:
@@ -90,7 +87,7 @@ production:
         always_enabled: true # LadybugDB standard tier is the foundation - always available
 
     # =========================================================================
-    # LADYBUGDB LARGE TIER - Dedicated r7g.large
+    # LADYBUGDB LARGE TIER - Dedicated m7g.large
     # =========================================================================
     - name: ladybug-large
       description: Dedicated m7g.large with subgraph support (10 subgraphs)
@@ -100,9 +97,6 @@ production:
 
       # Subgraph configuration
       max_subgraphs: 10 # Support up to 10 subgraphs (1 parent + 10 children = 11 databases total)
-
-      # Resource limits
-      api_rate_multiplier: 1.5 # 1.5x rate limits (2x RAM, 2x CPU vs standard)
 
       # Copy operation limits
       copy_operations:
@@ -169,9 +163,6 @@ production:
       max_subgraphs: 25 # Practical limit of 25 subgraphs (marketed as "unlimited")
       # Note: 1 parent + 25 subgraphs = 26 databases total on xlarge instance
 
-      # Resource limits
-      api_rate_multiplier: 2.5 # 2.5x rate limits (4x RAM, 2x CPU vs standard)
-
       # Copy operation limits
       copy_operations:
         max_file_size_gb: 10.0 # Maximum file size for enterprise workloads
@@ -237,9 +228,6 @@ production:
 
       # Repository configuration
       max_subgraphs: 10 # Platform-managed subgraphs only (e.g., sec_historical)
-
-      # Resource limits
-      api_rate_multiplier: null # Separate rate limiting for public access
 
       # Copy operation limits (for platform data loading)
       copy_operations:
@@ -335,7 +323,6 @@ staging:
       tier: ladybug-standard
 
       max_subgraphs: 3
-      api_rate_multiplier: 1.0
 
       # Copy operation limits
       copy_operations:
@@ -389,7 +376,6 @@ staging:
       tier: ladybug-large
 
       max_subgraphs: 10
-      api_rate_multiplier: 2.5
 
       copy_operations:
         max_file_size_gb: 5.0
@@ -441,7 +427,6 @@ staging:
       tier: ladybug-xlarge
 
       max_subgraphs: 25
-      api_rate_multiplier: 5.0
 
       copy_operations:
         max_file_size_gb: 10.0
@@ -493,7 +478,6 @@ staging:
       tier: ladybug-shared
 
       max_subgraphs: 10 # Platform-managed subgraphs only
-      api_rate_multiplier: null
 
       copy_operations:
         max_file_size_gb: 10.0
@@ -560,7 +544,6 @@ development:
       tier: ladybug-standard
 
       max_subgraphs: 3
-      api_rate_multiplier: 1.0
 
       copy_operations:
         max_file_size_gb: 1.0

@@ -108,3 +108,19 @@ class TestOfferingEndpoint:
         f"{tier['name']} advertises no backup retention"
       )
       assert tier["instance_type"], f"{tier['name']} has no instance type"
+
+  async def test_rate_multiplier_is_the_derived_value(self, async_client: AsyncClient):
+    """The advertised multiplier must come from the enforced limits table.
+
+    graph.yml no longer defines api_rate_multiplier, so reading it off the
+    tier config dict silently reports 1.0 for every tier.
+    """
+    from robosystems.config.graph_tier import GraphTierConfig
+
+    response = await async_client.get("/v1/offering")
+    assert response.status_code == 200
+
+    for tier in response.json()["graph_subscriptions"]["tiers"]:
+      assert tier["api_rate_multiplier"] == GraphTierConfig.get_api_rate_multiplier(
+        tier["name"]
+      ), f"{tier['name']} advertises a multiplier the limiter does not enforce"

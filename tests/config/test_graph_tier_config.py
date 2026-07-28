@@ -129,7 +129,10 @@ def test_tier_config_loads_once_when_cached(mock_graph_config):
 
 def test_accessors_return_configured_values(mock_graph_config):
   assert get_tier_max_subgraphs("ladybug-standard") == 5
-  assert get_tier_api_rate_multiplier("ladybug-standard") == 1.5
+  # No longer read from graph.yml: the multiplier is derived from the limits
+  # SUBSCRIPTION_RATE_LIMITS actually enforces, so it cannot drift from them.
+  # The mocked YAML's api_rate_multiplier is therefore ignored by design.
+  assert get_tier_api_rate_multiplier("ladybug-standard") == 1.0
 
   copy_limits = get_tier_copy_operation_limits("ladybug-standard")
   assert copy_limits["max_file_size_gb"] == 3
@@ -150,7 +153,7 @@ def test_accessors_return_configured_values(mock_graph_config):
 def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
   # ladybug-large is missing multiplier/copy settings so defaults apply
   assert GraphTierConfig.get_tier_config("unknown-tier") == {}
-  assert get_tier_api_rate_multiplier("ladybug-large") == 1.0
+  assert get_tier_api_rate_multiplier("ladybug-large") == 2.0  # derived, 2 vCPU
 
   default_copy = get_tier_copy_operation_limits("ladybug-large")
   assert default_copy["max_file_size_gb"] == 1.0
@@ -229,8 +232,8 @@ def test_tiers_defined_in_an_environment_match_production():
   numbers, since subgraph count and storage cap are properties of the tier
   rather than of the deployment.
 
-  api_rate_multiplier is deliberately not asserted: staging runs Large/XLarge
-  looser than production (2.5/5.0 vs 1.5/2.5), plausibly intentional headroom.
+  api_rate_multiplier needs no assertion here: it is derived from
+  SUBSCRIPTION_RATE_LIMITS, which does not vary by environment.
   """
   GraphTierConfig.clear_cache()
   tiers = ("ladybug-standard", "ladybug-large", "ladybug-xlarge")
@@ -249,6 +252,37 @@ def test_tiers_defined_in_an_environment_match_production():
       assert GraphTierConfig.get_instance_storage_limit_gb(tier, env_name) == (
         GraphTierConfig.get_instance_storage_limit_gb(tier, "production")
       ), f"{env_name}/{tier} instance_storage_limit_gb does not match production"
+
+
+def test_available_tiers_report_the_derived_rate_multiplier():
+  """The multiplier surfaced by /v1/offering and /v1/graphs/tiers is derived.
+
+  graph.yml no longer carries an api_rate_multiplier key, so any surface that
+  reads it off the writer dict with .get() silently flattens every tier to the
+  1.0 default — telling Large and XLarge customers they get standard limits
+  while enforcement gives them 2x/4x. Pin the reported value to the derived
+  one for every tier the catalog can list.
+  """
+  GraphTierConfig.clear_cache()
+  expected = {
+    "ladybug-standard": 1.0,
+    "ladybug-large": 2.0,
+    "ladybug-xlarge": 4.0,
+  }
+
+  for env_name in ("production", "staging"):
+    tiers = GraphTierConfig.get_available_tiers(env_name, include_disabled=True)
+    by_name = {t["tier"]: t for t in tiers if t["tier"] in expected}
+    assert set(by_name) == set(expected), (
+      f"{env_name} does not define all customer tiers: {sorted(by_name)}"
+    )
+    for tier_name, multiplier in expected.items():
+      assert by_name[tier_name]["api_rate_multiplier"] == multiplier, (
+        f"{env_name}/{tier_name} reports "
+        f"{by_name[tier_name]['api_rate_multiplier']}, expected {multiplier}"
+      )
+    assert "2x API rate limits" in by_name["ladybug-large"]["features"]
+    assert "4x API rate limits" in by_name["ladybug-xlarge"]["features"]
 
 
 def test_subgraph_memory_is_configured_separately_from_parent(mock_graph_config):

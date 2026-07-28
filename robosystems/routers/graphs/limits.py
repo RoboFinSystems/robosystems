@@ -98,9 +98,6 @@ async def get_graph_limits(
     from robosystems.models.core.graph import Graph
     from robosystems.models.core.graph.graph_credits import GraphCredits
 
-    # Get user's subscription tier
-    user_tier = getattr(current_user, "subscription_tier", "ladybug-standard")
-
     # Get graph information if it exists
     graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
 
@@ -116,6 +113,20 @@ async def get_graph_limits(
       graph_tier = "ladybug-standard"
 
     is_shared = MultiTenantUtils.is_shared_repository(graph_id)
+
+    # The tier whose rate-limit table the limiter enforces for requests to
+    # this graph. Shared repositories are user-keyed at the fallback tier, and
+    # a tier string without a limits table (ladybug-shared, legacy values)
+    # also floors there — without this, the lookup below would fall through to
+    # the anonymous "base" table and report 20/min for a graph served 60.
+    from ...config.rate_limits import EndpointCategory, RateLimitConfig
+    from ...middleware.rate_limits.graph_tier_resolver import FALLBACK_TIER
+
+    enforced_tier = (
+      graph_tier
+      if not is_shared and graph_tier in RateLimitConfig.SUBSCRIPTION_RATE_LIMITS
+      else FALLBACK_TIER
+    )
 
     # Get storage information (instance storage limit from graph.yml).
     # Reads the itemized breakdown so this agrees with `instance_usage` below
@@ -173,23 +184,23 @@ async def get_graph_limits(
     # Get backup limits from tier configuration (based on graph tier)
     backup_limits = get_tier_backup_limits(graph_tier)
 
-    # Define rate limits based on graph tier (using api_rate_multiplier from config)
-    base_requests_per_minute = 60
-    base_requests_per_hour = 1000
-    base_burst_capacity = 10
-
-    multiplier = GraphTierConfig.get_api_rate_multiplier(graph_tier)
+    # Report what the limiter actually enforces, read from the same table the
+    # limiter reads. This previously computed 60 x api_rate_multiplier, which
+    # told Large 90/min and XLarge 150/min while enforcement gave every tier
+    # 60 — the multiplier is read in several places and applied in none.
+    # Reporting a limit we do not honour is worse than reporting a lower one.
+    query_limit = RateLimitConfig.get_rate_limit(
+      enforced_tier, EndpointCategory.GRAPH_QUERY
+    )
+    requests_per_minute = query_limit[0] if query_limit else 60
 
     rate_limits = {
-      "requests_per_minute": int(base_requests_per_minute * multiplier)
-      if multiplier
-      else base_requests_per_minute,
-      "requests_per_hour": int(base_requests_per_hour * multiplier)
-      if multiplier
-      else base_requests_per_hour,
-      "burst_capacity": int(base_burst_capacity * multiplier)
-      if multiplier
-      else base_burst_capacity,
+      "requests_per_minute": requests_per_minute,
+      # Derived, not separately enforced: the limiter uses fixed-window
+      # per-minute buckets, so these describe the same budget over a longer
+      # span rather than independent ceilings.
+      "requests_per_hour": requests_per_minute * 60,
+      "burst_capacity": requests_per_minute,
     }
 
     # Get credit limits if applicable
@@ -201,11 +212,14 @@ async def get_graph_limits(
         )
         if graph_credits:
           credit_limits = {
-            "monthly_ai_credits": graph_credits.monthly_credit_limit,
-            "current_balance": graph_credits.current_balance,
+            "monthly_ai_credits": int(graph_credits.monthly_allocation),
+            "current_balance": int(graph_credits.current_balance),
           }
-      except Exception:
-        pass
+      except Exception as e:
+        # A bare pass here once hid a nonexistent-column read for the life of
+        # the endpoint; credits are optional in the response, but the failure
+        # must be visible.
+        logger.warning(f"Could not get credit limits for {graph_id}: {e}")
 
     # Get content limits and instance usage for non-shared graphs.
     # check_instance_storage is a single Graph API call covering the whole
@@ -266,7 +280,10 @@ async def get_graph_limits(
     # Build comprehensive response using typed models
     response = GraphLimitsResponse(
       graph_id=graph_id,
-      subscription_tier=user_tier,
+      # Graph subscriptions are per graph, not per user (User has no tier
+      # column): report the tier whose limits this graph's requests are
+      # actually held to.
+      subscription_tier=enforced_tier,
       graph_tier=graph_tier,
       is_shared_repository=is_shared,
       storage=StorageLimits(**storage_limits),

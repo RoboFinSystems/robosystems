@@ -484,6 +484,15 @@ def subscription_aware_rate_limit_dependency(request: Request):
     # Fall back to general rate limiting for non-subscription endpoints
     return rate_limit_dependency(request)
 
+  from ...config.rate_limits import RateLimitConfig
+  from ...config.shared_repositories import is_shared_repository_or_subgraph
+  from ..graph.types import parse_graph_id
+  from .graph_tier_resolver import (
+    FALLBACK_TIER,
+    extract_graph_id,
+    resolve_graph_tier,
+  )
+
   # Get user identification
   user_id = get_user_from_request(request)
   if not user_id:
@@ -491,9 +500,7 @@ def subscription_aware_rate_limit_dependency(request: Request):
     subscription_tier = "base"
     identifier = f"anon_sub:{request.client.host if request.client else 'unknown'}"
   else:
-    # All authenticated users get ladybug-standard tier rate limits
-    # Graph-specific subscriptions are handled at the graph level
-    subscription_tier = "ladybug-standard"
+    subscription_tier = FALLBACK_TIER
     identifier = f"user_sub:{user_id}"
 
   # Determine endpoint category
@@ -501,6 +508,40 @@ def subscription_aware_rate_limit_dependency(request: Request):
   if not category:
     # Fall back to general rate limiting if category not found
     return rate_limit_dependency(request)
+
+  # Resolve the graph's own tier for graph-scoped requests. Previously every
+  # authenticated user was pinned to ladybug-standard, which made the large and
+  # xlarge tables unreachable, and the bucket was keyed by user, so a customer
+  # with ten graphs shared one budget across all of them — per-graph pricing
+  # that delivered no per-graph throughput.
+  #
+  # Three conditions, and each excludes a case where per-graph bucketing is
+  # actively wrong:
+  #
+  #   1. The request is graph-scoped at all.
+  #   2. The graph is NOT a shared repository. `sec` is one graph that every
+  #      tenant queries, so keying the bucket by graph id would put all of them
+  #      in a single budget and let one heavy user rate-limit everyone else off
+  #      it. Shared repositories stay user-keyed, which is also what isolates
+  #      tenants from each other. Subgraphs count too — `sec_historical` is as
+  #      shared as `sec`.
+  #   3. The category hits the tenant's own instance. Shared-infrastructure
+  #      categories stay user-keyed and tier-flat, or a customer could multiply
+  #      their load on OpenSearch or the extensions RDS by creating graphs.
+  graph_id = extract_graph_id(request.url.path) if user_id else None
+  if (
+    graph_id
+    and not is_shared_repository_or_subgraph(graph_id)
+    and category in RateLimitConfig.DEDICATED_RESOURCE_CATEGORIES
+  ):
+    # A subgraph lives on its parent's instance and is not separately priced,
+    # so it draws from the parent's budget: kg123_dev buckets as kg123. Without
+    # this, an XLarge tenant with 25 subgraphs would hold 26 independent
+    # budgets against one machine. Resolving the parent also spares the
+    # resolver a per-subgraph cache entry and database row dependency.
+    parent_graph_id, _subgraph_name = parse_graph_id(graph_id)
+    subscription_tier = resolve_graph_tier(parent_graph_id)
+    identifier = f"graph_sub:{parent_graph_id}"
 
   # Get subscription-based limits
   limit_config = get_subscription_rate_limit(subscription_tier, category)

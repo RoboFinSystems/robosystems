@@ -194,3 +194,152 @@ class TestGraphCreationLimits:
   #   """Test that users without limits get defaults from environment."""
   #   # This test needs to be rewritten to handle the new SSE response format
   #   pass
+
+
+@pytest.mark.asyncio
+class TestGraphLimitsEndpoint:
+  """GET /v1/graphs/{graph_id}/limits must report what is enforced.
+
+  Three bugs lived in this one handler: `credits` was permanently null (it
+  read a column that does not exist, behind a bare except), `subscription_tier`
+  came from a User attribute that does not exist, and shared repositories
+  reported the anonymous base table while enforcement grants the user-keyed
+  standard tier. These pin the endpoint end to end.
+  """
+
+  def _use_test_db(self, test_db):
+    """Route the endpoint's async session dependency at the test database.
+
+    async_client does not override get_async_db_session; its teardown clears
+    all overrides, so adding one here is safe.
+    """
+    from main import app
+    from robosystems.database import get_async_db_session
+
+    async def override():
+      yield test_db
+
+    app.dependency_overrides[get_async_db_session] = override
+
+  def _make_graph(self, test_db, test_org, test_user, tier, with_credits=True):
+    import uuid
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from robosystems.models.core import Graph, GraphCredits, GraphUser
+
+    graph = Graph.create(
+      graph_id=f"kg{uuid.uuid4().hex[:16]}",
+      graph_name="Limits Endpoint Graph",
+      graph_type="entity",
+      org_id=test_org.id,
+      session=test_db,
+      base_schema="base",
+      schema_extensions=[],
+      graph_tier=tier,
+      graph_instance_id="test-instance",
+    )
+    GraphUser.create(
+      user_id=test_user.id,
+      graph_id=graph.graph_id,
+      role="admin",
+      is_selected=False,
+      session=test_db,
+    )
+    if with_credits:
+      test_db.add(
+        GraphCredits(
+          id=f"gc_{graph.graph_id}",
+          graph_id=graph.graph_id,
+          user_id=test_user.id,
+          billing_admin_id=test_user.id,
+          current_balance=Decimal("31999.50"),
+          monthly_allocation=Decimal("32000"),
+          last_allocation_date=datetime.now(UTC),
+        )
+      )
+    test_db.commit()
+    return graph
+
+  def _no_graph_api(self):
+    """The handler tolerates an unreachable Graph API; keep tests hermetic."""
+    from unittest.mock import AsyncMock
+
+    return (
+      patch(
+        "robosystems.routers.graphs.limits.get_universal_repository",
+        new=AsyncMock(),
+      ),
+      patch(
+        "robosystems.routers.graphs.limits._get_graph_client",
+        new=AsyncMock(side_effect=RuntimeError("no graph api in tests")),
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.IngestionLimitChecker.check_instance_storage",
+        new=AsyncMock(side_effect=RuntimeError("no graph api in tests")),
+      ),
+    )
+
+  async def test_reports_enforced_tier_rate_and_credits(
+    self, async_client: AsyncClient, test_db, test_org, test_user
+  ):
+    from robosystems.config.graph_tier import GraphTier
+
+    graph = self._make_graph(test_db, test_org, test_user, GraphTier.LADYBUG_LARGE)
+    self._use_test_db(test_db)
+
+    repo, client, storage = self._no_graph_api()
+    with repo, client, storage:
+      response = await async_client.get(f"/v1/graphs/{graph.graph_id}/limits")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["graph_tier"] == "ladybug-large"
+    assert data["subscription_tier"] == "ladybug-large"
+    # The enforced GRAPH_QUERY limit for ladybug-large, not 60 x multiplier
+    assert data["rate_limits"]["requests_per_minute"] == 120
+    # Was permanently null: the handler read monthly_credit_limit, a column
+    # that does not exist, and a bare except swallowed the AttributeError.
+    assert data["credits"] == {
+      "monthly_ai_credits": 32000,
+      "current_balance": 31999,
+    }
+
+  async def test_shared_repository_reports_the_enforced_fallback_tier(
+    self, async_client: AsyncClient, test_db
+  ):
+    """ladybug-shared has no limits table; enforcement grants the user-keyed
+    standard tier, and the report must not fall to the base table (20/min)."""
+    self._use_test_db(test_db)
+
+    repo, client, storage = self._no_graph_api()
+    with repo, client, storage:
+      response = await async_client.get("/v1/graphs/sec/limits")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["is_shared_repository"] is True
+    assert data["graph_tier"] == "ladybug-shared"
+    assert data["subscription_tier"] == "ladybug-standard"
+    assert data["rate_limits"]["requests_per_minute"] == 60
+    assert data["credits"] is None
+
+  async def test_legacy_tier_string_floors_at_standard_not_base(
+    self, async_client: AsyncClient, test_db, test_org, test_user
+  ):
+    """A graphs.graph_tier value predating a tier rename must report the
+    fallback tier's limits, mirroring what the limiter enforces."""
+    graph = self._make_graph(
+      test_db, test_org, test_user, "kuzu-standard", with_credits=False
+    )
+    self._use_test_db(test_db)
+
+    repo, client, storage = self._no_graph_api()
+    with repo, client, storage:
+      response = await async_client.get(f"/v1/graphs/{graph.graph_id}/limits")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["graph_tier"] == "kuzu-standard"
+    assert data["subscription_tier"] == "ladybug-standard"
+    assert data["rate_limits"]["requests_per_minute"] == 60

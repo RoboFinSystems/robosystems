@@ -140,7 +140,7 @@ async def get_service_offerings(
         "instance_storage_limit_gb": GraphTierConfig.get_instance_storage_limit_gb(
           tier_name
         ),
-        "api_rate_multiplier": tier_config.get("api_rate_multiplier", 1.0),
+        "api_rate_multiplier": GraphTierConfig.get_api_rate_multiplier(tier_name),
         "backend": tier_config.get("backend", "ladybug"),
         "instance_type": instance_type or None,
       }

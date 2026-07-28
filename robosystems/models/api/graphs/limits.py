@@ -222,7 +222,9 @@ class GraphLimitsResponse(BaseModel):
   )
 
   graph_id: str = Field(..., description="Graph database identifier")
-  subscription_tier: str = Field(..., description="User's subscription tier")
+  subscription_tier: str = Field(
+    ..., description="Rate-limit tier enforced for requests to this graph"
+  )
   graph_tier: str = Field(..., description="Graph's database tier")
   is_shared_repository: bool = Field(
     ..., description="Whether this is a shared repository"
