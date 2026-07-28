@@ -219,6 +219,38 @@ def test_get_instance_storage_limit_gb(mock_graph_config):
   assert GraphTierConfig.get_instance_storage_limit_gb("ladybug-large") == 50.0
 
 
+def test_tiers_defined_in_an_environment_match_production():
+  """Where a tier IS defined, its capability and product limits match prod.
+
+  Not every environment defines every tier — development deliberately defines
+  only ladybug-standard, because it runs a single graph_api and Large/XLarge
+  cannot exist there. That absence is fine and is handled by omitting the tier
+  from /v1/offering. What is not fine is a tier that exists with *different*
+  numbers, since subgraph count and storage cap are properties of the tier
+  rather than of the deployment.
+
+  api_rate_multiplier is deliberately not asserted: staging runs Large/XLarge
+  looser than production (2.5/5.0 vs 1.5/2.5), plausibly intentional headroom.
+  """
+  GraphTierConfig.clear_cache()
+  tiers = ("ladybug-standard", "ladybug-large", "ladybug-xlarge")
+
+  for env_name in ("staging", "development"):
+    for tier in tiers:
+      config = GraphTierConfig.get_tier_config(tier, env_name)
+      if not config:
+        continue  # Not offered in this environment — see docstring.
+
+      prod = GraphTierConfig.get_tier_config(tier, "production")
+      assert config.get("max_subgraphs") == prod.get("max_subgraphs"), (
+        f"{env_name}/{tier} max_subgraphs={config.get('max_subgraphs')} does not "
+        f"match production's {prod.get('max_subgraphs')}"
+      )
+      assert GraphTierConfig.get_instance_storage_limit_gb(tier, env_name) == (
+        GraphTierConfig.get_instance_storage_limit_gb(tier, "production")
+      ), f"{env_name}/{tier} instance_storage_limit_gb does not match production"
+
+
 def test_subgraph_memory_is_configured_separately_from_parent(mock_graph_config):
   """Subgraphs get a smaller buffer pool than the parent database.
 
