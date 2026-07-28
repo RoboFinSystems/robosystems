@@ -8,6 +8,7 @@ deleted graph must not hand out XLarge throughput.
 """
 
 from ...config.graph_tier import GraphTier
+from ...config.rate_limits import RateLimitConfig
 from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 
@@ -25,6 +26,26 @@ _CACHE_PREFIX = "ratelimit:graph_tier:"
 # for a non-existent graph does not re-query the database each time.
 _UNKNOWN = "-"
 
+# Static path segments that occupy the graph-id position under /v1/graphs.
+# Treating one as a graph id would collapse every caller of that route into a
+# single shared bucket — the cross-tenant failure the shared-repository
+# exclusion exists to prevent. Those routes use the general limiter today, so
+# this guard is defense in depth against one of them adopting the
+# subscription-aware dependency.
+_STATIC_GRAPH_SEGMENTS = frozenset({"schema", "tiers", "capacity", "extensions"})
+
+# One client for the process, created lazily. The limiter runs per request on
+# the hottest path in the API; creating a client (and its connection pool) per
+# call would mean a TCP/TLS handshake per request in production.
+_redis_client = None
+
+
+def _redis():
+  global _redis_client
+  if _redis_client is None:
+    _redis_client = create_redis_client(ValkeyDatabase.GRAPH_ROUTING)
+  return _redis_client
+
 
 def extract_graph_id(path: str) -> str | None:
   """Pull the graph id out of a request path, or None if it is not graph-scoped.
@@ -41,8 +62,7 @@ def extract_graph_id(path: str) -> str | None:
 
   if len(parts) >= 3 and parts[0] == "v1" and parts[1] == "graphs":
     candidate = parts[2]
-    # /v1/graphs/schema/validate carries no graph id.
-    return None if candidate == "schema" else candidate
+    return None if candidate in _STATIC_GRAPH_SEGMENTS else candidate
 
   if len(parts) >= 2 and parts[0] == "extensions":
     if parts[1] in ("roboledger", "roboinvestor"):
@@ -54,8 +74,7 @@ def extract_graph_id(path: str) -> str | None:
 
 def _cached_tier(graph_id: str) -> str | None:
   try:
-    client = create_redis_client(ValkeyDatabase.GRAPH_ROUTING)
-    value = client.get(f"{_CACHE_PREFIX}{graph_id}")
+    value = _redis().get(f"{_CACHE_PREFIX}{graph_id}")
   except Exception as e:
     # A cache outage must not fail the request; fall through to the database.
     logger.debug(f"Rate limit tier cache unavailable for {graph_id}: {e}")
@@ -65,8 +84,7 @@ def _cached_tier(graph_id: str) -> str | None:
 
 def _store_tier(graph_id: str, tier: str) -> None:
   try:
-    client = create_redis_client(ValkeyDatabase.GRAPH_ROUTING)
-    client.setex(f"{_CACHE_PREFIX}{graph_id}", _TIER_CACHE_TTL_SECONDS, tier)
+    _redis().setex(f"{_CACHE_PREFIX}{graph_id}", _TIER_CACHE_TTL_SECONDS, tier)
   except Exception as e:
     logger.debug(f"Could not cache tier for {graph_id}: {e}")
 
@@ -77,12 +95,20 @@ def resolve_graph_tier(graph_id: str) -> str:
   Never raises: rate limiting is not the place to surface a lookup failure, and
   failing open would let an error hand out more throughput than the customer
   bought.
+
+  A tier string with no entry in SUBSCRIPTION_RATE_LIMITS (ladybug-shared on a
+  repository row, or a legacy value predating a rename) also resolves to
+  FALLBACK_TIER: without this guard the limits lookup would fall through to the
+  anonymous "base" table, dropping a paying customer below the floor this
+  module promises.
   """
   cached = _cached_tier(graph_id)
   if cached == _UNKNOWN:
     return FALLBACK_TIER
   if cached:
-    return cached
+    return (
+      cached if cached in RateLimitConfig.SUBSCRIPTION_RATE_LIMITS else FALLBACK_TIER
+    )
 
   try:
     from ...database import session as session_factory
@@ -103,4 +129,4 @@ def resolve_graph_tier(graph_id: str) -> str:
     return FALLBACK_TIER
 
   _store_tier(graph_id, tier)
-  return tier
+  return tier if tier in RateLimitConfig.SUBSCRIPTION_RATE_LIMITS else FALLBACK_TIER

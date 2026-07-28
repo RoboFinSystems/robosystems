@@ -486,6 +486,7 @@ def subscription_aware_rate_limit_dependency(request: Request):
 
   from ...config.rate_limits import RateLimitConfig
   from ...config.shared_repositories import is_shared_repository_or_subgraph
+  from ..graph.types import parse_graph_id
   from .graph_tier_resolver import (
     FALLBACK_TIER,
     extract_graph_id,
@@ -533,8 +534,14 @@ def subscription_aware_rate_limit_dependency(request: Request):
     and not is_shared_repository_or_subgraph(graph_id)
     and category in RateLimitConfig.DEDICATED_RESOURCE_CATEGORIES
   ):
-    subscription_tier = resolve_graph_tier(graph_id)
-    identifier = f"graph_sub:{graph_id}"
+    # A subgraph lives on its parent's instance and is not separately priced,
+    # so it draws from the parent's budget: kg123_dev buckets as kg123. Without
+    # this, an XLarge tenant with 25 subgraphs would hold 26 independent
+    # budgets against one machine. Resolving the parent also spares the
+    # resolver a per-subgraph cache entry and database row dependency.
+    parent_graph_id, _subgraph_name = parse_graph_id(graph_id)
+    subscription_tier = resolve_graph_tier(parent_graph_id)
+    identifier = f"graph_sub:{parent_graph_id}"
 
   # Get subscription-based limits
   limit_config = get_subscription_rate_limit(subscription_tier, category)

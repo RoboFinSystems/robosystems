@@ -492,8 +492,14 @@ async def get_available_graph_tiers(
     from robosystems.config import BillingConfig
     from robosystems.config.graph_tier import GraphTierConfig
 
-    # Get tier configurations from graph.yml
-    tiers = GraphTierConfig.get_available_tiers(include_disabled=include_disabled)
+    # include_disabled=True is deliberate, same reasoning as /v1/offering:
+    # get_available_tiers gates on deployment.always_enabled/enabled_default,
+    # which answers "is the CloudFormation stack deployed by default" — not
+    # "can a customer buy this". Large and XLarge carry enabled_default: false
+    # plus an enable_var only the deploy workflow reads, so honouring the flag
+    # here made both tiers invisible in production. What is sellable is
+    # decided by the billing catalog below.
+    tiers = GraphTierConfig.get_available_tiers(include_disabled=True)
 
     # Filter out internal-only and not-yet-available tiers
     excluded_tiers = [
@@ -501,34 +507,28 @@ async def get_available_graph_tiers(
     ]
     tiers = [tier for tier in tiers if tier.get("tier") not in excluded_tiers]
 
-    # Try to add pricing information from billing config
+    # Attach pricing from the billing catalog, which also decides what is
+    # offered: a tier billing cannot price is not purchasable here and is
+    # omitted unless the caller asked for disabled tiers. No hardcoded price
+    # fallback — a fabricated number that matches neither billing nor Stripe
+    # is worse than omission.
     try:
-      pricing_info = BillingConfig.get_all_pricing_info()
-      tier_pricing = pricing_info.get("subscription_tiers", {})
-
-      for tier in tiers:
-        tier_key = tier.get("tier", "")
-
-        # tier_pricing uses the same keys as tier names (e.g., "ladybug-standard")
-        if tier_pricing.get(tier_key):
-          # Convert cents to dollars for monthly_price
-          base_price_cents = tier_pricing[tier_key].get("base_price_cents", 0)
-          tier["monthly_price"] = base_price_cents / 100.0
-          tier["monthly_credits"] = tier_pricing[tier_key].get(
-            "monthly_credit_allocation", 0
-          )
-        else:
-          # Default pricing if not found (matching current billing config)
-          default_prices = {
-            "ladybug-standard": 100.0,
-            "ladybug-large": 300.0,
-            "ladybug-xlarge": 700.0,
-          }
-          tier["monthly_price"] = default_prices.get(tier_key)
-
+      tier_pricing = BillingConfig.get_all_pricing_info().get("subscription_tiers", {})
     except Exception as pricing_error:
       logger.warning(f"Could not load pricing information: {pricing_error}")
-      # Pricing remains None if we can't load it
+      tier_pricing = None
+
+    if tier_pricing is not None:
+      priced_tiers = []
+      for tier in tiers:
+        plan_data = tier_pricing.get(tier.get("tier", ""))
+        if plan_data:
+          tier["monthly_price"] = plan_data.get("base_price_cents", 0) / 100.0
+          tier["monthly_credits"] = plan_data.get("monthly_credit_allocation", 0)
+          priced_tiers.append(tier)
+        elif include_disabled:
+          priced_tiers.append(tier)
+      tiers = priced_tiers
 
     return AvailableGraphTiersResponse(tiers=tiers)
 

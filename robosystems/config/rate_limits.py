@@ -236,9 +236,8 @@ class RateLimitConfig:
       EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
       EndpointCategory.TABLE_MANAGEMENT: (15, RateLimitPeriod.MINUTE),
     },
-    # ladybug-xlarge: r7g.xlarge (32GB, 4 vCPU)
-    # Identical enforcement to standard (see ladybug-large note): reference/
-    # parity only; the limiter treats all authenticated users as standard.
+    # ladybug-xlarge: r7g.xlarge (32GB, 4 vCPU) — 4x Standard's vCPU, so the
+    # dedicated-resource categories quadruple. Shared categories match Standard.
     "ladybug-xlarge": {
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (60, RateLimitPeriod.MINUTE),
@@ -246,7 +245,7 @@ class RateLimitConfig:
       EndpointCategory.STATUS: (120, RateLimitPeriod.MINUTE),
       EndpointCategory.SSE: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.BILLING: (60, RateLimitPeriod.MINUTE),  # Never block payments
-      # Graph-scoped — same base, multiplied by 2.5x from graph.yml
+      # Dedicated instance — 4x Standard (4 vCPU vs 1)
       EndpointCategory.GRAPH_READ: (480, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_WRITE: (120, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_ANALYTICS: (60, RateLimitPeriod.MINUTE),

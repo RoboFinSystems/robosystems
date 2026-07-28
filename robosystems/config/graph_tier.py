@@ -333,6 +333,12 @@ class GraphTierConfig:
     """
     from .rate_limits import EndpointCategory, RateLimitConfig
 
+    # A tier without its own limits table (ladybug-shared, legacy strings) is
+    # enforced at the standard-tier fallback, so its multiplier is 1.0 — not
+    # the base-table ratio get_rate_limit's fallback would imply.
+    if tier not in RateLimitConfig.SUBSCRIPTION_RATE_LIMITS:
+      return 1.0
+
     baseline = RateLimitConfig.get_rate_limit(
       "ladybug-standard", EndpointCategory.GRAPH_QUERY
     )
@@ -513,10 +519,12 @@ class GraphTierConfig:
       if max_memory_mb and max_memory_mb > 0:
         features.append(f"{max_memory_mb / 1024:.0f}GB RAM")
 
-    # Add rate limit multiplier if not standard
-    rate_multiplier = tier_config.get("api_rate_multiplier", 1.0)
-    if rate_multiplier is not None and rate_multiplier > 1:
-      features.append(f"{rate_multiplier}x API rate limits")
+    # Add rate limit multiplier if not standard. Derived from the enforced
+    # limits — graph.yml no longer carries an api_rate_multiplier key.
+    tier_name = tier_config.get("tier") or tier_config.get("name")
+    rate_multiplier = cls.get_api_rate_multiplier(tier_name) if tier_name else 1.0
+    if rate_multiplier > 1:
+      features.append(f"{rate_multiplier:g}x API rate limits")
 
     # Add backup retention
     backup_limits = tier_config.get("backup_limits", {})
@@ -597,7 +605,7 @@ class GraphTierConfig:
         "enabled": is_enabled,
         "max_subgraphs": writer.get("max_subgraphs"),
         "monthly_credits": monthly_credits,
-        "api_rate_multiplier": writer.get("api_rate_multiplier", 1.0),
+        "api_rate_multiplier": cls.get_api_rate_multiplier(tier_name),
         "features": cls._generate_tier_features(writer),
         "instance": {
           "type": instance_config.get("type"),

@@ -33,6 +33,11 @@ class TestExtractGraphId:
       ("/v1/auth/login", None),
       # Carries no graph id despite sitting under /graphs
       ("/v1/graphs/schema/validate", None),
+      # Static routes whose second segment is not a graph id. Treating one as
+      # a graph id would collapse every caller into a single shared bucket.
+      ("/v1/graphs/tiers", None),
+      ("/v1/graphs/capacity", None),
+      ("/v1/graphs/extensions", None),
     ],
   )
   def test_extraction(self, path, expected):
@@ -77,6 +82,28 @@ class TestResolveGraphTier:
 
     with patch("robosystems.database.session", side_effect=RuntimeError("db is down")):
       assert resolve_graph_tier("kg1abc") == FALLBACK_TIER
+
+  @patch("robosystems.middleware.rate_limits.graph_tier_resolver._store_tier")
+  @patch("robosystems.middleware.rate_limits.graph_tier_resolver._cached_tier")
+  def test_tier_without_a_limits_table_falls_back(self, mock_cached, _mock_store):
+    """A stored tier string with no SUBSCRIPTION_RATE_LIMITS entry — a legacy
+    value or ladybug-shared — must floor at FALLBACK_TIER, not fall through to
+    the anonymous base table."""
+    mock_cached.return_value = None
+    graph = MagicMock()
+    graph.graph_tier = "kuzu-standard"
+
+    with patch("robosystems.models.core.graph.Graph.get_by_id", return_value=graph):
+      with patch("robosystems.database.session", return_value=MagicMock()):
+        assert resolve_graph_tier("kg1legacy") == FALLBACK_TIER
+
+  @patch("robosystems.middleware.rate_limits.graph_tier_resolver._cached_tier")
+  def test_cached_tier_without_a_limits_table_falls_back(self, mock_cached):
+    mock_cached.return_value = "ladybug-shared"
+
+    with patch("robosystems.models.core.graph.Graph.get_by_id") as mock_get:
+      assert resolve_graph_tier("kg1abc") == FALLBACK_TIER
+      mock_get.assert_not_called()
 
   def test_fallback_is_the_tightest_customer_tier(self):
     """Degrading must never hand out more than the cheapest tier allows."""
@@ -183,6 +210,47 @@ class TestSharedRepositoryIsolation:
       "graph_sub:kg1bbb:graph_query",
     ], seen
 
+  def test_subgraph_queries_draw_from_the_parents_budget(self):
+    """kg…_dev lives on its parent's instance and is not separately priced,
+    so it must share the parent's bucket — not mint its own."""
+    from robosystems.middleware.rate_limits.rate_limiting import (
+      subscription_aware_rate_limit_dependency,
+    )
+
+    seen = []
+
+    def record(identifier, limit, window):
+      seen.append(identifier)
+      return (True, 100)
+
+    request = MagicMock()
+    request.method = "POST"
+    request.client.host = "1.2.3.4"
+    request.state = MagicMock()
+    request.headers = {}
+
+    parent = "kg0123456789abcdef"
+
+    with patch(
+      "robosystems.middleware.rate_limits.rate_limiting.rate_limit_cache.check_rate_limit",
+      side_effect=record,
+    ):
+      with patch(
+        "robosystems.middleware.rate_limits.rate_limiting.get_user_from_request",
+        return_value="user_a",
+      ):
+        with patch(
+          "robosystems.middleware.rate_limits.graph_tier_resolver.resolve_graph_tier",
+          return_value="ladybug-standard",
+        ) as mock_resolve:
+          for gid in (parent, f"{parent}_dev"):
+            request.url.path = f"/v1/graphs/{gid}/query/cypher"
+            subscription_aware_rate_limit_dependency(request)
+
+    assert seen == [f"graph_sub:{parent}:graph_query"] * 2, seen
+    for call in mock_resolve.call_args_list:
+      assert call.args[0] == parent
+
 
 class TestTierDifferentiation:
   def test_dedicated_categories_scale_with_vcpu(self):
@@ -222,5 +290,8 @@ class TestTierDifferentiation:
       ("ladybug-standard", 1.0),
       ("ladybug-large", 2.0),
       ("ladybug-xlarge", 4.0),
+      # No limits table of their own — enforced at the standard fallback.
+      ("ladybug-shared", 1.0),
+      ("kuzu-standard", 1.0),
     ):
       assert GraphTierConfig.get_api_rate_multiplier(tier) == expected
