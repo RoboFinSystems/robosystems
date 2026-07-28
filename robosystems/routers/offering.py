@@ -71,6 +71,19 @@ async def get_service_offerings(
       # Find the corresponding tier config for technical specs
       tier_config = next((t for t in tier_configs if t.get("tier") == tier_name), None)
 
+      # Skip a tier this environment cannot describe. Billing defines what is
+      # purchasable; graph.yml defines the specs. When the two disagree — as in
+      # local dev, which only defines ladybug-standard because it runs a single
+      # graph_api — the tier used to be advertised anyway, with max_subgraphs
+      # fabricated as 0 and the limits falling through to Standard-shaped
+      # defaults. "Zero subgraphs, 20 GB" is a confident wrong answer where the
+      # truth is "not offered here"; omitting the tier says that instead.
+      if not tier_config:
+        logger.info(
+          f"Skipping tier {tier_name} in offerings: no tier config for this environment"
+        )
+        continue
+
       # Get backup retention from graph.yml (single source of truth for infra limits)
       backup_limits = GraphTierConfig.get_backup_limits(tier_name)
       backup_retention_days = backup_limits.get("backup_retention_days", 0)
@@ -101,23 +114,17 @@ async def get_service_offerings(
         else "Standard support",
       ]
 
-      # Add subgraph support if available
-      if tier_config and tier_config.get("max_subgraphs", 0) > 0:
+      # tier_config is guaranteed non-None past the skip above.
+      if tier_config.get("max_subgraphs", 0) > 0:
         features.append(f"Up to {tier_config.get('max_subgraphs')} subgraphs")
 
-      # Add content limits if available
-      graph_limits: dict = {}
-      if tier_config:
-        graph_limits = tier_config.get("limits", {}).get("graph_limits", {})
-        if not graph_limits:
-          # Try from the writer config directly
-          from ..config.graph_tier import GraphTierConfig
-
-          graph_limits = GraphTierConfig.get_graph_limits(tier_name)
-        if graph_limits:
-          storage_limit = graph_limits.get("instance_storage_limit_gb", 0)
-          if storage_limit > 0:
-            features.append(f"{int(storage_limit)} GB instance storage")
+      graph_limits: dict = tier_config.get("limits", {}).get("graph_limits", {})
+      if not graph_limits:
+        # Try from the writer config directly
+        graph_limits = GraphTierConfig.get_graph_limits(tier_name)
+      storage_limit = graph_limits.get("instance_storage_limit_gb", 0)
+      if storage_limit > 0:
+        features.append(f"{int(storage_limit)} GB instance storage")
 
       tier_info = {
         "name": tier_name,
@@ -129,14 +136,12 @@ async def get_service_offerings(
         "features": features,
         "backup_retention_days": backup_retention_days,
         "priority_support": plan_data.get("priority_support", False),
-        "max_subgraphs": tier_config.get("max_subgraphs", 0) if tier_config else 0,
+        "max_subgraphs": tier_config.get("max_subgraphs", 0),
         "instance_storage_limit_gb": GraphTierConfig.get_instance_storage_limit_gb(
           tier_name
         ),
-        "api_rate_multiplier": tier_config.get("api_rate_multiplier", 1.0)
-        if tier_config
-        else 1.0,
-        "backend": tier_config.get("backend", "ladybug") if tier_config else "ladybug",
+        "api_rate_multiplier": tier_config.get("api_rate_multiplier", 1.0),
+        "backend": tier_config.get("backend", "ladybug"),
         "instance_type": instance_type or None,
       }
       graph_tiers.append(tier_info)

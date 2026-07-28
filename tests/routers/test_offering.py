@@ -75,6 +75,36 @@ class TestOfferingEndpoint:
     # Structure should be the same
     assert data1.keys() == data2.keys()
 
+  # Note: More detailed tests would require knowledge of the actual
+  # offering data structure which may change over time.
 
-# Note: More detailed tests would require knowledge of the actual
-# offering data structure which may change over time.
+  async def test_advertised_tiers_never_report_fabricated_specs(
+    self, async_client: AsyncClient
+  ):
+    """A listed tier must carry real specs, not defaults standing in for them.
+
+    Billing defines what is purchasable; graph.yml defines the specs. Where
+    they disagree — local dev defines only ladybug-standard, because it runs a
+    single graph_api — the tier used to be listed anyway with max_subgraphs
+    fabricated as 0 and the limits falling through to Standard-shaped defaults.
+    "Up to 0 subgraphs, 20 GB" is a confident wrong answer; the tier is now
+    omitted instead, so anything listed here is genuinely described.
+    """
+    response = await async_client.get("/v1/offering")
+    assert response.status_code == 200
+
+    tiers = response.json()["graph_subscriptions"]["tiers"]
+    assert tiers, "at least one tier must be offered"
+
+    for tier in tiers:
+      assert tier["max_subgraphs"] > 0, (
+        f"{tier['name']} advertises {tier['max_subgraphs']} subgraphs — a tier "
+        "without a config should be omitted, not listed with zeros"
+      )
+      assert tier["instance_storage_limit_gb"] > 0, (
+        f"{tier['name']} advertises no storage limit"
+      )
+      assert tier["backup_retention_days"] > 0, (
+        f"{tier['name']} advertises no backup retention"
+      )
+      assert tier["instance_type"], f"{tier['name']} has no instance type"
