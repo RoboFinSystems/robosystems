@@ -540,3 +540,76 @@ class TestCreditCaching:
     balance, tier = result
     assert balance == Decimal("950.0")
     assert tier == "standard"
+
+
+@pytest.mark.unit
+class TestSharedRepositorySubgraphBilling:
+  """AI operations on a shared repository's subgraph bill the parent's pool.
+
+  The exact-only shared-repository check sent sec_historical down the
+  user-graph path, where GraphCredits.get_by_graph_id("sec") finds nothing —
+  so the operation ran and was never billed. The pool is keyed by the
+  repository id, so routing must resolve the parent first.
+  """
+
+  @pytest.fixture
+  def credit_service(self):
+    with patch("robosystems.middleware.billing.cache.credit_cache"):
+      return CreditService(MagicMock())
+
+  def test_consume_credits_routes_subgraph_to_parent_repository_pool(
+    self, credit_service
+  ):
+    with patch.object(
+      credit_service,
+      "consume_shared_repository_credits",
+      return_value={"success": True, "credits_consumed": 5.0},
+    ) as mock_consume:
+      result = credit_service.consume_credits(
+        graph_id="sec_historical",
+        operation_type="agent_call",
+        base_cost=Decimal("5"),
+        user_id="user123",
+      )
+
+    assert result["success"] is True
+    assert mock_consume.call_args.kwargs["repository_name"] == "sec"
+
+  def test_consume_credits_on_the_repository_itself_is_unchanged(self, credit_service):
+    with patch.object(
+      credit_service,
+      "consume_shared_repository_credits",
+      return_value={"success": True, "credits_consumed": 1.0},
+    ) as mock_consume:
+      credit_service.consume_credits(
+        graph_id="sec",
+        operation_type="query",
+        base_cost=Decimal("1"),
+        user_id="user123",
+      )
+
+    assert mock_consume.call_args.kwargs["repository_name"] == "sec"
+
+  def test_subgraph_without_user_id_is_rejected_not_misrouted(self, credit_service):
+    """The shared path requires a user; the failure must say so rather than
+    fall through to a nonexistent GraphCredits pool."""
+    result = credit_service.consume_credits(
+      graph_id="sec_historical",
+      operation_type="query",
+      base_cost=Decimal("1"),
+    )
+
+    assert result["success"] is False
+    assert "User ID required" in result["error"]
+
+  def test_check_credit_balance_routes_subgraph_to_parent(self, credit_service):
+    with patch.object(
+      credit_service,
+      "check_shared_repository_access",
+      return_value={"has_access": True, "has_sufficient_credits": True},
+    ) as mock_check:
+      credit_service.check_credit_balance(
+        "sec_historical", Decimal("1"), user_id="user123"
+      )
+
+    assert mock_check.call_args.kwargs["repository_name"] == "sec"

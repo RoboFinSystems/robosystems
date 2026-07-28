@@ -74,6 +74,34 @@ class TestGraphTypeRegistry:
     assert identity.graph_type == "entity"
     assert identity.graph_tier == GraphTier.LADYBUG_STANDARD
 
+  def test_shared_repo_subgraph_row_still_classifies_as_shared(
+    self, db_session, test_org
+  ):
+    """The registry is authoritative over the row's is_repository flag.
+
+    subgraph_service creates shared-repo subgraph rows (e.g. sec_historical)
+    with is_repository=False, so trusting the row alone classified them as
+    READ_WRITE user graphs whenever a session was passed — while the
+    sessionless fallback said SHARED/READ_ONLY for the same id.
+    """
+    subgraph_row = Graph.create(
+      graph_id=f"sec_h{self.unique_id}",
+      graph_name="SEC Historical Subgraph",
+      graph_type="entity",
+      org_id=test_org.id,
+      session=db_session,
+      graph_tier=GraphTier.LADYBUG_SHARED,
+    )
+    assert subgraph_row.is_repository is False
+
+    identity = GraphTypeRegistry.identify_graph(
+      subgraph_row.graph_id, session=db_session
+    )
+
+    assert identity.category == GraphCategory.SHARED
+    assert identity.access_pattern == AccessPattern.READ_ONLY
+    assert identity.graph_tier == GraphTier.LADYBUG_SHARED
+
   def test_identify_graph_named_parameter_usage(self):
     """
     Regression test: ensure graph_tier uses named parameter.

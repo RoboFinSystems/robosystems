@@ -22,7 +22,7 @@ from ...config.shared_repositories import (
   get_credit_costs as _get_credit_costs,
 )
 from ...config.shared_repositories import (
-  is_shared_repository as _is_shared_repository,
+  is_shared_repository_or_subgraph as _is_shared_repository_or_subgraph,
 )
 from ...middleware.graph.types import parse_graph_id
 from ...models.core import (
@@ -122,8 +122,14 @@ class CreditService:
     return parent_id
 
   def _is_shared_repository(self, graph_id: str) -> bool:
-    """Check if the graph_id represents a shared repository."""
-    return _is_shared_repository(graph_id)
+    """Check if the graph_id is a shared repository or one of its subgraphs.
+
+    Subgraphs count: `sec_historical` bills against the user's `sec`
+    repository pool, exactly as `sec` does. The exact-only check sent shared
+    subgraphs down the user-graph path, where the GraphCredits lookup for a
+    repository finds nothing and AI operations ran unbilled.
+    """
+    return _is_shared_repository_or_subgraph(graph_id)
 
   def consume_credits(
     self,
@@ -169,10 +175,11 @@ class CreditService:
           "credits_consumed": 0,
         }
 
-      # Route to shared repository credit system
+      # Route to shared repository credit system. The pool is keyed by the
+      # repository id, so a shared subgraph resolves to its parent first.
       return self.consume_shared_repository_credits(
         user_id=user_id,
-        repository_name=graph_id,
+        repository_name=self._get_parent_graph_id(graph_id),
         operation_type=operation_type,
         metadata=metadata,
         cached=cached,
@@ -313,10 +320,11 @@ class CreditService:
       if not user_id:
         return {"error": "User ID required for shared repository credit summary"}
 
-      # Get user's repository credits
+      # Get user's repository credits. The pool is keyed by the repository id,
+      # so a shared subgraph resolves to its parent first.
       user_repo_credits = UserRepositoryCredits.get_user_repository_credits(
         user_id=user_id,
-        repository_type=graph_id,  # repository_type is the graph_id for shared repos
+        repository_type=self._get_parent_graph_id(graph_id),
         session=self.session,
       )
 
@@ -507,10 +515,11 @@ class CreditService:
           "error": "User ID required for shared repository access",
         }
 
-      # Route to shared repository credit system
+      # Route to shared repository credit system. The pool is keyed by the
+      # repository id, so a shared subgraph resolves to its parent first.
       shared_check = self.check_shared_repository_access(
         user_id=user_id,
-        repository_name=graph_id,
+        repository_name=self._get_parent_graph_id(graph_id),
         operation_type=operation_type,
         required_credits=required_credits,  # Pass the required credits for AI operations
       )

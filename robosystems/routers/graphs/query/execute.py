@@ -463,11 +463,11 @@ async def execute_cypher_query(
           user_id=current_user.id,
         )
 
-        # Shared repositories have their own scaling (ALB + ASG) —
-        # queuing just delays the inevitable, so return a timeout error.
-        # User graphs benefit from the queue since they have limited
-        # connections (max 3) and no read replicas.
-        is_shared = MultiTenantUtils.is_shared_repository(graph_id)
+        # Shared repositories and their subgraphs have their own scaling
+        # (ALB + ASG) — queuing just delays the inevitable, so return a
+        # timeout error. User graphs benefit from the queue since they have
+        # limited connections (max 3) and no read replicas.
+        is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
 
         if client_info["is_interactive"] or is_shared:
           elapsed = (datetime.now(UTC) - start_time).total_seconds()

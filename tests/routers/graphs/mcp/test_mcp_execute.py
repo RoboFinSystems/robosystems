@@ -729,3 +729,25 @@ class TestCachedStrategies:
       graph_id="sec_historical",
     )
     assert schema_strategy == MCPExecutionStrategy.SCHEMA_CACHED
+
+
+@pytest.mark.unit
+class TestToolsRouterOperationType:
+  """tools.py carries its own _get_mcp_operation_type; it must agree with
+  execute.py and the MCP factory that shared subgraphs are reads — it
+  returned "write" for sec_historical while both of those said "read"."""
+
+  def test_shared_repo_and_subgraph_return_read(self):
+    from robosystems.routers.graphs.mcp.tools import (
+      _get_mcp_operation_type as tools_op_type,
+    )
+
+    assert tools_op_type("sec") == "read"
+    assert tools_op_type("sec_historical") == "read"
+
+  def test_user_graph_returns_write(self):
+    from robosystems.routers.graphs.mcp.tools import (
+      _get_mcp_operation_type as tools_op_type,
+    )
+
+    assert tools_op_type("kg0123456789abcdef") == "write"
