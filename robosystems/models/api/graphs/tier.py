@@ -41,7 +41,13 @@ class GraphTierInstance(BaseModel):
   """Instance specifications for a tier."""
 
   type: str = Field(..., description="Instance type identifier")
-  memory_mb: int = Field(..., description="Memory allocated to your graph in megabytes")
+  memory_mb: int = Field(
+    ...,
+    description=(
+      "LadybugDB memory budget for the whole instance in megabytes (below "
+      "physical RAM after OS overhead; not a per-graph allocation)"
+    ),
+  )
   is_multitenant: bool = Field(
     ..., description="Whether this tier shares infrastructure with other graphs"
   )

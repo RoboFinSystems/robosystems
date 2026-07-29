@@ -46,12 +46,15 @@ class TestBackupCreateRequest:
       BackupCreateRequest(retention_days=0)
 
   def test_retention_days_maximum(self):
-    model = BackupCreateRequest(retention_days=2555)
-    assert model.retention_days == 2555
+    """90 is the ceiling: the S3 lifecycle expires backup objects at 90 days,
+    so accepting more (this once allowed 2555) produced COMPLETED backup
+    records pointing at objects the lifecycle had already deleted."""
+    model = BackupCreateRequest(retention_days=90)
+    assert model.retention_days == 90
 
   def test_retention_days_above_maximum(self):
     with pytest.raises(ValidationError):
-      BackupCreateRequest(retention_days=2556)
+      BackupCreateRequest(retention_days=91)
 
   def test_compression_must_be_true(self):
     with pytest.raises(ValidationError) as exc_info:

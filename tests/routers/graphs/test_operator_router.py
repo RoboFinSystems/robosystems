@@ -454,3 +454,33 @@ class TestOperatorEndpoints:
     components = openapi["components"]["schemas"]
     assert "OperatorRequest" in components
     assert "OperatorResponse" in components
+
+
+class TestOperatorSharedRepositoryLimits:
+  """The operator surface must enforce the manifest's agent_calls_* limits.
+
+  Repository plans have always advertised agent volume limits, but only
+  query/mcp/search called the volume limiter — nothing ever passed
+  operation="agent", so the advertised numbers were unenforced.
+  """
+
+  @pytest.mark.asyncio
+  async def test_agent_limits_delegate_with_agent_operation(self):
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from robosystems.routers.graphs.operator.execute import (
+      _enforce_shared_repository_agent_limits,
+    )
+
+    user = MagicMock()
+    db = MagicMock()
+
+    with patch(
+      "robosystems.routers.graphs.query.execute._check_shared_repository_limits",
+      new=AsyncMock(),
+    ) as mock_check:
+      await _enforce_shared_repository_agent_limits("sec", user, db)
+
+    mock_check.assert_awaited_once_with(
+      "sec", user, db, endpoint="agent", operation="agent"
+    )
