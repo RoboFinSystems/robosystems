@@ -33,6 +33,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.models.api.common import OPERATION_ERROR_RESPONSES
 from robosystems.models.api.extensions.reports import (
   LiveFinancialStatementRequest,
+  LiveFinancialStatementResponse,
 )
 from robosystems.models.core import User
 from robosystems.operations.roboledger.reads.reports import (
@@ -57,7 +58,7 @@ _require_roboledger = require_graph_extension("roboledger")
 
 @router.post(
   "/live-financial-statement",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[LiveFinancialStatementResponse],
   operation_id="liveFinancialStatement",
   summary="Live Financial Statement",
   description=(
