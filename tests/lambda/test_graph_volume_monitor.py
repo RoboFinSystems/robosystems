@@ -7,6 +7,8 @@ still-awake shared master's wake health-gate. `mark_volume_attached` resets
 a row a detach has already moved to 'available'.
 """
 
+from datetime import UTC, datetime, timedelta
+
 import boto3
 import pytest
 
@@ -90,3 +92,142 @@ class TestTierVolumeCeiling:
       assert limit == GraphTierConfig.get_instance_storage_limit_gb(
         tier, "production"
       ), f"{tier}: Lambda says {limit}, graph.yml disagrees"
+
+
+# ---------------------------------------------------------------------------
+# Instance registry reconciliation
+#
+# Writers deregister twice over (on-instance lifecycle script + the termination
+# hook's detachment Lambda), but both hang off EBS volume management — so
+# volume-less nodes get neither. Shared replicas register on boot and nothing
+# ever removes them, and they run on spot, so rows accumulate at the reclaim
+# rate. Reconciling from EC2 covers every termination path, graceful or not.
+# ---------------------------------------------------------------------------
+
+INSTANCE_TABLE = "robosystems-graph-test-instance-registry"
+
+
+def _put_instance(
+  instance_id: str,
+  status: str = "healthy",
+  node_type: str = "shared_replica",
+  created_at: str | None = None,
+) -> None:
+  ddb = boto3.resource("dynamodb", region_name="us-east-1")
+  ddb.Table(INSTANCE_TABLE).put_item(
+    Item={
+      "instance_id": instance_id,
+      "status": status,
+      "node_type": node_type,
+      "created_at": created_at or (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+    }
+  )
+
+
+def _instance_rows() -> set[str]:
+  ddb = boto3.resource("dynamodb", region_name="us-east-1")
+  return {i["instance_id"] for i in ddb.Table(INSTANCE_TABLE).scan().get("Items", [])}
+
+
+def _launch_tagged_instance(role: str = "shared_replica") -> str:
+  """A running instance carrying the tags discover_lbug_instances filters on."""
+  ec2 = boto3.client("ec2", region_name="us-east-1")
+  ami_id = ec2.describe_images(Owners=["amazon"])["Images"][0]["ImageId"]
+  resp = ec2.run_instances(
+    ImageId=ami_id,
+    MinCount=1,
+    MaxCount=1,
+    InstanceType="r7g.large",
+    TagSpecifications=[
+      {
+        "ResourceType": "instance",
+        "Tags": [
+          {"Key": "Service", "Value": "RoboSystems"},
+          {"Key": "LadybugRole", "Value": role},
+          {"Key": "Environment", "Value": "test"},
+        ],
+      }
+    ],
+  )
+  return resp["Instances"][0]["InstanceId"]
+
+
+def test_sync_removes_row_for_an_instance_that_no_longer_exists(gvmon):
+  """The replica case: registered on boot, never deregistered, EC2 gone."""
+  _put_instance("i-longgone", status="healthy", node_type="shared_replica")
+
+  result = gvmon.sync_instance_registry()
+
+  assert result["removed"] == 1
+  assert "i-longgone" not in _instance_rows()
+
+
+def test_sync_keeps_a_live_instance(gvmon):
+  instance_id = _launch_tagged_instance()
+  _put_instance(instance_id, status="healthy")
+
+  result = gvmon.sync_instance_registry()
+
+  assert result["removed"] == 0
+  assert instance_id in _instance_rows()
+
+
+def test_sync_spares_a_recently_registered_instance(gvmon):
+  """An instance writes its row before it is running and tagged.
+
+  Without the grace window, reconciliation would delete a row out from under an
+  instance that is still booting.
+  """
+  _put_instance(
+    "i-stillbooting",
+    status="initializing",
+    created_at=datetime.now(UTC).isoformat(),
+  )
+
+  result = gvmon.sync_instance_registry()
+
+  assert result["removed"] == 0
+  assert result["skipped_recent"] == 1
+  assert "i-stillbooting" in _instance_rows()
+
+
+def test_sync_removes_terminated_writers_and_stale_replicas_together(gvmon):
+  """Mixed fleet: only rows without a live EC2 instance are removed."""
+  live = _launch_tagged_instance(role="writer")
+  _put_instance(live, status="healthy", node_type="writer")
+  _put_instance("i-deadwriter", status="terminated", node_type="writer")
+  _put_instance("i-deadreplica", status="healthy", node_type="shared_replica")
+
+  result = gvmon.sync_instance_registry()
+
+  assert result["removed"] == 2
+  assert _instance_rows() == {live}
+
+
+def test_sync_is_a_noop_without_a_configured_table(gvmon, monkeypatch):
+  monkeypatch.setattr(gvmon, "INSTANCE_REGISTRY_TABLE", None)
+  assert gvmon.sync_instance_registry() == {
+    "scanned": 0,
+    "removed": 0,
+    "skipped_recent": 0,
+  }
+
+
+def test_handler_exposes_sync_on_demand(gvmon):
+  """Reconciling a known-stale registry shouldn't require waiting for the schedule."""
+  _put_instance("i-longgone")
+
+  result = gvmon.handler({"action": "sync_instance_registry"}, None)
+
+  assert result["statusCode"] == 200
+  assert result["removed"] == 1
+
+
+def test_monitor_all_reports_the_instance_sync(gvmon):
+  """A failure in one registry sync must not mask or be masked by the other."""
+  _put_instance("i-longgone")
+
+  result = gvmon.monitor_all_instances()
+
+  assert result["instance_registry_synced"] is True
+  assert result["stale_instances_removed"] == 1

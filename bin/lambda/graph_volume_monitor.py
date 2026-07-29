@@ -34,6 +34,13 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "staging")
 VOLUME_REGISTRY_TABLE = os.environ.get("VOLUME_REGISTRY_TABLE")
 INSTANCE_REGISTRY_TABLE = os.environ.get("INSTANCE_REGISTRY_TABLE")
 ALERT_TOPIC_ARN = os.environ.get("ALERT_TOPIC_ARN")
+# An instance writes its registry row before it is `running` and fully tagged,
+# so it is briefly invisible to discovery. Rows younger than this are never
+# reaped, which keeps reconciliation from deleting an instance mid-boot. Well
+# above the ~3.5 min observed writer boot.
+INSTANCE_REGISTRY_GRACE_SECONDS = int(
+  os.environ.get("INSTANCE_REGISTRY_GRACE_SECONDS", "1800")
+)
 EXPANSION_THRESHOLD = float(os.environ.get("EXPANSION_THRESHOLD", "0.8"))  # 80%
 EXPANSION_FACTOR = float(os.environ.get("EXPANSION_FACTOR", "1.5"))  # 50% increase
 # Floor on each expansion step. Kept meaningfully large because EBS enforces
@@ -110,6 +117,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
       return grow_filesystem_only(event)
     elif action == "fix_stuck_volumes":
       return fix_stuck_optimizing_volumes()
+    elif action == "sync_instance_registry":
+      # On-demand path so a known-stale registry can be reconciled without
+      # waiting for the next scheduled run.
+      return {"statusCode": 200, **sync_instance_registry()}
     else:
       return {"statusCode": 400, "error": f"Unknown action: {action}"}
   else:
@@ -146,6 +157,8 @@ def monitor_all_instances(expand_immediately: bool = False) -> dict[str, Any]:
     "volumes_expanded": [],
     "errors": [],
     "registry_synced": False,
+    "instance_registry_synced": False,
+    "stale_instances_removed": 0,
   }
 
   try:
@@ -157,6 +170,18 @@ def monitor_all_instances(expand_immediately: bool = False) -> dict[str, Any]:
     except Exception as e:
       logger.warning(f"Failed to sync volume registry: {e}")
       results["errors"].append(f"Registry sync failed: {e!s}")
+
+    # Separately guarded: the instance registry has no deregistration path of
+    # its own for volume-less nodes, so a failure here must not be masked by,
+    # or mask, the volume sync above.
+    try:
+      instance_sync = sync_instance_registry()
+      results["instance_registry_synced"] = True
+      results["stale_instances_removed"] = instance_sync["removed"]
+      logger.info(f"Instance registry synchronized: {instance_sync}")
+    except Exception as e:
+      logger.warning(f"Failed to sync instance registry: {e}")
+      results["errors"].append(f"Instance registry sync failed: {e!s}")
 
     # Discover all Graph instances
     instances = discover_lbug_instances()
@@ -1403,6 +1428,85 @@ def send_stuck_volume_alert(fixed_volumes: list[dict]):
 
   except Exception as e:
     logger.error(f"Failed to send stuck volume alert: {e}")
+
+
+def sync_instance_registry() -> dict[str, int]:
+  """Remove instance-registry rows whose EC2 instance no longer exists.
+
+  Writers deregister themselves twice over: the on-instance lifecycle script
+  marks `terminating` then `terminated`, and the termination lifecycle hook's
+  detachment Lambda deletes the row outright. Both of those hang off EBS volume
+  management, so an instance with no volume gets neither — shared replicas
+  register on boot (`ladybug-replica.sh`) and nothing ever removes them. They
+  also run on spot, so the rows accumulate at the reclaim rate rather than the
+  deploy rate.
+
+  Reconciling here rather than giving replicas their own lifecycle hook covers
+  every way an instance can vanish — graceful shutdown, spot reclaim, or host
+  failure — instead of only the ones that grant a shutdown window.
+
+  Rows younger than INSTANCE_REGISTRY_GRACE_SECONDS are left alone: an instance
+  registers itself before it is `running` and fully tagged, so it is briefly
+  invisible to discovery and must not be reaped during its own boot.
+  """
+  results = {"scanned": 0, "removed": 0, "skipped_recent": 0}
+
+  if not INSTANCE_REGISTRY_TABLE:
+    logger.info("No instance registry table configured, skipping sync")
+    return results
+
+  # Discovery is the same tag+state filter the monitor already trusts to
+  # enumerate live instances, so a row absent from it is absent from EC2.
+  live_instance_ids = {i["instance_id"] for i in discover_lbug_instances()}
+
+  table = dynamodb.Table(INSTANCE_REGISTRY_TABLE)
+  cutoff = (
+    datetime.now(UTC) - timedelta(seconds=INSTANCE_REGISTRY_GRACE_SECONDS)
+  ).isoformat()
+
+  rows: list[dict] = []
+  response = table.scan()
+  rows.extend(response.get("Items", []))
+  while "LastEvaluatedKey" in response:
+    response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+    rows.extend(response.get("Items", []))
+
+  results["scanned"] = len(rows)
+
+  for row in rows:
+    instance_id = row.get("instance_id")
+    if not instance_id or instance_id in live_instance_ids:
+      continue
+
+    if (row.get("created_at") or "") > cutoff:
+      results["skipped_recent"] += 1
+      logger.info(f"Instance {instance_id} registered recently; leaving it alone")
+      continue
+
+    table.delete_item(Key={"instance_id": instance_id})
+    results["removed"] += 1
+    logger.warning(
+      f"Removed instance-registry row for {instance_id} "
+      f"(status={row.get('status')}, node_type={row.get('node_type')}) — "
+      "no matching live EC2 instance"
+    )
+
+  if results["removed"]:
+    try:
+      cloudwatch.put_metric_data(
+        Namespace=f"RoboSystems/Graph/{ENVIRONMENT}",
+        MetricData=[
+          {
+            "MetricName": "StaleInstanceRegistryEntries",
+            "Value": results["removed"],
+            "Unit": "Count",
+          }
+        ],
+      )
+    except Exception as e:
+      logger.warning(f"Failed to publish stale instance registry metric: {e}")
+
+  return results
 
 
 def sync_volume_registry():
