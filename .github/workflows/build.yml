@@ -369,6 +369,7 @@ jobs:
             --provenance=false \
             --cache-from type=gha,scope=lambda \
             --cache-to type=gha,scope=lambda,mode=max \
+            --build-arg CACHE_DATE=$(date -u +%Y%m%d) \
             -t "${ECR_URL}:${IMAGE_TAG}" \
             -f Dockerfile.lambda .
 
