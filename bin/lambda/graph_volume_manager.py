@@ -146,22 +146,29 @@ def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
   if node_type == "shared_master" or (
     node_type == "writer" and tier == "ladybug-shared"
   ):
-    # Look for existing SEC volume
-    existing_volume = find_volume_with_database("sec", az, tier)
-    if existing_volume:
-      logger.info(
-        f"Found existing SEC volume {existing_volume['volume_id']} for shared repository"
-      )
-      # Preserve the SEC database in the volume's database list
-      return attach_and_register_volume(
-        existing_volume["volume_id"], instance_id, ["sec"]
-      )
-    else:
-      # No existing SEC volume, will create new one
-      if not databases:
-        databases = ["sec"]  # Ensure SEC is in the database list for shared nodes
-      elif "sec" not in databases:
-        databases.append("sec")
+    # Same claim discipline as the writer path below: reclaim strays first so
+    # a stranded `claiming` SEC volume is visible, then claim atomically before
+    # attaching — two concurrent master launches must not both attach the same
+    # volume and burn the VolumeInUse retry loop.
+    reclaim_stale_claims(az, tier)
+    for existing_volume in find_volumes_with_database("sec", az, tier):
+      volume_id = existing_volume["volume_id"]
+      if not claim_volume(volume_id, instance_id):
+        continue
+      logger.info(f"Claimed existing SEC volume {volume_id} for shared repository")
+      try:
+        # Preserve the SEC database in the volume's database list
+        return attach_and_register_volume(volume_id, instance_id, ["sec"])
+      except Exception:
+        release_claim(volume_id, instance_id)
+        raise
+
+    # No existing SEC volume (or every candidate was claimed by a concurrent
+    # launch) — fall through, ensuring SEC stays in the database list.
+    if not databases:
+      databases = ["sec"]
+    elif "sec" not in databases:
+      databases.append("sec")
 
   # Return anything stranded mid-claim to the pool before scanning, or a volume
   # whose claimant died would stay invisible to the `available` filter forever.
@@ -234,8 +241,14 @@ def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
   return create_and_attach_volume(instance_id, tier, az, databases, node_type)
 
 
-def find_volume_with_database(database: str, az: str, tier: str) -> dict | None:
-  """Find a volume that contains a specific database"""
+def find_volumes_with_database(database: str, az: str, tier: str) -> list[dict]:
+  """Find available volumes carrying a specific database, oldest first.
+
+  Ordered (rather than ``Items[0]`` of an unsorted scan) so that if a stray
+  duplicate ever exists — e.g. an empty volume minted by a launch that raced
+  the previous master's detach — every caller deterministically prefers the
+  long-lived original over the accident.
+  """
   response = table.scan(
     FilterExpression="contains(databases, :db) AND availability_zone = :az AND tier = :tier AND #status = :status",
     ExpressionAttributeNames={"#status": "status"},
@@ -247,9 +260,10 @@ def find_volume_with_database(database: str, az: str, tier: str) -> dict | None:
     },
   )
 
-  if response["Items"]:
-    return response["Items"][0]
-  return None
+  return sorted(
+    response.get("Items", []),
+    key=lambda item: (item.get("created_at") or "", item.get("volume_id") or ""),
+  )
 
 
 def update_graph_registry_for_instance(
@@ -530,7 +544,11 @@ def attach_and_register_volume(
     waiter.wait(InstanceIds=[instance_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60})
   except Exception as e:
     logger.error(f"Instance {instance_id} did not reach running state: {e}")
-    return {"statusCode": 500, "error": f"Instance not ready: {e!s}"}
+    # Raise rather than return a 500 dict: callers holding a volume claim
+    # release it in their except path, and a return here would strand the
+    # volume in `claiming` (invisible to the pool) until the stale-claim
+    # sweep. The handler's top-level catch still maps this to a 500 response.
+    raise RuntimeError(f"Instance not ready: {e!s}") from e
 
   # Wait for volume to actually reach `available`. EBS detach is async — the
   # detachment Lambda may have ack'd before the volume left `detaching`. Without
@@ -1263,6 +1281,18 @@ def sync_registry_with_ec2(event: dict[str, Any]) -> dict[str, Any]:
       # Determine actual status
       actual_status = "attached" if ec2_volume["Attachments"] else "available"
       registry_status = registry_item.get("status")
+
+      # In-flight states are invariants, not mismatches: `claiming` is a
+      # volume mid-attach (flipping it back to `available` invites a
+      # double-claim), `expanding` is a resize awaiting its filesystem grow,
+      # and attaching/detaching are EBS transitions. EC2's binary
+      # attached/available view cannot adjudicate any of them — the
+      # stale-claim sweep and the monitor own their lifecycles.
+      if registry_status in ("claiming", "expanding", "attaching", "detaching"):
+        logger.info(
+          f"Volume {volume_id} is {registry_status} (in-flight); skipping sync"
+        )
+        continue
 
       if actual_status != registry_status:
         logger.warning(

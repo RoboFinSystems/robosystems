@@ -757,3 +757,177 @@ def test_ordered_candidates_preserves_preference_order(gvm):
   assert ordered[0][1] == ["kg_mine"]
   assert ordered[1][1] == ["kg_other"]
   assert ordered[2][1] == ["kg_mine"]
+
+
+# ---------------------------------------------------------------------------
+# Shared-master claim discipline + claim-leak fixes
+#
+# The atomic-claim fix originally covered only the writer scan path. The
+# shared-master SEC branch attached without claiming (two concurrent master
+# launches both saw `available` and one burned the VolumeInUse retry loop),
+# one attach failure path returned a 500 dict instead of raising (so the
+# caller's except-based release never fired and the volume stayed `claiming`),
+# and the manual sync_registry action force-flipped in-flight rows.
+# ---------------------------------------------------------------------------
+
+
+def _seed_sec_volume(volume_id: str, status: str = "available") -> None:
+  _seed_registry(
+    "test-volume-registry",
+    volume_id,
+    ["sec"],
+    status=status,
+    node_type="shared_master",
+    tier="ladybug-shared",
+  )
+
+
+def test_shared_master_claims_sec_volume_before_attach(gvm):
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _seed_sec_volume(volume_id)
+
+  result = gvm.handle_instance_launch(
+    {"instance_id": instance_id, "node_type": "shared_master", "tier": "ladybug-shared"}
+  )
+
+  assert result["statusCode"] == 200
+  assert result["volume_id"] == volume_id
+  item = _registry_item(volume_id)
+  assert item["status"] == "attached"
+  assert item["instance_id"] == instance_id
+
+
+def test_shared_master_lost_claim_does_not_attach_the_contested_volume(gvm):
+  """A concurrent master already claimed the SEC volume: the loser must not
+  attach it (the pre-fix behavior burned the VolumeInUse retry loop and
+  failed the boot)."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _seed_sec_volume(volume_id)
+  # A concurrent launch wins the claim first.
+  assert gvm.claim_volume(volume_id, "i-concurrent-master") is True
+
+  result = gvm.handle_instance_launch(
+    {"instance_id": instance_id, "node_type": "shared_master", "tier": "ladybug-shared"}
+  )
+
+  # The loser fell through to minting a fresh volume; the contested volume
+  # still belongs to the concurrent winner.
+  assert result["statusCode"] == 200
+  assert result["volume_id"] != volume_id
+  assert _registry_item(volume_id)["instance_id"] == "i-concurrent-master"
+
+
+def test_shared_master_attach_failure_releases_the_claim(gvm):
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _seed_sec_volume(volume_id)
+
+  with patch.object(
+    gvm, "attach_and_register_volume", side_effect=RuntimeError("attach exploded")
+  ):
+    with pytest.raises(RuntimeError):
+      gvm.handle_instance_launch(
+        {
+          "instance_id": instance_id,
+          "node_type": "shared_master",
+          "tier": "ladybug-shared",
+        }
+      )
+
+  item = _registry_item(volume_id)
+  assert item["status"] == "available"
+  assert "claimed_at" not in item
+
+
+def test_instance_waiter_failure_raises_and_releases_the_claim(gvm):
+  """The instance_running waiter failure used to *return* a 500 dict, so the
+  writer path's except-based release never fired and the volume sat in
+  `claiming` — invisible to the pool — while the ASG replacement minted a
+  fresh empty volume next to the real one."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _seed_registry("test-volume-registry", volume_id, ["kg_a"])
+
+  real_get_waiter = gvm.ec2.get_waiter
+
+  class _FailingWaiter:
+    def wait(self, **kwargs):
+      raise RuntimeError("instance went to shutting-down")
+
+  def get_waiter(name):
+    if name == "instance_running":
+      return _FailingWaiter()
+    return real_get_waiter(name)
+
+  with patch.object(gvm.ec2, "get_waiter", side_effect=get_waiter):
+    with pytest.raises(RuntimeError):
+      gvm.handle_instance_launch(
+        {"instance_id": instance_id, "node_type": "writer", "tier": "ladybug-standard"}
+      )
+
+  item = _registry_item(volume_id)
+  assert item["status"] == "available"
+  assert "claimed_at" not in item
+
+
+def _tag_for_sync(volume_id: str) -> None:
+  ec2 = boto3.client("ec2", region_name="us-east-1")
+  ec2.create_tags(
+    Resources=[volume_id],
+    Tags=[
+      {"Key": "Environment", "Value": "test"},
+      {"Key": "ManagedBy", "Value": "GraphVolumeManager"},
+    ],
+  )
+
+
+def test_sync_registry_leaves_claiming_volumes_alone(gvm):
+  """The manual sync_registry action saw an unattached-in-EC2 volume whose
+  registry row said `claiming` and force-flipped it to `available` —
+  letting a concurrent launch double-claim it mid-attach."""
+  volume_id = _create_test_volume()
+  _tag_for_sync(volume_id)
+  _seed_registry(
+    "test-volume-registry", volume_id, ["kg_a"], status="claiming", instance_id="i-mid"
+  )
+
+  result = gvm.sync_registry_with_ec2({})
+
+  assert result["statusCode"] == 200
+  item = _registry_item(volume_id)
+  assert item["status"] == "claiming"
+  assert item["instance_id"] == "i-mid"
+
+
+def test_sync_registry_leaves_expanding_volumes_alone(gvm):
+  volume_id = _create_test_volume()
+  _tag_for_sync(volume_id)
+  _seed_registry(
+    "test-volume-registry",
+    volume_id,
+    ["kg_a"],
+    status="expanding",
+    instance_id="i-resizing",
+  )
+
+  gvm.sync_registry_with_ec2({})
+
+  assert _registry_item(volume_id)["status"] == "expanding"
+
+
+def test_sync_registry_still_corrects_genuine_mismatches(gvm):
+  """The guard must not neuter the action: a plain attached/available
+  mismatch still gets corrected."""
+  volume_id = _create_test_volume()
+  _tag_for_sync(volume_id)
+  _seed_registry(
+    "test-volume-registry", volume_id, ["kg_a"], status="attached", instance_id="i-gone"
+  )
+
+  gvm.sync_registry_with_ec2({})
+
+  item = _registry_item(volume_id)
+  assert item["status"] == "available"
+  assert item["instance_id"] == "unattached"
