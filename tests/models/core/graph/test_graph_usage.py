@@ -265,9 +265,11 @@ class TestGraphUsage:
 
     self.session.commit()
 
-    # Get summary
+    # Graph-keyed: the reader must not care which user's id the sensor
+    # happened to stamp on the snapshot rows (it picks one arbitrary
+    # admin) — any member of the graph reads the same summary.
     summary = GraphUsage.get_monthly_storage_summary(
-      user_id=self.test_user_id, year=2024, month=1, session=self.session
+      graph_id=self.test_graph_id, year=2024, month=1, session=self.session
     )
 
     assert self.test_graph_id in summary
@@ -282,11 +284,8 @@ class TestGraphUsage:
 
   def test_get_monthly_storage_summary_no_data(self):
     """Test getting monthly storage summary with no data."""
-    # Use a different user ID to avoid conflicts with other tests
-    different_user = "no_data_user_999"
-
     summary = GraphUsage.get_monthly_storage_summary(
-      user_id=different_user, year=2024, month=1, session=self.session
+      graph_id="kg_no_snapshots_999", year=2024, month=1, session=self.session
     )
 
     assert summary == {}

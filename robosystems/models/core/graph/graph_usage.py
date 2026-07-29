@@ -364,17 +364,23 @@ class GraphUsage(Model):
   @classmethod
   def get_monthly_storage_summary(
     cls,
-    user_id: str,
+    graph_id: str,
     year: int,
     month: int,
     session: Session,
   ) -> dict[str, dict]:
-    """Get monthly storage summary for billing."""
-    # Get storage snapshots for the month
+    """Get a graph's monthly storage summary.
+
+    Keyed by graph, not user: snapshots are written by the usage monitor
+    sensor under one arbitrary admin's user_id, so a user-keyed read
+    rendered the storage section empty for every other org member (and
+    fractured history whenever graph admins changed). Storage is a
+    property of the graph; per-graph access is enforced at the route.
+    """
     records = (
       session.query(cls)
       .filter(
-        cls.user_id == user_id,
+        cls.graph_id == graph_id,
         cls.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
         cls.billing_year == year,
         cls.billing_month == month,
