@@ -20,15 +20,18 @@ from sqlalchemy.orm import Session
 from robosystems.models.api.taxonomy_block import UpdateTaxonomyBlockRequest
 from robosystems.models.extensions import (
   Association,
+  AssociationClassification,
   Element,
   ElementLabel,
   ElementReference,
   ElementTrait,
+  FactSet,
   Rule,
   Structure,
   Taxonomy,
   VerificationResult,
 )
+from robosystems.models.extensions.roboledger.fact import Fact
 from robosystems.operations.taxonomy_block._helpers import structure_from_request
 from robosystems.operations.taxonomy_block.rule_persistence import (
   persist_tenant_rules,
@@ -412,32 +415,47 @@ def apply_structures_to_remove(
   taxonomy: Taxonomy,
   payload: UpdateTaxonomyBlockRequest,
 ) -> None:
-  """Delete structures + their rules + cascading associations.
+  """Delete structures + their derived rows, in FK-dependency order.
 
-  Verification results FK both the structures and their rules with no
-  ON DELETE, so they go first — by ``structure_id`` and by ``rule_id``
-  of the structures' rules.
+  Verification results FK the structures and their rules, fact sets FK
+  the structures, classification rows FK the associations — all with no
+  ON DELETE — so each goes before its referent (same order as
+  ``delete_schedule``, the sibling structure-removal surface). Facts
+  stamped to the structure and facts inside its fact sets are derived
+  artifacts of the structure and are removed with it.
   """
   if not payload.structures_to_remove:
     return
 
   ids = list(payload.structures_to_remove)
-  structure_rule_ids = select(Rule.id).where(
-    Rule.target_kind == "structure", Rule.target_structure_id.in_(ids)
+  association_ids = (
+    session.execute(select(Association.id).where(Association.structure_id.in_(ids)))
+    .scalars()
+    .all()
   )
-  session.execute(
-    delete(VerificationResult).where(
-      or_(
-        VerificationResult.structure_id.in_(ids),
-        VerificationResult.rule_id.in_(structure_rule_ids),
+  rule_filters = [(Rule.target_kind == "structure") & Rule.target_structure_id.in_(ids)]
+  if association_ids:
+    rule_filters.append(Rule.target_association_id.in_(association_ids))
+  rule_ids = session.execute(select(Rule.id).where(or_(*rule_filters))).scalars().all()
+
+  vr_filters = [VerificationResult.structure_id.in_(ids)]
+  if rule_ids:
+    vr_filters.append(VerificationResult.rule_id.in_(rule_ids))
+  session.execute(delete(VerificationResult).where(or_(*vr_filters)))
+
+  session.execute(delete(Fact).where(Fact.structure_id.in_(ids)))
+  # Facts still inside these sets cascade at the DB level
+  # (facts.fact_set_id is ON DELETE CASCADE).
+  session.execute(delete(FactSet).where(FactSet.structure_id.in_(ids)))
+
+  if rule_ids:
+    session.execute(delete(Rule).where(Rule.id.in_(rule_ids)))
+  if association_ids:
+    session.execute(
+      delete(AssociationClassification).where(
+        AssociationClassification.association_id.in_(association_ids)
       )
     )
-  )
-  session.execute(
-    delete(Rule).where(
-      Rule.target_kind == "structure", Rule.target_structure_id.in_(ids)
-    )
-  )
   session.execute(delete(Association).where(Association.structure_id.in_(ids)))
   session.execute(delete(Structure).where(Structure.id.in_(ids)))
   session.flush()
