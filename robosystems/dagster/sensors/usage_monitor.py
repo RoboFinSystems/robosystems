@@ -123,6 +123,37 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
 
       instance_status = storage_check["status"]
 
+      # One admin lookup serves both the snapshot row and any alert below.
+      graph_user = (
+        db.query(GraphUser)
+        .filter(
+          GraphUser.graph_id == graph.graph_id,
+          GraphUser.role == "admin",
+        )
+        .first()
+      )
+
+      # Persist the measurement as a STORAGE_SNAPSHOT row. The admin and org
+      # usage surfaces read these rows, and until this write nothing ever
+      # created one — every consumer was permanently empty. Recorded for
+      # every measured status, not just alert-worthy ones; skipped when the
+      # check returned "unknown" (nothing was measured).
+      if storage_check.get("total_storage_gb") is not None and graph_user:
+        try:
+          from robosystems.models.core.graph.graph_usage import GraphUsage
+
+          GraphUsage.record_storage_usage(
+            user_id=graph_user.user_id,
+            graph_id=graph.graph_id,
+            graph_tier=graph_tier,
+            storage_bytes=storage_check["total_storage_gb"] * (1024**3),
+            session=db,
+          )
+        except Exception as e:
+          context.log.warning(
+            f"Could not record storage snapshot for {graph.graph_id}: {e}"
+          )
+
       # Only alert for approaching or over_limit
       if instance_status not in _ALERT_STATUSES:
         continue
@@ -135,15 +166,7 @@ def graph_usage_monitor_sensor(context: SensorEvaluationContext):
         )
         continue
 
-      # Look up graph owner
-      graph_user = (
-        db.query(GraphUser)
-        .filter(
-          GraphUser.graph_id == graph.graph_id,
-          GraphUser.role == "admin",
-        )
-        .first()
-      )
+      # Owner already looked up above for the snapshot row
       if not graph_user:
         continue
 

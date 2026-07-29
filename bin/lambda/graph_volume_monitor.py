@@ -42,6 +42,22 @@ EXPANSION_FACTOR = float(os.environ.get("EXPANSION_FACTOR", "1.5"))  # 50% incre
 # Standard starting size this yields 20 -> 40GB, a doubling.
 MIN_EXPANSION_GB = int(os.environ.get("MIN_EXPANSION_GB", "20"))
 MAX_VOLUME_SIZE_GB = int(os.environ.get("MAX_VOLUME_SIZE_GB", "16384"))  # EBS limit
+
+# Product storage caps per tier in GB. Must match graph.yml's
+# instance_storage_limit_gb (this Lambda is standalone and cannot import the
+# app config; a repo test pins the two against each other). Tiers not listed
+# (ladybug-shared, replicas) have no product cap and grow to the EBS limit.
+TIER_STORAGE_LIMITS_GB = {
+  "ladybug-standard": 20,
+  "ladybug-large": 50,
+  "ladybug-xlarge": 100,
+}
+# Volume ceiling = product cap x this multiplier. Above 1.0 because DuckDB
+# staging, temp files, and vector indexes legitimately live on the volume
+# beyond the graph data the product cap governs. Without any ceiling this
+# Lambda kept expanding a 20 GB-cap tenant's volume toward the EBS maximum —
+# unbounded EBS spend for data the app-side cap should have stopped.
+TIER_CEILING_MULTIPLIER = float(os.environ.get("TIER_CEILING_MULTIPLIER", "2.0"))
 GRAPH_API_PORT = os.environ.get("GRAPH_API_PORT", "8001")
 GRAPH_API_SECRET_ARN = os.environ.get("GRAPH_API_SECRET_ARN", "")
 
@@ -341,7 +357,9 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
         return result
 
       # Calculate new size
-      new_size = calculate_new_volume_size(current_size, usage_percent)
+      new_size = calculate_new_volume_size(
+        current_size, usage_percent, tier=instance.get("tier", "unknown")
+      )
 
       if new_size > current_size:
         # Perform expansion
@@ -1018,8 +1036,14 @@ def trigger_filesystem_growth(instance: dict) -> dict:
     return {"success": False, "error": str(e)}
 
 
-def calculate_new_volume_size(current_size: int, usage_percent: float) -> int:
-  """Calculate the new volume size based on current usage"""
+def calculate_new_volume_size(
+  current_size: int, usage_percent: float, tier: str = "unknown"
+) -> int:
+  """Calculate the new volume size based on current usage.
+
+  Returns current_size unchanged when the tier's volume ceiling has been
+  reached — the caller treats no-growth as no-expansion.
+  """
 
   # Calculate size needed to get back to 60% usage
   target_usage = 0.6
@@ -1039,6 +1063,19 @@ def calculate_new_volume_size(current_size: int, usage_percent: float) -> int:
 
   # Round up to nearest 10GB for cleaner sizes
   new_size = ((new_size + 9) // 10) * 10
+
+  # Product-tier ceiling. Applied after rounding so rounding cannot step
+  # over it; never shrinks an existing volume.
+  tier_limit = TIER_STORAGE_LIMITS_GB.get(tier)
+  if tier_limit:
+    ceiling = int(tier_limit * TIER_CEILING_MULTIPLIER)
+    if current_size >= ceiling:
+      logger.error(
+        f"Volume at tier ceiling ({current_size} GB >= {ceiling} GB for "
+        f"{tier}); not expanding. Tenant is far over the product storage cap."
+      )
+      return current_size
+    new_size = min(new_size, ceiling)
 
   return new_size
 

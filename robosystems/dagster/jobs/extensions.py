@@ -63,6 +63,48 @@ def materialize_extensions_to_graph(
   asyncio.set_event_loop(loop)
 
   try:
+    # Enforce the tier storage cap on this path too. The HTTP materialize
+    # command runs the same check, but this op is also reached directly by
+    # the staleness sensor, which otherwise rebuilds over-cap graphs on
+    # every sync — the cap only ever bound manual calls. Unknown usage
+    # (Graph API unreachable) fails the run rather than proceeding
+    # unverified; the sensor resubmits after its cursor expiry.
+    from robosystems.database import get_db_session
+    from robosystems.middleware.graph.ingestion_limits import IngestionLimitChecker
+    from robosystems.models.core.graph.graph import Graph
+
+    db_gen = get_db_session()
+    db_session = next(db_gen)
+    try:
+      graph_row = db_session.query(Graph).filter(Graph.graph_id == graph_id).first()
+      graph_tier = (
+        str(graph_row.graph_tier)
+        if graph_row and graph_row.graph_tier
+        else "ladybug-standard"
+      )
+      storage_check = loop.run_until_complete(
+        IngestionLimitChecker.check_instance_storage(db_session, graph_id, graph_tier)
+      )
+    finally:
+      try:
+        next(db_gen)
+      except StopIteration:
+        pass
+
+    if not storage_check["allowed"]:
+      context.log.error(
+        f"Storage cap blocked materialization for {graph_id}: "
+        f"{'; '.join(storage_check['errors'])}"
+      )
+      raise Failure(
+        description=f"Storage cap blocked materialization for {graph_id}",
+        metadata={
+          "graph_id": MetadataValue.text(graph_id),
+          "errors": MetadataValue.text("; ".join(storage_check["errors"])),
+          "storage_status": MetadataValue.text(storage_check["status"]),
+        },
+      )
+
     materializer = ExtensionsMaterializer()
     result = loop.run_until_complete(
       materializer.materialize(

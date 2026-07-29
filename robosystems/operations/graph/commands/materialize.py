@@ -120,6 +120,18 @@ async def materialize_cmd(
     )
 
     if not limit_check["allowed"]:
+      # Unverifiable storage (Graph API unreachable) is transient — 503 so
+      # clients retry, not 413 which reads as "you are over your cap".
+      if limit_check.get("retryable"):
+        raise HTTPException(
+          status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+          detail={
+            "error": "Storage usage could not be verified; retry shortly",
+            "errors": limit_check["errors"],
+            "tier": graph_tier,
+          },
+          headers={"Retry-After": "30"},
+        )
       raise HTTPException(
         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         detail={
