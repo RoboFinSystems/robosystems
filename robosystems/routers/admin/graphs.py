@@ -142,7 +142,9 @@ async def list_graphs(
           storage_gb=float(latest_usage.storage_gb)
           if latest_usage and latest_usage.storage_gb
           else None,
-          storage_limit_gb=tier_config.get("storage_limit_gb"),
+          storage_limit_gb=GraphTierConfig.get_instance_storage_limit_gb(
+            graph.graph_tier
+          ),
           subgraph_count=subgraph_count or 0,
           subgraph_limit=tier_config.get("max_subgraphs"),
           created_at=graph.created_at,
@@ -221,7 +223,7 @@ async def get_graph(request: Request, graph_id: str):
       storage_gb=float(latest_usage.storage_gb)
       if latest_usage and latest_usage.storage_gb
       else None,
-      storage_limit_gb=tier_config.get("storage_limit_gb"),
+      storage_limit_gb=GraphTierConfig.get_instance_storage_limit_gb(graph.graph_tier),
       subgraph_count=subgraph_count or 0,
       subgraph_limit=tier_config.get("max_subgraphs"),
       created_at=graph.created_at,
@@ -341,14 +343,17 @@ async def get_graph_storage(request: Request, graph_id: str):
       else 0.0
     )
 
+    # Default to the tier limit ingestion actually enforces
+    # (instance_storage_limit_gb: 20/50/100). This used to read a
+    # storage_limit_gb key that exists in no billing plan, so every graph
+    # reported a fabricated 500 GB limit — and the override read a column
+    # name that does not exist (storage_limit_override_gb), turning this
+    # endpoint into a 500 for any graph with a credit pool.
     credits = GraphCredits.get_by_graph_id(graph_id, session)
-    from ...config.billing import BillingConfig
-
-    tier_config = BillingConfig.get_subscription_plan(graph.graph_tier)
     storage_limit = (
-      float(credits.storage_limit_override_gb)
-      if credits and credits.storage_limit_override_gb
-      else float(tier_config.get("storage_limit_gb", 500))
+      float(credits.storage_override_gb)
+      if credits and credits.storage_override_gb
+      else GraphTierConfig.get_instance_storage_limit_gb(graph.graph_tier)
     )
 
     usage_percentage = (

@@ -224,3 +224,83 @@ class TestDeprovisionGraph:
       assert response.status_code == 200
       data = response.json()
       assert data["backup_created"] is False
+
+
+class TestGraphStorageReporting:
+  """Admin storage numbers must be the limits ingestion actually enforces.
+
+  The list/detail endpoints read a storage_limit_gb key that exists in no
+  tier or billing config (reporting null / a fabricated 500 GB), and the
+  storage detail read an override column that does not exist — an
+  AttributeError 500 for any graph with a credit pool.
+  """
+
+  def _add_credit_pool(self, db_session, test_graph, test_user, override=None):
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from robosystems.models.core import GraphCredits
+
+    credits = GraphCredits(
+      id=f"gc_{test_graph.graph_id}",
+      graph_id=test_graph.graph_id,
+      user_id=test_user.id,
+      billing_admin_id=test_user.id,
+      current_balance=Decimal("1000"),
+      monthly_allocation=Decimal("1000"),
+      last_allocation_date=datetime.now(UTC),
+      storage_override_gb=override,
+    )
+    db_session.add(credits)
+    db_session.commit()
+
+  def test_storage_detail_reports_the_enforced_tier_limit(
+    self, client, test_graph, mock_admin_auth
+  ):
+    response = client.get(
+      f"/admin/v1/graphs/{test_graph.graph_id}/storage",
+      headers={"Authorization": "Bearer test-admin-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["storage_limit_gb"] == 20.0
+
+  def test_graph_with_credit_pool_does_not_500(
+    self, client, db_session, test_graph, test_user, mock_admin_auth
+  ):
+    self._add_credit_pool(db_session, test_graph, test_user)
+
+    response = client.get(
+      f"/admin/v1/graphs/{test_graph.graph_id}/storage",
+      headers={"Authorization": "Bearer test-admin-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["storage_limit_gb"] == 20.0
+
+  def test_admin_storage_override_wins(
+    self, client, db_session, test_graph, test_user, mock_admin_auth
+  ):
+    from decimal import Decimal
+
+    self._add_credit_pool(db_session, test_graph, test_user, override=Decimal("75"))
+
+    response = client.get(
+      f"/admin/v1/graphs/{test_graph.graph_id}/storage",
+      headers={"Authorization": "Bearer test-admin-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["storage_limit_gb"] == 75.0
+
+  def test_graph_list_reports_the_enforced_tier_limit(
+    self, client, test_graph, mock_admin_auth
+  ):
+    response = client.get(
+      "/admin/v1/graphs",
+      headers={"Authorization": "Bearer test-admin-key"},
+    )
+
+    assert response.status_code == 200
+    row = next(r for r in response.json() if r["graph_id"] == test_graph.graph_id)
+    assert row["storage_limit_gb"] == 20.0
