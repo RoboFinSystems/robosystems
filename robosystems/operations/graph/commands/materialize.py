@@ -177,6 +177,7 @@ async def materialize_cmd(
       }
 
     # Staged path: uploaded parquet files → DuckDB → LadybugDB
+    _require_rebuild_for_populated_graph(db, graph_id, rebuild=body.rebuild)
     use_direct = _should_use_direct_materialization(db, graph_id)
     lock_key = f"graph_materialize:{graph_id}" if lock else None
 
@@ -260,6 +261,56 @@ def _resolve_source(source: str | None, graph_type: str) -> str:
       ),
     )
   return source
+
+
+def _require_rebuild_for_populated_graph(
+  db: Session, graph_id: str, *, rebuild: bool
+) -> None:
+  """Reject a non-rebuild materialize that would re-copy ingested rows.
+
+  DuckDB staging tables rebuild from *all* uploaded files, so once any file
+  has been materialized into the graph, a later non-rebuild materialize
+  replays the whole table — duplicate node keys fail the COPY and duplicate
+  relationships load silently. Only the combination that actually re-copies
+  is rejected: prior ingested files AND new pending files. A repeat call
+  with nothing new keeps its existing not-stale skip behavior, and a first
+  materialize (nothing ingested yet) is unaffected.
+  """
+  if rebuild:
+    return
+
+  from robosystems.models.core import GraphFile, GraphTable
+
+  def _file_exists(*filters) -> bool:
+    return (
+      db.query(GraphFile.id)
+      .join(GraphTable, GraphFile.table_id == GraphTable.id)
+      .filter(GraphTable.graph_id == graph_id, *filters)
+      .first()
+      is not None
+    )
+
+  previously_ingested = _file_exists(GraphFile.graph_status == "ingested")
+  if not previously_ingested:
+    return
+
+  pending_files = _file_exists(
+    GraphFile.duckdb_status == "staged",
+    GraphFile.graph_status != "ingested",
+  )
+  if not pending_files:
+    return
+
+  raise HTTPException(
+    status_code=status.HTTP_409_CONFLICT,
+    detail={
+      "error": (
+        "This graph already contains materialized data; materializing new "
+        "uploads without a rebuild would re-copy previously ingested rows."
+      ),
+      "resolution": ("Pass rebuild=true to rebuild the graph from all uploaded files."),
+    },
+  )
 
 
 def _should_use_direct_materialization(db: Session, graph_id: str) -> bool:
