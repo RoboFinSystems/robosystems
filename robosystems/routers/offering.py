@@ -222,12 +222,15 @@ async def get_service_offerings(
         ],
       },
       repository_subscriptions={
-        "description": "Organization-level shared repository access subscriptions",
-        "pricing_model": "per_organization",
+        # Per USER, not per organization: access, credits, and volume limits
+        # all key on the subscribing user (UserRepository / UserRepositoryCredits).
+        # This copy once claimed org-level sharing the implementation never had.
+        "description": "Per-user shared repository access subscriptions",
+        "pricing_model": "per_user",
         "repositories": repositories,
         "notes": [
-          "Repository subscriptions are purchased at the organization level",
-          "All organization members share access to subscribed repositories",
+          "Repository subscriptions are purchased per user",
+          "Each subscribing user gets their own credits and rate limits",
           "Repository subscriptions are separate from graph subscriptions",
           "Can be combined with any graph infrastructure tier",
           "Repository queries do not consume AI credits",

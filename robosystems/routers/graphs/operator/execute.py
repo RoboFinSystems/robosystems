@@ -66,6 +66,24 @@ from .strategies import (
 router = APIRouter()
 
 
+async def _enforce_shared_repository_agent_limits(
+  graph_id: str, current_user: User, db: Session
+) -> None:
+  """Apply shared-repository access + per-plan agent volume limits.
+
+  Repository plans advertise agent_calls_per_* limits; until this hook,
+  nothing ever checked them (query/mcp/search had their equivalents, the
+  operator surface did not), so the advertised numbers were unenforced.
+  """
+  from robosystems.routers.graphs.query.execute import (
+    _check_shared_repository_limits,
+  )
+
+  await _check_shared_repository_limits(
+    graph_id, current_user, db, endpoint="agent", operation="agent"
+  )
+
+
 def _check_operator_post_enabled():
   """Check if operator POST endpoints are enabled."""
   if not env.OPERATOR_POST_ENABLED:
@@ -156,6 +174,7 @@ async def auto_operator(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> OperatorResponse | JSONResponse | EventSourceResponse:
   _check_operator_post_enabled()
+  await _enforce_shared_repository_agent_limits(graph_id, current_user, db)
 
   try:
     # Detect client capabilities
@@ -318,6 +337,7 @@ async def specific_operator(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> OperatorResponse | JSONResponse | EventSourceResponse:
   _check_operator_post_enabled()
+  await _enforce_shared_repository_agent_limits(graph_id, current_user, db)
 
   try:
     # Get operator to access execution profile (operators are lightweight, no graph/user needed)
@@ -427,6 +447,7 @@ async def batch_operator(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> BatchOperatorResponse:
   _check_operator_post_enabled()
+  await _enforce_shared_repository_agent_limits(graph_id, current_user, db)
 
   import time
 

@@ -710,7 +710,11 @@ async def execute_cypher_query(
 
 
 async def _check_shared_repository_limits(
-  graph_id: str, user: User, session: Session, endpoint: str = "query"
+  graph_id: str,
+  user: User,
+  session: Session,
+  endpoint: str = "query",
+  operation: str = "query",
 ) -> None:
   from robosystems.config import env
   from robosystems.config.shared_repositories import (
@@ -764,7 +768,7 @@ async def _check_shared_repository_limits(
     limit_check = await limiter.check_limits(
       user_id=user.id,
       graph_id=graph_id,
-      operation="query",  # Direct queries
+      operation=operation,
       endpoint=endpoint,
       repository_plan=repo_plan,
     )

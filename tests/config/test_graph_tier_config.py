@@ -305,3 +305,16 @@ def test_subgraph_memory_is_configured_separately_from_parent(mock_graph_config)
   instance = GraphTierConfig.get_tier_config("ladybug-standard")["instance"]
   assert instance["memory_per_db_mb"] == 512
   assert instance["memory_per_subgraph_mb"] == 256
+
+
+def test_backup_hosting_days_never_exceed_the_s3_lifecycle():
+  """The S3 lifecycle rule deletes backup objects at 90 days, and the final
+  deprovisioning backup creates no GraphBackup row, so no tier can promise
+  hosting beyond 90 days. This table once promised 180/365 to Large/XLarge —
+  retention the infrastructure silently could not deliver."""
+  from robosystems.config.deprovisioning import get_deprovisioning_config
+
+  config = get_deprovisioning_config()
+  for tier, days in config.backup_hosting_days.items():
+    assert days <= 90, f"{tier} promises {days}-day backup hosting; S3 deletes at 90"
+  assert config.get_backup_hosting_days("unknown-tier") <= 90

@@ -505,9 +505,13 @@ class GraphTierConfig:
       elif "MEDIUM" in instance_type:
         features.append("Dedicated medium instance")
 
-      max_memory_mb = instance.get("max_memory_mb", 0)
-      if max_memory_mb and max_memory_mb > 0:
-        features.append(f"{max_memory_mb / 1024:.0f}GB RAM")
+      # Advertise the instance's physical RAM, matching /v1/offering's
+      # infrastructure line. max_memory_mb is the LadybugDB budget after OS
+      # overhead — reporting it here made the same tier claim "3GB RAM" in
+      # one response and "4 GB RAM" in another.
+      instance_ram_gb = instance.get("instance_ram_gb", 0)
+      if instance_ram_gb and instance_ram_gb > 0:
+        features.append(f"{instance_ram_gb:g} GB RAM")
 
     # Add rate limit multiplier if not standard. Derived from the enforced
     # limits — graph.yml no longer carries an api_rate_multiplier key.
