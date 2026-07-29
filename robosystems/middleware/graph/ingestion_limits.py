@@ -96,6 +96,9 @@ class IngestionLimitChecker:
 
     return {
       "allowed": len(errors) == 0,
+      # Unverifiable storage is a transient condition, not a limit violation;
+      # callers surface it as retryable (503) rather than over-limit (413).
+      "retryable": storage_check.get("retryable", False),
       "errors": errors,
       "warnings": warnings,
       "current_usage": {
@@ -147,8 +150,29 @@ class IngestionLimitChecker:
     # also replaces the previous N+1 (one Graph API call per subgraph), and
     # catches on-disk leftovers the graph registry has lost track of.
     breakdown = await cls._get_storage_breakdown(graph_id)
-    items: list[dict[str, Any]] = breakdown.get("items", []) if breakdown else []
-    total_bytes = breakdown.get("total_bytes", 0) if breakdown else None
+    if breakdown is None:
+      # Usage could not be measured. This used to fall through as 0.0 GB /
+      # healthy / allowed, which silently disabled the cap exactly when the
+      # instance was struggling. "Cannot verify" is not "empty": the write
+      # path fails closed, and `retryable` tells callers to surface it as a
+      # transient condition rather than a limit violation.
+      return {
+        "allowed": False,
+        "retryable": True,
+        "errors": [
+          f"Instance storage usage for {graph_id} could not be verified "
+          "(Graph API unavailable). Retry shortly."
+        ],
+        "total_storage_gb": None,
+        "limit_gb": limit_gb,
+        "usage_percentage": None,
+        "status": "unknown",
+        "databases": [],
+        "items": [],
+      }
+
+    items: list[dict[str, Any]] = breakdown.get("items", [])
+    total_bytes = breakdown.get("total_bytes", 0)
 
     # Roll the itemized view up per database for the summary shape, so a
     # database's graph/vector/staging bytes appear as one line.
@@ -191,6 +215,7 @@ class IngestionLimitChecker:
 
     return {
       "allowed": len(errors) == 0,
+      "retryable": False,
       "errors": errors,
       "total_storage_gb": total_storage_gb,
       "limit_gb": limit_gb,

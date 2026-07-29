@@ -73,7 +73,17 @@ async def validate_storage_capacity(
   storage_info = await IngestionLimitChecker.check_instance_storage(
     db, graph_id, current_tier
   )
-  total_gb = storage_info.get("total_storage_gb", 0)
+  total_gb = storage_info.get("total_storage_gb")
+
+  # Fail closed: approving a downgrade without knowing the usage could land
+  # a graph over its new, smaller cap the moment the change completes.
+  if total_gb is None:
+    raise HTTPException(
+      status_code=503,
+      detail=(
+        "Storage usage could not be verified for downgrade validation; retry shortly."
+      ),
+    )
 
   if total_gb > new_limit_gb:
     raise HTTPException(

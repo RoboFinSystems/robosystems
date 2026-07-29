@@ -14,10 +14,20 @@ class TestCheckMaterializationLimits:
   async def test_within_limits_allowed(self):
     """Test that materialization is allowed when within row limits."""
     mock_db = MagicMock()
-    with patch.object(
-      IngestionLimitChecker,
-      "_get_pending_row_counts",
-      return_value={"Entity": 1000, "Fact": 2000, "ENTITY_HAS_FACT": 500},
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_pending_row_counts",
+        return_value={"Entity": 1000, "Fact": 2000, "ENTITY_HAS_FACT": 500},
+      ),
+      # A measured, in-bounds breakdown. Without this mock the test only
+      # passed via the old fail-open path (unmeasured -> 0 GB -> allowed).
+      patch.object(
+        IngestionLimitChecker,
+        "_get_storage_breakdown",
+        new_callable=AsyncMock,
+        return_value={"total_bytes": 1024**3, "items": []},
+      ),
     ):
       result = await IngestionLimitChecker.check_materialization_limits(
         db=mock_db,
@@ -149,10 +159,18 @@ class TestCheckMaterializationLimits:
     """
     mock_db = MagicMock()
     # Even with large row counts, as long as they're within per-operation limits
-    with patch.object(
-      IngestionLimitChecker,
-      "_get_pending_row_counts",
-      return_value={"Entity": 500_000, "ENTITY_HAS_FACT": 250_000},
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_pending_row_counts",
+        return_value={"Entity": 500_000, "ENTITY_HAS_FACT": 250_000},
+      ),
+      patch.object(
+        IngestionLimitChecker,
+        "_get_storage_breakdown",
+        new_callable=AsyncMock,
+        return_value={"total_bytes": 1024**3, "items": []},
+      ),
     ):
       result = await IngestionLimitChecker.check_materialization_limits(
         db=mock_db,
@@ -415,11 +433,15 @@ class TestCheckInstanceStorage:
     assert result["databases"][0]["size_mb"] == 6 * 1024
     assert result["total_storage_gb"] == 6.0
 
-  @pytest.mark.asyncio
-  async def test_unavailable_breakdown_degrades_to_zero(self):
-    """An unreachable node must not fabricate usage or block on nothing."""
-    mock_db = MagicMock()
 
+class TestUnmeasurableStorageFailsClosed:
+  """A Graph API failure used to read as 0 GB / healthy / allowed —
+  silently disabling the storage cap exactly when the instance was
+  struggling, which is when it matters most."""
+
+  @pytest.mark.asyncio
+  async def test_check_instance_storage_returns_unknown_and_blocks(self):
+    mock_db = MagicMock()
     with (
       patch.object(
         IngestionLimitChecker,
@@ -437,12 +459,82 @@ class TestCheckInstanceStorage:
       ),
     ):
       result = await IngestionLimitChecker.check_instance_storage(
-        db=mock_db,
-        graph_id="kg_test",
-        tier="ladybug-standard",
+        db=mock_db, graph_id="kg_test", tier="ladybug-standard"
       )
 
-    assert result["allowed"] is True
-    assert result["total_storage_gb"] == 0.0
-    assert result["databases"] == []
-    assert result["items"] == []
+    assert result["allowed"] is False
+    assert result["retryable"] is True
+    assert result["status"] == "unknown"
+    assert result["total_storage_gb"] is None
+    assert result["usage_percentage"] is None
+
+  @pytest.mark.asyncio
+  async def test_materialization_check_marks_the_block_retryable(self):
+    """Callers must be able to distinguish 'cannot verify, retry' from
+    'over your cap' — a 503 versus a 413."""
+    mock_db = MagicMock()
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_pending_row_counts",
+        return_value={"Entity": 1000},
+      ),
+      patch.object(
+        IngestionLimitChecker,
+        "_get_storage_breakdown",
+        new_callable=AsyncMock,
+        return_value=None,
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_instance_storage_limit_gb",
+        return_value=20.0,
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_graph_limits",
+        return_value={
+          "instance_storage_limit_gb": 20,
+          "max_rows_per_copy": 1_000_000,
+          "max_single_table_rows": 2_500_000,
+          "chunk_size_rows": 250_000,
+          "warn_at_percentage": 80,
+        },
+      ),
+    ):
+      result = await IngestionLimitChecker.check_materialization_limits(
+        db=mock_db, graph_id="kg_test", tier="ladybug-standard"
+      )
+
+    assert result["allowed"] is False
+    assert result["retryable"] is True
+    assert any("could not be verified" in e for e in result["errors"])
+
+  @pytest.mark.asyncio
+  async def test_measured_over_limit_is_not_retryable(self):
+    """A genuine over-cap block must stay a hard 413, not a retry hint."""
+    mock_db = MagicMock()
+    with (
+      patch.object(
+        IngestionLimitChecker,
+        "_get_storage_breakdown",
+        new_callable=AsyncMock,
+        return_value={
+          "total_bytes": 25 * 1024**3,
+          "items": [{"type": "graph", "id": "kg_test", "bytes": 25 * 1024**3}],
+        },
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_instance_storage_limit_gb",
+        return_value=20.0,
+      ),
+      patch(
+        "robosystems.middleware.graph.ingestion_limits.GraphTierConfig.get_graph_limits",
+        return_value={"warn_at_percentage": 80},
+      ),
+    ):
+      result = await IngestionLimitChecker.check_instance_storage(
+        db=mock_db, graph_id="kg_test", tier="ladybug-standard"
+      )
+
+    assert result["allowed"] is False
+    assert result["retryable"] is False
+    assert result["status"] == "over_limit"
