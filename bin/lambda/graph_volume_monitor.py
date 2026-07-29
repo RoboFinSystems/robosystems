@@ -264,6 +264,34 @@ def discover_lbug_instances() -> list[dict]:
   return instances
 
 
+def discover_replica_instance_ids() -> set[str]:
+  """Enumerate running shared replicas for registry reconciliation.
+
+  Replica launch templates tag instances with `NodeType: shared_replica` and no
+  `LadybugRole` tag, so `discover_lbug_instances` cannot see them. They are
+  enumerated separately (rather than folded into that filter) so they stay out
+  of the volume-expansion loop — replicas carry no data volume to manage.
+  """
+  try:
+    response = ec2.describe_instances(
+      Filters=[
+        {"Name": "tag:Service", "Values": ["RoboSystems"]},
+        {"Name": "tag:NodeType", "Values": ["shared_replica"]},
+        {"Name": "instance-state-name", "Values": ["running"]},
+        {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
+      ]
+    )
+  except Exception as e:
+    logger.error(f"Failed to discover shared replicas: {e}")
+    raise
+
+  return {
+    instance["InstanceId"]
+    for reservation in response["Reservations"]
+    for instance in reservation["Instances"]
+  }
+
+
 def check_and_expand_volume(instance: dict, expand_immediately: bool = False) -> dict:
   """Check a single instance and expand if needed"""
 
@@ -1455,9 +1483,11 @@ def sync_instance_registry() -> dict[str, int]:
     logger.info("No instance registry table configured, skipping sync")
     return results
 
-  # Discovery is the same tag+state filter the monitor already trusts to
-  # enumerate live instances, so a row absent from it is absent from EC2.
+  # Writers come from the same tag+state filter the monitor already trusts;
+  # shared replicas are tagged differently and need their own discovery. A row
+  # absent from the union is absent from EC2.
   live_instance_ids = {i["instance_id"] for i in discover_lbug_instances()}
+  live_instance_ids |= discover_replica_instance_ids()
 
   table = dynamodb.Table(INSTANCE_REGISTRY_TABLE)
   cutoff = (
