@@ -885,6 +885,11 @@ class EnvConfig:
     "lbug_admission/MEMORY_THRESHOLD",
     AdmissionDefaults.MEMORY_THRESHOLD,
   )
+  LBUG_ADMISSION_MIN_AVAILABLE_MB = get_tuning_float(
+    "LBUG_ADMISSION_MIN_AVAILABLE_MB",
+    "lbug_admission/MIN_AVAILABLE_MB",
+    AdmissionDefaults.MIN_AVAILABLE_MB,
+  )
   LBUG_ADMISSION_CPU_THRESHOLD = get_tuning_float(
     "LBUG_ADMISSION_CPU_THRESHOLD",
     "lbug_admission/CPU_THRESHOLD",
