@@ -460,13 +460,21 @@ class TestApplyStructuresToRemove:
     )
     apply_structures_to_remove(session, taxonomy, payload)
 
-    # 4 DELETEs: verification results FIRST (they FK rules and
-    # structures with no ON DELETE), then rules, associations, structures
-    assert session.execute.call_count == 4
-    deleted_tables = [c.args[0].table.name for c in session.execute.call_args_list]
+    # FK-dependency order: verification results FIRST (they FK rules and
+    # structures with no ON DELETE), then facts + fact_sets (fact_sets FK
+    # structures), rules, association classifications (FK associations),
+    # associations, structures.
+    deleted_tables = [
+      c.args[0].table.name
+      for c in session.execute.call_args_list
+      if getattr(c.args[0], "is_dml", False)
+    ]
     assert deleted_tables == [
       "verification_results",
+      "facts",
+      "fact_sets",
       "rules",
+      "association_classifications",
       "associations",
       "structures",
     ]
