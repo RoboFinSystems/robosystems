@@ -1,6 +1,6 @@
 """Repository-specific rate limiting tests."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -131,3 +131,29 @@ class TestDualLayerRateLimiter:
     result = await limiter.get_usage_stats("u1", "sec", "sec-starter")
     if result:  # Only check if sec-starter has limits configured
       assert "usage" in result or result == {}
+
+
+class TestPlanKeying:
+  """The manifest keys rate limits by canonical plan name only."""
+
+  def test_canonical_plan_returns_real_limits(self):
+    result = SharedRepositoryRateLimits.get_limits("sec", "starter")
+    assert result, "canonical plan must resolve to non-empty limits"
+    assert "queries_per_minute" in result
+
+  def test_prefixed_plan_returns_empty(self):
+    """Prefixed forms are not valid manifest keys. Normalization is the
+    billing config's job (get_repository_plan returns the canonical key);
+    anything persisting a prefixed plan string bricks the user's access."""
+    assert SharedRepositoryRateLimits.get_limits("sec", "sec-starter") == {}
+
+  def test_is_endpoint_allowed_forwards_the_repository(self):
+    """Dropping the repository argument skipped every per-repo endpoint list
+    and always ran the cross-manifest fallback."""
+    with patch(
+      "robosystems.middleware.rate_limits.repository_rate_limits._is_endpoint_allowed",
+      return_value=True,
+    ) as mock_check:
+      SharedRepositoryRateLimits.is_endpoint_allowed("sec", "query")
+
+    mock_check.assert_called_once_with("query", repo_id="sec")

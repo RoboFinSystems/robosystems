@@ -225,12 +225,15 @@ async def create_repository_subscription(
         or "Valid payment method required to subscribe to repositories.",
       )
 
-    # Create subscription in "provisioning" state
+    # Create subscription in "provisioning" state. plan_name is the canonical
+    # plan key from config, not the request's raw string — everything keyed on
+    # the plan (rate limits, credits, price lookups) expects the canonical form.
+    plan_name = plan_config["name"]
     subscription = BillingSubscription.create_subscription(
       org_id=org_id,
       resource_type="repository",
       resource_id=parent_repo_id,
-      plan_name=request.plan_name,
+      plan_name=plan_name,
       base_price_cents=plan_config["price_cents"],
       session=db,
       billing_interval="monthly",
@@ -241,13 +244,13 @@ async def create_repository_subscription(
       event_type=BillingEventType.SUBSCRIPTION_CREATED,
       org_id=org_id,
       subscription_id=subscription.id,
-      description=f"Created {request.plan_name} subscription for {graph_id} repository",
+      description=f"Created {plan_name} subscription for {graph_id} repository",
       actor_type="user",
       actor_user_id=current_user.id,
       event_data={
         "resource_type": "repository",
-        "resource_id": graph_id,
-        "plan_name": request.plan_name,
+        "resource_id": parent_repo_id,
+        "plan_name": plan_name,
         "base_price_cents": plan_config["price_cents"],
       },
     )
@@ -262,10 +265,13 @@ async def create_repository_subscription(
         from ...operations.providers.payment_provider import get_payment_provider
 
         provider = get_payment_provider("stripe")
+        # Stripe products/prices are keyed on the parent repository and the
+        # canonical plan name; a subgraph URL or raw plan string here misses
+        # the product and errors out of the billing path.
         stripe_price_id = provider.get_or_create_price(
-          plan_name=request.plan_name,
+          plan_name=plan_name,
           resource_type="repository",
-          repository_id=graph_id,
+          repository_id=parent_repo_id,
         )
 
         stripe_subscription_id = provider.create_subscription(
@@ -275,7 +281,7 @@ async def create_repository_subscription(
             "subscription_id": str(subscription.id),
             "user_id": current_user.id,
             "resource_type": "repository",
-            "resource_id": graph_id,
+            "resource_id": parent_repo_id,
           },
         )
 
@@ -299,7 +305,7 @@ async def create_repository_subscription(
           extra={
             "user_id": current_user.id,
             "subscription_id": subscription.id,
-            "plan_name": request.plan_name,
+            "plan_name": plan_name,
           },
           exc_info=True,
         )
@@ -328,18 +334,20 @@ async def create_repository_subscription(
     )
 
     try:
+      # Provisioning is keyed on the parent repository (RepositoryType,
+      # UserRepository rows); a subgraph URL here would fail the enum lookup.
       result = await run_user_repository_provisioning(
         operation_id=None,  # No SSE tracking for sync API calls
         subscription_id=subscription_id,
         user_id=user_id,
-        repository_name=graph_id,
+        repository_name=parent_repo_id,
       )
       logger.info(
-        f"Repository provisioning completed for user {user_id} to {graph_id}",
+        f"Repository provisioning completed for user {user_id} to {parent_repo_id}",
         extra={
           "user_id": user_id,
-          "repository": graph_id,
-          "plan_name": request.plan_name,
+          "repository": parent_repo_id,
+          "plan_name": plan_name,
           "subscription_id": subscription_id,
           "credits_allocated": result.get("credits_allocated", 0),
         },
@@ -484,21 +492,26 @@ async def _change_repository_plan(
   old_plan = subscription.plan_name
   is_upgrade = new_price_cents > subscription.base_price_cents
 
-  # Update DB first — if this fails, Stripe stays consistent
-  subscription.update_plan(new_plan_tier, new_price_cents, db)
-
-  # Update UserRepository access (credits, rate limits)
-  user_repo = UserRepository.get_by_user_and_repository(current_user.id, graph_id, db)
+  # Fetch the access record BEFORE any write. It is keyed on the parent
+  # repository, and looking it up after update_plan committed left the
+  # subscription mutated with credits and rate limits untouched whenever the
+  # record was missing — the partial write this order exists to prevent.
+  user_repo = UserRepository.get_by_user_and_repository(
+    current_user.id, parent_repo_id, db
+  )
   if not user_repo:
     logger.error(
-      f"No UserRepository record for user {current_user.id} on {graph_id} "
-      f"during plan change — credits and rate limits were NOT updated",
-      extra={"user_id": current_user.id, "repository_id": graph_id},
+      f"No UserRepository record for user {current_user.id} on {parent_repo_id} "
+      f"during plan change — no changes were made",
+      extra={"user_id": current_user.id, "repository_id": parent_repo_id},
     )
     raise HTTPException(
       status_code=500,
       detail="Repository access record not found. Please contact support.",
     )
+
+  # Update DB first — if this fails, Stripe stays consistent
+  subscription.update_plan(new_plan_tier, new_price_cents, db)
 
   user_repo.upgrade_tier(
     new_plan=new_plan_tier,
@@ -507,14 +520,15 @@ async def _change_repository_plan(
     new_credits=new_credits,
   )
 
-  # Update Stripe subscription if linked
+  # Update Stripe subscription if linked. Products/prices are keyed on the
+  # parent repository and the canonical plan name.
   stripe_sub_id = subscription.stripe_subscription_id
   if stripe_sub_id:
     provider = get_payment_provider("stripe")
     new_stripe_price_id = provider.get_or_create_price(
-      plan_name=new_plan_name,
+      plan_name=new_plan_tier,
       resource_type="repository",
-      repository_id=graph_id,
+      repository_id=parent_repo_id,
     )
     provider.change_subscription_price(
       subscription_id=stripe_sub_id,
@@ -538,7 +552,7 @@ async def _change_repository_plan(
     actor_user_id=current_user.id,
     event_data={
       "resource_type": "repository",
-      "resource_id": graph_id,
+      "resource_id": parent_repo_id,
       "old_plan": old_plan,
       "new_plan": new_plan_tier,
       "old_price_cents": subscription.base_price_cents,

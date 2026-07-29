@@ -401,3 +401,110 @@ class TestCancelRepositorySubscription:
         )
     assert exc.value.status_code == 403
     assert "owner" in exc.value.detail.lower()
+
+
+class TestChangeRepositoryPlan:
+  """Plan changes must persist the canonical plan key and never write partially."""
+
+  def _active_subscription(self) -> Mock:
+    sub = Mock(spec=BillingSubscription)
+    sub.id = "sub_123"
+    sub.resource_type = "repository"
+    sub.resource_id = "sec"
+    sub.plan_name = "starter"
+    sub.billing_interval = "monthly"
+    sub.status = "active"
+    sub.base_price_cents = 2900
+    sub.current_period_start = datetime(2026, 1, 1, tzinfo=UTC)
+    sub.current_period_end = datetime(2026, 2, 1, tzinfo=UTC)
+    sub.started_at = datetime(2026, 1, 1, tzinfo=UTC)
+    sub.canceled_at = None
+    sub.ends_at = None
+    sub.stripe_subscription_id = None
+    sub.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    return sub
+
+  def _owner_org(self):
+    from robosystems.models.core import OrgRole
+
+    org = Mock()
+    org.org_id = "org_1"
+    org.role = OrgRole.OWNER
+    return org
+
+  @pytest.mark.asyncio
+  @patch(f"{MODULE}.BillingAuditLog")
+  @patch(f"{MODULE}.UserRepository.get_by_user_and_repository")
+  @patch(f"{MODULE}.BillingSubscription.get_by_resource_and_user")
+  async def test_prefixed_plan_name_persists_the_canonical_form(
+    self, mock_get_sub, mock_get_repo, _mock_audit
+  ):
+    """new_plan_name='sec-advanced' must persist 'advanced' everywhere.
+
+    The raw string used to be written to both records; every lookup keyed on
+    the plan (rate limits, credits, price) then returned empty, which reads
+    as "no access" — a 429 on every query until the row was hand-fixed.
+    """
+    from robosystems.models.api.billing.subscription import (
+      UpgradeSubscriptionRequest,
+    )
+    from robosystems.routers.graphs.subscriptions import _change_repository_plan
+
+    db = MagicMock()
+    user = MagicMock()
+    user.id = "user_123"
+    sub = self._active_subscription()
+    mock_get_sub.return_value = sub
+    user_repo = Mock()
+    mock_get_repo.return_value = user_repo
+
+    with patch(
+      "robosystems.models.core.OrgUser.get_user_orgs",
+      return_value=[self._owner_org()],
+    ):
+      await _change_repository_plan(
+        "sec",
+        UpgradeSubscriptionRequest(new_plan_name="sec-advanced"),
+        user,
+        db,
+      )
+
+    sub.update_plan.assert_called_once_with("advanced", 9900, db)
+    assert mock_get_repo.call_args.args[1] == "sec"
+    assert user_repo.upgrade_tier.call_args.kwargs["new_plan"] == "advanced"
+
+  @pytest.mark.asyncio
+  @patch(f"{MODULE}.BillingAuditLog")
+  @patch(f"{MODULE}.UserRepository.get_by_user_and_repository")
+  @patch(f"{MODULE}.BillingSubscription.get_by_resource_and_user")
+  async def test_missing_access_record_makes_no_changes(
+    self, mock_get_sub, mock_get_repo, _mock_audit
+  ):
+    """The access record is checked before any write: a missing record must
+    error out with the subscription untouched, not after mutating it."""
+    from robosystems.models.api.billing.subscription import (
+      UpgradeSubscriptionRequest,
+    )
+    from robosystems.routers.graphs.subscriptions import _change_repository_plan
+
+    db = MagicMock()
+    user = MagicMock()
+    user.id = "user_123"
+    sub = self._active_subscription()
+    mock_get_sub.return_value = sub
+    mock_get_repo.return_value = None
+
+    with patch(
+      "robosystems.models.core.OrgUser.get_user_orgs",
+      return_value=[self._owner_org()],
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await _change_repository_plan(
+          "sec",
+          UpgradeSubscriptionRequest(new_plan_name="advanced"),
+          user,
+          db,
+        )
+
+    assert exc.value.status_code == 500
+    sub.update_plan.assert_not_called()

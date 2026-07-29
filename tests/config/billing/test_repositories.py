@@ -94,3 +94,21 @@ def test_get_all_repository_pricing_contains_repos():
   assert pricing["plans"]["starter"]["price_display"] == "$29/month"
   assert pricing["repositories"]["sec"]["status"] == "available"
   assert pricing["billing_model"].startswith("No credit consumption")
+
+
+def test_get_repository_plan_returns_the_canonical_plan_key():
+  """The returned name is the manifest plan key, never the caller's raw string.
+
+  'sec-advanced' is accepted for lookup, but persisting it verbatim broke
+  every downstream lookup keyed on the plan: rate limits returned {} (read as
+  "no access"), and credit/price config zeroed out.
+  """
+  from robosystems.config import BillingConfig
+
+  prefixed = BillingConfig.get_repository_plan("sec", "sec-advanced")
+  plain = BillingConfig.get_repository_plan("sec", "advanced")
+
+  assert prefixed is not None and plain is not None
+  assert prefixed["name"] == "advanced"
+  assert plain["name"] == "advanced"
+  assert prefixed["price_cents"] == plain["price_cents"]
