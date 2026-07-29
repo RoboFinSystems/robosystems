@@ -720,3 +720,109 @@ class TestBillingSubscriptionIndexes:
     )
 
     assert len(active_subs) == 2
+
+
+class TestResubscribeLookups:
+  """Canceled/failed rows are kept as history and must neither block a new
+  subscription to the same resource nor shadow the live one in lookups.
+
+  An unfiltered `.first()` here is what turned one canceled repository
+  subscription (or one declined card) into a permanent 409 on resubscribe.
+  """
+
+  def _repo_sub(self, db_session, org_id, status: str | None = None):
+    sub = BillingSubscription.create_subscription(
+      org_id=org_id,
+      resource_type="repository",
+      resource_id="sec",
+      plan_name="starter",
+      base_price_cents=2900,
+      session=db_session,
+      billing_interval="monthly",
+    )
+    if status is not None:
+      sub.status = status
+      db_session.commit()
+    return sub
+
+  def test_terminal_rows_do_not_count_as_conflicts(
+    self, db_session: Session, test_user, test_org
+  ):
+    from robosystems.models.core.billing.subscription import (
+      TERMINAL_SUBSCRIPTION_STATUSES,
+    )
+
+    for status in TERMINAL_SUBSCRIPTION_STATUSES:
+      self._repo_sub(db_session, test_org.id, status=status)
+
+    conflict = BillingSubscription.get_by_resource_and_org(
+      resource_type="repository",
+      resource_id="sec",
+      org_id=test_org.id,
+      session=db_session,
+      exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES,
+    )
+
+    assert conflict is None
+
+  def test_live_row_still_counts_as_conflict(
+    self, db_session: Session, test_user, test_org
+  ):
+    from robosystems.models.core.billing.subscription import (
+      TERMINAL_SUBSCRIPTION_STATUSES,
+    )
+
+    self._repo_sub(db_session, test_org.id, status=SubscriptionStatus.ACTIVE.value)
+
+    conflict = BillingSubscription.get_by_resource_and_org(
+      resource_type="repository",
+      resource_id="sec",
+      org_id=test_org.id,
+      session=db_session,
+      exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES,
+    )
+
+    assert conflict is not None
+
+  def test_live_row_shadows_terminal_history(
+    self, db_session: Session, test_user, test_org
+  ):
+    """After a cancel-then-resubscribe, unfiltered lookups (status GET,
+    plan change, cancel) must resolve to the live subscription, not
+    whichever row the database happens to return first."""
+    self._repo_sub(db_session, test_org.id, status=SubscriptionStatus.CANCELED.value)
+    live = self._repo_sub(
+      db_session, test_org.id, status=SubscriptionStatus.ACTIVE.value
+    )
+
+    found = BillingSubscription.get_by_resource_and_org(
+      resource_type="repository",
+      resource_id="sec",
+      org_id=test_org.id,
+      session=db_session,
+    )
+
+    assert found is not None
+    assert found.id == live.id
+
+  def test_most_recent_terminal_row_when_none_live(
+    self, db_session: Session, test_user, test_org
+  ):
+    """With only history left, lookups return the most recent chapter of it —
+    so a status GET after a full cancel still reads 'canceled'."""
+    self._repo_sub(db_session, test_org.id, status=SubscriptionStatus.FAILED.value)
+    latest = self._repo_sub(
+      db_session, test_org.id, status=SubscriptionStatus.CANCELED.value
+    )
+    latest.created_at = latest.created_at + timedelta(seconds=5)
+    db_session.commit()
+
+    found = BillingSubscription.get_by_resource_and_org(
+      resource_type="repository",
+      resource_id="sec",
+      org_id=test_org.id,
+      session=db_session,
+    )
+
+    assert found is not None
+    assert found.id == latest.id

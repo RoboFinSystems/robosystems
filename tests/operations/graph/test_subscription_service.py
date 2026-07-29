@@ -89,6 +89,8 @@ class TestGraphSubscriptionService:
     ):
       # Mock no existing subscription
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      # get_by_resource_and_org orders live-before-terminal, newest-first
+      mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
       mock_session.query.return_value.filter.return_value.count.return_value = 0
 
       result = subscription_service.create_graph_subscription(
@@ -120,6 +122,8 @@ class TestGraphSubscriptionService:
     ):
       # Mock existing subscription check (none exists)
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      # get_by_resource_and_org orders live-before-terminal, newest-first
+      mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
       mock_session.query.return_value.filter.return_value.count.return_value = 0
 
       # Call the method
@@ -147,11 +151,14 @@ class TestGraphSubscriptionService:
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
     ):
-      # Mock existing subscription
+      # Mock existing subscription — get_by_resource_and_org orders
+      # live-before-terminal, newest-first, so the lookup chain includes
+      # order_by
       existing_sub = Mock(spec=BillingSubscription)
       mock_session.query.return_value.filter.return_value.first.return_value = (
         existing_sub
       )
+      mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = existing_sub
 
       result = subscription_service.create_graph_subscription(user_id, graph_id)
 
@@ -183,6 +190,8 @@ class TestGraphSubscriptionService:
     ):
       # Mock no existing subscription
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      # get_by_resource_and_org orders live-before-terminal, newest-first
+      mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
       mock_session.commit.side_effect = SQLAlchemyError("Database error")
 
       with pytest.raises(SQLAlchemyError):

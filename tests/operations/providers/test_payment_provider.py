@@ -160,11 +160,17 @@ class TestStripeSubscriptionOperations:
   @pytest.fixture
   def stripe_provider(self):
     """Create Stripe provider with mocked Stripe."""
+    import stripe as stripe_module
+
     with patch("robosystems.operations.providers.payment_provider.env"):
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
         provider.stripe.Subscription = Mock()
+        # cancel_subscription's idempotency check catches
+        # stripe.error.InvalidRequestError; except-clauses need the real
+        # exception classes, not Mock attributes.
+        provider.stripe.error = stripe_module.error
         return provider
 
   def test_create_subscription_success(self, stripe_provider):
@@ -565,3 +571,76 @@ class TestGraphPriceResolution:
 
     assert result == "price_99"
     stripe_provider.stripe.Price.create.assert_not_called()
+
+
+class TestStripeCancelIdempotency:
+  """Cancel must be idempotent so callers can gate local cancellation on it.
+
+  The contract: a raise always means Stripe still has a live subscription
+  that will keep billing. Already-canceled and missing subscriptions count
+  as success — failing those cases would permanently block a local cancel
+  that Stripe-side state has already satisfied.
+  """
+
+  @pytest.fixture
+  def stripe_provider(self):
+    import stripe as stripe_module
+
+    with patch("robosystems.operations.providers.payment_provider.env"):
+      with patch.object(StripePaymentProvider, "__init__", lambda self: None):
+        provider = StripePaymentProvider()
+        provider.stripe = Mock()
+        # Except-clauses need the real exception classes, not Mock attributes.
+        provider.stripe.error = stripe_module.error
+        return provider
+
+  def _invalid_request(self):
+    from stripe.error import InvalidRequestError
+
+    return InvalidRequestError("No such subscription", "id")
+
+  def test_cancel_success(self, stripe_provider):
+    stripe_provider.cancel_subscription("sub_1")
+    stripe_provider.stripe.Subscription.cancel.assert_called_once_with("sub_1")
+
+  def test_cancel_missing_subscription_counts_as_success(self, stripe_provider):
+    stripe_provider.stripe.Subscription.cancel.side_effect = self._invalid_request()
+    stripe_provider.stripe.Subscription.retrieve.side_effect = self._invalid_request()
+
+    stripe_provider.cancel_subscription("sub_gone")
+
+  def test_cancel_already_canceled_counts_as_success(self, stripe_provider):
+    stripe_provider.stripe.Subscription.cancel.side_effect = self._invalid_request()
+    stripe_provider.stripe.Subscription.retrieve.return_value = Mock(status="canceled")
+
+    stripe_provider.cancel_subscription("sub_already")
+
+  def test_cancel_failure_on_live_subscription_reraises(self, stripe_provider):
+    from stripe.error import InvalidRequestError
+
+    stripe_provider.stripe.Subscription.cancel.side_effect = self._invalid_request()
+    stripe_provider.stripe.Subscription.retrieve.return_value = Mock(status="active")
+
+    with pytest.raises(InvalidRequestError):
+      stripe_provider.cancel_subscription("sub_live")
+
+  def test_period_end_sets_flag(self, stripe_provider):
+    stripe_provider.cancel_subscription_at_period_end("sub_1")
+    stripe_provider.stripe.Subscription.modify.assert_called_once_with(
+      "sub_1", cancel_at_period_end=True
+    )
+
+  def test_period_end_missing_subscription_counts_as_success(self, stripe_provider):
+    stripe_provider.stripe.Subscription.modify.side_effect = self._invalid_request()
+    stripe_provider.stripe.Subscription.retrieve.side_effect = self._invalid_request()
+
+    stripe_provider.cancel_subscription_at_period_end("sub_gone")
+
+  def test_period_end_failure_on_live_subscription_reraises(self, stripe_provider):
+    from stripe.error import InvalidRequestError
+
+    stripe_provider.stripe.Subscription.modify.side_effect = self._invalid_request()
+    stripe_provider.stripe.Subscription.retrieve.return_value = Mock(status="active")
+
+    with pytest.raises(InvalidRequestError):
+      stripe_provider.cancel_subscription_at_period_end("sub_live")

@@ -39,6 +39,8 @@ class TestSubscriptionEdgeCases:
     ):
       # Mock no existing subscription
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      # get_by_resource_and_org orders live-before-terminal, newest-first
+      mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
 
       # Simulate unique constraint violation
       mock_session.commit.side_effect = IntegrityError(
@@ -72,6 +74,8 @@ class TestSubscriptionEdgeCases:
       return_value=plan_config,
     ):
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      # get_by_resource_and_org orders live-before-terminal, newest-first
+      mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
       mock_session.query.return_value.filter.return_value.count.return_value = 0
 
       result = subscription_service.create_graph_subscription(user_id, graph_id, "free")
@@ -117,6 +121,8 @@ class TestSubscriptionEdgeCases:
       return_value=plan_config,
     ):
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      # get_by_resource_and_org orders live-before-terminal, newest-first
+      mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
       mock_session.query.return_value.filter.return_value.count.return_value = 0
 
       result = subscription_service.create_graph_subscription(

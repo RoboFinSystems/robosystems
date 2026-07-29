@@ -508,3 +508,180 @@ class TestChangeRepositoryPlan:
 
     assert exc.value.status_code == 500
     sub.update_plan.assert_not_called()
+
+
+class TestCancelStripeFailureHandling:
+  """A Stripe-side cancel failure must abort before any local mutation.
+
+  The old path logged the Stripe error and proceeded: the customer lost
+  access (and could never resubscribe) while Stripe kept billing them.
+  """
+
+  def _stripe_linked_subscription(self) -> Mock:
+    sub = Mock(spec=BillingSubscription)
+    sub.id = "sub_123"
+    sub.resource_type = "repository"
+    sub.resource_id = "sec"
+    sub.plan_name = "starter"
+    sub.billing_interval = "monthly"
+    sub.status = "active"
+    sub.base_price_cents = 999
+    sub.current_period_start = datetime(2026, 1, 1, tzinfo=UTC)
+    sub.current_period_end = datetime(2026, 2, 1, tzinfo=UTC)
+    sub.started_at = datetime(2026, 1, 1, tzinfo=UTC)
+    sub.canceled_at = None
+    sub.ends_at = None
+    sub.stripe_subscription_id = "sub_stripe_xyz"
+    sub.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    return sub
+
+  def _owner_org(self):
+    from robosystems.models.core import OrgRole
+
+    org = Mock()
+    org.org_id = "org_1"
+    org.role = OrgRole.OWNER
+    return org
+
+  @pytest.mark.asyncio
+  @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
+  @patch(f"{MODULE}.UserRepository.get_by_user_and_repository")
+  @patch(f"{MODULE}.BillingAuditLog")
+  @patch(f"{MODULE}.BillingSubscription.get_by_resource_and_user")
+  async def test_stripe_cancel_failure_aborts_local_cancel(
+    self, mock_get_sub, _mock_audit, mock_get_repo, mock_get_provider
+  ):
+    user = MagicMock()
+    user.id = "user_123"
+    db = MagicMock()
+    sub = self._stripe_linked_subscription()
+    mock_get_sub.return_value = sub
+
+    provider = MagicMock()
+    provider.cancel_subscription.side_effect = Exception("stripe is down")
+    mock_get_provider.return_value = provider
+
+    with (
+      patch(f"{MODULE}.is_shared_repository", return_value=True),
+      patch(f"{MODULE}.resolve_shared_repository_parent", return_value="sec"),
+      patch(
+        "robosystems.models.core.OrgUser.get_user_orgs",
+        return_value=[self._owner_org()],
+      ),
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await cancel_repository_subscription(
+          graph_id="sec",
+          body=CancelSubscriptionRequest(immediate=True, confirm="sec"),
+          current_user=user,
+          db=db,
+          _rate_limit=None,
+        )
+
+    assert exc.value.status_code == 502
+    sub.cancel.assert_not_called()
+    mock_get_repo.assert_not_called()
+
+  @pytest.mark.asyncio
+  @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
+  @patch(f"{MODULE}.UserRepository.get_by_user_and_repository")
+  @patch(f"{MODULE}.BillingAuditLog")
+  @patch(f"{MODULE}.BillingSubscription.get_by_resource_and_user")
+  async def test_period_end_cancel_uses_idempotent_provider_method(
+    self, mock_get_sub, _mock_audit, mock_get_repo, mock_get_provider
+  ):
+    """Period-end cancel goes through the provider's idempotent method, not a
+    raw Subscription.modify the failure contract can't see through."""
+    user = MagicMock()
+    user.id = "user_123"
+    db = MagicMock()
+    sub = self._stripe_linked_subscription()
+    mock_get_sub.return_value = sub
+    mock_get_repo.return_value = None
+
+    provider = MagicMock()
+    mock_get_provider.return_value = provider
+
+    with (
+      patch(f"{MODULE}.is_shared_repository", return_value=True),
+      patch(f"{MODULE}.resolve_shared_repository_parent", return_value="sec"),
+      patch(
+        "robosystems.models.core.OrgUser.get_user_orgs",
+        return_value=[self._owner_org()],
+      ),
+    ):
+      await cancel_repository_subscription(
+        graph_id="sec",
+        body=CancelSubscriptionRequest(),
+        current_user=user,
+        db=db,
+        _rate_limit=None,
+      )
+
+    provider.cancel_subscription_at_period_end.assert_called_once_with("sub_stripe_xyz")
+    provider.cancel_subscription.assert_not_called()
+    sub.cancel.assert_called_once_with(db, immediate=False)
+
+
+class TestChangePlanStripeFirst:
+  """The plan change applies Stripe first: a payment-provider failure must
+  leave local state untouched so the retry path stays open.
+
+  DB-first left an unrecoverable seam — local rows on the new plan, Stripe
+  billing the old price, and every retry rejected by 'Already on this plan'.
+  """
+
+  @pytest.mark.asyncio
+  @patch("robosystems.operations.providers.payment_provider.get_payment_provider")
+  @patch(f"{MODULE}.BillingAuditLog")
+  @patch(f"{MODULE}.UserRepository.get_by_user_and_repository")
+  @patch(f"{MODULE}.BillingSubscription.get_by_resource_and_user")
+  async def test_stripe_price_change_failure_makes_no_local_changes(
+    self, mock_get_sub, mock_get_repo, _mock_audit, mock_get_provider
+  ):
+    from robosystems.models.api.billing.subscription import (
+      UpgradeSubscriptionRequest,
+    )
+    from robosystems.models.core import OrgRole
+    from robosystems.routers.graphs.subscriptions import _change_repository_plan
+
+    org = Mock()
+    org.org_id = "org_1"
+    org.role = OrgRole.OWNER
+
+    db = MagicMock()
+    user = MagicMock()
+    user.id = "user_123"
+
+    sub = Mock(spec=BillingSubscription)
+    sub.id = "sub_123"
+    sub.resource_type = "repository"
+    sub.resource_id = "sec"
+    sub.plan_name = "starter"
+    sub.status = "active"
+    sub.base_price_cents = 2900
+    sub.stripe_subscription_id = "sub_stripe_xyz"
+    mock_get_sub.return_value = sub
+
+    user_repo = Mock()
+    mock_get_repo.return_value = user_repo
+
+    provider = MagicMock()
+    provider.change_subscription_price.side_effect = Exception("stripe is down")
+    mock_get_provider.return_value = provider
+
+    with patch(
+      "robosystems.models.core.OrgUser.get_user_orgs",
+      return_value=[org],
+    ):
+      with pytest.raises(HTTPException) as exc:
+        await _change_repository_plan(
+          "sec",
+          UpgradeSubscriptionRequest(new_plan_name="advanced"),
+          user,
+          db,
+        )
+
+    assert exc.value.status_code == 502
+    sub.update_plan.assert_not_called()
+    user_repo.upgrade_tier.assert_not_called()
