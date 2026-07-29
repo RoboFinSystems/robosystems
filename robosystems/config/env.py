@@ -1260,11 +1260,13 @@ class EnvConfig:
               and get_int_env("LBUG_DATABASES_PER_INSTANCE", 0) > 0
               else instance_config.get("databases_per_instance", 10)
             ),
-            # Tier-level settings from full config
+            # Tier-level settings from full config. Storage, credits, and
+            # rate multipliers deliberately do not appear here: those keys
+            # never existed in graph.yml, so this dict only fabricated
+            # defaults (500 GB / 10000 / 1.0) that nothing should read.
+            # Their sources of truth are GraphTierConfig, BillingConfig,
+            # and RateLimitConfig respectively.
             "tier": tier,
-            "storage_limit_gb": full_tier_config.get("storage_limit_gb", 500),
-            "monthly_credits": full_tier_config.get("monthly_credits", 10000),
-            "api_rate_multiplier": full_tier_config.get("api_rate_multiplier", 1.0),
             "max_subgraphs": full_tier_config.get("max_subgraphs", 0),
           }
     except ImportError:
@@ -1288,9 +1290,6 @@ class EnvConfig:
       "max_databases": get_int_env("LBUG_DATABASES_PER_INSTANCE", 10),
       # Default tier settings
       "tier": "ladybug-standard",
-      "storage_limit_gb": 500,
-      "monthly_credits": 10000,
-      "api_rate_multiplier": 1.0,
       "max_subgraphs": 0,
     }
 

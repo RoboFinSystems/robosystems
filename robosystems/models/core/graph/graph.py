@@ -109,7 +109,7 @@ class Graph(Model):
     String, nullable=False, default=GraphTier.LADYBUG_STANDARD.value
   )  # ladybug-standard, ladybug-large, ladybug-xlarge, etc. (infrastructure tier)
 
-  # Subgraph support (Enterprise/Premium only)
+  # Subgraph support (all dedicated tiers; max count varies by tier)
   parent_graph_id = Column(
     String, nullable=True, index=True
   )  # Parent graph ID if this is a subgraph

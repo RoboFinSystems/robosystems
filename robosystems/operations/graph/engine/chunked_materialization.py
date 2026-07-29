@@ -19,8 +19,11 @@ if TYPE_CHECKING:
 # Per-chunk timeout (seconds) — matches materialize_table default
 CHUNK_TIMEOUT = 600.0
 
-# Fallback chunk size when tier config is unavailable
-DEFAULT_CHUNK_SIZE_ROWS = 1_000_000
+# Fallback chunk size when tier config is unavailable. Must never exceed the
+# smallest tier's chunk_size_rows (ladybug-standard: 250k on m7g.medium) — a
+# larger fallback applies a bigger tier's chunk to a smaller box, the OOM the
+# guardrail exists to prevent. Pinned by test_graph_tier_config.
+DEFAULT_CHUNK_SIZE_ROWS = 250_000
 
 
 async def materialize_table_chunked(

@@ -59,7 +59,7 @@ class SubgraphService:
     Create a new subgraph database on the parent's instance.
 
     This method creates a new database on the same instance as the parent graph,
-    allowing Enterprise/Premium customers to maximize their dedicated infrastructure.
+    letting customers maximize their dedicated instance (subgraph count varies by tier).
 
     For shared repositories, subgraphs can only be created with platform_managed=True
     (used by Dagster jobs and platform scripts). The user-facing API does not pass

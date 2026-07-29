@@ -6,8 +6,8 @@ and dedicated graph backup downloads. Uses Valkey DB 1 (RATE_LIMITS)
 with monthly TTL expiration.
 
 Limits by product:
-- Shared repositories: Defined in adapter manifests (e.g., SEC starter=0, pro=1)
-- Dedicated graphs: Defined in billing/core.py (standard=2, large=4, xlarge=10)
+- Shared repositories: Defined in adapter manifests (SEC starter=1, advanced=4)
+- Dedicated graphs: Defined in billing/core.py (standard=10, large=20, xlarge=40)
 """
 
 from datetime import UTC, datetime

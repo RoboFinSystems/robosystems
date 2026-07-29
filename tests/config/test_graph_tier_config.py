@@ -216,6 +216,17 @@ def test_graph_limit_defaults_do_not_exceed_the_smallest_tier():
       f"{standard[key]:,} — a fallback must never be larger than the smallest tier"
     )
 
+  # The chunked-materialization engine carries its own fallback constant; it
+  # drifted to 4x Standard's chunk once (kept m7g.large's 1M after the resize).
+  from robosystems.operations.graph.engine.chunked_materialization import (
+    DEFAULT_CHUNK_SIZE_ROWS,
+  )
+
+  assert standard["chunk_size_rows"] >= DEFAULT_CHUNK_SIZE_ROWS, (
+    f"DEFAULT_CHUNK_SIZE_ROWS={DEFAULT_CHUNK_SIZE_ROWS:,} exceeds "
+    f"ladybug-standard's {standard['chunk_size_rows']:,}"
+  )
+
 
 def test_get_instance_storage_limit_gb(mock_graph_config):
   assert GraphTierConfig.get_instance_storage_limit_gb("ladybug-standard") == 20.0
@@ -294,13 +305,3 @@ def test_subgraph_memory_is_configured_separately_from_parent(mock_graph_config)
   instance = GraphTierConfig.get_tier_config("ladybug-standard")["instance"]
   assert instance["memory_per_db_mb"] == 512
   assert instance["memory_per_subgraph_mb"] == 256
-
-
-def test_get_storage_cap_gb_from_backup_limits(mock_graph_config):
-  cap = GraphTierConfig.get_storage_cap_gb("ladybug-standard")
-  assert cap == 20  # From backup_limits.max_backup_size_gb
-
-
-def test_get_storage_cap_gb_falls_back_to_default(mock_graph_config):
-  cap = GraphTierConfig.get_storage_cap_gb("unknown-tier")
-  assert cap == 10  # Default

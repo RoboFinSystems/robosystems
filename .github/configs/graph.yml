@@ -100,7 +100,7 @@ production:
 
       # Copy operation limits
       copy_operations:
-        max_file_size_gb: 5.0 # Larger files for professional workloads
+        max_file_size_gb: 5.0 # Larger files for larger workloads
         timeout_seconds: 1800 # 30 minute timeout for large operations
         concurrent_operations: 3 # Support concurrent operations for team
         max_files_per_operation: 1000 # Higher batch limits
@@ -108,7 +108,7 @@ production:
 
       # Backup limits
       backup_limits:
-        max_backup_size_gb: 50 # Larger backup capacity for professional workloads
+        max_backup_size_gb: 50 # Larger backup capacity for larger workloads
         backup_retention_days: 30 # Extended retention for team collaboration
         max_backups_per_day: 10 # More frequent backups for active development
 

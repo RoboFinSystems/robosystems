@@ -163,10 +163,21 @@ class TestMaterializeTableChunked:
 
   @pytest.mark.asyncio
   async def test_tier_config_failure_uses_default_chunk_size(self):
-    """When tier config lookup fails, use DEFAULT_CHUNK_SIZE_ROWS."""
+    """When tier config lookup fails, use DEFAULT_CHUNK_SIZE_ROWS.
+
+    Derived from the constant rather than a literal: the fallback is sized to
+    the smallest tier (it drifted to 4x Standard once), so the batch count
+    must follow it.
+    """
+    import math
+
+    from robosystems.operations.graph.engine.chunked_materialization import (
+      DEFAULT_CHUNK_SIZE_ROWS,
+    )
+
+    row_count = 1_500_000
     client = AsyncMock()
-    # Row count > DEFAULT_CHUNK_SIZE_ROWS (1M) -> should chunk
-    client.query_table.return_value = {"rows": [[1_500_000]]}
+    client.query_table.return_value = {"rows": [[row_count]]}
     client.materialize_table.return_value = {"rows_ingested": 750_000}
 
     with patch(
@@ -182,7 +193,7 @@ class TestMaterializeTableChunked:
       )
 
     assert result["chunked"] is True
-    assert result["batches"] == 2
+    assert result["batches"] == math.ceil(row_count / DEFAULT_CHUNK_SIZE_ROWS)
 
   @pytest.mark.asyncio
   async def test_file_ids_passed_through(self):

@@ -403,8 +403,8 @@ class DuckDBConnectionPool:
     3. Default: 4
 
     Thread counts are aligned with instance vCPU counts:
-    - r7g.medium (1 vCPU): 2 threads
-    - r7g.large (2 vCPU): 2 threads
+    - m7g.medium (1 vCPU): 2 threads
+    - m7g.large (2 vCPU): 2 threads
     - r7g.xlarge (4 vCPU): 4 threads
 
     Returns:
