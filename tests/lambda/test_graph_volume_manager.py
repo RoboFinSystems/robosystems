@@ -584,3 +584,176 @@ def test_cleanup_snapshots_honors_retention_days_tag(gvm):
   # The 7-day default snapshot is within retention (5 < 7) → kept.
   assert s3["SnapshotId"] in deleted
   assert s7["SnapshotId"] not in deleted
+
+
+# ---------------------------------------------------------------------------
+# Atomic volume claiming
+#
+# Selection is a scan plus a deterministic sort, so concurrent launches in the
+# same AZ and tier converge on the same candidate. EC2 stops the double-attach,
+# but the loser's retry loop then waits out a volume that will never free and
+# fails the instance — which is why the claim has to be atomic before any
+# concurrency (batched rolling update, ASG instance refresh, spot reclaim).
+# ---------------------------------------------------------------------------
+
+
+def _registry_item(volume_id: str) -> dict:
+  ddb = boto3.resource("dynamodb", region_name="us-east-1")
+  return ddb.Table("test-volume-registry").get_item(Key={"volume_id": volume_id})[
+    "Item"
+  ]
+
+
+def test_claim_volume_takes_an_available_volume(gvm):
+  volume_id = _create_test_volume()
+  _seed_registry("test-volume-registry", volume_id, [])
+
+  assert gvm.claim_volume(volume_id, "i-winner") is True
+
+  item = _registry_item(volume_id)
+  assert item["status"] == "claiming"
+  assert item["instance_id"] == "i-winner"
+  assert "claimed_at" in item
+
+
+def test_claim_volume_loses_to_an_earlier_claim(gvm):
+  """The second caller must lose rather than both proceeding to attach."""
+  volume_id = _create_test_volume()
+  _seed_registry("test-volume-registry", volume_id, [])
+
+  assert gvm.claim_volume(volume_id, "i-first") is True
+  assert gvm.claim_volume(volume_id, "i-second") is False
+
+  # The winner keeps it; the loser must not have overwritten the owner.
+  assert _registry_item(volume_id)["instance_id"] == "i-first"
+
+
+def test_claim_volume_loses_to_an_attached_volume(gvm):
+  volume_id = _create_test_volume()
+  _seed_registry("test-volume-registry", volume_id, [], status="attached")
+
+  assert gvm.claim_volume(volume_id, "i-late") is False
+
+
+def test_launch_falls_through_when_a_candidate_is_claimed_concurrently(gvm):
+  """A lost claim must advance to the next candidate, not fail the instance.
+
+  This is the regression that makes concurrent replacement safe: previously the
+  loser called attach_and_register_volume on a volume another instance held,
+  burned its retry budget on VolumeInUse, and raised.
+  """
+  instance_id = _create_test_instance()
+  taken = _create_test_volume()
+  free = _create_test_volume()
+  # Both carry data so they sort into the same preference bucket.
+  _seed_registry("test-volume-registry", taken, ["kg_taken"])
+  _seed_registry("test-volume-registry", free, ["kg_free"])
+
+  real_claim = gvm.claim_volume
+  first = {"seen": False}
+
+  def claim_but_lose_the_first(volume_id, iid):
+    """Simulate a concurrent winner taking whichever volume we try first."""
+    if not first["seen"]:
+      first["seen"] = True
+      real_claim(volume_id, "i-someone-else")
+      return False
+    return real_claim(volume_id, iid)
+
+  with patch.object(gvm, "claim_volume", side_effect=claim_but_lose_the_first):
+    result = gvm.handle_instance_launch(
+      {"instance_id": instance_id, "node_type": "writer", "tier": "ladybug-standard"}
+    )
+
+  assert result["statusCode"] == 200
+  # It attached the volume it could actually get, not the contested one.
+  assert result["volume_id"] in {taken, free}
+  assert _registry_item(result["volume_id"])["instance_id"] == instance_id
+  assert _registry_item(result["volume_id"])["status"] == "attached"
+
+
+def test_attach_failure_releases_the_claim(gvm):
+  """A failed attach must return the volume to the pool, not strand it."""
+  instance_id = _create_test_instance()
+  volume_id = _create_test_volume()
+  _seed_registry("test-volume-registry", volume_id, ["kg_a"])
+
+  with patch.object(
+    gvm, "attach_and_register_volume", side_effect=RuntimeError("attach exploded")
+  ):
+    with pytest.raises(RuntimeError):
+      gvm.handle_instance_launch(
+        {"instance_id": instance_id, "node_type": "writer", "tier": "ladybug-standard"}
+      )
+
+  item = _registry_item(volume_id)
+  assert item["status"] == "available"
+  assert "claimed_at" not in item
+
+
+def test_release_claim_will_not_undo_someone_elses_claim(gvm):
+  volume_id = _create_test_volume()
+  _seed_registry("test-volume-registry", volume_id, [])
+
+  gvm.claim_volume(volume_id, "i-owner")
+  gvm.release_claim(volume_id, "i-not-the-owner")
+
+  item = _registry_item(volume_id)
+  assert item["status"] == "claiming"
+  assert item["instance_id"] == "i-owner"
+
+
+def test_reclaim_stale_claims_frees_a_stranded_volume(gvm):
+  """A claim whose Lambda died must not hide the volume forever.
+
+  Scans filter on `available`, so without this sweep a stranded claim takes the
+  volume — and the graph it holds — out of circulation permanently.
+  """
+  volume_id = _create_test_volume()
+  _seed_registry("test-volume-registry", volume_id, ["kg_stranded"])
+  gvm.claim_volume(volume_id, "i-died")
+
+  stale = (
+    datetime.now(UTC) - timedelta(seconds=gvm.STALE_CLAIM_SECONDS + 60)
+  ).isoformat()
+  ddb = boto3.resource("dynamodb", region_name="us-east-1")
+  ddb.Table("test-volume-registry").update_item(
+    Key={"volume_id": volume_id},
+    UpdateExpression="SET claimed_at = :t",
+    ExpressionAttributeValues={":t": stale},
+  )
+
+  assert gvm.reclaim_stale_claims("us-east-1c", "ladybug-standard") == 1
+
+  item = _registry_item(volume_id)
+  assert item["status"] == "available"
+  assert item["databases"] == ["kg_stranded"]
+
+
+def test_reclaim_leaves_a_fresh_claim_alone(gvm):
+  """An in-flight attach must never be stolen out from under itself."""
+  volume_id = _create_test_volume()
+  _seed_registry("test-volume-registry", volume_id, [])
+  gvm.claim_volume(volume_id, "i-still-working")
+
+  assert gvm.reclaim_stale_claims("us-east-1c", "ladybug-standard") == 0
+  assert _registry_item(volume_id)["status"] == "claiming"
+
+
+def test_ordered_candidates_preserves_preference_order(gvm):
+  """Matching databases first, then any data, then empty — unchanged from before."""
+  empty = {"volume_id": "vol-empty", "databases": []}
+  other_data = {"volume_id": "vol-other", "databases": ["kg_other"]}
+  matching = {"volume_id": "vol-match", "databases": ["kg_mine"]}
+
+  ordered = gvm.ordered_volume_candidates([empty, other_data, matching], ["kg_mine"])
+
+  assert [v["volume_id"] for v, _ in ordered] == [
+    "vol-match",
+    "vol-other",
+    "vol-empty",
+  ]
+  # The empty volume registers the caller's databases; the others keep their own.
+  assert ordered[0][1] == ["kg_mine"]
+  assert ordered[1][1] == ["kg_other"]
+  assert ordered[2][1] == ["kg_mine"]
