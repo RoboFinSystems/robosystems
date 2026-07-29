@@ -702,16 +702,52 @@ Resources:
   # ========================================
   # CLOUDWATCH ALARMS
   # ========================================
-  UnhealthyHostsAlarm:
+  # Serving-capacity alarm: fires when fewer than MinInstances replicas can take
+  # traffic. This is the real availability signal - a replica still bootstrapping
+  # does not reduce the healthy count, so scale-out never trips it. With
+  # MinInstances=0 (cost-saving mode) the threshold makes it unfirable, which is
+  # correct for a deliberately empty fleet.
+  InsufficientHealthyHostsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub robosystems-shared-replicas-${Environment}-unhealthy-hosts
-      AlarmDescription: Alert when replicas are unhealthy
-      MetricName: UnHealthyHostCount
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-insufficient-healthy-hosts
+      AlarmDescription: Alert when serving replicas drop below the configured minimum
+      MetricName: HealthyHostCount
       Namespace: AWS/ApplicationELB
       Statistic: Average
       Period: 60
       EvaluationPeriods: 3
+      Threshold: !Ref MinInstances
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt ReplicaTargetGroup.TargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt ReplicaALB.LoadBalancerFullName
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
+  # Stuck-host alarm: a replica that never finishes coming up (failed shared
+  # database download, crash-looping container) while healthy replicas still
+  # serve traffic - a gap InsufficientHealthyHostsAlarm cannot see.
+  #
+  # The evaluation window must clear normal bootstrap, which is dominated by the
+  # shared database download from S3 (~8 min for the ~120GB sec graph) plus the
+  # container pull and warmup - about 11 min end to end, and growing with the
+  # graph. The instance refresh already budgets 900s (InstanceWarmup) for this.
+  # 20 min clears both with margin; anything unhealthy that long is genuinely
+  # stuck, not warming.
+  UnhealthyHostsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-unhealthy-hosts
+      AlarmDescription: Alert when a replica stays unhealthy well past normal bootstrap
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 20
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       Dimensions:
