@@ -650,7 +650,15 @@ Resources:
       AutoScalingRollingUpdate:
         MinInstancesInService: 0 # Allow full flexibility since instances are protected
         MaxBatchSize: 1
-        PauseTime: PT5M
+        # Conditional because PauseTime means opposite things either side of
+        # WaitOnResourceSignals below. With signals it is a ceiling — a booted
+        # instance signals and the rollout moves on — so it must cover a full
+        # cold boot, and PT15M matches the CreationPolicy budget above for the
+        # identical work. Without signals it is a floor: CloudFormation sleeps
+        # the whole duration per batch regardless, so the tiers that run at
+        # min=0 keep the short pause rather than paying 15 idle minutes an
+        # instance.
+        PauseTime: !If [HasMinInstances, PT15M, PT5M]
         WaitOnResourceSignals: !If [HasMinInstances, true, false]
         SuspendProcesses:
           - AlarmNotification

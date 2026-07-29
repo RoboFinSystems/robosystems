@@ -134,7 +134,11 @@ on:
 jobs:
   deploy:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
-    timeout-minutes: 30
+    # A rolling update replaces one instance at a time, so the ceiling is
+    # min_instances x the stack's PauseTime — 3 x PT15M = 45 min for the
+    # standard tier. Must stay above the monitor step's own timeout below, or
+    # the job is killed before the monitor can report why the stack is stuck.
+    timeout-minutes: 65
     permissions:
       id-token: write
       contents: read
@@ -339,7 +343,10 @@ jobs:
         uses: ./.github/actions/monitor-stack-deployment
         with:
           stack-name: ${{ inputs.stack_name }}
-          timeout: "1800"
+          # 55 min: clears the 45-min worst case (3 standard writers x PT15M)
+          # with headroom, and stays under the job's timeout-minutes so a stuck
+          # rollout surfaces here as a reported failure rather than a killed job.
+          timeout: "3300"
           interval: "10"
 
       - name: Get Stack Outputs
