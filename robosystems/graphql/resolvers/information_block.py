@@ -50,7 +50,11 @@ class InformationBlockQuery:
     info: Info[GraphQLContext, None],
     id: strawberry.ID,
     scenario_id: str | None = None,
-    series: bool = False,
+    # Nullable rather than `bool = False`: generated SDK clients pass
+    # explicit null for omitted variables, and GraphQL rejects null for a
+    # non-null argument even with a schema default (same contract as the
+    # pagination args in _common.resolve_pagination).
+    series: bool | None = None,
     series_history: int | None = None,
     series_forecast: int | None = None,
   ) -> InformationBlock | None:
@@ -77,7 +81,7 @@ class InformationBlockQuery:
         session,
         str(id),
         scenario_id=scenario_id,
-        series=series,
+        series=bool(series),
         series_history=series_history,
         series_forecast=series_forecast,
       )

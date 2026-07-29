@@ -135,6 +135,11 @@ def _actual_set_at(
   monthly period_end coincides with the FY end, and without the window
   guard the ANNUAL comparative set (created later) would win and seed
   ``Revenues[t-1]`` with the FY column instead of the month.
+
+  Canonical sets (report_id IS NULL — the close-time stamp) beat
+  publication snapshots, same contract as the envelope loaders: a Report
+  published later for the base month must not seed the forecast off a
+  frozen snapshot that may have been regenerated with a different style.
   """
   return session.execute(
     select(FactSet)
@@ -146,7 +151,10 @@ def _actual_set_at(
       FactSet.period_end == period_end,
       FactSet.period_start >= period_start,
     )
-    .order_by(FactSet.created_at.desc())
+    .order_by(
+      FactSet.report_id.isnot(None).asc(),
+      FactSet.created_at.desc(),
+    )
     .limit(1)
   ).scalar_one_or_none()
 
@@ -513,6 +521,7 @@ def cmd_compute_forecast(
     # Authoring rejects overlap with assertions and active catalog
     # rules, but a stale overlap (catalog rule activated after the
     # growth entry was stored) yields to the rule, legibly.
+    grown_this_month: set[str] = set()
     for element_id, rate_by_month in growth_rates.items():
       rate = rate_by_month.get(month)
       if rate is None:
@@ -528,6 +537,7 @@ def cmd_compute_forecast(
         )
         continue
       current[element_id] = prior_values.get(element_id, 0.0) * (1.0 + rate)
+      grown_this_month.add(element_id)
 
     # (a3) Line assertions — the manual overrides win over carry and
     # schedule projection for the months they name; a displaced driver
@@ -541,6 +551,10 @@ def cmd_compute_forecast(
     month_asserted_instants = {
       el for el in asserted_this_month if assertion_period_type.get(el) == "instant"
     }
+    # One owner per line: a grown value is as authored as an asserted one,
+    # so the push-down must not rescale it away — the driven parent's
+    # remainder distributes over the un-owned siblings instead.
+    pinned_this_month = asserted_this_month | grown_this_month
 
     # (b) Driver rules in same-month dependency order.
     asserted_ancestors = _ancestor_closure(
@@ -565,7 +579,7 @@ def cmd_compute_forecast(
       # the final subtotal derivation would contradict the driven value.
       # Displace it as legibly as a direct-target assertion.
       if ar.target.id in asserted_ancestors and _subtree_all_pinned(
-        ar.target.id, calculations, current, asserted_this_month
+        ar.target.id, calculations, current, pinned_this_month
       ):
         displaced_targets.add(ar.target.id)
         skipped.append(
@@ -704,10 +718,10 @@ def cmd_compute_forecast(
     # parent's carried children proportionally, the workbook's implicit
     # semantics (every revenue stream grows at g). Without this the
     # statement's own RollUp verification fails: driven parent, stale
-    # children. Asserted leaves are pinned — the remainder distributes
-    # over the unpinned children only.
+    # children. Asserted and grown leaves are pinned — the remainder
+    # distributes over the unpinned children only.
     _scale_rule_target_children(
-      current, active_target_ids, calculations, pinned=asserted_this_month
+      current, active_target_ids, calculations, pinned=pinned_this_month
     )
 
     # (c) Calc-DAG subtotals — derive, never carry (present = direct wins).
@@ -1015,9 +1029,9 @@ def _scale_rule_target_children(
   carry scales by exactly 1.0 (children carried too), so this is a no-op
   for inactive months.
 
-  ``pinned`` elements (line-asserted leaves) are never scaled: the
-  driven parent's remainder after the pinned contributions distributes
-  proportionally over the unpinned children. A parent whose children
+  ``pinned`` elements (line-asserted or line-grown leaves) are never
+  scaled: the driven parent's remainder after the pinned contributions
+  distributes proportionally over the unpinned children. A parent whose children
   are all pinned (or whose unpinned sum is zero) is left untouched —
   the visible RollUp failure again beats inventing a split.
   """
