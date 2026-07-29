@@ -54,7 +54,16 @@ def load_rs_gaap_calculations(
     """)
   ).fetchall()
   calculations: dict[str, list[tuple[str, float]]] = {}
+  seen: set[tuple[str, str]] = set()
   for r in rows:
+    # The merge is keyed on (parent → child) across every calc structure of
+    # the standard. The shipped package has no duplicate pairs today, but a
+    # future edit that arcs the same pair in a second structure would
+    # silently double-count the child in every subtotal — dedupe rather
+    # than trust the package forever.
+    if (r.parent, r.child) in seen:
+      continue
+    seen.add((r.parent, r.child))
     weight = float(r.weight) if r.weight is not None else 1.0
     calculations.setdefault(r.parent, []).append((r.child, weight))
   return calculations

@@ -191,6 +191,33 @@ class TestInformationBlocksQuery:
     assert kwargs["limit"] == 200
     assert kwargs["offset"] == 0
 
+  def test_explicit_null_series_variables_are_accepted(self) -> None:
+    """Regression: the series args must follow the same nullable contract
+    as pagination — generated SDK clients send explicit ``null`` for every
+    omitted variable, and ``series: Boolean! = false`` rejected it
+    ("Argument 'series' of non-null type 'Boolean!' must not be null")."""
+    with (
+      _patch_session(),
+      patch(GET_PATH, return_value=None) as mock_get,
+    ):
+      result = schema.execute_sync(
+        "query Get($id: ID!, $series: Boolean, $seriesHistory: Int,"
+        " $seriesForecast: Int) {"
+        " informationBlock(id: $id, series: $series,"
+        " seriesHistory: $seriesHistory, seriesForecast: $seriesForecast)"
+        " { id } }",
+        variable_values={
+          "id": "struct_ib_01",
+          "series": None,
+          "seriesHistory": None,
+          "seriesForecast": None,
+        },
+        context_value=_ctx(),
+      )
+    assert result.errors is None
+    _, kwargs = mock_get.call_args
+    assert kwargs["series"] is False
+
   def test_returns_empty_list_on_library_sentinel(self) -> None:
     """Schedule has surfaces_in_library=False, so the sentinel returns []."""
     with (

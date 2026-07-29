@@ -691,6 +691,36 @@ class TestLineGrowth:
     )
     assert rec.value("struct_is", JUL, "el_mkt") == pytest.approx(0.0)
 
+  def test_grown_child_is_pinned_against_rule_delta_push_down(self) -> None:
+    """One owner per line: a grown leaf under a rule-driven calc parent
+    keeps its authored trajectory — the driven parent's remainder
+    distributes over the un-owned sibling only (same contract as line
+    assertions). Previously the push-down silently rescaled the grown
+    value with no skipped entry."""
+    calc_dag = {
+      "el_gp": [("el_rev", 1.0), ("el_cogs", -1.0)],
+      "el_rev": [("el_rev_a", 1.0), ("el_rev_b", 1.0)],
+    }
+    base_facts = [
+      *BASE_IS_FACTS,
+      SimpleNamespace(element_id="el_rev_a", value=60.0),
+      SimpleNamespace(element_id="el_rev_b", value=40.0),
+    ]
+    levers = [_lever("rs-driver:RevenueGrowthRate", "el_growth", 0.03, ALL_MONTHS)]
+    growth = [_growth("rs-gaap:RevenueStreamA", "el_rev_a", {"2026-07": 0.10})]
+    _, rec = _run(
+      _mechanics(levers, growth=growth),
+      [GROWTH_RULE],
+      levers,
+      calc_dag=calc_dag,
+      base_is_facts=base_facts,
+    )
+    assert rec.value("struct_is", JUL, "el_rev") == pytest.approx(103.0)
+    # 60 grown 10% — not rescaled by the parent's push-down.
+    assert rec.value("struct_is", JUL, "el_rev_a") == pytest.approx(66.0)
+    # Remainder over the un-owned sibling: (103 - 66) / 40 scales 40 -> 37.
+    assert rec.value("struct_is", JUL, "el_rev_b") == pytest.approx(37.0)
+
   def test_growth_articulates_through_subtotals(self) -> None:
     """A grown COGS re-derives GrossProfit — the grown leaf participates
     in the calc DAG exactly like a carried or rule-driven one."""
