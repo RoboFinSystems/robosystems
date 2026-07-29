@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from robosystems.models.api.oauth import (
   OAuthCallbackRequest,
+  OAuthCallbackResponse,
   OAuthConnectionUpdate,
   OAuthInitRequest,
   OAuthInitResponse,
@@ -161,3 +162,45 @@ class TestOAuthConnectionUpdate:
         provider_data={},
         status="connected",
       )  # type: ignore[call-arg]
+
+
+@pytest.mark.unit
+class TestOAuthCallbackResponse:
+  """The callback's success payload is a published contract: the OpenAPI 200
+  for oauthCallback is generated from this model, and the TypeScript client
+  casts against it."""
+
+  def test_valid_response(self):
+    model = OAuthCallbackResponse(
+      success=True,
+      message="QuickBooks connection established successfully",
+      connection_id="conn_123",
+      auto_sync_task_id="task_456",
+    )
+    assert model.success is True
+    assert model.connection_id == "conn_123"
+    assert model.auto_sync_task_id == "task_456"
+
+  def test_auto_sync_task_id_is_optional(self):
+    # No sync is started when the connection is revived rather than created.
+    model = OAuthCallbackResponse(
+      success=True,
+      message="QuickBooks connection established successfully",
+      connection_id="conn_123",
+    )
+    assert model.auto_sync_task_id is None
+
+  def test_requires_connection_id(self):
+    with pytest.raises(ValidationError):
+      OAuthCallbackResponse(success=True, message="ok")  # type: ignore[call-arg]
+
+  def test_serializes_the_shape_the_router_returns(self):
+    # Mirrors the literal dict returned by oauth_callback so a drift between
+    # the two shows up here rather than as an `unknown` in the clients.
+    payload = {
+      "success": True,
+      "message": "QuickBooks connection established successfully",
+      "connection_id": "conn_123",
+      "auto_sync_task_id": None,
+    }
+    assert OAuthCallbackResponse(**payload).model_dump() == payload

@@ -19,6 +19,7 @@ from robosystems.models.api.common import (
 )
 from robosystems.models.api.oauth import (
   OAuthCallbackRequest,
+  OAuthCallbackResponse,
   OAuthInitRequest,
   OAuthInitResponse,
 )
@@ -104,6 +105,7 @@ async def init_oauth(
   summary="OAuth Callback",
   description="Completes the OAuth authorization flow after provider redirect. Exchanges the authorization code for tokens, stores them, and triggers an initial sync. This is a redirect target — not typically called directly.",
   operation_id="oauthCallback",
+  response_model=OAuthCallbackResponse,
   responses={**RESOURCE_ERROR_RESPONSES},
 )
 async def oauth_callback(
