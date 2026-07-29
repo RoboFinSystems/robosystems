@@ -46,6 +46,20 @@ class OAuthCallbackRequest(BaseModel):
   error_description: str | None = Field(None, description="OAuth error details")
 
 
+class OAuthCallbackResponse(BaseModel):
+  """Result of completing an OAuth authorization flow."""
+
+  success: bool = Field(..., description="Whether the connection was established")
+  message: str = Field(..., description="Human-readable outcome of the exchange")
+  connection_id: str = Field(
+    ..., description="Connection the authorization was linked to"
+  )
+  auto_sync_task_id: str | None = Field(
+    None,
+    description="Task id of the initial sync started after connecting, or null when no sync was kicked off",
+  )
+
+
 class OAuthTokens(BaseModel):
   """OAuth tokens from provider."""
 
