@@ -343,3 +343,25 @@ class TestGraphLimitsEndpoint:
     assert data["graph_tier"] == "kuzu-standard"
     assert data["subscription_tier"] == "ladybug-standard"
     assert data["rate_limits"]["requests_per_minute"] == 60
+
+  async def test_shared_repository_subgraph_takes_the_shared_path(
+    self, async_client: AsyncClient, test_db
+  ):
+    """sec_historical must be treated exactly like sec: shared tier report,
+    no storage walk against the shared master, no credits block. The
+    exact-only check ran it through the user-graph sections."""
+    self._use_test_db(test_db)
+
+    repo, client, storage = self._no_graph_api()
+    with repo, client, storage:
+      response = await async_client.get("/v1/graphs/sec_historical/limits")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["is_shared_repository"] is True
+    assert data["graph_tier"] == "ladybug-shared"
+    assert data["subscription_tier"] == "ladybug-standard"
+    assert data["rate_limits"]["requests_per_minute"] == 60
+    assert data["credits"] is None
+    assert data["content"] is None
+    assert data["instance"] is None

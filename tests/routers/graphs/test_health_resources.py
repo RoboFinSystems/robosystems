@@ -33,6 +33,14 @@ class TestResourcesExposable:
     """sec runs one database per box but is read by every tenant."""
     assert _resources_exposable("sec", "ladybug-shared") is False
 
+  def test_shared_repository_subgraph_is_not_exposable(self):
+    """sec_historical serves every tenant from the shared master, like sec.
+
+    The exact-only check let it through to the databases_per_instance branch,
+    which is 1 for ladybug-shared — leaking shared-master metrics.
+    """
+    assert _resources_exposable("sec_historical", "ladybug-shared") is False
+
   def test_packed_tier_is_not_exposable(self):
     """A tier that co-locates tenants closes the guard automatically.
 

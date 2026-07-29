@@ -49,7 +49,9 @@ def _resources_exposable(graph_id: str, graph_tier: str) -> bool:
   from robosystems.config.graph_tier import GraphTierConfig
   from robosystems.middleware.graph.utils import MultiTenantUtils
 
-  if MultiTenantUtils.is_shared_repository(graph_id):
+  # Subgraph-aware: sec_historical serves every tenant from the shared master
+  # exactly as sec does, so the exact-only check leaked its instance metrics.
+  if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
     return False
   return GraphTierConfig.get_databases_per_instance(graph_tier) == 1
 

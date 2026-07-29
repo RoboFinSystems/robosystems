@@ -213,6 +213,13 @@ class GraphTypeRegistry:
     Returns:
         GraphIdentity with category and type information
     """
+    # The registry is authoritative for what is shared. Shared-repo subgraph
+    # rows are created with is_repository=False (subgraph_service), so trusting
+    # the row alone classified sec_historical as a READ_WRITE user graph.
+    from ...config.shared_repositories import (
+      is_shared_repository_or_subgraph as _is_shared_repo_or_sub,
+    )
+
     # Try database lookup first if session provided
     if session:
       from ...models.core import Graph
@@ -220,7 +227,7 @@ class GraphTypeRegistry:
       graph = Graph.get_by_id(graph_id, session)
       if graph:
         # Found in database - use actual metadata
-        if graph.is_repository:
+        if graph.is_repository or _is_shared_repo_or_sub(graph_id):
           try:
             tier = (
               GraphTier(graph.graph_tier)
@@ -268,10 +275,6 @@ class GraphTypeRegistry:
 
     # Fallback: pattern-based detection (for cases without session)
     # Check if it's a known shared repository
-    from ...config.shared_repositories import (
-      is_shared_repository_or_subgraph as _is_shared_repo_or_sub,
-    )
-
     if _is_shared_repo_or_sub(graph_id):
       return GraphIdentity(
         graph_id=graph_id,

@@ -151,20 +151,27 @@ async def list_backups(
         )
       )
 
-    # Check if this is a shared repository and get download quota
-    is_shared_repo = MultiTenantUtils.is_shared_repository(graph_id)
+    # Check if this is a shared repository and get download quota.
+    # Subgraph-aware, and the quota keys on the parent repository — matching
+    # the download endpoint, which enforces against the parent's counter. The
+    # exact-only check made list and download disagree about sec_historical.
+    is_shared_repo = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
     download_quota = None
 
     if is_shared_repo:
-      # Get user's repository subscription for quota info
+      from robosystems.config.shared_repositories import (
+        resolve_shared_repository_parent,
+      )
+
+      repository_id = resolve_shared_repository_parent(graph_id)
       user_repo = UserRepository.get_by_user_and_repository(
-        str(current_user.id), graph_id, db
+        str(current_user.id), repository_id, db
       )
       if user_repo:
         plan = user_repo.repository_plan
         quota_info = await DownloadRateLimiter.get_download_quota(
           user_id=str(current_user.id),
-          repository=graph_id,
+          repository=repository_id,
           plan=plan,
         )
         download_quota = DownloadQuota(

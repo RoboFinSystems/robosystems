@@ -32,8 +32,10 @@ circuit_breaker = CircuitBreakerManager()
 
 
 def _get_mcp_operation_type(graph_id: str) -> str:
-  # Shared repos route to reader cluster; user graphs always use writer for consistency
-  if MultiTenantUtils.is_shared_repository(graph_id):
+  # Shared repos and their subgraphs route to the reader cluster; user graphs
+  # always use the writer for consistency. Matches middleware/mcp/factory.py,
+  # which already classified sec_historical as read while this returned write.
+  if MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
     return "read"
   else:
     return "write"
@@ -140,7 +142,7 @@ async def list_mcp_tools(
       event_data={
         "graph_id": graph_id,
         "tool_count": len(enhanced_tools),
-        "is_shared_repo": MultiTenantUtils.is_shared_repository(graph_id),
+        "is_shared_repo": MultiTenantUtils.is_shared_repository_or_subgraph(graph_id),
       },
       user_id=current_user.id,
     )

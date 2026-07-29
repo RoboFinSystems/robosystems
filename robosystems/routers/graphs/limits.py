@@ -107,12 +107,15 @@ async def get_graph_limits(
     # - Fallback: ladybug-standard (shouldn't happen in practice)
     if graph:
       graph_tier = str(graph.graph_tier)
-    elif MultiTenantUtils.is_shared_repository(graph_id):
+    elif MultiTenantUtils.is_shared_repository_or_subgraph(graph_id):
       graph_tier = "ladybug-shared"
     else:
       graph_tier = "ladybug-standard"
 
-    is_shared = MultiTenantUtils.is_shared_repository(graph_id)
+    # Subgraph-aware, matching _get_graph_client above: sec_historical must
+    # take the shared-repository path here too, or the sections below walk the
+    # shared master's storage — the exact latency hazard their comments forbid.
+    is_shared = MultiTenantUtils.is_shared_repository_or_subgraph(graph_id)
 
     # The tier whose rate-limit table the limiter enforces for requests to
     # this graph. Shared repositories are user-keyed at the fallback tier, and
