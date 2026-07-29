@@ -423,6 +423,22 @@ Resources:
             #!/bin/bash
             set -e
 
+            # Apply Amazon Linux security patches. The ASG launches from a pinned
+            # AMI refreshed monthly, so without this an instance runs whatever
+            # packages that AMI shipped with for up to a month after publication.
+            # --releasever=latest is required, not optional: AL2023 pins releasever
+            # to the version baked into the AMI, so a plain `dnf update` resolves
+            # against that frozen snapshot and upgrades nothing at all. For the same
+            # reason this cannot be narrowed to --security: AL2023 ships no
+            # updateinfo metadata, so security-only filtering matches nothing.
+            # Non-fatal on purpose: set -e plus the cfn-signal ERR trap below would
+            # turn a transient repo error into a failed launch.
+            # kernel* is excluded because a kernel update needs a reboot to take
+            # effect — installing one here would have scanners report it patched
+            # while the vulnerable kernel is still running. AMI refresh covers those.
+            echo "Applying security updates..."
+            dnf update -y --releasever=latest --exclude='kernel*' || echo "WARNING: security update failed, continuing boot"
+
             # Set environment variables
             echo "Setting environment variables..."
 

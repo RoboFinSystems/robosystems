@@ -5,6 +5,16 @@
 # Use AWS Lambda Python base image (ARM64 for Graviton cost savings)
 FROM public.ecr.aws/lambda/python:3.13-arm64
 
+# Apply Amazon Linux security patches. The base image lags AL2023 package
+# releases, so without this the image ships whatever AWS last baked.
+# --releasever=latest is required, not optional: AL2023 pins releasever to the
+# version baked into the image, so a plain `dnf update` resolves against that
+# frozen snapshot and upgrades nothing at all.
+# CACHE_DATE (set per-build in build.yml) busts this layer so the upgrade
+# re-runs despite GHA layer caching — a cached layer keeps stale OS packages.
+ARG CACHE_DATE
+RUN echo "os-refresh ${CACHE_DATE}" && dnf update -y --releasever=latest && dnf clean all && rm -rf /var/cache/dnf
+
 # Install uv for dependency export
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
