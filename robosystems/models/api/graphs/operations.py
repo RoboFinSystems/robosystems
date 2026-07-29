@@ -93,7 +93,13 @@ class MaterializeOp(BaseModel):
     default=False, description="Force materialization even if already up to date"
   )
   rebuild: bool = Field(
-    default=False, description="Rebuild the graph from scratch, dropping existing data"
+    default=False,
+    description=(
+      "Rebuild the graph from scratch, dropping existing data. Required "
+      "(staged source) when materializing new uploads into a graph that "
+      "already contains materialized data — staging replays all uploaded "
+      "files, so a non-rebuild pass would re-copy ingested rows (409)."
+    ),
   )
   dry_run: bool = Field(
     default=False, description="Validate tables without writing to the graph"

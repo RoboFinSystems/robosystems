@@ -183,9 +183,12 @@ def materialize_graph_data(clients: RoboSystemsClients, graph_id: str) -> None:
   print("=" * 70)
 
   try:
+    # The demo reuses its graph across runs and re-uploads every file, so a
+    # rebuild is the correct semantics — a non-rebuild materialize of a
+    # populated graph is rejected with a 409 (it would re-copy ingested rows).
     result = clients.graphs.materialize(
       graph_id,
-      MaterializationOptions(rebuild=False),
+      MaterializationOptions(rebuild=True),
     )
     if result.success:
       print(f"\n✅ Materialization complete: {result.message}")
