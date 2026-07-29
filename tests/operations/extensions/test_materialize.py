@@ -643,3 +643,112 @@ class TestExtensionsMaterializer:
     # -wip stripped before the lookup, so the source graph's extensions resolve
     assert captured["id"] == base_id
     assert exts == ["roboledger", "roboinvestor"]
+
+
+class TestPartialStatusAndSwapGate:
+  """A failed edge COPY must not ship as success.
+
+  Edge failures are deliberately non-fatal for the remaining tables, but a
+  graph missing a whole relationship table (ENTRY_HAS_LINE_ITEM,
+  TRANSACTION_HAS_ENTRY) renders empty statements — the blue-green swap and
+  the Dagster consumer both gate on status, so 'partial' has to be a status
+  they can see, not a note buried in result.errors.
+  """
+
+  def _materializer(self):
+    from robosystems.operations.extensions.materialize import (
+      ExtensionsMaterializer,
+    )
+
+    return ExtensionsMaterializer()
+
+  @pytest.mark.asyncio
+  async def test_edge_failure_marks_result_partial(self):
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    result.tables_staged = ["Entity", "ENTRY_HAS_LINE_ITEM", "TRANSACTION_HAS_ENTRY"]
+
+    async def materialize_table(graph_id, table_name, timeout, source_graph_id=None):
+      if table_name == "ENTRY_HAS_LINE_ITEM":
+        raise RuntimeError("COPY exploded")
+      return {"rows_ingested": 10}
+
+    client = AsyncMock()
+    client.materialize_table.side_effect = materialize_table
+
+    await materializer._materialize_tables(client, GRAPH_ID, result)
+
+    assert result.status == "partial"
+    assert len(result.errors) == 1
+    # The failure is non-fatal: the remaining edge table still materialized.
+    assert result.tables_materialized == ["Entity", "TRANSACTION_HAS_ENTRY"]
+
+  @pytest.mark.asyncio
+  async def test_node_failure_still_fatal(self):
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+    result.tables_staged = ["Entity", "ENTRY_HAS_LINE_ITEM"]
+
+    client = AsyncMock()
+    client.materialize_table.side_effect = RuntimeError("COPY exploded")
+
+    with pytest.raises(RuntimeError):
+      await materializer._materialize_tables(client, GRAPH_ID, result)
+
+    assert result.status == "failed"
+
+  async def _run_blue_green(self, final_status: str):
+    """Drive _materialize_blue_green with a stubbed pipeline."""
+    materializer = self._materializer()
+    result = MaterializeResult(graph_id=GRAPH_ID)
+
+    async def fake_materialize_tables(client, graph_id, res, source_graph_id=None):
+      res.status = final_status
+
+    client = AsyncMock()
+    client.database_exists.return_value = False
+
+    lock = AsyncMock()
+    lock.acquire.return_value = True
+    lock.acquired = True
+
+    with (
+      patch.object(materializer, "_ensure_database", new=AsyncMock()),
+      patch.object(
+        materializer, "_get_graph_extensions", new=AsyncMock(return_value=[])
+      ),
+      patch.object(materializer, "_stage_tables", new=AsyncMock()),
+      patch.object(materializer, "_materialize_tables", new=fake_materialize_tables),
+      patch(
+        "robosystems.operations.extensions.materialize.build_postgres_connstr",
+        return_value=CONNSTR,
+      ),
+      patch(
+        "robosystems.graph_api.core.ladybug.materialization_lock.MaterializationLock",
+        return_value=lock,
+      ),
+      patch(
+        "robosystems.config.valkey_registry.create_async_redis_client",
+        return_value=AsyncMock(),
+      ),
+    ):
+      await materializer._materialize_blue_green(client, GRAPH_ID, ENTITY_ID, result)
+
+    return client
+
+  @pytest.mark.asyncio
+  async def test_clean_build_swaps(self):
+    client = await self._run_blue_green("success")
+    client.swap_database.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_partial_build_does_not_swap(self):
+    client = await self._run_blue_green("partial")
+    client.swap_database.assert_not_called()
+    # WIP is abandoned so the last good graph stays active.
+    client.delete_database.assert_called_once()
+
+  @pytest.mark.asyncio
+  async def test_error_build_does_not_swap(self):
+    client = await self._run_blue_green("error")
+    client.swap_database.assert_not_called()

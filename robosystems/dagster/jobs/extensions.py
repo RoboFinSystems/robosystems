@@ -116,12 +116,16 @@ def materialize_extensions_to_graph(
   finally:
     loop.close()
 
-  if result.status == "error":
-    context.log.error(f"Extensions materialization failed: {result.errors}")
+  if result.status != "success":
+    # 'partial' matters as much as 'error': a graph missing a relationship
+    # table renders empty statements. Failing here leaves graph_stale set,
+    # so the next OLTP write triggers another rebuild attempt.
+    context.log.error(f"Extensions materialization {result.status}: {result.errors}")
     raise Failure(
-      description=f"Extensions materialization failed for {graph_id}",
+      description=(f"Extensions materialization {result.status} for {graph_id}"),
       metadata={
         "graph_id": MetadataValue.text(graph_id),
+        "status": MetadataValue.text(result.status),
         "errors": MetadataValue.text("; ".join(result.errors)),
         "duration_ms": MetadataValue.float(result.duration_ms),
       },
