@@ -685,19 +685,87 @@ class StripePaymentProvider(PaymentProvider):
       raise
 
   def cancel_subscription(self, subscription_id: str) -> None:
-    """Cancel a Stripe subscription immediately."""
+    """Cancel a Stripe subscription immediately.
+
+    Idempotent: a subscription that is already canceled or no longer exists
+    on Stripe's side counts as success, so callers can safely gate local
+    cancellation on this raising — a raise always means Stripe still has a
+    live subscription that will keep billing.
+    """
     try:
       self.stripe.Subscription.cancel(subscription_id)
       logger.info(
         f"Canceled Stripe subscription {subscription_id}",
         extra={"subscription_id": subscription_id},
       )
+    except self.stripe.error.InvalidRequestError as e:
+      if self._subscription_already_terminal(subscription_id):
+        logger.warning(
+          f"Stripe subscription {subscription_id} already canceled or missing; "
+          "treating cancel as success",
+          extra={"subscription_id": subscription_id},
+        )
+        return
+      logger.error(
+        f"Failed to cancel Stripe subscription {subscription_id}: {e}",
+        exc_info=True,
+      )
+      raise
     except Exception as e:
       logger.error(
         f"Failed to cancel Stripe subscription {subscription_id}: {e}",
         exc_info=True,
       )
       raise
+
+  def cancel_subscription_at_period_end(self, subscription_id: str) -> None:
+    """Flag a Stripe subscription to cancel when the current period ends.
+
+    Idempotent with the same contract as `cancel_subscription`: an
+    already-canceled or missing subscription counts as success.
+    """
+    try:
+      self.stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
+      logger.info(
+        f"Set Stripe subscription {subscription_id} to cancel at period end",
+        extra={"subscription_id": subscription_id},
+      )
+    except self.stripe.error.InvalidRequestError as e:
+      if self._subscription_already_terminal(subscription_id):
+        logger.warning(
+          f"Stripe subscription {subscription_id} already canceled or missing; "
+          "treating period-end cancel as success",
+          extra={"subscription_id": subscription_id},
+        )
+        return
+      logger.error(
+        f"Failed to set period-end cancel on Stripe subscription "
+        f"{subscription_id}: {e}",
+        exc_info=True,
+      )
+      raise
+    except Exception as e:
+      logger.error(
+        f"Failed to set period-end cancel on Stripe subscription "
+        f"{subscription_id}: {e}",
+        exc_info=True,
+      )
+      raise
+
+  def _subscription_already_terminal(self, subscription_id: str) -> bool:
+    """True when Stripe no longer has a live subscription to cancel.
+
+    Retrieval is the robust check — Stripe's InvalidRequestError covers both
+    'no such subscription' and 'already canceled', and message-matching on
+    those is brittle across API versions.
+    """
+    try:
+      subscription = self.stripe.Subscription.retrieve(subscription_id)
+      return subscription.status == "canceled"
+    except self.stripe.error.InvalidRequestError:
+      return True
+    except Exception:
+      return False
 
   def create_portal_session(self, customer_id: str, return_url: str) -> str:
     """Create a Stripe Customer Portal session for payment management."""

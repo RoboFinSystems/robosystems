@@ -25,6 +25,10 @@ from ...models.api.common import RESOURCE_ERROR_RESPONSES
 from ...models.core import User, UserRepository
 from ...models.core.billing import BillingAuditLog, BillingCustomer, BillingSubscription
 from ...models.core.billing.audit_log import BillingEventType
+from ...models.core.billing.subscription import (
+  TERMINAL_SUBSCRIPTION_STATUSES,
+  SubscriptionStatus,
+)
 
 logger = get_logger(__name__)
 
@@ -181,11 +185,15 @@ async def create_repository_subscription(
       )
 
     parent_repo_id = resolve_shared_repository_parent(graph_id)
+    # Only a subscription still in force conflicts. Canceled and failed rows
+    # are kept as history and must not block resubscribing — an unfiltered
+    # check here turned one declined card into a permanent 409.
     existing = BillingSubscription.get_by_resource_and_user(
       resource_type="repository",
       resource_id=parent_repo_id,
       user_id=current_user.id,
       session=db,
+      exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES,
     )
 
     if existing:
@@ -309,7 +317,7 @@ async def create_repository_subscription(
           },
           exc_info=True,
         )
-        subscription.status = "failed"
+        subscription.status = SubscriptionStatus.FAILED.value
         db.commit()
         raise HTTPException(
           status_code=402,
@@ -358,7 +366,7 @@ async def create_repository_subscription(
       # The subscription will be in a bad state - mark it as failed
       failed_sub = db.query(BillingSubscription).filter_by(id=subscription_id).first()
       if failed_sub:
-        failed_sub.status = "failed"
+        failed_sub.status = SubscriptionStatus.FAILED.value
         # Cancel Stripe subscription so the customer isn't charged
         if failed_sub.stripe_subscription_id:
           try:
@@ -510,7 +518,42 @@ async def _change_repository_plan(
       detail="Repository access record not found. Please contact support.",
     )
 
-  # Update DB first — if this fails, Stripe stays consistent
+  # Stripe first, DB second. The reverse order left an unrecoverable seam:
+  # update_plan commits, Stripe fails, and every retry dies on the
+  # "Already on this plan" check above — local state says the new plan while
+  # Stripe keeps billing the old price forever. This order converges instead:
+  # a Stripe failure changes nothing locally (clean 502, retry works), and a
+  # DB failure after Stripe succeeded leaves the retry path open, where
+  # re-applying the same price to the subscription is a no-op.
+  # Products/prices are keyed on the parent repository and the canonical
+  # plan name.
+  stripe_sub_id = subscription.stripe_subscription_id
+  if stripe_sub_id:
+    provider = get_payment_provider("stripe")
+    try:
+      new_stripe_price_id = provider.get_or_create_price(
+        plan_name=new_plan_tier,
+        resource_type="repository",
+        repository_id=parent_repo_id,
+      )
+      provider.change_subscription_price(
+        subscription_id=stripe_sub_id,
+        new_price_id=new_stripe_price_id,
+      )
+    except Exception as e:
+      logger.error(
+        f"Failed to change Stripe price for {graph_id} plan change: {e}",
+        extra={"subscription_id": subscription.id},
+        exc_info=True,
+      )
+      raise HTTPException(
+        status_code=502,
+        detail=(
+          "The payment provider could not apply the plan change. "
+          "No changes were made — please try again."
+        ),
+      )
+
   subscription.update_plan(new_plan_tier, new_price_cents, db)
 
   user_repo.upgrade_tier(
@@ -519,21 +562,6 @@ async def _change_repository_plan(
     new_price_cents=new_price_cents,
     new_credits=new_credits,
   )
-
-  # Update Stripe subscription if linked. Products/prices are keyed on the
-  # parent repository and the canonical plan name.
-  stripe_sub_id = subscription.stripe_subscription_id
-  if stripe_sub_id:
-    provider = get_payment_provider("stripe")
-    new_stripe_price_id = provider.get_or_create_price(
-      plan_name=new_plan_tier,
-      resource_type="repository",
-      repository_id=parent_repo_id,
-    )
-    provider.change_subscription_price(
-      subscription_id=stripe_sub_id,
-      new_price_id=new_stripe_price_id,
-    )
 
   # Audit log
   org_id = user_orgs[0].org_id
@@ -657,7 +685,11 @@ async def cancel_repository_subscription(
         ),
       )
 
-  # Stripe-side: full cancel for immediate, period-end via Subscription.modify.
+  # Stripe-side: full cancel for immediate, period-end otherwise. Both provider
+  # methods are idempotent (already-canceled/missing counts as success), so a
+  # raise here always means Stripe still has a live subscription that will
+  # keep billing — in which case the local cancel and access revocation must
+  # not proceed, or the customer pays for access they no longer have.
   # Default cancel does NOT prorate or refund.
   if subscription.stripe_subscription_id:
     try:
@@ -665,15 +697,19 @@ async def cancel_repository_subscription(
       if body.immediate:
         provider.cancel_subscription(subscription.stripe_subscription_id)
       else:
-        provider.stripe.Subscription.modify(
-          subscription.stripe_subscription_id,
-          cancel_at_period_end=True,
-        )
+        provider.cancel_subscription_at_period_end(subscription.stripe_subscription_id)
     except Exception as e:
       logger.error(
         f"Failed to cancel Stripe subscription for {graph_id}: {e}",
         extra={"subscription_id": subscription.id},
         exc_info=True,
+      )
+      raise HTTPException(
+        status_code=502,
+        detail=(
+          "The payment provider could not cancel the subscription. "
+          "No changes were made — please try again."
+        ),
       )
 
   subscription.cancel(db, immediate=body.immediate)

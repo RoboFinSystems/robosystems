@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, case
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -25,8 +25,18 @@ class SubscriptionStatus(str, Enum):
   UPGRADING = "upgrading"
   PAUSED = "paused"
   CANCELED = "canceled"
+  FAILED = "failed"
   PAST_DUE = "past_due"
   UNPAID = "unpaid"
+
+
+# Statuses that no longer represent a subscription in force. Rows in these
+# states must not block a new subscription to the same resource — a canceled
+# or payment-failed subscription is history, not a conflict.
+TERMINAL_SUBSCRIPTION_STATUSES = (
+  SubscriptionStatus.CANCELED.value,
+  SubscriptionStatus.FAILED.value,
+)
 
 
 class BillingInterval(str, Enum):
@@ -163,21 +173,33 @@ class BillingSubscription(Base):
     resource_id: str,
     org_id: str,
     session: Session,
+    exclude_statuses: tuple[str, ...] = (),
   ) -> Optional["BillingSubscription"]:
     """Get subscription for a specific resource and organization.
 
     This is particularly useful for shared repositories where multiple orgs
     can have separate subscriptions to the same resource.
+
+    Pass `exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES` when checking for
+    a *conflicting* subscription: canceled/failed rows are never deleted, and
+    an unfiltered lookup would treat that history as a live duplicate.
+
+    When several rows exist for the same resource (a canceled subscription
+    followed by a resubscribe), the one still in force wins, then recency —
+    so "the subscription" always resolves to the live row when there is one,
+    and to the most recent terminal row when there is not.
     """
-    return (
-      session.query(cls)
-      .filter(
-        cls.resource_type == resource_type,
-        cls.resource_id == resource_id,
-        cls.org_id == org_id,
-      )
-      .first()
+    query = session.query(cls).filter(
+      cls.resource_type == resource_type,
+      cls.resource_id == resource_id,
+      cls.org_id == org_id,
     )
+    if exclude_statuses:
+      query = query.filter(cls.status.notin_(exclude_statuses))
+    return query.order_by(
+      case((cls.status.in_(TERMINAL_SUBSCRIPTION_STATUSES), 1), else_=0),
+      cls.created_at.desc(),
+    ).first()
 
   @classmethod
   def get_by_resource_and_user(
@@ -186,6 +208,7 @@ class BillingSubscription(Base):
     resource_id: str,
     user_id: str,
     session: Session,
+    exclude_statuses: tuple[str, ...] = (),
   ) -> Optional["BillingSubscription"]:
     """Get subscription for a specific resource and user (looks up user's org first)."""
     from robosystems.models.core.org import OrgUser
@@ -200,6 +223,7 @@ class BillingSubscription(Base):
       resource_id=resource_id,
       org_id=membership.org_id,
       session=session,
+      exclude_statuses=exclude_statuses,
     )
 
   @classmethod
