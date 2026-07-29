@@ -89,13 +89,22 @@ class TimeoutDefaults:
 
 class AdmissionDefaults:
   """
-  Admission control thresholds (all values are percentages 0-100).
+  Admission control thresholds.
 
   These thresholds determine when to start rejecting new requests
   to protect system stability.
+
+  MEMORY_THRESHOLD is a percentage (0-100) used to *report* memory pressure.
+  It is deliberately not the gate for rejecting graph queries: a LadybugDB
+  buffer pool is a fixed pre-commitment that is supposed to fill, so percent
+  of total memory conflates that constant with the query working set that
+  actually predicts exhaustion. Rejection is gated on MIN_AVAILABLE_MB, an
+  absolute headroom figure that does not move when the pool or the instance
+  size changes.
   """
 
-  MEMORY_THRESHOLD = 85.0  # Start rejecting at 85% memory usage
+  MEMORY_THRESHOLD = 85.0  # Report memory pressure at 85% usage
+  MIN_AVAILABLE_MB = 1024.0  # Reject when free memory falls below 1GB
   CPU_THRESHOLD = 90.0  # Start rejecting at 90% CPU usage
   QUEUE_THRESHOLD = 80.0  # Start rejecting at 80% queue capacity
 

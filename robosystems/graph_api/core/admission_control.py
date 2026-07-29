@@ -32,7 +32,8 @@ class LadybugAdmissionController:
 
   def __init__(
     self,
-    memory_threshold: float = 85.0,  # Conservative threshold for production safety (% of total instance memory)
+    memory_threshold: float = 85.0,  # Reporting only - see min_available_mb for the gate
+    min_available_mb: float = 1024.0,
     cpu_threshold: float = 95.0,
     max_connections_per_db: int = 10,
     check_interval: float = 1.0,
@@ -41,12 +42,19 @@ class LadybugAdmissionController:
     Initialize LadybugDB admission controller.
 
     Args:
-        memory_threshold: Max memory usage percent before rejecting
+        memory_threshold: Memory usage percent at which the node reports
+            pressure. Not a rejection gate - a buffer pool is meant to fill,
+            so percent of total conflates that fixed allocation with the
+            query working set. See min_available_mb.
+        min_available_mb: Reject when free memory falls below this many MB.
+            Absolute rather than proportional, so it stays correct when the
+            buffer pool or the instance size changes.
         cpu_threshold: Max CPU usage percent before rejecting
         max_connections_per_db: Max concurrent connections per database
         check_interval: Seconds between resource checks (cached)
     """
     self.memory_threshold = memory_threshold
+    self.min_available_mb = min_available_mb
     self.cpu_threshold = cpu_threshold
     self.max_connections_per_db = max_connections_per_db
     self.check_interval = check_interval
@@ -54,13 +62,15 @@ class LadybugAdmissionController:
     # Cached resource data to avoid frequent psutil calls
     self._last_check = 0.0
     self._cached_memory = 0.0
+    self._cached_available_mb = float("inf")
     self._cached_cpu = 0.0
 
     # Connection tracking
     self._connections_per_db: dict[str, int] = {}
 
     logger.info(
-      f"LadybugAdmissionController initialized - Memory: {memory_threshold}%, "
+      f"LadybugAdmissionController initialized - Min available: {min_available_mb}MB, "
+      f"Memory report threshold: {memory_threshold}%, "
       f"CPU: {cpu_threshold}%, Max connections/DB: {max_connections_per_db}"
     )
 
@@ -69,13 +79,16 @@ class LadybugAdmissionController:
     now = time.time()
     if now - self._last_check >= self.check_interval:
       try:
-        self._cached_memory = psutil.virtual_memory().percent
+        memory = psutil.virtual_memory()
+        self._cached_memory = memory.percent
+        self._cached_available_mb = memory.available / (1024 * 1024)
         self._cached_cpu = psutil.cpu_percent(interval=0.1)
         self._last_check = now
       except Exception as e:
         logger.error(f"Failed to get system resources: {e}")
-        # Use conservative defaults on error
+        # Fail closed on error: assume no headroom rather than admit blindly
         self._cached_memory = 80.0
+        self._cached_available_mb = 0.0
         self._cached_cpu = 80.0
 
   def check_admission(
@@ -94,11 +107,14 @@ class LadybugAdmissionController:
     # Update cached metrics
     self._update_resource_cache()
 
-    # Check memory threshold
-    if self._cached_memory > self.memory_threshold:
+    # Check free memory headroom. Gated on absolute available memory, not
+    # percent used: the buffer pool is a fixed allocation that fills by design,
+    # so a warm node legitimately sits high on percent-used while still having
+    # room to serve.
+    if self._cached_available_mb < self.min_available_mb:
       reason = (
-        f"Memory usage too high: {self._cached_memory:.1f}% "
-        f"(threshold: {self.memory_threshold}%)"
+        f"Insufficient memory headroom: {self._cached_available_mb:.0f}MB available "
+        f"(minimum: {self.min_available_mb:.0f}MB)"
       )
       logger.warning(f"Rejecting request for {database_name}: {reason}")
       return AdmissionDecision.REJECT_MEMORY, reason
@@ -152,8 +168,10 @@ class LadybugAdmissionController:
     self._update_resource_cache()
     return {
       "memory_percent": self._cached_memory,
+      "memory_available_mb": self._cached_available_mb,
       "cpu_percent": self._cached_cpu,
       "memory_threshold": self.memory_threshold,
+      "min_available_mb": self.min_available_mb,
       "cpu_threshold": self.cpu_threshold,
       "connections_per_db": dict(self._connections_per_db),
       "total_connections": sum(self._connections_per_db.values()),
@@ -174,6 +192,7 @@ def get_admission_controller() -> LadybugAdmissionController:
     # Use centralized config (which handles env vars and defaults properly)
     _admission_controller = LadybugAdmissionController(
       memory_threshold=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
+      min_available_mb=env.LBUG_ADMISSION_MIN_AVAILABLE_MB,
       cpu_threshold=env.LBUG_ADMISSION_CPU_THRESHOLD,
       max_connections_per_db=LBUG_MAX_CONNECTIONS_PER_DB,
     )
