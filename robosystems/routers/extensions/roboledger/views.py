@@ -82,7 +82,7 @@ _RATE_LIMIT = Depends(subscription_aware_rate_limit_dependency)
 
 @router.post(
   "/build-fact-grid",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[ViewResponse],
   operation_id="buildFactGrid",
   summary="Build Fact Grid",
   description="Queries LadybugDB `Fact` nodes by element qnames or canonical concepts, with filters for periods, entities, form, and fiscal context. Returns a deduplicated pivot table. Works on both roboledger tenant graphs (post-materialization) and the SEC shared repository.",
@@ -180,7 +180,7 @@ async def build_fact_grid_op(
 
 @router.post(
   "/financial-statement-analysis",
-  response_model=OperationEnvelope,
+  response_model=OperationEnvelope[FinancialStatementAnalysisResponse],
   operation_id="financialStatementAnalysis",
   summary="Financial Statement Analysis",
   description=(
