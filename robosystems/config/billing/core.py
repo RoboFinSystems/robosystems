@@ -187,9 +187,14 @@ class BillingConfig:
     plan_display = plan_details.get("name", plan_tier.title())
     display_name = f"{repo_display} - {plan_display}"
 
-    # Return in a consistent format with subscription plans
+    # Return in a consistent format with subscription plans. `name` is the
+    # canonical manifest plan key, not the caller's raw string: a prefixed
+    # input like 'sec-advanced' is accepted for lookup, but persisting it
+    # verbatim broke every downstream lookup keyed on the plan (rate limits
+    # returned {}, which reads as "no access", and credit/price config
+    # zeroed out).
     return {
-      "name": plan_name,
+      "name": plan_tier,
       "display_name": display_name,
       "price_cents": plan_details["price_cents"],
       "monthly_credits": plan_details["monthly_credits"],

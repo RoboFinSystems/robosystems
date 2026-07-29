@@ -67,8 +67,13 @@ class SharedRepositoryRateLimits:
 
   @classmethod
   def is_endpoint_allowed(cls, repository: str, endpoint: str) -> bool:
-    """Check if an endpoint is allowed for a shared repository."""
-    return _is_endpoint_allowed(endpoint)
+    """Check if an endpoint is allowed for a shared repository.
+
+    The repository must be forwarded: dropping it skipped every per-repo
+    allowed/blocked list and always ran the cross-manifest fallback —
+    invisible with one registered manifest, wrong the moment there are two.
+    """
+    return _is_endpoint_allowed(endpoint, repo_id=repository)
 
 
 class DualLayerRateLimiter:
