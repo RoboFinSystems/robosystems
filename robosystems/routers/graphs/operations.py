@@ -590,13 +590,21 @@ async def create_backup_op(
       detail="Only 'full_dump' backup format is currently supported",
     )
 
-  # Cap retention to tier max
+  # Cap retention to the tier's maximum. Unconditional: a missing graph row
+  # or tier falls back to the smallest tier's cap rather than skipping the
+  # clamp — an uncapped value would be accepted here and then destroyed by
+  # the 90-day S3 lifecycle rule, leaving a COMPLETED record pointing at a
+  # deleted object.
   graph_record = Graph.get_by_id(graph_id, db)
-  if graph_record and graph_record.graph_tier:
-    backup_limits = GraphTierConfig.get_backup_limits(graph_record.graph_tier)
-    tier_max = backup_limits.get("backup_retention_days", 90)
-    if body.retention_days > tier_max:
-      body.retention_days = tier_max
+  backup_tier = (
+    str(graph_record.graph_tier)
+    if graph_record and graph_record.graph_tier
+    else "ladybug-standard"
+  )
+  tier_max = GraphTierConfig.get_backup_limits(backup_tier).get(
+    "backup_retention_days", 7
+  )
+  effective_retention_days = min(body.retention_days, tier_max)
 
   # Enqueue Dagster backup job
   run_config = build_graph_job_config(
@@ -605,7 +613,7 @@ async def create_backup_op(
     user_id=user_id,
     backup_type="full",
     backup_format=body.backup_format,
-    retention_days=body.retention_days,
+    retention_days=effective_retention_days,
     compression=True,
     encryption=body.encryption,
   )
@@ -623,7 +631,15 @@ async def create_backup_op(
     operation_id=operation_id,
     partial_result={
       "status": "accepted",
-      "message": "Backup creation started",
+      "message": (
+        "Backup creation started"
+        if effective_retention_days == body.retention_days
+        else (
+          f"Backup creation started (retention capped to "
+          f"{effective_retention_days} days, the {backup_tier} maximum)"
+        )
+      ),
+      "retention_days": effective_retention_days,
       "monitoring": {
         "sse_endpoint": f"/v1/operations/{operation_id}/stream",
       },

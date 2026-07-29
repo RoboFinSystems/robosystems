@@ -183,7 +183,7 @@ class ListSubgraphsResponse(BaseModel):
 
   subgraphs_enabled: bool = Field(
     ...,
-    description="Whether subgraphs are enabled for this tier (requires Large/XLarge tier)",
+    description="Whether subgraphs are enabled for this tier",
   )
 
   subgraph_count: int = Field(..., description="Total number of subgraphs", ge=0)

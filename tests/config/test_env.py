@@ -188,10 +188,12 @@ def test_get_lbug_tier_config_uses_tier_config_overrides(monkeypatch):
   assert config["databases_per_instance"] == 15
   assert config["max_databases"] == 15
   assert config["tier"] == "ladybug-shared"
-  assert config["storage_limit_gb"] == 750
-  assert config["monthly_credits"] == 2500
-  assert config["api_rate_multiplier"] == 1.8
   assert config["max_subgraphs"] == 6
+  # Storage, credits, and rate multipliers are deliberately absent: those keys
+  # never existed in graph.yml, so this dict only ever fabricated defaults.
+  # Their sources of truth are GraphTierConfig, BillingConfig, RateLimitConfig.
+  for fabricated in ("storage_limit_gb", "monthly_credits", "api_rate_multiplier"):
+    assert fabricated not in config
 
 
 def test_get_lbug_tier_config_falls_back_on_errors(monkeypatch):
@@ -235,9 +237,8 @@ def test_get_lbug_tier_config_falls_back_on_errors(monkeypatch):
   # max_databases now uses same source as databases_per_instance (consolidated config)
   assert config["max_databases"] == 13
   assert config["tier"] == "ladybug-standard"
-  assert config["storage_limit_gb"] == 500
-  assert config["monthly_credits"] == 10000
-  assert config["api_rate_multiplier"] == 1.0
+  for fabricated in ("storage_limit_gb", "monthly_credits", "api_rate_multiplier"):
+    assert fabricated not in config
   assert config["max_subgraphs"] == 0
 
 

@@ -196,7 +196,7 @@ def create_backup(
   context.log.info(f"Creating backup for graph {config.graph_id}")
 
   # Validate graph_id
-  if not MultiTenantUtils.is_shared_repository(config.graph_id):
+  if not MultiTenantUtils.is_shared_repository_or_subgraph(config.graph_id):
     MultiTenantUtils.validate_graph_id(config.graph_id)
 
   database_name = MultiTenantUtils.get_database_name(config.graph_id)

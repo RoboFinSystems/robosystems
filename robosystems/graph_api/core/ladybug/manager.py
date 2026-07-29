@@ -136,7 +136,7 @@ class LadybugDatabaseManager:
         status_code=status.HTTP_400_BAD_REQUEST, detail="Graph ID is required"
       )
 
-    # Check capacity (bypass for subgraphs on Enterprise/Premium instances)
+    # Check capacity (bypass for subgraphs — they share the parent's slot)
     # Only count primary databases, not subgraphs (which contain '_' in their name)
     all_databases = self.list_databases()
     current_count = len([db for db in all_databases if "_" not in db])

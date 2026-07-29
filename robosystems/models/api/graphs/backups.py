@@ -18,7 +18,16 @@ class BackupCreateRequest(BaseModel):
     description="Backup type - only 'full' is supported",
     pattern="^full$",  # Only allow full backups
   )
-  retention_days: int = Field(30, ge=1, le=2555, description="Retention period in days")
+  retention_days: int = Field(
+    30,
+    ge=1,
+    le=90,
+    description=(
+      "Retention period in days, further capped to the graph tier's maximum "
+      "(7/30/90). 90 is the hard ceiling: the storage lifecycle expires "
+      "backup objects then regardless of the requested value."
+    ),
+  )
   compression: bool = Field(
     True, description="Enable compression (always enabled for optimal storage)"
   )

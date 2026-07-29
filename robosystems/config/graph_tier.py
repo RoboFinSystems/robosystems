@@ -227,8 +227,8 @@ class GraphTierConfig:
     """Get DuckDB max threads for a tier.
 
     Thread counts are aligned with instance vCPU counts to prevent oversubscription:
-    - r7g.medium (1 vCPU): 2 threads (DuckDB benefits from slight oversubscription)
-    - r7g.large (2 vCPU): 2 threads
+    - m7g.medium (1 vCPU): 2 threads (DuckDB benefits from slight oversubscription)
+    - m7g.large (2 vCPU): 2 threads
     - r7g.xlarge (4 vCPU): 4 threads
 
     Args:
@@ -435,27 +435,11 @@ class GraphTierConfig:
         environment: Environment (defaults to current env)
 
     Returns:
-        Storage limit in GB (soft cap — used for reporting, not enforcement)
+        Storage limit in GB. This is the enforced cap: materialization and
+        file upload reject over it (IngestionLimitChecker, ingest_file).
     """
     graph_limits = cls.get_graph_limits(tier, environment)
     return float(graph_limits.get("instance_storage_limit_gb", 20))
-
-  @classmethod
-  def get_storage_cap_gb(cls, tier: str, environment: str | None = None) -> float:
-    """Get storage safety cap in GB (from backup limits, not billed).
-
-    Storage is included in each tier. This cap is a safety valve derived
-    from the backup size limit in graph.yml.
-
-    Args:
-        tier: The tier name
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Storage cap in GB
-    """
-    backup_limits = cls.get_backup_limits(tier, environment)
-    return backup_limits.get("max_backup_size_gb", 10)
 
   @classmethod
   def _generate_tier_features(cls, tier_config: dict[str, Any]) -> list[str]:
@@ -475,10 +459,16 @@ class GraphTierConfig:
     if storage_limit is not None and storage_limit > 0:
       features.append(f"{int(storage_limit)} GB instance storage")
 
-    # Add AI credits allocation
-    monthly_credits = tier_config.get("monthly_credits")
-    if monthly_credits is not None and monthly_credits > 0:
-      features.append(f"{monthly_credits:,} AI credits per month")
+    # Add AI credits allocation. Credits live in billing config, not
+    # graph.yml — a tier_config.get("monthly_credits") here read a key that
+    # never exists, so no tier ever advertised its credits.
+    feature_tier = tier_config.get("tier") or tier_config.get("name")
+    if feature_tier:
+      from .billing import BillingConfig
+
+      monthly_credits = BillingConfig.get_monthly_credits(feature_tier)
+      if monthly_credits > 0:
+        features.append(f"{monthly_credits:,} AI credits per month")
 
     # Add subgraph support
     max_subgraphs = tier_config.get("max_subgraphs")
@@ -515,9 +505,13 @@ class GraphTierConfig:
       elif "MEDIUM" in instance_type:
         features.append("Dedicated medium instance")
 
-      max_memory_mb = instance.get("max_memory_mb", 0)
-      if max_memory_mb and max_memory_mb > 0:
-        features.append(f"{max_memory_mb / 1024:.0f}GB RAM")
+      # Advertise the instance's physical RAM, matching /v1/offering's
+      # infrastructure line. max_memory_mb is the LadybugDB budget after OS
+      # overhead — reporting it here made the same tier claim "3GB RAM" in
+      # one response and "4 GB RAM" in another.
+      instance_ram_gb = instance.get("instance_ram_gb", 0)
+      if instance_ram_gb and instance_ram_gb > 0:
+        features.append(f"{instance_ram_gb:g} GB RAM")
 
     # Add rate limit multiplier if not standard. Derived from the enforced
     # limits — graph.yml no longer carries an api_rate_multiplier key.

@@ -14,7 +14,6 @@ from robosystems.middleware.graph.execution_strategies import (
   BaseClientDetector,
   BaseStrategySelector,
 )
-from robosystems.middleware.graph.utils import MultiTenantUtils
 
 
 class MCPExecutionStrategy(Enum):
@@ -216,9 +215,6 @@ class MCPStrategySelector(BaseStrategySelector):
     """
     # Analyze the tool call
     analysis = MCPToolAnalyzer.analyze_tool_call(tool_name, arguments)
-
-    # Check if this is a shared repository (for future optimizations)
-    _is_shared_repo = MultiTenantUtils.is_shared_repository(graph_id)
 
     # Special handling for AI agents (MCP clients)
     is_mcp_client = client_info.get("is_mcp_client", False)

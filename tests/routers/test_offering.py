@@ -124,3 +124,13 @@ class TestOfferingEndpoint:
       assert tier["api_rate_multiplier"] == GraphTierConfig.get_api_rate_multiplier(
         tier["name"]
       ), f"{tier['name']} advertises a multiplier the limiter does not enforce"
+
+  async def test_repository_pricing_model_is_per_user(self, async_client: AsyncClient):
+    """Access, credits, and volume limits all key on the subscribing user
+    (UserRepository / UserRepositoryCredits); this copy once claimed
+    org-level sharing the implementation never had."""
+    response = await async_client.get("/v1/offering")
+    assert response.status_code == 200
+
+    repos = response.json()["repository_subscriptions"]
+    assert repos["pricing_model"] == "per_user"
