@@ -130,7 +130,18 @@ def _instance_rows() -> set[str]:
 
 
 def _launch_tagged_instance(role: str = "shared_replica") -> str:
-  """A running instance carrying the tags discover_lbug_instances filters on."""
+  """A running instance tagged the way the launch templates actually tag it.
+
+  Writers carry `LadybugRole` (graph-ladybug.yaml); shared replicas carry only
+  `NodeType: shared_replica` (graph-ladybug-replicas.yaml) — no `LadybugRole`.
+  Keeping the fake fleet faithful to the real tag scheme is what lets these
+  tests catch a discovery filter that can't see one of the node types.
+  """
+  role_tag = (
+    {"Key": "NodeType", "Value": "shared_replica"}
+    if role == "shared_replica"
+    else {"Key": "LadybugRole", "Value": role}
+  )
   ec2 = boto3.client("ec2", region_name="us-east-1")
   ami_id = ec2.describe_images(Owners=["amazon"])["Images"][0]["ImageId"]
   resp = ec2.run_instances(
@@ -143,7 +154,7 @@ def _launch_tagged_instance(role: str = "shared_replica") -> str:
         "ResourceType": "instance",
         "Tags": [
           {"Key": "Service", "Value": "RoboSystems"},
-          {"Key": "LadybugRole", "Value": role},
+          role_tag,
           {"Key": "Environment", "Value": "test"},
         ],
       }
@@ -192,16 +203,23 @@ def test_sync_spares_a_recently_registered_instance(gvmon):
 
 
 def test_sync_removes_terminated_writers_and_stale_replicas_together(gvmon):
-  """Mixed fleet: only rows without a live EC2 instance are removed."""
-  live = _launch_tagged_instance(role="writer")
-  _put_instance(live, status="healthy", node_type="writer")
+  """Mixed fleet: only rows without a live EC2 instance are removed.
+
+  The live replica is the regression case: it is visible only via its
+  `NodeType` tag, so a reconciler that discovers solely by `LadybugRole`
+  would reap it alongside the genuinely dead rows.
+  """
+  live_writer = _launch_tagged_instance(role="writer")
+  live_replica = _launch_tagged_instance(role="shared_replica")
+  _put_instance(live_writer, status="healthy", node_type="writer")
+  _put_instance(live_replica, status="healthy", node_type="shared_replica")
   _put_instance("i-deadwriter", status="terminated", node_type="writer")
   _put_instance("i-deadreplica", status="healthy", node_type="shared_replica")
 
   result = gvmon.sync_instance_registry()
 
   assert result["removed"] == 2
-  assert _instance_rows() == {live}
+  assert _instance_rows() == {live_writer, live_replica}
 
 
 def test_sync_is_a_noop_without_a_configured_table(gvmon, monkeypatch):
