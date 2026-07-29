@@ -336,7 +336,7 @@ async def get_graph_usage(
 
     if include_storage:
       storage_data = GraphUsage.get_monthly_storage_summary(
-        user_id=current_user.id,
+        graph_id=graph_id,
         year=year,
         month=month,
         session=db,
