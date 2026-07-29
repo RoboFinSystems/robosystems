@@ -1483,16 +1483,20 @@ class ExtensionsMaterializer:
       # Use source_graph_id so the WIP reads from the original graph's DuckDB
       await self._materialize_tables(client, wip_id, result, source_graph_id=graph_id)
 
-      # Step 6: Swap WIP → active (milliseconds of downtime)
-      if result.status != "error":
+      # Step 6: Swap WIP → active (milliseconds of downtime). Only a fully
+      # clean build ships: a 'partial' WIP (an edge table failed to COPY)
+      # would swap in a ledger whose statements silently render empty, so
+      # the last good graph stays active instead and staleness is left set
+      # for a retry.
+      if result.status == "success":
         logger.info(f"Swapping WIP {wip_id} → active {graph_id}")
         await client.swap_database(graph_id, lock_token=lock.token if lock else None)
         logger.info(f"Blue-green swap complete for {graph_id}")
       else:
         # Materialization had errors — abandon WIP, active is untouched
         logger.warning(
-          f"Blue-green materialization had errors for {graph_id}, "
-          f"abandoning WIP (active graph untouched)"
+          f"Blue-green materialization {result.status} for {graph_id} "
+          f"({len(result.errors)} errors), abandoning WIP (active graph untouched)"
         )
         try:
           await client.delete_database(wip_id, preserve_duckdb=True)
@@ -1681,3 +1685,9 @@ class ExtensionsMaterializer:
             f"so edge tables don't silently load with broken FK targets. "
             f"Original error: {e!s}"
           ) from e
+        # Edge failure: keep going (an isolated edge problem isn't
+        # graph-invalidating for the remaining tables), but the run is no
+        # longer a clean build — callers gating on status must not treat a
+        # graph missing a relationship table as success.
+        if result.status == "success":
+          result.status = "partial"
