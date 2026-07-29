@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
 
 # Configure logging
 logger = logging.getLogger()
@@ -40,6 +41,14 @@ ALERT_TOPIC = os.environ["ALERT_TOPIC_ARN"]
 # Retention for fallback cleanup of orphaned volume snapshots (tagged AutoDelete: true)
 # Note: DLM handles primary snapshot lifecycle with 3-day retention
 RETENTION_DAYS = int(os.environ.get("SNAPSHOT_RETENTION_DAYS", "7"))
+
+# How long a volume may sit in `claiming` before another launch may take it.
+# Only reached if the Lambda dies between claiming a volume and attaching it —
+# the ordinary failure path releases the claim itself. Must exceed the worst
+# case of attach_and_register_volume (instance_running waiter 5 min, plus the
+# volume_available waiter and attach retries) so a slow-but-live attach is
+# never stolen out from under itself.
+STALE_CLAIM_SECONDS = int(os.environ.get("STALE_CLAIM_SECONDS", "900"))
 
 # Volume defaults (used as fallback when tier not found in tier_config)
 DEFAULT_SIZE = 50  # GB
@@ -154,6 +163,10 @@ def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
       elif "sec" not in databases:
         databases.append("sec")
 
+  # Return anything stranded mid-claim to the pool before scanning, or a volume
+  # whose claimant died would stay invisible to the `available` filter forever.
+  reclaim_stale_claims(az, tier)
+
   # Check for any available volumes in the same AZ and tier
   # CRITICAL: Must match availability zone exactly to avoid attachment failures
   all_items = []
@@ -184,44 +197,33 @@ def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
     valid_volumes = [v for v in all_items if v.get("availability_zone") == az]
 
     if valid_volumes:
-      # Sort volumes by preference:
-      # 1. Volumes with matching databases (if databases were specified)
-      # 2. Volumes with any data
-      # 3. Empty volumes
+      # Try candidates in preference order, claiming each atomically before
+      # attaching. A lost claim means a concurrent launch took that volume, so
+      # move on rather than fail — the attach retry loop cannot help there,
+      # since it waits on a volume that is now legitimately held.
+      for volume, volume_databases in ordered_volume_candidates(
+        valid_volumes, databases
+      ):
+        volume_id = volume["volume_id"]
 
-      if databases:
-        # Look for volumes with matching databases
-        matching_db_volumes = [
-          v
-          for v in valid_volumes
-          if v.get("databases")
-          and any(db in v.get("databases", []) for db in databases)
-        ]
-        if matching_db_volumes:
-          volume = matching_db_volumes[0]
-          logger.info(
-            f"Reusing volume {volume['volume_id']} with matching databases: {volume.get('databases')} in AZ {az}"
-          )
-          return attach_and_register_volume(
-            volume["volume_id"], instance_id, volume.get("databases", databases)
-          )
+        if not claim_volume(volume_id, instance_id):
+          continue
 
-      # Prefer volumes with data
-      volumes_with_data = [v for v in valid_volumes if v.get("databases")]
-      if volumes_with_data:
-        volume = volumes_with_data[0]
         logger.info(
-          f"Reusing volume {volume['volume_id']} with databases: {volume.get('databases')} in AZ {az}"
+          f"Claimed volume {volume_id} with databases: {volume.get('databases')} in AZ {az}"
         )
-        # Preserve existing databases on the volume
-        existing_databases = volume.get("databases", [])
-        return attach_and_register_volume(
-          volume["volume_id"], instance_id, existing_databases
-        )
-      else:
-        volume = valid_volumes[0]
-        logger.info(f"Reusing empty volume {volume['volume_id']} in AZ {az}")
-        return attach_and_register_volume(volume["volume_id"], instance_id, databases)
+        try:
+          return attach_and_register_volume(volume_id, instance_id, volume_databases)
+        except Exception:
+          # Put it back so the next launch can use it; the instance still fails,
+          # which is the pre-existing behaviour for a genuine attach failure.
+          release_claim(volume_id, instance_id)
+          raise
+
+      logger.info(
+        f"All {len(valid_volumes)} candidate volumes in AZ {az} were claimed by "
+        "other instances; creating a new volume"
+      )
     else:
       logger.warning(
         f"Found {len(all_items)} volumes but none in AZ {az}, creating new volume"
@@ -345,6 +347,174 @@ def update_graph_registry_for_instance(
     )
 
   return results
+
+
+def claim_volume(volume_id: str, instance_id: str) -> bool:
+  """Atomically take a volume out of the `available` pool.
+
+  Returns True when this caller won the volume, False when another instance
+  claimed it first.
+
+  Selection above is a scan followed by a deterministic sort, so two instances
+  launching concurrently in the same AZ and tier see the same list and pick the
+  same candidate. Without this conditional write both proceed to attach; EC2
+  makes one of them lose with VolumeInUse, and the attach retry loop then waits
+  out a volume that will never free before failing the instance. That is
+  survivable while instances cycle one at a time, but it becomes the normal case
+  under any concurrent replacement — a batched rolling update, an ASG instance
+  refresh, a spot reclaim during a deploy, or two graphs provisioned together.
+  """
+  try:
+    table.update_item(
+      Key={"volume_id": volume_id},
+      UpdateExpression=(
+        "SET #status = :claiming, instance_id = :instance_id, claimed_at = :timestamp"
+      ),
+      ConditionExpression="#status = :available",
+      ExpressionAttributeNames={"#status": "status"},
+      ExpressionAttributeValues={
+        ":claiming": "claiming",
+        ":available": "available",
+        ":instance_id": instance_id,
+        ":timestamp": datetime.now(UTC).isoformat(),
+      },
+    )
+    return True
+  except ClientError as e:
+    if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+      raise
+    logger.info(
+      f"Volume {volume_id} was claimed by another instance before {instance_id} "
+      "could take it; trying the next candidate"
+    )
+    # Emitted so the contention rate is observable before concurrency is raised.
+    # At MaxBatchSize 1 this should stay at zero outside of scale-out overlap; a
+    # non-zero baseline means the race is already live at the current fleet size.
+    try:
+      cloudwatch.put_metric_data(
+        Namespace=f"RoboSystems/Graph/{ENVIRONMENT}",
+        MetricData=[
+          {"MetricName": "VolumeClaimContention", "Value": 1, "Unit": "Count"}
+        ],
+      )
+    except Exception as metric_error:
+      logger.warning(f"Failed to publish claim contention metric: {metric_error}")
+    return False
+
+
+def release_claim(volume_id: str, instance_id: str) -> None:
+  """Return a claimed-but-unattached volume to the pool.
+
+  Guarded on this instance still holding the claim so a release can never undo
+  a later claim by someone else.
+  """
+  try:
+    table.update_item(
+      Key={"volume_id": volume_id},
+      UpdateExpression="SET #status = :available REMOVE claimed_at",
+      ConditionExpression="#status = :claiming AND instance_id = :instance_id",
+      ExpressionAttributeNames={"#status": "status"},
+      ExpressionAttributeValues={
+        ":available": "available",
+        ":claiming": "claiming",
+        ":instance_id": instance_id,
+      },
+    )
+    logger.info(f"Released claim on volume {volume_id} held by {instance_id}")
+  except ClientError as e:
+    if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+      raise
+    logger.warning(
+      f"Claim on {volume_id} was no longer held by {instance_id}; nothing released"
+    )
+
+
+def reclaim_stale_claims(az: str, tier: str) -> int:
+  """Return volumes stranded in `claiming` to the pool.
+
+  A claim is only stranded when the Lambda died between claiming and attaching,
+  since every handled failure releases its own claim. Without this sweep such a
+  volume is invisible to future scans forever, because they filter on
+  `available` — the graph it holds would be stranded with it.
+  """
+  cutoff = (datetime.now(UTC) - timedelta(seconds=STALE_CLAIM_SECONDS)).isoformat()
+  reclaimed = 0
+
+  last_evaluated_key = None
+  while True:
+    scan_params: dict[str, Any] = {
+      "FilterExpression": (
+        "availability_zone = :az AND tier = :tier AND #status = :claiming "
+        "AND claimed_at < :cutoff"
+      ),
+      "ExpressionAttributeNames": {"#status": "status"},
+      "ExpressionAttributeValues": {
+        ":az": az,
+        ":tier": tier,
+        ":claiming": "claiming",
+        ":cutoff": cutoff,
+      },
+    }
+    if last_evaluated_key:
+      scan_params["ExclusiveStartKey"] = last_evaluated_key
+
+    response = table.scan(**scan_params)
+    for item in response.get("Items", []):
+      volume_id = item["volume_id"]
+      try:
+        table.update_item(
+          Key={"volume_id": volume_id},
+          UpdateExpression="SET #status = :available REMOVE claimed_at",
+          # Re-check staleness at write time: a concurrent launch may have
+          # legitimately re-claimed it between the scan and here.
+          ConditionExpression="#status = :claiming AND claimed_at < :cutoff",
+          ExpressionAttributeNames={"#status": "status"},
+          ExpressionAttributeValues={
+            ":available": "available",
+            ":claiming": "claiming",
+            ":cutoff": cutoff,
+          },
+        )
+        reclaimed += 1
+        logger.warning(
+          f"Reclaimed volume {volume_id} stranded in `claiming` since "
+          f"{item.get('claimed_at')}"
+        )
+      except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+          raise
+
+    last_evaluated_key = response.get("LastEvaluatedKey")
+    if not last_evaluated_key:
+      break
+
+  return reclaimed
+
+
+def ordered_volume_candidates(
+  valid_volumes: list[dict], databases: Any
+) -> list[tuple[dict, Any]]:
+  """Volumes to try in preference order, each paired with the databases to register.
+
+  Order is unchanged: a volume already holding one of this instance's databases,
+  then any volume carrying data, then an empty one. What changed is that every
+  candidate is returned rather than only the best, so a caller that loses a
+  claim race falls through to the next instead of failing.
+  """
+  matching: list[tuple[dict, Any]] = []
+  with_data: list[tuple[dict, Any]] = []
+  empty: list[tuple[dict, Any]] = []
+
+  for volume in valid_volumes:
+    volume_dbs = volume.get("databases") or []
+    if databases and any(db in volume_dbs for db in databases):
+      matching.append((volume, volume_dbs))
+    elif volume_dbs:
+      with_data.append((volume, volume_dbs))
+    else:
+      empty.append((volume, databases))
+
+  return matching + with_data + empty
 
 
 def attach_and_register_volume(
