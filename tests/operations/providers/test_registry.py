@@ -9,11 +9,18 @@ import pytest
 def _make_mock_env(
   sec_enabled=True,
   quickbooks_enabled=True,
+  external_enabled=False,
 ):
-  """Create a mock env object with connection feature flags."""
+  """Create a mock env object with connection feature flags.
+
+  ``external_enabled`` defaults False so the pre-external assertions
+  (empty registry, provider counts) stay literal; external-specific
+  tests opt in.
+  """
   mock_env = Mock()
   mock_env.CONNECTION_SEC_ENABLED = sec_enabled
   mock_env.CONNECTION_QUICKBOOKS_ENABLED = quickbooks_enabled
+  mock_env.CONNECTION_EXTERNAL_ENABLED = external_enabled
   # QuickBooks provider needs these
   mock_env.INTUIT_ENVIRONMENT = "sandbox"
   return mock_env
@@ -89,18 +96,50 @@ class TestProviderRegistryInit:
 
   def test_registry_all_providers_registered_when_all_enabled(self):
     """Test all providers are present when all flags are True."""
-    env_mock = _make_mock_env(sec_enabled=True, quickbooks_enabled=True)
+    env_mock = _make_mock_env(
+      sec_enabled=True, quickbooks_enabled=True, external_enabled=True
+    )
     registry = _build_registry(env_mock)
 
     assert "sec" in registry._providers
     assert "quickbooks" in registry._providers
+    assert "external" in registry._providers
 
   def test_registry_empty_when_all_disabled(self):
     """Test no providers registered when all flags are False."""
-    env_mock = _make_mock_env(sec_enabled=False, quickbooks_enabled=False)
+    env_mock = _make_mock_env(
+      sec_enabled=False, quickbooks_enabled=False, external_enabled=False
+    )
     registry = _build_registry(env_mock)
 
     assert len(registry._providers) == 0
+
+  def test_registry_registers_external_when_enabled(self):
+    """External provider is registered when CONNECTION_EXTERNAL_ENABLED=True."""
+    env_mock = _make_mock_env(external_enabled=True)
+    registry = _build_registry(env_mock)
+
+    assert "external" in registry._providers
+    assert set(registry._providers["external"].keys()) == {
+      "create",
+      "sync",
+      "cleanup",
+      "config_class",
+    }
+
+  def test_registry_does_not_register_external_when_disabled(self):
+    """External provider is absent when CONNECTION_EXTERNAL_ENABLED=False."""
+    env_mock = _make_mock_env(external_enabled=False)
+    registry = _build_registry(env_mock)
+
+    assert "external" not in registry._providers
+
+  def test_get_provider_disabled_external_raises_value_error(self):
+    """Disabled external provider surfaces the support-facing message."""
+    env_mock = _make_mock_env(external_enabled=False)
+    with _registry_context(env_mock) as (registry, _):
+      with pytest.raises(ValueError, match="External provider is not enabled"):
+        registry.get_provider("external")
 
 
 @pytest.mark.unit
