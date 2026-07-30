@@ -317,6 +317,14 @@ Resources:
                     - UseProvidedVolumeRegistry
                     - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}/index/*"
                     - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry/index/*"
+              # Instance-registry reconciliation (sync_instance_registry, runs
+              # inside every scheduled monitor_all): scan the registry and
+              # delete rows whose EC2 instance no longer exists.
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:DeleteItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry"
               - Effect: Allow
                 Action:
                   - ssm:SendCommand
