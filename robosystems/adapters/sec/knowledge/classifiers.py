@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-import networkit as nk
-
 if TYPE_CHECKING:
+  import networkit as nk
+
   from robosystems.adapters.sec.knowledge.graphs import ElementGraph
 
 logger = logging.getLogger(__name__)
