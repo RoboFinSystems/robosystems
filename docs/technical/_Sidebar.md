@@ -21,6 +21,7 @@
 - [Credits & Billing](Credits-and-Billing)
 - [AI Operators & MCP](AI-Operators-and-MCP)
 - [Pipeline Guide](Pipeline-Guide)
+- [Building Custom Integrations](Building-Custom-Integrations)
 
 ### Extensions Layer
 - [Extensions Surface Overview](Extensions-Surface-Overview)

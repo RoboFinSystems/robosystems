@@ -184,15 +184,17 @@ No billing config files, no DB migrations, no hardcoded lists to update.
 
 See [PR #308](https://github.com/RoboFinSystems/robosystems/pull/308) and [RFC #191](https://github.com/RoboFinSystems/robosystems/issues/191) for the broader extensible adapter design.
 
-## Adding Custom Adapters
+## Adding Custom Data Sources
 
-The `custom_*/` namespace is reserved for fork additions that won't conflict with upstream updates:
+**The supported route is an integration, not an in-core adapter**: a program in its own repository that writes through the public API — see [Building Custom Integrations](Building-Custom-Integrations) and the [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template). Integrations survive every platform release, work against managed and self-hosted deployments alike, and need no fork. The in-core adapter registry (this page's pipelines) is maintained exclusively by the platform team — platform-operated deployments run an unmodified core.
+
+For **self-hosted forks only**, the `custom_*/` namespace remains available as a merge boundary for in-core additions:
 
 1. Create `adapters/custom_myservice/` with `client/`, `processors/`, and `pipeline/`
 2. Implement `pipeline/__init__.py` with `get_dagster_components()` returning `{"assets": [...], "jobs": [...], "sensors": [...], "schedules": [...]}`
 3. Import and collect in `dagster/definitions.py` (see the `# === FORK` comment)
 
-See [Adapters README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md#fork-friendly-custom-adapters) for details and [RFC #191](https://github.com/RoboFinSystems/robosystems/issues/191) for the broader extensible adapter design.
+See the [Adapters README](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md) for details.
 
 ---
 

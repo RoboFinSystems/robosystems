@@ -181,7 +181,7 @@ dagster/
     └── provisioning.py    # Watch for pending subscriptions
 
 adapters/sec/pipeline/     # SEC pipeline (assets, jobs, sensors, schedule)
-adapters/custom_*/pipeline/ # Fork-friendly custom adapter pipelines
+adapters/custom_*/pipeline/ # Self-hosted-fork adapter namespace
 ```
 
 **What Dagster Handles:**
@@ -486,19 +486,19 @@ The manifest registry (`config/shared_repositories.py`) lazy-loads all manifests
 - Creates nodes: Entity, Report, Fact, Element, Period, Unit, Taxonomy
 - Outputs year-partitioned Parquet files to S3
 
-**Fork-Friendly Extensibility:**
+**Extending with custom sources:**
 
-The adapter directory structure is designed as a **merge boundary** for forks. Add custom data sources in the `custom_*` namespace:
+The supported route for connecting your own data sources is an **integration** — a program in its own repository writing through the public API ([Building Custom Integrations](Building-Custom-Integrations), [`robosystems-integration-template`](https://github.com/RoboFinSystems/robosystems-integration-template)). The in-core adapter registry is maintained exclusively by the platform team; platform-operated deployments run an unmodified core.
+
+For **self-hosted forks**, the adapter directory remains a merge boundary — in-core additions go in the `custom_*` namespace so `git pull upstream main` never conflicts:
 
 ```
 adapters/
 ├── sec/                 # ← Upstream (don't modify)
 ├── quickbooks/          # ← Upstream (don't modify)
-└── custom_*/            # ← Your namespace (upstream never touches)
-    └── custom_erp/      #    Your custom integrations
+└── custom_*/            # ← Self-hosted-fork namespace (upstream never touches)
+    └── custom_erp/
 ```
-
-This enables `git pull upstream main` without merge conflicts on your custom adapters.
 
 **See**: [Adapters Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md) in codebase
 
