@@ -19,7 +19,6 @@ from types import SimpleNamespace
 
 import duckdb
 import ladybug as lbug
-import pyarrow.parquet as pq
 import pytest
 
 from robosystems.graph_api.routers.databases.tables.materialize import (
@@ -44,9 +43,17 @@ def _ladybug_service(conn):
 
 
 def _load(conn, duck, table_name, select_sql, out_path):
-  """DuckDB SELECT -> parquet -> ladybug COPY. Returns rows COPYed."""
-  duck.execute(f"COPY ({select_sql}) TO '{out_path}' (FORMAT parquet)")
-  rows = pq.read_metadata(str(out_path)).num_rows
+  """DuckDB SELECT -> parquet -> ladybug COPY. Returns rows COPYed.
+
+  Counts with duckdb rather than ``pyarrow.parquet.read_metadata``: duckdb
+  wrote the file, and pyarrow's local-file operations raise
+  ``ArrowKeyError: Attempted to register factory for scheme 'file'`` in any
+  process that has imported networkit (see the SEC knowledge package) —
+  which, in a full-suite run, is this one.
+  """
+  esc = str(out_path).replace("'", "''")
+  duck.execute(f"COPY ({select_sql}) TO '{esc}' (FORMAT parquet)")
+  rows = duck.execute(f"SELECT count(*) FROM read_parquet('{esc}')").fetchone()[0]
   if rows:
     conn.execute(f"COPY {table_name} FROM '{out_path}'")
   return rows
